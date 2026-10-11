@@ -362,10 +362,9 @@ export class HopperApplicationLauncher implements BridgeLauncher {
       ? { ok: true, strategy: selection.strategy }
       : {
           ok: false,
-          error: new HopperProcessError(
-            selection.exitCode,
-            selection.diagnostic,
-          ),
+          error: new HopperProcessError(selection.exitCode, {
+            diagnostic: selection.diagnostic,
+          }),
         };
   }
 }

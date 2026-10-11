@@ -232,6 +232,7 @@ describe("setup scoped readiness", () => {
       clients: ["codex"],
       providers: [],
       skill: true,
+      skillClients: ["codex"],
     });
   });
 

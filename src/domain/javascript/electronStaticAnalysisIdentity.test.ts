@@ -77,7 +77,7 @@ describe("Electron API identity", () => {
   it("follows bundler namespace interop helpers without accepting other writes", () => {
     const analysis = analyzeJavaScriptStaticSource(`
       var __toESM = (mod) => mod;
-      var __importStar = (this && this.__importStar) || ((mod) => mod);
+      var __importStar = (mod) => mod;
       let electron = require("electron");
       electron = __toESM(electron);
       new electron.BrowserWindow({ webPreferences: { preload: "./rolldown.js" } });
@@ -119,5 +119,54 @@ describe("Electron API identity", () => {
     `);
 
     expect(analysis.electron.browser_windows).toEqual([]);
+  });
+
+  it("follows stable declaration aliases but not an assigned default parameter", () => {
+    const analysis = analyzeJavaScriptStaticSource(`
+      const direct = require("electron");
+      const constAlias = direct;
+      new constAlias.BrowserWindow({webPreferences:{preload:"./const.js"}});
+
+      let letAlias = require("electron");
+      new letAlias.BrowserWindow({webPreferences:{preload:"./let.js"}});
+
+      const { BrowserWindow } = require("electron");
+      new BrowserWindow({webPreferences:{preload:"./destructured.js"}});
+
+      function withDefault(electron = require("./not-electron")) {
+        if (flag) electron = require("electron");
+        new electron.BrowserWindow({webPreferences:{preload:"./default.js"}});
+      }
+    `);
+
+    expect(
+      analysis.electron.browser_windows.map(({ preload_path }) => preload_path),
+    ).toEqual(["./const.js", "./let.js", "./destructured.js"]);
+  });
+
+  it("preserves one initializer across variable redeclarations without accepting writes", () => {
+    const analysis = analyzeJavaScriptStaticSource(`
+      var electron;
+      var electron = require("electron");
+      var electron;
+      new electron.BrowserWindow({webPreferences:{preload:"./redeclared.js"}});
+
+      var replaced;
+      var replaced = require("electron");
+      replaced = fake;
+      new replaced.BrowserWindow({webPreferences:{preload:"./replaced.js"}});
+
+      var initializedTwice = require("electron");
+      var initializedTwice = fake;
+      new initializedTwice.BrowserWindow({});
+
+      var conditional;
+      if (flag) { var conditional = require("electron"); }
+      new conditional.BrowserWindow({});
+    `);
+
+    expect(
+      analysis.electron.browser_windows.map(({ preload_path }) => preload_path),
+    ).toEqual(["./redeclared.js"]);
   });
 });

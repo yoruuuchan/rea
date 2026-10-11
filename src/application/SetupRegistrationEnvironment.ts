@@ -1,4 +1,5 @@
 import type { DoctorProviderInspection } from "./Doctor.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** Preserve adapter-published settings independently of runtime readiness. */
 export const providerRegistrationEnvironment = (
@@ -9,5 +10,5 @@ export const providerRegistrationEnvironment = (
       .flatMap(({ registrationEnvironment }) =>
         Object.entries(registrationEnvironment),
       )
-      .sort(([left], [right]) => left.localeCompare(right)),
+      .sort(([left], [right]) => compareUnicodeCodePoints(left, right)),
   );

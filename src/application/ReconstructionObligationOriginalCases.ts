@@ -2,6 +2,7 @@ import type { Evidence } from "../domain/evidence.js";
 import type { ReconstructionObligation } from "../domain/reconstructionObligationLedgerSchemas.js";
 import { evidenceSupportsOriginalAuthority } from "./ReconstructionObligationAuthority.js";
 import type { ReconstructionObligationCandidate } from "./ReconstructionObligationCandidates.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 type Binding = NonNullable<ReconstructionObligation["binding"]>;
 type Diagnostic = ReconstructionObligation["diagnostics"][number];
@@ -21,7 +22,8 @@ export const originalCasesFor = (
       ),
     ).values(),
   ].sort((left, right) =>
-    `${left.kind}:${left.evidence_id}:${left.location}`.localeCompare(
+    compareUnicodeCodePoints(
+      `${left.kind}:${left.evidence_id}:${left.location}`,
       `${right.kind}:${right.evidence_id}:${right.location}`,
     ),
   );

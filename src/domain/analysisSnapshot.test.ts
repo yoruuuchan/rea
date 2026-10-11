@@ -8,6 +8,7 @@ import {
   snapshotBinding,
   snapshotEvidenceForQuery,
   snapshotTarget,
+  snapshotMatchesTarget,
 } from "./analysisSnapshot.js";
 import {
   ANALYSIS_SNAPSHOT_PROFILE,
@@ -16,6 +17,7 @@ import {
 } from "./analysisSnapshot.fixture.js";
 import { createEvidence } from "./evidence.js";
 import { createEvidenceBundle } from "./evidenceBundle.js";
+import type { BinaryTarget } from "./binaryTargetTypes.js";
 
 const snapshotWithHistoricalEvidence = () => {
   const target = snapshotTarget(ANALYSIS_SNAPSHOT_TARGET);
@@ -68,6 +70,54 @@ const snapshotWithHistoricalEvidence = () => {
 };
 
 describe("analysis snapshot contract", () => {
+  it("partitions raw snapshots and query identities by the canonical entry", () => {
+    const target: BinaryTarget = {
+      path: "/fixture/image.bin",
+      sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
+      kind: "executable",
+      format: "raw-binary",
+      architecture: "arm",
+      availableArchitectures: ["arm"],
+      entryPoint: "0x8000000",
+      entryPointSource: "0x08000000",
+    };
+    const snapshot = snapshotTarget(target);
+    const binding = snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE);
+    const changed = {
+      ...target,
+      entryPoint: "0x9000000",
+      entryPointSource: "0x09000000",
+    };
+    expect(
+      snapshotMatchesTarget(snapshot, {
+        ...target,
+        entryPointSource: "0x8000000",
+      }),
+    ).toBe(true);
+    expect(snapshotMatchesTarget(snapshot, changed)).toBe(false);
+    expect(analysisQueryId(snapshot, binding, "list_procedures", {})).not.toBe(
+      analysisQueryId(snapshotTarget(changed), binding, "list_procedures", {}),
+    );
+    const parsed = analysisSnapshotSchema.parse({
+      target: snapshot,
+      binding,
+      entries: [],
+      workflow_entries: [],
+      evidence_bundle: createEvidenceBundle([]),
+    });
+    expect(parsed.target).toHaveProperty("entry_point", target.entryPoint);
+    const { entry_point: _entry, ...legacy } = {
+      ...snapshot,
+      entry_point: target.entryPoint,
+    };
+    expect(
+      analysisSnapshotSchema.safeParse({ ...parsed, target: legacy }).success,
+    ).toBe(false);
+    expect(snapshotTarget(ANALYSIS_SNAPSHOT_TARGET)).not.toHaveProperty(
+      "entry_point",
+    );
+  });
+
   it("preserves DOS MZ target and subject formats with the x86 family", () => {
     const target = {
       path: ANALYSIS_SNAPSHOT_TARGET.path,

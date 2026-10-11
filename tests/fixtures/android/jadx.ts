@@ -27,6 +27,7 @@ const fixture = fileURLToPath(new URL("./jadx-mcp.mjs", import.meta.url));
 export const createJadxProtocolFixture = async (
   mode = "normal",
   cleanupFailure?: () => boolean,
+  inventory?: { readonly classCount?: number },
 ) => {
   const root = await createTestTempDirectory("rea-android-boundary-");
   const apk = join(root, "fixture.apk");
@@ -64,7 +65,15 @@ export const createJadxProtocolFixture = async (
         command: process.execPath,
         arguments: [fixture],
         expectedCommand: process.execPath,
-        env: { ...options.env, REA_FAKE_JADX_MODE: mode },
+        env: {
+          ...options.env,
+          REA_FAKE_JADX_MODE: mode,
+          ...(inventory?.classCount === undefined
+            ? {}
+            : {
+                REA_FAKE_JADX_CLASS_COUNT: String(inventory.classCount),
+              }),
+        },
       });
       launches.push({
         runId: options.runId,

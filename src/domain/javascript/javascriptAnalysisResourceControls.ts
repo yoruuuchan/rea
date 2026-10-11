@@ -18,6 +18,7 @@ export const javaScriptAnalysisCoverageLimits = (
     "worker_process_memory_limit_bytes",
     "worker_timeout_ms",
     "parent_result_budget_bytes",
+    "parent_available_result_budget_bytes",
     "semantic_result_budget_bytes",
     "transfer_record_bytes",
     "transfer_file_bytes",

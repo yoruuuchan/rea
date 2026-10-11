@@ -73,7 +73,7 @@ function expectKnownAuthorityHints(tools: readonly ToolSchemas[]): void {
     },
     annotate_native_function: {
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: true,
       openWorldHint: true,
     },
@@ -102,7 +102,21 @@ function expectKnownAuthorityHints(tools: readonly ToolSchemas[]): void {
       openWorldHint: false,
     },
     capture_process_scenario: {
+      readOnlyHint: false,
+      destructiveHint: true,
       openWorldHint: true,
+    },
+    observe_native_calls: {
+      readOnlyHint: false,
+      destructiveHint: true,
+    },
+    uninstall_adb_package: {
+      readOnlyHint: false,
+      destructiveHint: true,
+    },
+    start_adb_app: {
+      readOnlyHint: false,
+      destructiveHint: true,
     },
     export_evidence_bundle: {
       readOnlyHint: false,

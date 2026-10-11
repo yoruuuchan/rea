@@ -137,12 +137,29 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
 }> => {
   const state = emptyArtifactAnalysis<JavaScriptModuleSemanticIr>();
   let interruption: AnalysisError | null = null;
-  for (const [index, file] of fileSet.files.entries()) {
+  const selectedFileCount =
+    fileSet.files.length - (fileSet.source_selection?.unselected_files ?? 0);
+  let selectedFileIndex = 0;
+  for (const file of fileSet.files) {
     try {
       await setImmediate();
-      await beforeFile(file, index, fileSet.files.length);
       if (signal?.aborted === true)
         throw new AnalysisCancelledError("analyze_javascript_application");
+      if (
+        !file.text.included &&
+        file.text.reason === "outside-analysis-scope"
+      ) {
+        state.files.push({ file, javascript: null, semantic: null });
+        if (file.kind === "javascript")
+          projection.recordUnavailableFile(
+            file,
+            "Source was not analyzed because it is outside the caller-selected source_paths.",
+            null,
+            "incomplete-module",
+          );
+        continue;
+      }
+      await beforeFile(file, selectedFileIndex++, selectedFileCount);
       if (file.kind !== "javascript" || !file.text.included) {
         const steps = analyzeArtifactFileSteps(file, {
           state,
@@ -267,6 +284,20 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
     };
     for (const file of fileSet.files) {
       if (analyzedPaths.has(file.path)) continue;
+      if (
+        !file.text.included &&
+        file.text.reason === "outside-analysis-scope"
+      ) {
+        state.files.push({ file, javascript: null, semantic: null });
+        if (file.kind === "javascript")
+          projection.recordUnavailableFile(
+            file,
+            "Source was not analyzed because it is outside the caller-selected source_paths.",
+            null,
+            "incomplete-module",
+          );
+        continue;
+      }
       state.files.push({
         file,
         javascript: null,
@@ -336,6 +367,10 @@ function* analyzeArtifactFileSteps<
   context: ArtifactAnalysisContext<SemanticIr>,
 ): Generator<void, void> {
   const { state } = context;
+  if (!file.text.included && file.text.reason === "outside-analysis-scope") {
+    state.files.push({ file, javascript: null, semantic: null });
+    return;
+  }
   addStructuredObservations(file, state);
   if (file.kind === "html" && file.text.included)
     state.htmlScripts.push(...parseHtmlScripts(file.path, file.text.value));

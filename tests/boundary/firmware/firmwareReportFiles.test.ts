@@ -1,8 +1,11 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import { readFirmwareReport } from "../../../src/firmware/FirmwareFiles.js";
+import {
+  inventoryFirmwareOutput,
+  readFirmwareReport,
+} from "../../../src/firmware/FirmwareFiles.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 it.each([
@@ -40,4 +43,25 @@ it("preserves valid Unicode and a literal replacement character in producer JSON
   expect(await readFirmwareReport(path, "inspect_firmware_regions")).toEqual(
     report,
   );
+});
+
+it("orders extracted firmware paths by code point independently of host locale", async () => {
+  const root = await createTestTempDirectory("rea-firmware-inventory-");
+  await mkdir(join(root, "Lib"));
+  for (const path of ["a.bin", "z.bin", "\u00e4.bin", "B.bin", "Lib/x.bin"])
+    await writeFile(join(root, path), "");
+  const entries = await inventoryFirmwareOutput(
+    root,
+    1024,
+    16,
+    "inspect_firmware_regions",
+  );
+  // Locale collation would interleave case and place "ä" by language rules.
+  expect(entries.map(({ relativePath }) => relativePath)).toEqual([
+    "B.bin",
+    "Lib/x.bin",
+    "a.bin",
+    "z.bin",
+    "\u00e4.bin",
+  ]);
 });

@@ -1,7 +1,7 @@
 import * as t from "@babel/types";
 
 /**
- * Visit every Babel AST node in deterministic source-tree order.
+ * Visit Babel AST nodes in deterministic source-tree order, excluding skipped subtrees.
  *
  * `readAncestors` returns a snapshot during `enter`, outermost-first and
  * ending with the direct parent. Callers
@@ -17,6 +17,8 @@ export const traverseJavaScriptAst = (
 
 /** Callbacks for one deterministic AST traversal. */
 export interface JavaScriptAstVisitor {
+  /** Omit a child and its subtree without entering or exiting it. */
+  readonly skip?: (node: t.Node) => boolean;
   readonly enter: (
     node: t.Node,
     parent: t.Node | null,
@@ -50,6 +52,7 @@ export function* traverseJavaScriptAstSteps(
       current.nextIndex += 1;
       if (visited % 1024 === 0) yield;
       visited += 1;
+      if (visitor.skip?.(child) === true) continue;
       pending.push(enter(child, current.node));
     } else {
       visitor.exit?.(current.node, current.parent);
@@ -82,8 +85,7 @@ interface TraversalFrame {
  * not be reintroduced (they diverge on loc/comment fields and ordering).
  */
 export const childNodes = (node: t.Node): t.Node[] => {
-  const keys = t.VISITOR_KEYS[node.type];
-  if (keys === undefined) return [];
+  const keys = javaScriptAstChildKeys(node);
   const children: t.Node[] = [];
   for (const key of keys) {
     const value: unknown = Reflect.get(node, key);
@@ -98,3 +100,7 @@ export const childNodes = (node: t.Node): t.Node[] => {
   }
   return children;
 };
+
+/** Child-bearing fields; shared by traversal and structural AST comparison. */
+export const javaScriptAstChildKeys = (node: t.Node): readonly string[] =>
+  t.VISITOR_KEYS[node.type] ?? [];

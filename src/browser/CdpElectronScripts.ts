@@ -9,6 +9,7 @@ import { CdpCaptureCompleteness } from "./CdpCaptureCompleteness.js";
 import { requiredScriptSource } from "./CdpCaptureValues.js";
 import type { ElectronScriptDraft } from "./CdpElectronScriptEvents.js";
 import { authorizedElectronFile } from "./ElectronFileScope.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 interface ElectronScriptCaptureInput {
   readonly connection: CdpConnection;
@@ -65,7 +66,7 @@ export const captureElectronScripts = async (
   return {
     total,
     items: items.sort((left, right) =>
-      left.script_key.localeCompare(right.script_key),
+      compareUnicodeCodePoints(left.script_key, right.script_key),
     ),
   };
 };

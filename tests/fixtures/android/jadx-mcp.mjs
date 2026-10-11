@@ -10,10 +10,20 @@ const server = new McpServer({
   version:
     mode === "empty-server-identity" ? "" : mode === "version" ? "99.0.0" : "1",
 });
+const requestedCount = Number.parseInt(
+  process.env.REA_FAKE_JADX_CLASS_COUNT ?? "",
+  10,
+);
+const generatedCount =
+  Number.isInteger(requestedCount) && requestedCount >= 0
+    ? requestedCount
+    : mode === "large-inventory"
+      ? 9000
+      : 400;
 const classes = [
   "fixture.Target",
   ...Array.from(
-    { length: mode === "large-inventory" ? 9000 : 400 },
+    { length: generatedCount },
     (_, index) => `fixture.Class${index}`,
   ),
 ];

@@ -139,8 +139,11 @@ directory, so default OS-home discovery remains unverified. Live model APIs and
 native Windows are also unverified.
 
 `verify:claude-client` requires installed Claude Code (verified with
-`@anthropic-ai/claude-code@2.1.296`); select it with `REA_VERIFY_CLAUDE_COMMAND`.
-The optional POSIX lane uses native `CLAUDE_CONFIG_DIR` discovery, an independent
+`@anthropic-ai/claude-code@2.1.296` on POSIX and native Windows); select it
+with `REA_VERIFY_CLAUDE_COMMAND`. On Windows, select
+`claude.exe`: npm installs put only a `claude.cmd` shim on `PATH`, and the real
+executable is under `node_modules/@anthropic-ai/claude-code/bin`.
+The optional lane uses native `CLAUDE_CONFIG_DIR` discovery, an independent
 Git workspace, user settings and default built-in tools. It preserves caller
 preferences and backups, checks idempotent setup, waits through the native
 `WaitForMcpServers` tool when discovery is pending, and validates the complete
@@ -149,8 +152,8 @@ native `Skill`, checks its full body and verifies named-schema JavaScript Eviden
 for a Unicode path. Use `-- chat` for ordinary chat with REA enabled, or
 `REA_VERIFY_RUNTIME_ROOT` for a production-only installed package. The local
 Anthropic Messages/SSE fixture preserves native resource-hint envelopes in its
-request artifacts. Usage is synthetic; live Anthropic API, native Windows and
-bare-mode personal-skill activation remain unverified by this lane.
+request artifacts. Usage is synthetic; live Anthropic API and bare-mode
+personal-skill activation remain unverified by this lane.
 
 `verify:copilot-client` requires installed GitHub Copilot CLI (verified with
 `@github/copilot@1.0.95`); select it with `REA_VERIFY_COPILOT_COMMAND`.
@@ -279,10 +282,12 @@ establish live DeepSeek API or native Windows coverage. Receipts include
 request artifacts, result digests and owned-process lineage.
 
 Full E2E tests invoke the production command dispatcher and real providers,
-without fake launchers, runners or responses. `verify:keyed-archive` writes an
-actual Foundation binary archive, runs the CLI and a separate stdio MCP
-subprocess, checks parity and pagination, rejects an escaping path and checks
-an XML graph golden. `verify:asset-catalog` compiles source-owned colors with
+without fake launchers, runners or responses. `verify:keyed-archive` writes
+Foundation binary, XML, and integer archives using one run-owned Swift module
+cache. It checks CLI and separate stdio MCP parity, pagination, escaping-path
+rejection, an XML graph golden, and numeric meaning for safe controls, unsafe
+integers, boxed numbers, and integral-valued reals. `verify:asset-catalog`
+compiles source-owned colors with
 `actool`, invokes real `assetutil`, then checks CLI/MCP results, exact catalog
 digest, every raw metadata field, pagination and malformed input rejection.
 Neither artifact workflow requires Hopper or launches it. Both run in macOS CI.
@@ -458,7 +463,7 @@ prove behavior on the verified Ghidra 12.1.4 and JDK 21 build.
 | Ghidra lane                                | Supported runner/target                                                                         | Additional local tools                                              |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `npm run verify:ghidra`                    | Linux x64/arm64 ELF or macOS x64/arm64 Mach-O                                                   | Host C compiler, Ghidra 12.1.4, and full JDK 21                     |
-| `npm run verify:ghidra:seeds`              | POSIX host; source-owned 32-bit x86 raw fixture; function order and BSS labels                  | Ghidra 12.1.4 and full JDK 21                                       |
+| `npm run verify:ghidra:seeds`              | POSIX; raw x86 fixture; seed ordering, BSS labels, analyzer readback and unknown-name rejection | Ghidra 12.1.4 and full JDK 21                                       |
 | `npm run verify:ghidra:swift`              | macOS x64/arm64 Mach-O                                                                          | Host Swift compiler, Ghidra 12.1.4, and full JDK 21                 |
 | `npm run verify:ghidra:switch`             | Linux x64 ELF; GCC/Clang optimized and stripped switch fixtures                                 | GCC, Clang, GNU nm/objdump/strip, Ghidra 12.1.4, and full JDK 21    |
 | `npm run verify:ghidra:aarch64-jump-table` | Any supported Ghidra host; AArch64 ELF; signed/unsigned byte/halfword tables; host ARM64 Mach-O | Clang with AArch64 target support, Ghidra 12.1.4, and full JDK 21   |
@@ -792,6 +797,16 @@ annotations must preserve the live function dossier; CLI and MCP must report the
 truncation constraint, while leading-zero coordinates still resolve correctly.
 It has the same Ghidra/JDK prerequisites as the MZ lane. Neither lane claims DOS
 runtime or PC-98 device execution.
+
+`npm run verify:ghidra:raw` uses a generated ARM little-endian headerless image
+through the compiled CLI and stdio MCP server. With the same Ghidra/JDK
+prerequisites, it checks preparation and bridge startup, verified load mappings,
+instruction and byte readback, canonical-entry session reuse, replacement when
+the entry changes without `provider_id`, unchanged source bytes, and owned
+cleanup. Six-byte x86 and x86_64 controls also verify supported compiler
+specifications, independent mappings, unchanged bytes, and decompilation of a
+known return value. AArch64 remains covered by deterministic tests rather than
+this real-provider lane. See [raw binary analysis](raw-binary.md).
 
 ## Apple Interface Builder archives
 

@@ -526,12 +526,16 @@ const CPU_TYPE_X86 = 7;
 const CPU_TYPE_ARM = 12;
 const CPU_SUBTYPE_MASK = 0xff000000;
 const CPU_SUBTYPE_ARM64E = 2;
+const CPU_SUBTYPE_ARM64E_X1 = 12;
 const CPU_SUBTYPE_X86_64_H = 8;
 
 const architectureName = (cpuType: number, cpuSubtype: number): string => {
   const subtype = cpuSubtype & ~CPU_SUBTYPE_MASK;
   if (cpuType === (CPU_TYPE_ARM | CPU_ARCH_ABI64))
-    return subtype === CPU_SUBTYPE_ARM64E ? "arm64e" : "arm64";
+    // Both pointer-authentication subtypes belong to the arm64e family.
+    return subtype === CPU_SUBTYPE_ARM64E || subtype === CPU_SUBTYPE_ARM64E_X1
+      ? "arm64e"
+      : "arm64";
   if (cpuType === (CPU_TYPE_ARM | CPU_ARCH_ABI64_32)) return "arm64_32";
   if (cpuType === (CPU_TYPE_X86 | CPU_ARCH_ABI64))
     return subtype === CPU_SUBTYPE_X86_64_H ? "x86_64h" : "x86_64";

@@ -26,6 +26,8 @@ import {
   validateDosComLength,
   type ExecutableFormatHint,
 } from "../domain/dosCom.js";
+import { admitRawBinary } from "../domain/rawBinary.js";
+import type { BinaryArchitecture } from "../domain/binaryTargetTypes.js";
 import { mzWindowsHeaderOffset } from "../domain/dosMz.js";
 import {
   hasZipSignature,
@@ -45,6 +47,8 @@ export interface BinaryTargetResolverOptions {
   readonly hostArchitecture?: NodeJS.Architecture;
   readonly targetKind?: BinaryTarget["kind"];
   readonly formatHint?: ExecutableFormatHint;
+  readonly architecture?: BinaryArchitecture;
+  readonly entryPoint?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -61,7 +65,7 @@ export const parseBinaryTarget = async (
 > => {
   const cwd = options.cwd ?? process.cwd();
   const hostArchitecture = options.hostArchitecture ?? process.arch;
-  const { targetKind, formatHint, signal } = options;
+  const { targetKind, formatHint, signal, architecture, entryPoint } = options;
   const candidate = isAbsolute(input) ? input : resolve(cwd, input);
   try {
     throwIfTargetResolutionCancelled(signal);
@@ -83,6 +87,40 @@ export const parseBinaryTarget = async (
       throwIfTargetResolutionCancelled(signal);
       const metadata = await handle.stat();
       throwIfTargetResolutionCancelled(signal);
+      if (formatHint === "raw-binary") {
+        if (targetKind !== undefined && targetKind !== "executable")
+          return err(
+            new BinaryTargetError(
+              path,
+              "raw-binary format requires an executable target kind",
+            ),
+          );
+        const admitted = admitRawBinary({
+          architecture,
+          entryPoint,
+          fileBytes: metadata.size,
+        });
+        if (!admitted.ok)
+          return err(new BinaryTargetError(path, admitted.error));
+        return ok({
+          path,
+          sourcePath: canonical,
+          sha256: await sha256Handle(handle, path, metadata, signal),
+          kind: "executable",
+          format: "raw-binary",
+          architecture: admitted.value.architecture,
+          availableArchitectures: [admitted.value.architecture],
+          entryPoint: admitted.value.entryPoint,
+          entryPointSource: admitted.value.entryPointSource,
+        });
+      }
+      if (architecture !== undefined || entryPoint !== undefined)
+        return err(
+          new BinaryTargetError(
+            path,
+            "architecture and entry_point apply only with format=raw-binary",
+          ),
+        );
       if (formatHint === "dos-com") {
         if (targetKind !== undefined && targetKind !== "executable")
           return err(
@@ -194,7 +232,13 @@ const detectArtifactFormat = async (
 ): Promise<
   | Exclude<
       BinaryTarget["format"],
-      "analysis-database" | "mach-o" | "elf" | "pe" | "dos-mz" | "dos-com"
+      | "analysis-database"
+      | "mach-o"
+      | "elf"
+      | "pe"
+      | "dos-mz"
+      | "dos-com"
+      | "raw-binary"
     >
   | undefined
 > => {
@@ -244,7 +288,13 @@ const namedArtifactFormat = (
 const isArchiveFormat = (
   format: Exclude<
     BinaryTarget["format"],
-    "analysis-database" | "mach-o" | "elf" | "pe" | "dos-mz" | "dos-com"
+    | "analysis-database"
+    | "mach-o"
+    | "elf"
+    | "pe"
+    | "dos-mz"
+    | "dos-com"
+    | "raw-binary"
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) || ["asar", "dmg", "pkg"].includes(format);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { javaScriptSourceSelectionSchema } from "../javascript/javascriptSourceSelection.js";
 
 import {
   AnalysisInputError,
@@ -170,6 +171,7 @@ const javascriptSummarySchema = z.strictObject({
   input_path: z.string().min(1),
   format: z.enum(["asar", "directory"]),
   root_artifact_sha256: digestSchema,
+  source_selection: javaScriptSourceSelectionSchema.exactOptional(),
   statistics: jsonObjectSchema,
   electron: jsonObjectSchema,
   coverage: jsonObjectSchema,

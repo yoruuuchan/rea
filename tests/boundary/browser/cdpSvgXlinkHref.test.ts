@@ -29,6 +29,11 @@ const chromeExecutable = [
     existsSync(candidate),
 );
 
+// Match the real-browser verifier: a cold Chrome launch on a loaded coverage
+// runner can exceed 20 seconds before publishing DevToolsActivePort.
+const CHROME_STARTUP_TIMEOUT_MS = 60_000;
+const CHROME_TEST_TIMEOUT_MS = CHROME_STARTUP_TIMEOUT_MS + 30_000;
+
 // Issue 1586's page, plus the HTML, image, use, and foreign-origin cases the
 // real snapshot must distinguish. The XHTML page is the prefixed-svg gap
 // reported on PR 1602. The tests are skipped when no Chrome-family executable
@@ -90,7 +95,7 @@ it.skipIf(chromeExecutable === undefined)(
         executable,
         activePortPath: join(profile, "DevToolsActivePort"),
         stderr: () => stderr,
-        timeoutMs: 20_000,
+        timeoutMs: CHROME_STARTUP_TIMEOUT_MS,
       });
       const endpoint = `http://127.0.0.1:${String(port)}`;
       const provider = new CdpBrowserProvider();
@@ -158,6 +163,7 @@ it.skipIf(chromeExecutable === undefined)(
       });
     }
   },
+  CHROME_TEST_TIMEOUT_MS,
 );
 
 const xhtmlPage = `<?xml version="1.0" encoding="UTF-8"?>
@@ -261,7 +267,7 @@ for (const { format, page, contentType, nodeNames, link, destinations } of [
           executable,
           activePortPath: join(profile, "DevToolsActivePort"),
           stderr: () => stderr,
-          timeoutMs: 20_000,
+          timeoutMs: CHROME_STARTUP_TIMEOUT_MS,
         });
         const endpoint = `http://127.0.0.1:${String(port)}`;
         const provider = new CdpBrowserProvider();
@@ -312,6 +318,7 @@ for (const { format, page, contentType, nodeNames, link, destinations } of [
         });
       }
     },
+    CHROME_TEST_TIMEOUT_MS,
   );
 }
 

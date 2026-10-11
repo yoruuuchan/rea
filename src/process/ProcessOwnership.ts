@@ -8,6 +8,7 @@ import {
 import { launcherIdentityFailure } from "./ProcessOwnershipIdentity.js";
 import { descendantsOf, liveProcesses } from "./ProcessOwnershipProcessTree.js";
 import { readProcessRunTokens } from "./ProcessRunTokenObservations.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -157,19 +158,15 @@ export type ProcessCleanupResult =
       readonly signaled: boolean;
       readonly unverified?: readonly OwnershipSweepUnverifiedProcess[];
     }
-  | {
-      readonly cleaned: false;
-      readonly reason: string;
-      readonly failures?: readonly {
-        readonly pid: number;
-        readonly reason:
-          | "environment-unreadable"
-          | "run-token-mismatch"
-          | "process-identity-unavailable";
-        readonly diagnostic?: string;
-      }[];
-      readonly unverified?: readonly OwnershipSweepUnverifiedProcess[];
-    };
+  | ProcessCleanupFailure;
+
+/** Retained verification failures for one cleanup attempt, without additional signaling authority. */
+export interface ProcessCleanupFailure {
+  readonly cleaned: false;
+  readonly reason: string;
+  readonly failures?: readonly ProcessOwnershipValidationFailure[];
+  readonly unverified?: readonly OwnershipSweepUnverifiedProcess[];
+}
 
 /** Token-verified liveness result used by post-root-exit settlement. */
 export type ProcessGroupObservation =
@@ -591,7 +588,15 @@ const cleanupValidationFailure = (
   if (failures.some(({ reason }) => reason === "run-token-mismatch"))
     return {
       cleaned: false,
-      reason: "process tree contains an unowned or PID-reused process",
+      reason: `process ownership token mismatch for PID(s): ${[
+        ...new Set(
+          failures
+            .filter(({ reason }) => reason === "run-token-mismatch")
+            .map(({ pid }) => pid),
+        ),
+      ]
+        .sort((left, right) => left - right)
+        .join(", ")}`,
       failures,
       ...unverifiedEntry,
     };
@@ -609,7 +614,7 @@ const cleanupValidationFailure = (
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
     const breakdown = [...counts]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareUnicodeCodePoints(left, right))
       .map(([category, count]) => `${category}=${String(count)}`)
       .join(", ");
     const candidates = unreadable
@@ -617,7 +622,7 @@ const cleanupValidationFailure = (
         ({ pid, diagnostic }) =>
           `${String(pid)}=${sanitizedTokenReadFailure(diagnostic)}`,
       )
-      .sort((left, right) => left.localeCompare(right));
+      .sort((left, right) => compareUnicodeCodePoints(left, right));
     return {
       cleaned: false,
       reason: `process ownership token could not be read for ${String(unreadable.length)} live process(es): ${breakdown}; live candidates ${candidates.join(", ")}`,

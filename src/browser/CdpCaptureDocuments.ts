@@ -12,6 +12,7 @@ import {
 import { exclusionReasonForUrl } from "./CdpCaptureEventHelpers.js";
 import type { CdpCaptureCompleteness } from "./CdpCaptureCompleteness.js";
 import { createDocumentSvgAncestry, domSvgLink } from "./CdpCaptureDomSvg.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 export type CapturedResource = Omit<
   WebPageInspection["resources"][number],
@@ -346,7 +347,7 @@ const accessibilityStates = (
     if (state !== undefined) states.set(name, state);
   }
   return [...states]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareUnicodeCodePoints(left, right))
     .map(([name, state]) => ({ name, value: state }));
 };
 

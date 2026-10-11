@@ -358,6 +358,18 @@ const buildMetadataTables = ({
     if ((valid & (1n << BigInt(index))) === 0n) continue;
     tableCursor += 4;
   }
+  // CLR readers honor an optional extra-data word after the row counts.
+  // Its value is opaque; it is not a length or part of the first table row.
+  if (((tableBytes[6] ?? 0) & 0x40) !== 0) {
+    if (tableCursor > tableBytes.length - 4)
+      throw managedFailure(
+        "invalid-metadata-root",
+        "metadata.tables-extra-data",
+        "Metadata tables extra-data word is truncated",
+        tablesOffset + tableCursor,
+      );
+    tableCursor += 4;
+  }
   for (let index = 0; index < METADATA_TABLE_NAMES.length; index += 1) {
     const count = rowCounts[index] ?? 0;
     if ((valid & (1n << BigInt(index))) === 0n) continue;

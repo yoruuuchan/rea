@@ -129,13 +129,9 @@ export class HopperClient {
     this.#responses.push(chunk);
   };
   readonly #onSocketError = (): void => {
-    const error = new HopperProcessError(
-      null,
-      undefined,
-      undefined,
-      undefined,
-      "unreachable",
-    );
+    const error = new HopperProcessError(null, {
+      providerState: "unreachable",
+    });
     this.#failAll(error);
     this.#rememberProcessFailure(error, []);
   };
@@ -151,25 +147,18 @@ export class HopperClient {
       setImmediate(() => {
         if (this.#closing || this.#launcherExitCode !== undefined) return;
         const exitCode = launch.process.exitCode ?? null;
-        const error = new HopperProcessError(
-          exitCode,
-          this.#launcherFailureDiagnostic,
-          undefined,
-          undefined,
-          exitCode !== null ? "exited" : "unreachable",
-        );
+        const error = new HopperProcessError(exitCode, {
+          diagnostic: this.#launcherFailureDiagnostic,
+          providerState: exitCode !== null ? "exited" : "unreachable",
+        });
         this.#failAll(error);
         this.#rememberProcessFailure(error, []);
       });
       return;
     }
-    const error = new HopperProcessError(
-      null,
-      undefined,
-      undefined,
-      undefined,
-      "unreachable",
-    );
+    const error = new HopperProcessError(null, {
+      providerState: "unreachable",
+    });
     this.#failAll(error);
     this.#rememberProcessFailure(error, []);
   };
@@ -729,15 +718,12 @@ export class HopperClient {
       )) ?? false;
     const launcherFailure = this.#launcherOutcome(outputClosed);
     if (ownsProviderLifetime)
-      return new HopperProcessError(
-        exitCode,
-        this.#launcherFailureDiagnostic,
-        undefined,
-        undefined,
-        "exited",
-        "launch",
+      return new HopperProcessError(exitCode, {
+        diagnostic: this.#launcherFailureDiagnostic,
+        providerState: "exited",
+        stage: "launch",
         launcherFailure,
-      );
+      });
     if (
       this.#resources.launch?.authorizationDenialBeforeHandoff === true &&
       nativeHopperLaunchWasDenied(launcherFailure)
@@ -766,18 +752,34 @@ export class HopperClient {
     },
   ): Promise<Result<JsonValue, HopperError>> {
     const id = this.#nextId++;
+    if (
+      this.#resources.launch?.providerLifetime === "launcher-process" &&
+      this.#launcherExitCode !== undefined
+    ) {
+      return this.#unavailableRequest(
+        new HopperProcessError(this.#launcherExitCode, {
+          diagnostic: this.#launcherFailureDiagnostic,
+          operation: method,
+          requestId: id,
+          providerState: "exited",
+          stage: hopperOperationStage(method),
+          launcherFailure: this.#launcherOutcome(
+            (await this.#resources.processSupervisor?.waitForOutputClose(0)) ??
+              false,
+          ),
+        }),
+      );
+    }
     const socket = this.#socket;
     const token = this.#token;
     if (socket === undefined || socket.destroyed || token === undefined) {
       return this.#unavailableRequest(
-        new HopperProcessError(
-          null,
-          undefined,
-          method,
-          id,
-          "unreachable",
-          hopperOperationStage(method),
-        ),
+        new HopperProcessError(null, {
+          operation: method,
+          requestId: id,
+          providerState: "unreachable",
+          stage: hopperOperationStage(method),
+        }),
       );
     }
     if (options.signal?.aborted === true)
@@ -888,13 +890,11 @@ export class HopperClient {
     if (launch.providerLifetime === "launcher-process" && !this.#closing) {
       this.#rememberExit(event.code);
       this.#failAll(
-        new HopperProcessError(
-          event.code,
-          this.#launcherFailureDiagnostic,
-          undefined,
-          undefined,
-          "exited",
-        ),
+        new HopperProcessError(event.code, {
+          diagnostic: this.#launcherFailureDiagnostic,
+          providerState: "exited",
+          launcherFailure: this.#launcherOutcome(false),
+        }),
       );
     }
   }

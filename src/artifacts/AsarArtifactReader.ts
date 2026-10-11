@@ -32,6 +32,7 @@ import { closeAsarHandle, readValidatedAsarEntry } from "./AsarEntryStream.js";
 import { admitAsarHeader } from "./AsarHeader.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /**
  * Official Electron ASAR adapter with range-streamed member reads.
@@ -64,7 +65,7 @@ export class AsarArtifactReader implements ArtifactReader {
   ) {}
 
   async *entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry> {
-    let paths: string[];
+    let paths: readonly AsarListedPath[];
     try {
       await this.prepareContainer(undefined, signal);
       const snapshotPath = this.#snapshotPath();
@@ -82,9 +83,7 @@ export class AsarArtifactReader implements ArtifactReader {
         await headerHandle.close();
       }
       abortIfNeeded(signal);
-      paths = listPackage(snapshotPath, { isPack: false }).sort((left, right) =>
-        left.localeCompare(right, "en"),
-      );
+      paths = orderAsarListing(listPackage(snapshotPath, { isPack: false }));
       const archiveMetadata = await lstat(snapshotPath);
       if (!archiveMetadata.isFile() || archiveMetadata.isSymbolicLink())
         throw new ArtifactReaderFailure(
@@ -95,13 +94,8 @@ export class AsarArtifactReader implements ArtifactReader {
     } catch (cause: unknown) {
       throw asarFailure(this.path, "inventory", cause);
     }
-    for (const listed of paths) {
+    for (const { listed, path } of paths) {
       abortIfNeeded(signal);
-      // @electron/asar returns paths assembled with the host path module.
-      // Keep that spelling for its API calls, but expose archive paths with
-      // portable separators. On POSIX, backslashes can be literal filename
-      // characters and must remain untouched.
-      const path = toArtifactPath(listed);
       if (path.length === 0) continue;
       const providerPath = listed.startsWith(sep)
         ? listed.slice(sep.length)
@@ -577,8 +571,30 @@ const waitForOperation = async (
   });
 };
 
-const toArtifactPath = (listed: string): string => {
-  const portable = sep === "\\" ? listed.replaceAll("\\", "/") : listed;
+interface AsarListedPath {
+  readonly listed: string;
+  readonly path: string;
+}
+
+/**
+ * Pair each host-spelled listing with its portable archive path, ordered by
+ * the portable path so Windows and POSIX hosts agree.
+ *
+ * @electron/asar returns paths assembled with the host path module. Keep that
+ * spelling for its API calls, but expose archive paths with portable
+ * separators. On POSIX, backslashes can be literal filename characters and
+ * must remain untouched.
+ */
+export const orderAsarListing = (
+  listed: readonly string[],
+  separator: string = sep,
+): AsarListedPath[] =>
+  listed
+    .map((entry) => ({ listed: entry, path: toArtifactPath(entry, separator) }))
+    .sort((left, right) => compareUnicodeCodePoints(left.path, right.path));
+
+const toArtifactPath = (listed: string, separator: string): string => {
+  const portable = separator === "\\" ? listed.replaceAll("\\", "/") : listed;
   return portable.replace(/^\/+|\/+$/gu, "");
 };
 

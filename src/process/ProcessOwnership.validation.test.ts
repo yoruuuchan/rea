@@ -74,7 +74,7 @@ describe("owned process-group cleanup validation: ownership and lineage", () => 
     });
     expect(await cleanupOwnedProcessGroup(ownership, adapter)).toEqual({
       cleaned: false,
-      reason: "process tree contains an unowned or PID-reused process",
+      reason: "process ownership token mismatch for PID(s): 101",
       failures: [{ pid: 101, reason: "run-token-mismatch" }],
     });
     expect(signalGroup).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe("owned process-group cleanup validation: ownership and lineage", () => 
     };
     expect(await cleanupOwnedProcessGroup(ownership, adapter)).toEqual({
       cleaned: false,
-      reason: "process tree contains an unowned or PID-reused process",
+      reason: "process ownership token mismatch for PID(s): 101",
       failures: [
         expect.objectContaining({
           pid: 100,
@@ -189,7 +189,7 @@ describe("owned process-group cleanup liveness rechecks", () => {
         cleanupOwnedProcessGroup(ownership, adapter),
       ).resolves.toEqual({
         cleaned: false,
-        reason: "process tree contains an unowned or PID-reused process",
+        reason: "process ownership token mismatch for PID(s): 101",
         failures: recheckFails
           ? [
               {
@@ -345,7 +345,7 @@ describe("owned process-group cleanup validation: launcher exit races", () => {
         if (remaining === "foreign")
           expect(result).toMatchObject({
             cleaned: false,
-            reason: "process tree contains an unowned or PID-reused process",
+            reason: "process ownership token mismatch for PID(s): 101",
           });
         else
           expect(result).toEqual({

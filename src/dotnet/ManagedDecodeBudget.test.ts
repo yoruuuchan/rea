@@ -38,6 +38,18 @@ describe("managed projection admission", () => {
 });
 
 describe("managed decoding bounds", () => {
+  it("bounds new row identities without charging lookup replay or merging tables", () => {
+    const budget = new ManagedDecodeBudget();
+    budget.reserve(64 * 1024 * 1024 - 512, null);
+    budget.reserveRow(2, 1, 100);
+    budget.reserveRow(12, 1, 200);
+
+    expect(() => budget.reserveRow(2, 1, 100)).not.toThrow();
+    expect(() => budget.reserveRow(2, 2, 300)).toThrow(ManagedReaderFailure);
+    // A rejected row has no retained reservation; replay cannot bypass capacity.
+    expect(() => budget.reserveRow(2, 2, 300)).toThrow(ManagedReaderFailure);
+  });
+
   it("keeps concurrent decoding bounds within one budget until released", () => {
     const budget = new ManagedDecodeBudget();
     const bound = 40 * 1024 * 1024;

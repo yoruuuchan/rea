@@ -24,6 +24,7 @@ import {
   type UpdateUnknownInput,
 } from "../../domain/residualUnknown.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
 type EvidenceLedgerFailure = EvidenceIntegrityError;
 type RecordResult = Result<"added" | "duplicate", EvidenceLedgerFailure>;
@@ -321,7 +322,9 @@ export class EvidenceLedger {
             unknown.severity === filters.severity) &&
           (filters.domain === undefined || unknown.domain === filters.domain),
       )
-      .sort((left, right) => left.unknown_id.localeCompare(right.unknown_id))
+      .sort((left, right) =>
+        compareUnicodeCodePoints(left.unknown_id, right.unknown_id),
+      )
       .map((unknown) => structuredClone(unknown));
   }
 

@@ -15,12 +15,25 @@ interface CachedString {
 export class ManagedDecodeBudget {
   #remaining = MAX_METADATA_REPRESENTATION_BYTES;
   #transient = 0;
+  readonly #rows = new Map<number, Set<number>>();
   readonly #strings = new Map<number, CachedString>();
   readonly #digests = new WeakMap<ArrayBufferLike, Map<string, string>>();
 
   reserve(bytes: number, offset: number | null): void {
     this.#admit(bytes, offset);
     this.#remaining -= bytes;
+  }
+
+  /** Retain one bookkeeping reservation per physical row, independently of lookup replay. */
+  reserveRow(table: number, row: number, offset: number): void {
+    let rows = this.#rows.get(table);
+    if (rows?.has(row) === true) return;
+    this.reserve(256, offset);
+    if (rows === undefined) {
+      rows = new Set<number>();
+      this.#rows.set(table, rows);
+    }
+    rows.add(row);
   }
 
   /** Bound a decoding allocation that stays live until `releaseTransient`; only retained output is reserved. */

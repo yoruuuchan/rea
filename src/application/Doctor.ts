@@ -120,6 +120,7 @@ export interface DoctorReport {
 /** Caller-selected readiness boundary; omitted values retain audit semantics. */
 export interface DoctorScope {
   readonly clients?: readonly string[];
+  readonly skillClients?: readonly string[];
   readonly providers?: readonly string[];
   readonly skill?: boolean;
 }
@@ -206,9 +207,10 @@ const collectDoctorIdentity = async (
   const installationPaths = (await host.installationPaths?.()) ?? [];
   const registrations = (await host.clientRegistrations?.()) ?? [];
   const skillClientIds =
-    scope.mode === "audit-wide"
+    scope.skill_clients ??
+    (scope.mode === "audit-wide"
       ? registrations.map(({ client }) => client)
-      : scope.clients;
+      : scope.clients);
   const installedSkillIdentity =
     await host.installedSkillIdentity?.(skillClientIds);
   const skillAligned = skillIdentityAligned(installedSkillIdentity);

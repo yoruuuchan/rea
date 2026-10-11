@@ -6,9 +6,10 @@ import { z } from "zod";
 import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
 import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
 import { CLI_COMMAND_NAMES } from "./cliCommandNames.js";
+import { compareUnicodeCodePoints } from "./domain/unicodeCodePointOrder.js";
 
 const sortedToolContracts = [...TOOL_CONTRACTS].sort((left, right) =>
-  left.name.localeCompare(right.name),
+  compareUnicodeCodePoints(left.name, right.name),
 );
 
 const createToolCatalog = () =>
@@ -39,7 +40,7 @@ const promptCatalog = PROMPT_CONTRACTS.map((contract) => ({
   description: contract.description,
   arguments: contract.arguments,
   steps: contract.steps,
-})).sort((left, right) => left.name.localeCompare(right.name));
+})).sort((left, right) => compareUnicodeCodePoints(left.name, right.name));
 
 const digest = (value: unknown): string => {
   const encoded = canonicalize(value);

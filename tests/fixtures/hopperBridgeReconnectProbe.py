@@ -45,11 +45,21 @@ def probe(path, socket_path, mode):
         assert time.monotonic() < deadline, failures
         time.sleep(0.005)
 
-    def connect():
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(2)
-        client.connect(socket_path)
-        return client, client.makefile("rwb")
+    def connect(wait_until_listening=False):
+        deadline = time.monotonic() + 2 if wait_until_listening else None
+        while True:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            try:
+                client.connect(socket_path)
+            except OSError as error:
+                client.close()
+                if (not isinstance(error, ConnectionRefusedError)
+                        or deadline is None or time.monotonic() >= deadline):
+                    raise
+                time.sleep(0.005)
+            else:
+                return client, client.makefile("rwb")
 
     def send(file, method, token="owned-token", params=None):
         file.write((json.dumps({"id": 1, "method": method, "token": token, "params": params or {}}) + "\n").encode())
@@ -63,7 +73,8 @@ def probe(path, socket_path, mode):
             if "event" not in value:
                 return value
 
-    client, file = connect()
+    # bind() creates the socket path before listen() makes it connectable.
+    client, file = connect(wait_until_listening=True)
     send(file, "health", "foreign-token" if mode == "unauthorized" else "owned-token")
     if mode == "lost-reply":
         assert entered.wait(2)

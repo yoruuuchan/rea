@@ -6,6 +6,7 @@ import { WindowsOwnedProcess } from "../windows/WindowsOwnedProcess.js";
 
 import type {
   OwnedProcessGroup,
+  ProcessCleanupFailure,
   ProcessCleanupResult,
 } from "./ProcessOwnership.js";
 import { prepareProcessOwnershipInspection } from "./ProcessOwnershipObservation.js";
@@ -143,7 +144,11 @@ export type ProviderProcessStopResult =
         | "terminated"
         | "killed";
     }
-  | { readonly status: "incomplete"; readonly reason: string };
+  | {
+      readonly status: "incomplete";
+      readonly reason: string;
+      readonly cleanupResult?: ProcessCleanupFailure;
+    };
 
 /**
  * Spawn a provider in an owned Windows job or dedicated POSIX process group.
@@ -373,13 +378,21 @@ export class ProviderProcessSupervisor {
       if (this.launch.cleanup !== undefined) {
         const cleanup = await this.#ownedCleanup(options.cleanupResult);
         if (!cleanup.cleaned)
-          return { status: "incomplete", reason: cleanup.reason };
+          return {
+            status: "incomplete",
+            reason: cleanup.reason,
+            cleanupResult: cleanup,
+          };
         const graceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
         if (await this.waitForExit(graceMs))
           return { status: "verified-cleanup" };
         const retried = await this.launch.cleanup();
         if (!retried.cleaned)
-          return { status: "incomplete", reason: retried.reason };
+          return {
+            status: "incomplete",
+            reason: retried.reason,
+            cleanupResult: retried,
+          };
         if (await this.waitForExit(graceMs))
           return { status: "verified-cleanup" };
         return {

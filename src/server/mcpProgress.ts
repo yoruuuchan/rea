@@ -22,8 +22,10 @@ export const mcpProgressReporter = (
           method: "notifications/progress",
           params: {
             progressToken: token,
-            progress: update.completed,
-            ...(update.total === null ? {} : { total: update.total }),
+            // Status phases can repeat their work count while waiting. The
+            // protocol requires every notification to advance; count emitted
+            // observations without inventing a total amount of analysis work.
+            progress: update.sequence,
             message: `${update.phase}: ${update.message}`,
           },
         });

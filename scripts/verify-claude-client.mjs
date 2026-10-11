@@ -13,10 +13,6 @@ import { exec } from "./lib/verify-package-core.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 import { createAnthropicModelFixture } from "./verify/clients/anthropic-model-fixture.mjs";
 
-assert(
-  process.platform !== "win32",
-  "Native Claude Code verifier requires POSIX; Windows is unverified",
-);
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const runtimeRoot = process.env.REA_VERIFY_RUNTIME_ROOT ?? repo;
 const command = process.env.REA_VERIFY_CLAUDE_COMMAND ?? "claude";
@@ -46,8 +42,13 @@ try {
     await exec(command, ["--version"], { env: environment, timeout: 30_000 })
   ).stdout.trim();
 } catch (cause) {
+  // npm installs put only a claude.cmd shim on PATH, which Node does not spawn without a shell.
+  const windowsHint =
+    process.platform === "win32"
+      ? " On Windows, select claude.exe; npm installs provide it under node_modules/@anthropic-ai/claude-code/bin."
+      : "";
   throw new Error(
-    `Claude Code preflight failed for ${command}; install Claude Code or set REA_VERIFY_CLAUDE_COMMAND. ${String(cause)}`,
+    `Claude Code preflight failed for ${command}; install Claude Code or set REA_VERIFY_CLAUDE_COMMAND.${windowsHint} ${String(cause)}`,
   );
 }
 const target = join(lab, "fixture α测试");

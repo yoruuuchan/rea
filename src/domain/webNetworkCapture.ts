@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonValueSchema } from "./jsonValue.js";
+import { localPathStringSchema } from "./localPath.js";
 
 /** Complete historical evidence budgets; exceeding a budget returns no partial capture. */
 export const WEB_NETWORK_CAPTURE_LIMITS = {
@@ -11,10 +12,9 @@ export const WEB_NETWORK_CAPTURE_LIMITS = {
 
 /** Inspect an explicit retained capture without contacting its recorded destinations. */
 export const inspectWebNetworkCaptureInputSchema = z.strictObject({
-  capture_path: z
-    .string()
-    .min(1)
-    .describe("Absolute local HAR or mitmproxy capture path."),
+  capture_path: localPathStringSchema.describe(
+    "Absolute local HAR or mitmproxy capture path.",
+  ),
   format: z.enum(["har", "mitmproxy"]),
   record_ordinals: z
     .array(z.number().int().nonnegative())

@@ -130,6 +130,16 @@ export const buildJavaScriptSemanticGraph = ({
   for (const analyzed of analysis.files) {
     if (analyzed.semantic !== null)
       projection.projectFile(analyzed.file, analyzed.semantic.ir);
+    else if (
+      !analyzed.file.text.included &&
+      analyzed.file.text.reason === "outside-analysis-scope"
+    )
+      projection.recordUnavailableFile(
+        analyzed.file,
+        "Source was not analyzed because it is outside the caller-selected source_paths.",
+        null,
+        "incomplete-module",
+      );
   }
   return projection.finish(rootArtifactSha256, applicationGraph);
 };

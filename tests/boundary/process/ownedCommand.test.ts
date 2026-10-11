@@ -8,7 +8,10 @@ import {
   runOwnedCommand,
 } from "../../../src/process/OwnedCommand.js";
 import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
-import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
+import {
+  cleanupOwnedProcessGroup,
+  type ProcessCleanupResult,
+} from "../../../src/process/ProcessOwnership.js";
 import { prepareProcessOwnershipInspection } from "../../../src/process/ProcessOwnershipObservation.js";
 import { waitForProviderProcessReady } from "../../fixtures/providerProcess.js";
 
@@ -185,6 +188,99 @@ it("returns a timeout for a running process after independent cleanup", async ()
     }),
   ).rejects.toMatchObject({ reason: "timeout", cleanupFailure: null });
 });
+
+it.skipIf(process.platform === "win32").each(["cancelled", "timeout"] as const)(
+  "retains the real per-member cleanup ledger after %s and settles after cooperative exit",
+  async (reason) => {
+    const childScript =
+      'process.stdin.once("data", () => process.exit(0)); process.stdout.write("child-ready\\n")';
+    const request = {
+      ...command(`
+        const { spawn } = require("node:child_process");
+        const child = spawn(process.execPath, ["-e", ${JSON.stringify(childScript)}], {
+          env: { ...process.env, REA_PROCESS_RUN_ID: "different-child-owner" },
+          stdio: ["pipe", "inherit", "inherit"],
+        });
+        const release = () => child.stdin.end("release");
+        process.stdin.once("data", release);
+        const failsafe = setTimeout(release, 10000);
+        child.once("exit", () => { clearTimeout(failsafe); process.stdin.destroy(); });
+      `),
+      stdin: "pipe" as const,
+    };
+    const controller = new AbortController();
+    let launched:
+      | Awaited<ReturnType<typeof spawnOwnedProviderProcess>>
+      | undefined;
+    let cleanup: ProcessCleanupResult | undefined;
+    let failure: OwnedCommandFailure | undefined;
+    try {
+      await runOwnedCommand(
+        request,
+        { timeoutMs: 2000, diagnosticBytes: 1024 },
+        {
+          signal: controller.signal,
+          launcher: async (input) => {
+            const acquired = await spawnOwnedProviderProcess(input);
+            launched = acquired;
+            acquired.process.stdout?.on("data", (chunk: Buffer) => {
+              if (
+                reason === "cancelled" &&
+                chunk.toString().includes("child-ready")
+              )
+                controller.abort();
+            });
+            return {
+              ...acquired,
+              cleanup: async () => {
+                const observed = await cleanupOwnedProcessGroup(
+                  acquired.ownership,
+                );
+                cleanup ??= observed;
+                return observed;
+              },
+            };
+          },
+        },
+      ).catch((cause: unknown) => {
+        if (!(cause instanceof OwnedCommandFailure)) throw cause;
+        failure = cause;
+      });
+      if (failure === undefined || launched === undefined)
+        throw new Error(
+          "The acquired command must retain its failed cleanup owner",
+        );
+      expect(failure.reason).toBe(reason);
+      expect(failure.snapshot?.stdout.text).toContain("child-ready");
+      expect(cleanup).toMatchObject({
+        cleaned: false,
+        failures: [expect.objectContaining({ reason: "run-token-mismatch" })],
+      });
+      expect(failure.cleanupResult).toEqual(cleanup);
+      expect(failure.resources).toEqual(
+        expect.arrayContaining([request.runId]),
+      );
+      // An unresolved member does not grant authority to signal the shared group.
+      const acquiredPid = launched.ownership.leaderPid;
+      expect(() => process.kill(acquiredPid, 0)).not.toThrow();
+      if (cleanup?.cleaned === false) {
+        for (const member of cleanup.failures ?? []) {
+          expect(() => process.kill(member.pid, 0)).not.toThrow();
+          expect(failure.cleanupFailure).toContain(String(member.pid));
+        }
+      }
+    } finally {
+      // Release through the fixture's acquired input channel, never by an unverified PID.
+      launched?.process.stdin?.end("release");
+      if (failure?.cleanupOwner !== undefined) {
+        expect(await failure.cleanupOwner.waitForOutputClose(5000)).toBe(true);
+        expect(await failure.cleanupOwner.stop()).toEqual({
+          status: "verified-cleanup",
+        });
+      }
+    }
+  },
+);
 
 it("honors cancellation during cleanup after a successful command", async () => {
   const controller = new AbortController();

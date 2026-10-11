@@ -51,9 +51,9 @@ export interface AnalysisCleanupObservation {
 
 /** Optional provider-neutral context that must survive typed error projection. */
 export interface AnalysisErrorOptions extends ErrorOptions {
-  readonly capturedOutput?: AnalysisCapturedOutput;
-  readonly cleanup?: AnalysisCleanupObservation;
-  readonly partialObservation?: AnalysisPartialObservation;
+  readonly capturedOutput?: AnalysisCapturedOutput | undefined;
+  readonly cleanup?: AnalysisCleanupObservation | undefined;
+  readonly partialObservation?: AnalysisPartialObservation | undefined;
 }
 
 /** Base class for expected analysis, provider, and session failures. */

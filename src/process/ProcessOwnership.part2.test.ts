@@ -111,7 +111,7 @@ describe("owned process-group cleanup discovery", () => {
     await expect(cleanupOwnedProcessGroup(ownership, adapter)).resolves.toEqual(
       {
         cleaned: false,
-        reason: "process tree contains an unowned or PID-reused process",
+        reason: "process ownership token mismatch for PID(s): 104",
         failures: [{ pid: 104, reason: "run-token-mismatch" }],
       },
     );

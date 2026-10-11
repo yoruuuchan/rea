@@ -13,6 +13,16 @@ describe("hostExecutableMarking", () => {
     expect(
       hostExecutableMarking("C:\\scratch\\SETUP.CMD", file(0o444), "win32"),
     ).toBe(true);
+    for (const path of [
+      "tools/SETUP.EXE",
+      "run.Cmd",
+      "build.bat",
+      "legacy.com",
+    ])
+      expect(hostExecutableMarking(path, file(0o666), "win32")).toBe(true);
+    expect(hostExecutableMarking("readonly.exe", file(0o444), "win32")).toBe(
+      true,
+    );
     expect(
       hostExecutableMarking("C:\\scratch\\library.dll", file(0o666), "win32"),
     ).toBe(false);
@@ -23,6 +33,11 @@ describe("hostExecutableMarking", () => {
         "win32",
       ),
     ).toBe(false);
+  });
+
+  it("does not treat other Windows filenames as executable even with execute bits", () => {
+    for (const path of ["notes.txt", "README", "archive.exe.bak"])
+      expect(hostExecutableMarking(path, file(0o777), "win32")).toBe(false);
   });
 
   it("keeps POSIX permission bits authoritative regardless of extension", () => {

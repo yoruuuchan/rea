@@ -13,6 +13,7 @@ import {
 } from "./CdpCaptureValues.js";
 import type { CaptureContext } from "./CdpPageCapture.js";
 import type { WebSourceMapRequest } from "./WebSourceMapFetcher.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 export interface CapturedScripts {
   readonly inventory: WebPageInspection["scripts"];
@@ -131,11 +132,15 @@ const keyAndBuildInventory = (
   }));
   keyed.sort(
     (left, right) =>
-      left.base.localeCompare(right.base) ||
-      sourceDigest(left.item.source).localeCompare(
+      compareUnicodeCodePoints(left.base, right.base) ||
+      compareUnicodeCodePoints(
+        sourceDigest(left.item.source),
         sourceDigest(right.item.source),
       ) ||
-      (left.item.frame_id ?? "").localeCompare(right.item.frame_id ?? ""),
+      compareUnicodeCodePoints(
+        left.item.frame_id ?? "",
+        right.item.frame_id ?? "",
+      ),
   );
   const totals = new Map<string, number>();
   for (const { base } of keyed) totals.set(base, (totals.get(base) ?? 0) + 1);

@@ -109,15 +109,23 @@ export class IdaProvider implements AnalysisProviderCandidate {
           "REA's IDA adapter has no verified MIPS lane. Select a supported Ghidra profile instead.",
         diagnostics,
       };
-    return target.kind === "executable"
-      ? { status: "supported", code: null, reason: null, diagnostics }
-      : {
-          status: "unsupported",
-          code: "target_kind_unsupported",
-          reason:
-            "IDA MCP integration admits executable inputs, not analysis databases. Select the original input binary.",
-          diagnostics,
-        };
+    if (target.kind !== "executable")
+      return {
+        status: "unsupported",
+        code: "target_kind_unsupported",
+        reason:
+          "IDA MCP integration admits executable inputs, not analysis databases. Select the original input binary.",
+        diagnostics,
+      };
+    if (target.format === "raw-binary")
+      return {
+        status: "unsupported",
+        code: "target_format_unsupported",
+        reason:
+          "IDA does not admit headerless raw binaries. Open the target with Ghidra and supply architecture and entry_point.",
+        diagnostics,
+      };
+    return { status: "supported", code: null, reason: null, diagnostics };
   }
   async resolveAnalysisProfile(
     _target: BinaryTarget,

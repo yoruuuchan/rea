@@ -308,6 +308,8 @@ it.each(["depth", "dependency", "link"])(
       expect(normalized.diagnostics).toEqual([
         {
           input_path: "$input",
+          stage: "gzip",
+          missing_dependencies: ["sasquatch"],
           report: {
             __typename__: "ExtractorDependencyNotFoundReport",
             severity: "ERROR",

@@ -25,6 +25,7 @@ import {
   supportedClients,
 } from "./SupportedClients.js";
 import type { SetupClient } from "./SupportedClients.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 interface ClientRegistrationStatusBase {
   readonly client: string;
@@ -184,7 +185,7 @@ export const readClientRegistrationStatuses = async (
     }
   }
   return statuses.sort((left, right) =>
-    left.client.localeCompare(right.client),
+    compareUnicodeCodePoints(left.client, right.client),
   );
 };
 

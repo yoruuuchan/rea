@@ -79,6 +79,13 @@ export type BinaryTarget =
       readonly managed?: never;
     })
   | (ExecutableTarget & {
+      readonly format: "raw-binary";
+      readonly entryPoint: string;
+      readonly entryPointSource: string;
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (ExecutableTarget & {
       readonly format: "pe";
       /** Provider-neutral PE image role observed from COFF characteristics. */
       readonly executableRole:

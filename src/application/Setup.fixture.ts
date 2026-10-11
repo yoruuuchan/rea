@@ -159,6 +159,7 @@ export class FakeSetupHost implements SetupHost {
       scope === undefined
         ? environmentHealthy
         : (scope.clients?.length ?? 0) === 0 &&
+            (scope.skillClients?.length ?? 0) === 0 &&
             (scope.providers?.length ?? 0) === 0 &&
             scope.skill !== true
           ? true
@@ -169,6 +170,9 @@ export class FakeSetupHost implements SetupHost {
       scope: {
         mode: scope === undefined ? "audit-wide" : "explicit",
         clients: scope?.clients ?? [],
+        ...(scope?.skillClients === undefined
+          ? {}
+          : { skill_clients: scope.skillClients }),
         providers: scope?.providers ?? [],
         skill: scope?.skill === true,
         target: null,

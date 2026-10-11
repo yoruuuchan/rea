@@ -25,6 +25,7 @@ import {
   evaluateAnalysisProviderCandidate,
   type AnalysisProviderCandidateEvaluation,
 } from "./AnalysisProviderEvaluation.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
 /** Deterministic discovery truth for one configured deep provider. */
 export interface AnalysisProviderCandidateStatus {
@@ -109,12 +110,14 @@ export class AnalysisProviderRegistry {
     }
     this.#providers = Object.freeze(
       [...providers].sort((left, right) =>
-        left.identity().id.localeCompare(right.identity().id),
+        compareUnicodeCodePoints(left.identity().id, right.identity().id),
       ),
     );
     this.#byId = byId;
     this.#declaredOperations = Object.freeze(
-      [...declaredOperations].sort((left, right) => left.localeCompare(right)),
+      [...declaredOperations].sort((left, right) =>
+        compareUnicodeCodePoints(left, right),
+      ),
     );
   }
 

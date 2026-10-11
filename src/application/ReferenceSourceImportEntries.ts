@@ -18,6 +18,7 @@ import type {
   ReferenceSourceRead,
 } from "../reference/ReferenceSourceReaderTypes.js";
 import { PARSEABLE_REFERENCE_SOURCE_LANGUAGES } from "./ReferenceSourceImportTypes.js";
+import { typescriptEmittedSourceCandidates } from "./TypeScriptEmittedSourceCandidates.js";
 
 export interface ParsedReferenceSourceEntries {
   readonly entries: HistoricalSourceGraphInput["entries"];
@@ -99,22 +100,9 @@ const resolveInternalSpecifier = (
     `${normalized}${suffix}`,
     `${normalized}/index${suffix}`,
   ]);
-  // TypeScript source commonly names the extension emitted for NodeNext.
   // Retain present runtime files first; substitute only a missing counterpart.
   // Counterparts cover explicit filenames, not directory/index resolution.
-  if (/\.(?:ts|tsx|mts|cts)$/u.test(fromPath)) {
-    const sourceSuffixes = normalized.endsWith(".js")
-      ? [".ts", ".tsx", ".d.ts"]
-      : normalized.endsWith(".mjs")
-        ? [".mts", ".d.mts"]
-        : normalized.endsWith(".cjs")
-          ? [".cts", ".d.cts"]
-          : normalized.endsWith(".jsx")
-            ? [".tsx", ".d.ts"]
-            : [];
-    const stem = normalized.slice(0, -posix.extname(normalized).length);
-    candidates.push(...sourceSuffixes.map((suffix) => `${stem}${suffix}`));
-  }
+  candidates.push(...typescriptEmittedSourceCandidates(fromPath, normalized));
   const match = lookupPath.resolveCandidates(candidates);
   return match === undefined
     ? { to: normalized, resolution: "unresolved" }

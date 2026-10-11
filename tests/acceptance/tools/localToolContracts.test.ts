@@ -91,6 +91,42 @@ const pathRequests: readonly [string, Record<string, unknown>][] = [
   ),
   ["capture_electron_scenario", { ...electron, args: ["a\0b"] }],
   ["demangle_swift", { symbols: ["abc\0def"] }],
+  ["inspect_web_network_capture", { capture_path: nul, format: "har" }],
+  [
+    "export_web_scripts",
+    { capture_path: nul, output_directory: "/tmp/exported-scripts" },
+  ],
+  [
+    "export_web_scripts",
+    { capture_path: "/tmp/capture.json", output_directory: nul },
+  ],
+  [
+    "trace_web_source_location",
+    {
+      manifest_path: nul,
+      script_index: 0,
+      source_map: { path: "/tmp/source.map", url: "http://127.0.0.1/a" },
+      generated_position: { line: 1, column: 0 },
+    },
+  ],
+  [
+    "trace_web_source_location",
+    {
+      manifest_path: "/tmp/manifest.json",
+      script_index: 0,
+      source_map: { path: nul, url: "http://127.0.0.1/a" },
+      generated_position: { line: 1, column: 0 },
+    },
+  ],
+  ["trace_web_module_imports", { manifest_path: nul, script_index: 0 }],
+  [
+    "trace_web_module_imports",
+    {
+      manifest_path: "/tmp/manifest.json",
+      script_index: 0,
+      import_map: { path: nul, base_url: "http://127.0.0.1/a" },
+    },
+  ],
 ];
 
 it("rejects OS-invalid local inputs through the real advertised MCP contracts", async () => {

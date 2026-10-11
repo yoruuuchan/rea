@@ -86,16 +86,20 @@ export const semanticObjectPatternKeys = (
     return key === null ? [] : [key];
   });
 
-/** Visit member write targets in direct and destructuring assignment forms. */
-export function* semanticMemberWriteTargets(
+/** Visit binding and member leaves in direct and destructuring write targets. */
+export function* semanticWriteTargets(
   root: t.Node,
-): Generator<t.MemberExpression | t.OptionalMemberExpression> {
+): Generator<t.Identifier | t.MemberExpression | t.OptionalMemberExpression> {
   const pending = [root];
   while (pending.length > 0) {
     const next = pending.pop();
     if (next === undefined) break;
     const node = unwrapJavaScriptExpression(next).node;
-    if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node))
+    if (
+      t.isIdentifier(node) ||
+      t.isMemberExpression(node) ||
+      t.isOptionalMemberExpression(node)
+    )
       yield node;
     else if (t.isRestElement(node)) pending.push(node.argument);
     else if (t.isAssignmentPattern(node)) pending.push(node.left);

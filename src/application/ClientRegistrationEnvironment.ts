@@ -8,6 +8,7 @@ import {
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** Read explicit REA overrides without dropping peers when one value is invalid. */
 export const clientRegistrationEnvironment = (
@@ -47,7 +48,7 @@ export const clientRegistrationEnvironment = (
   return ok(
     Object.fromEntries(
       Object.entries(environment).sort(([left], [right]) =>
-        left.localeCompare(right),
+        compareUnicodeCodePoints(left, right),
       ),
     ),
   );

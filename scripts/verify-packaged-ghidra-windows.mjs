@@ -14,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -172,11 +172,14 @@ const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const runtimeParent = join(workspace, "runtime with spaces");
 await mkdir(runtimeParent);
 const callerDirectory = join(workspace, "caller cwd with spaces");
+// Keep sorted for comparison with the final caller-directory listing.
 const scriptCollisions = [
-  "ReaGhidraBridge.java",
-  "ReaGhidraPrepareCom.java",
+  "ReaGhidraAnalysisOptions.java",
   "ReaGhidraApplySeeds.java",
+  "ReaGhidraBridge.java",
   "ReaGhidraNoReturnFix.java",
+  "ReaGhidraPrepareCom.java",
+  "ReaGhidraPrepareRaw.java",
 ];
 await mkdir(callerDirectory);
 for (const name of scriptCollisions) await mkdir(join(callerDirectory, name));
@@ -290,6 +293,23 @@ try {
     await client.connect(transport);
     await call("open_binary", { path: target });
     await call("binary_overview", {});
+    const activators = (
+      await readdir(runtimeParent, { recursive: true })
+    ).filter((path) => basename(path) === "ReaGhidraBundleActivator.class");
+    assert.equal(activators.length, 1);
+    const [activator] = activators;
+    assert.ok(activator !== undefined);
+    const bundleDirectory = dirname(join(runtimeParent, activator));
+    const manifest = await readFile(
+      join(bundleDirectory, "META-INF", "MANIFEST.MF"),
+      "utf8",
+    );
+    assert.match(manifest, /^Bundle-Activator: ReaGhidraBundleActivator\r?$/mu);
+    await assert.rejects(
+      readFile(join(bundleDirectory, "GeneratedActivator.class")),
+      { code: "ENOENT" },
+    );
+    report.bundleActivator = "ReaGhidraBundleActivator";
     assert.equal((await call("list_documents", {})).length, 1);
     await call("list_names", {});
     const procedures = await call("list_procedures", {});

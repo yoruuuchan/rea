@@ -150,13 +150,15 @@ structured data and matching text projection. Oversized errors are retained
 as Evidence before delivery of a bounded diagnostic with an export reference;
 if retention is unavailable or fails, the diagnostic reports that reason.
 
-REA accepts ordinary `tools/call` progress tokens. Updates are monotonic,
-rate-bounded to at most one intermediate update per 100 ms, and always allow a
-terminal update. Unknown totals are omitted; REA does not fabricate percentages.
+REA accepts ordinary `tools/call` progress tokens. The numeric `progress` counts
+emitted status observations and strictly increases, including when a waiting
+phase has completed no additional work. Updates are rate-bounded to at most one
+intermediate update per 100 ms and always allow a terminal update. `total` is
+omitted because the number of future status observations is unknown. Read
+`message` for the phase and observed work; REA does not fabricate percentages.
 `capture_process_scenario` uses that boundary only when the client supplies a
-progress token. Notifications set `progress` to the count of collected terminal
-frames, process samples, and interaction events, omit `total`, and put the
-lifecycle phase, elapsed time, and final cleanup status in `message`. A client
+progress token. Notifications put the lifecycle phase, elapsed time, and final
+cleanup status in `message`. A client
 that does not send a progress token receives no progress notifications. The
 tool result is unchanged either way.
 Provider calls receive the request cancellation signal. Artifact traversal,
@@ -230,6 +232,18 @@ engine readiness or a percentage of Ghidra auto-analysis. A longer server
 startup allowance does not extend the client's deadline; progress also does not
 extend it unless the client explicitly implements that policy.
 
+While Ghidra startup is pending, REA sends a waiting notification every ten
+seconds when the request has a progress token. Its message gives elapsed waiting
+time; import, auto-analysis and bridge readiness may all still be pending.
+Waiting notifications stop when startup settles or the caller cancels. They do
+not measure engine work completed.
+
+The pinned SDK can reset the request's inactivity timeout on progress with
+`resetTimeoutOnProgress: true`. Also set `maxTotalTimeout` to bound the complete
+request; the provider's startup deadline still applies. These options belong in
+the same second argument of `callTool`. Without that explicit client policy, the
+default 60-second request deadline still expires despite waiting notifications.
+
 The 240-second setting is a measured example, not a universal timeout: a
 controlled Linux x64/WSL2 fixture took about 64 seconds for its first overview
 with Ghidra 12.1.4 on a mounted NTFS installation, native JDK 21, two CPUs, and a
@@ -265,9 +279,10 @@ observed process-family member remained after final close. This was a small
 1,024-byte fixture, so the longer request setting remains an example, not a
 guarantee for larger targets. No macOS cold-start recovery was exercised.
 
-With a supplied progress token, the Windows run received an operation-start
+With a supplied progress token, that earlier Windows run received an operation-start
 notification before timeout and start/completion notifications for the
-successful retry. It received no intermediate import or auto-analysis progress.
+successful retry, before startup waiting notifications were added. It received
+no intermediate import or auto-analysis progress.
 These operation markers do not measure analysis work completed or extend the
 client's deadline. Each new provider session still imports the target into a
 fresh temporary project.
@@ -435,7 +450,13 @@ Tool annotations describe effects and are hints, not authorization controls
 ([MCP ToolAnnotations](https://modelcontextprotocol.io/specification/2025-06-18/schema#toolannotations)).
 `readOnlyHint` includes session state: an analysis call that records additive
 Evidence is marked non-read-only even when it leaves the target unchanged.
-`destructiveHint` describes possible data loss, not ordinary Evidence recording.
+`destructiveHint` is true when a tool may discard data (overwriting or clearing
+analyst metadata, replacing files, dropping session state), runs or drives code
+REA does not own (`executesForeignCode`: process, LLDB, Electron, browser, and
+native UI scenarios), or changes an attached Android device (`mutatesDevice`:
+push, install, uninstall, start, and stop). Ordinary Evidence recording is not
+destructive. The effect record in `binary_session` and the generated catalog
+carries each flag separately.
 Effect metadata covers possible behavior across supported inputs: DMG inventory
 can launch `hdiutil` and create an owned temporary mount directory; extraction
 creates a fresh output directory on every call. Comparing supplied web captures

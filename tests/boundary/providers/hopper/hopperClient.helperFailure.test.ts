@@ -1,13 +1,68 @@
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
 
 import { expect, it, onTestFinished } from "vitest";
 
 import { AnalysisError } from "../../../../src/domain/analysisErrorBase.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { ok } from "../../../../src/domain/result.js";
-import type { BridgeLauncher } from "../../../../src/hopper/BridgeLauncher.js";
+import type {
+  BridgeLauncher,
+  BridgeSession,
+} from "../../../../src/hopper/BridgeLauncher.js";
 import { HopperApplicationLauncher } from "../../../../src/hopper/BridgeLauncher.js";
 import { HopperClient } from "../../../../src/hopper/HopperClient.js";
+import { HopperFixtureLauncher } from "./hopperClient.fixture.js";
+
+// Failure assertions keep the external document unknown. Teardown then publishes
+// this run's authenticated bridge so normal cleanup can release its runtime/lease.
+const trackFailedHelperClient = (
+  launcher: BridgeLauncher,
+  startupTimeoutMs = 10_000,
+): HopperClient => {
+  let session: BridgeSession | undefined;
+  let external = false;
+  const client = new HopperClient({
+    launcher: {
+      async launch(input, options) {
+        session = input;
+        const launched = await launcher.launch(input, options);
+        external =
+          launched.ok &&
+          launched.value.providerLifetime === "external-application";
+        return launched;
+      },
+    },
+    startupTimeoutMs,
+  });
+  onTestFinished(async () => {
+    const fixture = new HopperFixtureLauncher();
+    const published =
+      external && session !== undefined
+        ? await fixture.launch(session)
+        : undefined;
+    try {
+      const closed = await client.close();
+      if (!closed.ok) throw closed.error;
+      if (published !== undefined) {
+        expect(fixture.requests.map((request) => request.method)).toEqual([
+          "health",
+          "shutdown_document",
+        ]);
+      }
+      if (session !== undefined)
+        await expect(access(session.directory)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+    } finally {
+      if (published?.ok) {
+        const cleaned = await published.value.cleanup();
+        expect(cleaned.cleaned).toBe(true);
+      }
+    }
+  });
+  return client;
+};
 
 const projectPrimaryStartupFailure = (error: AnalysisError) => {
   if (!error.cleanupIncomplete) return projectAnalysisError(error);
@@ -32,10 +87,7 @@ it("does not equate an owned native helper exit with an external GUI exit", asyn
     bridgeScriptPath: "/rea/hopper_bridge.py",
     launchMode: "native",
   });
-  const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
-  onTestFinished(async () => {
-    await client.close();
-  }, 45_000);
+  const client = trackFailedHelperClient(launcher);
   const result = await client.start();
   expect(result).toMatchObject({
     ok: false,
@@ -84,10 +136,7 @@ it.each(["exit", "signal", "exit75"] as const)(
         );
       },
     };
-    const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
-    onTestFinished(async () => {
-      await client.close();
-    }, 45_000);
+    const client = trackFailedHelperClient(launcher);
     const result = await client.start();
     expect(result).toMatchObject({
       ok: false,
@@ -136,10 +185,7 @@ it.each([0, 1])(
         );
       },
     };
-    const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
-    onTestFinished(async () => {
-      await client.close();
-    }, 45_000);
+    const client = trackFailedHelperClient(launcher);
     const result = await client.start();
     expect(result).toMatchObject({
       ok: false,
@@ -174,10 +220,7 @@ it("preserves a successful helper's diagnostics when bridge readiness is never o
       );
     },
   };
-  const client = new HopperClient({ launcher, startupTimeoutMs: 1500 });
-  onTestFinished(async () => {
-    await client.close();
-  }, 45_000);
+  const client = trackFailedHelperClient(launcher, 1500);
   const result = await client.start();
   if (result.ok)
     throw new Error("Expected missing bridge readiness to time out");

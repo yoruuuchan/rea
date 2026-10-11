@@ -12,6 +12,7 @@ import {
 import type { CdpEndpointTarget } from "./CdpEndpoint.js";
 import { optionalCdpCommand } from "./CdpOptionalCommand.js";
 import { authorizedElectronFile } from "./ElectronFileScope.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** Inventory local worker targets without attaching to them. */
 export const captureElectronWorkers = async (input: {
@@ -70,7 +71,7 @@ export const captureElectronWorkers = async (input: {
     });
   }
   return workers.sort((left, right) =>
-    left.target_id.localeCompare(right.target_id),
+    compareUnicodeCodePoints(left.target_id, right.target_id),
   );
 };
 

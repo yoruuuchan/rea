@@ -245,8 +245,9 @@ export const metadataRowCursor = (
       "Metadata table is absent",
       start,
     );
-  // Reserve per-row object/index bookkeeping before readers retain decoded facts.
-  managedDecodeBudget(layout).reserve(256, start);
+  // Temporary cursors may revisit a row while resolving owners or references.
+  // Bind fixed retained bookkeeping to that row's identity, not each lookup.
+  managedDecodeBudget(layout).reserveRow(table, row, start);
   return new MetadataRowCursor(
     bytes,
     start,

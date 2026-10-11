@@ -20,6 +20,7 @@ import {
   clientRequirementsFor,
   NO_CLIENT_FEATURES,
 } from "./CapabilityClientRequirements.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 const statusSchema = z.object({
   open: z.boolean(),
@@ -210,7 +211,7 @@ export const buildCapabilityInventory = (
           reason: availability.reason,
           remediation: availability.remediation,
         };
-  }).sort((left, right) => left.name.localeCompare(right.name));
+  }).sort((left, right) => compareUnicodeCodePoints(left.name, right.name));
 };
 
 const availabilityFor = (context: AvailabilityContext): Availability => {

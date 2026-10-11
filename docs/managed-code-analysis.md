@@ -126,6 +126,24 @@ Member inspection binds build-local tokens, signatures, row offsets, method
 bodies, and decoded relationships to that artifact and MVID. Missing or malformed
 facts remain explicit in coverage and per-member status.
 
+Metadata table streams may carry the CLR-compatible `ExtraData` extension
+(`HeapSizes` flag `0x40`), which Microsoft readers honor although it is not
+specified by ECMA-335. REA skips its fixed four-byte word after the row counts
+before decoding table rows; the word's value is not a length. An incomplete
+word is reported as a metadata coverage failure at its file offset, without
+reading beyond the declared table stream.
+
+For unoptimized `#-` metadata, nonempty `FieldPtr` and `MethodPtr` tables
+translate TypeDef list positions to physical member definitions. REA resolves
+these indirections for member ownership and local attribute-constructor types;
+field and method tokens still identify the original definition rows.
+`field_list` and `method_list` retain the metadata's list coordinates, which
+refer to the pointer table when present rather than necessarily contiguous
+definition rows. Malformed or ambiguous pointers leave the owner unknown with
+partial coverage while preserving readable member and attribute facts.
+The retained inverse indexes are admitted against the existing representation
+budget before allocation.
+
 `exported_types` reports ExportedType rows as declared. Facade assemblies such
 as .NET `System.Runtime.dll` provide their types this way: `forwarder: true`
 marks a type forwarder, and `implementation_token` names the AssemblyRef, File,

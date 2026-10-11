@@ -195,6 +195,32 @@ describe("tRPC binding identity and bundled syntax", () => {
     ]);
   });
 
+  it("retains one client initializer across variable redeclarations", () => {
+    expect(
+      rpcEndpoints(`
+      var c;
+      var c = createTRPCClient({});
+      var c;
+      c.users.query();
+
+      var replaced;
+      var replaced = createTRPCClient({});
+      replaced = pool;
+      replaced.posts.query();
+
+      var initializedTwice = createTRPCClient({});
+      var initializedTwice = pool;
+      initializedTwice.comments.query();
+
+      var conditional;
+      if (flag) { var conditional = createTRPCClient({}); }
+      conditional.groups.query();
+    `),
+    ).toEqual([
+      { kind: "network", value: "users", mechanism: "trpc:procedure:query" },
+    ]);
+  });
+
   it("recognizes surviving factory names inside bundled call wrappers", () => {
     expect(
       rpcEndpoints(`

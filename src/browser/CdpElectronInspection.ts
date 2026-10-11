@@ -24,6 +24,7 @@ import {
 import { captureElectronScripts } from "./CdpElectronScripts.js";
 import { captureElectronWorkers } from "./CdpElectronWorkers.js";
 import { authorizedElectronFile } from "./ElectronFileScope.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 interface ElectronContext {
   readonly connection: CdpConnection;
@@ -300,7 +301,7 @@ const captureResources = async (
     pending.push(...recordsValue(tree.childFrames));
   }
   return resources.sort((left, right) =>
-    left.resource_key.localeCompare(right.resource_key),
+    compareUnicodeCodePoints(left.resource_key, right.resource_key),
   );
 };
 

@@ -265,9 +265,12 @@ const hopperProcessMessage = (error: HopperProcessError): string => {
   const startup =
     error.userMessage === undefined ? "" : ` ${error.userMessage}`;
   if (error.providerState === "exited") {
+    const signal = error.launcherFailure?.signal;
     const exit =
       error.exitCode === null
-        ? "no exit code was observed"
+        ? signal === undefined || signal === null
+          ? "no exit code was observed"
+          : `signal ${signal}`
         : `exit code ${String(error.exitCode)}`;
     const recovery =
       error.failureCode === undefined && stage !== "launch"

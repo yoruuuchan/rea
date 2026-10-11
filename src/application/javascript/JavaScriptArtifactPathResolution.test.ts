@@ -868,6 +868,365 @@ describe("package exports exact targets", () => {
   });
 });
 
+describe("package import alias resolution", () => {
+  it.each(["import", "require"] as const)(
+    "resolves an exact #%s alias from the enclosing package imports map",
+    (moduleKind) => {
+      const files = aliasFiles({
+        "package.json": JSON.stringify({
+          imports: { "#config": "./config.cjs" },
+        }),
+        "main.js": "",
+        "config.cjs": "",
+      });
+      expect(
+        resolve({
+          declaredPath: "#config",
+          sourcePath: "main.js",
+          context: "module-specifier",
+          moduleKind,
+          files,
+        }),
+      ).toMatchObject({
+        resolution_status: "resolved",
+        resolved_path: "config.cjs",
+        declared_path: "#config",
+      });
+    },
+  );
+
+  it("resolves an alias from a nested file through the enclosing package root", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./config.cjs" },
+      }),
+      "src/main.js": "",
+      "config.cjs": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "src/main.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "config.cjs",
+    });
+  });
+
+  it("uses a nested package imports map rather than the application root", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./root.cjs" },
+      }),
+      "root.cjs": "",
+      "node_modules/fixture/package.json": JSON.stringify({
+        imports: { "#config": "./local.cjs" },
+      }),
+      "node_modules/fixture/index.js": "",
+      "node_modules/fixture/local.cjs": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "node_modules/fixture/index.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "node_modules/fixture/local.cjs",
+    });
+  });
+
+  it("does not inherit an ancestor imports map across a nested package.json", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./root.cjs" },
+      }),
+      "root.cjs": "",
+      "node_modules/fixture/package.json": "{}",
+      "node_modules/fixture/index.js": "",
+    });
+    const outcome = resolve({
+      declaredPath: "#config",
+      sourcePath: "node_modules/fixture/index.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toContain(
+      "node_modules/fixture/package.json",
+    );
+    expect(outcome.limitations.join(" ")).not.toContain("root.cjs");
+  });
+
+  it("does not apply a nested package map to the application root importer", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./root.cjs" },
+      }),
+      "main.js": "",
+      "root.cjs": "",
+      "node_modules/fixture/package.json": JSON.stringify({
+        imports: { "#config": "./local.cjs" },
+      }),
+      "node_modules/fixture/local.cjs": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "main.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "root.cjs",
+    });
+  });
+});
+
+describe("package import alias target selection", () => {
+  it("selects import and require conditions from an imports target", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: {
+          "#config": {
+            import: "./config.mjs",
+            require: "./config.cjs",
+            default: "./fallback.js",
+          },
+        },
+      }),
+      "main.js": "",
+      "config.mjs": "",
+      "config.cjs": "",
+      "fallback.js": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "main.js",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }).resolved_path,
+    ).toBe("config.mjs");
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "main.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }).resolved_path,
+    ).toBe("config.cjs");
+  });
+
+  it("resolves array import targets at their first string entry", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": [{ import: "./missing.mjs" }, "./config.cjs"] },
+      }),
+      "main.js": "",
+      "config.cjs": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#config",
+        sourcePath: "main.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "config.cjs",
+    });
+  });
+
+  it("does not add an extension or index to a selected import target", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./config" },
+      }),
+      "main.js": "",
+      "config.cjs": "",
+      "config/index.js": "",
+    });
+    const outcome = resolve({
+      declaredPath: "#config",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "not-found",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toContain(
+      "import targets are exact files",
+    );
+  });
+});
+
+describe("package import alias refusals", () => {
+  it("reports a missing exact alias without looking in another package", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./config.cjs" },
+      }),
+      "main.js": "",
+      "config.cjs": "",
+    });
+    const outcome = resolve({
+      declaredPath: "#other",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toContain("#other");
+    expect(outcome.limitations.join(" ")).toContain("#config");
+  });
+
+  it("reports an explicit null import target as blocked", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": null },
+      }),
+      "main.js": "",
+      "config.cjs": "",
+    });
+    const outcome = resolve({
+      declaredPath: "#config",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toContain("explicit null");
+  });
+
+  it("leaves wildcard import aliases unresolved", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#internal/*": "./src/*.js" },
+      }),
+      "main.js": "",
+      "src/util.js": "",
+    });
+    const outcome = resolve({
+      declaredPath: "#internal/util",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "import",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toMatch(/wildcard/i);
+  });
+
+  it("leaves recursive and external-package import targets unresolved", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#loop": "#config", "#dep": "fixture" },
+      }),
+      "main.js": "",
+      "node_modules/fixture/index.js": "",
+    });
+    const recursive = resolve({
+      declaredPath: "#loop",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    const external = resolve({
+      declaredPath: "#dep",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(recursive).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(recursive.limitations.join(" ")).toMatch(/recursive/i);
+    expect(external).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(external.limitations.join(" ")).toMatch(/external-package/i);
+  });
+
+  it("rejects reserved hash specifiers", () => {
+    const files = aliasFiles({
+      "package.json": JSON.stringify({
+        imports: { "#config": "./config.cjs" },
+      }),
+      "main.js": "",
+      "config.cjs": "",
+    });
+    expect(
+      resolve({
+        declaredPath: "#",
+        sourcePath: "main.js",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({ resolution_status: "rejected", resolved_path: null });
+  });
+
+  it("does not use a foreign-container enclosing package.json", () => {
+    const files = fileMap([
+      file(
+        "package.json",
+        "other",
+        JSON.stringify({ imports: { "#config": "./config.cjs" } }),
+      ),
+      file("main.js", "root"),
+      file("config.cjs", "root"),
+    ]);
+    const outcome = resolve({
+      declaredPath: "#config",
+      sourcePath: "main.js",
+      context: "module-specifier",
+      moduleKind: "require",
+      files,
+    });
+    expect(outcome).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+    expect(outcome.limitations.join(" ")).toContain("package scopes");
+  });
+});
+
 describe("directory package entrypoint precedence", () => {
   it.each([
     ["require", '{"main":"actual.cjs"}', "actual.cjs"],
@@ -1105,6 +1464,159 @@ describe("contextual JavaScript module identity", () => {
   });
 });
 
+describe("TypeScript NodeNext emitted-extension resolution", () => {
+  const container = "container";
+
+  it.each([
+    ["./dep.js", "src/dep.ts"],
+    ["./ui/Button.js", "src/ui/Button.tsx"],
+    ["./cfg.mjs", "src/cfg.mts"],
+    ["./legacy.cjs", "src/legacy.cts"],
+  ] as const)(
+    "resolves %s to its TypeScript source counterpart",
+    (specifier, target) => {
+      const files = fileMap([
+        file("src/main.ts", container),
+        file(target, container, "export const value = 1;"),
+      ]);
+      expect(
+        resolve({
+          declaredPath: specifier,
+          sourcePath: "src/main.ts",
+          context: "module-specifier",
+          moduleKind: "import",
+          files,
+        }),
+      ).toMatchObject({ resolution_status: "resolved", resolved_path: target });
+    },
+  );
+
+  it.each([
+    ["./dep.js", "src/dep.d.ts"],
+    ["./cfg.mjs", "src/cfg.d.mts"],
+    ["./legacy.cjs", "src/legacy.d.cts"],
+  ] as const)(
+    "resolves %s to a declaration counterpart",
+    (specifier, target) => {
+      const files = fileMap([
+        file("src/main.ts", container),
+        file(target, container, "export const value = 1;"),
+      ]);
+      expect(
+        resolve({
+          declaredPath: specifier,
+          sourcePath: "src/main.ts",
+          context: "module-specifier",
+          moduleKind: "import",
+          files,
+        }),
+      ).toMatchObject({ resolution_status: "resolved", resolved_path: target });
+    },
+  );
+
+  it("prefers a present runtime file and keeps the fallback off for JS callers", () => {
+    const files = fileMap([
+      file("src/main.ts", container),
+      file("src/dep.js", container),
+      file("src/dep.ts", container),
+      file("src/js-main.js", container),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "./dep.js",
+        sourcePath: "src/main.ts",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "src/dep.js",
+    });
+    expect(
+      resolve({
+        declaredPath: "./dep.js",
+        sourcePath: "src/js-main.js",
+        context: "module-specifier",
+        moduleKind: "import",
+        files: fileMap([
+          file("src/js-main.js", container),
+          file("src/dep.ts", container),
+        ]),
+      }),
+    ).toMatchObject({ resolution_status: "not-found", resolved_path: null });
+  });
+
+  it("does not apply the mapping to URL resources or package export targets", () => {
+    const urlFiles = fileMap([
+      file("src/main.ts", container),
+      file("src/asset.ts", container),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "asset.js",
+        sourcePath: "src/main.ts",
+        context: "url-reference",
+        files: urlFiles,
+      }),
+    ).toMatchObject({ resolution_status: "not-found", resolved_path: null });
+
+    const packageFiles = fileMap([
+      file("src/main.ts", container),
+      file(
+        "src/node_modules/fixture/package.json",
+        container,
+        '{"exports":"./dep.js"}',
+      ),
+      file("src/node_modules/fixture/dep.ts", container),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "fixture",
+        sourcePath: "src/main.ts",
+        context: "module-specifier",
+        moduleKind: "import",
+        files: packageFiles,
+      }),
+    ).toMatchObject({ resolution_status: "not-found", resolved_path: null });
+  });
+
+  it("does not substitute source counterparts for directory or index resolution", () => {
+    const files = fileMap([
+      file("src/main.ts", container),
+      file("src/lib/index.ts", container),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "./lib.js",
+        sourcePath: "src/main.ts",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({ resolution_status: "not-found", resolved_path: null });
+  });
+
+  it("resolves an emitted dotfile name within its own directory", () => {
+    const files = fileMap([
+      file("src/main.ts", container),
+      file("src/.ts", container),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "./.js",
+        sourcePath: "src/main.ts",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "src/.ts",
+    });
+  });
+});
+
 describe("url-reference JavaScript artifact path resolution", () => {
   it.each([
     "app%00.js.map",
@@ -1210,6 +1722,15 @@ const file = (
       ? { included: false, reason: "invalid-utf8" }
       : { included: true, value: text },
 });
+
+const aliasFiles = (
+  entries: Readonly<Record<string, string | null>>,
+): ReturnType<typeof fileMap> =>
+  fileMap(
+    Object.entries(entries).map(([path, text]) =>
+      file(path, "root", text ?? ""),
+    ),
+  );
 
 describe("exact HTML resource resolution", () => {
   it.each([

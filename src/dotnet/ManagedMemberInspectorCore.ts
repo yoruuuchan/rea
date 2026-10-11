@@ -19,6 +19,10 @@ import {
   readMetadataString,
   sha256Bytes,
 } from "./ManagedMetadataHeaps.js";
+import {
+  memberListIndexSize,
+  memberListTable,
+} from "./ManagedMemberPointers.js";
 
 export type ManagedType = ManagedMemberInspection["types"][number];
 export type ManagedExportedType = NonNullable<
@@ -93,8 +97,8 @@ const readTypeRange = (
   row: number,
   issues: ManagedParseIssue[],
 ): TypeRange => {
-  const methods = layout.table(6);
-  const fields = layout.table(4);
+  const methods = memberListTable(layout, 6);
+  const fields = memberListTable(layout, 4);
   const cursor = metadataRowCursor(bytes, layout, 2, row);
   cursor.readUInt32();
   const nameIndex = cursor.readIndex(layout.stringIndexSize);
@@ -114,8 +118,8 @@ const readTypeRange = (
       issues,
     ) ?? null;
   cursor.readIndex(layout.codedIndexSize("TypeDefOrRef"));
-  const fieldStart = cursor.readIndex(layout.tableIndexSize(4));
-  const methodStart = cursor.readIndex(layout.tableIndexSize(6));
+  const fieldStart = cursor.readIndex(memberListIndexSize(layout, 4));
+  const methodStart = cursor.readIndex(memberListIndexSize(layout, 6));
   let nextField = (fields?.rowCount ?? 0) + 1;
   let nextMethod = (methods?.rowCount ?? 0) + 1;
   const typeTable = layout.table(2);
@@ -125,8 +129,8 @@ const readTypeRange = (
     next.readIndex(layout.stringIndexSize);
     next.readIndex(layout.stringIndexSize);
     next.readIndex(layout.codedIndexSize("TypeDefOrRef"));
-    nextField = next.readIndex(layout.tableIndexSize(4));
-    nextMethod = next.readIndex(layout.tableIndexSize(6));
+    nextField = next.readIndex(memberListIndexSize(layout, 4));
+    nextMethod = next.readIndex(memberListIndexSize(layout, 6));
   }
   return {
     token: metadataToken(2, row),
@@ -209,8 +213,8 @@ export const parseTypes = (
   readonly issues: readonly ManagedParseIssue[];
 } => {
   const typeTable = layout.table(2);
-  const fields = layout.table(4);
-  const methods = layout.table(6);
+  const fields = memberListTable(layout, 4);
+  const methods = memberListTable(layout, 6);
   const items: ManagedType[] = [];
   const issues: ManagedParseIssue[] = [];
   for (let row = 1; row <= (typeTable?.rowCount ?? 0); row += 1) {
@@ -233,8 +237,8 @@ export const parseTypes = (
       const extendsRaw = cursor.readIndex(
         layout.codedIndexSize("TypeDefOrRef"),
       );
-      const fieldStart = cursor.readIndex(layout.tableIndexSize(4));
-      const methodStart = cursor.readIndex(layout.tableIndexSize(6));
+      const fieldStart = cursor.readIndex(memberListIndexSize(layout, 4));
+      const methodStart = cursor.readIndex(memberListIndexSize(layout, 6));
       const nextRange = ranges[row] ?? null;
       const fieldRange = rowRange(
         fields,

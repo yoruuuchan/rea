@@ -263,6 +263,9 @@ const setupRunOptions = (
       ? {
           readinessScope: {
             clients: options.client,
+            ...(options.skillClient.length > 0
+              ? { skillClients: options.skillClient }
+              : {}),
             providers: options.installHopper ? ["hopper"] : [],
             skill: options.skill ?? agentIntegrationSelected,
           },

@@ -91,4 +91,7 @@ const parameters = (
 ): EvidenceObservation["parameters"] => ({
   format: input.format,
   integrity_policy: input.integrity_policy,
+  ...(input.source_paths === undefined
+    ? {}
+    : { source_paths: input.source_paths }),
 });

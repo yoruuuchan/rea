@@ -1,4 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import type { AnalysisOperationPort } from "../../../src/application/AnalysisProvider.js";
@@ -8,29 +9,52 @@ import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
 
 describe("ordinary MCP progress and cancellation", () => {
-  it("emits bounded progress for a normal tool request", async () => {
+  it("advances MCP progress when provider waiting does not advance completed work", async () => {
     const analysis: AnalysisOperationPort = {
-      execute: () => Promise.resolve(observed("0x1000")),
+      execute: async (_operation, _parameters, options) => {
+        for (const message of ["import pending", "analysis pending"]) {
+          await delay(120);
+          await options?.progress?.report({
+            phase: "ghidra_startup",
+            completed: 0,
+            total: null,
+            message,
+          });
+        }
+        return observed("0x1000");
+      },
     };
     const server = createServer({ kind: "fixed", analysis });
     const client = new Client({ name: "progress-test", version: "1" });
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
-    const progress: number[] = [];
+    const progress: {
+      progress: number;
+      total?: number | undefined;
+      message?: string | undefined;
+    }[] = [];
     try {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       const result = await client.callTool(
         { name: "current_address", arguments: {} },
-        { onprogress: (update) => progress.push(update.progress) },
+        { onprogress: (update) => progress.push(update) },
       );
 
       expect(result.isError).not.toBe(true);
-      expect(progress[0]).toBe(0);
-      expect(progress.at(-1)).toBe(1);
-      progress.forEach((value, index) => {
-        expect(value).toBeGreaterThanOrEqual(progress[index - 1] ?? 0);
-        expect(value).toBeLessThanOrEqual(1);
+      expect(progress[0]?.progress).toBe(1);
+      expect(progress.map((update) => update.message)).toEqual(
+        expect.arrayContaining([
+          "ghidra_startup: import pending",
+          "ghidra_startup: analysis pending",
+        ]),
+      );
+      expect(progress.at(-1)?.message).toContain("completed");
+      progress.forEach((update, index) => {
+        expect(update.progress).toBeGreaterThan(
+          progress[index - 1]?.progress ?? 0,
+        );
+        expect(update.total).toBeUndefined();
       });
     } finally {
       await Promise.allSettled([client.close(), server.close()]);

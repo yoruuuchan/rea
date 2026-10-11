@@ -31,6 +31,27 @@ describe("Hopper analysis profiles", () => {
     });
   });
 
+  it("does not map caller-supplied raw binaries onto a Hopper loader", () => {
+    expect(
+      hopperLoaderArgsForTarget({
+        path: "/tmp/ecu.bin",
+        sha256: "a".repeat(64),
+        kind: "executable",
+        format: "raw-binary",
+        architecture: "arm",
+        availableArchitectures: ["arm"],
+        entryPoint: "0x8000000",
+        entryPointSource: "0x8000000",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ProviderAdapterError",
+        operation: "resolve_analysis_profile",
+      },
+    });
+  });
+
   it.each([
     [target("elf", "x86_64"), ["-l", "ELF", "--intel-64"]],
     [target("pe", "x86"), ["-l", "WinPE", "--intel-32"]],

@@ -12,17 +12,15 @@ import { err, ok, type Result } from "../domain/result.js";
 import {
   attestGhidraDosComLoadImage,
   attestGhidraDosLoadImage,
+  attestGhidraRawBinaryLoadImage,
 } from "./GhidraLoadImageValues.js";
 import type { NativeAotPeResult } from "../domain/native/nativeAotPe.js";
-import type { GhidraTargetSnapshot } from "./GhidraClient.js";
+import type { GhidraClient } from "./GhidraClient.js";
 import type { GhidraSessionError } from "./GhidraSessionError.js";
 
-type LoadImageSnapshotClient = {
-  readonly readTargetSnapshot?: (
-    maximumBytes?: number,
-    signal?: AbortSignal,
-  ) => Promise<Result<GhidraTargetSnapshot, GhidraSessionError>>;
-};
+type LoadImageSnapshotClient = Partial<
+  Pick<GhidraClient, "hashTargetSnapshot" | "readTargetSnapshot">
+>;
 
 type NativeLoadImageAttestationInput = {
   readonly target: BinaryTarget;
@@ -37,7 +35,7 @@ type NativeLoadImageAttestationInput = {
 const isSignalAborted = (signal: AbortSignal | undefined): boolean =>
   signal?.aborted === true;
 
-/** Independently verify measured load-image observations for admitted DOS targets. */
+/** Independently verify measured load-image observations for admitted DOS and raw-binary targets. */
 export const attestGhidraNativeLoadImage = async (
   input: NativeLoadImageAttestationInput,
 ): Promise<Result<JsonValue, AnalysisError>> => {
@@ -71,7 +69,7 @@ export const attestGhidraNativeLoadImage = async (
           nativeLoadImageSchema.parse({
             status: "unsupported",
             reason:
-              "Independent load-image verification currently supports DOS MZ and explicit DOS COM targets only.",
+              "Independent load-image verification currently supports DOS MZ, explicit DOS COM, and caller-supplied raw-binary targets only.",
             observations: {
               ...observations,
               metadata_recovery: [
@@ -98,13 +96,17 @@ export const attestGhidraNativeLoadImage = async (
       );
     }
   }
-  if (target.format !== "dos-mz" && target.format !== "dos-com") {
+  if (
+    target.format !== "dos-mz" &&
+    target.format !== "dos-com" &&
+    target.format !== "raw-binary"
+  ) {
     return ok(
       jsonValueSchema.parse(
         nativeLoadImageSchema.parse({
           status: "unsupported",
           reason:
-            "Independent load-image verification currently supports DOS MZ and explicit DOS COM targets only.",
+            "Independent load-image verification currently supports DOS MZ, explicit DOS COM, and caller-supplied raw-binary targets only.",
           observations,
           limitations: [
             "Other formats expose measured mappings and source identities; no format-specific verification was performed.",
@@ -112,6 +114,33 @@ export const attestGhidraNativeLoadImage = async (
         }),
       ),
     );
+  }
+  if (target.format === "raw-binary") {
+    if (client.hashTargetSnapshot === undefined)
+      return err(
+        new ProviderAdapterError("ghidra", operation, {
+          diagnostics: {
+            reason:
+              "The Ghidra client does not expose its immutable target snapshot identity for independent raw-binary load-image verification.",
+          },
+        }),
+      );
+    const snapshot = await client.hashTargetSnapshot(signal);
+    if (!snapshot.ok) return err(mapSessionError(snapshot.error));
+    if (isSignalAborted(signal))
+      return err(new AnalysisCancelledError(operation));
+    const attested = attestGhidraRawBinaryLoadImage(
+      snapshot.value,
+      target,
+      observations,
+    );
+    return attested.ok
+      ? ok(jsonValueSchema.parse(attested.value))
+      : err(
+          new ProviderAdapterError("ghidra", operation, {
+            diagnostics: { reason: attested.error },
+          }),
+        );
   }
   if (client.readTargetSnapshot === undefined)
     return err(
@@ -122,14 +151,14 @@ export const attestGhidraNativeLoadImage = async (
         },
       }),
     );
-  const snapshot = await client.readTargetSnapshot();
+  const snapshot = await client.readTargetSnapshot(undefined, signal);
   if (!snapshot.ok) return err(mapSessionError(snapshot.error));
   if (snapshot.value.kind !== "captured")
     return err(
       new ProviderAdapterError("ghidra", operation, {
         diagnostics: {
           reason:
-            "The uncapped DOS load-image snapshot was unexpectedly not captured.",
+            "The uncapped load-image snapshot was unexpectedly not captured.",
         },
       }),
     );

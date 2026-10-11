@@ -13,6 +13,7 @@ import { parseDyldSymbols } from "./parsers/dyldInfo.js";
 import { parseLipoArchitectures } from "./parsers/lipo.js";
 import { withoutEchoedPathHeader } from "./parsers/echoedPath.js";
 import { parseOtoolLoadCommands } from "./parsers/otool.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 interface NativeMachoObservation {
   readonly result: JsonValue;
@@ -270,7 +271,7 @@ const uniqueSymbols = <Value extends { readonly name: string }>(
   for (const item of items)
     if (!unique.has(item.name)) unique.set(item.name, item);
   return [...unique.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
+    compareUnicodeCodePoints(left.name, right.name),
   );
 };
 

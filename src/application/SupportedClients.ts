@@ -6,6 +6,7 @@ import {
   HermesClientPathError,
   resolveHermesClientHome,
 } from "./HermesClientHome.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** One supported client configuration location. */
 export interface SetupClient {
@@ -642,6 +643,6 @@ export const clientSkillDirectories = (
       });
   }
   return [...destinations.values()].sort((left, right) =>
-    left.directory.localeCompare(right.directory),
+    compareUnicodeCodePoints(left.directory, right.directory),
   );
 };

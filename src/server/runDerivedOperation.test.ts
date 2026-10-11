@@ -67,8 +67,10 @@ describe("derived MCP operation boundary", () => {
     );
 
     expect(result).toEqual({ ok: true, value: "complete" });
-    expect(notifications.map(({ params }) => params?.progress)).toEqual([0, 2]);
-    expect(notifications.every(({ params }) => params?.total === 2)).toBe(true);
+    expect(notifications.map(({ params }) => params?.progress)).toEqual([1, 2]);
+    expect(
+      notifications.every(({ params }) => params?.total === undefined),
+    ).toBe(true);
   });
 
   it("projects synchronous computation failures into a typed result", async () => {

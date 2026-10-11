@@ -10,6 +10,7 @@ import type {
   ProviderIdentity,
 } from "../AnalysisProvider.js";
 import { closeAnalysisClient } from "./AnalysisClientCleanup.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
 /** Synthetic identity for a deterministic provider set. */
 const compositeProviderIdentity = (
@@ -53,8 +54,8 @@ export class CompositeProvider implements AnalysisProvider {
     this.#capabilities = Object.freeze(
       capabilities.sort(
         (left, right) =>
-          left.operation.localeCompare(right.operation) ||
-          left.provider.id.localeCompare(right.provider.id),
+          compareUnicodeCodePoints(left.operation, right.operation) ||
+          compareUnicodeCodePoints(left.provider.id, right.provider.id),
       ),
     );
   }
@@ -122,13 +123,13 @@ export class CompositeProvider implements AnalysisProvider {
         [...clients.values()]
           .flatMap((client) => client.runtimeLineageSnapshots?.() ?? [])
           .sort((left, right) =>
-            left.provider.id.localeCompare(right.provider.id),
+            compareUnicodeCodePoints(left.provider.id, right.provider.id),
           ),
       requestActivitySnapshots: () =>
         [...clients.values()]
           .flatMap((client) => client.requestActivitySnapshots?.() ?? [])
           .sort((left, right) =>
-            left.provider.id.localeCompare(right.provider.id),
+            compareUnicodeCodePoints(left.provider.id, right.provider.id),
           ),
       operationHealthSnapshot: () => {
         for (const client of clients.values()) {

@@ -18,6 +18,7 @@ import {
   semanticObligationPolicy,
   type ReconstructionObligationCandidatePolicy,
 } from "./ReconstructionObligationPolicies.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 type CandidateFields = Omit<
   ReconstructionObligation,
@@ -54,7 +55,7 @@ export const deriveReconstructionObligationCandidates = (
     addCandidate(candidates, reviewedCandidate(obligation, records));
   return {
     candidates: [...candidates.values()].sort((left, right) =>
-      left.obligation_id.localeCompare(right.obligation_id),
+      compareUnicodeCodePoints(left.obligation_id, right.obligation_id),
     ),
     limitations: [...limitations].sort(),
   };
@@ -430,7 +431,7 @@ const uniqueBy = <Value>(
   key: (value: Value) => string,
 ): Value[] =>
   [...new Map(values.map((value) => [key(value), value])).values()].sort(
-    (left, right) => key(left).localeCompare(key(right)),
+    (left, right) => compareUnicodeCodePoints(key(left), key(right)),
   );
 
 const obligationId = (key: string): string =>

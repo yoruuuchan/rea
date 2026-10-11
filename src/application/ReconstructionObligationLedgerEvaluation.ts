@@ -36,6 +36,7 @@ import {
   obligationReports,
   summarizeObligations,
 } from "./ReconstructionObligationLedgerProjection.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 type Diagnostic = ReconstructionObligation["diagnostics"][number];
 type Binding = NonNullable<ReconstructionObligation["binding"]>;
@@ -60,7 +61,7 @@ export const evaluateReconstructionObligationLedger = ({
 }): ReconstructionObligationLedger => {
   const bundle = parseEvidenceBundle(bundleInput);
   const allCandidates = [...candidatesInput].sort((left, right) =>
-    left.obligation_id.localeCompare(right.obligation_id),
+    compareUnicodeCodePoints(left.obligation_id, right.obligation_id),
   );
   const orphanManifestIds = findOrphanManifestIds(allCandidates, manifest);
   const candidates = allCandidates;

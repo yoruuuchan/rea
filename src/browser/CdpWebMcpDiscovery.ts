@@ -7,7 +7,10 @@ import type {
 } from "../domain/webMcpDiscovery.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { digestCanonicalValue } from "../domain/canonicalDigest.js";
-import { compositeKey } from "../domain/unicodeCodePointOrder.js";
+import {
+  compareUnicodeCodePoints,
+  compositeKey,
+} from "../domain/unicodeCodePointOrder.js";
 import type { CdpEndpointDiscovery, CdpEndpointTarget } from "./CdpEndpoint.js";
 import type { CdpConnection, CdpEvent } from "./CdpConnection.js";
 import { CdpCaptureCompleteness } from "./CdpCaptureCompleteness.js";
@@ -521,7 +524,7 @@ const buildWebMcpResult = (options: WebMcpResultOptions): WebMcpDiscovery => {
     tools: {
       total: tools.size + completeness.droppedTotal,
       items: [...tools.values()].sort((left, right) =>
-        left.tool_key.localeCompare(right.tool_key),
+        compareUnicodeCodePoints(left.tool_key, right.tool_key),
       ),
     },
     completeness: completeness.snapshot(),

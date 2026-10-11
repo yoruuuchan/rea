@@ -355,7 +355,10 @@ export const inspectSourceMapValue = (
     }
     const leaf = inspectLeaf(node, budget, options);
     leaves.push({ map: leaf, offset: node.offset, stop: node.stop });
-    if (options.profile !== "browser-collection")
+    if (options.profile !== "browser-collection") {
+      const ignoredSources = new Set(
+        leaf.ignoreList ?? leaf.x_google_ignoreList ?? [],
+      );
       for (const [sourceIndex, source] of leaf.sources.entries())
         declarations.push({
           sectionPath: node.path,
@@ -363,10 +366,9 @@ export const inspectSourceMapValue = (
           source,
           root: leaf.sourceRoot ?? null,
           content: leaf.sourcesContent?.[sourceIndex] ?? null,
-          ignored: (leaf.ignoreList ?? leaf.x_google_ignoreList ?? []).includes(
-            sourceIndex,
-          ),
+          ignored: ignoredSources.has(sourceIndex),
         });
+    }
   }
   return {
     format: root.sections === undefined ? "regular" : "indexed",

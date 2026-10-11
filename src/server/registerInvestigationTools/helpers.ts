@@ -5,6 +5,7 @@ import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { recordDerivedEvidence } from "../recordDerivedEvidence.js";
 import type { WorkflowUnknownInput } from "./types.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
 export const isIncomplete = (status: string): boolean =>
   status === "unknown" || status === "truncated";
@@ -21,7 +22,9 @@ export const functionEvidenceIds = (records: readonly Evidence[]): string[] =>
   uniqueIds(records.map(({ evidence_id }) => evidence_id));
 
 const uniqueIds = (ids: readonly string[]): string[] =>
-  [...new Set(ids)].sort((left, right) => left.localeCompare(right));
+  [...new Set(ids)].sort((left, right) =>
+    compareUnicodeCodePoints(left, right),
+  );
 
 export const evidenceClosure = (
   session: BinarySessionPort,

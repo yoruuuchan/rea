@@ -68,6 +68,53 @@ const known = new Set([
   "MultiFileReport",
 ]);
 
+const dependencyFailure = z.object({
+  __typename__: z.literal("ExtractorDependencyNotFoundReport"),
+  dependencies: z.array(z.string().min(1)).min(1),
+});
+
+/** Collect the named extractors from any dependency report nested in one value. */
+const missingDependencies = (value: unknown): string[] => {
+  const found: string[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const failure = dependencyFailure.safeParse(node);
+    if (failure.success) {
+      for (const dependency of failure.data.dependencies)
+        if (!found.includes(dependency)) found.push(dependency);
+      return;
+    }
+    for (const child of Object.values(node)) visit(child);
+  };
+  visit(value);
+  return found;
+};
+
+/**
+ * Name the missing extractors and the producing stage for one extraction
+ * problem so a caller can act without decoding the raw report. The original
+ * report stays retained alongside the normalized fields.
+ */
+const extractionDiagnostic = (
+  inputPath: string,
+  stage: string | null,
+  report: JsonValue,
+): JsonValue => {
+  const dependencies = missingDependencies(report);
+  return {
+    input_path: inputPath,
+    ...(stage === null ? {} : { stage }),
+    ...(dependencies.length === 0
+      ? {}
+      : { missing_dependencies: dependencies }),
+    report,
+  };
+};
+
 /** Interpret the pinned Binwalk report without inventing validated region lengths. */
 export const normalizeBinwalkReport = (
   raw: unknown,
@@ -234,7 +281,13 @@ export const normalizeUnblobReport = (
             : null;
         if (detail !== null)
           for (const problem of detail.extraction_reports)
-            diagnostics.push({ input_path: path, report: problem });
+            diagnostics.push(
+              extractionDiagnostic(
+                path,
+                detail.handler_name,
+                jsonValueSchema.parse(problem),
+              ),
+            );
         chunks.push({
           input_path: path,
           provider_id: parsed.id,
@@ -253,7 +306,13 @@ export const normalizeUnblobReport = (
       if (item.__typename__ === "MultiFileReport") {
         const parsed = multiFile.parse(item);
         if (parsed.extraction_reports.length > 0)
-          diagnostics.push({ input_path: path, report: item });
+          diagnostics.push(
+            extractionDiagnostic(
+              path,
+              parsed.handler_name,
+              jsonValueSchema.parse(item),
+            ),
+          );
       }
     }
   }

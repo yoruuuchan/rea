@@ -31,6 +31,7 @@ import {
 } from "./ManagedMetadataHeaps.js";
 import { readManagedValue } from "./ManagedReaderFailure.js";
 import { methodBody } from "./ManagedMethodBodyReader.js";
+import { memberListRowLookup } from "./ManagedMemberPointers.js";
 
 export const parseFields = (
   bytes: Buffer,
@@ -46,6 +47,10 @@ export const parseFields = (
   const issues: ManagedParseIssue[] = [];
   const table = layout.table(4);
   const declaringType = createDeclaringTypeLookup(ranges, "field");
+  const listRow = readManagedValue(
+    () => memberListRowLookup(bytes, layout, 4),
+    issues,
+  );
   for (let row = 1; row <= (table?.rowCount ?? 0); row += 1) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 4, row);
@@ -62,7 +67,11 @@ export const parseFields = (
         cursor.readIndex(layout.blobIndexSize),
         layout.blob.size,
       );
-      const declared = declaringType(row);
+      const position =
+        listRow === undefined
+          ? undefined
+          : readManagedValue(() => listRow(row), issues);
+      const declared = position === undefined ? null : declaringType(position);
       const token = metadataToken(4, row);
       fields.push({
         token,
@@ -237,6 +246,10 @@ export const parseMethods = ({
   const issues: ManagedParseIssue[] = [];
   const table = layout.table(6);
   const declaringType = createDeclaringTypeLookup(ranges, "method");
+  const listRow = readManagedValue(
+    () => memberListRowLookup(bytes, layout, 6),
+    issues,
+  );
   for (let row = 1; row <= (table?.rowCount ?? 0); row += 1) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 6, row);
@@ -256,7 +269,11 @@ export const parseMethods = ({
         layout.blob.size,
       );
       cursor.readIndex(layout.tableIndexSize(8));
-      const declared = declaringType(row);
+      const position =
+        listRow === undefined
+          ? undefined
+          : readManagedValue(() => listRow(row), issues);
+      const declared = position === undefined ? null : declaringType(position);
       const token = metadataToken(6, row);
       methods.push({
         token,

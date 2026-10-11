@@ -29,6 +29,47 @@ it("traces BOM-prefixed maps with a source-map transport prefix ending in CR", (
   });
 });
 
+it("keeps ignore-list precedence and section-local indexes for duplicate sources", () => {
+  const map = {
+    version: 3,
+    sections: [
+      {
+        offset: { line: 0, column: 0 },
+        map: {
+          ...leaf,
+          sources: ["same.ts", "same.ts"],
+          sourcesContent: ["first", "second"],
+          mappings: "AAAA,ACAA",
+          ignoreList: [1, 1],
+          x_google_ignoreList: [0],
+        },
+      },
+      {
+        offset: { line: 1, column: 0 },
+        map: { ...leaf, x_google_ignoreList: [0] },
+      },
+      {
+        offset: { line: 2, column: 0 },
+        map: { ...leaf, ignoreList: [], x_google_ignoreList: [0] },
+      },
+    ],
+  };
+  expect(trace(map).matches).toMatchObject([
+    { source_index: 0, ignored: false, content: { text: "first" } },
+    { source_index: 1, ignored: true, content: { text: "second" } },
+  ]);
+  expect(trace(map, { line: 2, column: 0 }).matches[0]).toMatchObject({
+    section_path: [1],
+    source_index: 0,
+    ignored: true,
+  });
+  expect(trace(map, { line: 3, column: 0 }).matches[0]).toMatchObject({
+    section_path: [2],
+    source_index: 0,
+    ignored: false,
+  });
+});
+
 describe("upstream source-map point evidence", () => {
   it("preserves every duplicate-column/source-URL candidate and its own embedded bytes", () => {
     const report = trace({

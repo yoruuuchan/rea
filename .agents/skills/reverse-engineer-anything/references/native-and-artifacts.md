@@ -150,6 +150,13 @@ For headerless DOS COM, explicitly open with `format: "dos-com"` (CLI
 analysis: the entry is `0x10100`, file offset zero, with imposed real-mode segment
 context. PSP/stack/device state remains unmodeled. See [DOS guide](https://github.com/morluto/rea/blob/main/docs/ghidra-dos.md).
 
+For other headerless images (embedded firmware without ELF/Mach-O/PE/MZ
+headers), open with `format: "raw-binary"`, `architecture` (`x86`, `x86_64`,
+`arm`, or `arm64`), and `entry_point` (`0x` hex). File offset 0 is mapped at
+that address. Hopper and IDA refuse this interpretation; Ghidra uses
+`BinaryLoader` with a little-endian generic language. Big-endian, Thumb-only,
+and Cortex-M variants are unsupported. See [raw binary guide](https://github.com/morluto/rea/blob/main/docs/raw-binary.md).
+
 ### Function annotations in Ghidra
 
 Use `annotate_native_function` for one function name and/or entry comments, with at least one explicit change. Review its annotation readback and refreshed dossier inline. Changes are atomic and session-scoped; empty comments clear them, omitted fields preserve them. Later MCP calls observe edits until close. CLI `annotate-native-function` returns the updated analysis before discarding the session. Original executable bytes are unchanged; edits invalidate immutable snapshots. Windows P0 does not admit database mutations. For naming only, `set_address_name` / `set_addresses_names` also work with Ghidra: they name function entries or data addresses (primary labels) and return compact per-address success booleans instead of a dossier.

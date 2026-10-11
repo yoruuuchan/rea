@@ -3,12 +3,119 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { parseEvidence } from "../../domain/evidence.js";
+import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascript/javascriptApplicationAnalysis.js";
+import { writeJavaScriptSourceSelectionFixture } from "../../../tests/fixtures/javascriptSourceSelection.js";
 
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { scanCanonicalArtifactInventory } from "../../../tests/fixtures/artifactInventory.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
+
+describe("Selected JavaScript source failure diagnostics", () => {
+  it("analyzes selected files in first-request order and reports only selected progress", async () => {
+    const root = await createTestTempDirectory("rea-js-selected-priority-");
+    await writeJavaScriptSourceSelectionFixture(root);
+    await writeFile(join(root, "z-later.mjs"), "export const later = 1;\n");
+    const progress: string[] = [];
+    const result = await analyzeJavaScriptApplication(
+      {
+        input_path: root,
+        source_paths: ["z-later.mjs", "main.mjs", "z-later.mjs"],
+      },
+      {
+        progress: {
+          report: async (event) => {
+            if (event.phase === "parse_javascript_source")
+              progress.push(event.message);
+          },
+        },
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(progress).toEqual([
+      "Parsing and projecting z-later.mjs (1/2)",
+      "Parsing and projecting main.mjs (2/2)",
+    ]);
+  });
+
+  it("verifies unselected bytes against the inventoried identity without decoding them", async () => {
+    const root = await createTestTempDirectory("rea-js-unselected-integrity-");
+    await writeJavaScriptSourceSelectionFixture(root);
+    const result = await analyzeJavaScriptApplication(
+      { input_path: root, source_paths: ["main.mjs"] },
+      {
+        progress: {
+          report: async (event) => {
+            if (event.phase === "read_javascript_artifacts")
+              await writeFile(
+                join(root, "vendor.js"),
+                "changed after inventory\n",
+              );
+          },
+        },
+      },
+    );
+    if (result.ok)
+      throw new Error(
+        "Unselected content changes must still fail integrity verification",
+      );
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "artifact_operation_failed",
+      details: { reason: "integrity" },
+    });
+  });
+
+  it("retains selected facts and unselected scope after cancellation between selected sources", async () => {
+    const root = await createTestTempDirectory("rea-js-selected-cancellation-");
+    await writeJavaScriptSourceSelectionFixture(root);
+    await writeFile(join(root, "z-later.mjs"), "export const later = 1;\n");
+    const controller = new AbortController();
+    const source_paths = ["main.mjs", "z-later.mjs"];
+    const result = await analyzeJavaScriptApplication(
+      { input_path: root, source_paths },
+      {
+        signal: controller.signal,
+        progress: {
+          report: async (event) => {
+            if (
+              event.phase === "parse_javascript_source" &&
+              event.message.includes("z-later.mjs")
+            )
+              controller.abort();
+          },
+        },
+      },
+    );
+    if (result.ok) throw new Error("Expected selected-source cancellation");
+    expect(projectAnalysisError(result.error).code).toBe("cancelled");
+    const evidence = parseEvidence(result.error.partialObservation);
+    const partial = javascriptApplicationAnalysisResultSchema.parse(
+      evidence.normalized_result,
+    );
+    expect(partial.source_selection).toEqual({
+      requested_paths: source_paths,
+      unselected_files: 5,
+    });
+    expect(
+      partial.semantic_graph.nodes.some(
+        ({ kind, label }) => kind === "function" && label === "selected",
+      ),
+    ).toBe(true);
+    expect(partial.statistics.parsed_javascript_files).toBe(1);
+    expect(partial.graph.coverage.status).toBe("partial");
+    expect(
+      partial.graph.nodes
+        .flatMap(({ observations }) =>
+          observations.map(({ properties }) => properties),
+        )
+        .filter(
+          (properties) => properties.text_status === "outside-analysis-scope",
+        ),
+    ).toHaveLength(5);
+  });
+});
 
 describe("JavaScript application failure diagnostics", () => {
   it("identifies the rejected result field in caller-visible diagnostics", async () => {

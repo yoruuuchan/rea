@@ -200,6 +200,9 @@ const registerJavaScriptApplicationCommand = (
               input_path: args.path,
               format: options.artifactFormat,
               integrity_policy: options.integrityPolicy,
+              ...(options.sourcePath === undefined
+                ? {}
+                : { source_paths: options.sourcePath }),
               ...(options.maxHeapMb === undefined
                 ? {}
                 : { max_heap_mb: options.maxHeapMb }),

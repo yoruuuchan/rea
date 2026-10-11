@@ -77,6 +77,47 @@ describe("firmware producer boundaries", () => {
 });
 
 describe("Unblob multi-file extraction diagnostics", () => {
+  it("names a missing extractor dependency and stage while retaining the raw report", () => {
+    const dependencyFailure = {
+      __typename__: "ExtractorDependencyNotFoundReport",
+      severity: "ERROR",
+      dependencies: ["sasquatch"],
+    };
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports.filter(
+              (item) => item.__typename__ !== "UnknownChunkReport",
+            ),
+            {
+              __typename__: "ChunkReport",
+              id: "gzip-id",
+              start_offset: 0,
+              end_offset: 20,
+              size: 20,
+              handler_name: "gzip",
+              is_encrypted: false,
+              extraction_reports: [dependencyFailure],
+            },
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.coverage).toBe("partial");
+    expect(normalized.diagnostics).toEqual([
+      {
+        input_path: "$input",
+        stage: "gzip",
+        missing_dependencies: ["sasquatch"],
+        report: dependencyFailure,
+      },
+    ]);
+  });
+
   it("retains nested MultiFile extraction failures in partial coverage", () => {
     const outputPath = `${context.outputRoot}/multi`;
     const childTask = {
@@ -130,7 +171,12 @@ describe("Unblob multi-file extraction diagnostics", () => {
 
     expect(normalized.coverage).toBe("partial");
     expect(normalized.diagnostics).toEqual([
-      { input_path: "$output/multi", report: multiFileReport },
+      {
+        input_path: "$output/multi",
+        stage: "multipart-firmware",
+        missing_dependencies: ["sasquatch"],
+        report: multiFileReport,
+      },
     ]);
   });
 });

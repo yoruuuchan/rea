@@ -415,8 +415,11 @@ it("exposes the target-free static JavaScript application workflow", async () =>
   );
 
   expect(analyzed.isError).not.toBe(true);
-  expect(progress[0]).toBe(0);
-  expect(progress.at(-1)).toBe(1);
+  expect(progress[0]).toBe(1);
+  expect(progress.at(-1)).toBeGreaterThan(1);
+  progress.forEach((value, index) => {
+    expect(value).toBeGreaterThan(progress[index - 1] ?? 0);
+  });
   const projected = z
     .object({
       evidence_id: z.string(),

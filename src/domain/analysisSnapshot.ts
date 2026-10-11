@@ -40,6 +40,7 @@ import { digestSchema } from "./../domain/digests.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import { canonicalJsonDigestSteps } from "./canonicalJsonDigestSteps.js";
 import { freezeJsonSnapshot } from "./immutableJson.js";
+import { rawBinaryEntryPointSchema } from "./rawBinary.js";
 
 const architectureSchema = z.enum(BINARY_ARCHITECTURES);
 const formatSchema = z.enum([
@@ -49,6 +50,7 @@ const formatSchema = z.enum([
   "pe",
   "dos-mz",
   "dos-com",
+  "raw-binary",
   "zip",
   "ipa",
   "apk",
@@ -80,12 +82,22 @@ const subjectSchema = z.object({
   ]),
   architecture: architectureSchema.nullable(),
 });
-const targetSchema = z.object({
+const targetIdentitySchema = z.object({
   sha256: digestSchema,
   kind: kindSchema,
-  format: formatSchema,
   architecture: architectureSchema.nullable(),
 });
+const targetSchema = z.discriminatedUnion("format", [
+  targetIdentitySchema.extend({
+    format: z.enum(
+      formatSchema.options.filter((format) => format !== "raw-binary"),
+    ),
+  }),
+  targetIdentitySchema.extend({
+    format: z.literal("raw-binary"),
+    entry_point: rawBinaryEntryPointSchema,
+  }),
+]);
 const bindingSchema = z
   .object({
     provider: committedProviderSchema,
@@ -311,12 +323,16 @@ const canonicalJson = (value: unknown): string => {
 /** Project a binary into the path-free identity used for cache invalidation. */
 export const snapshotTarget = (
   target: BinaryTarget,
-): AnalysisSnapshotTarget => ({
-  sha256: target.sha256,
-  kind: target.kind,
-  format: target.format,
-  architecture: target.architecture ?? null,
-});
+): AnalysisSnapshotTarget => {
+  const identity = {
+    sha256: target.sha256,
+    kind: target.kind,
+    architecture: target.architecture ?? null,
+  };
+  return target.format === "raw-binary"
+    ? { ...identity, format: target.format, entry_point: target.entryPoint }
+    : { ...identity, format: target.format };
+};
 
 /** Build the immutable provider/profile binding used by a cached snapshot. */
 export const snapshotBinding = (
@@ -335,7 +351,10 @@ export const snapshotMatchesTarget = (
   snapshot.sha256 === target.sha256 &&
   snapshot.kind === target.kind &&
   snapshot.format === target.format &&
-  snapshot.architecture === (target.architecture ?? null);
+  snapshot.architecture === (target.architecture ?? null) &&
+  (snapshot.format !== "raw-binary" ||
+    (target.format === "raw-binary" &&
+      snapshot.entry_point === target.entryPoint));
 
 /** Compare a snapshot binding with the selected concrete analysis profile. */
 export const snapshotMatchesProfile = (

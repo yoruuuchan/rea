@@ -6,6 +6,7 @@ import { readWindowsPrivateRuntimeFile } from "../windows/WindowsPrivateRuntime.
 
 import { err, ok, type Result } from "../domain/result.js";
 import { GhidraSessionError } from "./GhidraSessionError.js";
+import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** Local bridge transports used by the current Ghidra session. */
 export type GhidraTransportKind = "unix-socket" | "authenticated-loopback-tcp";
@@ -147,7 +148,7 @@ const hasExactKeys = (
   expected: readonly string[],
 ): value is Record<string, unknown> => {
   const keys = Object.keys(value).sort((left, right) =>
-    left.localeCompare(right),
+    compareUnicodeCodePoints(left, right),
   );
   return (
     keys.length === expected.length &&

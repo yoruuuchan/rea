@@ -1,5 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import type { Socket } from "node:net";
+import type { ProgressReporter } from "../application/ProgressReporter.js";
 
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -42,11 +45,12 @@ import {
   type GhidraSessionInfo,
 } from "./GhidraSessionValues.js";
 import { createGhidraTargetSnapshot } from "./GhidraTargetSnapshot.js";
-import { readFile } from "node:fs/promises";
+import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import {
   openRegularFile,
   RegularFileChangedError,
+  RegularFileAdmissionFailure,
   sameRegularFileState,
 } from "../filesystem/RegularFile.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
@@ -162,7 +166,12 @@ export class GhidraClient {
   }
 
   /** Launch Ghidra once and require its exact post-analysis handshake. */
-  start(signal?: AbortSignal): Promise<GhidraStartResult> {
+  start(
+    signal?: AbortSignal,
+    progress?: ProgressReporter,
+  ): Promise<GhidraStartResult> {
+    if (progress !== undefined)
+      return this.#reportStartupWait(this.start(signal), signal, progress);
     if (this.#closePromise !== undefined)
       return this.#closePromise.then(
         () => this.start(signal),
@@ -216,6 +225,41 @@ export class GhidraClient {
     return started;
   }
 
+  async #reportStartupWait(
+    started: Promise<GhidraStartResult>,
+    signal: AbortSignal | undefined,
+    progress: ProgressReporter,
+  ): Promise<GhidraStartResult> {
+    const startedAt = performance.now();
+    let active = true;
+    let reporting = false;
+    const timer = setInterval(() => {
+      if (!active || reporting || signal?.aborted) return;
+      reporting = true;
+      void Promise.resolve()
+        .then(() => {
+          if (!active || signal?.aborted) return;
+          return progress.report({
+            phase: "ghidra_startup",
+            completed: 0,
+            total: null,
+            message: `Waiting for Ghidra startup (${String(Math.floor((performance.now() - startedAt) / 1000))}s elapsed); import, auto-analysis and bridge readiness may still be pending`,
+          });
+        })
+        // Notification failure does not release the owned startup process.
+        .catch(() => {})
+        .finally(() => {
+          reporting = false;
+        });
+    }, 10_000);
+    try {
+      return await started;
+    } finally {
+      active = false;
+      clearInterval(timer);
+    }
+  }
+
   /** Revalidate live bridge, provider, run, and profile metadata. */
   async ping(
     options: GhidraRequestOptions = {},
@@ -231,9 +275,12 @@ export class GhidraClient {
   async callTool(
     operation: GhidraOperation,
     parameters: Readonly<Record<string, JsonValue>>,
-    options: { readonly signal?: AbortSignal } = {},
+    options: {
+      readonly signal?: AbortSignal;
+      readonly progress?: ProgressReporter;
+    } = {},
   ): Promise<Result<JsonValue, GhidraSessionError>> {
-    const started = await this.start(options.signal);
+    const started = await this.start(options.signal, options.progress);
     if (!started.ok) return started;
     return this.#requestQueue.run(
       operation,
@@ -242,12 +289,66 @@ export class GhidraClient {
     );
   }
 
-  /** Read the private immutable source for independent import verification. */
-  async readTargetSnapshot(
+  /** Read the private immutable source for format parsers that require captured bytes. */
+  readTargetSnapshot(
     maximumBytes?: number,
     signal?: AbortSignal,
   ): Promise<Result<GhidraTargetSnapshot, GhidraSessionError>> {
-    if (this.#snapshotPath === undefined)
+    return this.#withTargetSnapshot(async (handle, initial, path) => {
+      if (
+        maximumBytes !== undefined &&
+        (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0)
+      )
+        throw new RangeError("Snapshot byte limit must be a safe integer");
+      if (maximumBytes !== undefined && initial.size > maximumBytes)
+        return {
+          kind: "over-capacity",
+          sourceBytesAtLeast: initial.size,
+          maximumBytes,
+        };
+      const bytes = await readBoundedFileBytes(
+        handle,
+        maximumBytes ?? initial.size,
+        signal,
+        initial.size,
+      );
+      if (bytes === undefined || bytes.length !== initial.size)
+        throw new RegularFileChangedError(path);
+      return { kind: "captured", bytes };
+    }, signal);
+  }
+
+  /** Measure the complete snapshot identity without retaining its bytes in memory. */
+  hashTargetSnapshot(
+    signal?: AbortSignal,
+  ): Promise<
+    Result<
+      { readonly sha256: string; readonly bytes: number },
+      GhidraSessionError
+    >
+  > {
+    return this.#withTargetSnapshot(async (handle, initial, path) => {
+      const hash = createHash("sha256");
+      let bytes = 0;
+      for await (const chunk of readFileHandleChunks(handle, {
+        end: initial.size,
+        signal,
+      })) {
+        bytes += chunk.length;
+        if (bytes > initial.size) throw new RegularFileChangedError(path);
+        hash.update(chunk);
+      }
+      if (bytes !== initial.size) throw new RegularFileChangedError(path);
+      return { sha256: hash.digest("hex"), bytes };
+    }, signal);
+  }
+
+  async #withTargetSnapshot<T>(
+    read: (handle: FileHandle, initial: Stats, path: string) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<Result<T, GhidraSessionError>> {
+    const path = this.#snapshotPath;
+    if (path === undefined)
       return err(
         this.#failure(
           "protocol",
@@ -255,77 +356,42 @@ export class GhidraClient {
         ),
       );
     try {
-      if (maximumBytes !== undefined) {
-        signal?.throwIfAborted();
-        if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0)
-          throw new RangeError("Snapshot byte limit must be a safe integer");
-        const handle = await openRegularFile(this.#snapshotPath, {
-          symlinks: "reject",
-        });
-        const owner = new OwnedFileHandle(handle);
-        this.#snapshotOwners.add(owner);
-        let result: GhidraTargetSnapshot;
-        let readFailure: unknown;
-        try {
-          const metadata = await handle.stat();
-          signal?.throwIfAborted();
-          if (metadata.size > maximumBytes)
-            result = {
-              kind: "over-capacity",
-              sourceBytesAtLeast: metadata.size,
-              maximumBytes,
-            };
-          else {
-            const bytes = await readBoundedFileBytes(
-              handle,
-              maximumBytes,
-              signal,
-              metadata.size,
-            );
-            signal?.throwIfAborted();
-            const after = await handle.stat();
-            if (
-              bytes !== undefined &&
-              bytes.length === metadata.size &&
-              sameRegularFileState(metadata, after)
-            ) {
-              result = { kind: "captured", bytes };
-            } else if (
-              bytes === undefined &&
-              after.isFile() &&
-              after.size > maximumBytes
-            ) {
-              result = {
-                kind: "over-capacity",
-                sourceBytesAtLeast: after.size,
-                maximumBytes,
-              };
-            } else {
-              throw new RegularFileChangedError(this.#snapshotPath);
-            }
-          }
-        } catch (cause: unknown) {
-          readFailure = cause;
-        }
-        try {
-          await owner.close();
-          this.#snapshotOwners.delete(owner);
-        } catch (closeFailure: unknown) {
-          throw new AggregateError(
-            readFailure === undefined
-              ? [closeFailure]
-              : [readFailure, closeFailure],
-            "Ghidra target snapshot read or descriptor cleanup failed",
-          );
-        }
-        if (readFailure !== undefined) throw readFailure;
-        return ok(result!);
-      }
-      return ok({
-        kind: "captured",
-        bytes: await readFile(this.#snapshotPath),
+      const handle = await openRegularFile(path, {
+        symlinks: "reject",
+        signal,
       });
+      const owner = new OwnedFileHandle(handle);
+      this.#snapshotOwners.add(owner);
+      let result: Result<T, unknown>;
+      try {
+        const initial = await handle.stat();
+        signal?.throwIfAborted();
+        if (!Number.isSafeInteger(initial.size) || initial.size < 0)
+          throw new RangeError("Snapshot size must be a safe integer");
+        const value = await read(handle, initial, path);
+        signal?.throwIfAborted();
+        const after = await handle.stat();
+        signal?.throwIfAborted();
+        if (!sameRegularFileState(initial, after))
+          throw new RegularFileChangedError(path);
+        result = ok(value);
+      } catch (cause: unknown) {
+        result = err(cause);
+      }
+      try {
+        await owner.close();
+        this.#snapshotOwners.delete(owner);
+      } catch (closeFailure: unknown) {
+        throw new AggregateError(
+          result.ok ? [closeFailure] : [result.error, closeFailure],
+          "Ghidra target snapshot read or descriptor cleanup failed",
+        );
+      }
+      if (!result.ok) throw result.error;
+      return result;
     } catch (cause: unknown) {
+      if (cause instanceof RegularFileAdmissionFailure)
+        this.#snapshotOwners.add(cause.owner);
       return err(
         this.#failure(
           signal?.aborted === true ? "cancelled" : "protocol",

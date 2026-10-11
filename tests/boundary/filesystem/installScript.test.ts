@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -171,6 +171,99 @@ describe("curl installer scenarios", { timeout: 20_000 }, () => {
     });
   });
 });
+
+describe("truncated installer download", { timeout: 20_000 }, () => {
+  it("runs nothing from a download truncated after the npm install line", async () => {
+    const fixture = await createFixture();
+    const source = await readFile(join(process.cwd(), "install.sh"), "utf8");
+    const installLine = source.indexOf('npm "${install_args[@]}" ||');
+    expect(installLine).toBeGreaterThan(0);
+    const truncated = join(fixture.home, "..", "install-truncated.sh");
+    await writeFile(
+      truncated,
+      source.slice(0, source.indexOf("\n", installLine) + 1),
+    );
+    const failure: unknown = await runInstaller(
+      fixture,
+      ["--version", "0.3.0", "--no-setup"],
+      {},
+      truncated,
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect(getProcessOutput(failure, "stdout")).toBe("");
+    expect(getProcessOutput(failure, "stderr")).toContain("syntax error");
+    await expect(readFile(fixture.npmLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+});
+
+describe(
+  "installer download truncated at any byte",
+  {
+    timeout: 180_000,
+  },
+  () => {
+    // Every prefix of the script, from the empty download to the full file, as
+    // `curl ... | bash -s -- --dry-run` would see it. Covers the preamble (a
+    // cut right after `set` would print every shell variable), the body, and
+    // the final invocation (a cut right after `main` would drop the flags).
+    it("runs nothing and prints nothing until the closing brace arrives", async () => {
+      const source = await readFile(join(process.cwd(), "install.sh"));
+      expect(source.subarray(0, 14).toString()).toBe("#!/bin/bash\n{\n");
+      const groupOpen = source.indexOf("\n{\n") + 2;
+      const groupEnd = source.lastIndexOf("\n}\n") + 2;
+      expect(groupEnd).toBe(source.length - 1);
+      expect(source.subarray(groupOpen, groupEnd).toString()).toContain(
+        "set -euo pipefail",
+      );
+      const fixture = await createFixture();
+      const offsets = Array.from(
+        { length: source.length + 1 },
+        (_, offset) => offset,
+      );
+      const failures: string[] = [];
+      const check = async (offset: number): Promise<void> => {
+        const result = await runPipedInstaller(
+          fixture,
+          source.subarray(0, offset),
+          ["--dry-run"],
+          { SECRET_TOKEN: "inherited-secret" },
+        );
+        const context = `truncated at byte ${offset} after ${JSON.stringify(
+          source.subarray(Math.max(0, offset - 24), offset).toString(),
+        )}`;
+        if (offset >= groupEnd) {
+          if (result.code !== 0 || !result.stdout.includes("no changes made"))
+            failures.push(`${context}: complete script did not dry-run`);
+          return;
+        }
+        if (result.stdout !== "")
+          failures.push(`${context}: stdout ${JSON.stringify(result.stdout)}`);
+        if (offset >= groupOpen) {
+          if (result.code === 0) failures.push(`${context}: exit code 0`);
+          if (!/syntax error|unexpected EOF/u.test(result.stderr))
+            failures.push(
+              `${context}: stderr ${JSON.stringify(result.stderr)}`,
+            );
+        } else if (result.code !== 0 || result.stderr !== "")
+          failures.push(`${context}: preamble did not exit quietly`);
+      };
+      for (let index = 0; index < offsets.length; index += 16)
+        await Promise.all(offsets.slice(index, index + 16).map(check));
+      expect(failures).toEqual([]);
+      await expect(readFile(fixture.npmLog, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(fixture.reaLog, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  },
+);
 
 describe("Linux user-prefix installer", { timeout: 20_000 }, () => {
   it("prints the executed arguments as a reusable command with shell metacharacters", async () => {
@@ -408,8 +501,9 @@ const runInstaller = async (
   fixture: InstallerFixture,
   args: readonly string[] = [],
   overrides: Readonly<Record<string, string>> = {},
+  script = join(process.cwd(), "install.sh"),
 ): Promise<{ readonly stdout: string; readonly stderr: string }> =>
-  execFileAsync("/bin/bash", [join(process.cwd(), "install.sh"), ...args], {
+  execFileAsync("/bin/bash", [script, ...args], {
     env: {
       ...process.env,
       HOME: fixture.home,
@@ -421,6 +515,47 @@ const runInstaller = async (
       FAKE_NPM_PREFIX: join(fixture.home, ".npm-global"),
       ...overrides,
     },
+  });
+
+/**
+ * Run the installer as `curl ... | bash -s -- ARGS` does: source on stdin.
+ * The environment is minimal and does not inherit the test runner's.
+ */
+const runPipedInstaller = async (
+  fixture: InstallerFixture,
+  source: Uint8Array,
+  args: readonly string[],
+  overrides: Readonly<Record<string, string>> = {},
+): Promise<{
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}> =>
+  new Promise((resolve, reject) => {
+    const child = spawn("/bin/bash", ["-s", "--", ...args], {
+      env: {
+        HOME: fixture.home,
+        TMPDIR: fixture.temporary,
+        PATH: `${fixture.bin}:/usr/bin:/bin`,
+        FAKE_NPM_LOG: fixture.npmLog,
+        FAKE_REA_LOG: fixture.reaLog,
+        FAKE_REA_SOURCE: join(fixture.bin, "rea-source"),
+        FAKE_NPM_PREFIX: join(fixture.home, ".npm-global"),
+        ...overrides,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(source);
   });
 
 const shellQuote = (value: string): string =>

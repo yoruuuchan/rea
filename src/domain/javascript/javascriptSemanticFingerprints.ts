@@ -73,7 +73,7 @@ export function* collectJavaScriptSemanticFingerprintsSteps(
     const node = state.callableNodesById.get(callable.callableId);
     if (node === undefined) continue;
     yield;
-    const syntax = yield* fingerprintSyntaxSteps(node, callable.callableId);
+    const syntax = yield* fingerprintSyntaxSteps(node);
     const promiseEffects = promiseEffectsByOwner.get(callable.callableId) ?? [];
     const eventEffects = eventEffectsByOwner.get(callable.callableId) ?? [];
     const timerEffects = timerEffectsByOwner.get(callable.callableId) ?? [];
@@ -164,27 +164,18 @@ interface FingerprintSyntax {
 
 function* fingerprintSyntaxSteps(
   root: t.Node,
-  targetCallableId: string,
 ): Generator<void, FingerprintSyntax> {
   const normalizedTokens: string[] = [];
   const controlFlowTokens: string[] = [];
   const literals: string[] = [];
-  const callableStack: string[] = [];
   yield* traverseJavaScriptAstSteps(root, {
+    skip: (node) => semanticCallableIdForNode(node) !== null,
     enter: (node, parent) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null) callableStack.push(callableId);
-      if (callableStack.at(-1) !== targetCallableId) return;
       normalizedTokens.push(normalizedNodeToken(node, parent));
       const control = controlFlowToken(node);
       if (control !== null) controlFlowTokens.push(control);
       const literal = semanticLiteral(node);
       if (literal !== null) literals.push(literal);
-    },
-    exit: (node) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && callableStack.at(-1) === callableId)
-        callableStack.pop();
     },
   });
   return { normalizedTokens, controlFlowTokens, literals };
