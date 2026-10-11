@@ -4,6 +4,7 @@ import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { analysisErrorProjectionSchema } from "../../contracts/errorSchemas.js";
 import { inspectWebNetworkCaptureInputSchema } from "../../domain/webNetworkCapture.js";
 import { historicalCaptureFailure } from "./CaptureFailures.js";
+import { HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES } from "./CaptureRelease.js";
 import { redactExplicitFailure } from "../../domain/explicitSensitiveFailure.js";
 import { OwnedCommandFailure } from "../../process/OwnedCommand.js";
 
@@ -51,6 +52,99 @@ it.each([
       },
     });
     expect(JSON.stringify(projected)).not.toContain("rea doctor");
+    // Bun ignores the decoder's V8 heap flags, so no fixed heap is reported.
+    const heapLimits = { old_generation_heap_mib: 192, semi_space_heap_mib: 8 };
+    if (process.versions.bun === undefined)
+      expect(projected).toMatchObject({
+        details: { reported_limits: heapLimits },
+      });
+    else
+      expect(projected).not.toMatchObject({
+        details: { reported_limits: { old_generation_heap_mib: 192 } },
+      });
+  },
+);
+
+// Measured Bun 1.4.2 outcomes at a Job Object commit limit: a 512 MiB limit
+// panicked with exit 3 and a 256 MiB limit threw a JavaScript out-of-memory
+// exception with exit 1. Only the job notification identifies both.
+it.each([
+  { label: "a runtime panic", exitCode: 3, stderr: "panic: out of memory" },
+  {
+    label: "a JavaScript exception",
+    exitCode: 1,
+    stderr: "RangeError: Out of memory",
+  },
+])(
+  "reports a reached Job Object memory limit after $label",
+  ({ exitCode, stderr }) => {
+    const input = inspectWebNetworkCaptureInputSchema.parse({
+      capture_path: "/selected/input.har",
+      format: "har",
+    });
+    const snapshot = {
+      stdout: { text: "", bytes: 0, observedBytes: 0 },
+      stderr: {
+        text: stderr,
+        bytes: Buffer.byteLength(stderr),
+        observedBytes: Buffer.byteLength(stderr),
+      },
+      exitCode,
+      signal: null,
+    };
+    const projected = analysisErrorProjectionSchema.parse(
+      projectAnalysisError(
+        historicalCaptureFailure(
+          input,
+          new OwnedCommandFailure("process", "Decoder failed", {
+            ...snapshot,
+            memoryLimitReached: true,
+          }),
+          "decoder",
+        ),
+      ),
+    );
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      message: expect.stringContaining("Windows Job Object memory limit"),
+      details: {
+        resource: "memory",
+        reported_limits: {
+          format: "har",
+          observed_exit_code: exitCode,
+          observed_signal: null,
+        },
+        captured_output: { stderr },
+      },
+    });
+    // The enforced limit is reported only where Bun runs on Windows.
+    if (HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES === null)
+      expect(JSON.stringify(projected)).not.toContain(
+        "process_memory_limit_bytes",
+      );
+    else
+      expect(projected).toMatchObject({
+        details: {
+          reported_limits: {
+            process_memory_limit_bytes: HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES,
+          },
+        },
+        remediation: {
+          action: expect.stringContaining(
+            `${String(HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES)} bytes`,
+          ),
+        },
+      });
+    // The same exit without the job notification remains an ordinary failure.
+    expect(
+      projectAnalysisError(
+        historicalCaptureFailure(
+          input,
+          new OwnedCommandFailure("process", "Decoder failed", snapshot),
+          "decoder",
+        ),
+      ),
+    ).toMatchObject({ code: "execution_failure" });
   },
 );
 

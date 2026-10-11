@@ -246,6 +246,40 @@ describe("native UI action trace", () => {
   });
 });
 
+describe("native UI action selector origin", () => {
+  it("marks provider-reported function addresses as derived and the action seed as caller-supplied", async () => {
+    const inner = testAnalysis({
+      procedure_address: () => execution("procedure_address", "0x1000"),
+    });
+    const recorded: { operation: string; origin: unknown }[] = [];
+
+    const result = await new EnhancedTools({
+      execute: async (operation, parameters, options) => {
+        recorded.push({ operation, origin: options?.selectorOrigin });
+        return inner.execute(operation, parameters);
+      },
+    }).execute("trace_native_ui_action", { action: "0x1000" });
+
+    expect(result.ok, "the trace completes").toBe(true);
+    expect(
+      recorded
+        .filter(({ operation }) => operation === "procedure_address")
+        .map(({ origin }) => origin),
+      "the caller's action seed carries no provider origin",
+    ).toEqual([undefined]);
+    const probes = recorded.filter(
+      ({ operation }) =>
+        operation === "procedure_references" ||
+        operation === "procedure_callees",
+    );
+    expect(probes.length, "relationships were probed").toBeGreaterThan(0);
+    expect(
+      probes.every(({ origin }) => origin === "provider"),
+      "every relationship probe uses a provider-reported address",
+    ).toBe(true);
+  });
+});
+
 describe("bounded native UI tracing", () => {
   it("continues handler traversal from its own depth when another UI branch is deeper", async () => {
     const deepGraph = {

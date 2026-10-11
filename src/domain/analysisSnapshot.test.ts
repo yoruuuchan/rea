@@ -113,6 +113,37 @@ describe("analysis snapshot contract", () => {
     expect(parsed.evidence_bundle.records[0]?.subject?.format).toBe("dos-mz");
   });
 
+  it("rejects a snapshot subject path containing NUL", () => {
+    const binding = snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE);
+    const entry = {
+      query_id: `query_${"0".repeat(64)}`,
+      operation: "analyze_function",
+      parameters: {},
+      execution: {
+        result: null,
+        raw_result: null,
+        provider: binding.provider,
+        limitations: [],
+        locations: [],
+        subject: {
+          path: "a\u0000b",
+          sha256: "a".repeat(64),
+          format: "elf" as const,
+          architecture: null,
+        },
+      },
+    };
+    expect(
+      analysisSnapshotSchema.safeParse({
+        target: snapshotTarget(ANALYSIS_SNAPSHOT_TARGET),
+        binding,
+        entries: [entry],
+        workflow_entries: [],
+        evidence_bundle: createEvidenceBundle([]),
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts snapshots with more than ten thousand analysis entries", () => {
     const binding = snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE);
     const entry = {

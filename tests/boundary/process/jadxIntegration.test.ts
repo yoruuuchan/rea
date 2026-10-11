@@ -527,6 +527,14 @@ it("retries shutdown cleanup after ownership verification recovers", async () =>
     "normal",
     () => cleanupFails,
   );
+  const closeAfterRecovery = async () => {
+    cleanupFails = false;
+    // Closing the transport can leave the child between live and exited
+    // snapshots. Retry retained ownership until cleanup is actually verified.
+    await expect
+      .poll(() => provider.close(), { timeout: 5_000 })
+      .toBeUndefined();
+  };
   try {
     const outcome = await service.execute("inspect_android_package", {
       path: apk,
@@ -538,13 +546,11 @@ it("retries shutdown cleanup after ownership verification recovers", async () =>
     const workspace = launches[0]?.cwd;
     if (workspace === undefined) throw new Error("Expected acquired workspace");
     await expect(access(workspace)).resolves.toBeUndefined();
-    cleanupFails = false;
-    await provider.close();
+    await closeAfterRecovery();
     await verifyCleanup(launches);
     expect(launches).toHaveLength(1);
   } finally {
-    cleanupFails = false;
-    await provider.close();
+    await closeAfterRecovery();
   }
 });
 

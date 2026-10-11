@@ -1,5 +1,6 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
+  "globalPassThroughEnv": ["GOMAXPROCS", "GOMEMLIMIT", "UV_THREADPOOL_SIZE"],
   "tasks": {
     "compile": {
       "dependsOn": ["metadata:check"],
@@ -9,6 +10,7 @@
         "package-lock.json",
         "scripts/check-dependency-install.mjs",
         "scripts/clean-build-output.mjs",
+        "scripts/bundle-mcp-runtime.mjs",
         "scripts/generate-package-metadata.mjs",
         "src/**/*.ts",
         "!src/**/*.test.ts",

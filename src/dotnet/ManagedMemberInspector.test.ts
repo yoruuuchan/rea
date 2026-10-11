@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { inspectManagedMembersBytes } from "./ManagedMemberInspector.js";
+import { ManagedDecodeBudget } from "./ManagedDecodeBudget.js";
+import { edges } from "./ManagedMemberRows.js";
+import { signature, type ManagedMethod } from "./ManagedMemberInspectorCore.js";
+import { ManagedReaderFailure } from "./ManagedReaderFailure.js";
+import { managedMemberInspectionSchema } from "../domain/managed/managedArtifact.js";
+import { comparisonLimitations } from "../domain/managed/managedMemberComparisonCoverage.js";
+
 import {
   buildManagedPeFixture,
+  buildNativePeFixture,
   managedPeFixtureTarget,
 } from "./ManagedPe.fixture.js";
 
@@ -130,6 +138,291 @@ describe("managed member inspection", () => {
       },
     ]);
     expect(result.coverage).toMatchObject({ state: "complete", issues: [] });
+  });
+});
+
+describe("managed exported types", () => {
+  it("reports type forwarders and nested exported types with their implementation scope", () => {
+    const bytes = buildManagedPeFixture({
+      exportedTypes: [
+        {
+          namespace: "System",
+          name: "Object",
+          flags: 0x0020_0001,
+          implementationRaw: (1 << 2) | 1,
+        },
+        {
+          namespace: "",
+          name: "Enumerator",
+          flags: 0x0000_0002,
+          implementationRaw: (1 << 2) | 2,
+        },
+      ],
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.metadata.table_row_counts).toMatchObject({
+      ExportedType: 2,
+    });
+    expect(result.exported_types).toMatchObject([
+      {
+        token: "0x27000001",
+        namespace: "System",
+        name: "Object",
+        flags: 0x0020_0001,
+        forwarder: true,
+        type_def_id: 0,
+        implementation_token: "0x23000001",
+      },
+      {
+        token: "0x27000002",
+        namespace: "",
+        name: "Enumerator",
+        forwarder: false,
+        implementation_token: "0x27000001",
+      },
+    ]);
+    expect(result.coverage).toEqual({ state: "complete", issues: [] });
+  });
+
+  it("leaves exported types unknown when CLI metadata is unavailable", () => {
+    const bytes = buildNativePeFixture();
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.coverage.state).toBe("unavailable");
+    expect(result.exported_types).toBeNull();
+  });
+
+  it("reads member Evidence recorded before exported types as unexamined", () => {
+    const bytes = buildManagedPeFixture();
+    const { exported_types: _omitted, ...legacy } = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+    const parsed = managedMemberInspectionSchema.parse(legacy);
+
+    expect(parsed.exported_types).toBeNull();
+    expect(comparisonLimitations(parsed, parsed)).toContain(
+      "At least one managed member observation predates ExportedType inspection; its exported and forwarded types are unknown.",
+    );
+  });
+
+  it("retains an exported type whose implementation is out of range as partial", () => {
+    const bytes = buildManagedPeFixture({
+      exportedTypes: [
+        {
+          namespace: "System",
+          name: "Object",
+          flags: 0x0020_0001,
+          implementationRaw: (9 << 2) | 1,
+        },
+      ],
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.exported_types).toMatchObject([
+      { token: "0x27000001", name: "Object", implementation_token: null },
+    ]);
+    expect(result.coverage).toMatchObject({
+      state: "partial",
+      issues: [
+        {
+          code: "invalid-row",
+          scope: "metadata.ExportedType:0x27000001",
+          detail: expect.stringContaining(
+            "ExportedType implementation coded index 0x25 is invalid",
+          ),
+        },
+      ],
+    });
+  });
+});
+
+describe("managed member decoding budget", () => {
+  it("admits a wide-instruction method whose actual records fit the budget", () => {
+    // Five-byte branches all target the next instruction. A final ret leaves
+    // the method stack-neutral, despite over 256 KiB of valid IL bytes.
+    const il = Buffer.alloc(270_001);
+    for (let offset = 0; offset < il.length - 1; offset += 5) {
+      il[offset] = 0x38;
+    }
+    il[il.length - 1] = 0x2a;
+    const header = Buffer.alloc(12);
+    header.writeUInt16LE(0x3003, 0);
+    header.writeUInt16LE(8, 2);
+    header.writeUInt32LE(il.length, 4);
+    const bytes = buildManagedPeFixture({
+      ilBody: Buffer.concat([header, il]),
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.coverage).toMatchObject({ state: "complete", issues: [] });
+    expect(result.types).toHaveLength(1);
+    expect(result.methods[0]?.body).toMatchObject({
+      status: "present",
+      il_size: il.length,
+      decoded_instruction_count: 54_001,
+      opcode_counts: { br: 54_000, ret: 1 },
+    });
+  });
+
+  it("still rejects dense one-byte instructions before exceeding capacity", () => {
+    // All NOPs: unlike wide instructions, each IL byte adds a decoded record.
+    // A true oversized transient must remain an actionable resource limit.
+    const il = Buffer.alloc(270_001);
+    il[il.length - 1] = 0x2a;
+    const header = Buffer.alloc(12);
+    header.writeUInt16LE(0x3003, 0);
+    header.writeUInt16LE(8, 2);
+    header.writeUInt32LE(il.length, 4);
+    const bytes = buildManagedPeFixture({
+      ilBody: Buffer.concat([header, il]),
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.coverage).toMatchObject({
+      state: "unavailable",
+      issues: [{ code: "resource-limit", scope: "metadata.representation" }],
+    });
+    // Report the originating IL coordinate, not a generic decoding error.
+    expect(result.coverage.issues[0]?.offset).toBeGreaterThan(0);
+    expect(result.types).toEqual([]);
+    expect(result.methods).toEqual([]);
+  });
+
+  it("charges decoded output rather than accumulated decoding bounds", () => {
+    // Each bound fits alone, but 256 bytes per IL and signature byte together
+    // exceed the 64 MiB budget although the retained members are small.
+    const il = Buffer.concat([Buffer.alloc(200_000), Buffer.from([0x2a])]);
+    const header = Buffer.alloc(12);
+    header.writeUInt16LE(0x3003, 0);
+    header.writeUInt16LE(8, 2);
+    header.writeUInt32LE(il.length, 4);
+    const bytes = buildManagedPeFixture({
+      ilBody: Buffer.concat([header, il]),
+      methodSignature: Buffer.concat([
+        Buffer.from([0x00, 0x00, 0x01]),
+        Buffer.alloc(80_000),
+      ]),
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.coverage.state).not.toBe("unavailable");
+    expect(result.methods[0]?.body).toMatchObject({
+      status: "present",
+      il_size: il.length,
+      opcode_counts: { nop: 200_000, ret: 1 },
+    });
+  });
+
+  it("bounds a method's IL and exception sections together", () => {
+    // Each bound fits alone; both stay live while one method is decoded.
+    const il = Buffer.concat([Buffer.alloc(159_999), Buffer.from([0x2a])]);
+    const header = Buffer.alloc(12);
+    header.writeUInt16LE(0x300b, 0);
+    header.writeUInt16LE(8, 2);
+    header.writeUInt32LE(il.length, 4);
+    const clauses = 110_000;
+    const section = Buffer.alloc(4 + clauses * 24);
+    section.writeUInt32LE(0x41 | ((4 + clauses * 24) << 8), 0);
+    const bytes = buildManagedPeFixture({
+      ilBody: Buffer.concat([header, il, section]),
+    });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.coverage).toMatchObject({
+      state: "unavailable",
+      issues: [{ code: "resource-limit" }],
+    });
+  });
+});
+
+describe("managed derived edges", () => {
+  it("admits call edges before the derived graph exceeds the budget", () => {
+    const anchor = {
+      il_offset: 0,
+      opcode: "call",
+      operand_kind: "method",
+      operand: "0x0a000001",
+    };
+    const method = {
+      token: "0x06000001",
+      declaring_type: "T".repeat(2000),
+      name: "m",
+      body: { anchors: Array.from({ length: 40_000 }, () => anchor) },
+    } as unknown as ManagedMethod;
+
+    expect(() =>
+      edges(
+        [method],
+        new Map(),
+        new Map(),
+        new Map(),
+        new ManagedDecodeBudget(),
+      ),
+    ).toThrow(ManagedReaderFailure);
+  });
+});
+
+describe("managed derived caller names", () => {
+  it("admits a caller name before building it", () => {
+    let built = false;
+    // A string-like type name records whether the caller was interpolated.
+    const declaringType = {
+      length: 70 * 1024 * 1024,
+      charCodeAt: () => 0x54,
+      toString: () => {
+        built = true;
+        return "T";
+      },
+    } as unknown as string;
+    const method = {
+      token: "0x06000001",
+      declaring_type: declaringType,
+      name: "m",
+      body: {
+        anchors: [
+          {
+            il_offset: 0,
+            opcode: "call",
+            operand_kind: "method",
+            operand: "0x0a000001",
+          },
+        ],
+      },
+    } as unknown as ManagedMethod;
+
+    expect(() =>
+      edges(
+        [method],
+        new Map(),
+        new Map(),
+        new Map(),
+        new ManagedDecodeBudget(),
+      ),
+    ).toThrow(ManagedReaderFailure);
+    expect(built).toBe(false);
   });
 });
 
@@ -263,18 +556,197 @@ it.each([
   },
 );
 
-it("keeps an admitted but unimplemented element type unsupported", () => {
-  // ECMA-335 ELEMENT_TYPE_ARRAY is valid, but multidimensional arrays are not decoded here.
+it("decodes generic instantiation member signatures as complete coverage", () => {
+  // System.Runtime.Caching 0x06000001: instance void (Dictionary<string, object>)
+  // shape, with TypeRef/TypeSpec coded tokens kept as encoded.
   const bytes = buildManagedPeFixture({
-    fieldSignature: Buffer.from([6, 0x14, 8, 1, 0, 0]),
+    methodSignature: Buffer.from([
+      0x00, 0x01, 0x01, 0x15, 0x12, 0x71, 0x01, 0x0e,
+    ]),
+    fieldSignature: Buffer.from([
+      0x06, 0x15, 0x11, 0x0a, 0x02, 0x13, 0x00, 0x1e, 0x01,
+    ]),
   });
   const result = inspectManagedMembersBytes(
     bytes,
     managedPeFixtureTarget(bytes),
   );
+
+  expect(result.methods[0]?.signature).toMatchObject({
+    parse_status: "decoded",
+    return_type: "void",
+    parameter_types: ["class:113<string>"],
+    issue: null,
+  });
   expect(result.fields[0]?.signature).toMatchObject({
+    parse_status: "decoded",
+    field_type: "valuetype:10<var:0,mvar:1>",
+  });
+  expect(result.coverage).toMatchObject({ state: "complete", issues: [] });
+});
+
+it.each([
+  ["single-dimension general array", [0x14, 0x08, 0x01, 0x00, 0x00], "i4[...]"],
+  [
+    "sized array with signed lower bounds",
+    [0x14, 0x08, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x7f],
+    "i4[1...4,-1...1]",
+  ],
+  [
+    "partially bounded array",
+    [0x14, 0x0e, 0x03, 0x01, 0x05, 0x00],
+    "string[5,,]",
+  ],
+  [
+    "function pointer",
+    [0x1b, 0x00, 0x02, 0x08, 0x0e, 0x1c],
+    "fnptr[default](string,object)->i4",
+  ],
+  ["required modifier", [0x1f, 0x09, 0x08], "i4 modreq:9"],
+  [
+    "optional modifier under a pointer",
+    [0x0f, 0x20, 0x0d, 0x08],
+    "i4 modopt:13*",
+  ],
+  [
+    "adjacent modifiers in source order",
+    [0x1f, 0x05, 0x20, 0x09, 0x08],
+    "i4 modreq:5 modopt:9",
+  ],
+  [
+    "modifier runs separated by a pointer",
+    [0x1f, 0x05, 0x0f, 0x20, 0x09, 0x08],
+    "i4 modopt:9* modreq:5",
+  ],
+  [
+    "unmanaged cdecl function pointer",
+    [0x1b, 0x01, 0x01, 0x01, 0x18],
+    "fnptr[c](native-int)->void",
+  ],
+  [
+    "array of generic instantiations",
+    [0x1d, 0x15, 0x12, 0x05, 0x01, 0x14, 0x08, 0x01, 0x01, 0x03, 0x00],
+    "class:5<i4[3]>[]",
+  ],
+])("decodes a %s field signature", (_name, type, expected) => {
+  expect(signature(Buffer.from([0x06, ...type]))).toMatchObject({
+    kind: "field",
+    parse_status: "decoded",
+    field_type: expected,
+    issue: null,
+  });
+});
+
+it.each([
+  ["generic instantiation without arguments", [0x15, 0x12, 0x05, 0x00]],
+  ["generic instantiation of a primitive", [0x15, 0x08, 0x05, 0x01, 0x08]],
+  ["zero-rank array", [0x14, 0x08, 0x00, 0x00, 0x00]],
+  [
+    "array with more sizes than dimensions",
+    [0x14, 0x08, 0x01, 0x02, 0x01, 0x01, 0x00],
+  ],
+  ["truncated generic argument list", [0x15, 0x12, 0x05, 0x02, 0x08]],
+  ["truncated function pointer", [0x1b, 0x00, 0x01, 0x08]],
+  ["function pointer with a field header", [0x1b, 0x06, 0x00, 0x01]],
+  ["function pointer with a reserved flag", [0x1b, 0x80, 0x00, 0x01]],
+  [
+    "function pointer with explicit-this but no has-this",
+    [0x1b, 0x40, 0x00, 0x01],
+  ],
+  ["typed reference field", [0x16]],
+  ["modified typed reference field", [0x20, 0x09, 0x16]],
+  ["typed reference generic argument", [0x15, 0x12, 0x05, 0x01, 0x16]],
+  ["typed reference array element", [0x1d, 0x16]],
+  ["by-reference generic argument", [0x15, 0x12, 0x05, 0x01, 0x10, 0x08]],
+  ["void generic argument", [0x15, 0x12, 0x05, 0x01, 0x01]],
+  ["void function pointer parameter", [0x1b, 0x00, 0x01, 0x01, 0x01]],
+  ["by-reference pointee", [0x0f, 0x10, 0x08]],
+  ["nested by-reference", [0x10, 0x10, 0x08]],
+  ["void field", [0x01]],
+  ["void array element", [0x1d, 0x01]],
+])("reports a %s as malformed", (_name, type) => {
+  expect(signature(Buffer.from([0x06, ...type]))).toMatchObject({
+    kind: "unknown",
+    parse_status: "malformed",
+  });
+});
+
+it("rejects array ranks beyond the CLR limit before rendering dimensions", () => {
+  expect(
+    signature(
+      Buffer.from([0x06, 0x14, 0x08, 0xdf, 0xff, 0xff, 0xff, 0x00, 0x00]),
+    ),
+  ).toMatchObject({
     parse_status: "unsupported",
-    issue: "unsupported element type 0x14",
+    issue: "array rank 536870911 exceeds the 32 dimensions the CLR supports",
+  });
+  expect(
+    signature(Buffer.from([0x06, 0x14, 0x08, 0x20, 0x00, 0x00])),
+  ).toMatchObject({
+    parse_status: "decoded",
+    field_type: `i4[${",".repeat(31)}]`,
+  });
+});
+
+it("decodes typed references in parameter and return positions", () => {
+  expect(
+    signature(Buffer.from([0x00, 0x02, 0x16, 0x20, 0x09, 0x16, 0x08])),
+  ).toMatchObject({
+    kind: "method",
+    parse_status: "decoded",
+    return_type: "typedbyref",
+    parameter_types: ["typedbyref modopt:9", "i4"],
+  });
+  expect(
+    signature(Buffer.from([0x06, 0x1b, 0x20, 0x01, 0x01, 0x16])),
+  ).toMatchObject({
+    parse_status: "decoded",
+    field_type: "fnptr[default has-this](typedbyref)->void",
+  });
+});
+
+it.each([
+  ["by-reference field", [0x06, 0x10, 0x08], { field_type: "i4&" }],
+  ["void pointer field", [0x06, 0x0f, 0x01], { field_type: "void*" }],
+  [
+    "by-reference function pointer return and parameter",
+    [0x06, 0x1b, 0x00, 0x01, 0x10, 0x08, 0x10, 0x0e],
+    { field_type: "fnptr[default](string&)->i4&" },
+  ],
+  [
+    "by-reference method return and parameter",
+    [0x00, 0x01, 0x10, 0x08, 0x10, 0x15, 0x12, 0x05, 0x01, 0x0f, 0x01],
+    { return_type: "i4&", parameter_types: ["class:5<void*>&"] },
+  ],
+])("decodes a %s in its grammar position", (_name, blob, expected) => {
+  expect(signature(Buffer.from(blob))).toMatchObject({
+    parse_status: "decoded",
+    ...expected,
+  });
+});
+
+it("keeps element types that member signatures do not assign unsupported", () => {
+  expect(signature(Buffer.from([0x06, 0x45, 0x08]))).toMatchObject({
+    parse_status: "unsupported",
+    issue: "unsupported element type 0x45",
+  });
+});
+
+it("decodes deeply nested generic instantiations without recursion", () => {
+  const depth = 4_000;
+  const decoded = signature(
+    Buffer.concat([
+      Buffer.from([0x06]),
+      Buffer.from(
+        Array.from({ length: depth }, () => [0x15, 0x12, 0x05, 0x01]).flat(),
+      ),
+      Buffer.from([0x08]),
+    ]),
+  );
+
+  expect(decoded).toMatchObject({
+    parse_status: "decoded",
+    field_type: `${"class:5<".repeat(depth)}i4${">".repeat(depth)}`,
   });
 });
 

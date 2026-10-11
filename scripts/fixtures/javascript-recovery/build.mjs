@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,23 +20,56 @@ export async function buildRecoveryFixtures(root, prefix) {
   const source = fileURLToPath(new URL("./entry.mjs", import.meta.url));
   const webpackOutput = join(root, "webpack");
   await mkdir(webpackOutput);
-  await new Promise((resolve, reject) => {
-    const compiler = webpack({
-      mode: "production",
-      entry: source,
-      parallelism: 1,
-      optimization: { concatenateModules: false },
-      output: { path: webpackOutput, filename: "bundle.js" },
-    });
-    compiler.run((error, stats) => {
-      compiler.close((closeError) => {
-        if (error || closeError) return reject(error ?? closeError);
-        if (!stats || stats.hasErrors())
-          return reject(new Error(stats?.toString() ?? "No webpack stats"));
-        resolve();
+  const compileWebpack = async (options) =>
+    new Promise((resolve, reject) => {
+      const compiler = webpack(options);
+      compiler.run((error, stats) => {
+        compiler.close((closeError) => {
+          if (error || closeError) return reject(error ?? closeError);
+          if (!stats || stats.hasErrors())
+            return reject(new Error(stats?.toString() ?? "No webpack stats"));
+          resolve();
+        });
       });
     });
+  await compileWebpack({
+    mode: "production",
+    entry: source,
+    parallelism: 1,
+    optimization: { concatenateModules: false },
+    output: { path: webpackOutput, filename: "bundle.js" },
   });
+  const splitOutput = join(root, "webpack-code-split");
+  await mkdir(splitOutput);
+  const splitSource = fileURLToPath(
+    new URL("./code-split/entry.mjs", import.meta.url),
+  );
+  await compileWebpack({
+    mode: "production",
+    entry: splitSource,
+    parallelism: 1,
+    optimization: {
+      concatenateModules: false,
+      runtimeChunk: "single",
+      splitChunks: {
+        chunks: "all",
+        minSize: 0,
+        cacheGroups: {
+          shared: { test: /shared\.mjs$/u, name: "shared", enforce: true },
+        },
+      },
+    },
+    output: {
+      path: splitOutput,
+      filename: "[name].js",
+      chunkFilename: "[id].chunk.js",
+    },
+  });
+  const splitFiles = (await readdir(splitOutput))
+    .filter((name) => name !== "main.js")
+    .sort();
+  if (splitFiles.length !== 3)
+    throw new Error("Expected runtime, shared and lazy chunks");
   const esbuildPath = join(root, "esbuild.js");
   await esbuild.build({
     entryPoints: [source],
@@ -95,6 +128,13 @@ export async function buildRecoveryFixtures(root, prefix) {
         options: { extraction_mode: "inspection", rewrite_level: "minimal" },
       },
     ],
+    codeSplit: {
+      name: "webpack-code-split",
+      path: join(splitOutput, "main.js"),
+      additional_paths: splitFiles.map((name) => join(splitOutput, name)),
+      expectedFormat: "webpack5",
+      expectedModules: 4,
+    },
     toolchains: { esbuild: esbuild.version, webpack: webpackVersion },
   };
 }

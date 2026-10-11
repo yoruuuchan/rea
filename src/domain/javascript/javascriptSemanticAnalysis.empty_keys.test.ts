@@ -56,7 +56,7 @@ it("retains exact empty method names and environment keys", () => {
   ]);
 });
 
-it("retains exact empty require paths without dynamic-key links", () => {
+it("retains exact empty require paths and dependencies without dynamic-key bindings", () => {
   const ir = analyzeJavaScriptSemantics(`
     const { '': fromPattern } = require("./table.js");
     const fromMember = require("./table.js")[''];
@@ -82,6 +82,18 @@ it("retains exact empty require paths without dynamic-key links", () => {
       kind: "require",
       importedName: "",
       localName: "fromMember",
+      exportedName: null,
+    },
+    {
+      kind: "require",
+      importedName: null,
+      localName: null,
+      exportedName: null,
+    },
+    {
+      kind: "require",
+      importedName: null,
+      localName: null,
       exportedName: null,
     },
     {

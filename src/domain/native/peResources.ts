@@ -22,12 +22,17 @@ export const inspectPeResourcesInputSchema = z.strictObject({
     .max(536870912)
     .default(67108864)
     .describe("Maximum stable artifact bytes to read (default 64 MiB)"),
+  // Windows resource images carry thousands of entries: Windows 11 25H2
+  // SystemResources measures imageres.dll.mun at 6476 examined entries,
+  // shell32.dll.mun at 5903 and wmploc.DLL.mun at 5440. The default admits
+  // those stock images with headroom; the independent 8 MiB metadata budget
+  // still bounds allocation.
   max_entries: z
     .number()
     .int()
     .min(1)
     .max(65536)
-    .default(4096)
+    .default(16384)
     .describe(
       "Maximum resource directory entries to examine; exceeding the budget fails without partial success",
     ),

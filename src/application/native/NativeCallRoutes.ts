@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { AnalysisOperationPort } from "../AnalysisProvider.js";
+import type {
+  AnalysisOperationPort,
+  ExecutionOptions,
+} from "../AnalysisProvider.js";
 import {
   parseRelatedAddresses,
   referenceKindSchema,
@@ -26,8 +29,12 @@ export const readNativeCallRoutes = async (
   analysis: AnalysisOperationPort,
   procedure: string,
   signal?: AbortSignal,
+  selectorOrigin?: ExecutionOptions["selectorOrigin"],
 ) => {
-  const options = signal === undefined ? {} : { signal };
+  const options = {
+    ...(signal === undefined ? {} : { signal }),
+    ...(selectorOrigin === undefined ? {} : { selectorOrigin }),
+  };
   const execution = await analysis.execute(
     "procedure_references",
     { procedure, direction: "outgoing" },

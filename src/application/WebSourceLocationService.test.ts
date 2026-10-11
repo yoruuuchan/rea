@@ -93,6 +93,52 @@ it.each(["digest", "url", "point"])(
     expect(response.error._tag).toBe("AnalysisOutputError");
   },
 );
+it.each([
+  {
+    runtime: {
+      id: "node-v8",
+      version: "v24.18.0",
+      v8_heap_limit_bytes: 201326592,
+    },
+    limitation: "192 MiB old-generation heap and one V8 worker",
+  },
+  {
+    runtime: {
+      id: "bun",
+      version: "1.4.2",
+      node_compatibility_version: "24.3.0",
+      v8_heap_limit_bytes: null,
+      process_memory_limit_bytes: 738197504,
+    },
+    limitation:
+      "a Windows Job Object limited its committed memory to 738197504 bytes",
+  },
+  {
+    runtime: {
+      id: "bun",
+      version: "1.4.2",
+      node_compatibility_version: "24.3.0",
+      v8_heap_limit_bytes: null,
+      process_memory_limit_bytes: null,
+    },
+    limitation: "so no codec heap limit is established",
+  },
+] as const)(
+  "states the codec memory bound its runtime enforced: $limitation",
+  async ({ runtime, limitation }) => {
+    const response = await service(undefined, {
+      trace: async (input) => {
+        const decoded = await decoder.trace(input);
+        if (!decoded.ok) return decoded;
+        return ok({ ...decoded.value, runtime });
+      },
+    }).trace(args);
+    if (!response.ok) throw response.error;
+    expect(
+      response.value.limitations.filter((text) => text.includes(limitation)),
+    ).toHaveLength(1);
+  },
+);
 it("honors cancellation both before acquisition and across decoder completion", async () => {
   const first = new AbortController();
   first.abort();

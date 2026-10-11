@@ -6,6 +6,30 @@ import { fileURLToPath } from "node:url";
 import { expect, onTestFinished } from "vitest";
 import { z } from "zod";
 
+// validateSchema checks against the meta-schema without registering user $ids.
+const schemaValidator = new Ajv2020({
+  strict: false,
+  validateFormats: false,
+});
+const validatedSchemas = new Set<string>();
+const compiledValidators = new Map<string, ValidateFunction<unknown>>();
+
+const compileValidator = (schema: unknown): ValidateFunction<unknown> => {
+  const schemaRecord = z.record(z.string(), z.unknown()).parse(schema);
+  const serialized = JSON.stringify(schemaRecord);
+  const cached = compiledValidators.get(serialized);
+  if (cached !== undefined) return cached;
+
+  // Keep a private Ajv registry per schema: distinct tool schemas can carry
+  // identical $id values, while this cache only reuses exact schema content.
+  const validate = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile<unknown>(schemaRecord);
+  compiledValidators.set(serialized, validate);
+  return validate;
+};
+
 /** Start the built production server without configuring deep binary providers. */
 export async function connectLocalToolsMcp() {
   const transport = new StdioClientTransport({
@@ -28,50 +52,32 @@ export async function connectLocalToolsMcp() {
   });
   await client.connect(transport);
   const tools = (await client.listTools()).tools;
-  const schemaValidator = new Ajv2020({
-    strict: false,
-    validateFormats: false,
-  });
   for (const tool of tools)
     for (const [kind, schema] of [
       ["inputSchema", tool.inputSchema],
       ["outputSchema", tool.outputSchema],
     ] as const) {
       if (schema === undefined) continue;
-      const valid = schemaValidator.validateSchema(
-        z.record(z.string(), z.unknown()).parse(schema),
-      );
+      const serialized = JSON.stringify(schema);
+      if (validatedSchemas.has(serialized)) continue;
+      const schemaRecord = z.record(z.string(), z.unknown()).parse(schema);
+      const valid = schemaValidator.validateSchema(schemaRecord);
       expect(
         valid,
         `${tool.name}.${kind}: ${schemaValidator.errorsText(schemaValidator.errors)}`,
       ).toBe(true);
+      validatedSchemas.add(serialized);
     }
   const definitions = new Map(tools.map((tool) => [tool.name, tool]));
-  const compiledInputs = new Set<string>();
-  const validators = new Map<string, ValidateFunction<unknown>>();
   const call = async (name: string, arguments_: Record<string, unknown>) => {
     const definition = definitions.get(name);
-    if (definition !== undefined && !compiledInputs.has(name)) {
-      new Ajv2020({ strict: false, validateFormats: false }).compile(
-        definition.inputSchema,
-      );
-      compiledInputs.add(name);
-    }
+    if (definition !== undefined) compileValidator(definition.inputSchema);
     const response = await client.callTool({ name, arguments: arguments_ });
     if (
       response.structuredContent !== undefined &&
       definition?.outputSchema !== undefined
     ) {
-      let validate = validators.get(name);
-      if (validate === undefined) {
-        validate = new Ajv2020({
-          strict: false,
-          validateFormats: false,
-        }).compile<unknown>(
-          z.record(z.string(), z.unknown()).parse(definition.outputSchema),
-        );
-        validators.set(name, validate);
-      }
+      const validate = compileValidator(definition.outputSchema);
       expect(
         validate(response.structuredContent),
         JSON.stringify(validate.errors),

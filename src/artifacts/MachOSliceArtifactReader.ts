@@ -301,7 +301,7 @@ export class MachOSliceArtifactReader implements ArtifactReader {
   }
 
   async #releaseResources(): Promise<void> {
-    await Promise.allSettled([...this.#pendingCommands]);
+    await Promise.allSettled(this.#pendingCommands);
     let cleanup: ArtifactReaderFailure["cleanup"];
     try {
       const failures = (await this.runner.retryCleanup?.()) ?? [];

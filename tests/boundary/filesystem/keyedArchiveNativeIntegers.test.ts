@@ -1,14 +1,36 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect } from "vitest";
 import { inspectBundleKeyedArchive } from "../../../src/artifacts/apple/KeyedArchiveReader.js";
 import { keyedArchiveResultSchema } from "../../../src/domain/apple/keyedArchive.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import {
   keyedArchiveIntegerFormats,
   keyedArchiveIntegerCases,
-  keyedArchiveIntegerFixture,
+  keyedArchiveIntegerFixtures,
   expectKeyedArchiveIntegerCase,
+  type KeyedArchiveIntegerFixtures,
 } from "../../fixtures/keyedArchiveIntegers.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
+import {
+  createTestWorkspace,
+  removeTestWorkspace,
+} from "../../support/workspace/workspaceFixture.js";
+
+const archiveTest = cliTest.extend<{
+  $worker: { keyedArchiveIntegerArchives: KeyedArchiveIntegerFixtures };
+}>({
+  keyedArchiveIntegerArchives: [
+    // oxlint-disable-next-line no-empty-pattern -- Vitest parses fixture dependencies from object destructuring.
+    async ({}, use) => {
+      const workspace = await createTestWorkspace("rea-keyed-integers-");
+      try {
+        await use(await keyedArchiveIntegerFixtures(workspace.root));
+      } finally {
+        await removeTestWorkspace(workspace.root);
+      }
+    },
+    { scope: "worker" },
+  ],
+});
 
 const cases = keyedArchiveIntegerFormats.flatMap((format) =>
   keyedArchiveIntegerCases.map((selectedCase) => ({ format, selectedCase })),
@@ -17,10 +39,10 @@ const cases = keyedArchiveIntegerFormats.flatMap((format) =>
 describe.skipIf(process.platform !== "darwin")(
   "Foundation archive integer precision",
   () => {
-    it.each(cases)(
+    archiveTest.for(cases)(
       "filesystem preserves $format $selectedCase numeric meaning",
-      async ({ format, selectedCase }) => {
-        const fixture = await keyedArchiveIntegerFixture(format);
+      async ({ format, selectedCase }, { keyedArchiveIntegerArchives }) => {
+        const fixture = keyedArchiveIntegerArchives[format];
         const result = await inspectBundleKeyedArchive({
           bundlePath: fixture.root,
           targetSha256: fixture.digest,
@@ -34,10 +56,13 @@ describe.skipIf(process.platform !== "darwin")(
         );
       },
     );
-    cliTest.for(cases)(
+    archiveTest.for(cases)(
       "built CLI preserves $format $selectedCase numeric meaning",
-      async ({ format, selectedCase }, { cli }) => {
-        const fixture = await keyedArchiveIntegerFixture(format);
+      async (
+        { format, selectedCase },
+        { cli, keyedArchiveIntegerArchives },
+      ) => {
+        const fixture = keyedArchiveIntegerArchives[format];
         const output = await cli.run({
           arguments: ["inspect-keyed-archive", fixture.archivePath, "--json"],
           environment: {

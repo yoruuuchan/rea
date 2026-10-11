@@ -10,3 +10,25 @@ export const SUPPORTED_NODE_VERSION_PROSE =
 /** Return whether a Node.js version satisfies REA's tested runtime families. */
 export const supportsNodeVersion = (version: string): boolean =>
   satisfies(version, SUPPORTED_NODE_VERSION_RANGE);
+
+/** JavaScript runtime executing REA. Bun also reports a Node.js compatibility version. */
+export type JavaScriptRuntime =
+  | { readonly id: "node"; readonly version: string }
+  | {
+      readonly id: "bun";
+      readonly version: string;
+      readonly nodeCompatibilityVersion: string;
+    };
+
+/** Identify the runtime from `process.versions`; only Bun reports `bun`. */
+export const javaScriptRuntime = (versions: {
+  readonly node: string;
+  readonly bun?: string | undefined;
+}): JavaScriptRuntime =>
+  versions.bun === undefined
+    ? { id: "node", version: versions.node }
+    : {
+        id: "bun",
+        version: versions.bun,
+        nodeCompatibilityVersion: versions.node,
+      };

@@ -195,7 +195,20 @@ outside-memory and undecodable addresses have separate outcomes. Effective
 memory base/index/displacement roles and per-instruction context mode remain
 unavailable; `mode` is the program language variant.
 
-Compact instruction references and call-target references preserve the source
+`inspect_native_instruction` also returns `incoming_references` to the exact
+queried address, including data, interior-instruction and undecodable addresses.
+Ghidra enumerates its ReferenceManager, excludes synthetic entry-point
+references, and returns deterministic source-address ordering while retaining
+distinct operand references from the same source. `[]` means that enumeration
+found no references; omission or `null` means this facet is unavailable in an
+older capture or another provider. Empty static references do not prove that
+the address is unused at runtime. The existing `references` field still holds
+outgoing instruction references, and `xrefs` still returns bare source addresses.
+The Ghidra analysis profile versions this incoming-reference coverage. Reopen
+the target without an older snapshot and save a fresh snapshot to acquire it;
+the older snapshot's Evidence bundle remains readable with this facet unavailable.
+
+Compact incoming, outgoing instruction and call-target references preserve the source
 address, operand index, DATA/READ/WRITE classification, primary status, provider
 `provenance`, and reference `source` (for Ghidra: `analysis`, `default`, `imported`
 or `user_defined`). Primary status reports the provider's chosen reference; it

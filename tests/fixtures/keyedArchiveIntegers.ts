@@ -7,7 +7,6 @@ import { promisify } from "node:util";
 import { expect } from "vitest";
 import { z } from "zod";
 import { keyedArchiveResultSchema } from "../../src/domain/apple/keyedArchive.js";
-import { createTestTempDirectory } from "./temporaryDirectory.js";
 
 const rowSchema = z.object({
   container: z.enum(["roots", "objects"]),
@@ -25,11 +24,22 @@ const archiveSchema = z.object({
 const oracleSchema = z.object({ xml: archiveSchema, binary: archiveSchema });
 export const keyedArchiveIntegerFormats = ["xml", "binary"] as const;
 export const keyedArchiveIntegerCases = ["controls", "unsafe"] as const;
-type Format = (typeof keyedArchiveIntegerFormats)[number];
 type Case = (typeof keyedArchiveIntegerCases)[number];
 type Row = z.infer<typeof rowSchema>;
-export const keyedArchiveIntegerFixture = async (format: Format) => {
-  const root = await createTestTempDirectory("rea-keyed-integers-");
+type SelectedFixture = {
+  readonly root: string;
+  readonly selected: z.infer<typeof archiveSchema>;
+  readonly archivePath: string;
+  readonly digest: string;
+};
+export interface KeyedArchiveIntegerFixtures {
+  readonly xml: SelectedFixture;
+  readonly binary: SelectedFixture;
+}
+
+export const keyedArchiveIntegerFixtures = async (
+  root: string,
+): Promise<KeyedArchiveIntegerFixtures> => {
   await promisify(execFile)(
     "/usr/bin/xcrun",
     [
@@ -76,12 +86,19 @@ export const keyedArchiveIntegerFixture = async (format: Format) => {
       ),
     ).toBe(true);
   }
-  const selected = oracle[format];
-  const archivePath = join(root, selected.filename);
-  const bytes = await readFile(archivePath);
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  expect(digest).toBe(selected.sha256);
-  return { root, selected, archivePath, digest };
+  const selectedFixture = async (
+    selected: z.infer<typeof archiveSchema>,
+  ): Promise<SelectedFixture> => {
+    const archivePath = join(root, selected.filename);
+    const bytes = await readFile(archivePath);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    expect(digest).toBe(selected.sha256);
+    return { root, selected, archivePath, digest };
+  };
+  return {
+    xml: await selectedFixture(oracle.xml),
+    binary: await selectedFixture(oracle.binary),
+  };
 };
 const at = (value: unknown, path: Row["path"]): unknown => {
   for (const key of path) {

@@ -1,3 +1,6 @@
+import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
+import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
+
 /** Exact upstream package profile for unchanged offline HAR validation and numeric parsing. */
 export const HAR_CAPTURE_PROVIDER_IDENTITY = {
   id: "har-schema/lossless-json",
@@ -10,6 +13,14 @@ export const HAR_CAPTURE_HEAP_LIMITS = {
   oldGenerationMiB: 192,
   semiSpaceMiB: 8,
 } as const;
+
+/** The HAR decoder runs on this executable; Bun accepts but ignores V8 heap flags. */
+export const HAR_CAPTURE_HEAP_ENFORCED =
+  javaScriptRuntime(process.versions).id === "node";
+
+/** Windows Job Object commit limit replacing the ignored heap flags under Bun; otherwise null. */
+export const HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES =
+  javaScriptWorkerMemoryLimitBytes(HAR_CAPTURE_HEAP_LIMITS.oldGenerationMiB);
 
 /** Native executable profile verified with unchanged mitmproxy raw-state decoding. */
 export const MITMPROXY_CAPTURE_PROVIDER_IDENTITY = {

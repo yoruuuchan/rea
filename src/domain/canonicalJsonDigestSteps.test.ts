@@ -23,7 +23,7 @@ describe("cooperative canonical JSON digest", () => {
     { [`${"x".repeat(8191)}𐀀${"\n".repeat(20_000)}`]: "value" },
     Object.fromEntries(
       Array.from({ length: 512 }, (_, index) => [
-        `escaped\n\"\\𐀀${"x".repeat(32)}${index}`,
+        `escaped\n"\\𐀀${"x".repeat(32)}${index}`,
         { repeated: index },
       ]),
     ),

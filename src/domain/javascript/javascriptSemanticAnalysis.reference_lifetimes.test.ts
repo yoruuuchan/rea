@@ -48,6 +48,26 @@ describe("bounded member path propagation", () => {
     expect(performance.now() - start).toBeLessThan(2000);
   }, 30000);
 
+  // A dynamic self alias escapes its repeated prefix, which conservatively
+  // covers every child; a static key without that slot keeps the literal.
+  it.each([
+    ["node = node[key]", "node.name.toLowerCase();", "unknown"],
+    ["node = node[key]", "mutate(node);", "unknown"],
+    ["node = node[key]", "node.value = 2;", "unknown"],
+    ["node = node.next", "node.value = 2;", "literal"],
+  ])(
+    "bounds a self alias below an observed container: %s; %s",
+    (alias, effect, status) => {
+      const start = performance.now();
+      const value = resultValue(
+        `class Item {} const seed = { child: { value: 1 } }; let node = flag ? seed : new Item(); while ((${alias})) ${effect} return seed.child.value;`,
+      );
+      expect(performance.now() - start).toBeLessThan(2000);
+      expect(value?.status).toBe(status);
+    },
+    30000,
+  );
+
   it.each([
     ["child:external,", "child", "present"],
     ["", "missing", "unknown-coverage"],
@@ -111,6 +131,10 @@ describe("bounded member path propagation", () => {
     [
       "let alias = owner; let i = 0; while (i++ < 1) { alias = flag ? alias.child : alias; alias.value = 2; }",
       "value",
+    ],
+    [
+      "let alias = owner; let i = 0; while (i++ < 1) { alias = flag ? alias.child : alias; alias.value = 2; }",
+      "child.value",
     ],
   ])(
     "keeps a write that reaches a child through a longer path: %s",

@@ -21,7 +21,14 @@ describe("compact Ghidra reference MCP evidence", () => {
       { ...base, type: "WRITE", primary: false, write: true, operand_index: 0 },
     ];
     const outputs = {
-      inspect_native_instruction: compactInstruction(references),
+      inspect_native_instruction: {
+        ...compactInstruction(references),
+        incoming_references: references.map((reference) => ({
+          ...reference,
+          source_address: "ram:00403000",
+          target_address: "0x401000",
+        })),
+      },
       resolve_native_call_targets: compactCallTargets([compactReference()]),
     };
     const harness = await connectGhidraMcp(
@@ -58,7 +65,11 @@ describe("compact Ghidra reference MCP evidence", () => {
 
   it("preserves empty references and unresolved targets without manufacturing provenance", async () => {
     const outputs = {
-      inspect_native_instruction: compactInstruction(),
+      inspect_native_instruction: {
+        ...compactInstruction(),
+        status: "data",
+        incoming_references: [],
+      },
       resolve_native_call_targets: compactCallTargets(),
     };
     const harness = await connectGhidraMcp(

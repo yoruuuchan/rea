@@ -216,11 +216,20 @@ describe("interactive setup journey", () => {
 
 describe("interactive setup completion", () => {
   it.each([
-    { npmCommand: "", launcher: "rea" },
-    { npmCommand: "exec", launcher: "npx rea-agents" },
+    { npmCommand: "", userAgent: "", launcher: "rea" },
+    {
+      npmCommand: "exec",
+      userAgent: "npm/10.9.0 node/v24.11.0 linux x64",
+      launcher: "npx rea-agents",
+    },
+    {
+      npmCommand: "exec",
+      userAgent: "bun/1.4.2 npm/? node/v26.3.0 linux x64",
+      launcher: "bunx rea-agents",
+    },
   ])(
     "prints an available next command for $launcher invocation",
-    async ({ npmCommand, launcher }) => {
+    async ({ npmCommand, userAgent, launcher }) => {
       const { stderr } = await execute(
         process.execPath,
         [
@@ -246,7 +255,12 @@ describe("interactive setup completion", () => {
         ],
         {
           cwd: process.cwd(),
-          env: { ...process.env, npm_command: npmCommand, NO_COLOR: "1" },
+          env: {
+            ...process.env,
+            npm_command: npmCommand,
+            npm_config_user_agent: userAgent,
+            NO_COLOR: "1",
+          },
         },
       );
 

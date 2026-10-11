@@ -7,6 +7,7 @@ import {
   compareUnicodeCodePoints,
   compositeKey,
 } from "./unicodeCodePointOrder.js";
+import { localPathStringSchema } from "./localPath.js";
 
 import {
   analysisProfileSchema,
@@ -53,6 +54,9 @@ const formatSchema = z.enum([
   "apk",
   "msix",
   "appx",
+  "hap",
+  "hsp",
+  "app-pack",
   "asar",
   "dmg",
   "pkg",
@@ -62,7 +66,7 @@ const formatSchema = z.enum([
 ]);
 const kindSchema = z.enum(["executable", "database", "archive", "artifact"]);
 const subjectSchema = z.object({
-  path: z.string().min(1),
+  path: localPathStringSchema,
   sha256: digestSchema,
   format: z.enum([
     ...formatSchema.options,

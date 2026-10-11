@@ -22,7 +22,7 @@ import {
   checkRecoveryDeadline,
   recoveryFailureMessage,
   recoveryInputFailure,
-  snapshotRecoveryInput,
+  snapshotRecoveryInputs,
 } from "./RecoveryFiles.js";
 import {
   resolveWakaruCommand,
@@ -55,7 +55,7 @@ export class WakaruProvider implements JavaScriptRecoveryPort {
     readonly launcher?: WakaruLauncher,
   ) {}
 
-  /** Recover one script using validated upstream reports and verified output bytes. */
+  /** Recover selected scripts using validated reports and verified output bytes. */
   recover(
     input: JavaScriptRecoveryInput,
     options?: ExecutionOptions,
@@ -109,9 +109,9 @@ export class WakaruProvider implements JavaScriptRecoveryPort {
       const staging = join(root, "modules");
       await mkdir(inputs, { mode: 0o700 });
       await mkdir(staging, { mode: 0o700 });
-      const source = await snapshotRecoveryInput(
-        input.path,
-        join(inputs, "bundle.js"),
+      const sources = await snapshotRecoveryInputs(
+        [input.path, ...(input.additional_paths ?? [])],
+        inputs,
         options?.signal,
       );
       try {
@@ -128,7 +128,7 @@ export class WakaruProvider implements JavaScriptRecoveryPort {
         root,
         tree,
         input,
-        source,
+        sources,
         engine,
         environment: this.environment,
         launcher: this.launcher,

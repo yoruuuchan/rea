@@ -204,6 +204,7 @@ These deadlines have different owners:
 | Deadline             | Owner and effect                                                                                                                                                                                                                    |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MCP initialize       | The client bounds transport/REA connection startup, before any target query.                                                                                                                                                        |
+| Hopper startup       | REA allows 120,000 ms by default; `REA_HOPPER_STARTUP_TIMEOUT_MS` accepts decimal integers from 1–2,147,483,647 ms. Invalid values fail configuration validation. Startup failure is reported by the first provider query.          |
 | Ghidra startup       | REA allows 330,000 ms by default; `REA_GHIDRA_STARTUP_TIMEOUT_MS` accepts decimal integers from 1–2,147,483,647 ms. Invalid supplied values fail configuration validation. Startup failure is reported by the first provider query. |
 | Individual tool call | The client bounds its wait, including cold engine startup. The pinned client SDK 2.3.1 defaults to 60,000 ms and can cancel earlier than REA's startup deadline.                                                                    |
 

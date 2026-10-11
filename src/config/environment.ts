@@ -8,7 +8,11 @@ import {
   ghidraCompilerSpecIdSchema,
   ghidraLanguageIdSchema,
 } from "./ghidraLanguageOverride.js";
-import { ghidraStartupTimeoutSchema } from "./ghidraStartupTimeout.js";
+import {
+  DEFAULT_GHIDRA_STARTUP_TIMEOUT_MS,
+  DEFAULT_HOPPER_STARTUP_TIMEOUT_MS,
+  providerStartupTimeoutSchema,
+} from "./providerStartupTimeout.js";
 import { mcpInputSchemaProfileSchema } from "./mcpInputSchemaProfile.js";
 import { mcpResponseBudgetSchema } from "./mcpResponseBudget.js";
 
@@ -36,7 +40,12 @@ const environmentSchema = z.object({
     .min(1)
     .refine(isAbsolute, "REA_GHIDRA_NATIVEAOT_JAR must be absolute")
     .optional(),
-  REA_GHIDRA_STARTUP_TIMEOUT_MS: ghidraStartupTimeoutSchema,
+  REA_GHIDRA_STARTUP_TIMEOUT_MS: providerStartupTimeoutSchema.default(
+    DEFAULT_GHIDRA_STARTUP_TIMEOUT_MS,
+  ),
+  REA_HOPPER_STARTUP_TIMEOUT_MS: providerStartupTimeoutSchema.default(
+    DEFAULT_HOPPER_STARTUP_TIMEOUT_MS,
+  ),
   REA_GHIDRA_LANGUAGE_ID: ghidraLanguageIdSchema.optional(),
   REA_GHIDRA_COMPILER_SPEC_ID: ghidraCompilerSpecIdSchema.optional(),
   REA_GHIDRA_SEED_FILE: z

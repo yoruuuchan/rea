@@ -86,6 +86,40 @@ it("accepts a full JDK and canonicalizes the selected JAR", async () => {
   });
 });
 
+it("admits engine classes past repeated ZIP resource filenames", async () => {
+  const root = await createTestTempDirectory("rea-jadx-duplicate-resource-");
+  const jar = join(root, "engine.jar");
+  const javaHome = await createFakeJdk(root);
+  await writeOrderedZip(jar, [
+    "META-INF/LICENSE.txt",
+    "META-INF/LICENCE.txt",
+    "com/atxx/jhmcp/JadxSession.class",
+    "com/atxx/jhmcp/SessionHolder.class",
+    "jadx/api/JadxDecompiler.class",
+    "com/google/gson/Gson.class",
+    "io/modelcontextprotocol/kotlin/sdk/server/Server.class",
+  ]);
+  const bytes = await readFile(jar);
+  const original = Buffer.from("META-INF/LICENCE.txt");
+  let renamed = 0;
+  for (
+    let offset = bytes.indexOf(original);
+    offset >= 0;
+    offset = bytes.indexOf(original, offset + original.length)
+  ) {
+    bytes.write("META-INF/LICENSE.txt", offset);
+    renamed++;
+  }
+  expect(renamed).toBe(2);
+  await writeFile(jar, bytes);
+  await expect(
+    resolveConfiguration(
+      { REA_JADX_MCP_JAR: jar, JAVA_HOME: javaHome },
+      "inspect_android_package",
+    ),
+  ).resolves.toMatchObject({ jar: await realpath(jar) });
+});
+
 it("configures heap and visible processors independently without forcing either", async () => {
   const root = await createTestTempDirectory("rea-jadx-config-");
   const jar = join(root, "engine.jar");

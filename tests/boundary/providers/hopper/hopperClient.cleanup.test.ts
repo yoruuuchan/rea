@@ -82,7 +82,7 @@ const clients: HopperClient[] = [];
 
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close()));
-});
+}, 45_000);
 
 describe("HopperClient cleanup", () => {
   it("waits for an operation reply without a fixed request deadline", async () => {

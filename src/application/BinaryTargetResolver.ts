@@ -29,6 +29,7 @@ import {
 import { mzWindowsHeaderOffset } from "../domain/dosMz.js";
 import {
   hasZipSignature,
+  isZipPackageFormat,
   zipPackageFormatForPath,
 } from "../domain/zipPackageFormat.js";
 
@@ -203,6 +204,9 @@ const detectArtifactFormat = async (
   const observed = await handle.read(magic, 0, magic.length, 0);
   throwIfTargetResolutionCancelled(signal);
   if (hasZipSignature(magic.subarray(0, observed.bytesRead))) {
+    // The HarmonyOS App Pack suffix `.app` is a root-input concept; a nested
+    // ZIP member ending in `.app` keeps the generic zip classification.
+    if (lower.endsWith(".app")) return "app-pack";
     return zipPackageFormatForPath(lower) ?? "zip";
   }
   const named = namedArtifactFormat(lower);
@@ -243,7 +247,7 @@ const isArchiveFormat = (
     "analysis-database" | "mach-o" | "elf" | "pe" | "dos-mz" | "dos-com"
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
-  ["zip", "ipa", "apk", "msix", "appx", "asar", "dmg", "pkg"].includes(format);
+  isZipPackageFormat(format) || ["asar", "dmg", "pkg"].includes(format);
 
 const sha256Handle = async (
   handle: FileHandle,

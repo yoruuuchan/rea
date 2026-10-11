@@ -3,15 +3,18 @@ import type { HistoricalCaptureFormatAdapter } from "./HistoricalCaptureFormatAd
 import {
   HAR_CAPTURE_PROVIDER_IDENTITY,
   HAR_CAPTURE_HEAP_LIMITS,
+  HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES,
 } from "./CaptureRelease.js";
 
 /** HAR's parser/schema packages run in one bounded Node heap, without network or target execution. */
 export class HarCaptureAdapter implements HistoricalCaptureFormatAdapter {
   readonly format = "har";
   readonly identity = HAR_CAPTURE_PROVIDER_IDENTITY;
-  async command(
-    requestPath: string,
-  ): Promise<{ command: string; arguments: readonly string[] }> {
+  async command(requestPath: string): Promise<{
+    command: string;
+    arguments: readonly string[];
+    memoryLimitBytes?: number;
+  }> {
     return {
       command: process.execPath,
       arguments: [
@@ -22,6 +25,9 @@ export class HarCaptureAdapter implements HistoricalCaptureFormatAdapter {
         fileURLToPath(new URL("./HarCaptureProcess.js", import.meta.url)),
         requestPath,
       ],
+      ...(HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES === null
+        ? {}
+        : { memoryLimitBytes: HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES }),
     };
   }
 }

@@ -37,6 +37,13 @@ export const legacyMetadataSchema = z
     base: idaAddressSchema,
   })
   .passthrough();
+/** A worker that is still busy right after opening reports this transient shape instead of its identity. */
+export const busyHealthSchema = z
+  .object({
+    status: z.literal("busy"),
+    busy_tool: z.string().optional(),
+  })
+  .passthrough();
 export const modernHealthSchema = z
   .object({
     status: z.literal("ok"),

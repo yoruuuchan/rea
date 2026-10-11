@@ -96,11 +96,11 @@ describe("enhanced MCP tools", () => {
               category: "execution_failure",
               details: { operation: "decompile", reason: "failed" },
               message:
-                "Analysis returned an unreadable result. Retry once; if it continues, run `rea doctor`.",
+                "Analysis returned an unreadable result. Run `rea doctor` and review the reported details; repeating the unchanged request is not expected to succeed.",
               retryable: false,
               remediation: {
                 action:
-                  "Analysis returned an unreadable result. Retry once; if it continues, run `rea doctor`.",
+                  "Analysis returned an unreadable result. Run `rea doctor` and review the reported details; repeating the unchanged request is not expected to succeed.",
               },
             },
           },

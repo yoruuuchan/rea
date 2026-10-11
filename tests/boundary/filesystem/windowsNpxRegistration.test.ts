@@ -56,7 +56,7 @@ it.each([
       expect.objectContaining({ client: "claude_code", state: "stale" }),
     );
     const client = { name: "claude_code", configPath, format: "json" } as const;
-    const command = setupRegistrationCommand("win32", true);
+    const command = setupRegistrationCommand("win32", "npx");
     expect(
       await configureClientConfiguration(client, {}, command),
     ).toMatchObject({ status: "configured" });
@@ -83,35 +83,38 @@ it.each([
   },
 );
 
-it("keeps the Windows launcher aligned through Codex TOML setup and removal", async () => {
-  const home = await createTestTempDirectory("rea-windows-codex-");
-  await mkdir(join(home, ".codex"));
-  const configPath = join(home, ".codex", "config.toml");
-  const original =
-    '\uFEFF# Keep this explanation.\nnotify = ["a", "b"]\nliteral = \'C:\\demo\\path\'\ndisabled_mcp_servers = ["rea"]\n\n[mcp_servers.other]\ncommand = "another-server"\n';
-  await writeFile(configPath, original);
-  const client = { name: "codex", configPath, format: "toml" } as const;
-  const command = setupRegistrationCommand("win32", true);
-  expect(await configureClientConfiguration(client, {}, command)).toMatchObject(
-    { status: "configured" },
-  );
-  expect(
-    await readClientRegistrationStatuses(home, undefined, {
-      platform: "win32",
-      environment: {},
-    }),
-  ).toContainEqual(
-    expect.objectContaining({ client: "codex", state: "aligned" }),
-  );
-  expect(await configureClientConfiguration(client, {}, command)).toEqual({
-    status: "unchanged",
-  });
-  expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(original);
-  expect(await systemUninstallHost(home).removeClient(client)).toMatchObject({
-    status: "removed",
-  });
-  expect(await readFile(configPath, "utf8")).toBe(original);
-});
+it.each(["npx", "bunx"] as const)(
+  "keeps the Windows %s launcher aligned through Codex TOML setup and removal",
+  async (runner) => {
+    const home = await createTestTempDirectory("rea-windows-codex-");
+    await mkdir(join(home, ".codex"));
+    const configPath = join(home, ".codex", "config.toml");
+    const original =
+      '\uFEFF# Keep this explanation.\nnotify = ["a", "b"]\nliteral = \'C:\\demo\\path\'\ndisabled_mcp_servers = ["rea"]\n\n[mcp_servers.other]\ncommand = "another-server"\n';
+    await writeFile(configPath, original);
+    const client = { name: "codex", configPath, format: "toml" } as const;
+    const command = setupRegistrationCommand("win32", runner);
+    expect(
+      await configureClientConfiguration(client, {}, command),
+    ).toMatchObject({ status: "configured" });
+    expect(
+      await readClientRegistrationStatuses(home, undefined, {
+        platform: "win32",
+        environment: {},
+      }),
+    ).toContainEqual(
+      expect.objectContaining({ client: "codex", state: "aligned" }),
+    );
+    expect(await configureClientConfiguration(client, {}, command)).toEqual({
+      status: "unchanged",
+    });
+    expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(original);
+    expect(await systemUninstallHost(home).removeClient(client)).toMatchObject({
+      status: "removed",
+    });
+    expect(await readFile(configPath, "utf8")).toBe(original);
+  },
+);
 
 it("retains rea-named custom shell registrations without writing a backup", async () => {
   const home = await createTestTempDirectory("rea-custom-shell-registration-");
@@ -124,6 +127,9 @@ it("retains rea-named custom shell registrations without writing a backup", asyn
     ["cmd.exe", "/c", "npx", "-y", "another-package", "mcp"],
     ["cmd.exe", "/c", "npx", "-y", "rea-agents@5.0.0", "mcp", "&", "other"],
     ["cmd.exe", "/c", "npx", "-y", "rea-agents@5.0.0 & other", "mcp"],
+    ["cmd.exe", "/c", "bunx", "another-package", "mcp"],
+    ["cmd.exe", "/c", "bunx", "-y", "rea-agents@5.0.0", "mcp"],
+    ["cmd.exe", "/c", "bunx", "rea-agents@5.0.0", "mcp", "&", "other"],
   ]) {
     const original = JSON.stringify({
       mcpServers: { rea: { command: command[0], args: command.slice(1) } },
@@ -139,9 +145,12 @@ it("retains rea-named custom shell registrations without writing a backup", asyn
   }
 });
 
-it.skipIf(process.platform !== "win32")(
-  "starts the written Windows registration through a native npx.cmd shim",
-  async () => {
+it.skipIf(process.platform !== "win32").each([
+  ["npx", ["-y", PRODUCT_IDENTITY.registrationPackageSpecifier, "mcp"]],
+  ["bunx", [PRODUCT_IDENTITY.registrationPackageSpecifier, "mcp"]],
+] as const)(
+  "starts the written Windows registration through a native %s.cmd shim",
+  async (runner, shimArguments) => {
     const root = await createTestTempDirectory("rea-windows-mcp-");
     const home = join(root, "home with spaces");
     await mkdir(home);
@@ -151,26 +160,29 @@ it.skipIf(process.platform !== "win32")(
       configPath,
       format: "json",
     } as const;
+    const command = setupRegistrationCommand("win32", runner);
     // The default writer and npm-run setup must produce the same native launcher.
-    expect(await configureClientConfiguration(setupClient)).toMatchObject({
-      status: "configured",
-    });
+    expect(
+      await (runner === "npx"
+        ? configureClientConfiguration(setupClient)
+        : configureClientConfiguration(setupClient, {}, command)),
+    ).toMatchObject({ status: "configured" });
     const decoded: unknown = JSON.parse(await readFile(configPath, "utf8"));
     const registration = configurationSchema.parse(decoded).mcpServers.rea;
-    expect([registration.command, ...registration.args]).toEqual(
-      setupRegistrationCommand("win32", true),
-    );
+    expect([registration.command, ...registration.args]).toEqual(command);
     const entry = fileURLToPath(
       new URL("../../../scripts/rea.mjs", import.meta.url),
     );
     // Exercise the actual batch-shim boundary without registry access or package installation.
     await writeFile(
-      join(home, "npx.cmd"),
+      join(home, `${runner}.cmd`),
       [
         "@echo off",
-        'if not "%~1"=="-y" exit /b 11',
-        `if not "%~2"=="${PRODUCT_IDENTITY.registrationPackageSpecifier}" exit /b 12`,
-        'if not "%~3"=="mcp" exit /b 13',
+        ...shimArguments.map(
+          (argument, index) =>
+            `if not "%~${String(index + 1)}"=="${argument}" exit /b ${String(11 + index)}`,
+        ),
+        `if not "%~${String(shimArguments.length + 1)}"=="" exit /b 19`,
         `"${process.execPath}" "${entry}" mcp`,
         "",
       ].join("\r\n"),

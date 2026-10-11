@@ -77,7 +77,7 @@ it("binds ZIP opens to the emitted entry metadata", async () => {
   }
 });
 
-it("rejects duplicate ZIP names before replacing an emitted entry", async () => {
+it("retains duplicate ZIP members without replacing their source identities", async () => {
   const root = await createTestTempDirectory("rea-zip-duplicate-identity-");
   const path = join(root, "duplicates.zip");
   const writer = new ZipWriter(new Uint8ArrayWriter());
@@ -106,11 +106,20 @@ it("rejects duplicate ZIP names before replacing an emitted entry", async () => 
     const iterator = reader.entries()[Symbol.asyncIterator]();
     const first = await iterator.next();
     if (first.done) throw new Error("Expected the first ZIP member");
-    await expect(iterator.next()).rejects.toMatchObject({ reason: "path" });
-    const stream = await reader.open({ ...first.value });
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-    expect(Buffer.concat(chunks).toString()).toBe("first bytes\n");
+    const second = await iterator.next();
+    if (second.done) throw new Error("Expected the second ZIP member");
+    expect(first.value.path).toBe(second.value.path);
+    expect(first.value.adapterKey).not.toBe(second.value.adapterKey);
+    expect((await iterator.next()).done).toBe(true);
+    for (const [entry, expected] of [
+      [first.value, "first bytes\n"],
+      [second.value, "later bytes\n"],
+    ] as const) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of await reader.open({ ...entry }))
+        chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe(expected);
+    }
   } finally {
     await reader.close();
   }

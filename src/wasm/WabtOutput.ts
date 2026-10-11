@@ -1,0 +1,66 @@
+/** Frame WABT's raw custom names using the ordered names from its escaped WAT output. */
+export const parseWabtOutput = (
+  text: string,
+  artifactBytes: number,
+  customSectionNames: readonly string[],
+) => {
+  const prefix =
+    /^\nmodule\.wasm:\tfile format wasm 0x1\n\nSections:\n\n/u.exec(text);
+  if (prefix === null)
+    throw new Error("Unsupported WABT section header format.");
+  let offset = prefix[0].length;
+  let customIndex = 0;
+  const sections = [];
+  while (!text.startsWith("\nSection Details:\n", offset)) {
+    const match =
+      /^[ \t]+(\w+) start=0x([\da-f]+) end=0x([\da-f]+) \(size=0x([\da-f]+)\) /u.exec(
+        text.slice(offset),
+      );
+    if (match === null) throw new Error("Unrecognized WABT section row.");
+    offset += match[0].length;
+    let description: string;
+    if (match[1] === "Custom") {
+      const name = customSectionNames[customIndex++];
+      if (name === undefined || !text.startsWith(`"${name}"\n`, offset))
+        throw new Error(
+          "WABT custom-section header does not match decoded WAT.",
+        );
+      description = `"${name}"`;
+      offset += description.length + 1;
+    } else {
+      const end = text.indexOf("\n", offset);
+      if (end < 0) throw new Error("Incomplete WABT section row.");
+      description = text.slice(offset, end).trim();
+      offset = end + 1;
+    }
+    const section = {
+      kind: match[1] ?? "",
+      start: Number.parseInt(match[2] ?? "", 16),
+      end: Number.parseInt(match[3] ?? "", 16),
+      bytes: Number.parseInt(match[4] ?? "", 16),
+      description,
+    };
+    if (
+      section.end > artifactBytes ||
+      section.end - section.start !== section.bytes ||
+      section.start < 8 ||
+      section.start < (sections.at(-1)?.end ?? 8)
+    )
+      throw new Error("WABT section ranges do not match selected artifact.");
+    sections.push(section);
+  }
+  if (customIndex !== customSectionNames.length)
+    throw new Error(
+      "WABT custom-section inventory does not match decoded WAT.",
+    );
+  if ((sections.at(-1)?.end ?? 8) !== artifactBytes)
+    throw new Error(
+      "WABT section output does not cover the selected artifact.",
+    );
+  const separator = offset + 1;
+  return {
+    sections,
+    headers: text.slice(0, separator),
+    details: `module.wasm:\tfile format wasm 0x1\n\n${text.slice(separator)}`,
+  };
+};

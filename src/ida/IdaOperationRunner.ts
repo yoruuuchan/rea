@@ -51,6 +51,11 @@ const identity = (fn: IdaFunction) => ({
   classification: null,
   body: unknownBody,
 });
+/** The only lookup answers upstream reports for a name or address that is not a function. */
+const MISSING_PROCEDURE_ANSWERS: ReadonlySet<string> = new Set([
+  "Not found",
+  "Not a function",
+]);
 const lines = (asm: IdaDisassembly) =>
   asm.lines.map(({ address, instruction }) => `${address}: ${instruction}`);
 
@@ -64,6 +69,7 @@ export class IdaOperationRunner {
     private readonly protocol: "legacy" | "modern",
     private readonly database?: string,
     private readonly signal?: AbortSignal,
+    private readonly selectorOrigin?: "provider",
   ) {}
 
   async call(
@@ -106,11 +112,42 @@ export class IdaOperationRunner {
     return result;
   }
 
-  async resolve(query: string): Promise<IdaFunction> {
+  /**
+   * Resolves a procedure. When `requestedBy` names the caller's operation, an
+   * upstream "not found" or "not a function" answer is reported as invalid
+   * input; every other failed lookup stays a producer fault. `run()` passes
+   * `requestedBy` only for caller-supplied selectors. Provider-derived
+   * selectors, such as the addresses composed workflows revisit, and the
+   * callee resolution inside `relationships()` pass none, because those
+   * addresses were reported by IDA itself.
+   */
+  async resolve(query: string, requestedBy?: string): Promise<IdaFunction> {
     if (this.protocol === "modern") {
       const item = modernLookupSchema.parse(
         await this.call("lookup_funcs", { queries: [query] }),
       )[0];
+      if (
+        requestedBy !== undefined &&
+        item?.query === query &&
+        item.fn === null &&
+        item.error !== null &&
+        MISSING_PROCEDURE_ANSWERS.has(item.error)
+      )
+        throw new AnalysisInputError(
+          requestedBy,
+          {
+            cause: new AnalysisProtocolError(
+              `IDA function lookup failed for ${query}: ${item.error}`,
+            ),
+          },
+          [
+            {
+              path: [],
+              reason: "invalid_value",
+              message: `IDA could not resolve procedure ${JSON.stringify(query)}: ${item.error}.`,
+            },
+          ],
+        );
       if (item?.fn == null || item.error !== null)
         throw new AnalysisProtocolError(
           `IDA function lookup failed for ${query}: ${item?.error ?? "missing function"}`,
@@ -351,6 +388,7 @@ export class IdaOperationRunner {
     }
     const fn = await this.resolve(
       z.string().min(1).parse(parameters.procedure),
+      this.selectorOrigin === "provider" ? undefined : operation,
     );
     this.locations.push({ kind: "address", address: fn.address });
     switch (operation) {

@@ -37,7 +37,10 @@ import {
   completeSemanticSteps,
   traverseJavaScriptAstSteps,
 } from "./javascriptSemanticTraversal.js";
-import { semanticRequireOrigin } from "./javascriptSemanticRequireOrigin.js";
+import {
+  semanticNamespaceInteropOperand,
+  semanticRequireOrigin,
+} from "./javascriptSemanticRequireOrigin.js";
 import { collectSemanticMemberMutationsSteps } from "./javascriptSemanticMemberMutations.js";
 import {
   collectSemanticReturns,
@@ -384,7 +387,10 @@ export function* classifyParsedJavaScriptElectronBindingsSteps(
       }
       return exported ?? undefined;
     }
-    const origin = semanticRequireOrigin(root, state);
+    const origin = semanticRequireOrigin(
+      semanticNamespaceInteropOperand(root, state) ?? root,
+      state,
+    )?.origin;
     return origin !== undefined && ELECTRON_MODULE.test(origin.specifier)
       ? electronExportPath(origin.importedPath)
       : undefined;
@@ -416,14 +422,15 @@ const electronExport = (
   binding: JavaScriptSemanticBindingState,
   state: JavaScriptSemanticAnalysisState,
 ): readonly string[] | null => {
-  if (binding.definitions.some(({ kind }) => kind === "assignment"))
-    return null;
-  const directOrigin = bindingOrigin(binding, state);
-  const [initializer] = binding.initializers;
+  const initializers = namespacePreservingInitializers(binding, state);
+  if (initializers === undefined) return null;
+  const directOrigin = bindingOrigin(binding, initializers, state);
+  const [initializer] = initializers;
   if (
     directOrigin === undefined &&
     (initializer === undefined ||
-      binding.initializers.length !== 1 ||
+      initializers.length !== 1 ||
+      initializers.length !== binding.initializers.length ||
       state.conditionalInitializers.has(initializer.node))
   )
     return null;
@@ -441,25 +448,66 @@ const electronExport = (
     : null;
 };
 
+/**
+ * Return the initializers that can change which module a binding names.
+ * Bundlers emit `name = __toESM(name)` after a CommonJS require; rewrapping
+ * the binding's own value keeps every member, so it is not a reassignment.
+ */
+const namespacePreservingInitializers = (
+  binding: JavaScriptSemanticBindingState,
+  state: JavaScriptSemanticAnalysisState,
+): JavaScriptSemanticBindingState["initializers"] | undefined => {
+  const initializers = binding.initializers.filter(
+    ({ node }) => !rewrapsOwnNamespace(binding, node, state),
+  );
+  const rewraps = binding.initializers.length - initializers.length;
+  const assignments = binding.definitions.filter(
+    ({ kind }) => kind === "assignment",
+  ).length;
+  return assignments === rewraps ? initializers : undefined;
+};
+
+const rewrapsOwnNamespace = (
+  binding: JavaScriptSemanticBindingState,
+  node: t.Node,
+  state: JavaScriptSemanticAnalysisState,
+): boolean => {
+  const assignment = state.parentsByNode.get(node);
+  const operand = semanticNamespaceInteropOperand(node, state);
+  return (
+    t.isAssignmentExpression(assignment) &&
+    assignment.operator === "=" &&
+    assignment.right === node &&
+    t.isIdentifier(assignment.left, { name: binding.name }) &&
+    t.isIdentifier(operand, { name: binding.name }) &&
+    !semanticResolutionBlocked(state, operand, operand.name) &&
+    resolveSemanticBindingState(state, operand, operand.name) === binding
+  );
+};
+
 const bindingOrigin = (
   binding: JavaScriptSemanticBindingState,
+  initializers: JavaScriptSemanticBindingState["initializers"],
   state: JavaScriptSemanticAnalysisState,
 ): JavaScriptModuleOrigin | undefined => {
   if (binding.directOrigins.length > 0)
     return binding.directOrigins.length === 1
       ? binding.directOrigins[0]
       : undefined;
-  const [initializer] = binding.initializers;
+  const [initializer] = initializers;
   // A var/let declaration permits writes without proving one occurred.
   // Require one unconditional initializer and no actual binding writes.
   if (
     initializer === undefined ||
-    binding.initializers.length !== 1 ||
-    binding.definitions.some(({ kind }) => kind === "assignment") ||
+    initializers.length !== 1 ||
     state.conditionalInitializers.has(initializer.node)
   )
     return undefined;
-  const origin = semanticRequireOrigin(initializer.node, state);
+  const origin = semanticRequireOrigin(
+    semanticNamespaceInteropOperand(initializer.node, state) ??
+      initializer.node,
+    state,
+  )?.origin;
   const projection = initializer.projection;
   return origin === undefined ||
     !projection.every((key): key is string => typeof key === "string")
@@ -485,6 +533,7 @@ const createState = (program: t.Program): JavaScriptSemanticAnalysisState => {
     callables: [],
     callableNodesById: new Map(),
     moduleLinks: [],
+    linkedRequireCalls: new WeakSet(),
     moduleLinkBindings: new WeakMap(),
     conditionalInitializers: new WeakSet(),
   };

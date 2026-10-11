@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import {
   AnalysisCancelledError,
@@ -11,7 +11,7 @@ import {
   javascriptRecoveryInputSchema,
   javascriptRecoveryResultSchema,
 } from "../../domain/javascript/javascriptRecovery.js";
-import { jsonObjectSchema } from "../../domain/jsonValue.js";
+import { jsonObjectSchema, jsonValueSchema } from "../../domain/jsonValue.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
@@ -44,17 +44,38 @@ export class JavaScriptRecoveryService {
     const invalidPaths = (["path", "output_directory"] as const).filter(
       (field) => !isAbsolute(parsed.data[field]),
     );
-    if (invalidPaths.length > 0)
+    const invalidAdditional = (parsed.data.additional_paths ?? []).filter(
+      (additional) => !isAbsolute(additional),
+    );
+    if (invalidPaths.length > 0 || invalidAdditional.length > 0)
       return err(
-        new AnalysisInputError(
-          OPERATION,
-          undefined,
-          invalidPaths.map((field) => ({
+        new AnalysisInputError(OPERATION, undefined, [
+          ...invalidPaths.map((field) => ({
             path: [field],
-            reason: "invalid_format",
+            reason: "invalid_format" as const,
             message: `${field} must be an absolute filesystem path on this host.`,
           })),
-        ),
+          ...invalidAdditional.map((additional) => ({
+            path: ["additional_paths"],
+            reason: "invalid_format" as const,
+            message: `additional_paths entries must be absolute filesystem paths on this host: ${additional}`,
+          })),
+        ]),
+      );
+    const selectedInputs = new Set(
+      [parsed.data.path, ...(parsed.data.additional_paths ?? [])].map((path) =>
+        resolve(path),
+      ),
+    );
+    if (selectedInputs.size !== 1 + (parsed.data.additional_paths ?? []).length)
+      return err(
+        new AnalysisInputError(OPERATION, undefined, [
+          {
+            path: ["additional_paths"],
+            reason: "invalid_format",
+            message: "additional_paths must not repeat path or each other.",
+          },
+        ]),
       );
     const execution = await this.provider.recover(parsed.data, options);
     if (!execution.ok) return execution;
@@ -70,6 +91,11 @@ export class JavaScriptRecoveryService {
       );
     if (
       result.data.source.path !== parsed.data.path ||
+      (result.data.additional_sources ?? []).length !==
+        (parsed.data.additional_paths ?? []).length ||
+      (parsed.data.additional_paths ?? []).some(
+        (path, index) => result.data.additional_sources?.[index]?.path !== path,
+      ) ||
       execution.value.subject.path !== result.data.source.path ||
       execution.value.subject.sha256 !== result.data.source.sha256 ||
       execution.value.provider.id !== result.data.engine.id ||
@@ -85,7 +111,7 @@ export class JavaScriptRecoveryService {
       createEvidence(execution.value.subject, execution.value.provider, {
         operation: OPERATION,
         parameters: jsonObjectSchema.parse(parsed.data),
-        result: result.data,
+        result: jsonValueSchema.parse(result.data),
         rawResult: execution.value.rawResult,
         locations: execution.value.locations,
         limitations: execution.value.limitations,

@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 
 import {
+  createTestWorkspace,
+  removeTestWorkspace,
+} from "../workspace/workspaceFixture.js";
+import {
   processTest,
   type ProcessResult,
   type TestProcesses,
@@ -36,7 +40,10 @@ const parseJson = (stdout: string): unknown | undefined => {
 };
 
 /** Create a compiled CLI driver backed by the supplied process registry. */
-export const createTestCli = (processes: TestProcesses): TestCli => ({
+export const createTestCli = (
+  processes: TestProcesses,
+  compileCache?: string,
+): TestCli => ({
   run: async ({
     arguments: arguments_,
     cwd,
@@ -51,6 +58,10 @@ export const createTestCli = (processes: TestProcesses): TestCli => ({
         cwd: cwd ?? process.cwd(),
         env: {
           PATH: process.env.PATH ?? "",
+          ...(compileCache === undefined ||
+          environment?.NODE_V8_COVERAGE !== undefined
+            ? {}
+            : { NODE_COMPILE_CACHE: compileCache }),
           ...environment,
         },
         ...(input === undefined ? {} : { input }),
@@ -62,8 +73,23 @@ export const createTestCli = (processes: TestProcesses): TestCli => ({
 });
 
 /** Vitest API extended with an owned process registry and compiled CLI driver. */
-export const cliTest = processTest.extend<{ cli: TestCli }>({
-  cli: async ({ processes }, use) => {
-    await use(createTestCli(processes));
+export const cliTest = processTest.extend<{
+  $test: { cli: TestCli };
+  $worker: { cliCompileCache: string };
+}>({
+  cliCompileCache: [
+    // oxlint-disable-next-line no-empty-pattern -- Vitest parses fixture dependencies from object destructuring.
+    async ({}, use) => {
+      const workspace = await createTestWorkspace("rea-cli-compile-cache-");
+      try {
+        await use(workspace.path("node-compile"));
+      } finally {
+        await removeTestWorkspace(workspace.root);
+      }
+    },
+    { scope: "worker" },
+  ],
+  cli: async ({ processes, cliCompileCache }, use) => {
+    await use(createTestCli(processes, cliCompileCache));
   },
 });

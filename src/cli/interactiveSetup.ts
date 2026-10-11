@@ -16,6 +16,7 @@ import type {
   SetupResult,
 } from "../application/SetupTypes.js";
 import { SUPPORTED_CLIENT_DEFINITIONS } from "../application/SupportedClients.js";
+import { invokingPackageRunner } from "../application/ClientRegistrationIdentity.js";
 
 const clientDisplayNames: ReadonlyMap<string, string> = new Map(
   SUPPORTED_CLIENT_DEFINITIONS.map(({ name, displayName }) => [
@@ -224,8 +225,10 @@ const renderKeyboardHelp = (accessible: boolean): void => {
   );
 };
 
-const cliInvocation = (environment: Readonly<NodeJS.ProcessEnv>): string =>
-  environment.npm_command === "exec" ? "npx rea-agents" : "rea";
+const cliInvocation = (environment: Readonly<NodeJS.ProcessEnv>): string => {
+  const runner = invokingPackageRunner(environment);
+  return runner === undefined ? "rea" : `${runner} rea-agents`;
+};
 
 const renderReadyCapabilities = (
   result: SetupResult,

@@ -35,6 +35,7 @@ export class HopperFixtureLauncher implements BridgeLauncher {
   constructor(
     readonly tokenOverride?: string,
     readonly diagnosticMode: "quiet" | "noisy" | "noisy_no_socket" = "quiet",
+    readonly healthMode: "ready" | "gated" = "ready",
   ) {}
 
   launch(session: BridgeSession) {
@@ -51,6 +52,7 @@ export class HopperFixtureLauncher implements BridgeLauncher {
         session.runId,
         "acknowledge",
         this.diagnosticMode,
+        this.healthMode,
       ],
       { stdio: ["ignore", "pipe", "pipe", "ipc"] },
     );

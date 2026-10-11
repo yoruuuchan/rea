@@ -11,6 +11,48 @@
     <!-- website:sharing:start -->
     <!-- prettier-ignore -->
     <link rel="canonical" href="https://rea.tools/guides/browser/" />
+    <!-- website:languages:start -->
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="en" href="https://rea.tools/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-CN" href="https://rea.tools/zh-CN/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-TW" href="https://rea.tools/zh-TW/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ja" href="https://rea.tools/ja/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ko" href="https://rea.tools/ko/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="tr" href="https://rea.tools/tr/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ru" href="https://rea.tools/ru/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="vi" href="https://rea.tools/vi/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="th" href="https://rea.tools/th/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="de" href="https://rea.tools/de/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="es" href="https://rea.tools/es/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fr" href="https://rea.tools/fr/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="uk" href="https://rea.tools/uk/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pl" href="https://rea.tools/pl/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pt-BR" href="https://rea.tools/pt-BR/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ar" href="https://rea.tools/ar/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fa" href="https://rea.tools/fa/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="id" href="https://rea.tools/id/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="it" href="https://rea.tools/it/guides/browser/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="x-default" href="https://rea.tools/guides/browser/" />
+    <!-- website:languages:end -->
     <!-- prettier-ignore -->
     <meta property="og:type" content="website" />
     <!-- prettier-ignore -->
@@ -61,7 +103,7 @@
       <div class="container header-inner">
         <a class="brand" href="../../" aria-label="REA home"
           ><span class="brand-name">REA</span
-          ><span class="brand-caption">Reverse Engineer Anything</span></a
+          ><span class="brand-caption" data-i18n-skip>Reverse Engineer Anything</span></a
         >
         <nav class="navigation" aria-label="Main navigation">
           <a href="../../showcase/">Showcases</a>
@@ -71,6 +113,7 @@
           <a href="../../faq/">FAQ</a>
         </nav>
         <div class="header-social">
+          <details class="language-picker" data-i18n-skip><summary><span aria-hidden="true">文 / A</span> <span>English</span></summary><nav aria-label="English"><a href="../../guides/browser/" lang="en" dir="ltr" data-language="en" aria-current="true">English</a><a href="../../zh-CN/guides/browser/" lang="zh-CN" dir="ltr" data-language="zh-CN">简体中文</a><a href="../../zh-TW/guides/browser/" lang="zh-TW" dir="ltr" data-language="zh-TW">繁體中文</a><a href="../../ja/guides/browser/" lang="ja" dir="ltr" data-language="ja">日本語</a><a href="../../ko/guides/browser/" lang="ko" dir="ltr" data-language="ko">한국어</a><a href="../../tr/guides/browser/" lang="tr" dir="ltr" data-language="tr">Türkçe</a><a href="../../ru/guides/browser/" lang="ru" dir="ltr" data-language="ru">Русский</a><a href="../../vi/guides/browser/" lang="vi" dir="ltr" data-language="vi">Tiếng Việt</a><a href="../../th/guides/browser/" lang="th" dir="ltr" data-language="th">ไทย</a><a href="../../de/guides/browser/" lang="de" dir="ltr" data-language="de">Deutsch</a><a href="../../es/guides/browser/" lang="es" dir="ltr" data-language="es">Español</a><a href="../../fr/guides/browser/" lang="fr" dir="ltr" data-language="fr">Français</a><a href="../../uk/guides/browser/" lang="uk" dir="ltr" data-language="uk">Українська</a><a href="../../pl/guides/browser/" lang="pl" dir="ltr" data-language="pl">Polski</a><a href="../../pt-BR/guides/browser/" lang="pt-BR" dir="ltr" data-language="pt-BR">Português (Brasil)</a><a href="../../ar/guides/browser/" lang="ar" dir="rtl" data-language="ar">العربية</a><a href="../../fa/guides/browser/" lang="fa" dir="rtl" data-language="fa">فارسی</a><a href="../../id/guides/browser/" lang="id" dir="ltr" data-language="id">Bahasa Indonesia</a><a href="../../it/guides/browser/" lang="it" dir="ltr" data-language="it">Italiano</a></nav></details>
           <a
             class="nav-github"
             href="https://github.com/morluto/rea"
@@ -382,7 +425,10 @@
             </p>
             <div class="code-block">
               <div class="code-header">
-                <span>export.js · example source excerpt</span>
+                <span
+                  ><span translate="no">export.js</span> · example source
+                  excerpt</span
+                >
               </div>
               <pre><code>const response = await fetch(&quot;./notes.json&quot;);
 const { notes } = await response.json();
@@ -400,11 +446,11 @@ link.click();</code></pre>
             <p>
               <a href="../../examples/notes-web/">Open the example</a> ·
               <a href="../../examples/notes-web/export.js" download
-                >Download export.js</a
+                >Download <span translate="no">export.js</span></a
               >
               ·
               <a href="../../examples/notes-web/notes.json" download
-                >Download notes.json</a
+                >Download <span translate="no">notes.json</span></a
               >
             </p>
             <blockquote class="prompt">

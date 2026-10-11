@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Route production MCP before importing Incur. Incur owns registration helpers
-// such as `mcp add`, while only dist/main.js may serve the stdio tool catalog.
+// such as `mcp add`, while the MCP runtime serves the stdio tool catalog.
 const args = process.argv.slice(2);
 const { default: packageJson } = await import("../package.json", {
   with: { type: "json" },
@@ -31,9 +31,9 @@ if (
 }
 
 const runtimeFiles = isMcpMode
-  ? ["dist/main.js"]
+  ? ["dist/mcp/main.js"]
   : isMcpDoctorMode
-    ? ["dist/main.js", "dist/mcpDoctor.js"]
+    ? ["dist/mcp/main.js", "dist/mcpDoctor.js"]
     : ["dist/cli.js", "dist/cliOutput.js", "dist/cli/streamedJsonOutput.js"];
 
 if (!(await compiledRuntimeExists(runtimeFiles))) {
@@ -42,7 +42,7 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   );
   process.exitCode = 1;
 } else if (isMcpMode) {
-  const { runEntrypoint } = await import("../dist/main.js");
+  const { runEntrypoint } = await import("../dist/mcp/main.js");
   await runEntrypoint();
 } else if (isMcpDoctorMode) {
   const { runProductionMcpDoctorCli } = await import("../dist/mcpDoctor.js");

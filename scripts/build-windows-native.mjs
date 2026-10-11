@@ -11,7 +11,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const nodeVersion = "22.19.0";
 const compiler = "x86_64-w64-mingw32-g++";
 const cache = join(homedir(), ".cache", "rea-windows-native");
-const output = join(root, "native", "windows", "build");
+const inspectionFixture = process.argv[2] === "--inspection-fixture";
+if (process.argv.length > 3 || (process.argv.length > 2 && !inspectionFixture))
+  throw new Error("Unknown Windows native build argument");
+const output = inspectionFixture
+  ? join(root, ".cache", "windows-native-inspection-fixture")
+  : join(root, "native", "windows", "build");
 const run = (command, args) => {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -120,7 +125,9 @@ run(compiler, [
   "-Wl,--no-insert-timestamp",
   `-I${headers}`,
   "native/windows/src/addon.cc",
-  "native/windows/src/filesystem.cc",
+  inspectionFixture
+    ? "tests/fixtures/windows-native-inspection-failure.cc"
+    : "native/windows/src/filesystem.cc",
   "native/windows/src/process.cc",
   library,
   "-ladvapi32",

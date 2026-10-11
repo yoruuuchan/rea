@@ -664,7 +664,8 @@ const provenanceForExpression = (
     });
   }
   const required = semanticRequireOrigin(node, context.state);
-  if (required !== undefined) return semanticOriginsProvenance([required]);
+  if (required !== undefined)
+    return semanticOriginsProvenance([required.origin]);
   if (t.isIdentifier(node)) {
     const binding = resolveSemanticBindingState(context.state, node, node.name);
     return binding === undefined

@@ -126,7 +126,14 @@ deadline per source, including startup and fact transfer. Select
 `max_heap_mb` and `analysis_timeout_ms` through MCP, or `--max-heap-mb` and
 `--analysis-timeout-ms` on the dedicated CLI command. These choices control the
 analyzer; the caller's `NODE_OPTIONS` still controls the CLI/MCP process heap.
-V8 old-space limits do not impose a process RSS limit.
+V8 old-space limits do not impose a process RSS limit. When REA runs on Bun,
+the analyzer ignores the V8 heap flags; resource failures then report
+`worker_heap_limit_bytes` as null instead of a requested or V8-reported limit.
+On Windows, the analyzer's owned Job Object instead limits its committed
+memory to `max_heap_mb` plus a 512 MiB reserve for Bun itself (1536 MiB by
+default). Reaching it fails the current source with the same memory resource
+failure and reports `worker_process_memory_limit_bytes`, also a coverage limit;
+the next source starts a new analyzer. Bun elsewhere enforces no analyzer limit.
 
 A source that exhausts the analyzer heap does not terminate the CLI/MCP
 process. Completed static facts are retained, other files can still be analyzed,
@@ -316,8 +323,15 @@ substitute version-dependent Electron defaults for omitted `webPreferences`.
 Dynamic option objects, bridge keys, API objects, and IPC channel expressions
 remain unknown and make coverage partial.
 
-Electron API identity follows proven lexical module aliases. Reassigned bindings,
-dynamic selections, and visibly overwritten namespace members are unresolved.
+Electron API identity follows proven lexical module aliases. Bundled CommonJS
+namespace imports are also followed through the interop helpers that bundlers
+and compilers emit (`__toESM`, `__importStar`, `_interopRequireWildcard`),
+including the `electron = __toESM(electron)` rewrap that Rolldown emits. This
+step is inferred: a helper is recognized by its emitted name and a single
+program-scope function definition, and its body is not evaluated, so a local
+function that reuses one of these names is trusted to pass the module through.
+Other reassigned bindings, dynamic selections, and visibly overwritten namespace
+members are unresolved.
 Direct and destructuring assignment, loop, update, and delete targets are checked
 through namespace aliases; unrelated member writes do not discard observed API
 identity. This static check does

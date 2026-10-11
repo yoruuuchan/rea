@@ -108,6 +108,8 @@ export const matchCapturedModules = (
   url: string,
   scripts: readonly ExportedWebScript[],
 ) => {
+  const transport = URL.parse(url);
+  if (transport !== null) transport.hash = "";
   const candidates: {
     script_index: number;
     match: "exact-reported-url" | "response-url-without-fragment";
@@ -116,20 +118,15 @@ export const matchCapturedModules = (
   scripts.forEach((script, script_index) => {
     if (script.url === url)
       candidates.push({ script_index, match: "exact-reported-url", script });
-    else if (script.source.kind === "scenario-response") {
-      try {
-        const transport = new URL(url);
-        transport.hash = "";
-        if (transport.href === script.url)
-          candidates.push({
-            script_index,
-            match: "response-url-without-fragment",
-            script,
-          });
-      } catch (cause: unknown) {
-        void cause;
-      }
-    }
+    else if (
+      script.source.kind === "scenario-response" &&
+      transport?.href === script.url
+    )
+      candidates.push({
+        script_index,
+        match: "response-url-without-fragment",
+        script,
+      });
   });
   return candidates;
 };

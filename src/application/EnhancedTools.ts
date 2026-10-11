@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   AnalysisOperation,
   AnalysisOperationPort,
+  ExecutionOptions,
 } from "./AnalysisProvider.js";
 import type { EnhancedToolName } from "../contracts/enhancedInputs.js";
 import { enhancedInputSchemas } from "../contracts/enhancedInputs.js";
@@ -163,8 +164,8 @@ export class EnhancedTools {
         );
       case "trace_call_path":
         return traceCallPath(
-          (name, arguments_, operationSignal) =>
-            this.#call(name, arguments_, operationSignal),
+          (name, arguments_, operationSignal, selectorOrigin) =>
+            this.#call(name, arguments_, operationSignal, selectorOrigin),
           call.input,
           signal,
         );
@@ -267,6 +268,7 @@ export class EnhancedTools {
           "procedure_pseudo_code",
           { procedure: resolved.ok ? resolved.value : address },
           signal,
+          resolved.ok ? "provider" : undefined,
         );
         if (!result.ok)
           return {
@@ -361,6 +363,7 @@ export class EnhancedTools {
         tool,
         { procedure: current.address },
         signal,
+        "provider",
       );
       if (!result.ok) {
         graph[level].push({
@@ -518,13 +521,13 @@ export class EnhancedTools {
     name: AnalysisOperation,
     arguments_: Readonly<Record<string, JsonValue>>,
     signal?: AbortSignal,
+    selectorOrigin?: ExecutionOptions["selectorOrigin"],
   ): Promise<Result<JsonValue, AnalysisError>> {
     if (isAborted(signal)) return err(new AnalysisCancelledError(name));
-    const execution = await this.analysis.execute(
-      name,
-      arguments_,
-      signal === undefined ? {} : { signal },
-    );
+    const execution = await this.analysis.execute(name, arguments_, {
+      ...(signal === undefined ? {} : { signal }),
+      ...(selectorOrigin === undefined ? {} : { selectorOrigin }),
+    });
     if (isAborted(signal)) return err(new AnalysisCancelledError(name));
     return execution.ok ? ok(execution.value.result) : execution;
   }

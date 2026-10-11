@@ -37,6 +37,7 @@ export const peResourceFixture = (
     { type: 10, name: 7, language: 1041, payload: Buffer.from("World") },
     { type: 14, name: 42, language: 1033, payload: iconGroup() },
   ],
+  sectionBytes = 65536,
 ) => {
   const tree: Tree = { children: new Map() };
   for (const resource of resources) {
@@ -58,7 +59,7 @@ export const peResourceFixture = (
       if ("children" in child.value) parent = child.value;
     }
   }
-  const section = Buffer.alloc(65536);
+  const section = Buffer.alloc(sectionBytes);
   let cursor = 0;
   const allocate = (size: number, alignment = 4): number => {
     cursor = Math.ceil(cursor / alignment) * alignment;

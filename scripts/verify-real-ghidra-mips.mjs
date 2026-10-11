@@ -21,12 +21,26 @@ import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { functionDossierSchema } from "../dist/domain/hopperValues.js";
 import { inspectGhidraInstallation } from "../dist/ghidra/GhidraInstallation.js";
 import { buildMipsFixture } from "../tests/conformance/ghidra/mips-fixture.mjs";
-import { requireMcpOperationResult } from "./lib/mcp-verifier-results.mjs";
+import {
+  buildPspFixture,
+  assertPspLoadedImage,
+  assertPspProbe,
+} from "../tests/conformance/ghidra/psp-fixture.mjs";
+import {
+  requireMcpToolError,
+  requireMcpOperationResult,
+} from "./lib/mcp-verifier-results.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 
 // Optional cross-target lane. No tool acquisition and no target execution.
-if (process.argv.length !== 2)
-  throw new Error("Usage: node scripts/verify-real-ghidra-mips.mjs");
+const mode = process.argv[2];
+const psp = mode === "--psp" || mode === "--psp-missing-extension";
+const missingExtension = mode === "--psp-missing-extension";
+if (process.argv.length > 3 || (mode !== undefined && !psp))
+  throw new Error(
+    "Usage: node scripts/verify-real-ghidra-mips.mjs [--psp|--psp-missing-extension]",
+  );
+const prefix = psp ? "rea_psp" : "rea_mips";
 if (!["linux", "darwin"].includes(process.platform))
   throw new Error(
     "MIPS verification requires a supported Linux/macOS Ghidra host",
@@ -66,16 +80,29 @@ for (const setting of ["GHIDRA_HEADLESS_MAXMEM", "GHIDRA_MAXMEM"]) {
 const reports = [];
 let primaryFailure;
 try {
-  for (const byteOrder of ["little", "big"]) {
-    const fixture = await buildMipsFixture(workspace, byteOrder);
-    const independent = await inspectMipsReadelf(fixture.path, byteOrder);
+  for (const byteOrder of psp ? ["little"] : ["little", "big"]) {
+    const fixture = psp
+      ? await buildPspFixture(workspace)
+      : await buildMipsFixture(workspace, byteOrder);
+    const independent = psp
+      ? fixture
+      : await inspectMipsReadelf(fixture.path, byteOrder);
     const resolved = await parseBinaryTarget(fixture.path);
     if (!resolved.ok) throw resolved.error;
-    assert.deepEqual(
-      resolved.value.mips,
-      independent.mips,
-      "REA ELF/ABI interpretation disagrees with GNU readelf",
-    );
+    if (psp) {
+      assert.equal(resolved.value.mips.flags, 0x10a23001);
+      assert.deepEqual(
+        resolved.value.mips,
+        independent.mips,
+        "REA PSP ELF/ABI interpretation disagrees with GNU readelf and raw ABI bytes",
+      );
+    } else {
+      assert.deepEqual(
+        resolved.value.mips,
+        independent.mips,
+        "REA ELF/ABI interpretation disagrees with GNU readelf",
+      );
+    }
     assert.equal(resolved.value.sha256, fixture.sha256);
     const snapshotPath = join(workspace, `${byteOrder}.snapshot.json`);
     const transport = new StdioClientTransport({
@@ -99,6 +126,51 @@ try {
     };
     try {
       await client.connect(transport);
+      if (missingExtension) {
+        const rejected = await client.callTool(
+          {
+            name: "open_binary",
+            arguments: { path: fixture.path, provider_id: "ghidra" },
+          },
+          undefined,
+          { timeout: 60000 },
+        );
+        const error = requireMcpToolError(rejected);
+        assert.match(JSON.stringify(error), /PSP_EXTENSION_UNAVAILABLE/u);
+        let cliError;
+        try {
+          await execute(
+            process.execPath,
+            [
+              entrypoint,
+              "function",
+              fixture.path,
+              `${prefix}_entry`,
+              "--provider",
+              "ghidra",
+              "--json",
+            ],
+            { env, timeout: 60000, maxBuffer: 1024 * 1024 },
+          );
+        } catch (cause) {
+          cliError = cause;
+        }
+        assert.ok(
+          cliError && Number.isInteger(cliError.code) && cliError.code !== 0,
+          "Expected a typed public rejection, not a timeout or success",
+        );
+        assert.match(
+          `${cliError.stdout}\n${cliError.stderr}`,
+          /PSP_EXTENSION_UNAVAILABLE/u,
+        );
+        reports.push({
+          path: fixture.path,
+          status: "expected-missing-extension-refusal",
+          cli_exit: cliError.code,
+          mcp_error: error,
+        });
+        continue;
+      }
       const target = await call("open_binary", {
         path: fixture.path,
         provider_id: "ghidra",
@@ -108,45 +180,56 @@ try {
       // ELF load-image verification is not the DOS comparison lane. Its retained
       // observations still expose the actual Ghidra language and loaded bytes.
       const image = await call("inspect_native_load_image");
-      assertMipsLoadedImage(image.observations, byteOrder, fixture.sha256);
+      if (psp) assertPspLoadedImage(image.observations, fixture.sha256);
+      else assertMipsLoadedImage(image.observations, byteOrder, fixture.sha256);
       const procedures = await call("list_procedures");
-      const entry = procedures.find((p) => p.value === "rea_mips_entry");
-      const leaf = procedures.find((p) => p.value === "rea_mips_leaf");
+      const entry = procedures.find((p) => p.value === `${prefix}_entry`);
+      const leaf = procedures.find((p) => p.value === `${prefix}_leaf`);
       assert.ok(entry, "Entry function missing from real Ghidra inventory");
       assert.ok(leaf, "Leaf function missing from real Ghidra inventory");
       assert.equal(
         BigInt(entry.address),
-        BigInt(independent.symbols.rea_mips_entry),
+        BigInt(independent.symbols[`${prefix}_entry`]),
       );
       assert.equal(
         BigInt(leaf.address),
-        BigInt(independent.symbols.rea_mips_leaf),
+        BigInt(independent.symbols[`${prefix}_leaf`]),
       );
-      const probe = independent.symbols.rea_mips_probe;
+      const probe = independent.symbols[`${prefix}_probe`];
       assert.ok(
         procedures.some(
           (p) =>
-            p.value === "rea_mips_probe" && BigInt(p.address) === BigInt(probe),
+            p.value === `${prefix}_probe` &&
+            BigInt(p.address) === BigInt(probe),
         ),
       );
       const move = await call("inspect_native_instruction", { address: probe });
       const branch = await call("inspect_native_instruction", {
         address: `0x${(BigInt(probe) + 4n).toString(16)}`,
       });
-      assertMipsProbe(move, branch, byteOrder, probe);
+      if (psp) assertPspProbe(move, branch);
+      else assertMipsProbe(move, branch, byteOrder, probe);
       const global = await call("read_bytes", {
-        address: independent.symbols.rea_mips_global,
+        address: independent.symbols[`${prefix}_global`],
         length: 4,
       });
       assert.equal(global.returned_bytes, 4);
       assertMipsGlobal(global.bytes_hex, byteOrder);
       const marker = await call("read_bytes", {
-        address: independent.symbols.rea_mips_marker,
-        length: 30,
+        address: independent.symbols[`${prefix}_marker`],
+        length: Buffer.byteLength(
+          psp
+            ? "rea-psp-source-owned-fixture\0"
+            : "rea-mips-source-owned-fixture\0",
+        ),
       });
       assert.equal(
         marker.bytes_hex,
-        Buffer.from("rea-mips-source-owned-fixture\0").toString("hex"),
+        Buffer.from(
+          psp
+            ? "rea-psp-source-owned-fixture\0"
+            : "rea-mips-source-owned-fixture\0",
+        ).toString("hex"),
       );
       const callees = await call("procedure_callees", {
         procedure: entry.address,
@@ -186,11 +269,47 @@ try {
         JSON.parse(await readFile(snapshotPath, "utf8")),
       );
       assert.equal(snapshot.target.architecture, "mips");
-      assert.equal(
-        snapshot.binding.analysis_profile.parameters.mips_elf.byte_order,
-        byteOrder,
+      const abi = independent.mips.abiFlags;
+      assert.deepEqual(
+        snapshot.binding.analysis_profile.parameters.mips_elf,
+        {
+          elf_class: independent.mips.elfClass,
+          byte_order: independent.mips.byteOrder,
+          type: independent.mips.type,
+          flags: independent.mips.flags,
+          abi_flags: {
+            version: abi.version,
+            isa_level: abi.isaLevel,
+            isa_revision: abi.isaRevision,
+            gpr_size: abi.gprSize,
+            cpr1_size: abi.cpr1Size,
+            cpr2_size: abi.cpr2Size,
+            fp_abi: abi.fpAbi,
+            isa_extension: abi.isaExtension,
+            ases: abi.ases,
+            flags1: abi.flags1,
+            flags2: abi.flags2,
+          },
+        },
+        "Snapshot profile did not retain the independently inspected ELF/ABI declaration",
       );
       assert.ok(snapshot.evidence_bundle.records.length > 0);
+      if (psp) {
+        assert.equal(
+          snapshot.binding.analysis_profile.parameters.language_id,
+          "Allegrex:LE:32:default",
+        );
+        assert.match(
+          snapshot.binding.analysis_profile.parameters.psp_extension.sha256,
+          /^[a-f0-9]{64}$/u,
+        );
+        assert.ok(
+          snapshot.evidence_bundle.records.some((record) =>
+            JSON.stringify(record).includes("VFPU prefix"),
+          ),
+          "PSP limitations missing from retained Evidence",
+        );
+      }
       for (const evidence of snapshot.evidence_bundle.records)
         assert.equal(parseEvidence(evidence).subject?.architecture, "mips");
       await call("open_binary", {
@@ -201,6 +320,52 @@ try {
       assert.deepEqual(await call("list_procedures"), procedures);
       await call("close_binary");
 
+      if (psp) {
+        const alternate = join(workspace, "alternate");
+        await mkdir(alternate);
+        const other = await buildPspFixture(alternate, 11);
+        assert.notEqual(other.sha256, fixture.sha256);
+        assert.equal(
+          other.symbols.rea_psp_global,
+          fixture.symbols.rea_psp_global,
+          "Target-switch control must reuse the same global address",
+        );
+        for (const item of [fixture, other, fixture]) {
+          const selected = await call("open_binary", {
+            path: item.path,
+            provider_id: "ghidra",
+          });
+          assert.equal(selected.sha256, item.sha256);
+          const word = await call("read_bytes", {
+            address: item.symbols.rea_psp_global,
+            length: 4,
+          });
+          const expected = Buffer.alloc(4);
+          expected.writeUInt32LE(item.global_value);
+          assert.equal(word.bytes_hex, expected.toString("hex"));
+          await call("close_binary");
+        }
+        const wrongSnapshot = await client.callTool(
+          {
+            name: "open_binary",
+            arguments: {
+              path: other.path,
+              provider_id: "ghidra",
+              snapshot_path: snapshotPath,
+            },
+          },
+          undefined,
+          { timeout: 180000 },
+        );
+        requireMcpToolError(wrongSnapshot);
+        // A bad snapshot must not poison the next clean public session.
+        await call("open_binary", {
+          path: fixture.path,
+          provider_id: "ghidra",
+        });
+        await call("close_binary");
+      }
+
       // Same public operation through CLI, not a private injected provider.
       const cli = await execute(
         process.execPath,
@@ -208,7 +373,7 @@ try {
           entrypoint,
           "function",
           fixture.path,
-          "rea_mips_entry",
+          `${prefix}_entry`,
           "--provider",
           "ghidra",
           "--json",
@@ -230,103 +395,120 @@ try {
         fixture.sha256,
         "Analysis modified the source executable",
       );
-      // Carved firmware keeps all program headers/load bytes but loses sections.
-      const read16 = (offset) =>
-        byteOrder === "little"
-          ? sourceBytes.readUInt16LE(offset)
-          : sourceBytes.readUInt16BE(offset);
-      const read32 = (offset) =>
-        byteOrder === "little"
-          ? sourceBytes.readUInt32LE(offset)
-          : sourceBytes.readUInt32BE(offset);
-      const sectionOffset = read32(32);
-      const cut = sectionOffset - 1;
-      const programOffset = read32(28);
-      const programCount = read16(44);
-      assert.equal(read16(42), 32);
-      assert.ok(cut >= programOffset + programCount * 32);
-      for (let i = 0; i < programCount; i += 1) {
-        const offset = programOffset + i * 32;
-        assert.ok(read32(offset + 4) + read32(offset + 16) <= cut);
-      }
-      const carvedBytes = sourceBytes.subarray(0, cut);
-      const carvedPath = join(workspace, `${byteOrder}-carved.elf`);
-      const carvedSha256 = createHash("sha256")
-        .update(carvedBytes)
-        .digest("hex");
-      await writeFile(carvedPath, carvedBytes);
-      const carvedResolved = await parseBinaryTarget(carvedPath);
-      if (!carvedResolved.ok) throw carvedResolved.error;
-      assert.deepEqual(
-        carvedResolved.value.mips.abiFlags,
-        independent.mips.abiFlags,
-      );
-      assert.match(
-        carvedResolved.value.mips.limitations.join(" "),
-        /section header table/u,
-      );
-      const carvedTarget = await call("open_binary", {
-        path: carvedPath,
-        provider_id: "ghidra",
-      });
-      assert.equal(carvedTarget.sha256, carvedSha256);
-      const carvedImage = await call("inspect_native_load_image");
-      assertMipsLoadedImage(carvedImage.observations, byteOrder, carvedSha256);
-      const carvedProcedures = await call("list_procedures");
-      assert.ok(
-        carvedProcedures.some(
-          (p) =>
-            BigInt(p.address) === BigInt(independent.symbols.rea_mips_entry),
-        ),
-      );
-      const carvedDossier = functionDossierSchema.parse(
-        await call("analyze_function", {
-          procedure: independent.symbols.rea_mips_entry,
-        }),
-      );
-      assert.ok(carvedDossier.pseudocode.trim().length > 0);
-      const carvedSnapshotPath = join(
-        workspace,
-        `${byteOrder}-carved.snapshot.json`,
-      );
-      await call("close_binary", { snapshot_path: carvedSnapshotPath });
-      const carvedSnapshot = parseAnalysisSnapshot(
-        JSON.parse(await readFile(carvedSnapshotPath, "utf8")),
-      );
-      assert.equal(carvedSnapshot.target.sha256, carvedSha256);
-      assert.ok(
-        carvedSnapshot.evidence_bundle.records.some((record) =>
-          parseEvidence(record).limitations.some((item) =>
+      // This upstream carved-firmware proof is specific to the generic MIPS fixture.
+      // PSP keeps its independent Allegrex/A-B-A checks; carved PSP is not verified.
+      let carved;
+      if (!psp) {
+        // Carved firmware keeps all program headers/load bytes but loses sections.
+        const read16 = (offset) =>
+          byteOrder === "little"
+            ? sourceBytes.readUInt16LE(offset)
+            : sourceBytes.readUInt16BE(offset);
+        const read32 = (offset) =>
+          byteOrder === "little"
+            ? sourceBytes.readUInt32LE(offset)
+            : sourceBytes.readUInt32BE(offset);
+        const sectionOffset = read32(32);
+        const cut = sectionOffset - 1;
+        const programOffset = read32(28);
+        const programCount = read16(44);
+        assert.equal(read16(42), 32);
+        assert.ok(cut >= programOffset + programCount * 32);
+        for (let i = 0; i < programCount; i += 1) {
+          const offset = programOffset + i * 32;
+          assert.ok(read32(offset + 4) + read32(offset + 16) <= cut);
+        }
+        const carvedBytes = sourceBytes.subarray(0, cut);
+        const carvedPath = join(workspace, `${byteOrder}-carved.elf`);
+        const carvedSha256 = createHash("sha256")
+          .update(carvedBytes)
+          .digest("hex");
+        await writeFile(carvedPath, carvedBytes);
+        const carvedResolved = await parseBinaryTarget(carvedPath);
+        if (!carvedResolved.ok) throw carvedResolved.error;
+        assert.deepEqual(
+          carvedResolved.value.mips.abiFlags,
+          independent.mips.abiFlags,
+        );
+        assert.match(
+          carvedResolved.value.mips.limitations.join(" "),
+          /section header table/u,
+        );
+        const carvedTarget = await call("open_binary", {
+          path: carvedPath,
+          provider_id: "ghidra",
+        });
+        assert.equal(carvedTarget.sha256, carvedSha256);
+        const carvedImage = await call("inspect_native_load_image");
+        assertMipsLoadedImage(
+          carvedImage.observations,
+          byteOrder,
+          carvedSha256,
+        );
+        const carvedProcedures = await call("list_procedures");
+        assert.ok(
+          carvedProcedures.some(
+            (p) =>
+              BigInt(p.address) === BigInt(independent.symbols.rea_mips_entry),
+          ),
+        );
+        const carvedDossier = functionDossierSchema.parse(
+          await call("analyze_function", {
+            procedure: independent.symbols.rea_mips_entry,
+          }),
+        );
+        assert.ok(carvedDossier.pseudocode.trim().length > 0);
+        const carvedSnapshotPath = join(
+          workspace,
+          `${byteOrder}-carved.snapshot.json`,
+        );
+        await call("close_binary", { snapshot_path: carvedSnapshotPath });
+        const carvedSnapshot = parseAnalysisSnapshot(
+          JSON.parse(await readFile(carvedSnapshotPath, "utf8")),
+        );
+        assert.equal(carvedSnapshot.target.sha256, carvedSha256);
+        assert.ok(
+          carvedSnapshot.evidence_bundle.records.some((record) =>
+            parseEvidence(record).limitations.some((item) =>
+              item.includes("section header table"),
+            ),
+          ),
+        );
+        const carvedCli = await execute(
+          process.execPath,
+          [
+            entrypoint,
+            "function",
+            carvedPath,
+            independent.symbols.rea_mips_entry,
+            "--provider",
+            "ghidra",
+            "--json",
+          ],
+          { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
+        );
+        const carvedEvidence = parseEvidence(JSON.parse(carvedCli.stdout));
+        assert.equal(carvedEvidence.subject?.digest.sha256, carvedSha256);
+        assert.ok(
+          carvedEvidence.limitations.some((item) =>
             item.includes("section header table"),
           ),
-        ),
-      );
-      const carvedCli = await execute(
-        process.execPath,
-        [
-          entrypoint,
-          "function",
-          carvedPath,
-          independent.symbols.rea_mips_entry,
-          "--provider",
-          "ghidra",
-          "--json",
-        ],
-        { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
-      );
-      const carvedEvidence = parseEvidence(JSON.parse(carvedCli.stdout));
-      assert.equal(carvedEvidence.subject?.digest.sha256, carvedSha256);
-      assert.ok(
-        carvedEvidence.limitations.some((item) =>
-          item.includes("section header table"),
-        ),
-      );
-      assert.equal(
-        functionDossierSchema.parse(carvedEvidence.normalized_result).procedure
-          .address,
-        carvedDossier.procedure.address,
-      );
-      assert.deepEqual(await readFile(carvedPath), carvedBytes);
+        );
+        assert.equal(
+          functionDossierSchema.parse(carvedEvidence.normalized_result)
+            .procedure.address,
+          carvedDossier.procedure.address,
+        );
+        assert.deepEqual(await readFile(carvedPath), carvedBytes);
+        carved = {
+          sha256: carvedSha256,
+          source_bytes: carvedBytes.length,
+          section_header_offset: sectionOffset,
+          effective_language: carvedImage.observations.language_id,
+          limitations: carvedResolved.value.mips.limitations,
+          procedures: carvedProcedures.length,
+        };
+      }
       reports.push({
         ...fixture,
         independent_reader: independent,
@@ -336,18 +518,17 @@ try {
           "independent ELF/ABI and symbols",
           "loaded Ghidra identity",
           "fixed instruction bytes and immediate",
-          "conditional branch destination",
+          psp
+            ? "Allegrex BITREV decoding and A-B-A target identity"
+            : "conditional branch destination",
           "global word and marker bytes",
           "CLI/MCP and snapshot identity",
         ],
         procedures: procedures.length,
-        carved: {
-          sha256: carvedSha256,
-          source_bytes: carvedBytes.length,
-          section_header_offset: sectionOffset,
-          effective_language: carvedImage.observations.language_id,
-          limitations: carvedResolved.value.mips.limitations,
-          procedures: carvedProcedures.length,
+        carved: carved ?? {
+          status: "not_run",
+          reason:
+            "Carved-firmware verification covers generic MIPS fixtures; carved PSP coverage is not established.",
         },
         status: "passed",
       });

@@ -10,6 +10,7 @@ describe("runtime configuration", () => {
     if (empty.ok) {
       expect(empty.value.hopperTargetPath).toBeUndefined();
       expect(empty.value.analysisProvider).toBe("auto");
+      expect(empty.value.hopperStartupTimeoutMs).toBe(120_000);
     }
     const result = parseConfig({ HOPPER_TARGET_PATH: "/usr/bin/true" });
     expect(result.ok).toBe(true);
@@ -170,6 +171,40 @@ describe("runtime collection configuration", () => {
 });
 
 describe("configuration failure diagnostics", () => {
+  it.each(["1", "900000", "2147483647"])(
+    "accepts Hopper startup deadline %s without changing Ghidra's deadline",
+    (value) => {
+      expect(
+        parseConfig({ REA_HOPPER_STARTUP_TIMEOUT_MS: value }),
+      ).toMatchObject({
+        ok: true,
+        value: {
+          hopperStartupTimeoutMs: Number(value),
+          ghidraStartupTimeoutMs: 330_000,
+        },
+      });
+    },
+  );
+
+  it.each(["", "0", "-1", "1.5", "1e3", "invalid", "2147483648"])(
+    "rejects malformed Hopper startup deadline %j with its setting",
+    (value) => {
+      const result = parseConfig({ REA_HOPPER_STARTUP_TIMEOUT_MS: value });
+      if (result.ok) throw new Error("Expected invalid startup deadline");
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "configuration_invalid",
+        details: {
+          settings: [
+            {
+              setting: "REA_HOPPER_STARTUP_TIMEOUT_MS",
+              constraint: expect.any(String),
+            },
+          ],
+        },
+      });
+    },
+  );
+
   it.each([
     "",
     " ",

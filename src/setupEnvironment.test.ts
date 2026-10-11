@@ -12,6 +12,12 @@ import { systemUninstallHost } from "./application/Uninstall.js";
 import { runUpdateCommand } from "./application/UpdateRuntime.js";
 import { createSystemDoctorHost } from "./doctorRuntime.js";
 import { PRODUCT_IDENTITY } from "./identity.js";
+import {
+  invokingPackageRunner,
+  packageRunnerRegistrationCommand,
+  withoutPackageRunnerIdentity,
+} from "./application/ClientRegistrationIdentity.js";
+import { snapshotEnvironment } from "./process/snapshotEnvironment.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -98,3 +104,27 @@ it("passes only selected environment to updater subprocesses and drops npm invoc
   );
   expect(result).toEqual({ ok: true, value: '{"marker":"selected"}' });
 });
+
+it.each([
+  { userAgent: "npm/10.9.0 node/v24.11.0 win32 x64", runner: "npx" },
+  { userAgent: "bun/1.4.2 npm/? node/v26.3.0 win32 x64", runner: "bunx" },
+] as const)(
+  "registers the $runner launcher from a Windows CLI environment snapshot",
+  ({ userAgent, runner }) => {
+    // The CLI snapshot canonicalizes Windows variable names to upper case.
+    const environment = snapshotEnvironment(
+      { npm_command: "exec", npm_config_user_agent: userAgent },
+      "win32",
+    );
+    expect(invokingPackageRunner(environment, "win32")).toBe(runner);
+    expect(
+      systemSetupHost(
+        createDoctorHostFixture({ platform: "win32" }),
+        environment,
+      ).registrationCommand,
+    ).toEqual(packageRunnerRegistrationCommand(runner, "win32"));
+    expect(withoutPackageRunnerIdentity(environment, "win32")).toEqual({
+      NPM_CONFIG_USER_AGENT: userAgent,
+    });
+  },
+);

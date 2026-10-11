@@ -384,6 +384,20 @@ describe("provider process host injection", () => {
   });
 });
 
+describe("provider process memory limits", () => {
+  it("refuses a memory limit that the selected launcher cannot enforce", async () => {
+    await expect(
+      spawnOwnedProviderProcess({
+        command: `${tmpdir()}/rea-provider-must-not-spawn-without-limit`,
+        arguments: [],
+        runId: "provider-process-unenforceable-limit-run",
+        platform: "linux",
+        memoryLimitBytes: 704 * 1024 * 1024,
+      }),
+    ).rejects.toThrow("require the Windows Job Object launcher");
+  });
+});
+
 describe("provider startup cancellation", () => {
   it("rejects an already cancelled launch before preparing or spawning", async () => {
     const controller = new AbortController();

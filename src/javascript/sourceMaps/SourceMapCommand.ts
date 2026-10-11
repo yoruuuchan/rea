@@ -8,6 +8,7 @@ import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
   AnalysisOutputError,
+  AnalysisResourceConstraintError,
   AnalysisTimeoutError,
 } from "../../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
@@ -20,6 +21,7 @@ import {
   PrivateRuntimeRootUnavailableError,
 } from "../../process/PrivateRuntimeRoot.js";
 import { ProviderStartupDeadline } from "../../process/ProviderDeadline.js";
+import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
 import { cleanupOwnedProcessGroup } from "../../process/ProcessOwnership.js";
 import {
   ProviderProcessSupervisor,
@@ -31,6 +33,9 @@ import { prepareProcessOwnershipInspection } from "../../process/ProcessOwnershi
 
 const OPERATION = "trace_web_source_location";
 const PROVIDER = "source-map-decoder";
+/** Process commit limit enforced on the codec; null where V8 heap flags apply. */
+export const SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES =
+  javaScriptWorkerMemoryLimitBytes(WEB_SOURCE_MAP_LIMITS.codecHeapMiB);
 /** Launcher seam retains the actual codec protocol and ownership supervisor. */
 export type SourceMapCodecLauncher = (
   options: OwnedProviderProcessSpawnOptions,
@@ -147,7 +152,7 @@ class OwnedCodec implements SourceMapCleanupOwner {
     )({
       command: process.execPath,
       arguments: [
-        "--max-old-space-size=192",
+        `--max-old-space-size=${String(WEB_SOURCE_MAP_LIMITS.codecHeapMiB)}`,
         "--max-semi-space-size=8",
         "--v8-pool-size=1",
         "--single-threaded",
@@ -158,6 +163,9 @@ class OwnedCodec implements SourceMapCleanupOwner {
       runId: this.#runId,
       cwd: this.#runtime.path,
       hostEnvironment: environment,
+      ...(SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES === null
+        ? {}
+        : { memoryLimitBytes: SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES }),
       signal: this.deadline.signal,
     });
     this.#supervisor = new ProviderProcessSupervisor(
@@ -191,6 +199,23 @@ class OwnedCodec implements SourceMapCleanupOwner {
     while (!(await supervisor.waitForOutputClose(50))) this.check();
     this.check();
     const snapshot = supervisor.snapshot();
+    // No partial codec result exists; a reached limit fails the whole trace.
+    if (snapshot.memoryLimitReached === true)
+      throw new AnalysisResourceConstraintError(
+        OPERATION,
+        "memory",
+        `Source-map codec reached its ${SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES === null ? "" : `${String(SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES)}-byte `}process memory limit for ${this.path}; no partial evidence was returned.`,
+        {
+          codec_process_memory_limit_bytes: SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES,
+        },
+        {
+          capturedOutput: {
+            stdout: "",
+            stderr: snapshot.stderr.text,
+            truncated: snapshot.diagnosticTruncated ?? false,
+          },
+        },
+      );
     if (snapshot.exitCode !== 0 || snapshot.signal !== null)
       throw new ProviderAdapterError(PROVIDER, OPERATION, {
         diagnostics: {

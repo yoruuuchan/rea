@@ -42,9 +42,10 @@ it("does not treat ordinary error-looking data or nested Evidence as command fai
 describe("CLI command outcome classification", () => {
   it("returns nonzero for the UpdateResult failure variant", async () => {
     const installation = {
+      manager: "npm",
       prefix: "/fixture",
       packageRoot: "/fixture/lib/node_modules/rea-agents",
-    };
+    } as const;
     const updateHost: UpdateHost = {
       installation: () => Promise.resolve(installation),
       latestVersion: () =>

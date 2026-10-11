@@ -7,7 +7,9 @@ import {
   type WindowsNativeLoadHost,
 } from "./WindowsNativeLoader.js";
 
-const fixture = (protocolStdin?: boolean) => {
+const fixture = (
+  capabilities: { protocolStdin?: boolean; jobMemoryLimit?: unknown } = {},
+) => {
   const bytes = Buffer.alloc(128);
   bytes.write("MZ");
   bytes.writeUInt32LE(64, 0x3c);
@@ -51,7 +53,7 @@ const fixture = (protocolStdin?: boolean) => {
           privateDacl: true,
           atomicJobAssignment: true,
           killOnOwnerClose: true,
-          ...(protocolStdin === undefined ? {} : { protocolStdin }),
+          ...capabilities,
         }),
       };
     },
@@ -63,7 +65,7 @@ describe("packaged Windows native admission", () => {
   it.each([true, false])(
     "preserves protocol stdin capability %s alongside existing job controls",
     (protocolStdin) => {
-      const value = fixture(protocolStdin);
+      const value = fixture({ protocolStdin });
       expect(loadWindowsNativeAuthority(value.host)).toMatchObject({
         available: true,
         authority: {
@@ -76,6 +78,22 @@ describe("packaged Windows native admission", () => {
       });
     },
   );
+  it("admits the Job Object memory limit control only as an affirmative observation", () => {
+    expect(
+      loadWindowsNativeAuthority(fixture({ jobMemoryLimit: true }).host),
+    ).toMatchObject({
+      available: true,
+      authority: { inspection: { jobMemoryLimit: true } },
+    });
+    // Earlier artifacts omit the control; callers must refuse a limit then.
+    const earlier = loadWindowsNativeAuthority(fixture().host);
+    if (!earlier.available) throw new Error(earlier.reason);
+    expect(earlier.authority.inspection.jobMemoryLimit).toBeUndefined();
+    expect(
+      loadWindowsNativeAuthority(fixture({ jobMemoryLimit: false }).host)
+        .available,
+    ).toBe(false);
+  });
   it("loads only after compatibility and digest checks, preserving producer identity", () => {
     const value = fixture();
     expect(loadWindowsNativeAuthority(value.host)).toMatchObject({
@@ -151,17 +169,18 @@ describe("packaged Windows native admission", () => {
       }),
     ).toMatchObject({
       available: false,
+      retryable: true,
       reason: expect.stringContaining("private DACL: access denied"),
     });
   });
 
   it("requires every inspected native fact", () => {
     const value = fixture();
-    expect(
-      loadWindowsNativeAuthority({
-        ...value.host,
-        loadArtifact: () => ({ call: () => ({ privateDacl: true }) }),
-      }).available,
-    ).toBe(false);
+    const loaded = loadWindowsNativeAuthority({
+      ...value.host,
+      loadArtifact: () => ({ call: () => ({ privateDacl: true }) }),
+    });
+    expect(loaded.available).toBe(false);
+    expect(loaded).not.toHaveProperty("retryable");
   });
 });

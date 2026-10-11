@@ -1,4 +1,5 @@
 import { generateExampleCode } from "./aegis-otp.js";
+import { t } from "./i18n.js";
 
 async function initializeAegisDemo() {
   const demo = document.querySelector("[data-aegis-demo]");
@@ -18,19 +19,22 @@ async function initializeAegisDemo() {
       demo.querySelector("[data-aegis-block]").textContent = String(block);
       demo.querySelector("[data-aegis-division]").textContent =
         `floor(${seconds} / 30)`;
-      demo.querySelector("[data-aegis-window]").textContent =
-        `${block * 30}–${block * 30 + 29} seconds`;
+      demo.querySelector("[data-aegis-window]").textContent = t(
+        "{start}–{end} seconds",
+        { start: block * 30, end: block * 30 + 29 },
+      );
       demo.querySelector("[data-aegis-code]").textContent = code;
       clock.setAttribute(
         "aria-valuetext",
-        `${seconds} seconds, time block ${block}`,
+        t("{seconds} seconds, time block {block}", { seconds, block }),
       );
       status.textContent = "";
       return true;
     } catch {
       if (currentRevision === revision) {
-        status.textContent =
-          "Interactive calculation is unavailable in this browser. The example shows the code at 59 seconds.";
+        status.textContent = t(
+          "Interactive calculation is unavailable in this browser. The example shows the code at 59 seconds.",
+        );
       }
       return false;
     }
@@ -55,7 +59,7 @@ async function initializeAegisDemo() {
   checkButton.disabled = false;
   checkButton.addEventListener("click", async () => {
     checkButton.disabled = true;
-    checkResult.textContent = "Checking…";
+    checkResult.textContent = t("Checking…");
     try {
       const response = await fetch(
         new URL("../showcase/aegis/test-vectors.json", import.meta.url),
@@ -69,12 +73,14 @@ async function initializeAegisDemo() {
           if (code === vector.sha1.slice(-digits)) passed += 1;
         }
       }
-      checkResult.textContent =
-        `${passed} / ${vectors.length * 2} checks passed ` +
-        "(six reference cases, at six and eight digits).";
+      checkResult.textContent = t(
+        "{passed} / {total} checks passed (six reference cases, at six and eight digits).",
+        { passed, total: vectors.length * 2 },
+      );
     } catch {
-      checkResult.textContent =
-        "Could not run the reference checks. Try again.";
+      checkResult.textContent = t(
+        "Could not run the reference checks. Try again.",
+      );
     } finally {
       checkButton.disabled = false;
     }

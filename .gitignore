@@ -33,6 +33,7 @@ codedb.snapshot
 htmlcov/
 .coverage
 coverage/
+.vitest/
 .vitest-reports/
 test-results.xml
 .turbo/
@@ -67,3 +68,6 @@ Thumbs.db
 /docs/public/product-catalog.json
 /docs/verification/managed-conformance-manifest.json
 /docs/verification/managed-conformance-ledger.json
+
+# Complete static website output, including generated language editions.
+website/_site/

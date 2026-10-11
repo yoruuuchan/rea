@@ -1,33 +1,33 @@
 import { Cli } from "incur";
 import { expect, it, vi } from "vitest";
 
-import type { BrowserScenarioCapturePort } from "../../../src/application/BrowserScenarioCapturePort.js";
-import { createBrowserScenarioEvidence } from "../../../src/application/BrowserScenarioEvidence.js";
-import type { BrowserScenarioSessionPort } from "../../../src/browser/BrowserScenarioSessionPort.js";
-import { PlaywrightBrowserScenarioProvider } from "../../../src/browser/PlaywrightBrowserScenarioProvider.js";
-import { PlaywrightScenarioBrowserCleanupOwner } from "../../../src/browser/PlaywrightScenarioBrowser.js";
-import { registerBrowserScenarioCommands } from "../../../src/cliBrowserScenarioCommands.js";
-import { sanitizeBrowserUrl } from "../../../src/domain/browserObservation.js";
+import type { BrowserScenarioCapturePort } from "../../src/application/BrowserScenarioCapturePort.js";
+import { createBrowserScenarioEvidence } from "../../src/application/BrowserScenarioEvidence.js";
+import type { BrowserScenarioSessionPort } from "../../src/browser/BrowserScenarioSessionPort.js";
+import { PlaywrightBrowserScenarioProvider } from "../../src/browser/PlaywrightBrowserScenarioProvider.js";
+import { PlaywrightScenarioBrowserCleanupOwner } from "../../src/browser/PlaywrightScenarioBrowser.js";
+import { registerBrowserScenarioCommands } from "../../src/cliBrowserScenarioCommands.js";
+import { sanitizeBrowserUrl } from "../../src/domain/browserObservation.js";
 import {
   browserScenarioSchema,
   type BrowserScenario,
-} from "../../../src/domain/browserScenario.js";
-import type { BrowserScenarioAction } from "../../../src/domain/browserScenarioValues.js";
-import { browserStepArtifactsSchema } from "../../../src/domain/browserScenarioCaptureValues.js";
-import { silentLogger } from "../../../src/logger.js";
+} from "../../src/domain/browserScenario.js";
+import type { BrowserScenarioAction } from "../../src/domain/browserScenarioValues.js";
+import { browserStepArtifactsSchema } from "../../src/domain/browserScenarioCaptureValues.js";
+import { silentLogger } from "../../src/logger.js";
 import {
   AnalysisCancelledError,
   AnalysisTimeoutError,
-} from "../../../src/domain/analysisErrorCore.js";
-import { BrowserObservationError } from "../../../src/domain/browserObservationError.js";
-import { parseEvidence } from "../../../src/domain/evidence.js";
-import { jsonObjectSchema } from "../../../src/domain/jsonValue.js";
-import { ok } from "../../../src/domain/result.js";
+} from "../../src/domain/analysisErrorCore.js";
+import { BrowserObservationError } from "../../src/domain/browserObservationError.js";
+import { parseEvidence } from "../../src/domain/evidence.js";
+import { jsonObjectSchema } from "../../src/domain/jsonValue.js";
+import { ok } from "../../src/domain/result.js";
 
 const state = vi.hoisted(() => ({
   provider: undefined as BrowserScenarioCapturePort | undefined,
 }));
-vi.mock("../../../src/composition/browserScenario.js", () => ({
+vi.mock("../../src/composition/browserScenario.js", () => ({
   createBrowserScenarioProvider: () => state.provider,
 }));
 

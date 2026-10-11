@@ -74,6 +74,46 @@ const DEFERRED_IMPORTS = [
     name: "binary-composition",
     path: "/dist/composition/binary.js",
   },
+  {
+    name: "javascript-application",
+    path: "/dist/application/javascript/JavaScriptApplicationService.js",
+  },
+  {
+    name: "javascript-workflows",
+    path: "/dist/application/javascript/JavaScriptApplicationWorkflowService.js",
+  },
+  {
+    name: "javascript-semantic-trace",
+    path: "/dist/application/javascript/JavaScriptSemanticTraceService.js",
+  },
+  {
+    name: "electron-observation",
+    path: "/dist/application/javascript/ElectronObservationService.js",
+  },
+  {
+    name: "electron-active-observation",
+    path: "/dist/application/javascript/ElectronActiveObservationService.js",
+  },
+  {
+    name: "javascript-runtime-reconciliation",
+    path: "/dist/application/javascript/JavaScriptRuntimeReconciliationService.js",
+  },
+  {
+    name: "android-application",
+    path: "/dist/application/android/AndroidApplicationService.js",
+  },
+  {
+    name: "apple-application",
+    path: "/dist/application/apple/AppleApplicationService.js",
+  },
+  {
+    name: "reconstruction-coverage",
+    path: "/dist/application/ReconstructionCoverageService.js",
+  },
+  {
+    name: "reconstruction-obligation-ledger",
+    path: "/dist/application/ReconstructionObligationLedgerService.js",
+  },
 ] as const;
 // Report each resolved deferred package on stderr without changing resolution.
 const RESOLUTION_HOOK = `data:text/javascript,${encodeURIComponent(`
@@ -174,7 +214,7 @@ describe("CLI startup imports", () => {
         source,
         "--json",
       ]),
-    ).resolves.toEqual(new Set());
+    ).resolves.toEqual(new Set(["javascript-application"]));
   });
 
   it("loads native provider composition when a provider operation is called", async () => {

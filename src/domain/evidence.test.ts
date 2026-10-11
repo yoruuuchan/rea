@@ -291,6 +291,22 @@ describe("analysis evidence identity", () => {
   });
 });
 
+it("rejects a subject local path containing NUL while admitting an empty path", () => {
+  const evidence = createEvidence(TARGET, PROVIDER, {
+    operation: "health",
+    parameters: {},
+    result: true,
+  });
+  expect(evidence.subject).not.toBeNull();
+  const withPath = (path: string) => ({
+    ...evidence,
+    subject: { ...evidence.subject, local_path: path },
+  });
+  expect(evidenceSchema.safeParse(withPath("/tmp/fixture")).success).toBe(true);
+  expect(evidenceSchema.safeParse(withPath("")).success).toBe(true);
+  expect(evidenceSchema.safeParse(withPath("a\u0000b")).success).toBe(false);
+});
+
 it("binds an explicit unknown-subject reason into the semantic Evidence identity", () => {
   const reason = "Caller excluded the observed digest.";
   const observation = { operation: "health", parameters: {}, result: true };

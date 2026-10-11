@@ -5,12 +5,64 @@ import type { ClientRegistrationStatus } from "./ClientRegistrationStatus.js";
 import { createDoctorHostFixture as host } from "./Doctor.fixture.js";
 import { runDoctor } from "./Doctor.js";
 
+describe("doctor runtime check", () => {
+  it("reports Node 25 as unsupported", async () => {
+    const result = await runDoctor(
+      undefined,
+      host({ runtime: { id: "node", version: "25.1.0" } }),
+    );
+
+    expect(result.healthy).toBe(false);
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        name: "node",
+        ok: false,
+        detail: "25.1.0",
+        details: { runtime: "node", version: "25.1.0" },
+        classification: "missing_dependency",
+      }),
+    );
+  });
+
+  it.each([
+    { compatibility: "26.3.0", ok: true },
+    { compatibility: "25.1.0", ok: false },
+  ])(
+    "identifies Bun and admits it by Node.js compatibility $compatibility",
+    async ({ compatibility, ok }) => {
+      const result = await runDoctor(
+        undefined,
+        host({
+          runtime: {
+            id: "bun",
+            version: "1.4.2",
+            nodeCompatibilityVersion: compatibility,
+          },
+        }),
+      );
+
+      expect(result.checks).toContainEqual(
+        expect.objectContaining({
+          name: "node",
+          ok,
+          classification: ok ? "healthy" : "missing_dependency",
+          details: {
+            runtime: "bun",
+            version: "1.4.2",
+            node_compatibility_version: compatibility,
+          },
+        }),
+      );
+    },
+  );
+});
+
 describe("doctor", () => {
   it("returns exact recovery for every failed diagnostic", async () => {
     const result = await runDoctor(
       "/missing/app",
       host({
-        nodeVersion: "20.0.0",
+        runtime: { id: "node", version: "20.0.0" },
         macosVersion: () => Promise.resolve("11.7"),
         executable: () => Promise.resolve(false),
         validTarget: () => Promise.resolve(false),
@@ -26,20 +78,6 @@ describe("doctor", () => {
       hopper: "Run rea setup to install Hopper, or set HOPPER_LAUNCHER_PATH.",
       target: "Supply a readable local app or program path.",
     });
-  });
-
-  it("reports Node 25 as unsupported", async () => {
-    const result = await runDoctor(undefined, host({ nodeVersion: "25.1.0" }));
-
-    expect(result.healthy).toBe(false);
-    expect(result.checks).toContainEqual(
-      expect.objectContaining({
-        name: "node",
-        ok: false,
-        detail: "25.1.0",
-        classification: "missing_dependency",
-      }),
-    );
   });
 
   it.each(["11.7", undefined])(

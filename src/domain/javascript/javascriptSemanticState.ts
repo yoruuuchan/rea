@@ -66,6 +66,8 @@ export interface JavaScriptSemanticAnalysisState {
   readonly callables: JavaScriptSemanticCallable[];
   readonly callableNodesById: Map<string, t.Node>;
   readonly moduleLinks: JavaScriptSemanticModuleLink[];
+  /** Exact calls already represented by binding or dependency links. */
+  readonly linkedRequireCalls: WeakSet<t.CallExpression>;
   readonly moduleLinkBindings: WeakMap<
     JavaScriptSemanticModuleLink,
     JavaScriptSemanticBindingState

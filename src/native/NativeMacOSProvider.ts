@@ -261,7 +261,7 @@ class NativeMacOSClient implements AnalysisClient {
 
   async close(): Promise<Result<null, AnalysisError>> {
     this.#closed = true;
-    await Promise.allSettled([...this.#pendingCommands]);
+    await Promise.allSettled(this.#pendingCommands);
     const uiCleanupFailures = await this.#serializeNativeUi(() =>
       this.#retryNativeUiCleanup(),
     );

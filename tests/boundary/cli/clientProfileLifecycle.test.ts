@@ -1,4 +1,12 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -15,12 +23,6 @@ const cases = [
     client: "opencode",
     env: { OPENCODE_CONFIG_DIR: "profile" },
     config: "profile/opencode.json",
-    skill: ".agents/skills",
-  },
-  {
-    client: "opencode",
-    env: { OPENCODE_CONFIG_DIR: "" },
-    config: ".config/opencode/opencode.json",
     skill: ".agents/skills",
   },
   {
@@ -42,37 +44,117 @@ const cases = [
     skill: ".agents/skills",
   },
   {
-    client: "devin",
-    env: { XDG_CONFIG_HOME: "profile" },
-    config: "profile/devin/mcp_config.json",
-    skill: ".agents/skills",
-  },
-  {
     client: "antigravity",
     env: {},
     config: ".gemini/config/mcp_config.json",
     skill: ".gemini/config/skills",
   },
 ];
-for (const testCase of cases.filter(
-  ({ client }) => process.platform !== "win32" || client !== "devin",
-)) {
+const groups = [
+  {
+    name: "selected client profiles",
+    cases,
+  },
+  ...(process.platform === "win32"
+    ? []
+    : [
+        {
+          // XDG also changes OpenCode's global config layers. Exercise this
+          // override independently of either OpenCode scenario.
+          name: "Devin XDG profile",
+          cases: [
+            {
+              client: "devin",
+              env: { XDG_CONFIG_HOME: "profile" },
+              config: "profile/devin/mcp_config.json",
+              skill: ".agents/skills",
+            },
+          ],
+        },
+      ]),
+  {
+    // Devin's XDG override changes OpenCode's default root, so keep this
+    // empty-override scenario in its own home and environment.
+    name: "default OpenCode profile",
+    cases: [
+      {
+        client: "opencode",
+        env: { OPENCODE_CONFIG_DIR: "" },
+        config: ".config/opencode/opencode.json",
+        skill: ".agents/skills",
+      },
+    ],
+  },
+];
+
+cliTest(
+  "uninstall purge retains unrelated data behind a managed-root symlink",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-uninstall-root-link-");
+    const home = join(root, "home");
+    const unrelated = join(root, "unrelated-application");
+    await mkdir(home);
+    for (const name of ["cache", "state"]) {
+      await mkdir(join(unrelated, name), { recursive: true });
+      await writeFile(join(unrelated, name, "keep.txt"), `unrelated ${name}`);
+    }
+    const managedRoot = join(home, ".rea");
+    await symlink(
+      unrelated,
+      managedRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const result = await cli.run({
+      arguments: ["uninstall", "--purge-data", "--json"],
+      cwd: home,
+      environment: {
+        HOME: home,
+        USERPROFILE: home,
+        XDG_CONFIG_HOME: join(root, "xdg-config"),
+        XDG_CACHE_HOME: join(root, "xdg-cache"),
+      },
+      timeoutMs: 20_000,
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect.soft(result.json).toMatchObject({
+      status: "complete",
+      items: expect.arrayContaining([
+        expect.objectContaining({ name: "cache", status: "retained" }),
+        expect.objectContaining({ name: "state", status: "retained" }),
+      ]),
+    });
+    expect((await lstat(managedRoot)).isSymbolicLink()).toBe(true);
+    expect(await realpath(managedRoot)).toBe(await realpath(unrelated));
+    for (const name of ["cache", "state"])
+      await expect
+        .soft(readFile(join(unrelated, name, "keep.txt"), "utf8"))
+        .resolves.toBe(`unrelated ${name}`);
+  },
+);
+
+for (const group of groups) {
   cliTest(
-    `${testCase.client} lifecycle follows the selected roots (${testCase.config})`,
+    `${group.name} lifecycle follows the selected roots`,
     async ({ cli }) => {
       const home = await createTestTempDirectory("rea-client-profile-");
       const environment: NodeJS.ProcessEnv = { HOME: home, USERPROFILE: home };
-      for (const [key, value] of Object.entries(testCase.env))
-        environment[key] = value === "profile" ? join(home, value) : value;
+      for (const testCase of group.cases)
+        for (const [key, value] of Object.entries(testCase.env))
+          environment[key] = value === "profile" ? join(home, value) : value;
       // OMP's relative override is relative to the caller, not silently ignored.
-      if (testCase.client === "omp")
+      if (group.cases.some(({ client }) => client === "omp"))
         environment.PI_CODING_AGENT_DIR = "profile";
-      const config = join(home, testCase.config);
-      const skillDirectory = join(
-        home,
-        testCase.skill,
-        "reverse-engineer-anything",
-      );
+      const profiles = group.cases.map((testCase) => ({
+        ...testCase,
+        config: join(home, testCase.config),
+        skillDirectory: join(home, testCase.skill, "reverse-engineer-anything"),
+      }));
+      const clientArguments = profiles.flatMap(({ client }) => [
+        "--client",
+        client,
+      ]);
       const run = (arguments_: readonly string[]) =>
         cli.run({
           arguments: arguments_,
@@ -80,71 +162,89 @@ for (const testCase of cases.filter(
           environment,
           timeoutMs: 20_000,
         });
-      const planned = await run([
-        "setup",
-        "--client",
-        testCase.client,
-        "--dry-run",
-        "--json",
-      ]);
-      expect(planned.exitCode).toBe(0);
-      expect(planned.json).toMatchObject({
-        status: "planned",
-        plannedActions: expect.arrayContaining([
-          expect.objectContaining({ target: config }),
-          expect.objectContaining({ target: skillDirectory }),
-        ]),
-      });
-      await expect(access(config)).rejects.toMatchObject({ code: "ENOENT" });
-      const setup = await run([
-        "setup",
-        "--client",
-        testCase.client,
-        "--yes",
-        "--json",
-      ]);
+      for (const { client, config, skillDirectory } of profiles) {
+        const planned = await run([
+          "setup",
+          "--client",
+          client,
+          "--dry-run",
+          "--json",
+        ]);
+        expect(planned.exitCode, client).toBe(0);
+        expect(planned.json, client).toMatchObject({
+          status: "planned",
+          plannedActions: expect.arrayContaining([
+            expect.objectContaining({
+              id: `configure_client:${client}`,
+              target: config,
+            }),
+            expect.objectContaining({ target: skillDirectory }),
+          ]),
+        });
+        await expect(access(skillDirectory)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+      for (const { config } of profiles)
+        await expect(access(config)).rejects.toMatchObject({ code: "ENOENT" });
+      const setup = await run(["setup", ...clientArguments, "--yes", "--json"]);
       expect(setup.exitCode).toBe(0);
       expect(setup.json).toMatchObject({ status: "ready" });
-      await expect(access(config)).resolves.toBeUndefined();
-      expect(
-        await readFile(join(skillDirectory, "SKILL.md"), "utf8"),
-      ).toContain("reverse-engineer-anything");
+      for (const { config, skillDirectory } of profiles) {
+        await expect(access(config)).resolves.toBeUndefined();
+        expect(
+          await readFile(join(skillDirectory, "SKILL.md"), "utf8"),
+        ).toContain("reverse-engineer-anything");
+      }
       await expect(access(join(home, "config.toml"))).rejects.toMatchObject({
         code: "ENOENT",
       });
-      const doctor = await run([
-        "doctor",
-        "--client",
-        testCase.client,
-        "--skill",
-        "--json",
-      ]);
-      expect(doctor.exitCode).toBe(0);
-      expect(doctor.json).toMatchObject({
-        healthy: true,
-        identity: { skill: { state: "aligned" } },
-      });
-      if (testCase.client === "grok_build") {
-        const original = await readFile(config, "utf8");
-        await writeFile(
-          config,
-          original.replace(
-            "[mcp_servers.rea]",
-            "[mcp_servers.rea]\ndisabled = true",
-          ),
-        );
-        expect(
-          (await run(["doctor", "--client", "grok_build", "--json"])).exitCode,
-        ).toBe(0);
-        await writeFile(config, original);
+      for (const { client, config } of profiles) {
+        const doctor = await run([
+          "doctor",
+          "--client",
+          client,
+          "--skill",
+          "--json",
+        ]);
+        expect(doctor.exitCode, client).toBe(0);
+        expect(doctor.json, client).toMatchObject({
+          healthy: true,
+          scope: { mode: "explicit", clients: [client], skill: true },
+          identity: {
+            skill: { state: "aligned" },
+            registrations: expect.arrayContaining([
+              expect.objectContaining({
+                client,
+                config_path: config,
+                state: "aligned",
+              }),
+            ]),
+          },
+        });
+        if (client === "grok_build") {
+          const original = await readFile(config, "utf8");
+          await writeFile(
+            config,
+            original.replace(
+              "[mcp_servers.rea]",
+              "[mcp_servers.rea]\ndisabled = true",
+            ),
+          );
+          expect(
+            (await run(["doctor", "--client", "grok_build", "--json"]))
+              .exitCode,
+          ).toBe(0);
+          await writeFile(config, original);
+        }
       }
       const repeat = await run([
         "setup",
-        "--client",
-        testCase.client,
+        ...clientArguments,
         "--yes",
         "--json",
       ]);
+      expect(repeat.exitCode).toBe(0);
       expect(repeat.json).toMatchObject({
         status: "ready",
         appliedActions: [],
@@ -152,9 +252,10 @@ for (const testCase of cases.filter(
       const uninstall = await run(["uninstall", "--json"]);
       expect(uninstall.exitCode).toBe(0);
       expect(uninstall.json).toMatchObject({ status: "complete" });
-      await expect(
-        access(join(skillDirectory, "SKILL.md")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+      for (const { skillDirectory } of profiles)
+        await expect(
+          access(join(skillDirectory, "SKILL.md")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
 }

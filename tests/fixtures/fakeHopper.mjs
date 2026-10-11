@@ -6,6 +6,7 @@ const [
   runId,
   shutdownMode = "acknowledge",
   diagnosticMode = "quiet",
+  healthMode = "ready",
 ] = process.argv.slice(2);
 let diagnosticOutputEmitted = false;
 const heldReplies = new Map();
@@ -201,17 +202,21 @@ const server = createServer((socket) => {
         send({ id: request.id, error: { code: -32001, message: "bad token" } });
       } else if (request.method === "health") {
         emitDiagnosticOutput();
-        send(
-          {
-            id: request.id,
-            result: {
-              name: "REA Hopper bridge",
-              version: "1.0.0",
-              run_id: runId,
+        const reply = () =>
+          send(
+            {
+              id: request.id,
+              result: {
+                name: "REA Hopper bridge",
+                version: "1.0.0",
+                run_id: runId,
+              },
             },
-          },
-          true,
-        );
+            true,
+          );
+        if (healthMode === "gated") heldReplies.set(request.id, reply);
+        else if (healthMode === "ready") reply();
+        else throw new Error(`Unknown health fixture mode: ${healthMode}`);
       } else if (
         request.method === "shutdown" ||
         request.method === "shutdown_document"

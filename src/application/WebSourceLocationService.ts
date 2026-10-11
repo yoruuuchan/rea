@@ -49,8 +49,19 @@ const LIMITATIONS = [
   "Embedded source hashes identify the UTF-8 encoding of decoded sourcesContent text, not an independently retained original file. Missing or out-of-range original content positions remain explicit.",
   "Lookup returns all segments at the greatest generated position not greater than the selected point, including earlier lines and generated-only segments. A mapped point does not establish an executed range or UI causality.",
   "Regular maps and inline indexed sections are supported. External section URLs are unsupported; unknown extensions are retained in raw map text and are not interpreted.",
-  "Complete evidence has a 4 MiB map, 32 MiB reply, 262144 decoded rows/segments and 64-level section budget. The owned codec has a 20-second deadline, 192 MiB old-generation heap and one V8 worker; cleanup may extend the deadline. V8 heap limits do not establish aggregate RSS limits.",
 ];
+const CODEC_BUDGET =
+  "Complete evidence has a 4 MiB map, 32 MiB reply, 262144 decoded rows/segments and 64-level section budget. The owned codec has a 20-second deadline";
+/** Bun accepts but ignores the codec's V8 heap flags; Windows enforces a commit limit instead. */
+const codecBudgetLimitation = (
+  runtime: WebSourceMapReport["runtime"],
+): string => {
+  if (runtime.id === "node-v8")
+    return `${CODEC_BUDGET}, ${String(WEB_SOURCE_MAP_LIMITS.codecHeapMiB)} MiB old-generation heap and one V8 worker; cleanup may extend the deadline. V8 heap limits do not establish aggregate RSS limits.`;
+  return runtime.process_memory_limit_bytes === null
+    ? `${CODEC_BUDGET}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags, so no codec heap limit is established.`
+    : `${CODEC_BUDGET}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags; a Windows Job Object limited its committed memory to ${String(runtime.process_memory_limit_bytes)} bytes, which is not a heap or RSS limit.`;
+};
 
 /** Join verified captured bytes with an explicitly selected source-map point. */
 export class WebSourceLocationService {
@@ -110,6 +121,10 @@ export class WebSourceLocationService {
     if (!report.ok) return report;
     if (options?.signal?.aborted)
       return err(new AnalysisCancelledError(OPERATION));
+    const limitations = [
+      ...LIMITATIONS,
+      codecBudgetLimitation(report.value.runtime),
+    ];
     const normalized = webSourceLocationResultSchema.safeParse({
       ...report.value,
       manifest: capturedWebManifestIdentity(data),
@@ -122,7 +137,7 @@ export class WebSourceLocationService {
       generated_offset: generatedOffset,
       source_authenticity: "unknown",
       execution: "unknown",
-      limitations: LIMITATIONS,
+      limitations,
     });
     if (!normalized.success) return invalidOutput(normalized.error.message);
     return ok(
@@ -144,7 +159,7 @@ export class WebSourceLocationService {
           rawResult: { source_map_text: map.text },
           confidence: "derived",
           authority: "historical-reference",
-          limitations: LIMITATIONS,
+          limitations,
           locations: [
             data.sourceFile.path,
             data.manifestFile.path,

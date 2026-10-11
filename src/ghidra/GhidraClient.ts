@@ -16,7 +16,7 @@ import {
   type ProviderProcessSnapshot,
   ProviderProcessSupervisor,
 } from "../process/ProviderProcess.js";
-import { DEFAULT_GHIDRA_STARTUP_TIMEOUT_MS } from "../config/ghidraStartupTimeout.js";
+import { DEFAULT_GHIDRA_STARTUP_TIMEOUT_MS } from "../config/providerStartupTimeout.js";
 import type {
   GhidraClientOptions,
   GhidraRequestOptions,

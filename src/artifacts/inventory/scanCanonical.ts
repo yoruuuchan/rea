@@ -34,6 +34,7 @@ import {
   artifactManifestId,
 } from "../../domain/artifactIdentity.js";
 import { classifyAndHashRootForInventory } from "./classify.js";
+import { hostExecutableMarking } from "../hostExecutableMarking.js";
 import type { HashResult } from "../ArtifactHash.js";
 import {
   hashStableRootArtifact,
@@ -211,7 +212,7 @@ const buildInventorySnapshot = async (
   rekeyOccurrences(rootNode.artifact_id, input.occurrences);
   const rootOccurrence = rootOccurrenceFor(rootNode, {
     size: metadata.size,
-    executable: (metadata.mode & 0o111) !== 0,
+    executable: hostExecutableMarking(path, metadata),
     format: rootFormat,
     path,
   });

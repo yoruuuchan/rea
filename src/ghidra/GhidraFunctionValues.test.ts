@@ -172,6 +172,45 @@ describe("Ghidra function-analysis result values", () => {
 });
 
 describe("Ghidra compact reference provenance", () => {
+  it("distinguishes incoming references, examined emptiness and unavailable coverage at data addresses", () => {
+    const instruction = {
+      ...compactInstruction(),
+      address: "ram:00402000",
+      status: "data",
+      procedure: null,
+    };
+    const reference = {
+      ...compactReference(),
+      source_address: "ram:00401000",
+      target_address: instruction.address,
+      type: "WRITE",
+      call: false,
+      data: true,
+      write: true,
+    };
+    for (const incoming of [
+      {},
+      { incoming_references: null },
+      { incoming_references: [] },
+      { incoming_references: [reference] },
+      { incoming_references: [{ ...reference, primary: null, source: null }] },
+    ]) {
+      const expected = { ...instruction, ...incoming };
+      const parsed = parseFunctionValueFixture(
+        "inspect_native_instruction",
+        expected,
+      );
+      if (!parsed.ok) throw parsed.error;
+      expect(parsed.value).toEqual(expected);
+    }
+    expect(
+      parseFunctionValueFixture("inspect_native_instruction", {
+        ...instruction,
+        incoming_references: [{ ...reference, primary: "false" }],
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
+  });
+
   const operations = [
     ["inspect_native_instruction", compactInstruction],
     ["resolve_native_call_targets", compactCallTargets],

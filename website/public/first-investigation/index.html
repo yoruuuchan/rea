@@ -11,6 +11,48 @@
     <!-- website:sharing:start -->
     <!-- prettier-ignore -->
     <link rel="canonical" href="https://rea.tools/first-investigation/" />
+    <!-- website:languages:start -->
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="en" href="https://rea.tools/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-CN" href="https://rea.tools/zh-CN/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-TW" href="https://rea.tools/zh-TW/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ja" href="https://rea.tools/ja/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ko" href="https://rea.tools/ko/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="tr" href="https://rea.tools/tr/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ru" href="https://rea.tools/ru/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="vi" href="https://rea.tools/vi/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="th" href="https://rea.tools/th/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="de" href="https://rea.tools/de/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="es" href="https://rea.tools/es/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fr" href="https://rea.tools/fr/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="uk" href="https://rea.tools/uk/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pl" href="https://rea.tools/pl/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pt-BR" href="https://rea.tools/pt-BR/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ar" href="https://rea.tools/ar/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fa" href="https://rea.tools/fa/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="id" href="https://rea.tools/id/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="it" href="https://rea.tools/it/first-investigation/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="x-default" href="https://rea.tools/first-investigation/" />
+    <!-- website:languages:end -->
     <!-- prettier-ignore -->
     <meta property="og:type" content="website" />
     <!-- prettier-ignore -->
@@ -61,7 +103,7 @@
       <div class="container header-inner">
         <a class="brand" href="../" aria-label="REA home"
           ><span class="brand-name">REA</span
-          ><span class="brand-caption">Reverse Engineer Anything</span></a
+          ><span class="brand-caption" data-i18n-skip>Reverse Engineer Anything</span></a
         >
         <nav class="navigation" aria-label="Main navigation">
           <a href="../showcase/">Showcases</a>
@@ -71,6 +113,7 @@
           <a href="../faq/">FAQ</a>
         </nav>
         <div class="header-social">
+          <details class="language-picker" data-i18n-skip><summary><span aria-hidden="true">文 / A</span> <span>English</span></summary><nav aria-label="English"><a href="../first-investigation/" lang="en" dir="ltr" data-language="en" aria-current="true">English</a><a href="../zh-CN/first-investigation/" lang="zh-CN" dir="ltr" data-language="zh-CN">简体中文</a><a href="../zh-TW/first-investigation/" lang="zh-TW" dir="ltr" data-language="zh-TW">繁體中文</a><a href="../ja/first-investigation/" lang="ja" dir="ltr" data-language="ja">日本語</a><a href="../ko/first-investigation/" lang="ko" dir="ltr" data-language="ko">한국어</a><a href="../tr/first-investigation/" lang="tr" dir="ltr" data-language="tr">Türkçe</a><a href="../ru/first-investigation/" lang="ru" dir="ltr" data-language="ru">Русский</a><a href="../vi/first-investigation/" lang="vi" dir="ltr" data-language="vi">Tiếng Việt</a><a href="../th/first-investigation/" lang="th" dir="ltr" data-language="th">ไทย</a><a href="../de/first-investigation/" lang="de" dir="ltr" data-language="de">Deutsch</a><a href="../es/first-investigation/" lang="es" dir="ltr" data-language="es">Español</a><a href="../fr/first-investigation/" lang="fr" dir="ltr" data-language="fr">Français</a><a href="../uk/first-investigation/" lang="uk" dir="ltr" data-language="uk">Українська</a><a href="../pl/first-investigation/" lang="pl" dir="ltr" data-language="pl">Polski</a><a href="../pt-BR/first-investigation/" lang="pt-BR" dir="ltr" data-language="pt-BR">Português (Brasil)</a><a href="../ar/first-investigation/" lang="ar" dir="rtl" data-language="ar">العربية</a><a href="../fa/first-investigation/" lang="fa" dir="rtl" data-language="fa">فارسی</a><a href="../id/first-investigation/" lang="id" dir="ltr" data-language="id">Bahasa Indonesia</a><a href="../it/first-investigation/" lang="it" dir="ltr" data-language="it">Italiano</a></nav></details>
           <a
             class="nav-github"
             href="https://github.com/morluto/rea"
@@ -144,7 +187,8 @@
           check one detail yourself.
         </p>
         <p class="page-meta">
-          A supplied example · Node.js and npm · Your coding agent
+          A supplied example · <span translate="no">Node.js</span> and npm ·
+          Your coding agent
         </p>
       </div>
       <div class="article-layout">
@@ -163,7 +207,7 @@
             <h2>1. Connect your agent to REA</h2>
             <p>
               Use a coding agent such as Claude Code, Codex or Cursor. You’ll
-              need Node.js and npm; the
+              need <span translate="no">Node.js</span> and npm; the
               <a href="../get-started/">setup guide lists supported versions</a
               >.
             </p>
@@ -186,9 +230,10 @@
               <p class="terminal-prompt">
                 <span class="prompt-symbol" aria-hidden="true">›</span
                 ><span id="first-install-prompt"
-                  >Install REA and connect it to this coding agent using npx
-                  rea-agents@latest setup. Show me the setup plan for approval,
-                  then verify the installation.</span
+                  >Install REA and connect it to this coding agent using
+                  <span translate="no">npx rea-agents@latest setup</span>. Show
+                  me the setup plan for approval, then verify the
+                  installation.</span
                 ><span class="terminal-cursor" aria-hidden="true"></span>
               </p>
             </div>
@@ -235,11 +280,14 @@
               <p class="terminal-prompt">
                 <span class="prompt-symbol" aria-hidden="true">›</span
                 ><span id="first-analysis-prompt"
-                  >Download https://rea.tools/examples/notes-example.zip into a
-                  new example folder and unpack it. Use REA to find what happens
-                  when I click Export notes. Show where notes.csv is written,
-                  which fields it contains, and the relevant files and
-                  lines.</span
+                  >Download
+                  <span translate="no"
+                    >https://rea.tools/examples/notes-example.zip</span
+                  >
+                  into a new example folder and unpack it. Use REA to find what
+                  happens when I click Export notes. Show where
+                  <span translate="no">notes.csv</span> is written, which fields
+                  it contains, and the relevant files and lines.</span
                 ><span class="terminal-cursor" aria-hidden="true"></span>
               </p>
             </div>
@@ -276,22 +324,26 @@
               <p class="figure-title">From the button to the file writer</p>
               <ol class="flow-steps">
                 <li>
-                  <span class="flow-label">Page · renderer.js</span
+                  <span class="flow-label"
+                    >Page · <span translate="no">renderer.js</span></span
                   ><span class="flow-node">Export notes</span
                   ><span class="flow-note"
                     >Calls <code>notes.exportCsv()</code>.</span
                   >
                 </li>
                 <li>
-                  <span class="flow-label">Bridge · preload.js</span
+                  <span class="flow-label"
+                    >Bridge · <span translate="no">preload.js</span></span
                   ><span class="flow-node"><code>notes:export</code></span
                   ><span class="flow-note"
                     >Sends a named message to the main process.</span
                   >
                 </li>
                 <li>
-                  <span class="flow-label">Handler · main.js</span
-                  ><span class="flow-node">Write notes.csv</span
+                  <span class="flow-label"
+                    >Handler · <span translate="no">main.js</span></span
+                  ><span class="flow-node"
+                    >Write <span translate="no">notes.csv</span></span
                   ><span class="flow-note"
                     >Calls the formatter in <code>csv.js</code> and writes the
                     file.</span
@@ -305,7 +357,7 @@
             </figure>
             <div class="code-block">
               <div class="code-header">
-                <span>main.js · lines 8–12</span
+                <span><span translate="no">main.js</span> · lines 8–12</span
                 ><a href="../examples/notes-electron/main.js">Source</a>
               </div>
               <pre><code>ipcMain.handle("notes:export", () =&gt; {
@@ -350,9 +402,11 @@
               <p class="terminal-prompt">
                 <span class="prompt-symbol" aria-hidden="true">›</span
                 ><span id="first-check-prompt"
-                  >Predict the CSV for a note with id 1 and title Hello, "REA".
-                  Then run the example’s toCsv formatter with Node.js to check
-                  it. Show the prediction and actual output.</span
+                  >Predict the CSV for a note with id 1 and title
+                  <span translate="no">Hello, "REA"</span>. Then run the
+                  example’s <span translate="no">toCsv</span> formatter with
+                  <span translate="no">Node.js</span> to check it. Show the
+                  prediction and actual output.</span
                 ><span class="terminal-cursor" aria-hidden="true"></span>
               </p>
             </div>
@@ -365,7 +419,8 @@
             </div>
             <p>
               The title stays in one quoted field; each quotation mark is
-              doubled. This checks the formatter directly with Node.js.
+              doubled. This checks the formatter directly with
+              <span translate="no">Node.js</span>.
             </p>
             <details class="evidence-details">
               <summary>Run the check yourself</summary>
@@ -375,7 +430,8 @@
               </p>
               <div class="code-block">
                 <div class="code-header">
-                  <span>Node.js · CSV formatter</span
+                  <span
+                    ><span translate="no">Node.js</span> · CSV formatter</span
                   ><button
                     class="copy-button"
                     type="button"

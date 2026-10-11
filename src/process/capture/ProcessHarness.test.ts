@@ -274,6 +274,33 @@ it("waits for terminal observations delivered after the exit callback", async ()
   expect(journal[1]).toMatchObject({ collection: "frames", index: 1 });
 });
 
+it("does not settle while a trailing observation is already due behind a stalled event loop", async () => {
+  const journal: Array<{
+    capture_order: number;
+    collection: "frames";
+    index: number;
+  }> = [{ capture_order: 0, collection: "frames", index: 0 }];
+  const lateFrame = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      journal.push({ capture_order: 1, collection: "frames", index: 1 });
+      resolve();
+    }, 12);
+  });
+
+  const wait = settleProcessCaptureJournal(journal, 20, 200);
+  // Stall the event loop past the quiet window so the settle wake-up and the
+  // trailing observation are both already due when timer callbacks resume.
+  const stalledUntil = Date.now() + 40;
+  while (Date.now() < stalledUntil) {
+    // Deliberately occupy the loop; no timer can run until this returns.
+  }
+  await wait;
+
+  expect(journal).toHaveLength(2);
+  expect(journal[1]).toMatchObject({ collection: "frames", index: 1 });
+  await lateFrame;
+});
+
 it("keeps empty cleanup exception messages actionable in the report", async () => {
   const host: ProcessCaptureCleanupHost = {
     platform: process.platform,

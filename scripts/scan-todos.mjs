@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import { globSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");

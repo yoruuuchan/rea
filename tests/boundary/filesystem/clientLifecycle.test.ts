@@ -1341,6 +1341,146 @@ describe("Codex configuration comments", () => {
   });
 });
 
+describe("managed data purge root validation", () => {
+  it.each(["existing", "dangling"] as const)(
+    "retains cache and state when the managed-root symlink is %s",
+    async (targetState) => {
+      const root = await createTestTempDirectory("rea-uninstall-data-root-");
+      roots.push(root);
+      const home = join(root, "home");
+      const outside = join(root, "unrelated-application");
+      await mkdir(home);
+      if (targetState === "existing")
+        for (const name of ["cache", "state"]) {
+          await mkdir(join(outside, name), { recursive: true });
+          await writeFile(join(outside, name, "keep.txt"), "unrelated data");
+        }
+      const managedRoot = join(home, ".rea");
+      await symlink(
+        outside,
+        managedRoot,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      const result = await runUninstall(
+        true,
+        systemUninstallHost(home, undefined, {}),
+      );
+
+      expect(result.status).toBe("complete");
+      expect((await lstat(managedRoot)).isSymbolicLink()).toBe(true);
+      for (const name of ["cache", "state"])
+        expect(result.items).toContainEqual(
+          expect.objectContaining({ name, status: "retained" }),
+        );
+      if (targetState === "existing")
+        for (const name of ["cache", "state"])
+          expect(await readFile(join(outside, name, "keep.txt"), "utf8")).toBe(
+            "unrelated data",
+          );
+      else
+        await expect(lstat(outside)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
+  it("retains a managed data root that is not a directory", async () => {
+    const home = await createTestTempDirectory("rea-uninstall-data-file-");
+    roots.push(home);
+    const managedRoot = join(home, ".rea");
+    await writeFile(managedRoot, "unrelated file");
+
+    const result = await runUninstall(
+      true,
+      systemUninstallHost(home, undefined, {}),
+    );
+
+    expect(result.status).toBe("complete");
+    for (const name of ["cache", "state"])
+      expect(result.items).toContainEqual(
+        expect.objectContaining({ name, status: "retained" }),
+      );
+    expect(await readFile(managedRoot, "utf8")).toBe("unrelated file");
+  });
+
+  it("purges ordinary managed data through a legitimate home directory link", async () => {
+    const root = await createTestTempDirectory("rea-uninstall-home-link-");
+    roots.push(root);
+    const home = join(root, "actual-home");
+    const linkedHome = join(root, "linked-home");
+    const managedRoot = join(home, ".rea");
+    for (const name of ["cache", "state"]) {
+      await mkdir(join(managedRoot, name), { recursive: true });
+      await writeFile(join(managedRoot, name, "data.txt"), "managed data");
+    }
+    await writeFile(join(managedRoot, "keep.txt"), "other data");
+    await symlink(
+      home,
+      linkedHome,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const result = await runUninstall(
+      true,
+      systemUninstallHost(linkedHome, undefined, {}),
+    );
+
+    expect(result.status).toBe("complete");
+    for (const name of ["cache", "state"]) {
+      expect(result.items).toContainEqual(
+        expect.objectContaining({ name, status: "removed" }),
+      );
+      await expect(lstat(join(managedRoot, name))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+    expect((await lstat(linkedHome)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(managedRoot, "keep.txt"), "utf8")).toBe(
+      "other data",
+    );
+  });
+
+  it("reports root inspection failure without removing managed data", async () => {
+    const home = await createTestTempDirectory("rea-uninstall-data-denied-");
+    roots.push(home);
+    const managedRoot = join(home, ".rea");
+    for (const name of ["cache", "state"]) {
+      await mkdir(join(managedRoot, name), { recursive: true });
+      await writeFile(join(managedRoot, name, "keep.txt"), "managed data");
+    }
+    const remove = vi.fn(testFileSystem.remove);
+    const result = await runUninstall(
+      true,
+      systemUninstallHost(
+        home,
+        {
+          ...testFileSystem,
+          stat: (path) =>
+            path === managedRoot
+              ? Promise.reject(
+                  Object.assign(new Error("root inspection denied"), {
+                    code: "EACCES",
+                  }),
+                )
+              : lstat(path),
+          remove,
+        },
+        {},
+      ),
+    );
+
+    expect(result.status).toBe("failed");
+    expect(remove).not.toHaveBeenCalled();
+    for (const name of ["cache", "state"]) {
+      expect(result.items).toContainEqual(
+        expect.objectContaining({ name, status: "failed" }),
+      );
+      expect(await readFile(join(managedRoot, name, "keep.txt"), "utf8")).toBe(
+        "managed data",
+      );
+    }
+  });
+});
+
 describe("client configuration filesystem removal", () => {
   it("uninstalls only owned entries and refuses purge symlinks", async () => {
     const home = await createTestTempDirectory("rea-uninstall-");

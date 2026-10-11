@@ -411,6 +411,7 @@ const addDirectCallees = async (input: {
       input.analysis,
       current.address,
       input.signal,
+      "provider",
     );
     examined += 1;
     if (!execution.ok) {

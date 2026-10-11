@@ -94,6 +94,12 @@ fallback for an overloaded method instead of attributing all bodies to one
 selected overload. Native/abstract methods with no decompiled body report
 `body_status: "not_available"` without inferring which implementation flag caused it.
 
+Static initializers (`<clinit>`) return smali with the
+`static_initializer_disassembly` marker. Java decompilation can move their
+instructions into field declarations, leaving an empty or incomplete method
+body. The selected method's disassembly preserves those instructions and retains
+the same source byte limit and explicit truncation reporting.
+
 ## Interpret the result
 
 - Package inspection retains decoded manifest XML, summary declarations,

@@ -18,8 +18,16 @@ import {
   type InspectWebNetworkCaptureInput,
 } from "../../domain/webNetworkCapture.js";
 import { OwnedCommandFailure } from "../../process/OwnedCommand.js";
-import { HAR_CAPTURE_HEAP_LIMITS } from "./CaptureRelease.js";
+import {
+  HAR_CAPTURE_HEAP_ENFORCED,
+  HAR_CAPTURE_HEAP_LIMITS,
+  HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES,
+} from "./CaptureRelease.js";
 const OPERATION = "inspect_web_network_capture";
+
+/** Reason for a decoder whose owned process tree reached its Job Object commit limit. */
+export const CAPTURE_PROCESS_MEMORY_LIMIT_REASON =
+  "The capture decoder reached its Windows Job Object memory limit";
 
 /** Preserve the origin and typed cause of a historical capture failure. */
 export const historicalCaptureFailure = (
@@ -57,6 +65,18 @@ export const historicalCaptureFailure = (
       );
     if (cause.reason === "output-limit")
       return new AnalysisOutputError(OPERATION, cause.message);
+    // The job's own notification is runtime-independent; Bun's exit status
+    // and diagnostics for an allocation failure are not.
+    if (
+      phase === "decoder" &&
+      cause.reason === "process" &&
+      cause.snapshot?.memoryLimitReached === true
+    )
+      return captureMemoryFailure(
+        input,
+        CAPTURE_PROCESS_MEMORY_LIMIT_REASON,
+        cause,
+      );
     if (
       phase === "decoder" &&
       input.format === "har" &&
@@ -176,11 +196,15 @@ export const captureMemoryFailure = (
       format: input.format,
       maximum_input_bytes: WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
       maximum_reply_bytes: WEB_NETWORK_CAPTURE_LIMITS.outputBytes,
-      ...(input.format === "har"
+      ...(input.format === "har" && HAR_CAPTURE_HEAP_ENFORCED
         ? {
             old_generation_heap_mib: HAR_CAPTURE_HEAP_LIMITS.oldGenerationMiB,
             semi_space_heap_mib: HAR_CAPTURE_HEAP_LIMITS.semiSpaceMiB,
           }
+        : {}),
+      ...(input.format === "har" &&
+      HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES !== null
+        ? { process_memory_limit_bytes: HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES }
         : {}),
       ...(cause instanceof OwnedCommandFailure
         ? {
@@ -191,7 +215,7 @@ export const captureMemoryFailure = (
     },
     {
       cause,
-      remediationAction: `Use a smaller capture exported by its producer, or another decoder with sufficient capacity for the original capture. Preserve the original for provenance; a subset does not establish complete-capture coverage.${input.format === "har" ? ` REA's HAR old-generation heap is fixed at ${HAR_CAPTURE_HEAP_LIMITS.oldGenerationMiB} MiB; inherited NODE_OPTIONS cannot raise it.` : ""}`,
+      remediationAction: `Use a smaller capture exported by its producer, or another decoder with sufficient capacity for the original capture. Preserve the original for provenance; a subset does not establish complete-capture coverage.${input.format === "har" && HAR_CAPTURE_HEAP_ENFORCED ? ` REA's HAR old-generation heap is fixed at ${HAR_CAPTURE_HEAP_LIMITS.oldGenerationMiB} MiB; inherited NODE_OPTIONS cannot raise it.` : ""}${input.format === "har" && HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES !== null ? ` REA's HAR decoder process commit limit is fixed at ${String(HAR_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES)} bytes.` : ""}`,
       ...(cause instanceof OwnedCommandFailure && cause.snapshot !== null
         ? {
             capturedOutput: {

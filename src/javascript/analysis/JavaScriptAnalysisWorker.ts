@@ -26,10 +26,12 @@ import {
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import { ok, err, type Result } from "../../domain/result.js";
+import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
 import {
   PrivateRuntimeRoot,
   PrivateRuntimeRootUnavailableError,
 } from "../../process/PrivateRuntimeRoot.js";
+import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
 import {
   ProviderProcessSupervisor,
   spawnOwnedProviderProcess,
@@ -58,6 +60,9 @@ const OPERATION = "analyze_javascript_application";
 const PROVIDER = "javascript-static-analysis";
 const MIB = 1024 * 1024;
 const pendingCleanup = new Set<JavaScriptAnalysisWorker>();
+/** The worker runs on this executable; Bun accepts but ignores V8 heap flags. */
+const WORKER_HEAP_FLAGS_ENFORCED =
+  javaScriptRuntime(process.versions).id === "node";
 
 /** One sequential owned worker, retained between source files and closed after analysis. */
 export class JavaScriptAnalysisWorker {
@@ -78,6 +83,8 @@ export class JavaScriptAnalysisWorker {
   #retainedStaticBytes = 0;
   #sourcesRemaining: number | undefined;
   readonly #resultBudgetBytes: number;
+  /** Null when the runtime enforces the V8 heap flags instead. */
+  readonly #processMemoryLimitBytes: number | null;
   readonly #onStdout = (chunk: Buffer | string): void => {
     try {
       this.#pending +=
@@ -129,6 +136,9 @@ export class JavaScriptAnalysisWorker {
         "JavaScript worker source count must be a nonnegative safe integer",
       );
     this.#sourcesRemaining = sourceCount;
+    this.#processMemoryLimitBytes = javaScriptWorkerMemoryLimitBytes(
+      limits.heapMb,
+    );
     // Reserve host-side control, schema/Evidence work and a maximum record's
     // transient copies. Admission also accounts for retained earlier files.
     this.#resultBudgetBytes = Math.max(
@@ -355,6 +365,9 @@ export class JavaScriptAnalysisWorker {
             });
         break;
       }
+      // An allocation failure may surface as a protocol failure or be caught
+      // inside the worker; any reached limit makes this file's result partial.
+      if (this.#memoryLimitReached()) throw this.#memoryFailure(file.path);
     } catch (cause: unknown) {
       const error = this.#failure(cause, file.path, deadline, signal);
       this.#lastFailure = error;
@@ -449,6 +462,9 @@ export class JavaScriptAnalysisWorker {
       cwd: this.#root.path,
       hostEnvironment: environment,
       stdin: "pipe",
+      ...(this.#processMemoryLimitBytes === null
+        ? {}
+        : { memoryLimitBytes: this.#processMemoryLimitBytes }),
       signal: deadline.signal,
     });
     this.#supervisor = new ProviderProcessSupervisor(
@@ -468,7 +484,12 @@ export class JavaScriptAnalysisWorker {
         OPERATION,
         "JavaScript worker emitted facts before its startup handshake",
       );
-    this.#heapLimitBytes = ready.heap_limit_bytes;
+    if ((ready.heap_limit_bytes === null) === WORKER_HEAP_FLAGS_ENFORCED)
+      throw new AnalysisOutputError(
+        OPERATION,
+        "JavaScript worker heap limit does not match the runtime that launched it",
+      );
+    this.#heapLimitBytes = ready.heap_limit_bytes ?? 0;
     this.#ready = true;
   }
 
@@ -494,25 +515,27 @@ export class JavaScriptAnalysisWorker {
         if (!(await this.#supervisor?.waitForOutputClose(10))) continue;
         if (this.#frames.length !== 0) continue;
         const drained = this.#supervisor?.snapshot() ?? snapshot;
-        throw /heap out of memory|heap limit|allocation failed/iu.test(
-          drained.stderr.text,
-        )
-          ? new AnalysisResourceConstraintError(
-              OPERATION,
-              "memory",
-              `Owned JavaScript worker exhausted its heap while analyzing ${path} during ${this.#phase}`,
-              this.#limits(),
-              { capturedOutput: this.#captured() },
-            )
-          : new ProviderAdapterError(PROVIDER, OPERATION, {
-              capturedOutput: this.#captured(),
-              diagnostics: {
-                source_path: path,
-                phase: this.#phase,
-                exit_code: drained.exitCode ?? null,
-                signal: drained.signal ?? null,
-              },
-            });
+        throw this.#memoryLimitReached()
+          ? this.#memoryFailure(path)
+          : /heap out of memory|heap limit|allocation failed/iu.test(
+                drained.stderr.text,
+              )
+            ? new AnalysisResourceConstraintError(
+                OPERATION,
+                "memory",
+                `Owned JavaScript worker exhausted its heap while analyzing ${path} during ${this.#phase}`,
+                this.#limits(),
+                { capturedOutput: this.#captured() },
+              )
+            : new ProviderAdapterError(PROVIDER, OPERATION, {
+                capturedOutput: this.#captured(),
+                diagnostics: {
+                  source_path: path,
+                  phase: this.#phase,
+                  exit_code: drained.exitCode ?? null,
+                  signal: drained.signal ?? null,
+                },
+              });
       }
       await waitForAbortableDelay(10, deadline.signal);
     }
@@ -585,12 +608,34 @@ export class JavaScriptAnalysisWorker {
 
   #limits() {
     return {
-      worker_old_space_mb: this.limits.heapMb,
-      ...(this.#heapLimitBytes === 0
+      ...(WORKER_HEAP_FLAGS_ENFORCED
+        ? {
+            worker_old_space_mb: this.limits.heapMb,
+            ...(this.#heapLimitBytes === 0
+              ? {}
+              : { worker_heap_limit_bytes: this.#heapLimitBytes }),
+          }
+        : // Bun enforces no worker heap limit; report it as unavailable.
+          { worker_heap_limit_bytes: null }),
+      ...(this.#processMemoryLimitBytes === null
         ? {}
-        : { worker_heap_limit_bytes: this.#heapLimitBytes }),
+        : {
+            worker_process_memory_limit_bytes: this.#processMemoryLimitBytes,
+          }),
       worker_timeout_ms: this.limits.timeoutMs,
     };
+  }
+  #memoryLimitReached(): boolean {
+    return this.#supervisor?.launch.process.memoryLimitReached === true;
+  }
+  #memoryFailure(path: string): AnalysisResourceConstraintError {
+    return new AnalysisResourceConstraintError(
+      OPERATION,
+      "memory",
+      `Owned JavaScript worker reached its ${this.#processMemoryLimitBytes === null ? "" : `${String(this.#processMemoryLimitBytes)}-byte `}process memory limit while analyzing ${path} during ${this.#phase}`,
+      this.#limits(),
+      { capturedOutput: this.#captured() },
+    );
   }
   #remainingResultBudget(): number {
     // Future sources need their compact observations before current modules
@@ -648,6 +693,13 @@ export class JavaScriptAnalysisWorker {
       return new AnalysisTimeoutError(OPERATION, this.limits.timeoutMs, {
         capturedOutput: this.#captured(),
       });
+    // A reached process limit explains the worker's exit, broken pipe or
+    // truncated frame better than the symptom it produced.
+    if (
+      this.#memoryLimitReached() &&
+      !(cause instanceof AnalysisResourceConstraintError)
+    )
+      return this.#memoryFailure(path);
     if (cause instanceof AnalysisError) return cause;
     if (
       cause instanceof z.ZodError ||

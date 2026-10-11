@@ -1,6 +1,7 @@
 #include "authority.hpp"
 
 #include <delayimp.h>
+#include <cstdio>
 
 namespace rea {
 
@@ -89,17 +90,45 @@ napi_value failureValue(napi_env env, const Failure& failure) {
     return error;
 }
 
+struct InspectionContext { std::unique_ptr<Runtime> probe; };
+
+static void cleanupInspection(void* data) noexcept {
+  std::unique_ptr<InspectionContext> context(static_cast<InspectionContext*>(data));
+  if (!context->probe) return;
+  try { closeRuntime(*context->probe); }
+  catch (const Failure& failure) {
+    // Environment teardown cannot retain an owner or return an error. Report
+    // terminal cleanup failure instead of claiming the directory was removed.
+    std::fprintf(stderr, "REA Windows probe cleanup failed (Win32 %lu) path=\"",
+                 static_cast<unsigned long>(failure.win32));
+    // Emit reversible UTF-16 escapes without allocation or CRT locale conversion.
+    for (wchar_t unit : failure.path) {
+      if (unit == L'"' || unit == L'\\') std::fputc('\\', stderr);
+      if (unit >= 0x20 && unit <= 0x7e) std::fputc(static_cast<int>(unit), stderr);
+      else std::fprintf(stderr, "\\u%04x", static_cast<unsigned>(unit));
+    }
+    std::fprintf(stderr, "\"\n");
+  }
+  catch (const std::exception& failure) {
+    std::fprintf(stderr, "REA Windows probe cleanup failed: %s\n", failure.what());
+  }
+  catch (...) {
+    std::fprintf(stderr, "REA Windows probe cleanup failed: unknown native exception\n");
+  }
+}
+
 static napi_value call(napi_env env, napi_callback_info info) {
   try {
     std::array<napi_value, 2> args;
     size_t count = args.size();
-    check(napi_get_cb_info(env, info, &count, args.data(), nullptr, nullptr));
+    void* data = nullptr;
+    check(napi_get_cb_info(env, info, &count, args.data(), nullptr, &data));
     require(count == 2, "Native call requires operation and arguments", L"", ERROR_INVALID_PARAMETER);
     const auto operation = wide(env, args[0]);
     const auto values = array(env, args[1]);
     if (operation == L"inspect") {
       require(values.empty(), "Inspect takes no arguments", L"", ERROR_INVALID_PARAMETER);
-      return inspect(env);
+      return inspect(env, static_cast<InspectionContext*>(data)->probe);
     }
     if (operation.rfind(L"process_", 0) == 0) return processCall(env, operation, values);
     return filesystemCall(env, operation, values);
@@ -114,8 +143,13 @@ static napi_value call(napi_env env, napi_callback_info info) {
 }
 
 static napi_value initialize(napi_env env, napi_value exports) {
+  auto context = std::make_unique<InspectionContext>();
+  if (napi_add_env_cleanup_hook(env, cleanupInspection, context.get()) != napi_ok) return nullptr;
+  // The environment owns callback data before a function can expose it. Failed
+  // initialization still leaves a valid context for the registered cleanup hook.
+  auto* data = context.release();
   napi_value function;
-  if (napi_create_function(env, "call", NAPI_AUTO_LENGTH, call, nullptr, &function) != napi_ok) return nullptr;
+  if (napi_create_function(env, "call", NAPI_AUTO_LENGTH, call, data, &function) != napi_ok) return nullptr;
   if (napi_set_named_property(env, exports, "call", function) != napi_ok) return nullptr;
   return exports;
 }

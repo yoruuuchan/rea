@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { supportsNodeVersion } from "./runtimeVersion.js";
+import { javaScriptRuntime, supportsNodeVersion } from "./runtimeVersion.js";
 
 describe("supported Node.js versions", () => {
   it.each([
@@ -22,5 +22,19 @@ describe("supported Node.js versions", () => {
     ["invalid", false],
   ])("classifies %s as supported=%s", (version, expected) => {
     expect(supportsNodeVersion(version)).toBe(expected);
+  });
+});
+
+describe("JavaScript runtime identity", () => {
+  it("distinguishes Bun from Node.js by its own version", () => {
+    expect(javaScriptRuntime({ node: "24.18.0" })).toEqual({
+      id: "node",
+      version: "24.18.0",
+    });
+    expect(javaScriptRuntime({ node: "26.3.0", bun: "1.4.2" })).toEqual({
+      id: "bun",
+      version: "1.4.2",
+      nodeCompatibilityVersion: "26.3.0",
+    });
   });
 });

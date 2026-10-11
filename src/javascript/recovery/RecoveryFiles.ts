@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { lstat, mkdir, open, opendir, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
+import { normalizeArtifactPath } from "../../artifacts/ArtifactPaths.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
@@ -89,12 +90,22 @@ export const readRecoveryFile = async (
   return Buffer.concat(chunks, result.bytes);
 };
 
-/** Snapshot one caller-selected UTF-8 script before invoking the engine. */
-export const snapshotRecoveryInput = async (
+export type RecoveryInputSnapshot = {
+  path: string;
+  snapshot_path: string;
+  relative_path: string;
+  sha256: string;
+  bytes: number;
+};
+
+/** Snapshot one script within the remaining operation-wide input budget. */
+const snapshotRecoveryInput = async (
   path: string,
   snapshotPath: string,
+  relativePath: string,
+  maximum: number,
   signal?: AbortSignal,
-) => {
+): Promise<RecoveryInputSnapshot> => {
   if (!isAbsolute(path))
     throw recoveryInputFailure(
       "path",
@@ -102,7 +113,7 @@ export const snapshotRecoveryInput = async (
     );
   let bytes: Buffer;
   try {
-    bytes = await readRecoveryFile(path, RECOVERY_LIMITS.inputBytes, signal);
+    bytes = await readRecoveryFile(path, maximum, signal);
     new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (cause: unknown) {
     if (cause instanceof AnalysisCancelledError) throw cause;
@@ -112,13 +123,76 @@ export const snapshotRecoveryInput = async (
       cause,
     );
   }
+  await mkdir(dirname(snapshotPath), { recursive: true, mode: 0o700 });
   await writeFile(snapshotPath, bytes, { flag: "wx", mode: 0o600 });
   return {
     path,
     snapshot_path: snapshotPath,
+    relative_path: relativePath,
     sha256: recoveryDigest(bytes),
     bytes: bytes.length,
   };
+};
+
+/** Preserve each selected file and its relative input layout without concatenation. */
+export const snapshotRecoveryInputs = async (
+  paths: readonly [string, ...string[]],
+  directory: string,
+  signal?: AbortSignal,
+): Promise<readonly [RecoveryInputSnapshot, ...RecoveryInputSnapshot[]]> => {
+  let commonDirectory = dirname(resolve(paths[0]));
+  for (const path of paths) {
+    while (true) {
+      const fromCommon = relative(commonDirectory, resolve(path));
+      if (
+        fromCommon !== ".." &&
+        !fromCommon.startsWith(`..${sep}`) &&
+        !isAbsolute(fromCommon)
+      )
+        break;
+      const parent = dirname(commonDirectory);
+      if (parent === commonDirectory)
+        throw recoveryInputFailure(
+          "additional_paths",
+          "Selected files must share a filesystem root",
+        );
+      commonDirectory = parent;
+    }
+  }
+  const snapshots: RecoveryInputSnapshot[] = [];
+  let remaining = RECOVERY_LIMITS.inputBytes;
+  for (const path of paths) {
+    const relativePath =
+      paths.length === 1
+        ? "bundle.js"
+        : relative(commonDirectory, resolve(path)).split(sep).join("/");
+    try {
+      if (normalizeArtifactPath(relativePath) !== relativePath)
+        throw new TypeError(
+          "Input names must already use NFC Unicode spelling",
+        );
+    } catch (cause: unknown) {
+      throw recoveryInputFailure(
+        "path",
+        `Cannot preserve selected input path in published artifacts: ${path}: ${recoveryFailureMessage(cause)}`,
+        cause,
+      );
+    }
+    const snapshot = await snapshotRecoveryInput(
+      path,
+      join(directory, relativePath),
+      relativePath,
+      remaining,
+      signal,
+    );
+    snapshots.push(snapshot);
+    remaining -= snapshot.bytes;
+  }
+  // The selected-input tuple guarantees a primary snapshot.
+  const [primary, ...additional] = snapshots;
+  if (primary === undefined)
+    throw recoveryInputFailure("path", "Select a JavaScript input");
+  return [primary, ...additional];
 };
 
 /** Inventory staging without following symlinks or publishing special files. */

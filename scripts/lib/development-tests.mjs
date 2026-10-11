@@ -56,7 +56,9 @@ const artifactConsumers = {
     "tests/boundary/mcp/contractPresentation.test.ts",
     "tests/boundary/mcp/toolSchemaValidity.test.ts",
   ],
-  "artifacts:product-catalog": ["tests/boundary/cli/productCatalog.test.ts"],
+  "artifacts:product-catalog": [
+    "tests/boundary/filesystem/productCatalog.test.ts",
+  ],
   "artifacts:managed-evidence": [
     "tests/boundary/filesystem/setupSkill.test.ts",
   ],

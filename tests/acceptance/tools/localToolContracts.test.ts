@@ -161,26 +161,27 @@ captureTest(
         }),
       ),
     ];
-    // Each CLI case is an independent process; running them concurrently keeps
-    // the suite well inside its deadline on slower CI runners.
-    await Promise.all(
-      invalid.map(async (options, index) => {
-        const request = { ...scenario, ...options };
-        expect(
-          (await call("capture_process_scenario", request)).isError,
-          JSON.stringify(options),
-        ).toBe(true);
-        const path = join(root, `scenario-${String(index)}.json`);
-        await writeFile(path, JSON.stringify(request));
-        await expect(
-          execute(process.execPath, [cli, "capture-process", path, "--json"]),
-          JSON.stringify(options),
-        ).rejects.toMatchObject({
-          code: 1,
-          stdout: expect.stringContaining("invalid_request"),
-        });
-      }),
-    );
+    // Each CLI case initializes its own runtime. Bound subprocess fanout too,
+    // so one test cannot oversubscribe the host beyond the Vitest workers.
+    for (let start = 0; start < invalid.length; start += 2)
+      await Promise.all(
+        invalid.slice(start, start + 2).map(async (options, offset) => {
+          const request = { ...scenario, ...options };
+          expect(
+            (await call("capture_process_scenario", request)).isError,
+            JSON.stringify(options),
+          ).toBe(true);
+          const path = join(root, `scenario-${String(start + offset)}.json`);
+          await writeFile(path, JSON.stringify(request));
+          await expect(
+            execute(process.execPath, [cli, "capture-process", path, "--json"]),
+            JSON.stringify(options),
+          ).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining("invalid_request"),
+          });
+        }),
+      );
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
     const missing = join(root, "missing-executable");
     const failed = await call("capture_process_scenario", {

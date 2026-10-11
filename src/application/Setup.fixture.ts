@@ -52,7 +52,7 @@ export class FakeSetupHost implements SetupHost {
 
   constructor(platform: NodeJS.Platform = "darwin") {
     this.platform = platform;
-    this.registrationCommand = setupRegistrationCommand(platform, false);
+    this.registrationCommand = setupRegistrationCommand(platform, undefined);
   }
 
   macosVersion = (): Promise<string | undefined> =>

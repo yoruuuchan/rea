@@ -20,6 +20,7 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { IdaConfiguration } from "./IdaConfiguration.js";
 import type { IdaMcpConnection } from "./IdaMcpConnection.js";
+import { readSettledHealth } from "./IdaBusyHealth.js";
 import { IdaOperationRunner } from "./IdaOperationRunner.js";
 import {
   IDA_LIMITATIONS,
@@ -183,7 +184,7 @@ export class IdaSessionClient implements AnalysisClient {
       );
     try {
       await this.#start();
-      const before = await this.#observe();
+      const before = await this.#observe(options);
       if (wasCancelled(options))
         return err(new AnalysisCancelledError(operation));
       if (operation === "health") return this.#health(before);
@@ -191,16 +192,11 @@ export class IdaSessionClient implements AnalysisClient {
         throw new AnalysisProtocolError(
           "IDA operation changed after validation.",
         );
-      const runner = new IdaOperationRunner(
-        this.connection,
-        this.config.mode === "attached" ? "legacy" : "modern",
-        this.#database,
-        options?.signal,
-      );
+      const runner = this.#runner(options);
       const result = await runner.run(operation, parameters);
       if (wasCancelled(options))
         return err(new AnalysisCancelledError(operation));
-      const after = await this.#observe();
+      const after = await this.#observe(options);
       if (wasCancelled(options))
         return err(new AnalysisCancelledError(operation));
       return ok(
@@ -224,6 +220,16 @@ export class IdaSessionClient implements AnalysisClient {
     } catch (cause: unknown) {
       return this.#failure(operation, cause, options);
     }
+  }
+
+  #runner(options: ExecutionOptions | undefined): IdaOperationRunner {
+    return new IdaOperationRunner(
+      this.connection,
+      this.config.mode === "attached" ? "legacy" : "modern",
+      this.#database,
+      options?.signal,
+      options?.selectorOrigin,
+    );
   }
 
   #health(metadata: JsonValue) {
@@ -339,7 +345,7 @@ export class IdaSessionClient implements AnalysisClient {
     }
   }
 
-  async #observe(): Promise<JsonValue> {
+  async #observe(options?: ExecutionOptions): Promise<JsonValue> {
     let identity: string;
     if (this.config.mode === "attached") {
       const raw = await this.connection.call("get_metadata", {});
@@ -359,8 +365,10 @@ export class IdaSessionClient implements AnalysisClient {
         throw new AnalysisProtocolError(
           "IDA headless session has no database binding.",
         );
-      const raw = await this.connection.call("server_health", {
+      const raw = await readSettledHealth(this.connection, {
         database: this.#database,
+        timeoutMs: this.config.timeoutMs,
+        signal: options?.signal,
       });
       const metadata = modernHealthSchema.parse(raw);
       if (

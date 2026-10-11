@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { getHeapStatistics } from "node:v8";
 import { AnalysisResourceConstraintError } from "../../domain/analysisErrorCore.js";
+import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
 import type { JavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
 import type { JavaScriptModuleSemanticIr } from "../../domain/javascript/javascriptModuleSemanticIr.js";
@@ -58,7 +59,10 @@ export const serveJavaScriptAnalysisWorker = async (
   const requests = input[Symbol.asyncIterator]();
   await send({
     kind: "ready",
-    heap_limit_bytes: getHeapStatistics().heap_size_limit,
+    heap_limit_bytes:
+      javaScriptRuntime(process.versions).id === "node"
+        ? getHeapStatistics().heap_size_limit
+        : null,
   });
   try {
     for (;;) {

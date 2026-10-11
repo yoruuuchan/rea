@@ -8,8 +8,13 @@ export interface HistoricalCaptureFormatAdapter {
     readonly name: string;
     readonly version: string;
   };
+  /** `memoryLimitBytes` requests an enforced commit limit for the decoder process tree. */
   command(
     requestPath: string,
     runtimePath: string,
-  ): Promise<{ command: string; arguments: readonly string[] }>;
+  ): Promise<{
+    command: string;
+    arguments: readonly string[];
+    memoryLimitBytes?: number;
+  }>;
 }

@@ -14,6 +14,7 @@ import type {
 } from "../../domain/artifactGraph.js";
 import {
   hasZipSignature,
+  isZipPackageFormat,
   zipPackageFormatForPath,
   type ZipPackageFormat,
 } from "../../domain/zipPackageFormat.js";
@@ -217,9 +218,8 @@ export const rootOccurrenceFor = (
   entry_kind: metadata.format === "directory" ? "directory" : "file",
   artifact_kind:
     metadata.format === "directory" ||
-    ["zip", "ipa", "apk", "msix", "appx", "asar", "dmg", "pkg"].includes(
-      metadata.format,
-    )
+    isZipPackageFormat(metadata.format) ||
+    ["asar", "dmg", "pkg"].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
   artifact_format: metadata.format,

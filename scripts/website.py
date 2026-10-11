@@ -31,6 +31,7 @@ def authored_markdown(root):
         path for path in sorted(site.rglob("*.md"))
         if not any(part.startswith(".") or part in ("node_modules", "__pycache__")
                    for part in path.relative_to(site).parts)
+        and "_site" not in path.relative_to(site).parts
     ]
 
 
@@ -111,6 +112,10 @@ def shared_blocks(root, path, source):
         "title": escape(metadata.titles[0].strip(), quote=True),
         "description": escape(metadata.descriptions[0].strip(), quote=True),
     }
+    from website_i18n import language_markup
+    selector, alternates = language_markup(root, path.relative_to(site).as_posix())
+    values["language_picker"] = selector if not metadata.noindex else ""
+    values["alternates"] = alternates if not metadata.noindex else ""
     templates = root / "website/templates"
     return {
         name: indent(Template((templates / f"{name}.html.tmpl").read_text(encoding="utf-8")).substitute(values), "    ")
@@ -207,13 +212,29 @@ def main():
     create.add_argument("route")
     create.add_argument("--title", required=True)
     create.add_argument("--description", required=True)
+    translations = commands.add_parser("translations", help="Maintain gettext catalogs")
+    translations.add_argument("action", choices=("extract", "status", "check"))
+    translations.add_argument("--language", help="Check one language, such as zh-CN")
+    translations.add_argument("--strict", action="store_true", help="Fail on missing or fuzzy translations")
     serve = commands.add_parser("serve", help="Prepare and preview the static site")
     serve.add_argument("--port", type=int, default=4173)
     serve.add_argument("--base-path", choices=("/", "/rea/"), default="/")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     try:
-        if args.command == "new-page":
+        if args.command == "translations":
+            from website_i18n import checked_catalog, extract_catalogs, languages
+            template = extract_catalogs(root, check=args.action != "extract")
+            if args.action != "extract":
+                inventory = languages(root)[1:]
+                if args.language:
+                    inventory = [item for item in inventory if item["code"] == args.language]
+                    if not inventory:
+                        raise ValueError(f"Unknown translation language: {args.language}")
+                for language in inventory:
+                    messages, missing = checked_catalog(root, language, template, strict=args.strict)
+                    print(f"{language['code']}: {len(messages)}/{len(template)} translated; {len(missing)} missing or fuzzy")
+        elif args.command == "new-page":
             new_page(root, args.route, args.title, args.description)
         elif args.command == "sync":
             sync_pages(root, check=args.check)
@@ -228,7 +249,7 @@ def main():
             run_script(root, "prepare-website.py")
             prefix = args.base_path
 
-            handler = preview_handler(root / "website/public", prefix)
+            handler = preview_handler(root / "website/_site", prefix)
             with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
                 print(f"Preview: http://127.0.0.1:{server.server_port}{prefix}", flush=True)
                 server.serve_forever()

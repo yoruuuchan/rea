@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Exact instruction location within the active analysis program. */
+/** Exact code or data location within the active analysis program. */
 export const nativeInstructionInputSchema = z.strictObject({
   address: z.string().min(1),
   document: z.string().optional(),
@@ -99,6 +99,13 @@ export const nativeInstructionSchema = z.strictObject({
       ),
   }),
   references: z.array(reference),
+  incoming_references: z
+    .array(reference)
+    .nullable()
+    .optional()
+    .describe(
+      "Static references to this exact code or data address, excluding synthetic entry-point references. An empty array means the provider examined the address and found none; null or omission means unavailable. Analyzer references do not prove literal addressing or runtime access.",
+    ),
   limitations: z.array(z.string()),
 });
 

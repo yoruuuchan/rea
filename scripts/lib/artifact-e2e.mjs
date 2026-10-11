@@ -5,13 +5,23 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-const environment = () => ({
-  PATH: process.env.PATH ?? "/usr/bin:/bin",
-  REA_LOG_LEVEL: "silent",
-  REA_ANALYSIS_PROVIDER: "auto",
-  // Artifact workflows have no deep-provider prerequisite or GUI authority.
-  HOPPER_LAUNCHER_PATH: "/rea-unconfigured-deep-provider/hopper",
-});
+const environment = () => {
+  const compileCache =
+    process.env.NODE_COMPILE_CACHE ??
+    process.env.REA_ARTIFACT_NODE_COMPILE_CACHE;
+  return {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ...(compileCache &&
+    process.env.NODE_V8_COVERAGE === undefined &&
+    process.env.NODE_DISABLE_COMPILE_CACHE !== "1"
+      ? { NODE_COMPILE_CACHE: compileCache }
+      : {}),
+    REA_LOG_LEVEL: "silent",
+    REA_ANALYSIS_PROVIDER: "auto",
+    // Artifact workflows have no deep-provider prerequisite or GUI authority.
+    HOPPER_LAUNCHER_PATH: "/rea-unconfigured-deep-provider/hopper",
+  };
+};
 
 /** Execute the compiled CLI with production providers and no test adapters. */
 export async function artifactCli(

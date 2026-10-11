@@ -5,6 +5,7 @@ import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.
 import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
+import { javaScriptWorkerMemoryLimitBytes } from "../../../src/process/JavaScriptWorkerMemoryLimit.js";
 import type { JavaScriptArtifactFile } from "../../../src/domain/javascript/javascriptArtifactFiles.js";
 
 const source = (path: string, value: string): JavaScriptArtifactFile => ({
@@ -17,6 +18,9 @@ const source = (path: string, value: string): JavaScriptArtifactFile => ({
   unpacked: false,
   text: { included: true, value },
 });
+
+/** The Job Object limit the worker requests for its 128 MiB heap budget, if any. */
+const processLimit = javaScriptWorkerMemoryLimitBytes(128);
 
 it("reuses one real owned analyzer while retaining distinct source identities and exported returns", async () => {
   const launches: number[] = [];
@@ -146,3 +150,131 @@ it("preserves a failed owned cleanup retry when the next caller cancels before a
     await next.close();
   }
 });
+
+// The handshake mirrors the real server: only Node.js reports an enforced V8 heap limit.
+const resourceFailureWorker = (heapLimit: string) =>
+  new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 30_000 }, (request) =>
+    spawnOwnedProviderProcess({
+      ...request,
+      arguments: [
+        "-e",
+        `const heap = ${heapLimit};
+process.stdout.write(JSON.stringify({ kind: "ready", heap_limit_bytes: heap }) + "\\n");
+require("node:readline").createInterface({ input: process.stdin }).once("line", (line) => {
+  const { id } = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ kind: "failure", id, reason: "resource", resource: "memory", limits: null, message: "fixture" }) + "\\n");
+});`,
+      ],
+    }),
+  );
+
+it("reports the worker heap limit only when the runtime enforces V8 heap flags", async () => {
+  const worker = resourceFailureWorker(
+    'process.versions.bun === undefined ? require("node:v8").getHeapStatistics().heap_size_limit : null',
+  );
+  try {
+    const result = await worker.analyze(
+      source("app.mjs", "export const observed = 7;"),
+      100,
+    );
+    if (result.ok) throw new Error("expected a reported resource failure");
+    expect(result.error.error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      reportedLimits:
+        process.versions.bun === undefined
+          ? {
+              worker_old_space_mb: 128,
+              worker_heap_limit_bytes: expect.any(Number),
+              worker_timeout_ms: 30_000,
+            }
+          : {
+              worker_heap_limit_bytes: null,
+              ...(processLimit === null
+                ? {}
+                : { worker_process_memory_limit_bytes: processLimit }),
+              worker_timeout_ms: 30_000,
+            },
+    });
+  } finally {
+    await worker.close();
+  }
+});
+
+it("rejects a worker heap report that contradicts the launching runtime", async () => {
+  const worker = resourceFailureWorker(
+    "process.versions.bun === undefined ? null : 1",
+  );
+  try {
+    const result = await worker.analyze(
+      source("app.mjs", "export const observed = 7;"),
+      100,
+    );
+    if (result.ok) throw new Error("expected a handshake failure");
+    expect(result.error.error._tag).toBe("AnalysisOutputError");
+  } finally {
+    await worker.close();
+  }
+});
+
+// The launcher runs a real child without a job limit, so any artifact can run
+// it, and its handle reports the notification an owned Windows job records
+// before exit. Bun exits 3 (panic) or 1 (exception) at a reached job limit.
+it.each([true, false])(
+  "classifies a worker exit by the job memory notification (reached: %s)",
+  async (reached) => {
+    const worker = new JavaScriptAnalysisWorker(
+      { heapMb: 128, timeoutMs: 30_000 },
+      async ({ memoryLimitBytes, ...request }) => {
+        expect(memoryLimitBytes).toBe(processLimit ?? undefined);
+        const spawned = await spawnOwnedProviderProcess({
+          ...request,
+          arguments: [
+            "-e",
+            `const heap = process.versions.bun === undefined ? require("node:v8").getHeapStatistics().heap_size_limit : null;
+process.stdout.write(JSON.stringify({ kind: "ready", heap_limit_bytes: heap }) + "\\n");
+require("node:readline").createInterface({ input: process.stdin }).once("line", () => {
+  process.stderr.write("panic: out of memory");
+  process.exit(3);
+});`,
+          ],
+        });
+        let exited = false;
+        spawned.process.once("exit", () => {
+          exited = true;
+        });
+        Object.defineProperty(spawned.process, "memoryLimitReached", {
+          get: () => reached && exited,
+        });
+        return spawned;
+      },
+    );
+    try {
+      const result = await worker.analyze(
+        source("app.mjs", "export const observed = 7;"),
+        100,
+      );
+      if (result.ok) throw new Error("expected the worker to fail");
+      expect(result.error.error).toMatchObject(
+        reached
+          ? {
+              _tag: "AnalysisResourceConstraintError",
+              resource: "memory",
+              reason: expect.stringContaining("process memory limit"),
+              reportedLimits:
+                processLimit === null
+                  ? expect.not.objectContaining({
+                      worker_process_memory_limit_bytes: expect.anything(),
+                    })
+                  : { worker_process_memory_limit_bytes: processLimit },
+              capturedOutput: { stderr: "panic: out of memory" },
+            }
+          : {
+              _tag: "ProviderAdapterError",
+              diagnostics: { exit_code: 3 },
+            },
+      );
+    } finally {
+      await worker.close();
+    }
+  },
+);

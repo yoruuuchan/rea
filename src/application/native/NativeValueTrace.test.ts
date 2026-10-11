@@ -529,3 +529,32 @@ describe("bounded native value dependency composition", () => {
     });
   });
 });
+
+describe("native value trace selector origin", () => {
+  it("marks only the initial procedure as caller-supplied", async () => {
+    const analyzed: { procedure: unknown; origin: unknown }[] = [];
+
+    const result = await traceNativeValues(
+      {
+        execute: async (operation, parameters, options) => {
+          if (operation === "analyze_function")
+            analyzed.push({
+              procedure: parameters.procedure,
+              origin: options?.selectorOrigin,
+            });
+          return analysis.execute(operation, parameters, options);
+        },
+      },
+      { procedure: "0x1000" },
+    );
+
+    expect(result.ok, "the trace completes").toBe(true);
+    expect(
+      analyzed,
+      "the caller's procedure is unmarked and the discovered callee is provider-derived",
+    ).toEqual([
+      { procedure: "0x1000", origin: undefined },
+      { procedure: "0x2000", origin: "provider" },
+    ]);
+  });
+});

@@ -5,7 +5,11 @@ import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { ConfigurationError } from "../domain/configurationErrors.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
-import { npxRegistrationCommand } from "./ClientRegistrationIdentity.js";
+import {
+  invokingPackageRunner,
+  packageRunnerRegistrationCommand,
+  type PackageRunner,
+} from "./ClientRegistrationIdentity.js";
 import {
   SUPPORTED_NODE_VERSION_PROSE,
   supportsNodeVersion,
@@ -48,10 +52,10 @@ import type { DoctorScope } from "./Doctor.js";
 /** Resolve the executable and arguments used in a managed MCP registration. */
 export const setupRegistrationCommand = (
   platform: NodeJS.Platform,
-  useNpmRunner: boolean,
+  packageRunner: PackageRunner | undefined,
 ): readonly string[] =>
-  useNpmRunner
-    ? npxRegistrationCommand(platform)
+  packageRunner !== undefined
+    ? packageRunnerRegistrationCommand(packageRunner, platform)
     : platform === "win32"
       ? [
           process.execPath,
@@ -113,7 +117,7 @@ export const systemSetupHost = (
       skillDestinations(homeDirectory, clientIds, environment, platform),
     registrationCommand: setupRegistrationCommand(
       platform,
-      environment.npm_command === "exec",
+      invokingPackageRunner(environment, platform),
     ),
     nodeVersion: process.versions.node,
     macosVersion: () => doctorHost.macosVersion(),

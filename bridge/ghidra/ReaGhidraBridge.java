@@ -375,7 +375,7 @@ public final class ReaGhidraBridge extends HeadlessScript {
             case "search_procedures" -> search(request.params, true);
             case "search_strings" -> search(request.params, false);
             case "inspect_native_data_type" -> inspectNativeDataType(request.params);
-            case "inspect_native_instruction" -> inspectNativeInstruction(request.params);
+            case "inspect_native_instruction" -> inspectNativeInstruction(request.params, true);
             case "resolve_native_call_targets" -> resolveNativeCallTargets(request.params);
             case "xrefs" -> xrefs(request.params);
             case "analyze_function" -> {
@@ -885,7 +885,7 @@ public final class ReaGhidraBridge extends HeadlessScript {
         return item;
     }
 
-    private JsonObject inspectNativeInstruction(JsonObject params) throws Exception {
+    private JsonObject inspectNativeInstruction(JsonObject params, boolean includeIncoming) throws Exception {
         requireKeys(params, Set.of("document", "address"));
         requireDocument(params);
         Address address = requireAddress(params, "address");
@@ -968,6 +968,19 @@ public final class ReaGhidraBridge extends HeadlessScript {
         result.add("operands", operands);
         result.add("flow", flow);
         result.add("references", references);
+        if (includeIncoming) {
+            TreeMap<String, Reference> incoming = new TreeMap<>();
+            ReferenceIterator incomingIterator = currentProgram.getReferenceManager().getReferencesTo(address);
+            while (incomingIterator.hasNext()) {
+                monitor.checkCancelled();
+                addReference(incoming, incomingIterator.next());
+            }
+            List<Reference> orderedIncoming = new ArrayList<>(incoming.values());
+            orderedIncoming.sort(REFERENCE_ORDER);
+            JsonArray incomingReferences = new JsonArray();
+            for (Reference reference : orderedIncoming) incomingReferences.add(instructionReference(reference));
+            result.add("incoming_references", incomingReferences);
+        }
         List<String> limitations = new ArrayList<>(List.of("Operand components are Ghidra Listing decoder tokens; effective memory base/index/displacement roles and per-instruction context mode are unavailable. The mode field is the program language variant."));
         if (flow.get("kind").getAsString().equals("terminal")) limitations.add("No RETURN operation was observed in the provider's instruction p-code; terminal classification remains generic.");
         result.add("limitations", GSON.toJsonTree(limitations));
@@ -975,7 +988,7 @@ public final class ReaGhidraBridge extends HeadlessScript {
     }
 
     private JsonObject resolveNativeCallTargets(JsonObject params) throws Exception {
-        JsonObject instruction = inspectNativeInstruction(params);
+        JsonObject instruction = inspectNativeInstruction(params, false);
         JsonObject result = new JsonObject();
         result.add("call_site", instruction.get("address"));
         result.add("procedure", instruction.get("procedure"));

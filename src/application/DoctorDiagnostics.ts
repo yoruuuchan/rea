@@ -91,11 +91,36 @@ export const doctorHealthy = (
   );
 };
 
-const nodeCheck = (host: DoctorHost): DoctorCheck =>
-  check("node", supportsNodeVersion(host.nodeVersion), host.nodeVersion, {
+/** Bun passes when its reported Node.js compatibility version is supported. */
+const nodeCheck = ({ runtime }: DoctorHost): DoctorCheck => {
+  const failure = {
     remediation: `Install ${SUPPORTED_NODE_VERSION_PROSE}.`,
     classification: "missing_dependency",
-  });
+  } as const;
+  if (runtime.id === "node")
+    return {
+      ...check(
+        "node",
+        supportsNodeVersion(runtime.version),
+        runtime.version,
+        failure,
+      ),
+      details: { runtime: "node", version: runtime.version },
+    };
+  return {
+    ...check(
+      "node",
+      supportsNodeVersion(runtime.nodeCompatibilityVersion),
+      `Bun ${runtime.version} (Node.js ${runtime.nodeCompatibilityVersion} compatibility)`,
+      failure,
+    ),
+    details: {
+      runtime: "bun",
+      version: runtime.version,
+      node_compatibility_version: runtime.nodeCompatibilityVersion,
+    },
+  };
+};
 
 const hostCheck = async (host: DoctorHost): Promise<DoctorCheck> => {
   const macosVersion =

@@ -33,3 +33,40 @@ it("exit does not establish complete output when a producer closes its streams l
     supervisor.dispose();
   }
 });
+
+it("reports a reached process memory limit only when the handle observed one", () => {
+  let reached = false;
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  // A live accessor, as on the owned Windows process handle.
+  Object.defineProperty(producer, "memoryLimitReached", { get: () => reached });
+  const exitSnapshots: unknown[] = [];
+  const supervisor = new ProviderProcessSupervisor(
+    { process: producer, ownsProcessLifetime: false },
+    {
+      onDiagnostic: (event) => {
+        if (event.type === "exit") exitSnapshots.push(event.snapshot);
+      },
+    },
+  );
+  try {
+    expect(supervisor.snapshot()).not.toHaveProperty("memoryLimitReached");
+    // Owned launchers record the job notification before emitting exit.
+    reached = true;
+    producer.emit("exit", 3, null);
+    expect(supervisor.snapshot()).toMatchObject({
+      exitCode: 3,
+      memoryLimitReached: true,
+    });
+    expect(exitSnapshots).toEqual([
+      expect.objectContaining({ memoryLimitReached: true }),
+    ]);
+  } finally {
+    supervisor.dispose();
+  }
+});

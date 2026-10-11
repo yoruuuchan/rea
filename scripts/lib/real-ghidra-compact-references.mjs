@@ -13,6 +13,7 @@ export async function verifyGhidraCompactReferences(call, x86, cli) {
     procedure: address(0x1020),
   });
   const inspected = {};
+  const incomingByTarget = new Map();
   for (const [kind, offset, target] of cases) {
     const instruction = await call("inspect_native_instruction", {
       address: address(offset),
@@ -26,6 +27,12 @@ export async function verifyGhidraCompactReferences(call, x86, cli) {
     assert.equal(reference.data, true);
     assert.equal(reference.read, kind === "read");
     assert.equal(reference.write, kind === "write");
+    const incoming = await call("inspect_native_instruction", {
+      address: address(target),
+    });
+    assert.notEqual(incoming.status, "decoded");
+    assertIncomingReference(incoming, reference);
+    incomingByTarget.set(incoming.address, incoming);
   }
   const indexed = await call("inspect_native_instruction", {
     address: address(x86 ? 0x103d : 0x1045),
@@ -39,6 +46,15 @@ export async function verifyGhidraCompactReferences(call, x86, cli) {
     ),
     "Indexed fixture lacks a non-primary analyzer reference",
   );
+  for (const reference of indexed.references) {
+    const incoming = await call("inspect_native_instruction", {
+      address: reference.target_address,
+    });
+    assertIncomingReference(incoming, reference);
+    incomingByTarget.set(incoming.address, incoming);
+  }
+  for (const incoming of incomingByTarget.values())
+    await verifyIncomingReferences(call, incoming);
 
   const { direct, targets } = await verifyDirectCall(
     call,
@@ -64,7 +80,13 @@ export async function verifyGhidraCompactReferences(call, x86, cli) {
   );
 
   if (cli !== undefined) {
-    for (const instruction of [inspected.write, indexed, direct, returned])
+    for (const instruction of [
+      inspected.write,
+      indexed,
+      direct,
+      returned,
+      ...incomingByTarget.values(),
+    ])
       assert.deepEqual(
         await cli("inspect-native-instruction", instruction.address),
         instruction,
@@ -82,6 +104,10 @@ export async function verifyGhidraCompactReferences(call, x86, cli) {
     data_read_write: true,
     source_primary_provenance: true,
     full_reference_parity: true,
+    typed_incoming_reference_parity: true,
+    incoming_reference_ordering: true,
+    incoming_xrefs_parity: true,
+    synthetic_entry_reference_excluded: true,
     direct_call_reference_parity: true,
     indexed_reference_count: indexed.references.length,
     indexed_non_primary_count: indexed.references.filter(
@@ -115,7 +141,62 @@ async function verifyDirectCall(call, entry, callee) {
   const full = await call("procedure_references", { procedure: entry });
   for (const reference of direct.references)
     assertReference(reference, entry, full.references);
+  const incoming = await call("inspect_native_instruction", {
+    address: callee,
+  });
+  const callReference = direct.references.find(
+    (reference) => reference.target_address === callee && reference.call,
+  );
+  assert.ok(callReference, "Direct fixture call lacks its reference");
+  assertIncomingReference(incoming, callReference);
+  await verifyIncomingReferences(call, incoming);
+  // PE header pointers are real incoming data references; synthetic loader
+  // entry-point references must not be presented as callers.
+  await verifyIncomingReferences(call, direct);
+  for (const reference of direct.incoming_references) {
+    assert.equal(reference.type, "DATA");
+    assert.equal(reference.data, true);
+    assert.equal(reference.source, "default");
+  }
   return { direct, targets };
+}
+
+function assertIncomingReference(instruction, reference) {
+  const incoming = instruction.incoming_references.find(
+    (item) =>
+      item.source_address === reference.source_address &&
+      item.target_address === reference.target_address &&
+      item.type === reference.type &&
+      item.operand_index === reference.operand_index &&
+      item.primary === reference.primary,
+  );
+  assert.ok(
+    incoming,
+    "Outgoing reference lacks its typed incoming counterpart",
+  );
+  assert.deepEqual(incoming, reference);
+}
+
+async function verifyIncomingReferences(call, instruction) {
+  const repeated = await call("inspect_native_instruction", {
+    address: instruction.address,
+  });
+  assert.deepEqual(
+    repeated.incoming_references,
+    instruction.incoming_references,
+    "Repeated incoming reference queries changed order or provider facts",
+  );
+  assert.deepEqual(
+    [
+      ...new Set(
+        instruction.incoming_references.map(
+          (reference) => reference.source_address,
+        ),
+      ),
+    ],
+    await call("xrefs", { address: instruction.address }),
+    "Incoming references differ from xrefs source addresses or their order",
+  );
 }
 
 async function verifyEmptyReferences(call, address) {
@@ -129,6 +210,7 @@ async function verifyEmptyReferences(call, address) {
   const outside = await call("inspect_native_instruction", { address: "0x0" });
   assert.equal(outside.status, "outside-memory");
   assert.deepEqual(outside.references, []);
+  assert.deepEqual(outside.incoming_references, []);
   assert.equal(
     (await call("resolve_native_call_targets", { address: "0x0" })).status,
     "unavailable",

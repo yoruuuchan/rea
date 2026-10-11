@@ -35,7 +35,7 @@ it("does not equate an owned native helper exit with an external GUI exit", asyn
   const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
   onTestFinished(async () => {
     await client.close();
-  });
+  }, 45_000);
   const result = await client.start();
   expect(result).toMatchObject({
     ok: false,
@@ -87,7 +87,7 @@ it.each(["exit", "signal", "exit75"] as const)(
     const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
     onTestFinished(async () => {
       await client.close();
-    });
+    }, 45_000);
     const result = await client.start();
     expect(result).toMatchObject({
       ok: false,
@@ -139,7 +139,7 @@ it.each([0, 1])(
     const client = new HopperClient({ launcher, startupTimeoutMs: 10_000 });
     onTestFinished(async () => {
       await client.close();
-    });
+    }, 45_000);
     const result = await client.start();
     expect(result).toMatchObject({
       ok: false,
@@ -177,7 +177,7 @@ it("preserves a successful helper's diagnostics when bridge readiness is never o
   const client = new HopperClient({ launcher, startupTimeoutMs: 1500 });
   onTestFinished(async () => {
     await client.close();
-  });
+  }, 45_000);
   const result = await client.start();
   if (result.ok)
     throw new Error("Expected missing bridge readiness to time out");

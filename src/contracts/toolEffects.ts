@@ -41,6 +41,11 @@ const sessionEvidence = effects({ mutatesSession: true });
 
 /** Explicit effect audit for every public tool. */
 export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
+  inspect_wasm_artifact: effects({
+    mutatesSession: true,
+    writesFilesystem: true,
+    launchesProcess: true,
+  }),
   inspect_evm_interface: effects({
     mutatesSession: true,
     writesFilesystem: true,
@@ -452,6 +457,7 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   evaluate_reconstruction_coverage: effects(),
   project_android_application_graph: evidence,
   project_apple_application_graph: evidence,
+  project_harmony_application_graph: evidence,
   open_binary: effects({ mutatesSession: true, launchesProcess: true }),
   close_binary: effects({
     mutatesSession: true,

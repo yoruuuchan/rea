@@ -1,4 +1,7 @@
-import type { AnalysisOperation } from "./AnalysisProvider.js";
+import type {
+  AnalysisOperation,
+  ExecutionOptions,
+} from "./AnalysisProvider.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { parseRelatedAddresses } from "../domain/hopperValues.js";
@@ -11,6 +14,7 @@ type AnalysisCall = (
   name: AnalysisOperation,
   arguments_: Readonly<Record<string, JsonValue>>,
   signal?: AbortSignal,
+  selectorOrigin?: ExecutionOptions["selectorOrigin"],
 ) => Promise<Result<JsonValue, AnalysisError>>;
 
 export interface CallPathTraceInput {
@@ -114,7 +118,7 @@ const expandAddress = async (
   const relation = input.direction === "forward" ? "callees" : "callers";
   const tool =
     input.direction === "forward" ? "procedure_callees" : "procedure_callers";
-  const result = await call(tool, { procedure: address }, signal);
+  const result = await call(tool, { procedure: address }, signal, "provider");
   if (!result.ok) {
     state.failures.push({
       address,

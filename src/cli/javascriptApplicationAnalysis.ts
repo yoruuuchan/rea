@@ -1,4 +1,3 @@
-import { analyzeJavaScriptApplication } from "../application/javascript/JavaScriptApplicationService.js";
 import { JAVASCRIPT_APPLICATION_PROVIDER } from "../application/InvestigationProviders.js";
 import { createProgressReporter } from "../application/ProgressReporter.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
@@ -13,6 +12,8 @@ export const runCliJavaScriptApplicationAnalysis = async (
   input: unknown,
   signal?: AbortSignal,
 ): Promise<JsonValue> => {
+  const { analyzeJavaScriptApplication } =
+    await import("../application/javascript/JavaScriptApplicationService.js");
   const progress = createProgressReporter(
     async (update) => {
       process.stderr.write(`${JSON.stringify({ rea_progress: update })}\n`);

@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -12,6 +13,9 @@ from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import urlopen
 import xml.etree.ElementTree as ET
+
+import polib
+from website_i18n import Document, build_translations, checked_catalog, extract_catalogs, languages, reading_pages, read_runtime
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -113,7 +117,7 @@ class WebsiteSearchChecks(unittest.TestCase):
         for name, old, new, message in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 site = Path(directory) / "public"
-                shutil.copytree(ROOT / "website/public", site)
+                shutil.copytree(ROOT / "website/_site", site)
                 path = site / name
                 source = path.read_text()
                 self.assertIn(old, source)
@@ -123,7 +127,7 @@ class WebsiteSearchChecks(unittest.TestCase):
                 )
         with tempfile.TemporaryDirectory() as directory:
             site = Path(directory) / "public"
-            shutil.copytree(ROOT / "website/public", site)
+            shutil.copytree(ROOT / "website/_site", site)
             (site / "assets/social-card.png").unlink()
             self.assertIn(
                 "Social preview PNG is missing; run scripts/prepare-website.py",
@@ -162,6 +166,9 @@ class WebsiteMaintenanceChecks(unittest.TestCase):
             for name in ("public", "templates"):
                 shutil.copytree(ROOT / "website" / name, root / "website" / name)
             site = root / "website/public"
+            WEBSITE.sync_pages(root)
+            shutil.copyfile(ROOT / "website/_site/assets/social-card.png", site / "assets/social-card.png")
+            PREPARE.prepare_notes_example(site)
             page = WEBSITE.new_page(root, "blog/new-example", 'A <test> & "result"', 'Check "quotes" & <markup>.')
             source = page.read_text()
             self.assertIn('href="../../blog/" aria-current="page"', source)
@@ -182,7 +189,7 @@ class WebsiteMaintenanceChecks(unittest.TestCase):
     def test_links_in_prompts_fragments_and_copy_controls_are_verified(self):
         with tempfile.TemporaryDirectory() as directory:
             site = Path(directory) / "public"
-            shutil.copytree(ROOT / "website/public", site)
+            shutil.copytree(ROOT / "website/_site", site)
             page = site / "faq/index.html"
             original = page.read_text()
             cases = (
@@ -240,6 +247,159 @@ class WebsiteMaintenanceChecks(unittest.TestCase):
                     finally:
                         server.shutdown()
                         worker.join()
+
+
+class WebsiteTranslationChecks(unittest.TestCase):
+    """Exercise source edits, translated evidence and language editions at their consumers."""
+
+    @contextlib.contextmanager
+    def translated_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("public", "templates", "locales"):
+                shutil.copytree(ROOT / "website" / name, root / "website" / name)
+            inventory = [item for item in languages(ROOT) if item["code"] in {"en", "zh-CN", "ar"}]
+            (root / "website/locales/languages.json").write_text(json.dumps(inventory))
+            for item in inventory:
+                (root / item["readme"]).write_text("# REA\n")
+            WEBSITE.sync_pages(root)
+            extract_catalogs(root)
+            yield root
+
+    def test_source_change_preserves_review_and_excludes_stale_translation_from_search(self):
+        with self.translated_project() as root:
+            path = root / "website/locales/zh-CN/messages.po"
+            catalog = polib.pofile(path)
+            old = catalog.find("How do I install REA?", msgctxt="page:faq/index.html")
+            old.tcomment = "Reviewed installation wording."
+            old_translation = old.msgstr
+            catalog.save(path)
+            page = root / "website/public/faq/index.html"
+            page.write_text(page.read_text().replace("How do I install REA?", "How do I install REA today?"))
+            with self.assertRaisesRegex(ValueError, "Translation sources changed"):
+                extract_catalogs(root, check=True)
+            extract_catalogs(root)
+            updated = polib.pofile(path)
+            archived = next(entry for entry in updated if entry.obsolete and entry.msgid == old.msgid)
+            self.assertEqual((archived.msgstr, archived.tcomment), (old_translation, old.tcomment))
+            new = updated.find("How do I install REA today?", msgctxt=old.msgctxt)
+            self.assertEqual(new.msgstr, "")
+            build_translations(root, root / "website/_site")
+            site = root / "website/_site"
+            PREPARE.prepare_sitemap(site)
+            fallback = VERIFY.HtmlReferences()
+            fallback.feed((site / "zh-CN/faq/index.html").read_text())
+            self.assertTrue(fallback.translation_fallback)
+            self.assertTrue(fallback.noindex())
+            self.assertEqual(fallback.lang, "en")
+            self.assertNotIn("https://rea.tools/zh-CN/faq/", (site / "sitemap.xml").read_text())
+            self.assertNotIn('hreflang="zh-CN"', (site / "faq/index.html").read_text())
+            new.msgstr = "现在如何安装 REA？"
+            new.flags.append("fuzzy")
+            updated.save(path)
+            build_translations(root, site)
+            self.assertIn('data-translation-fallback="true"', (site / "zh-CN/faq/index.html").read_text())
+            new.flags.remove("fuzzy")
+            updated.save(path)
+            build_translations(root, site)
+            PREPARE.prepare_sitemap(site)
+            result = (site / "zh-CN/faq/index.html").read_text()
+            self.assertIn("现在如何安装 REA？", result)
+            self.assertNotIn("data-translation-fallback", result)
+            self.assertIn('href="../assets/styles.css"', (site / "zh-CN/index.html").read_text())
+            self.assertIn('hreflang="zh-CN"', (site / "faq/index.html").read_text())
+            self.assertIn("https://rea.tools/zh-CN/faq/", (site / "sitemap.xml").read_text())
+
+    def test_broken_placeholders_and_inline_markup_fail_before_replacing_preview(self):
+        with self.translated_project() as root:
+            site = root / "website/_site"
+            build_translations(root, site)
+            before = (site / "zh-CN/index.html").read_bytes()
+            path = root / "website/locales/zh-CN/messages.po"
+            catalog = polib.pofile(path)
+            entry = catalog.find("Already know RE? {ph0}Skip to analysis guides →{ph1}", msgctxt="page:index.html")
+            original = entry.msgstr
+            for bad, reason in (("丢失链接", "changed placeholders"), ("{ph1}错误的链接{ph0}", "invalid inline markup")):
+                with self.subTest(reason=reason):
+                    entry.msgstr = bad
+                    catalog.save(path)
+                    with self.assertRaisesRegex(ValueError, reason):
+                        build_translations(root, site)
+                    self.assertEqual((site / "zh-CN/index.html").read_bytes(), before)
+            entry.msgstr = original
+            catalog.save(path)
+            (root / "website/locales/languages.json").unlink()
+            with self.assertRaisesRegex(ValueError, "Missing languages.json"):
+                build_translations(root, site)
+            self.assertEqual((site / "zh-CN/index.html").read_bytes(), before)
+
+    def test_runtime_message_drift_and_page_specific_completeness(self):
+        with self.translated_project() as root:
+            script = root / "website/public/assets/dino-demo.js"
+            original = script.read_text()
+            script.write_text(original.replace('t("Pause")', 't("Pause game")'))
+            self.assertIn("Pause game", read_runtime(root))
+            with self.assertRaisesRegex(ValueError, "Translation sources changed"):
+                extract_catalogs(root, check=True)
+            script.write_text(original.replace('t("Pause")', 't(dynamicMessage)'))
+            with self.assertRaisesRegex(ValueError, "one literal message"):
+                read_runtime(root)
+            script.write_text(original)
+            path = root / "website/locales/zh-CN/messages.po"
+            catalog = polib.pofile(path)
+            catalog.find("Pause", msgctxt="runtime").msgstr = ""
+            catalog.save(path)
+            site = root / "website/_site"
+            build_translations(root, site)
+            self.assertIn('data-translation-fallback="true"', (site / "zh-CN/examples/dino-lab/index.html").read_text())
+            self.assertNotIn('data-translation-fallback="true"', (site / "zh-CN/faq/index.html").read_text())
+
+    def test_all_readme_editions_preserve_code_targets_downloads_and_reciprocal_routes(self):
+        site = ROOT / "website/_site"
+        english_pages = reading_pages(ROOT / "website/public")
+        for language in languages(ROOT):
+            code = language["code"]
+            for original in english_pages:
+                relative = original.relative_to(ROOT / "website/public")
+                path = site / relative if code == "en" else site / code / relative
+                with self.subTest(language=code, page=str(relative)):
+                    source = original.read_text()
+                    translated = path.read_text()
+                    def evidence(html):
+                        doc = Document(html)
+                        return sorted(doc.source[node.start:node.end] for node in doc.nodes if node.tag in {"pre", "code", "kbd"} or node.attrs.get("translate") == "no")
+                    self.assertEqual(evidence(source), evidence(translated))
+                    parser = VERIFY.HtmlReferences()
+                    parser.feed(translated)
+                    self.assertEqual(parser.lang, "en" if parser.translation_fallback else code)
+                    if code != "en" and not parser.translation_fallback:
+                        self.assertEqual(parser.direction, language["dir"])
+                    if parser.translation_fallback:
+                        self.assertTrue(parser.noindex())
+                        self.assertNotIn(code, parser.alternates)
+                    else:
+                        self.assertEqual(parser.alternates[code], WEBSITE.page_url(site, path))
+                    english = VERIFY.HtmlReferences()
+                    english.feed((site / relative).read_text())
+                    self.assertEqual(parser.alternates, english.alternates)
+                    self.assertTrue(set(parser.copy_targets) <= parser.ids)
+        for fixture in WEBSITE.NOTES_FIXTURES:
+            self.assertEqual((site / fixture).read_bytes(), (ROOT / "website/public" / fixture).read_bytes())
+        with ThreadingHTTPServer(("127.0.0.1", 0), WEBSITE.preview_handler(site, "/rea/")) as server:
+            worker = Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}/rea/"
+                with urlopen(base + "ar/faq?test=1") as response:
+                    self.assertEqual(response.url, base + "ar/faq/?test=1")
+                    self.assertIn(b'lang="ar"', response.read())
+                with urlopen(base + "assets/i18n.js") as response:
+                    self.assertIn(b"export function t", response.read())
+                with urlopen(base + "examples/notes-example.zip") as response:
+                    self.assertEqual(response.read(), (site / "examples/notes-example.zip").read_bytes())
+            finally:
+                server.shutdown()
+                worker.join()
 
 
 if __name__ == "__main__":

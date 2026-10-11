@@ -27,6 +27,7 @@ export const toolFamilyCatalog = (sources) => {
       contracts: [
         ...sources.artifactContracts.ARTIFACT_TOOL_CONTRACTS,
         ...sources.evmContracts.EVM_TOOL_CONTRACTS,
+        ...sources.wasmContracts.WASM_TOOL_CONTRACTS,
       ],
     },
     {
@@ -178,6 +179,10 @@ export const providerCatalog = (sources) => {
         sources.binaryDiagnosticsContracts.BINARY_DIAGNOSTICS_TOOL_CONTRACTS.filter(
           ({ name }) => name === "inspect_pe_resources",
         ),
+    },
+    {
+      identity: sources.wasmProvider.WABT_PROVIDER_IDENTITY,
+      contracts: sources.wasmContracts.WASM_TOOL_CONTRACTS,
     },
     {
       identity: sources.evmProvider.EVMOLE_PROVIDER_IDENTITY,

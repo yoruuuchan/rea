@@ -111,11 +111,14 @@ snapshots and scripting.
 REA changes quickly, and new releases include frequent bug fixes. Keep your
 installation up to date.
 
-For an npm-installed CLI:
+For a CLI installed with `npm install --global` or `bun add --global`:
 
 ```bash
 rea update
 ```
+
+Bun global updates require Bun 1.2.17 or later. With an older Bun release,
+upgrade Bun manually before running `rea update`.
 
 To refresh your agent registrations and skill, run the setup command printed
 by the update.
@@ -127,7 +130,8 @@ npx rea-agents@latest setup
 ```
 
 Review the setup changes and restart your agent. For one-off CLI commands,
-use `npx rea-agents@latest` followed by the command.
+use `npx rea-agents@latest` followed by the command. With Bun, use
+`bunx rea-agents@latest` in place of `npx rea-agents@latest`.
 
 ## How REA works
 
@@ -151,6 +155,7 @@ Additional tools and host support depend on the target:
 | ---------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Native binaries        | Pseudocode, assembly, strings, symbols, calls and references                         | Hopper, Ghidra or IDA; [native analysis](https://rea.tools/guides/native/)                                                            |
 | Offline ELF layout     | Sections, segments, original symbols/relocations and static mitigation candidates    | Caller-supplied pwntools on Linux x64; [binary diagnostics](docs/binary-diagnostics.md)                                               |
+| WASM artifact          | Validation, sections, exact import/export WAT forms and decoded WAT                  | Caller-supplied WABT 1.0.42; `inspect_wasm_artifact`                                                                                  |
 | EVM bytecode           | Dispatch selectors, byte offsets, inferred arguments and mutability                  | Local raw/hex carrier on Linux x64; [offline EVM guide](docs/evm-bytecode.md)                                                         |
 | Recorded Linux crashes | Raw notes, every recorded thread's registers/signals and optional mapping candidates | Caller-supplied pwntools on Linux x64; optional GDB/pwndbg; [recorded crashes](docs/recorded-crashes.md)                              |
 | JavaScript / Electron  | Modules, imports, source maps, routes, IPC and native add-on relationships           | Node.js and npm; [application analysis](https://rea.tools/guides/javascript/)                                                         |
@@ -176,8 +181,8 @@ Native formats and host support vary by provider. See
 [IDA guide](docs/ida-provider.md), and
 [experimental Windows Ghidra support](docs/windows-ghidra-p0.md).
 Ghidra also supports [16-bit DOS analysis](docs/ghidra-dos.md).
-For large binaries, raise its startup deadline with
-`REA_GHIDRA_STARTUP_TIMEOUT_MS`.
+For large binaries, raise the provider's startup deadline with
+`REA_GHIDRA_STARTUP_TIMEOUT_MS` or `REA_HOPPER_STARTUP_TIMEOUT_MS`.
 For provider selection, see the [CLI guide](docs/cli.md#choose-a-provider).
 Check [release availability](docs/installation.md#released-package-and-main)
 for features added since the latest npm release.
@@ -276,7 +281,7 @@ model provider has its own data policy.
 
 Update first; a recent release may already fix it.
 
-For an npm-installed CLI:
+For a CLI installed with `npm install --global` or `bun add --global`:
 
 ```bash
 rea update
@@ -310,7 +315,7 @@ Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## Star history
 
-🎉 **80,000 GitHub stars — thank you!**
+🎉 **90,000 GitHub stars — thank you!**
 
 Thanks to everyone using REA, reporting bugs, requesting features, testing builds, and contributing fixes.
 

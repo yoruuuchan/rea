@@ -173,6 +173,7 @@ describe("canonical product catalog drift", () => {
       "README_ja.md",
       "README_ko.md",
       "README_ar.md",
+      "website/locales/languages.json",
       "docs/installation.md",
       "AGENTS.md",
       ".github/pull_request_template.md",
@@ -187,22 +188,40 @@ describe("canonical product catalog drift", () => {
     });
     const translatedPath = join(directory, "README_zh.md");
     const translated = await readFile(translatedPath, "utf8");
-    await writeFile(
-      translatedPath,
-      translated.replace(
+    const catalog = await createProductCatalog(root);
+    await expect(documentationFactIssues(directory, catalog)).resolves.toEqual(
+      [],
+    );
+    for (const [original, changed] of [
+      [
         "(docs/installation.md#supported-agents)",
         "(docs/installation.md#missing-agents)",
-      ),
-      "utf8",
-    );
-
-    const issues = await documentationFactIssues(
-      directory,
-      await createProductCatalog(root),
-    );
-    expect(issues).toContain(
-      "README_zh.md: documentation links differ from README.md",
-    );
+      ],
+      [
+        "https://rea.tools/zh-CN/guides/native/",
+        "https://rea.tools/zh-CN/missing/",
+      ],
+      [
+        "https://rea.tools/zh-CN/guides/native/",
+        "https://rea.tools/zh-TW/guides/native/",
+      ],
+      [
+        "https://rea.tools/zh-CN/guides/native/",
+        "https://rea.tools/zh-CN/guides/native/?other=1",
+      ],
+    ] as const) {
+      expect(translated).toContain(original);
+      await writeFile(
+        translatedPath,
+        translated.replace(original, changed),
+        "utf8",
+      );
+      await expect(
+        documentationFactIssues(directory, catalog),
+      ).resolves.toEqual([
+        "README_zh.md: documentation links differ from README.md",
+      ]);
+    }
   });
 
   it("fails check mode without rewriting a stale generated artifact", async () => {

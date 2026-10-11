@@ -5,14 +5,14 @@ workers_dev = true
 preview_urls = false
 
 [assets]
-directory = "./public"
+directory = "./_site"
 html_handling = "auto-trailing-slash"
 not_found_handling = "none"
 
 [build]
 cwd = ".."
 command = "python3 scripts/website.py check"
-watch_dir = "./public/examples/notes-electron"
+watch_dir = ["./public", "./locales", "./templates"]
 
 # Public HTTPS depends on zone activation and certificate readiness.
 [env.production]

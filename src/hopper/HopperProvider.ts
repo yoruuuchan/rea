@@ -237,6 +237,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
           : { launchMode: "native" as const }),
       }),
       ...(context === undefined ? {} : { runId: context.runId }),
+      startupTimeoutMs: this.config.hopperStartupTimeoutMs,
       logger: this.logger.child({ layer: "bridge" }),
       onDiagnostic: (diagnostic) =>
         this.logger.info(diagnostic, "Hopper bridge reported a diagnostic"),

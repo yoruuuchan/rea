@@ -1,4 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it, onTestFinished } from "vitest";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
@@ -10,9 +12,11 @@ import {
   recoveryFixture,
 } from "../../fixtures/javascript-recovery/provider.js";
 
-it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
-  "advertises and executes recovery through the named SDK contract without a binary target",
-  async () => {
+it
+  .skipIf(process.platform !== "linux" || process.arch !== "x64")
+  .each([false, true])(
+  "advertises and executes recovery through the named SDK contract (multiple inputs: %s)",
+  async (multiple) => {
     const fixture = await recoveryFixture();
     const session = createTestBinarySession(() => {
       throw new Error("no binary provider should start");
@@ -44,7 +48,13 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
     const outputSchema: Record<string, unknown> = advertised.outputSchema;
     expect(ajv.validateSchema(inputSchema)).toBe(true);
     expect(ajv.validateSchema(outputSchema)).toBe(true);
-    const args = { path: fixture.path, output_directory: fixture.output };
+    const additional = join(fixture.root, "chunk.js");
+    if (multiple) await writeFile(additional, "export const chunk = 1;");
+    const args = {
+      path: fixture.path,
+      output_directory: fixture.output,
+      ...(multiple ? { additional_paths: [additional] } : {}),
+    };
     expect(ajv.validate(inputSchema, args)).toBe(true);
     const response = await client.callTool({
       name: "recover_javascript_sources",

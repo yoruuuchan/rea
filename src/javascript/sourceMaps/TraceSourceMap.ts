@@ -8,6 +8,8 @@ import {
   type SourceMapSegment,
 } from "@jridgewell/trace-mapping";
 import { z } from "zod";
+import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
+import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
 import { webSourceOffset } from "../../domain/webSourcePosition.js";
 import {
   webSourceMapReportSchema,
@@ -72,15 +74,29 @@ export const traceSourceMap = (
   const version = z
     .object({ version: z.string().min(1) })
     .parse(metadata).version;
+  const runtime = javaScriptRuntime(process.versions);
   return webSourceMapReportSchema.parse({
     source_map_sha256: createHash("sha256").update(text).digest("hex"),
     url_context: url,
     engine: { id: "jridgewell-trace-mapping", version },
-    runtime: {
-      id: "node-v8",
-      version: process.version,
-      v8_heap_limit_bytes: getHeapStatistics().heap_size_limit,
-    },
+    // Bun reports V8-shaped heap statistics but ignores the codec's heap flags.
+    // Its launcher applies the same runtime policy, and the parent verifies it.
+    runtime:
+      runtime.id === "node"
+        ? {
+            id: "node-v8",
+            version: process.version,
+            v8_heap_limit_bytes: getHeapStatistics().heap_size_limit,
+          }
+        : {
+            id: "bun",
+            version: runtime.version,
+            node_compatibility_version: runtime.nodeCompatibilityVersion,
+            v8_heap_limit_bytes: null,
+            process_memory_limit_bytes: javaScriptWorkerMemoryLimitBytes(
+              WEB_SOURCE_MAP_LIMITS.codecHeapMiB,
+            ),
+          },
     format: inspected.format,
     reported_file: inspected.reportedFile,
     lookup: {

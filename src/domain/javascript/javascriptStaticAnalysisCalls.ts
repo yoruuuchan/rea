@@ -353,7 +353,9 @@ export const addSourceMapDirectives = (
     const urlOffset = commentSource.slice(equalsStart + 1).search(/\S/u);
     if (urlOffset === -1) continue;
     const declaredStart = equalsStart + 1 + urlOffset;
-    const terminator = commentSource.slice(declaredStart).search(/[\s*]/u);
+    const terminator = commentSource
+      .slice(declaredStart)
+      .search(commentSource.startsWith("//") ? /\s/u : /[\s*]/u);
     const declaredEnd =
       terminator === -1 ? commentSource.length : declaredStart + terminator;
     if (declaredEnd === declaredStart) continue;

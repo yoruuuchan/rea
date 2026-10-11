@@ -1,16 +1,14 @@
-import { chmod, copyFile, mkdir, readdir, rm, rmdir } from "node:fs/promises";
-import { createConnection } from "node:net";
-import { join } from "node:path";
+import { chmod, copyFile, rm } from "node:fs/promises";
 
 import { describe, expect, onTestFinished } from "vitest";
 import { z } from "zod";
 
 import { workspaceCliTest } from "../../support/cli/workspaceCliFixture.js";
 
-import { HOPPER_TARGET_LEASE_DIRECTORY } from "../../../src/hopper/HopperTargetLease.js";
+import { acquireHopperTargetLease } from "../../../src/hopper/HopperTargetLease.js";
 
 const FAILED_LAUNCHER = `#!/bin/sh
-printf 'Cannot launch Hopper!\\nNot authorized to send Apple events to Hopper Disassembler.\\n' >&2
+printf 'Cannot launch Hopper!\\nDocument state is unknown.\\n' >&2
 exit 2
 `;
 
@@ -27,45 +25,11 @@ const RetainedRuntime = z.object({
   }),
 });
 
-const listLeases = async (): Promise<ReadonlySet<string>> =>
-  new Set(await readdir(HOPPER_TARGET_LEASE_DIRECTORY).catch(() => []));
-
-const refusesConnections = (socketPath: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    const socket = createConnection(socketPath);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once("error", (error: NodeJS.ErrnoException) =>
-      resolve(error.code === "ECONNREFUSED"),
-    );
-  });
-
-/**
- * Remove a lease socket only when its owner has exited, holding the same
- * recovery reservation as production so a concurrent acquirer is never
- * unlinked. Live or busy leases are left for their owners.
- */
-const removeStaleLease = async (socketPath: string): Promise<void> => {
-  const recoveryPath = `${socketPath}.recovery`;
-  try {
-    await mkdir(recoveryPath, { mode: 0o700 });
-  } catch {
-    return;
-  }
-  try {
-    if (await refusesConnections(socketPath))
-      await rm(socketPath, { force: true });
-  } finally {
-    await rmdir(recoveryPath);
-  }
-};
-
 describe("Hopper launcher failure through the one-shot CLI", () => {
   // Hopper target leases are acquired only for the macOS launcher route.
   workspaceCliTest.skipIf(process.platform !== "darwin")(
     "exits after a retained-cleanup failure and releases the target to a retry",
+    { timeout: 90_000 },
     async ({ cli, workspace }) => {
       const launcherPath = await workspace.write(
         "failure-helper",
@@ -74,11 +38,16 @@ describe("Hopper launcher failure through the one-shot CLI", () => {
       await chmod(launcherPath, 0o700);
       const targetPath = workspace.path("probe");
       await copyFile("/usr/bin/true", targetPath);
-      const leasesBefore = await listLeases();
+      const loaderArgs = ["--probe"];
       onTestFinished(async () => {
-        for (const name of await listLeases())
-          if (!leasesBefore.has(name) && name.endsWith(".sock"))
-            await removeStaleLease(join(HOPPER_TARGET_LEASE_DIRECTORY, name));
+        const recovered = await acquireHopperTargetLease({
+          targetPath,
+          targetKind: "executable",
+          loaderArgs,
+          runId: "failed-cli-test-cleanup",
+        });
+        expect(recovered.acquired).toBe(true);
+        if (recovered.acquired) await recovered.lease.release();
       });
 
       for (const attempt of ["first", "retry"]) {
@@ -87,9 +56,10 @@ describe("Hopper launcher failure through the one-shot CLI", () => {
           environment: {
             ...workspace.environment,
             HOPPER_LAUNCHER_PATH: launcherPath,
+            HOPPER_LOADER_ARGS_JSON: JSON.stringify(loaderArgs),
             REA_LOG_LEVEL: "silent",
           },
-          timeoutMs: 30_000,
+          timeoutMs: 45_000,
         });
         const retained = RetainedRuntime.safeParse(result.json);
         if (retained.success)
@@ -113,7 +83,7 @@ describe("Hopper launcher failure through the one-shot CLI", () => {
                     exit_code: 2,
                     stderr: {
                       text: expect.stringContaining(
-                        "Not authorized to send Apple events",
+                        "Document state is unknown",
                       ),
                     },
                   },

@@ -96,5 +96,16 @@ export const comparisonLimitations = (
   ];
   if (left.coverage.state !== "complete" || right.coverage.state !== "complete")
     limitations.push("At least one managed member observation is partial.");
+  if (left.exported_types === null || right.exported_types === null)
+    limitations.push(
+      "At least one managed member observation predates ExportedType inspection; its exported and forwarded types are unknown.",
+    );
+  if (
+    (left.exported_types?.length ?? 0) > 0 ||
+    (right.exported_types?.length ?? 0) > 0
+  )
+    limitations.push(
+      "ExportedType rows, including type forwarders, are observed but not compared; an unchanged comparison does not establish an unchanged exported or forwarded type set.",
+    );
   return limitations;
 };

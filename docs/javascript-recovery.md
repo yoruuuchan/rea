@@ -1,7 +1,7 @@
 # JavaScript source recovery
 
 `recover_javascript_sources` / `recover-javascript-sources` derives readable
-modules from one explicitly selected UTF-8 JavaScript file or bundle. Use it on
+modules from explicitly selected UTF-8 JavaScript files or bundles. Use it on
 files returned by `export_web_scripts` or other local scripts. The operation
 never executes the selected or recovered application code.
 
@@ -52,35 +52,58 @@ Both give the same binary (SHA-256
 ```sh
 rea recover-javascript-sources /tmp/web-scripts/app.js /tmp/recovered-app --json
 rea analyze-javascript-application /tmp/recovered-app/modules --json
+
+# Recover related code-split chunks together; repeat --additional-path.
+rea recover-javascript-sources /tmp/web-scripts/main.js /tmp/recovered-chunks \
+  --additional-path /tmp/web-scripts/runtime.js \
+  --additional-path /tmp/web-scripts/shared.js \
+  --additional-path /tmp/web-scripts/checkout.chunk.js --json
 ```
 
 MCP input:
 
 ```json
 {
-  "path": "/tmp/web-scripts/app.js",
-  "output_directory": "/tmp/recovered-app"
+  "path": "/tmp/web-scripts/main.js",
+  "additional_paths": [
+    "/tmp/web-scripts/runtime.js",
+    "/tmp/web-scripts/shared.js",
+    "/tmp/web-scripts/checkout.chunk.js"
+  ],
+  "output_directory": "/tmp/recovered-chunks"
 }
 ```
 
 The output directory must be absent, absolute, and have an existing parent.
-The source is snapshotted in a private workspace, and the engine writes only to
+Each source is snapshotted separately in a private workspace. Multiple inputs
+retain their relative directory layout and are passed together to one Wakaru
+invocation, allowing cross-chunk module IDs to resolve. Inputs must be distinct;
+`additional_paths` accepts up to 16 additional files. The engine writes only to
 its own staging directory. Reported module paths, input identities, UTF-8 byte
 ranges, regular files and emitted map representations are validated before
 publication. REA writes verified bytes to an exclusively owned output tree and
 rolls it back on failure. It also checks that the original source and engine
 bytes remain unchanged before committing. The existing output is never overwritten.
 
+Multi-input relative filenames must be representable unchanged as artifact paths:
+NFC Unicode spelling and no literal backslashes. Unsupported layouts fail before
+invoking the engine rather than silently renaming inputs referenced by source maps.
+
 Published contents:
 
-- `inputs/bundle.js`: exact original snapshot; its digest binds the Evidence.
+- `inputs/bundle.js`: exact original snapshot for a single input. Multiple inputs
+  retain paths relative to their common parent under `inputs/`.
 - `modules/`: derived modules and any upstream-emitted source maps.
 - `reports/stdout.json` and `reports/provenance.json`: exact producer reports.
 - `manifest.json`: identities, modules, transform choices, warnings and limitations.
 
 The inline result includes complete file paths/digests/sizes, extraction ranges,
 warnings and `analysis_input`, directly usable as the arguments to
-`analyze_javascript_application`. Raw Evidence retains selected command arguments,
+`analyze_javascript_application`. `source` identifies the primary input and binds
+the Evidence subject; `additional_sources` records the other snapshots and their
+published copies when selected. Each module names its owning snapshot, original
+path and original digest; all extraction and context ranges refer to that input.
+Raw Evidence retains selected command arguments,
 reported input paths, exit status, stderr and reports; temporary paths are recorded
 as historical execution coordinates after their workspace is removed.
 
@@ -107,7 +130,8 @@ equivalence remain unknown. No network fetching occurs.
 ## Resource policy and verification
 
 Each operation uses one worker, a 1 GiB address-space ceiling and a 120-second
-deadline; it accepts up to 64 MiB of input and 128 MiB/10000 entries of staged
+deadline; it accepts up to 64 MiB of total input across all selected files and
+128 MiB/10000 entries of staged
 output, with 8 MiB per diagnostic/report stream. Exceeding a limit is an explicit
 failure with rollback. These limits apply per operation and do not claim aggregate
 host containment across concurrent callers.

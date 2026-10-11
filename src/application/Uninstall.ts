@@ -184,10 +184,7 @@ export const systemUninstallHost = (
     removeClient: (client) => removeClient(client, fileSystem),
     removeSkill: () =>
       removeManagedSkills(home, fileSystem, environment, platform),
-    purgeData: async () => [
-      await removeManagedPath(join(home, ".rea/cache"), "cache", fileSystem),
-      await removeManagedPath(join(home, ".rea/state"), "state", fileSystem),
-    ],
+    purgeData: () => purgeManagedData(join(home, ".rea"), fileSystem),
   };
 };
 
@@ -378,6 +375,39 @@ const isOwnedRegistration = (value: unknown, client: SetupClient): boolean => {
   if (!parsed.success) return false;
   const { command, args } = parsed.data;
   return isOwnedClientRegistrationCommand([command, ...args]);
+};
+
+const purgeManagedData = async (
+  root: string,
+  fileSystem: UninstallFileSystem,
+): Promise<readonly UninstallItem[]> => {
+  const names = ["cache", "state"];
+  try {
+    const stats = await fileSystem.stat(root);
+    const linked = stats.isSymbolicLink();
+    if (linked || stats.isDirectory?.() !== true)
+      return names.map((name) =>
+        item(
+          name,
+          "retained",
+          `REA did not remove this item because its managed data root ${root} is ${linked ? "a symbolic link" : "not a directory"}. Verify the root before removing its data manually.`,
+        ),
+      );
+  } catch (cause: unknown) {
+    return names.map((name) =>
+      isMissing(cause)
+        ? item(name, "skipped", `${join(root, name)} does not exist.`)
+        : item(
+            name,
+            "failed",
+            `The managed data root ${root} could not be verified. Check its permissions, then rerun uninstall.`,
+          ),
+    );
+  }
+  const items: UninstallItem[] = [];
+  for (const name of names)
+    items.push(await removeManagedPath(join(root, name), name, fileSystem));
+  return items;
 };
 
 const removeManagedPath = async (

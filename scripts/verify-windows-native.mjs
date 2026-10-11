@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { verifyWindowsProtocolInput } from "./lib/windows-protocol-input.mjs";
+import { verifyWindowsJobMemoryLimit } from "./lib/windows-job-memory-limit.mjs";
 
 if (process.platform !== "win32")
   throw new Error(
@@ -542,6 +543,10 @@ setInterval(()=>{},1000);\n`,
   assert.equal(live(ownerClose.pid), false);
   report.processes.killOnOwnerClose = true;
   report.processes.protocolInput = await verifyWindowsProtocolInput(
+    packageRoot,
+    workspace,
+  );
+  report.processes.jobMemoryLimit = await verifyWindowsJobMemoryLimit(
     packageRoot,
     workspace,
   );

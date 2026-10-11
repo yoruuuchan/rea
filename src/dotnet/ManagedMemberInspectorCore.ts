@@ -21,6 +21,9 @@ import {
 } from "./ManagedMetadataHeaps.js";
 
 export type ManagedType = ManagedMemberInspection["types"][number];
+export type ManagedExportedType = NonNullable<
+  ManagedMemberInspection["exported_types"]
+>[number];
 export type ManagedField = ManagedMemberInspection["fields"][number];
 export type ManagedMethod = ManagedMemberInspection["methods"][number];
 export type ManagedMemberRef = ManagedMemberInspection["member_refs"][number];
@@ -343,49 +346,296 @@ const ELEMENT_TYPES = new Map<number, string>([
   [0x1c, "object"],
 ]);
 
-const readTypeSignature = (
+const readSignedCompressed = (
+  bytes: Buffer,
+  offset: number,
+): { readonly value: number; readonly next: number } => {
+  const encoded = readCompressed(bytes, offset);
+  const width =
+    encoded.next - offset === 1 ? 7 : encoded.next - offset === 2 ? 14 : 29;
+  const magnitude = Math.floor(encoded.value / 2);
+  return {
+    value: encoded.value % 2 === 0 ? magnitude : magnitude - 2 ** (width - 1),
+    next: encoded.next,
+  };
+};
+
+const malformedSignature = (detail: string, offset: number): never => {
+  throw managedFailure("invalid-blob", "signature", detail, offset);
+};
+
+// Pending work while decoding one Type. Signatures nest arbitrarily deep, so
+// decoding keeps an explicit stack instead of recursing.
+type TypeContinuation =
+  | { readonly kind: "suffix"; readonly suffix: "*" | "&" | "[]" }
+  | { readonly kind: "modifiers"; readonly modifiers: string[] }
+  | { readonly kind: "array" }
+  | {
+      readonly kind: "list";
+      remaining: number;
+      readonly items: string[];
+      // Function pointer items are a RetType then Params; generic
+      // arguments are Types.
+      readonly signatureItems: boolean;
+      readonly render: (items: readonly string[]) => string;
+    };
+
+interface MethodSignatureHeader {
+  readonly first: number;
+  readonly genericParameterCount: number | null;
+  readonly parameterCount: number;
+  readonly next: number;
+}
+
+const readMethodSignatureHeader = (
+  blob: Buffer,
+  offset: number,
+): MethodSignatureHeader => {
+  const first = blob[offset];
+  if (first === undefined)
+    return malformedSignature("truncated method signature", offset);
+  let next = offset + 1;
+  let genericParameterCount: number | null = null;
+  if ((first & 0x10) !== 0) {
+    const generic = readCompressed(blob, next);
+    genericParameterCount = generic.value;
+    next = generic.next;
+  }
+  const parameterCount = readCompressed(blob, next);
+  return {
+    first,
+    genericParameterCount,
+    parameterCount: parameterCount.value,
+    next: parameterCount.next,
+  };
+};
+
+const MAX_ARRAY_RANK = 32;
+
+// FNPTR carries a method signature: managed DEFAULT/VARARG, or the unmanaged
+// C, STDCALL, THISCALL, FASTCALL, and UNMANAGED conventions that compilers
+// emit for unmanaged function pointers. FIELD, LOCAL_SIG, PROPERTY, and
+// GENERICINST headers are not method signatures.
+const FUNCTION_POINTER_CONVENTIONS = new Set([0, 1, 2, 3, 4, 5, 9]);
+
+const arrayShape = (
   blob: Buffer,
   offset: number,
 ): { readonly value: string; readonly next: number } => {
-  const suffixes: string[] = [];
-  let cursor = offset;
-  let kind = blob[cursor];
-  while (kind === 0x0f || kind === 0x10 || kind === 0x1d) {
-    suffixes.push(kind === 0x0f ? "*" : kind === 0x10 ? "&" : "[]");
-    cursor += 1;
-    kind = blob[cursor];
-  }
-  if (kind === undefined)
-    throw managedFailure(
-      "invalid-blob",
-      "signature",
-      "truncated type signature",
-      cursor,
-    );
-  const named = ELEMENT_TYPES.get(kind);
-  let value: string;
-  let next: number;
-  if (named !== undefined) {
-    value = named;
-    next = cursor + 1;
-  } else if (kind === 0x11 || kind === 0x12) {
-    const token = readCompressed(blob, cursor + 1);
-    value = `${kind === 0x11 ? "valuetype" : "class"}:${String(token.value)}`;
-    next = token.next;
-  } else if (kind === 0x1e || kind === 0x13) {
-    const variable = readCompressed(blob, cursor + 1);
-    value = `${kind === 0x1e ? "mvar" : "var"}:${String(variable.value)}`;
-    next = variable.next;
-  } else {
+  const rank = readCompressed(blob, offset);
+  if (rank.value === 0) return malformedSignature("array rank is zero", offset);
+  // ECMA-335 leaves rank unbounded, but the CLR loads at most 32 dimensions;
+  // larger ranks would expand a few bytes into an unbounded rendering.
+  if (rank.value > MAX_ARRAY_RANK)
     throw managedFailure(
       "unsupported-signature",
       "signature",
-      `unsupported element type 0x${kind.toString(16)}`,
-      cursor,
+      `array rank ${String(rank.value)} exceeds the ${String(MAX_ARRAY_RANK)} dimensions the CLR supports`,
+      offset,
     );
+  const sizeCount = readCompressed(blob, rank.next);
+  if (sizeCount.value > rank.value)
+    return malformedSignature("array has more sizes than dimensions", offset);
+  const sizes: number[] = [];
+  let next = sizeCount.next;
+  for (let index = 0; index < sizeCount.value; index += 1) {
+    const size = readCompressed(blob, next);
+    sizes.push(size.value);
+    next = size.next;
   }
-  return { value: value + suffixes.reverse().join(""), next };
+  const boundCount = readCompressed(blob, next);
+  if (boundCount.value > rank.value)
+    return malformedSignature(
+      "array has more lower bounds than dimensions",
+      offset,
+    );
+  const lowerBounds: number[] = [];
+  next = boundCount.next;
+  for (let index = 0; index < boundCount.value; index += 1) {
+    const bound = readSignedCompressed(blob, next);
+    lowerBounds.push(bound.value);
+    next = bound.next;
+  }
+  const dimensions = Array.from({ length: rank.value }, (_, index) => {
+    const size = sizes[index];
+    const lower = lowerBounds[index];
+    if (lower !== undefined)
+      return size === undefined
+        ? `${String(lower)}...`
+        : `${String(lower)}...${String(lower + size - 1)}`;
+    if (size !== undefined) return String(size);
+    // ILAsm spelling: a bare rank-1 `[]` is reserved for SZARRAY.
+    return rank.value === 1 ? "..." : "";
+  });
+  return { value: `[${dimensions.join(",")}]`, next };
 };
+
+/** Grammar position of the element being decoded (ECMA-335 II.23.2). */
+type SignaturePosition = "field" | "return" | "parameter" | "type" | "pointee";
+
+// Custom modifiers do not change the position they precede.
+const currentPosition = (
+  stack: readonly TypeContinuation[],
+  base: SignaturePosition,
+): SignaturePosition => {
+  const frame = stack.findLast(({ kind }) => kind !== "modifiers");
+  if (frame === undefined) return base;
+  if (frame.kind === "suffix") return frame.suffix === "*" ? "pointee" : "type";
+  if (frame.kind === "list" && frame.signatureItems)
+    return frame.items.length === 0 ? "return" : "parameter";
+  return "type";
+};
+
+// VOID is a RetType or a pointee; TYPEDBYREF is a RetType or Param; BYREF
+// prefixes a RetType, Param, or (since ref fields) a field type.
+const POSITION_ELEMENTS: ReadonlyMap<number, readonly SignaturePosition[]> =
+  new Map([
+    [0x01, ["return", "pointee"]],
+    [0x16, ["return", "parameter"]],
+    [0x10, ["return", "parameter", "field"]],
+  ]);
+
+const readTypeSignature = (
+  blob: Buffer,
+  offset: number,
+  base: SignaturePosition,
+): { readonly value: string; readonly next: number } => {
+  const stack: TypeContinuation[] = [];
+  let cursor = offset;
+  for (;;) {
+    let value: string | undefined;
+    const kind = blob[cursor];
+    if (kind === undefined)
+      return malformedSignature("truncated type signature", cursor);
+    const positions = POSITION_ELEMENTS.get(kind);
+    if (
+      positions !== undefined &&
+      !positions.includes(currentPosition(stack, base))
+    )
+      return malformedSignature(
+        `element type 0x${kind.toString(16)} is not valid in a ${currentPosition(stack, base)} position`,
+        cursor,
+      );
+    const named = ELEMENT_TYPES.get(kind);
+    if (named !== undefined) {
+      value = named;
+      cursor += 1;
+    } else if (kind === 0x0f || kind === 0x10 || kind === 0x1d) {
+      const suffix = kind === 0x0f ? "*" : kind === 0x10 ? "&" : "[]";
+      stack.push({ kind: "suffix", suffix });
+      cursor += 1;
+    } else if (kind === 0x1f || kind === 0x20) {
+      const token = readCompressed(blob, cursor + 1);
+      const modifier = `${kind === 0x1f ? "modreq" : "modopt"}:${String(token.value)}`;
+      // A modifier frame on top was pushed by the directly preceding byte;
+      // keep an adjacent run together and in source order.
+      const top = stack.at(-1);
+      if (top?.kind === "modifiers") top.modifiers.push(modifier);
+      else stack.push({ kind: "modifiers", modifiers: [modifier] });
+      cursor = token.next;
+    } else if (kind === 0x11 || kind === 0x12) {
+      const token = readCompressed(blob, cursor + 1);
+      value = `${kind === 0x11 ? "valuetype" : "class"}:${String(token.value)}`;
+      cursor = token.next;
+    } else if (kind === 0x1e || kind === 0x13) {
+      const variable = readCompressed(blob, cursor + 1);
+      value = `${kind === 0x1e ? "mvar" : "var"}:${String(variable.value)}`;
+      cursor = variable.next;
+    } else if (kind === 0x16) {
+      value = "typedbyref";
+      cursor += 1;
+    } else if (kind === 0x14) {
+      stack.push({ kind: "array" });
+      cursor += 1;
+    } else if (kind === 0x15) {
+      const generic = blob[cursor + 1];
+      if (generic !== 0x11 && generic !== 0x12)
+        return malformedSignature(
+          "generic instantiation does not name a class or value type",
+          cursor + 1,
+        );
+      const token = readCompressed(blob, cursor + 2);
+      const argumentCount = readCompressed(blob, token.next);
+      if (argumentCount.value === 0)
+        return malformedSignature(
+          "generic instantiation has no type arguments",
+          token.next,
+        );
+      const head = `${generic === 0x11 ? "valuetype" : "class"}:${String(token.value)}`;
+      stack.push({
+        kind: "list",
+        remaining: argumentCount.value,
+        items: [],
+        signatureItems: false,
+        render: (items) => `${head}<${items.join(",")}>`,
+      });
+      cursor = argumentCount.next;
+    } else if (kind === 0x1b) {
+      const header = readMethodSignatureHeader(blob, cursor + 1);
+      if (
+        !FUNCTION_POINTER_CONVENTIONS.has(header.first & 0x0f) ||
+        (header.first & 0x80) !== 0 ||
+        ((header.first & 0x40) !== 0 && (header.first & 0x20) === 0)
+      )
+        return malformedSignature(
+          `function pointer calling convention 0x${header.first.toString(16)} does not head a method signature`,
+          cursor + 1,
+        );
+      const convention = callingConvention(header.first);
+      const head =
+        header.genericParameterCount === null
+          ? convention
+          : `${convention};${String(header.genericParameterCount)}`;
+      stack.push({
+        kind: "list",
+        remaining: header.parameterCount + 1,
+        items: [],
+        signatureItems: true,
+        render: ([returnType, ...parameters]) =>
+          `fnptr[${head}](${parameters.join(",")})->${returnType ?? ""}`,
+      });
+      cursor = header.next;
+    } else {
+      throw managedFailure(
+        "unsupported-signature",
+        "signature",
+        `unsupported element type 0x${kind.toString(16)}`,
+        cursor,
+      );
+    }
+    while (value !== undefined) {
+      const top = stack.pop();
+      if (top === undefined) return { value, next: cursor };
+      if (top.kind === "suffix") value += top.suffix;
+      else if (top.kind === "modifiers")
+        value = `${value} ${top.modifiers.join(" ")}`;
+      else if (top.kind === "array") {
+        const shape = arrayShape(blob, cursor);
+        value += shape.value;
+        cursor = shape.next;
+      } else {
+        top.items.push(value);
+        top.remaining -= 1;
+        if (top.remaining === 0) value = top.render(top.items);
+        else {
+          value = undefined;
+          stack.push(top);
+        }
+      }
+    }
+  }
+};
+
+const CALLING_CONVENTION_NAMES = new Map([
+  [0, "default"],
+  [1, "c"],
+  [2, "stdcall"],
+  [3, "thiscall"],
+  [4, "fastcall"],
+  [5, "vararg"],
+  [6, "field"],
+  [9, "unmanaged"],
+]);
 
 const callingConvention = (value: number): string => {
   const base = value & 0x0f;
@@ -394,14 +644,7 @@ const callingConvention = (value: number): string => {
     (value & 0x40) === 0 ? null : "explicit-this",
     (value & 0x10) === 0 ? null : "generic",
   ].filter((flag) => flag !== null);
-  const name =
-    base === 0
-      ? "default"
-      : base === 5
-        ? "vararg"
-        : base === 6
-          ? "field"
-          : `unknown:${String(base)}`;
+  const name = CALLING_CONVENTION_NAMES.get(base) ?? `unknown:${String(base)}`;
   return flags.length === 0 ? name : `${name} ${flags.join(" ")}`;
 };
 
@@ -418,7 +661,7 @@ export const signature = (
       throw managedFailure("invalid-blob", "signature", "empty signature", 0);
     const first = blob[0] ?? 0;
     if ((first & 0x0f) === 6) {
-      const fieldType = readTypeSignature(blob, 1);
+      const fieldType = readTypeSignature(blob, 1, "field");
       return {
         ...raw,
         kind: "field",
@@ -433,20 +676,12 @@ export const signature = (
           fieldType.next === blob.length ? null : "Trailing signature data",
       };
     }
-    let offset = 1;
-    let genericParameterCount: number | null = null;
-    if ((first & 0x10) !== 0) {
-      const generic = readCompressed(blob, offset);
-      genericParameterCount = generic.value;
-      offset = generic.next;
-    }
-    const parameterCount = readCompressed(blob, offset);
-    offset = parameterCount.next;
-    const returnType = readTypeSignature(blob, offset);
-    offset = returnType.next;
+    const header = readMethodSignatureHeader(blob, 0);
+    const returnType = readTypeSignature(blob, header.next, "return");
+    let offset = returnType.next;
     const parameters: string[] = [];
-    for (let index = 0; index < parameterCount.value; index += 1) {
-      const parameter = readTypeSignature(blob, offset);
+    for (let index = 0; index < header.parameterCount; index += 1) {
+      const parameter = readTypeSignature(blob, offset, "parameter");
       parameters.push(parameter.value);
       offset = parameter.next;
     }
@@ -455,8 +690,8 @@ export const signature = (
       kind: "method",
       parse_status: offset === blob.length ? "decoded" : "partial",
       calling_convention: callingConvention(first),
-      generic_parameter_count: genericParameterCount,
-      parameter_count: parameterCount.value,
+      generic_parameter_count: header.genericParameterCount,
+      parameter_count: header.parameterCount,
       return_type: returnType.value,
       parameter_types: parameters,
       field_type: null,

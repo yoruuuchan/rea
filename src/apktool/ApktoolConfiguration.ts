@@ -8,6 +8,11 @@ import {
 import type { ProviderAvailability } from "../application/AnalysisProvider.js";
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import {
+  isWindowsBatchFile,
+  windowsBatchCommand,
+  WindowsBatchCommandError,
+} from "../process/WindowsBatchCommand.js";
 
 /** Environment key selecting the caller's apktool launcher. */
 export const APKTOOL_COMMAND_ENV = "REA_APKTOOL_COMMAND";
@@ -46,6 +51,7 @@ export const resolveApktoolCommand = (
 export type ApktoolConfigurationFailureCode =
   | "not_absolute"
   | "command_missing"
+  | "launcher_unsupported"
   | "version_unresolved";
 
 export class ApktoolConfigurationFailure extends Error {
@@ -63,6 +69,40 @@ export interface ApktoolClientIdentity {
   readonly version: string | null;
 }
 
+/** Process creation for one apktool run on the selected host. */
+export interface ApktoolInvocation {
+  readonly command: string;
+  readonly arguments: readonly string[];
+  readonly windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Run the selected launcher directly, or through cmd.exe when Windows can
+ * only execute it there (the Chocolatey `apktool.bat` and `java -jar`
+ * wrapper scripts). Throws WindowsBatchCommandError when a token cannot be
+ * passed to cmd.exe safely.
+ */
+export const apktoolInvocation = (
+  selection: ApktoolCommandSelection,
+  arguments_: readonly string[],
+  environment: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform = process.platform,
+): ApktoolInvocation =>
+  platform === "win32" && isWindowsBatchFile(selection.command)
+    ? {
+        ...windowsBatchCommand({
+          environment,
+          batchPath: selection.command,
+          arguments: arguments_,
+        }),
+        windowsVerbatimArguments: true,
+      }
+    : {
+        command: selection.command,
+        arguments: arguments_,
+        windowsVerbatimArguments: false,
+      };
+
 /** Read the version from `apktool --version` output (first non-empty line). */
 export const parseApktoolVersionOutput = (
   stdout: string,
@@ -79,15 +119,43 @@ export const inspectApktoolClient = async (
   selection: ApktoolCommandSelection,
   signal?: AbortSignal,
   environment: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<ApktoolClientIdentity> => {
+  const hostEnvironment = { ...process.env, ...environment };
+  let invocation: ApktoolInvocation;
   try {
-    const { stdout } = await execFileOutput(selection.command, ["--version"], {
-      timeout: VERSION_TIMEOUT_MS,
-      stopSignal: "SIGTERM",
-      maxBuffer: VERSION_MAX_OUTPUT_BYTES,
-      env: { ...process.env, ...environment },
-      ...(signal === undefined ? {} : { signal }),
-    });
+    invocation = apktoolInvocation(
+      selection,
+      ["--version"],
+      hostEnvironment,
+      platform,
+    );
+  } catch (cause) {
+    if (!(cause instanceof WindowsBatchCommandError)) throw cause;
+    throw new ApktoolConfigurationFailure(
+      "launcher_unsupported",
+      `The selected apktool launcher cannot be run through cmd.exe: ${cause.message}`,
+      {
+        selected_command: selection.command,
+        command_source: selection.commandSource,
+        remediation: `Set ${APKTOOL_COMMAND_ENV} to a launcher path without cmd.exe metacharacters (" % ^ ! & | < >), or to a native apktool executable`,
+      },
+      { cause },
+    );
+  }
+  try {
+    const { stdout } = await execFileOutput(
+      invocation.command,
+      invocation.arguments,
+      {
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        timeout: VERSION_TIMEOUT_MS,
+        stopSignal: "SIGTERM",
+        maxBuffer: VERSION_MAX_OUTPUT_BYTES,
+        env: hostEnvironment,
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
     return parseApktoolVersionOutput(stdout);
   } catch (cause) {
     const failure = execFileOutputFailure(cause);
@@ -127,7 +195,7 @@ const rejectionCodeOf = (
 ): ProviderRejectionCode =>
   code === "command_missing"
     ? "executable_missing"
-    : code === "not_absolute"
+    : code === "not_absolute" || code === "launcher_unsupported"
       ? "not_configured"
       : "version_unresolved";
 

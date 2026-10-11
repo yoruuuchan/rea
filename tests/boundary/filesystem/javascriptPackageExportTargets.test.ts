@@ -169,27 +169,13 @@ const nativeResultSchema = z.object({
   code: z.string().nullable(),
 });
 
-it.each(
-  (["import", "require"] as const).flatMap((moduleKind) =>
-    cases.map((testCase) => ({ ...testCase, moduleKind })),
-  ),
-)(
-  "matches Node $moduleKind target selection for $name",
-  async ({
-    moduleKind,
-    name,
-    exports,
-    expected,
-    nodeError,
-    rejectedTarget,
-  }) => {
+it.each(cases)(
+  "matches Node import and require target selection for $name",
+  async ({ name, exports, expected, nodeError, rejectedTarget }) => {
     const root = await createTestTempDirectory("rea-package-target-");
-    const mainPath = moduleKind === "import" ? "main.mjs" : "main.cjs";
     const files = {
-      [mainPath]:
-        moduleKind === "import"
-          ? 'import value from "fixture"; export default value;'
-          : 'module.exports = require("fixture");',
+      "main.mjs": 'import value from "fixture"; export default value;',
+      "main.cjs": 'module.exports = require("fixture");',
       "node_modules/fixture/package.json": JSON.stringify({ exports }),
       ...Object.fromEntries(
         [
@@ -209,57 +195,78 @@ it.each(
         await writeFile(join(root, path), text);
       }),
     );
-    const runner =
-      moduleKind === "import"
-        ? 'const load = async () => (await import("fixture")).default;'
-        : 'const load = async () => require("fixture");';
-    const native = await promisify(execFile)(
-      process.execPath,
-      [
-        "--input-type",
-        moduleKind === "import" ? "module" : "commonjs",
-        "--eval",
-        `${runner} load().then(value => console.log(JSON.stringify({value,code:null})), error => console.log(JSON.stringify({value:null,code:error.code ?? error.name})));`,
-      ],
-      { cwd: root, timeout: 5_000 },
-    );
-    const oracle = nativeResultSchema.parse(JSON.parse(native.stdout));
-    expect(oracle.value, name).toBe(expected);
-    if (nodeError !== undefined)
-      expect(oracle.code).toBe(
-        moduleKind === "import" && nodeError === "MODULE_NOT_FOUND"
-          ? "ERR_MODULE_NOT_FOUND"
-          : nodeError,
+    for (const moduleKind of ["import", "require"] as const) {
+      const runner =
+        moduleKind === "import"
+          ? 'const load = async () => (await import("fixture")).default;'
+          : 'const load = async () => require("fixture");';
+      const native = await promisify(execFile)(
+        process.execPath,
+        [
+          "--input-type",
+          moduleKind === "import" ? "module" : "commonjs",
+          "--eval",
+          `${runner} load().then(value => console.log(JSON.stringify({value,code:null})), error => console.log(JSON.stringify({value:null,code:error.code ?? error.name})));`,
+        ],
+        { cwd: root, timeout: 5_000 },
       );
+      const oracle = nativeResultSchema.parse(JSON.parse(native.stdout));
+      expect(oracle.value, `${name} (${moduleKind})`).toBe(expected);
+      if (nodeError !== undefined)
+        expect(oracle.code, `${name} (${moduleKind})`).toBe(
+          moduleKind === "import" && nodeError === "MODULE_NOT_FOUND"
+            ? "ERR_MODULE_NOT_FOUND"
+            : nodeError,
+        );
+    }
+
     const result = await reconstructJavaScriptArtifact({
       input_path: root,
       format: "directory",
     });
-    const edge = result.graph.edges.find(
-      ({ properties }) =>
-        properties.specifier === "fixture" &&
-        properties.resolution_status !== undefined &&
-        properties.resolution_status !== null,
-    );
-    expect(edge).toBeDefined();
-    expect(edge?.properties.resolved_path).toBe(expected);
-    if (expected !== null) {
-      expect(edge?.properties.resolution_status).toBe("resolved");
-    } else {
-      expect(edge?.properties.resolution_status).not.toBe("resolved");
-    }
-    if (rejectedTarget !== undefined) {
-      expect(edge?.properties.resolution_status).toBe("rejected");
-      expect(edge?.evidence.limitations.join(" ")).toContain(
-        JSON.stringify(rejectedTarget),
+    for (const mainPath of ["main.mjs", "main.cjs"] as const) {
+      const edge = result.graph.edges.find(
+        ({ evidence, properties }) =>
+          properties.specifier === "fixture" &&
+          properties.resolution_status !== undefined &&
+          properties.resolution_status !== null &&
+          evidence.location.available &&
+          evidence.location.value.kind === "source-range" &&
+          evidence.location.value.source === mainPath,
       );
-      expect(edge?.evidence.limitations.join(" ")).toContain("exports target");
-      expect(edge?.evidence.limitations.join(" ")).not.toContain(
-        "not valid package JSON",
+      expect(edge, `${name} (${mainPath})`).toBeDefined();
+      expect(edge?.properties.resolved_path, `${name} (${mainPath})`).toBe(
+        expected,
       );
-      expect(edge?.evidence.location).toMatchObject({
-        value: { kind: "source-range", source: mainPath },
-      });
+      if (expected !== null) {
+        expect(
+          edge?.properties.resolution_status,
+          `${name} (${mainPath})`,
+        ).toBe("resolved");
+      } else {
+        expect(
+          edge?.properties.resolution_status,
+          `${name} (${mainPath})`,
+        ).not.toBe("resolved");
+      }
+      if (rejectedTarget !== undefined) {
+        expect(
+          edge?.properties.resolution_status,
+          `${name} (${mainPath})`,
+        ).toBe("rejected");
+        expect(edge?.evidence.limitations.join(" ")).toContain(
+          JSON.stringify(rejectedTarget),
+        );
+        expect(edge?.evidence.limitations.join(" ")).toContain(
+          "exports target",
+        );
+        expect(edge?.evidence.limitations.join(" ")).not.toContain(
+          "not valid package JSON",
+        );
+        expect(edge?.evidence.location).toMatchObject({
+          value: { kind: "source-range", source: mainPath },
+        });
+      }
     }
   },
 );

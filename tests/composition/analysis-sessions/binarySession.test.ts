@@ -1114,3 +1114,41 @@ describe("no replacement start", () => {
     expect(session.status()).toMatchObject({ open: false });
   });
 });
+
+describe("selector origin forwarding", () => {
+  it("forwards the per-call selector origin to the provider client on both execution paths", async () => {
+    const [first] = await createBinarySessionTargets();
+    const seen: unknown[] = [];
+    const session = createTestBinarySession(() => ({
+      execute: (_operation, _parameters, options) => {
+        seen.push(options?.selectorOrigin);
+        return Promise.resolve(ok(null));
+      },
+      close: () => Promise.resolve(resultOk(null)),
+    }));
+    expect((await session.open(first)).ok, "the target opens").toBe(true);
+    seen.length = 0;
+
+    await session.execute(
+      "address_name",
+      { address: "0x1000" },
+      { selectorOrigin: "provider" },
+    );
+    await session.withAdmittedAnalysis(
+      "binary_overview",
+      undefined,
+      (analysis) =>
+        analysis.execute(
+          "address_name",
+          { address: "0x2000" },
+          { selectorOrigin: "provider" },
+        ),
+    );
+    await session.execute("address_name", { address: "0x3000" });
+
+    expect(
+      seen,
+      "direct and admitted calls forward the origin; an unmarked call carries none",
+    ).toEqual(["provider", "provider", undefined]);
+  });
+});

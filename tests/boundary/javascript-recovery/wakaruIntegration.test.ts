@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { SafeOutputTree } from "../../../src/artifacts/SafeOutputTree.js";
@@ -6,6 +6,7 @@ import { SafeOutputTreeCreationFailure } from "../../../src/artifacts/SafeOutput
 import { javascriptRecoveryResultSchema } from "../../../src/domain/javascript/javascriptRecovery.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+import { RECOVERY_LIMITS } from "../../../src/javascript/recovery/WakaruRelease.js";
 import {
   assertRecoveryCleanup,
   recoveryFixture,
@@ -36,6 +37,7 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
         },
       });
       expect(value.source.path).toBe(fixture.path);
+      expect(value.additional_sources).toBeUndefined();
       expect(value.source.published_copy.sha256).toBe(value.source.sha256);
       expect(value.modules[0]?.provenance.byte_ranges).toEqual([
         { start: 0, end: value.source.bytes },
@@ -393,6 +395,156 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
         access(join(fixture.output, "manifest.json")),
       ).resolves.toBeUndefined();
       await assertRecoveryCleanup(fixture.launches);
+    });
+  },
+);
+
+describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
+  "Wakaru multi-input ownership",
+  () => {
+    it.each(["cafe\u0301.js", "chunk\\name.js"])(
+      "rejects an unpublishable native filename %s before launching",
+      async (name) => {
+        const fixture = await recoveryFixture();
+        const additional = join(fixture.root, name);
+        await writeFile(additional, "export const value = 1;");
+        const result = await fixture.service.recover({
+          path: fixture.path,
+          additional_paths: [additional],
+          output_directory: fixture.output,
+        });
+        if (result.ok)
+          throw new Error("expected unsupported input-layout failure");
+        expect(projectAnalysisError(result.error).code).toBe("invalid_request");
+        expect(JSON.stringify(projectAnalysisError(result.error))).toContain(
+          "Cannot preserve selected input path",
+        );
+        expect(fixture.launches).toHaveLength(0);
+        await expect(access(fixture.output)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+        expect(await readFile(additional, "utf8")).toBe(
+          "export const value = 1;",
+        );
+      },
+    );
+    it("keeps separate snapshots, per-file ranges and relative paths for same-named inputs", async () => {
+      const fixture = await recoveryFixture(
+        "normal",
+        "import './nested/selected.js';\n",
+      );
+      const nested = join(fixture.root, "nested");
+      await mkdir(nested);
+      const additional = join(nested, "selected.js");
+      const content = "export const target = '🎯';\n";
+      await writeFile(additional, content);
+      const result = await fixture.service.recover({
+        path: fixture.path,
+        additional_paths: [additional],
+        output_directory: fixture.output,
+      });
+      if (!result.ok) throw result.error;
+      const value = javascriptRecoveryResultSchema.parse(
+        result.value.normalized_result,
+      );
+      const sources = [value.source, ...(value.additional_sources ?? [])];
+      expect(sources.map((source) => source.path)).toEqual([
+        fixture.path,
+        additional,
+      ]);
+      expect(sources.map((source) => source.published_copy.path)).toEqual([
+        join(fixture.output, "inputs/selected.js"),
+        join(fixture.output, "inputs/nested/selected.js"),
+      ]);
+      expect(await readFile(sources[1]!.published_copy.path, "utf8")).toBe(
+        content,
+      );
+      expect(result.value.subject?.digest.sha256).toBe(value.source.sha256);
+      for (const [index, module] of value.modules.entries()) {
+        const source = sources[index]!;
+        expect(source.published_copy.sha256).toBe(source.sha256);
+        expect(module.provenance).toMatchObject({
+          reported_input: source.snapshot_path,
+          original_path: source.path,
+          original_sha256: source.sha256,
+          byte_ranges: [{ start: 0, end: source.bytes }],
+          context_byte_ranges: [{ start: 0, end: source.bytes }],
+        });
+      }
+      const manifest = JSON.parse(await readFile(value.manifest.path, "utf8"));
+      expect(manifest.additional_sources).toEqual(value.additional_sources);
+      await assertRecoveryCleanup(fixture.launches);
+    });
+
+    it.each([
+      "secondary-foreign",
+      "secondary-overflow",
+      "secondary-utf8",
+      "secondary-change",
+      "redistribute",
+    ])("rejects %s against its own source and rolls back", async (mode) => {
+      const fixture = await recoveryFixture(mode, "a");
+      const additional = join(fixture.root, "chunk.js");
+      await writeFile(additional, mode === "secondary-utf8" ? "🎯" : "bc");
+      const result = await fixture.service.recover({
+        path: fixture.path,
+        additional_paths: [additional],
+        output_directory: fixture.output,
+      });
+      if (result.ok) throw new Error("expected per-source validation failure");
+      expect(projectAnalysisError(result.error).code).toMatch(
+        /execution_failure|unreadable_output/u,
+      );
+      const reason =
+        mode === "secondary-foreign"
+          ? "does not bind the selected input snapshot"
+          : mode === "redistribute" || mode === "secondary-change"
+            ? "Original input changed"
+            : "Invalid half-open UTF-8 byte range";
+      expect(JSON.stringify(projectAnalysisError(result.error))).toContain(
+        reason,
+      );
+      await expect(access(fixture.output)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await assertRecoveryCleanup(fixture.launches);
+    });
+
+    it("rejects aggregate input overflow before launching the engine", async () => {
+      const fixture = await recoveryFixture("normal", "a");
+      const additional = join(fixture.root, "chunk.js");
+      const handle = await open(additional, "wx");
+      try {
+        await handle.truncate(RECOVERY_LIMITS.inputBytes);
+      } finally {
+        await handle.close();
+      }
+      const result = await fixture.service.recover({
+        path: fixture.path,
+        additional_paths: [additional],
+        output_directory: fixture.output,
+      });
+      if (result.ok) throw new Error("expected aggregate capacity failure");
+      expect(projectAnalysisError(result.error).code).toBe("invalid_request");
+      expect(fixture.launches).toHaveLength(0);
+      await expect(access(fixture.output)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+
+    it("rejects non-UTF-8 input before launching recovery", async () => {
+      const fixture = await recoveryFixture();
+      await writeFile(fixture.path, Buffer.from([0xff, 0xfe]));
+      const result = await fixture.service.recover({
+        path: fixture.path,
+        output_directory: fixture.output,
+      });
+      if (result.ok) throw new Error("expected malformed source failure");
+      expect(projectAnalysisError(result.error).code).toBe("invalid_request");
+      expect(fixture.launches).toHaveLength(0);
+      await expect(access(fixture.output)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     });
   },
 );

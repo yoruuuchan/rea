@@ -13,7 +13,10 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { resolveJadxConfiguration } from "../../../dist/android/JadxConfiguration.js";
+import {
+  resolveJadxConfigurationInputs,
+  validateJadxConfiguration,
+} from "../../../dist/android/JadxConfiguration.js";
 
 /** Verify real Windows cancellation, disconnect and abrupt CLI owner exit. */
 export async function verifyWindowsAndroidLifecycle(options) {
@@ -36,7 +39,12 @@ export async function verifyWindowsAndroidLifecycle(options) {
 }
 
 async function verifyJavaSelection(environment) {
-  const selected = await resolveJadxConfiguration(
+  const selected = await resolveJadxConfigurationInputs(
+    environment,
+    "inspect_android_package",
+  );
+  await validateJadxConfiguration(
+    selected,
     environment,
     "inspect_android_package",
   );
@@ -51,7 +59,12 @@ async function verifyJavaSelection(environment) {
     // The owned junction borrows the selected JDK directory without copying it.
     await symlink(dirname(selected.java), alias, "junction");
     pathEnvironment.Path = `"${alias}"`;
-    const onPath = await resolveJadxConfiguration(
+    const onPath = await resolveJadxConfigurationInputs(
+      pathEnvironment,
+      "inspect_android_package",
+    );
+    await validateJadxConfiguration(
+      onPath,
       pathEnvironment,
       "inspect_android_package",
     );

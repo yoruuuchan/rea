@@ -1,5 +1,13 @@
 # JavaScript and Electron application artifacts
 
+For captured or bundled JavaScript that needs readable source recovery, use
+`recover_javascript_sources` with an absolute `path` and absent
+`output_directory`. Supply related runtime/shared/lazy files in
+`additional_paths` when advertised, then analyze the returned `analysis_input`
+directory together. Each input retains its own snapshot, digest and byte-range
+provenance; inputs and recovered code are never executed. Recovery requires a
+caller-supplied Wakaru on Linux x64; see [the recovery guide](https://github.com/morluto/rea/blob/main/docs/javascript-recovery.md).
+
 Use `analyze_javascript_application` directly on the operator-supplied ASAR or
 extracted tree. When size is unknown or large and the connected schema advertises
 `detail`, request `detail: "summary"`. This returns an `inspect_analysis_view`
@@ -12,7 +20,10 @@ the complete application Evidence inline when it fits.
 When the connected schema advertises `max_heap_mb` and `analysis_timeout_ms`,
 these select the isolated source analyzer's old-space heap and per-source
 deadline. Defaults are 1024 MiB and 300000 ms. They do not change the MCP
-process heap. Resource-limited analyses preserve completed static facts and
+process heap. A Bun-hosted REA does not enforce the heap choice; on Windows it
+instead limits the analyzer's committed memory to that choice plus a 512 MiB
+runtime reserve.
+Resource-limited analyses preserve completed static facts and
 report partial semantic coverage with specific unknown scopes; this does not
 mean the source is malformed. Inspect those limits before retrying a source.
 When expanded relationships exceed the parent's available memory, inspect the

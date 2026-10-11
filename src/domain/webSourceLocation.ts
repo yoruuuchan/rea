@@ -79,11 +79,22 @@ export const webSourceMapReportSchema = z.strictObject({
   source_map_sha256: digestSchema,
   url_context: z.string().min(1),
   engine: z.strictObject({ id: z.string().min(1), version: z.string().min(1) }),
-  runtime: z.strictObject({
-    id: z.string().min(1),
-    version: z.string().min(1),
-    v8_heap_limit_bytes: z.number().int().min(1),
-  }),
+  runtime: z.discriminatedUnion("id", [
+    z.strictObject({
+      id: z.literal("node-v8"),
+      version: z.string().min(1),
+      v8_heap_limit_bytes: z.number().int().min(1),
+    }),
+    // Bun reports V8-shaped heap statistics but does not enforce V8 heap flags.
+    // On Windows REA instead enforces a Job Object commit limit on the codec.
+    z.strictObject({
+      id: z.literal("bun"),
+      version: z.string().min(1),
+      node_compatibility_version: z.string().min(1),
+      v8_heap_limit_bytes: z.null(),
+      process_memory_limit_bytes: z.number().int().min(1).nullable(),
+    }),
+  ]),
   format: z.enum(["regular", "indexed"]),
   reported_file: z.string().nullable(),
   lookup: z.strictObject({
@@ -107,6 +118,8 @@ export const WEB_SOURCE_MAP_LIMITS = {
   decodedRecords: 262144,
   sectionDepth: 64,
   decodeTimeoutMs: 20000,
+  /** V8 old-generation heap for the codec, and its Bun process budget. */
+  codecHeapMiB: 192,
 } as const;
 export type WebSourceMapReport = z.output<typeof webSourceMapReportSchema>;
 

@@ -394,15 +394,15 @@ try {
           return evidence.normalized_result;
         },
       );
-    const expected = (
+    const { GHIDRA_MUTATING_OPERATIONS, GHIDRA_SESSION_CAPABILITIES } =
       await import(
         pathToFileURL(join(packageRoot, "dist/ghidra/GhidraSessionValues.js"))
-      )
-    ).GHIDRA_SESSION_CAPABILITIES.filter(
+      );
+    const expected = GHIDRA_SESSION_CAPABILITIES.filter(
       (name) =>
         name !== "ping" &&
         name !== "shutdown" &&
-        name !== "annotate_native_function",
+        !GHIDRA_MUTATING_OPERATIONS.has(name),
     );
     assert.ok(
       expected.every((name) => report.mcpOperations.includes(name)),
@@ -440,7 +440,10 @@ try {
     token,
     "Analysis changed caller token authority.",
   );
-  assert.deepEqual((await readdir(callerDirectory)).sort(), scriptCollisions);
+  assert.deepEqual(
+    (await readdir(callerDirectory)).sort(),
+    [...scriptCollisions].sort(),
+  );
   for (const name of scriptCollisions)
     assert.deepEqual(await readdir(join(callerDirectory, name)), []);
   report.callerScriptCollisionsPreserved = true;

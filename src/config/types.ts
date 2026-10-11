@@ -18,6 +18,7 @@ export interface AppConfig {
   readonly ghidraNativeAotJar?: string;
   readonly ilspyCmdPath: string | undefined;
   readonly hopperLauncherPath: string;
+  readonly hopperStartupTimeoutMs: number;
   readonly hopperTargetPath: string | undefined;
   readonly hopperTargetKind: "executable" | "database";
   readonly hopperLoaderArgs: readonly string[];

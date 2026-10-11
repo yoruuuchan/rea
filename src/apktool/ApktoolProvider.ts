@@ -48,9 +48,11 @@ import {
 } from "../process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
+import { WindowsBatchCommandError } from "../process/WindowsBatchCommand.js";
 import {
   ApktoolConfigurationFailure,
   apktoolConfigurationAvailability,
+  apktoolInvocation,
   inspectApktoolClient,
   resolveApktoolCommand,
   type ApktoolCommandSelection,
@@ -136,7 +138,7 @@ interface DecodeLimits {
 
 const runApktool = async (
   operation: string,
-  command: string,
+  selection: ApktoolCommandSelection,
   arguments_: readonly string[],
   limits: DecodeLimits,
   signal: AbortSignal | undefined,
@@ -145,13 +147,29 @@ const runApktool = async (
 ): Promise<Result<{ stdout: string; stderr: string }, AnalysisError>> => {
   if (signal?.aborted === true)
     return err(new AnalysisCancelledError(operation));
+  const hostEnvironment = { ...process.env, ...environment };
+  let invocation: ReturnType<typeof apktoolInvocation>;
+  try {
+    invocation = apktoolInvocation(selection, arguments_, hostEnvironment);
+  } catch (cause) {
+    if (!(cause instanceof WindowsBatchCommandError)) throw cause;
+    return err(
+      new AnalysisCapabilityUnavailableError(
+        APKTOOL_PROVIDER_IDENTITY.id,
+        operation,
+        `The apktool batch launcher cannot receive REA's decode paths through cmd.exe: ${cause.message}`,
+        { cause },
+      ),
+    );
+  }
   try {
     const output = await runOwnedCommand(
       {
-        command,
-        arguments: arguments_,
+        command: invocation.command,
+        arguments: invocation.arguments,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         runId: randomUUID(),
-        hostEnvironment: { ...process.env, ...environment },
+        hostEnvironment,
       },
       {
         timeoutMs: limits.timeoutMs,
@@ -219,7 +237,7 @@ const runApktool = async (
     return err(
       new AnalysisUnsupportedTargetError(
         operation,
-        command,
+        selection.command,
         output?.stderr.text.trim().slice(0, STDERR_EXCERPT_BYTES) ||
           `apktool exited with code ${String(output?.exitCode ?? "unknown")} for ${operation}`,
         {
@@ -586,7 +604,7 @@ export class ApktoolProvider {
       await mkdir(framework);
       const decoded = await runApktool(
         operation,
-        selection.command,
+        selection,
         [
           "d",
           "--no-src",

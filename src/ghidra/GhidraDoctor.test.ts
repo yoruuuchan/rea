@@ -54,7 +54,6 @@ const doctorHost = (
   createDoctorHostFixture({
     platform: "linux",
     architecture: "x64",
-    nodeVersion: "24.18.0",
     macosVersion: () => Promise.resolve(undefined),
     linuxDistribution: () =>
       Promise.resolve({

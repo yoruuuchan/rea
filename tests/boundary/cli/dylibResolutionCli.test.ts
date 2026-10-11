@@ -253,6 +253,71 @@ describe("trace-dylib-resolution CLI", () => {
 });
 
 cliTest(
+  "rejects build-version tool records outside their load command",
+  async ({ cli }) => {
+    const app = await fixtureApp();
+    const withTool = new Uint8Array(32);
+    withTool.set(buildVersionCommand(0xffffffff));
+    const toolView = new DataView(withTool.buffer);
+    toolView.setUint32(4, 32, true);
+    toolView.setUint32(20, 1, true);
+    toolView.setUint32(24, 3, true);
+    toolView.setUint32(28, 0x10000, true);
+
+    const missingTool = buildVersionCommand(1);
+    new DataView(missingTool.buffer).setUint32(20, 1, true);
+    const excessiveTools = buildVersionCommand(1);
+    new DataView(excessiveTools.buffer).setUint32(20, 0xffffffff, true);
+    const missingSecondTool = withTool.slice();
+    new DataView(missingSecondTool.buffer).setUint32(20, 2, true);
+    const shortHeader = buildVersionCommand(1).slice(0, 16);
+    new DataView(shortHeader.buffer).setUint32(4, 16, true);
+    const cases = [
+      ["no-tools", [buildVersionCommand(1)], "parsed"],
+      ["one-tool", [withTool], "parsed"],
+      // The following command and the image's trailing bytes cannot satisfy ntools.
+      ["missing-tool", [missingTool, rpathCommand("x")], "malformed"],
+      ["excessive-tools", [excessiveTools], "malformed"],
+      ["missing-second-tool", [missingSecondTool], "malformed"],
+      ["short-header", [shortHeader], "malformed"],
+    ] as const;
+    for (const [name, commands] of cases) {
+      await writeFiles(app, {
+        [`Contents/Helpers/${name}`]: machoImage({ commands }),
+      });
+    }
+
+    const result = await cli.run({
+      arguments: ["trace-dylib-resolution", app, "--json"],
+      environment: ENVIRONMENT,
+    });
+    expect(result.exitCode, JSON.stringify(result.json)).toBe(0);
+    const trace = dylibResolutionResultSchema.parse(
+      (result.json as { normalized_result: unknown }).normalized_result,
+    );
+    for (const [name, , status] of cases) {
+      const path = `Contents/Helpers/${name}`;
+      const image = trace.images.find((item) => item.path === path);
+      expect(image, name).toMatchObject({ parse_status: status });
+      if (status === "malformed") {
+        expect(image).toMatchObject({
+          reason: expect.stringContaining("LC_BUILD_VERSION"),
+          slices: [],
+        });
+        expect(trace.roots.some((root) => root.image === path)).toBe(false);
+        expect(trace.coverage.unparsed_images).toContain(path);
+      } else {
+        expect(image).toMatchObject({
+          reason: null,
+          slices: [{ platforms: [name === "one-tool" ? 0xffffffff : 1] }],
+        });
+      }
+    }
+    expect(trace.coverage.status).toBe("partial");
+  },
+);
+
+cliTest(
   "retains directory requirements when resolving dylib install names",
   async ({ cli }) => {
     const directory = await createTestTempDirectory("rea-dylib-path-cli-");

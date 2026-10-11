@@ -253,9 +253,9 @@ describe("setup workflow action selection", () => {
 
     expect(result.status).toBe("ready");
     expect(host.configuredCommands).toEqual([
-      setupRegistrationCommand("win32", false),
+      setupRegistrationCommand("win32", undefined),
     ]);
-    expect(setupRegistrationCommand("win32", false)).toEqual([
+    expect(setupRegistrationCommand("win32", undefined)).toEqual([
       process.execPath,
       resolve(process.argv[1] ?? "rea"),
       "mcp",

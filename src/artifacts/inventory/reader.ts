@@ -5,7 +5,10 @@ import { MachOSliceArtifactReader } from "../MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "../NativeDmgArtifactReader.js";
 import { ZipArtifactReader } from "../ZipArtifactReader.js";
 import type { ArtifactOccurrence } from "../../domain/artifactGraph.js";
-import { ZIP_NON_ENTRY_TAIL_LIMITATION } from "../../domain/zipPackageFormat.js";
+import {
+  isZipPackageFormat,
+  ZIP_NON_ENTRY_TAIL_LIMITATION,
+} from "../../domain/zipPackageFormat.js";
 import type { StableRegularFileDescriptor } from "../../filesystem/RegularFile.js";
 
 export const createReader = (
@@ -14,15 +17,11 @@ export const createReader = (
   environment: Readonly<NodeJS.ProcessEnv>,
   rootSource?: StableRegularFileDescriptor,
 ): ArtifactReader | undefined => {
+  if (isZipPackageFormat(format))
+    return new ZipArtifactReader(path, format, undefined, rootSource);
   switch (format) {
     case "directory":
       return new DirectoryArtifactReader(path);
-    case "zip":
-    case "ipa":
-    case "apk":
-    case "msix":
-    case "appx":
-      return new ZipArtifactReader(path, format, undefined, rootSource);
     case "asar":
       return new AsarArtifactReader(path);
     case "mach-o-universal":
@@ -42,11 +41,7 @@ export const inventoryLimitations = (
   reader: ArtifactReader | undefined,
 ): string[] => {
   if (reader !== undefined)
-    return reader.format === "zip" ||
-      reader.format === "ipa" ||
-      reader.format === "apk" ||
-      reader.format === "msix" ||
-      reader.format === "appx"
+    return isZipPackageFormat(reader.format)
       ? [ZIP_NON_ENTRY_TAIL_LIMITATION]
       : [];
   // dmg and pkg reach here only after classifyRootFormat matched their bytes.

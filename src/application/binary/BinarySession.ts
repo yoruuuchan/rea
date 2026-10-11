@@ -497,7 +497,7 @@ export class BinarySession
   execute(
     name: Parameters<AnalysisOperationPort["execute"]>[0],
     arguments_: Readonly<Record<string, JsonValue>>,
-    options?: { readonly signal?: AbortSignal },
+    options?: Pick<ExecutionOptions, "signal" | "selectorOrigin">,
   ): Promise<Result<AnalysisExecution, AnalysisError>> {
     const generation = this.#transitionGeneration;
     const call = this.#execute(name, arguments_, options, this.#transition);
@@ -535,7 +535,7 @@ export class BinarySession
   async #execute(
     name: Parameters<AnalysisOperationPort["execute"]>[0],
     arguments_: Readonly<Record<string, JsonValue>>,
-    options: { readonly signal?: AbortSignal } | undefined,
+    options: Pick<ExecutionOptions, "signal" | "selectorOrigin"> | undefined,
     transition: Promise<void>,
   ): Promise<Result<AnalysisExecution, AnalysisError>> {
     const transitioned = await this.#waitForTransition(

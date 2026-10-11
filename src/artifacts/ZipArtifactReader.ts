@@ -147,22 +147,23 @@ export class ZipArtifactReader implements ArtifactReader {
   }
 
   async *entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry> {
-    const filenames = new Set<string>();
+    let index = 0;
     for await (const entry of this.#reader.getEntriesGenerator()) {
       abortIfNeeded(signal);
-      // Each enumeration can replay valid entries, but a second record with
-      // the same name must not replace an already emitted source identity.
-      if (filenames.has(entry.filename))
+      // ZIP member identity is its directory occurrence, not its filename.
+      // Logical path uniqueness belongs to the artifact inventory boundary.
+      const metadata = projectZipEntry(entry, index++);
+      const stored = this.#entries.get(metadata.adapterKey);
+      if (stored !== undefined && !sameArtifactEntry(metadata, stored.metadata))
         throw new ArtifactReaderFailure(
-          "path",
-          `Artifact path collision: ${entry.filename}`,
+          "integrity",
+          `ZIP member identity changed during enumeration: ${entry.filename}`,
         );
-      filenames.add(entry.filename);
-      const metadata = projectZipEntry(entry);
-      this.#entries.set(entry.filename, {
-        source: entry,
-        metadata: copyArtifactEntry(metadata),
-      });
+      if (stored === undefined)
+        this.#entries.set(metadata.adapterKey, {
+          source: entry,
+          metadata: copyArtifactEntry(metadata),
+        });
       yield metadata;
     }
   }
@@ -203,7 +204,7 @@ export class ZipArtifactReader implements ArtifactReader {
   }
 }
 
-const projectZipEntry = (entry: Entry): ArtifactEntry => {
+const projectZipEntry = (entry: Entry, index: number): ArtifactEntry => {
   const symlink = isSymlink(entry);
   return {
     path: entry.filename,
@@ -216,7 +217,7 @@ const projectZipEntry = (entry: Entry): ArtifactEntry => {
     declaredSha256: null,
     unpacked: false,
     limitations: symlink ? ["Archive symlink target was not read."] : [],
-    adapterKey: entry.filename,
+    adapterKey: `zip-entry:${index}`,
   };
 };
 

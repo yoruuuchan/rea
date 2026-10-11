@@ -30,6 +30,11 @@ export interface OwnedProviderProcessSpawnOptions {
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   /** Opt into a writable protocol stream; other providers retain ignored stdin. */
   readonly stdin?: "pipe";
+  /**
+   * Commit limit in bytes for the whole owned process tree, enforced by its
+   * Windows Job Object. Other launchers cannot enforce it and refuse it.
+   */
+  readonly memoryLimitBytes?: number;
   /** Cancels native ownership preparation before provider process creation. */
   readonly signal?: AbortSignal;
 }
@@ -52,6 +57,8 @@ export interface ProviderProcessHandle extends Pick<
   readonly stderr: Readable | null;
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
+  /** True once an enforced process memory limit reported an allocation failure. */
+  readonly memoryLimitReached?: boolean;
   kill(signal?: NodeJS.Signals | number): boolean;
 }
 
@@ -89,6 +96,8 @@ export interface ProviderProcessSnapshot {
   };
   readonly exitCode: number | null | undefined;
   readonly signal: NodeJS.Signals | null | undefined;
+  /** Present only when the process tree reached its enforced memory limit. */
+  readonly memoryLimitReached?: true;
 }
 
 /** Resource-safe events emitted without imposing provider protocol semantics. */
@@ -162,7 +171,12 @@ export const spawnOwnedProviderProcess = async (
       options.cwd,
       environment,
       options.windowsVerbatimArguments ?? false,
-      options.stdin === "pipe",
+      {
+        protocolStdin: options.stdin === "pipe",
+        ...(options.memoryLimitBytes === undefined
+          ? {}
+          : { memoryLimitBytes: options.memoryLimitBytes }),
+      },
     );
     return {
       process: child,
@@ -175,6 +189,10 @@ export const spawnOwnedProviderProcess = async (
       cleanup: () => child.cleanup(),
     };
   }
+  if (options.memoryLimitBytes !== undefined)
+    throw new Error(
+      "Owned process memory limits require the Windows Job Object launcher; no limit can be enforced on this host.",
+    );
   const child = spawn(options.command, [...options.arguments], {
     shell: false,
     windowsHide: true,
@@ -277,6 +295,9 @@ export class ProviderProcessSupervisor {
       stderr: this.#stderr.snapshot(this.#stderrObservedBytes),
       exitCode: this.#exitObservation?.code,
       signal: this.#exitObservation?.signal,
+      ...(this.launch.process.memoryLimitReached === true
+        ? { memoryLimitReached: true }
+        : {}),
     };
   }
 

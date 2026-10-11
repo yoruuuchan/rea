@@ -210,7 +210,15 @@ it("blocks a fresh launch while cleanup remains unverified", async () => {
   const { client, child } = await failedStartup(launcher);
   await expect(client.start()).resolves.toMatchObject({
     ok: false,
-    error: { _tag: "HopperProtocolError" },
+    error: {
+      cleanupIncomplete: true,
+      cause: { _tag: "HopperTimeoutError" },
+      diagnostics: { primary_error: { code: "provider_timeout" } },
+    },
+  });
+  expect(client.operationHealth()).toMatchObject({
+    state: "not_started",
+    stage: "launch",
   });
   expect(launcher.processes).toEqual([child]);
   launcher.allowCleanup = true;
@@ -309,7 +317,10 @@ it("retries a failed lease release after document, process, and runtime cleanup 
   });
   await expect(client.start()).resolves.toMatchObject({
     ok: false,
-    error: { _tag: "HopperProtocolError" },
+    error: {
+      cleanupIncomplete: true,
+      diagnostics: { primary_error: { code: "provider_timeout" } },
+    },
   });
   releaseAllowed = true;
   await expect(client.close()).resolves.toEqual({ ok: true, value: null });

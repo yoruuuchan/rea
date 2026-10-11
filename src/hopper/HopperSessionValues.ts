@@ -2,6 +2,9 @@ import { HopperProtocolError } from "../domain/hopperErrors.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 
+/** Bound cleanup handshakes and the bridge's idle reconnection wait. */
+export const HOPPER_SHUTDOWN_TIMEOUT_MS = 30_000;
+
 /** Authenticated identity returned by the Hopper bridge health handshake. */
 export interface HopperServerInfo {
   readonly name: string;

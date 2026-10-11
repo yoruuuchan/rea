@@ -25,6 +25,7 @@ import {
 import { parseTypes, typeRanges } from "./ManagedMemberInspectorCore.js";
 import {
   edges,
+  parseExportedTypes,
   parseFields,
   parseMemberRefs,
   parseMethods,
@@ -60,6 +61,7 @@ const unavailable = (
         requires_mvid: null,
       },
       types: [],
+      exported_types: null,
       fields: [],
       methods: [],
       member_refs: [],
@@ -117,6 +119,8 @@ export const inspectManagedMembersBytes = (
     const ranges = typeRanges(bytes, layout, issues);
     const parsedTypes = parseTypes(bytes, layout, ranges);
     issues.push(...parsedTypes.issues);
+    const exportedTypes = parseExportedTypes(bytes, layout);
+    issues.push(...exportedTypes.issues);
     const fields = parseFields(bytes, layout, ranges);
     const memberRefs = parseMemberRefs(bytes, layout);
     issues.push(...memberRefs.issues);
@@ -142,6 +146,7 @@ export const inspectManagedMembersBytes = (
       methods.core,
       fields.core,
       memberRefs.core,
+      managedDecodeBudget(layout),
     );
     return managedMemberInspectionSchema.parse(
       admitManagedProjection(
@@ -164,6 +169,7 @@ export const inspectManagedMembersBytes = (
             requires_mvid: inventory.module?.mvid ?? null,
           },
           types: parsedTypes.types,
+          exported_types: exportedTypes.exportedTypes,
           fields: fields.fields,
           methods: methods.methods,
           member_refs: memberRefs.refs,
@@ -179,7 +185,8 @@ export const inspectManagedMembersBytes = (
           limitations: [
             "Metadata tokens are build-local coordinates and are only meaningful with the reported artifact SHA-256 and MVID.",
             "CIL instruction anchors are decoded from file-backed method bodies only; no target assembly is loaded or executed.",
-            "Signatures are decoded for common ECMA-335 primitive, class, valuetype, pointer, byref, array, and generic variable forms; unsupported forms retain raw signature hashes.",
+            "Exported types are reported from ExportedType rows as declared; forwarded types are not resolved in their implementing assemblies.",
+            "Member signatures decode ECMA-335 primitive, class, valuetype, generic instantiation, generic variable, pointer, byref, single-dimension and general array, function pointer, custom modifier, and typed reference forms; class and valuetype operands keep their encoded TypeDefOrRefOrSpec values, and unsupported forms such as vararg sentinels retain raw signature hashes.",
           ],
         },
         managedDecodeBudget(layout),

@@ -46,6 +46,7 @@ if (await pathExists(join(root, "src"))) {
 } else {
   for (const path of [
     "dist/main.js",
+    "dist/mcp/main.js",
     "dist/mcpDoctor.js",
     "dist/cli.js",
     "dist/cliOutput.js",

@@ -7,6 +7,12 @@ interface ManagedPeFixtureOptions {
   readonly corruptMetadataSignature?: boolean;
   readonly customAttributeTypeRaw?: number;
   readonly extendsRaw?: number;
+  readonly exportedTypes?: readonly {
+    readonly namespace: string;
+    readonly name: string;
+    readonly flags: number;
+    readonly implementationRaw: number;
+  }[];
   readonly fieldName?: string;
   readonly fieldSignature?: Buffer;
   readonly ilBody?: Buffer;
@@ -361,6 +367,21 @@ const manifestResourceRow = (
     metadataIndex(implementationRaw, implementationSize),
   ]);
 
+const exportedTypeRow = (
+  exported: { readonly name: number; readonly namespace: number },
+  flags: number,
+  stringSize: MetadataIndexSize,
+  implementationSize: MetadataIndexSize,
+  implementationRaw: number,
+): Buffer =>
+  Buffer.concat([
+    u32(flags),
+    u32(0),
+    metadataIndex(exported.name, stringSize),
+    metadataIndex(exported.namespace, stringSize),
+    metadataIndex(implementationRaw, implementationSize),
+  ]);
+
 const fixedStringAttributeBlob = (value: string): Buffer => {
   const bytes = Buffer.from(textEncoder.encode(value));
   if (bytes.length > 0x7f)
@@ -469,6 +490,10 @@ interface FixtureMetadataRowContext {
     readonly pinvokeModuleName: number | null;
     readonly pinvokeImportName: number | null;
     readonly resourceName: number;
+    readonly exportedTypes: readonly {
+      readonly name: number;
+      readonly namespace: number;
+    }[];
     readonly tokenBlob: number;
     readonly fieldSignature: number;
     readonly methodSignature: number;
@@ -521,6 +546,29 @@ const customAttributeRows = (
         ),
       ];
 
+const exportedTypeTable = (
+  options: ManagedPeFixtureOptions,
+  indexes: FixtureMetadataRowContext["indexes"],
+  heapSizes: FixtureMetadataRowContext["heapSizes"],
+  widths: FixtureIndexWidths,
+): readonly (readonly [number, readonly Buffer[]])[] =>
+  indexes.exportedTypes.length === 0
+    ? []
+    : [
+        [
+          39,
+          indexes.exportedTypes.map((exported, index) =>
+            exportedTypeRow(
+              exported,
+              options.exportedTypes?.[index]?.flags ?? 0,
+              heapSizes.strings,
+              widths.implementation,
+              options.exportedTypes?.[index]?.implementationRaw ?? 0,
+            ),
+          ),
+        ],
+      ];
+
 const fixtureIndexWidths = ({
   options,
   referenceStringIndexes,
@@ -539,6 +587,7 @@ const fixtureIndexWidths = ({
     ...(indexes.pinvokeImportName === null ? [] : ([[28, 1]] as const)),
     [32, options.assemblyRowCount ?? 1],
     [35, referenceStringIndexes.length],
+    [39, indexes.exportedTypes.length],
     [40, 1],
   ]);
   const count = (table: number): number => rowCounts.get(table) ?? 0;
@@ -697,6 +746,7 @@ const fixtureMetadataRows = ({
         ),
       ),
     ],
+    ...exportedTypeTable(options, indexes, heapSizes, widths),
     [
       40,
       [
@@ -736,6 +786,12 @@ const buildManagedFixtureMetadata = (
       ? null
       : strings.add(options.pinvoke.importName ?? "MessageBoxW");
   const resourceName = strings.add("Fixture.resources");
+  const exportedTypes = (options.exportedTypes ?? []).map(
+    ({ namespace, name }) => ({
+      name: strings.add(name),
+      namespace: strings.add(namespace),
+    }),
+  );
   const referenceNames = options.references ?? ["System.Runtime"];
   const referenceStringIndexes = referenceNames.map((name) =>
     strings.add(name),
@@ -775,6 +831,7 @@ const buildManagedFixtureMetadata = (
       pinvokeModuleName,
       pinvokeImportName,
       resourceName,
+      exportedTypes,
       tokenBlob,
       fieldSignature,
       methodSignature,

@@ -487,6 +487,16 @@ describe("platform-aware client config paths", () => {
       isOwnedClientRegistrationCommand(["npx", "-y", "another-package", "mcp"]),
     ).toBe(false);
     expect(
+      isOwnedClientRegistrationCommand([
+        "bunx",
+        `${PRODUCT_IDENTITY.packageName}@3.2.0`,
+        "mcp",
+      ]),
+    ).toBe(true);
+    expect(
+      isOwnedClientRegistrationCommand(["bunx", "another-package", "mcp"]),
+    ).toBe(false);
+    expect(
       isOwnedClientRegistrationCommand(
         [process.execPath, "/packaged/rea.mjs", "mcp"],
         "/packaged/rea.mjs",

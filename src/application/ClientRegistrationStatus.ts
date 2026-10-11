@@ -17,7 +17,7 @@ import { PRODUCT_IDENTITY } from "../identity.js";
 import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
 import {
   isOwnedClientRegistrationCommand,
-  npxRegistrationCommand,
+  packageRunnerRegistrationCommand,
 } from "./ClientRegistrationIdentity.js";
 import {
   clientEvidencePaths,
@@ -232,10 +232,14 @@ const registrationAligned = (
     resolve(command[1] ?? "") === currentCommandPath
   )
     return true;
-  const npxCommand = npxRegistrationCommand(platform);
   if (
-    command.length === npxCommand.length &&
-    command.every((argument, index) => argument === npxCommand[index])
+    (["npx", "bunx"] as const).some((runner) => {
+      const runnerCommand = packageRunnerRegistrationCommand(runner, platform);
+      return (
+        command.length === runnerCommand.length &&
+        command.every((argument, index) => argument === runnerCommand[index])
+      );
+    })
   )
     return true;
   return (

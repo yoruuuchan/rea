@@ -478,8 +478,17 @@ native decompiler. The namespace verifier reports missing or non-executable
 components before testing the fixture. REA does not build or install them.
 
 Windows native conformance runs with `npm run verify:windows-native` and does
-not require Ghidra or Java. An optional independently compiled Windows fixture
+not require Ghidra or Java. It includes Job Object commit-limit controls (a
+limited child that reaches the limit, a control that does not, and invalid
+limit rejection). An optional independently compiled Windows fixture
 adds in-place reparse, breakaway, environment, and token observations.
+The separate `scripts/verify-windows-native-inspection.mjs` lane uses the
+`.cache/windows-native-inspection-fixture` artifact built on Linux with
+`node scripts/build-windows-native.mjs --inspection-fixture`. Its controlled
+first deletion failure checks retained NTFS ownership, later-query recovery,
+successful-admission caching, and environment-teardown cleanup. It neither
+establishes the cause of the intermittent #1701 host failure nor replaces
+verification with the shipped production artifact.
 `npm run verify:ghidra:windows:package` additionally packs and installs REA into
 an isolated prefix and runs ordinary-user CLI/MCP operations against their
 canonical schemas. Run the controlled fixture generator before that lane, or
@@ -624,6 +633,18 @@ remain GUI-only surfaces in JEB 5.48.0 headless.
 Authenticated IPA and macOS application inventory projection is documented in
 [Apple application analysis](apple-application-analysis.md).
 
+`npm run verify:harmony` requires no SDK or engine. It projects the pinned
+harmony-next-pipeline 1.0.1 release HAP from an MIT-licensed source repository,
+fetched by `npm run fixtures:harmony` into ignored
+`_reference/harmony-integration/`, set as `REA_HARMONY_TEST_HAP`.
+The lane exercises `inspect_artifact`, projection determinism, Stage-model
+path hints, exact component sets, signing-entry limitations, and CLI/MCP parity.
+The release artifact has no independently established compiler/SDK or
+reproducible source build; the default lane does not verify an installed package.
+See [HarmonyOS package inventory](harmony-analysis.md) for those proof boundaries.
+HarmonyOS `.har` libraries are deliberately not suffix-classified because
+`.har` also names HTTP Archive JSON.
+
 Synthetic producer regressions run independently:
 
 ```sh
@@ -739,9 +760,15 @@ entries, external callees, target switches, cancellation draining, snapshot
 replay exclusion, ownership failures, and incomplete cleanup. They do not
 establish real IDA operation. The initial real workflows cover legacy upstream
 1.4.0 on a Windows GUI and the modern supervisor at upstream commit
-`c133c3853faa111a9b00ee615c013b720d0c4acd` with Windows x64 IDA 9.3.
-Linux/macOS headless, modern attached GUI tools, other engine versions and
-architectures remain unverified; see the [provider guide](ida-provider.md).
+`c133c3853faa111a9b00ee615c013b720d0c4acd` with Windows x64 IDA 9.3, and the
+headless profile on macOS arm64 with IDA Professional 9.1 (build 9.1.250226)
+at the same upstream commit, using `tests/conformance/ida/inventory.c` built
+with `clang -O0 -arch arm64` and the procedure `_rea_fixture_add` (Mach-O C
+symbols carry a leading underscore). Before the headless session waited out
+the transient `busy` health a worker can report right after opening, that lane
+failed intermittently on that host. Linux headless, modern attached GUI tools,
+other engine versions and architectures remain unverified; see the
+[provider guide](ida-provider.md).
 
 ## DOS Ghidra analysis
 
@@ -907,7 +934,7 @@ behavior, and complete CI evidence before merging.
 | `npm run test:focused -- PATH...` | Exact existing test files; compiled boundaries build first, and unmatched paths fail                                    |
 | `npm run test:changed`            | Source tests affected since the merge base with `origin/main`, including committed and dirty changes                    |
 | `npm run test:fast`               | All domain, service, adapter, composition, conformance, and evaluation tests without build                              |
-| `npm run test:boundary`           | Boundary, MCP boundary, process boundary, and process-global projects                                                   |
+| `npm run test:boundary`           | Boundary, CLI boundary, MCP boundary, process boundary, and process-global projects                                     |
 | `npm run test:mcp`                | MCP boundary project                                                                                                    |
 | `npm run test:acceptance`         | Complete compiled CLI and MCP acceptance workflows                                                                      |
 | `npm run test:watch`              | Dirty source tests in watch mode, without build                                                                         |
@@ -937,6 +964,11 @@ it or select another revision.
 
 Source typechecking needs no compiled runtime or generated test metadata.
 `npm run build:cached` compiles the CLI/MCP runtime and its packaged skill.
+Turbo's strict task environment preserves caller-selected `GOMAXPROCS`,
+`GOMEMLIMIT`, and `UV_THREADPOOL_SIZE` for resource-constrained builds and
+checks. These execution controls do not change artifact content, so changing
+their values retains cache reuse. They control individual runtimes; monitor
+the complete process family separately when enforcing a total memory budget.
 `npm run test:prepare` also generates the MCP contract test catalog, product
 catalog, and portable managed evidence used by the complete suite. Focused
 tests prepare those extra outputs only when their selected files consume them.
@@ -964,18 +996,43 @@ Vitest projects use up to two workers, bounded by host parallelism.
 `process-boundary` runs later with serial files because process-tree sampling
 shares host resources. Acceptance and process-global cases use isolated forks
 without serial scheduling. Pure domain/service, composition, conformance,
-evaluation, and MCP boundary projects share module graphs; their tests avoid
-process-global state and keep resource cleanup test-scoped. Each MCP session
-still owns its resources. Adapter, non-MCP boundary, acceptance, and
-process-global projects retain per-file isolation. See `vitest.config.ts` for
-current settings.
+evaluation, CLI boundary, and MCP boundary projects share module graphs. Their
+tests avoid process-global state and keep resource cleanup test-scoped. Each
+MCP session still owns its resources, and CLI cases retain fresh command
+instances or subprocesses. CLI module mocks belong in `tests/process-global/`
+so they keep per-file isolation. Product catalog verification stays with the
+isolated filesystem boundary tests because it loads both source and compiled
+module graphs. Adapter, other boundary, acceptance, and process-global projects
+retain per-file isolation. See `vitest.config.ts` for current settings.
+
+The reused CLI boundary workers cap V8 old space at 384 MiB, based on their
+profiled allocation and cleanup behavior. This encourages collection between
+files; spawned REA processes retain their own heap settings.
+
+Vitest worker limits do not bound subprocesses launched within a test. Bound
+those batches separately so repeated CLI validation cannot oversubscribe the
+runner. Preserve simultaneous launches where concurrency is itself under test.
 
 Build/documentation writers hold checkout-local output locks. Tests do not
 hold a broad command lock; `check:pr` finishes tests before document validation.
 
-Vitest and Node persistent compile caches are deliberately not enabled by
-default. To evaluate repeated local runs, opt in for both cold and warm
-measurements with an isolated cache:
+Vitest's persistent compile cache remains disabled. The `cliTest` fixture shares
+a temporary Node compile cache among its fresh CLI subprocesses. The worker
+removes it after test-scoped processes finish. Explicit child environment
+settings take precedence; children requesting `NODE_V8_COVERAGE` do not receive
+the fixture cache. These subprocesses are outside aggregate Vitest coverage;
+subprocess coverage attachment remains disabled. Cold-start import checks launch
+independently without this fixture cache.
+
+The Apple artifact verifier step shares a job-temporary bytecode cache among
+its fresh CLI/MCP children via `REA_ARTIFACT_NODE_COMPILE_CACHE`. The artifact
+helper maps this setting to child `NODE_COMPILE_CACHE`; npm, Turbo, and nested
+Vitest runs do not inherit that setting. Explicit `NODE_COMPILE_CACHE` takes
+precedence, and coverage collection or `NODE_DISABLE_COMPILE_CACHE=1` disables
+the helper's cache. The cache is discarded with the CI job.
+
+To evaluate persistent compile caching for repeated local runs, opt in for both
+cold and warm measurements with an isolated cache:
 
 ```bash
 NODE_COMPILE_CACHE=.cache/node-compile npm test
@@ -997,6 +1054,19 @@ reports, uploads them together, and writes the slowest files to the workflow
 summary. Static checks, documentation, build, package verification, and
 real-system lanes remain separate jobs so one kind of evidence cannot stand in
 for another.
+
+The build job saves portable Turbo outputs across runs. Eight Linux real-system
+lanes restore this cache without waiting for the build job. The shared action
+derives its key from `test:prepare --dry=json` task hashes, runner OS and
+architecture, and `.npmrc`; test-only changes can reuse compiled outputs. Every
+build and verification command still runs, so Turbo checks task inputs and
+rebuilds misses. There is no prefix fallback to accumulate older build outputs.
+
+Native package jobs reuse the same workflow's Turbo cache for portable compiled
+JavaScript, skills, and catalogs. They retain the normal build and prepack
+commands, which restore matching outputs or rebuild on a cache miss. Native
+artifacts, dependency installs, package archives, and runtime verification remain
+host-local. Keep platform-dependent outputs out of this shared cache.
 
 The PR acceptance target is a median `npm run check:pr` wall time below three
 minutes across three warm-build runs on the benchmark host. Keep Vitest caches
@@ -1072,7 +1142,10 @@ and `REA_JAVASCRIPT_FIXTURE_TOOLS` pointing to an isolated npm prefix containing
 esbuild 0.25.10 and webpack 5.101.3. No global installation is required.
 The lane compiles source-owned fixtures, exercises CLI and stdio MCP, verifies
 published bytes and provenance, feeds recovered modules into existing analysis,
-and compares a finite set of known fixture results. The provider also accepts
+and compares a finite set of known fixture results. A webpack fixture with separate
+runtime, shared, entry and lazy chunks verifies multi-input recovery through both
+surfaces, per-file provenance and resolved cross-chunk imports in the downstream
+application graph. The provider also accepts
 other ^1.13.0 releases and reports them as unverified; this lane proves the
 audited release. It does not establish
 arbitrary recovered-application equivalence. CI installs these prerequisites only
@@ -1289,3 +1362,25 @@ npm run evidence:check
 
 The records preserve unsupported and unverified coverage as explicit unknowns.
 Run the matching real-tool prerequisites described in this guide.
+
+### Offline WASM artifacts
+
+`npm run verify:wasm:artifact -- --require-tools` uses an absolute
+`REA_WABT_BIN_DIRECTORY` containing WABT 1.0.42, including `wat2wasm` for fixture
+generation. It installs nothing. Without configuration, the default invocation
+reports a named skip; `--require-tools` makes missing configuration fail.
+
+The verifier creates and validates real modules with custom sections, multiple
+import/export kinds, escaped names and empty modules. It compares exact WAT,
+section output and selected/tool digests through the compiled CLI and real MCP
+SDK, validates advertised schemas, checks identical CLI/MCP Evidence IDs and
+session bundle readback, retains invalid/truncated module diagnostics, preserves
+all inputs and checks workspace cleanup. Pass an installed package's
+`scripts/rea.mjs` as the first argument to run the same lane against the package.
+`npm run verify:wasm:package` packs and installs REA into an isolated temporary
+prefix with lifecycle scripts disabled and runs the same required real-tool lane.
+It requires WABT configuration and makes no host tool installation.
+
+Source-owned provider tests separately exercise cancellation, deadline propagation,
+malformed producer output and cleanup uncertainty; shared owned-command tests
+exercise actual subprocess timeout and cancellation.

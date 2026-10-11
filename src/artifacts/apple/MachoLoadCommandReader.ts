@@ -414,7 +414,14 @@ const decodeCommand = (
         "malformed",
         `load command ${index} is too short for LC_BUILD_VERSION`,
       );
-    const platform = viewOf(body).getUint32(8, true);
+    const view = viewOf(body);
+    const toolCount = view.getUint32(20, true);
+    if (toolCount > Math.floor((body.byteLength - 24) / 8))
+      throw new MachoFormatIssue(
+        "malformed",
+        `load command ${index} LC_BUILD_VERSION tool records exceed cmdsize`,
+      );
+    const platform = view.getUint32(8, true);
     slice.platforms.push(platform);
     return;
   }

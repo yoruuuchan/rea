@@ -162,6 +162,14 @@ const contextualCandidate = (
     return unresolvedCandidate("external", [
       "URL schemes and protocol-relative URLs are outside this local artifact path context.",
     ]);
+  if (context === "url-reference") {
+    const decoded = percentDecodeUrlPath(declared);
+    if (decoded === null)
+      return unresolvedCandidate("rejected", [
+        "The URL reference path percent-decodes to NUL or to bytes that are not UTF-8.",
+      ]);
+    declared = decoded;
+  }
   return relativeCandidate(input.sourcePath, declared);
 };
 
@@ -198,18 +206,27 @@ const bareModuleCandidate = (
     return unresolvedCandidate("external", [
       "The bare specifier is a Node builtin, package import map, or invalid package name.",
     ]);
+  if (input.moduleKind === "import" && packageName.includes("%"))
+    return unresolvedCandidate("rejected", [
+      "Percent signs are not admitted in ES module package names.",
+    ]);
+  const self = commonJsSelfCandidate(input, declared);
+  if (self !== null) return self;
   const subpath =
     declared === packageName ? "." : `.${declared.slice(packageName.length)}`;
   const source = input.files.get(input.sourcePath);
   let directory = posix.dirname(input.sourcePath);
   while (true) {
     const candidate = posix.join(directory, "node_modules", packageName);
+    const metadata = readPackageMetadata(input, candidate);
+    if (packageExportsEligible(input) && metadata.kind !== "absent")
+      return resolvePackageSpecifier(input, candidate, subpath, metadata);
     if (subpath === ".") {
       const direct = resolveFileCandidates(input, fileCandidates(candidate));
       if (direct !== null) return direct;
     }
     if (hasContainerDirectory(input.files, candidate, source?.container_sha256))
-      return resolvePackageSpecifier(input, candidate, subpath);
+      return resolvePackageSpecifier(input, candidate, subpath, metadata);
     if (directory === "." || directory === "") break;
     directory = posix.dirname(directory);
   }
@@ -218,30 +235,85 @@ const bareModuleCandidate = (
   ]);
 };
 
+/** Self references use the nearest package scope before dependency lookup. */
+const commonJsSelfCandidate = (
+  input: ResolveArtifactPathInput,
+  declared: string,
+): CandidateResolution | null => {
+  if (input.moduleKind !== "require" || !input.files.has(input.sourcePath))
+    return null;
+  let directory = posix.dirname(input.sourcePath);
+  while (posix.basename(directory) !== "node_modules") {
+    const metadata = readPackageMetadata(input, directory);
+    if (metadata.kind === "unavailable")
+      return unresolvedCandidate("unavailable", [metadata.limitation]);
+    if (metadata.kind === "available") {
+      if (
+        metadata.name === undefined ||
+        metadata.exports === undefined ||
+        (declared !== metadata.name &&
+          !declared.startsWith(`${metadata.name}/`))
+      )
+        return null;
+      const subpath =
+        declared === metadata.name
+          ? "."
+          : `.${declared.slice(metadata.name.length)}`;
+      // Self resolution does not apply the CommonJS dependency-name matcher.
+      return resolvePackageExports(
+        input,
+        metadata.path,
+        subpath,
+        metadata.exports,
+      );
+    }
+    if (directory === "." || directory === "") break;
+    directory = posix.dirname(directory);
+  }
+  return null;
+};
+
 /** Package roots and exact subpaths share metadata and exports selection. */
 const resolvePackageSpecifier = (
   input: ResolveArtifactPathInput,
   directory: string,
   subpath: string,
+  metadata: PackageMetadata,
 ): CandidateResolution => {
-  const metadata = readPackageMetadata(input, directory);
-  if (metadata.kind === "unavailable")
+  const exportsEligible = packageExportsEligible(input);
+  if (exportsEligible && metadata.kind === "unavailable")
     return unresolvedCandidate("unavailable", [metadata.limitation]);
   const rawExports =
-    metadata.kind === "available"
-      ? Reflect.get(metadata.value, "exports")
+    exportsEligible && metadata.kind === "available"
+      ? metadata.exports
       : undefined;
-  if (rawExports === undefined || rawExports === null) {
+  if (rawExports === undefined) {
     if (subpath === ".")
-      return resolveDirectory(input, directory, metadata, new Set());
+      return (
+        resolveFileCandidates(input, fileCandidates(directory)) ??
+        resolveDirectory(input, directory, metadata, new Set())
+      );
     // Preserve the trailing slash for a package directory request.
     const candidate = confineCandidate(`${directory}/${subpath.slice(2)}`);
     return typeof candidate === "string"
       ? resolveCandidate(input, candidate, new Set())
       : candidate;
   }
+  return resolvePackageExports(
+    input,
+    posix.join(directory, "package.json"),
+    subpath,
+    rawExports,
+  );
+};
+
+const resolvePackageExports = (
+  input: ResolveArtifactPathInput,
+  packagePath: string,
+  subpath: string,
+  rawExports: string | object,
+): CandidateResolution => {
   const exported = selectPackageExport(rawExports, subpath, input.moduleKind);
-  const packagePath = posix.join(directory, "package.json");
   if (exported.status === "rejected")
     return unresolvedCandidate("rejected", [
       `Package metadata ${packagePath}: ${exported.limitation}`,
@@ -282,6 +354,16 @@ const barePackageName = (specifier: string): string | null => {
       ? `${segments[0]}/${segments[1]}`
       : null;
   return segments[0] === "" ? null : (segments[0] ?? null);
+};
+
+const packageExportsEligible = (input: ResolveArtifactPathInput): boolean => {
+  if (input.moduleKind !== "require") return true;
+  // Node's CommonJS exports matcher excludes percent-containing package names.
+  // Compare the captured name so a scoped name cannot fall back to its scope.
+  const match = /^((?:@[^/\\%]+\/)?[^./\\%][^/\\%]*)(\/.*)?$/.exec(
+    input.declaredPath,
+  );
+  return match?.[1] === barePackageName(input.declaredPath);
 };
 
 const hasContainerDirectory = (
@@ -408,7 +490,10 @@ type PackageMetadata =
   | {
       readonly kind: "available";
       readonly path: string;
-      readonly value: object;
+      readonly name: string | undefined;
+      readonly exports: string | object | undefined;
+      readonly main: unknown;
+      readonly module: unknown;
     }
   | { readonly kind: "absent" }
   | { readonly kind: "unavailable"; readonly limitation: string };
@@ -440,12 +525,27 @@ const readPackageMetadata = (
       limitation: `Directory package metadata ${path} is not valid package JSON.`,
     };
   }
-  return typeof value === "object" && value !== null
-    ? { kind: "available", path, value }
-    : {
-        kind: "unavailable",
-        limitation: `Directory package metadata ${path} is not valid package JSON.`,
-      };
+  if (typeof value !== "object" || value === null)
+    return {
+      kind: "unavailable",
+      limitation: `Directory package metadata ${path} is not valid package JSON.`,
+    };
+  const name = Reflect.get(value, "name");
+  const exports = Reflect.get(value, "exports");
+  return {
+    kind: "available",
+    path,
+    name: typeof name === "string" ? name : undefined,
+    // Node's package reader ignores scalar root exports other than strings.
+    // Nested targets retain their raw values for exports validation.
+    exports:
+      typeof exports === "string" ||
+      (typeof exports === "object" && exports !== null)
+        ? exports
+        : undefined,
+    main: Reflect.get(value, "main"),
+    module: Reflect.get(value, "module"),
+  };
 };
 
 /** File and directory lookup never interprets a nested directory's exports. */
@@ -480,10 +580,8 @@ const resolveDirectory = (
       `Directory package entrypoint cycle includes ${metadata.path}.`,
     ]);
   const preferred = [
-    Reflect.get(metadata.value, "main"),
-    ...(input.moduleKind === undefined
-      ? [Reflect.get(metadata.value, "module")]
-      : []),
+    metadata.main,
+    ...(input.moduleKind === undefined ? [metadata.module] : []),
   ];
   const entry = preferred.find((value) => value !== undefined);
   if (entry === undefined)

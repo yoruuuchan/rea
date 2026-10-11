@@ -12,6 +12,7 @@ describe("executable dispatcher", () => {
       const scripts = await workspace.mkdir("scripts");
       await workspace.mkdir("dist");
       await workspace.mkdir("dist/cli");
+      await workspace.mkdir("dist/mcp");
       await Promise.all([
         copyFile("scripts/rea.mjs", join(scripts, "rea.mjs")),
         workspace.write(
@@ -19,7 +20,7 @@ describe("executable dispatcher", () => {
           JSON.stringify({ type: "module", version: "1.0.0" }),
         ),
         workspace.write(
-          "dist/main.js",
+          "dist/mcp/main.js",
           'export const runEntrypoint = () => process.stdout.write(JSON.stringify({ adapter: "mcp" }));\n',
         ),
         workspace.write(

@@ -47,6 +47,7 @@ const emptyManagedMembers = (
     requires_mvid: mvid,
   },
   types: [],
+  exported_types: [],
   fields: [],
   methods: [],
   member_refs: [],

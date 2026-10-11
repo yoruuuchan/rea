@@ -44,7 +44,7 @@ describe("enhanced MCP tools", () => {
             error: {
               category: "execution_failure",
               message:
-                "Analysis returned an unreadable result. Retry once; if it continues, run `rea doctor`.",
+                "Analysis returned an unreadable result. Run `rea doctor` and review the reported details; repeating the unchanged request is not expected to succeed.",
             },
           },
         ],

@@ -10,9 +10,10 @@ import {
 } from "./UpdateRuntime.js";
 
 const installation = {
+  manager: "npm",
   prefix: "/opt/rea",
   packageRoot: "/opt/rea/lib/node_modules/rea-agents",
-};
+} as const;
 
 describe("npm latest release metadata", () => {
   it("accepts npm 11's scalar JSON response", () => {

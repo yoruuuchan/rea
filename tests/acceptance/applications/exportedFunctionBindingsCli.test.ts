@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -768,6 +769,173 @@ describe("export writes in function evaluation contexts", () => {
     await expectRuntimeExports(fixture, (count) => ({ kind: "result", count }));
     expectCountChange(await compareThroughMcp(fixture.input));
   });
+});
+
+it("retains namespace re-export bindings and provenance through stdio MCP and CLI", async () => {
+  const root = await createTestTempDirectory("rea-namespace-reexports-");
+  const declarations = [
+    { clause: "* as ns", name: "ns", imported: "*" },
+    {
+      clause: '* as "namespace value"',
+      name: "namespace value",
+      imported: "*",
+    },
+    { clause: "{ value as forwarded }", name: "forwarded", imported: "value" },
+    { clause: "*", name: "*", imported: "*" },
+  ];
+  const source = declarations
+    .map(({ clause }) => `export ${clause} from "./dependency.mjs";`)
+    .join("\n");
+  const path = join(root, "barrel.mjs");
+  await Promise.all([
+    writeFile(path, source),
+    writeFile(join(root, "dependency.mjs"), "export const value = 42;"),
+  ]);
+  // Node executes only this test-owned fixture to establish its actual exports.
+  for (const name of ["ns", "namespace value"])
+    expect(await runtimeExport(path, name)).toEqual({ value: 42 });
+  for (const name of ["forwarded", "value"])
+    expect(await runtimeExport(path, name)).toBe(42);
+
+  const documents = [
+    await analyzeThroughMcp(root),
+    await runCli(["analyze-javascript-application", root, "--json"]),
+  ];
+  const digest = createHash("sha256").update(source).digest("hex");
+  for (const document of documents) {
+    const { graph } = applicationEnvelope.parse(document).normalized_result;
+    const sourceModule = graph.nodes.find(({ observations }) =>
+      observations.some(
+        ({ properties }) =>
+          properties.semantic_role === "source-module" &&
+          properties.path === "barrel.mjs",
+      ),
+    );
+    expect(sourceModule?.observations[0]?.properties).toMatchObject({
+      export_relationships: 4,
+      export_names: ["*", "forwarded", "namespace value", "ns"],
+      omitted_export_names: 0,
+    });
+    for (const [index, { clause, name, imported }] of declarations.entries()) {
+      const exported = graph.nodes.find(({ observations }) =>
+        observations.some(
+          ({ properties }) =>
+            properties.semantic_role === "export-binding" &&
+            properties.module_path === "barrel.mjs" &&
+            properties.exported_name === name,
+        ),
+      );
+      const observation = exported?.observations[0];
+      expect(observation?.properties).toMatchObject({
+        relationship_kind: "re-export",
+        declared_specifier: "./dependency.mjs",
+        imported_name: imported,
+        local_name: null,
+      });
+      if (imported === "*" && name !== "*")
+        expect(observation?.evidence).toMatchObject({
+          artifact: { available: true, sha256: digest },
+          location: {
+            available: true,
+            value: {
+              kind: "source-range",
+              source: "barrel.mjs",
+              start: { line: index + 1, column: 7 },
+              end: { line: index + 1, column: 7 + clause.length },
+            },
+          },
+        });
+      expect(graph.edges).toContainEqual(
+        expect.objectContaining({
+          source_node_id: sourceModule?.node_id,
+          target_node_id: exported?.node_id,
+          relation: "exposes",
+          properties: expect.objectContaining({ exported_name: name }),
+          evidence: expect.objectContaining({
+            artifact: observation?.evidence.artifact,
+            location: observation?.evidence.location,
+          }),
+        }),
+      );
+      expect(graph.edges).toContainEqual(
+        expect.objectContaining({
+          source_node_id: exported?.node_id,
+          relation: "imports",
+          properties: expect.objectContaining({
+            module_link_kind: "re-export",
+            imported_name: imported,
+            exported_name: name,
+            resolved_path: "dependency.mjs",
+            resolution_status: "resolved",
+          }),
+        }),
+      );
+    }
+    expect(graph.coverage).toMatchObject({
+      status: "complete",
+      omitted_count: 0,
+      truncated: false,
+    });
+  }
+});
+
+it("excludes erased namespace type exports through stdio MCP and CLI", async () => {
+  const root = await createTestTempDirectory("rea-namespace-type-exports-");
+  const path = join(root, "barrel.mts");
+  await Promise.all([
+    writeFile(
+      path,
+      'export type * as Types from "./types.mjs";\nexport * as Values from "./values.mjs";',
+    ),
+    writeFile(
+      join(root, "types.mjs"),
+      'throw new Error("Type-only dependency must not execute");',
+    ),
+    writeFile(join(root, "values.mjs"), "export const value = 42;"),
+  ]);
+  // Node strips the type-only declaration without loading its throwing target.
+  expect(await runtimeExport(path, "Types")).toBeUndefined();
+  expect(await runtimeExport(path, "Values")).toEqual({ value: 42 });
+
+  const documents = [
+    await analyzeThroughMcp(root),
+    await runCli(["analyze-javascript-application", root, "--json"]),
+  ];
+  for (const document of documents) {
+    const { graph } = applicationEnvelope.parse(document).normalized_result;
+    const observations = graph.nodes.flatMap(
+      ({ observations }) => observations,
+    );
+    expect(
+      observations.find(
+        ({ properties }) =>
+          properties.semantic_role === "source-module" &&
+          properties.path === "barrel.mts",
+      )?.properties,
+    ).toMatchObject({
+      export_relationships: 1,
+      export_names: ["Values"],
+      omitted_export_names: 0,
+    });
+    expect(
+      observations.filter(
+        ({ properties }) =>
+          properties.semantic_role === "export-binding" &&
+          properties.module_path === "barrel.mts" &&
+          properties.exported_name === "Types",
+      ),
+    ).toEqual([]);
+    expect(
+      graph.edges.filter(
+        ({ properties }) => properties.exported_name === "Types",
+      ),
+    ).toEqual([]);
+    expect(graph.coverage).toMatchObject({
+      status: "complete",
+      omitted_count: 0,
+      truncated: false,
+    });
+  }
 });
 
 const expectRuntimeExports = async (

@@ -39,7 +39,8 @@ const identity = { id: z.uuid() };
 export const javaScriptWorkerMessageSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("ready"),
-    heap_limit_bytes: z.number().int().positive(),
+    // Null when the worker runtime (Bun) does not enforce V8 heap flags.
+    heap_limit_bytes: z.number().int().positive().nullable(),
   }),
   z.strictObject({
     kind: z.literal("phase"),

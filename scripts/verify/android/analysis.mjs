@@ -7,13 +7,16 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { parseEvidence } from "../../../dist/domain/evidence.js";
-import { hashAndroidFile } from "../../../dist/android/AndroidTargetSnapshot.js";
+import { hashAndroidFile } from "./digest.mjs";
 import { JADX_RELEASE } from "../../../dist/android/JadxRelease.js";
 import fixture from "../../fixtures/android/apidemos.json" with { type: "json" };
 import { verifyAndroidCliCancellation } from "./cli-cancellation.mjs";
 import { verifyAndroidMetadata } from "./metadata.mjs";
 import { verifyAndroidFailureRecovery } from "./failure-recovery.mjs";
-import { resolveJadxConfiguration } from "../../../dist/android/JadxConfiguration.js";
+import {
+  resolveJadxConfigurationInputs,
+  validateJadxConfiguration,
+} from "../../../dist/android/JadxConfiguration.js";
 import { verifyWindowsAndroidLifecycle } from "./windows-lifecycle.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -35,10 +38,16 @@ assert.equal(
   JADX_RELEASE.sha256,
   "Real Android lane requires the audited headless JADX release JAR",
 );
-const { java, jvmArguments } = await resolveJadxConfiguration(
+const configuration = await resolveJadxConfigurationInputs(
   process.env,
   "inspect_android_package",
 );
+await validateJadxConfiguration(
+  configuration,
+  process.env,
+  "inspect_android_package",
+);
+const { java, jvmArguments } = configuration;
 const execute = promisify(execFile);
 await execute(java, ["-version"], { timeout: 10_000 });
 const entrypoint =
@@ -52,6 +61,8 @@ await verifyAndroidMetadata({
   repository,
   execute,
   jvmArguments,
+  entrypoint,
+  environment,
   bridge: resolve(dirname(entrypoint), "../bridge/android/ReaJadxBridge.java"),
 });
 const tasks = [

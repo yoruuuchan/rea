@@ -54,8 +54,7 @@ const OPERATION = "recover_javascript_sources";
 type ReportContext = {
   execution: Awaited<ReturnType<typeof runWakaruCommand>>;
   provenancePath: string;
-  snapshotPath: string;
-  sourceBytes: Buffer;
+  snapshots: ReadonlyMap<string, Buffer>;
   files: readonly { relativePath: string }[];
 };
 
@@ -121,7 +120,7 @@ const validateModuleSet = (
   provenance: z.output<typeof provenanceSchema>,
   context: ReportContext,
 ): void => {
-  const { files, snapshotPath, sourceBytes } = context;
+  const { files, snapshots } = context;
   const registry = new ArtifactPathRegistry();
   const expected = new Set(["provenance.json"]);
   const observed = new Set(files.map((file) => file.relativePath));
@@ -135,7 +134,9 @@ const validateModuleSet = (
     expected.add(path);
     if (observed.has(`${path}.map`)) expected.add(`${path}.map`);
     const entry = provenance.modules[path];
-    if (entry === undefined || entry.input !== snapshotPath)
+    const sourceBytes =
+      entry === undefined ? undefined : snapshots.get(entry.input);
+    if (entry === undefined || sourceBytes === undefined)
       throw new TypeError(
         `Module provenance does not bind the selected input snapshot: ${path}`,
       );

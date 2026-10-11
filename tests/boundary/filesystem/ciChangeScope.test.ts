@@ -1,11 +1,22 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { parse } from "yaml";
 import { z } from "zod";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import {
+  createTestWorkspace,
+  removeTestWorkspace,
+} from "../../support/workspace/workspaceFixture.js";
 import {
   executeWorkflowFixture as execFileAsync,
   workflowGit as git,
@@ -30,15 +41,35 @@ async function change(
   return commit(directory);
 }
 
-async function fixture() {
-  const directory = await createTestTempDirectory("rea-ci-scope-");
+let seed: { directory: string; base: string } | undefined;
+let seedWorkspaceRoot: string | undefined;
+
+beforeAll(async () => {
+  const workspace = await createTestWorkspace("rea-ci-scope-seed-");
+  seedWorkspaceRoot = workspace.root;
+  const directory = await workspace.mkdir("repository");
   await git(directory, ["init", "--initial-branch=main"]);
   const base = await change(
     directory,
     ["src/provider.ts", "README.md"],
     "Initial fixture content\n",
   );
-  return { directory, base };
+  seed = { directory, base };
+});
+
+afterAll(async () => {
+  if (seedWorkspaceRoot !== undefined)
+    await removeTestWorkspace(seedWorkspaceRoot);
+});
+
+async function fixture() {
+  const initial = seed;
+  if (initial === undefined)
+    throw new Error("CI scope seed was not initialized");
+  const directory = await createTestTempDirectory("rea-ci-scope-");
+  // Copy the pristine object database, refs and index; each case owns its mutations.
+  await cp(initial.directory, directory, { recursive: true });
+  return { directory, base: initial.base };
 }
 
 async function classify(
@@ -214,6 +245,16 @@ it.each([
     { code: true, runtime: false, browser: false, package: false },
   ],
   ["website/src/index.ts", { code: false, website: true, package: false }],
+  [
+    "website/locales/zh-CN/messages.po",
+    { code: false, website: true, package: false },
+  ],
+  ["scripts/website_i18n.py", { code: false, website: true, package: false }],
+  ["README_ja.md", { code: false, docs: true, website: true, package: false }],
+  [
+    ".github/workflows/website-pages.yml",
+    { code: false, website: true, package: false },
+  ],
   [
     "src/process/ProviderProcess.ts",
     { code: true, package: true, evm: true, browser: true },

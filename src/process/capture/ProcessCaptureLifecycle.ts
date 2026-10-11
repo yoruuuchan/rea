@@ -3,7 +3,7 @@ import { constants, statSync, type BigIntStats } from "node:fs";
 import { open, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { setImmediate, setTimeout as delay } from "node:timers/promises";
 import type { IPty } from "@lydell/node-pty";
 
 import type { ProcessCapture } from "../../domain/process/processCaptureParsing.js";
@@ -271,6 +271,10 @@ export const settleProcessCaptureJournal = async (
   let lastChangeAt = Date.now();
   while (Date.now() < deadline) {
     await new Promise<void>((resolve) => setTimeout(resolve, 4));
+    // A stalled event loop can leave timer and poll callbacks that were already
+    // due queued behind this wake-up. Drain them before judging silence so a
+    // trailing observation is not dropped by an early settle.
+    await setImmediate();
     if (journal.length !== observed) {
       observed = journal.length;
       lastChangeAt = Date.now();

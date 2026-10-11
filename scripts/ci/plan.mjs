@@ -123,6 +123,7 @@ if (
       file.startsWith("docs/")
     ) {
       selected.docs = true;
+      selected.website ||= matchesAny(file, SCOPES.website);
       continue;
     }
     if (/^(src|tests)\/.*\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file)) {

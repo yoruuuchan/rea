@@ -126,6 +126,20 @@ class ReaJadxBridge {
     return result;
   }
 
+  private JadxSession.SmartCode methodBody(JadxSession current, ClassSnapshot cls,
+      MethodSnapshot selected, JavaMethod method) {
+    if (!selected.shortId().equals("<clinit>()V"))
+      return current.getMethodBodySmart(method, current.getMaxSourceBytes(), true);
+    // Java code generation can fold all or part of <clinit> into field declarations.
+    // Its method text cannot establish coverage, even when a static block remains.
+    JadxSession.MethodSmali smali = current.getMethodSmali(cls.node(), method.getName());
+    if (!smali.getFound() || smali.getBlocks().size() != 1)
+      throw new IllegalArgumentException("Static initializer disassembly requires one exact method: " + selected.shortId());
+    return new JadxSession.SmartCode(
+        TextUtilKt.truncateToBytes(smali.getBlocks().get(0), current.getMaxSourceBytes()),
+        "smali", true, List.of("static_initializer_disassembly"));
+  }
+
   private CallToolResult handle(String name, JsonObject args) {
     if (name.equals("rea_jvm_status")) return json(Map.of(
         "engine_reported_version", BuildInfo.VERSION,
@@ -150,7 +164,7 @@ class ReaJadxBridge {
       int index = integer(args, "overload_index", 0);
       if (index >= overloads.size()) throw new InputFailure("overload_index", "overload_index out of range: " + index);
       JavaMethod method = method(cls, overloads.get(index));
-      JadxSession.SmartCode code = current.getMethodBodySmart(method, current.getMaxSourceBytes(), true);
+      JadxSession.SmartCode code = methodBody(current, cls, overloads.get(index), method);
       return json(Map.of("class_name", cls.summary().get("full_name"),
           "method_name", overloads.get(index).name(), "full_name", method.getFullName(),
           "overload_index", index, "overload_count", overloads.size(),
@@ -211,7 +225,7 @@ class ReaJadxBridge {
       String description = switch (name) {
         case "list_classes" -> "Indexed pages of all top-level class names, with offset and limit.";
         case "get_class_summary" -> "Parsed member metadata for one exact class name; no source generation.";
-        case "get_method_body" -> "Source for an exact class and stable same-name overload index, with smali fallback.";
+        case "get_method_body" -> "Source for an exact class and stable same-name overload index; static initializers use smali to preserve folded field initialization.";
         default -> "Complete static references to an exact class or unique method; source lines are unresolved.";
       };
       Tool narrowed = new Tool(name, new ToolSchema(null, new JsonObject(properties),

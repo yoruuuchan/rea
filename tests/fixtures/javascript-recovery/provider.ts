@@ -38,6 +38,7 @@ export const recoveryFixture = async (
           ...options.env,
           REA_RECOVERY_FIXTURE_MODE: mode,
           REA_RECOVERY_ORIGINAL_PATH: path,
+          REA_RECOVERY_ADDITIONAL_PATH: join(root, "chunk.js"),
           REA_RECOVERY_ENGINE_PATH: command,
         },
       });

@@ -51,7 +51,7 @@ const TEST_PROJECTS = [
     name: "adapters",
     include: [
       "src/*.test.ts",
-      "src/{apktool,jeb,adb,artifacts,browser,dotnet,evm,firmware,ghidra,hopper,ida,inspector,javascript,native,process,reference,server,windows}/**/*.test.ts",
+      "src/{apktool,jeb,adb,artifacts,browser,dotnet,evm,firmware,ghidra,hopper,ida,inspector,javascript,native,process,reference,server,wasm,windows}/**/*.test.ts",
     ],
     pool: "forks" as const,
     maxWorkers: MAX_TEST_WORKERS,
@@ -69,11 +69,24 @@ const TEST_PROJECTS = [
     name: "boundary",
     include: ["tests/boundary/**/*.test.ts"],
     exclude: [
+      "tests/boundary/cli/**/*.test.ts",
       "tests/boundary/mcp/**/*.test.ts",
       "tests/boundary/process/**/*.test.ts",
     ],
     pool: "forks" as const,
     maxWorkers: MAX_TEST_WORKERS,
+  },
+  {
+    name: "cli-boundary",
+    include: ["tests/boundary/cli/**/*.test.ts"],
+    pool: "forks" as const,
+    maxWorkers: MAX_TEST_WORKERS,
+    // CLI tests create fresh command instances or subprocesses and own their
+    // cleanup. Reuse the immutable graph; module mocks belong in process-global.
+    isolate: false,
+    // Long-lived workers should collect temporary command/schema allocations
+    // before their two heaps compete with the real CLI child processes.
+    execArgv: ["--max-old-space-size=384"],
   },
   {
     // Process-tree observations share host sampling resources; keep this small

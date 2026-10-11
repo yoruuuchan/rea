@@ -19,6 +19,13 @@ import type { ProviderOperationHealth } from "../domain/providerOperationHealth.
 export interface ExecutionOptions {
   readonly signal?: AbortSignal;
   readonly progress?: ProgressReporter;
+  /**
+   * Set when a procedure selector came from provider output, such as a
+   * revisited callee, rather than from the caller. A provider-derived
+   * selector is never the caller's input mistake. Absent means the caller
+   * supplied it.
+   */
+  readonly selectorOrigin?: "provider";
 }
 
 /** Closed operations accepted by provider-backed analysis sessions. */

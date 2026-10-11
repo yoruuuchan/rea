@@ -123,11 +123,10 @@ export const compareArtifacts = (
     ],
     leftCovered && rightCovered,
   );
-  const rootChange = rootHashChange(left.inventory, right.inventory, changes, [
+  applyRootHashChange(left.inventory, right.inventory, changes, [
     ...left.evidence.map(({ evidence_id: id }) => id),
     ...right.evidence.map(({ evidence_id: id }) => id),
   ]);
-  if (rootChange !== null) changes.push(rootChange);
   const summary = summarize(
     left.inventory,
     right.inventory,
@@ -441,27 +440,45 @@ const hasCoverageLimitation = (limitations: readonly string[]): boolean =>
       !/integrity contradiction\(s\) were recorded/u.test(limitation),
   );
 
-const rootHashChange = (
+// Differing manifest root digests prove a root content change even when node
+// details are unavailable. Fold that fact into an existing root row so one
+// logical path keeps one classification.
+const applyRootHashChange = (
   left: InventorySet,
   right: InventorySet,
-  changes: readonly ArtifactChange[],
+  changes: ArtifactChange[],
   evidenceLinks: readonly string[],
-): ArtifactChange | null => {
-  if (left.manifest.root_sha256 === right.manifest.root_sha256) return null;
-  if (
-    changes.some(
-      (change) =>
-        change.logical_path === "." && change.dimensions.includes("content"),
+): void => {
+  if (left.manifest.root_sha256 === right.manifest.root_sha256) return;
+  const index = changes.findIndex((change) => change.logical_path === ".");
+  const existing = changes[index];
+  if (existing !== undefined) {
+    if (
+      existing.dimensions.includes("content") ||
+      (existing.classification !== "unknown" &&
+        existing.classification !== "changed")
     )
-  )
-    return null;
+      return;
+    changes[index] = {
+      ...existing,
+      classification: "changed",
+      dimensions: comparisonDimensionSchema.options.filter(
+        (dimension) =>
+          dimension === "content" || existing.dimensions.includes(dimension),
+      ),
+      evidence_links: [
+        ...new Set([...existing.evidence_links, ...evidenceLinks]),
+      ],
+    };
+    return;
+  }
   const leftRoot = left.occurrences.find(
     (occurrence) => occurrence.logical_path === ".",
   );
   const rightRoot = right.occurrences.find(
     (occurrence) => occurrence.logical_path === ".",
   );
-  return {
+  changes.push({
     classification: "changed",
     logical_path: ".",
     dimensions: ["content"],
@@ -470,5 +487,5 @@ const rootHashChange = (
     left_artifact_id: leftRoot?.artifact_id ?? null,
     right_artifact_id: rightRoot?.artifact_id ?? null,
     evidence_links: [...evidenceLinks],
-  };
+  });
 };

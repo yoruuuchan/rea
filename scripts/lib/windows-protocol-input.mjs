@@ -39,7 +39,7 @@ function acquire(Process, workspace, script) {
     workspace,
     process.env,
     false,
-    true,
+    { protocolStdin: true },
   );
   let stdout = "";
   let stderr = "";

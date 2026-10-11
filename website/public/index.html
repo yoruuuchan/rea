@@ -11,6 +11,48 @@
     <!-- website:sharing:start -->
     <!-- prettier-ignore -->
     <link rel="canonical" href="https://rea.tools/" />
+    <!-- website:languages:start -->
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="en" href="https://rea.tools/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-CN" href="https://rea.tools/zh-CN/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="zh-TW" href="https://rea.tools/zh-TW/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ja" href="https://rea.tools/ja/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ko" href="https://rea.tools/ko/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="tr" href="https://rea.tools/tr/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ru" href="https://rea.tools/ru/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="vi" href="https://rea.tools/vi/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="th" href="https://rea.tools/th/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="de" href="https://rea.tools/de/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="es" href="https://rea.tools/es/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fr" href="https://rea.tools/fr/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="uk" href="https://rea.tools/uk/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pl" href="https://rea.tools/pl/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="pt-BR" href="https://rea.tools/pt-BR/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="ar" href="https://rea.tools/ar/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="fa" href="https://rea.tools/fa/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="id" href="https://rea.tools/id/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="it" href="https://rea.tools/it/" />
+    <!-- prettier-ignore -->
+    <link rel="alternate" hreflang="x-default" href="https://rea.tools/" />
+    <!-- website:languages:end -->
     <!-- prettier-ignore -->
     <meta property="og:type" content="website" />
     <!-- prettier-ignore -->
@@ -52,7 +94,7 @@
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/styles.css" />
     <script src="assets/main.js" defer></script>
-    <script src="assets/home.js" defer></script>
+    <script type="module" src="assets/home.js"></script>
     <script type="module" src="assets/dino-demo.js"></script>
   </head>
   <body class="home-page" id="top">
@@ -63,7 +105,7 @@
       <div class="container header-inner">
         <a class="brand" href="./" aria-label="REA home"
           ><span class="brand-name">REA</span
-          ><span class="brand-caption">Reverse Engineer Anything</span></a
+          ><span class="brand-caption" data-i18n-skip>Reverse Engineer Anything</span></a
         >
         <nav class="navigation" aria-label="Main navigation">
           <a href="./showcase/">Showcases</a>
@@ -73,6 +115,7 @@
           <a href="./faq/">FAQ</a>
         </nav>
         <div class="header-social">
+          <details class="language-picker" data-i18n-skip><summary><span aria-hidden="true">文 / A</span> <span>English</span></summary><nav aria-label="English"><a href="./" lang="en" dir="ltr" data-language="en" aria-current="true">English</a><a href="./zh-CN/" lang="zh-CN" dir="ltr" data-language="zh-CN">简体中文</a><a href="./zh-TW/" lang="zh-TW" dir="ltr" data-language="zh-TW">繁體中文</a><a href="./ja/" lang="ja" dir="ltr" data-language="ja">日本語</a><a href="./ko/" lang="ko" dir="ltr" data-language="ko">한국어</a><a href="./tr/" lang="tr" dir="ltr" data-language="tr">Türkçe</a><a href="./ru/" lang="ru" dir="ltr" data-language="ru">Русский</a><a href="./vi/" lang="vi" dir="ltr" data-language="vi">Tiếng Việt</a><a href="./th/" lang="th" dir="ltr" data-language="th">ไทย</a><a href="./de/" lang="de" dir="ltr" data-language="de">Deutsch</a><a href="./es/" lang="es" dir="ltr" data-language="es">Español</a><a href="./fr/" lang="fr" dir="ltr" data-language="fr">Français</a><a href="./uk/" lang="uk" dir="ltr" data-language="uk">Українська</a><a href="./pl/" lang="pl" dir="ltr" data-language="pl">Polski</a><a href="./pt-BR/" lang="pt-BR" dir="ltr" data-language="pt-BR">Português (Brasil)</a><a href="./ar/" lang="ar" dir="rtl" data-language="ar">العربية</a><a href="./fa/" lang="fa" dir="rtl" data-language="fa">فارسی</a><a href="./id/" lang="id" dir="ltr" data-language="id">Bahasa Indonesia</a><a href="./it/" lang="it" dir="ltr" data-language="it">Italiano</a></nav></details>
           <a
             class="nav-github"
             href="https://github.com/morluto/rea"
@@ -208,9 +251,10 @@
               <p class="terminal-prompt">
                 <span class="prompt-symbol" aria-hidden="true">›</span
                 ><span id="home-install-prompt"
-                  >Install REA and connect it to this coding agent using npx
-                  rea-agents@latest setup. Show me the setup plan for approval,
-                  then verify the installation.</span
+                  >Install REA and connect it to this coding agent using
+                  <span translate="no">npx rea-agents@latest setup</span>. Show
+                  me the setup plan for approval, then verify the
+                  installation.</span
                 ><span class="terminal-cursor" aria-hidden="true"></span>
               </p>
             </div>
@@ -230,7 +274,8 @@
               Approve the setup plan, then restart your agent.
             </p>
             <p class="home-expert-shortcut">
-              First time, or missing Node.js or a coding agent?
+              First time, or missing <span translate="no">Node.js</span> or a
+              coding agent?
               <a href="get-started/">Follow the step-by-step setup guide →</a>
             </p>
           </div>
@@ -254,7 +299,10 @@
           </p>
           <p class="comparison-question">
             One question:
-            <strong>why does Calculator give 220 for 200 + 10%?</strong>
+            <strong
+              >why does Calculator give 220 for
+              <span translate="no">200 + 10%</span>?</strong
+            >
           </p>
           <figure class="home-role-comparison" id="how-rea-helps">
             <div
@@ -440,8 +488,8 @@
                 <p class="terminal-prompt">
                   <span class="prompt-symbol" aria-hidden="true">›</span
                   ><span id="home-analysis-prompt"
-                    >Use REA to inspect Windows Calculator. Why does 200 + 10%
-                    give 220?</span
+                    >Use REA to inspect Windows Calculator. Why does
+                    <span translate="no">200 + 10%</span> give 220?</span
                   ><span class="terminal-cursor" aria-hidden="true"></span>
                 </p>
                 <div class="agent-reply">
@@ -622,7 +670,10 @@
               </p>
               <div class="code-block">
                 <div class="code-header">
-                  <span>REA · loaded index.js · selected lines</span>
+                  <span
+                    >REA · loaded <span translate="no">index.js</span> ·
+                    selected lines</span
+                  >
                 </div>
                 <pre><code>if (this.currentSpeed &lt; this.config.MAX_SPEED) {
   <span class="code-key">this.currentSpeed += this.config.ACCELERATION;</span>
@@ -724,8 +775,9 @@ SPEED: 6</code></pre>
             <p class="eyebrow">Example 02 · Windows Calculator</p>
             <h2>Rebuild Calculator’s % button.</h2>
             <p class="lede">
-              We saw why <strong>200 + 10% gives 220.</strong> Now let’s recover
-              the rules for both + and ×, and try them.
+              We saw why
+              <strong><span translate="no">200 + 10%</span> gives 220.</strong>
+              Now let’s recover the rules for both + and ×, and try them.
             </p>
           </div>
           <dl class="case-brief">
@@ -759,14 +811,14 @@ SPEED: 6</code></pre>
                   data-percent-operation="add"
                   aria-pressed="true"
                 >
-                  200 + 10%
+                  <span translate="no">200 + 10%</span>
                 </button>
                 <button
                   type="button"
                   data-percent-operation="multiply"
                   aria-pressed="false"
                 >
-                  200 × 10%
+                  <span translate="no">200 × 10%</span>
                 </button>
               </div>
               <div class="percent-display">
@@ -880,7 +932,8 @@ SPEED: 6</code></pre>
             </p>
             <ol class="flow-steps">
               <li>
-                <span class="flow-label">01 · REA reads calc.exe</span
+                <span class="flow-label"
+                  >01 · REA reads <span translate="no">calc.exe</span></span
                 ><span class="flow-node">It launches the Calculator app</span
                 ><span class="flow-note"
                   >The code opens <code>ms-calculator:</code>. The agent then
@@ -1001,8 +1054,9 @@ SPEED: 6</code></pre>
                 <p class="terminal-prompt">
                   <span class="prompt-symbol" aria-hidden="true">›</span
                   ><span id="website-project-prompt"
-                    >Use REA to inspect https://rea.tools/. Clone this website
-                    for me.</span
+                    >Use REA to inspect
+                    <span translate="no">https://rea.tools/</span>. Clone this
+                    website for me.</span
                   ><span class="terminal-cursor" aria-hidden="true"></span>
                 </p>
               </div>

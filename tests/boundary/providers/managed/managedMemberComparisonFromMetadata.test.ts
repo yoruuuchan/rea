@@ -311,7 +311,7 @@ describe("managed member comparison of undecoded signatures", () => {
   it("pairs undecoded signatures by exact declared type, name, and raw bytes", () => {
     const undecoded = {
       methodSignature: Buffer.from([0x00, 0x00, 0x7f]),
-      fieldSignature: Buffer.from([0x06, 0x15]),
+      fieldSignature: Buffer.from([0x06, 0x7f]),
     };
     const left = inspect(
       buildManagedPeFixture(undecoded),
@@ -346,7 +346,7 @@ describe("managed member comparison of undecoded signatures", () => {
     const left = inspect(
       buildManagedPeFixture({
         methodSignature: Buffer.from([0x00, 0x00, 0x7f]),
-        fieldSignature: Buffer.from([0x06, 0x15]),
+        fieldSignature: Buffer.from([0x06, 0x7f]),
       }),
       "/tmp/undecoded-before.dll",
     );
@@ -374,7 +374,7 @@ describe("managed member comparison of undecoded signatures", () => {
     const right = inspect(
       buildManagedPeFixture({
         methodSignature: Buffer.from([0x00, 0x00, 0x7f]),
-        fieldSignature: Buffer.from([0x06, 0x15]),
+        fieldSignature: Buffer.from([0x06, 0x7f]),
       }),
       "/tmp/undecoded-after.dll",
     );

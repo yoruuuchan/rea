@@ -48,7 +48,9 @@ cliTest(
         generated_offset: 0,
         execution: "unknown",
         matches: [{ content: { text: "original" } }],
-        runtime: { id: "node-v8" },
+        runtime: {
+          id: process.versions.bun === undefined ? "node-v8" : "bun",
+        },
       },
     });
     const transport = new StdioClientTransport({

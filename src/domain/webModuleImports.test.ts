@@ -142,4 +142,20 @@ describe("captured module candidates", () => {
       ),
     ).toEqual([]);
   });
+  it("retains exact non-URL identities without matching response fragments", () => {
+    const scripts = [
+      script("relative/module.js#part", "page-script"),
+      script("relative/module.js#part", "scenario-response"),
+      script("relative/module.js", "scenario-response"),
+    ];
+    expect(
+      matchCapturedModules("relative/module.js#part", scripts).map((item) => [
+        item.script_index,
+        item.match,
+      ]),
+    ).toEqual([
+      [0, "exact-reported-url"],
+      [1, "exact-reported-url"],
+    ]);
+  });
 });

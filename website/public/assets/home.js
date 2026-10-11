@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 function initializePercentDemo() {
   const demo = document.querySelector("[data-percent-demo]");
   if (demo === null) return;
@@ -24,11 +26,11 @@ function initializePercentDemo() {
     equals.disabled = stage !== "percent";
     status.textContent =
       stage === "input"
-        ? "Press % to see what happens to 10."
+        ? t("Press % to see what happens to 10.")
         : stage === "percent"
           ? adding
-            ? "10% of 200 is 20. Press = to add it."
-            : "For multiplication, 10 becomes 0.1. Press = to multiply."
+            ? t("10% of 200 is 20. Press = to add it.")
+            : t("For multiplication, 10 becomes 0.1. Press = to multiply.")
           : `200 ${operator} ${percent} = ${result}.`;
   };
 

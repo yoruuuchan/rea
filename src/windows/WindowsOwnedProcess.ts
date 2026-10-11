@@ -24,6 +24,26 @@ const pollSchema = z.strictObject({
   exitCode: z.number().int().nonnegative().max(0xffff_ffff).nullable(),
   activeProcesses: z.number().int().nonnegative(),
 });
+// A commit-limited job reports its applied limit at launch and its
+// notification state on every poll; an unlimited job reports neither.
+const limitedPollSchema = pollSchema.extend({
+  memoryLimitReached: z.boolean(),
+  peakJobMemoryBytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER),
+});
+
+/** Optional native job controls for one owned Windows process tree. */
+export interface WindowsOwnedProcessOptions {
+  /** Open a writable protocol pipe; otherwise stdin is NUL. */
+  readonly protocolStdin?: boolean;
+  /** Job Object commit limit for the whole process tree, in bytes. */
+  readonly memoryLimitBytes?: number;
+  /** Verified native authority; defaults to the package-owned artifact. */
+  readonly authority?: WindowsNativeAuthority;
+}
 
 /** Encode one ordinary Windows argv token using the CRT backslash rules. */
 export const quoteWindowsProcessArgument = (value: string): string => {
@@ -48,6 +68,9 @@ export class WindowsOwnedProcess extends EventEmitter {
   #failure: string | undefined;
   #timer: NodeJS.Timeout | undefined;
   #cleanup: Promise<ProcessCleanupResult> | undefined;
+  readonly #memoryLimitBytes: number | undefined;
+  #memoryLimitReached = false;
+  #peakJobMemoryBytes: number | undefined;
 
   constructor(
     command: string,
@@ -55,13 +78,24 @@ export class WindowsOwnedProcess extends EventEmitter {
     cwd: string | undefined,
     environment: NodeJS.ProcessEnv,
     verbatim: boolean,
-    protocolStdin = false,
+    options: WindowsOwnedProcessOptions = {},
   ) {
     super();
-    this.#authority = requireWindowsNativeAuthority();
+    const protocolStdin = options.protocolStdin === true;
+    this.#memoryLimitBytes = options.memoryLimitBytes;
+    this.#authority = options.authority ?? requireWindowsNativeAuthority();
     if (protocolStdin && this.#authority.inspection.protocolStdin !== true)
       throw new Error(
         "The bundled Windows native artifact does not support owned protocol stdin; use a matching current Windows x64 REA package.",
+      );
+    // A requested limit is never dropped: an artifact without the control
+    // refuses the launch instead of starting an unlimited process.
+    if (
+      this.#memoryLimitBytes !== undefined &&
+      this.#authority.inspection.jobMemoryLimit !== true
+    )
+      throw new Error(
+        "The bundled Windows native artifact does not support Job Object memory limits; use a matching current Windows x64 REA package.",
       );
     const entries = Object.entries(environment)
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
@@ -74,15 +108,24 @@ export class WindowsOwnedProcess extends EventEmitter {
         verbatim ? value : quoteWindowsProcessArgument(value),
       ),
     ].join(" ");
-    const launched = launchSchema.parse(
-      this.#authority.call("process_spawn", [
-        command,
-        line,
-        cwd ?? "",
-        entries,
-        ...(protocolStdin ? [true] : []),
-      ]),
-    );
+    // Earlier artifacts accept only 4 or 5 arguments; keep that shape unless
+    // a commit limit is requested.
+    let controls: unknown[] = protocolStdin ? [true] : [];
+    if (this.#memoryLimitBytes !== undefined)
+      controls = [protocolStdin, this.#memoryLimitBytes];
+    const spawned = this.#authority.call("process_spawn", [
+      command,
+      line,
+      cwd ?? "",
+      entries,
+      ...controls,
+    ]);
+    const launched =
+      this.#memoryLimitBytes === undefined
+        ? launchSchema.parse(spawned)
+        : launchSchema
+            .extend({ jobMemoryLimitBytes: z.literal(this.#memoryLimitBytes) })
+            .parse(spawned);
     this.pid = launched.pid;
     this.#handle = launched.handle;
     this.stdin = protocolStdin
@@ -123,6 +166,16 @@ export class WindowsOwnedProcess extends EventEmitter {
       this.#settle = resolve;
     });
     this.#schedule();
+  }
+
+  /** Whether the job reported reaching its commit limit; sticky once observed. */
+  get memoryLimitReached(): boolean {
+    return this.#memoryLimitReached;
+  }
+
+  /** Latest observed peak job commit; undefined for an unlimited job. */
+  get peakJobMemoryBytes(): number | undefined {
+    return this.#peakJobMemoryBytes;
   }
 
   async #writeInput(chunk: unknown): Promise<void> {
@@ -208,9 +261,19 @@ export class WindowsOwnedProcess extends EventEmitter {
     this.#timer = undefined;
     if (this.#closed) return;
     try {
-      const state = pollSchema.parse(
-        this.#authority.call("process_poll", [this.#handle]),
-      );
+      const observed: unknown = this.#authority.call("process_poll", [
+        this.#handle,
+      ]);
+      let state: z.output<typeof pollSchema>;
+      if (this.#memoryLimitBytes === undefined)
+        state = pollSchema.parse(observed);
+      else {
+        const limited = limitedPollSchema.parse(observed);
+        // Recorded before exit is emitted, so exit listeners observe it.
+        this.#memoryLimitReached ||= limited.memoryLimitReached;
+        this.#peakJobMemoryBytes = limited.peakJobMemoryBytes;
+        state = limited;
+      }
       this.#failure = undefined;
       if (state.stdout.length > 0) this.stdout.write(state.stdout);
       if (state.stderr.length > 0) this.stderr.write(state.stderr);

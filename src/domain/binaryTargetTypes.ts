@@ -102,6 +102,9 @@ export type BinaryTarget =
           | "apk"
           | "msix"
           | "appx"
+          | "hap"
+          | "hsp"
+          | "app-pack"
           | "asar"
           | "dmg"
           | "pkg";

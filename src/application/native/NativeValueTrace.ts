@@ -57,7 +57,10 @@ export const traceNativeValues = async (
     const execution = await analysis.execute(
       "analyze_function",
       { procedure: next.procedure },
-      signal === undefined ? {} : { signal },
+      {
+        ...(signal === undefined ? {} : { signal }),
+        ...(next.depth > 0 ? { selectorOrigin: "provider" as const } : {}),
+      },
     );
     decompilations++;
     if (!execution.ok) {

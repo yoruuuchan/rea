@@ -9,6 +9,7 @@ import {
 } from "../../domain/analysisErrorCore.js";
 import { ArtifactOperationError } from "../../domain/artifactOperationError.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
 import {
   WEB_SOURCE_MAP_LIMITS,
   type WebSourceMapReport,
@@ -18,6 +19,7 @@ import {
   sourceMapCodecReplySchema,
 } from "./SourceMapCodecProtocol.js";
 import {
+  SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES,
   SourceMapCleanupFailure,
   runSourceMapCommand,
   type SourceMapCleanupOwner,
@@ -140,14 +142,10 @@ export class SourceMapDecoder implements WebSourceMapPort {
       return err(new AnalysisCancelledError(OPERATION));
     if (reply.data.state === "failure")
       return codecFailure(input.path, reply.data.reason, reply.data.message);
-    if (reply.data.report.runtime.v8_heap_limit_bytes > 256 * 1024 * 1024)
-      return err(
-        new AnalysisOutputError(
-          OPERATION,
-          "Codec reported a V8 heap limit exceeding its independent process budget.",
-        ),
-      );
-    return ok(reply.data.report);
+    const runtimeFailure = codecRuntimeFailure(reply.data.report.runtime);
+    return runtimeFailure === undefined
+      ? ok(reply.data.report)
+      : err(new AnalysisOutputError(OPERATION, runtimeFailure));
   }
 
   async close(): Promise<void> {
@@ -173,6 +171,30 @@ export class SourceMapDecoder implements WebSourceMapPort {
     return undefined;
   }
 }
+/**
+ * The codec runs on this process's executable. Only a V8 report carries a heap
+ * limit; a Bun report must name the process limit its launcher enforced.
+ */
+const codecRuntimeFailure = (
+  runtime: WebSourceMapReport["runtime"],
+): string | undefined => {
+  if (
+    runtime.id !==
+    (javaScriptRuntime(process.versions).id === "bun" ? "bun" : "node-v8")
+  )
+    return `Codec reported runtime ${runtime.id}, not the runtime that launched it.`;
+  if (
+    runtime.id === "node-v8" &&
+    runtime.v8_heap_limit_bytes > 256 * 1024 * 1024
+  )
+    return "Codec reported a V8 heap limit exceeding its independent process budget.";
+  if (
+    runtime.id === "bun" &&
+    runtime.process_memory_limit_bytes !== SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES
+  )
+    return "Codec reported a process memory limit other than the one its launcher enforced.";
+  return undefined;
+};
 const codecFailure = (
   path: string,
   reason: "format" | "unsupported" | "limit",

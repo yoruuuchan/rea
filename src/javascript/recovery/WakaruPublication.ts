@@ -7,7 +7,11 @@ import {
   type JavaScriptRecoveryInput,
   type JavaScriptRecoveryResult,
 } from "../../domain/javascript/javascriptRecovery.js";
-import { readRecoveryFile, recoveryDigest } from "./RecoveryFiles.js";
+import {
+  readRecoveryFile,
+  recoveryDigest,
+  type RecoveryInputSnapshot,
+} from "./RecoveryFiles.js";
 import {
   recoveryRanges,
   validateRecoverySourceMap,
@@ -28,12 +32,7 @@ type PublicationContext = {
   tree: SafeOutputTree;
   staging: string;
   input: JavaScriptRecoveryInput;
-  source: {
-    path: string;
-    snapshot_path: string;
-    sha256: string;
-    bytes: number;
-  };
+  sources: readonly [RecoveryInputSnapshot, ...RecoveryInputSnapshot[]];
   engine: Awaited<ReturnType<typeof resolveWakaruCommand>>;
   admitted: Exclude<WakaruVersionAdmission, { status: "unsupported" }>;
   parsed: Awaited<ReturnType<typeof parseWakaruReports>>;
@@ -47,7 +46,7 @@ type RecoveryWriter = (path: string, bytes: Buffer) => Promise<PublishedFile>;
 export const publishWakaruArtifacts = async (
   context: PublicationContext,
 ): Promise<JavaScriptRecoveryResult> => {
-  const { tree, source, parsed, staging, signal } = context;
+  const { tree, sources, parsed, staging, signal } = context;
   const write = async (path: string, bytes: Buffer) => {
     const sha256 = recoveryDigest(bytes);
     const file = await tree.write(
@@ -62,17 +61,25 @@ export const publishWakaruArtifacts = async (
       bytes: file.bytesWritten,
     };
   };
-  const snapshot = await readRecoveryFile(
-    source.snapshot_path,
-    RECOVERY_LIMITS.inputBytes,
-    signal,
-  );
-  if (recoveryDigest(snapshot) !== source.sha256)
-    throw new AnalysisOutputError(
-      "recover_javascript_sources",
-      "The input snapshot changed during recovery",
+  const publishedSources: JavaScriptRecoveryResult["source"][] = [];
+  for (const selected of sources) {
+    const { relative_path, ...source } = selected;
+    const snapshot = await readRecoveryFile(
+      source.snapshot_path,
+      source.bytes,
+      signal,
     );
-  const publishedCopy = await write("inputs/bundle.js", snapshot);
+    if (recoveryDigest(snapshot) !== source.sha256)
+      throw new AnalysisOutputError(
+        "recover_javascript_sources",
+        `The input snapshot changed during recovery: ${source.path}`,
+      );
+    publishedSources.push({
+      ...source,
+      published_copy: await write(`inputs/${relative_path}`, snapshot),
+    });
+  }
+  const [source, ...additionalSources] = publishedSources;
   const modules: JavaScriptRecoveryResult["modules"] = [];
   for (const module of parsed.report.modules) {
     modules.push(await publishModule(context, module, write));
@@ -90,7 +97,10 @@ export const publishWakaruArtifacts = async (
     ),
   );
   const details = {
-    source: { ...source, published_copy: publishedCopy },
+    source,
+    ...(additionalSources.length === 0
+      ? {}
+      : { additional_sources: additionalSources }),
     engine: {
       id: "wakaru",
       version: context.admitted.version,
@@ -151,7 +161,7 @@ const publishModule = async (
   module: PublicationContext["parsed"]["report"]["modules"][number],
   write: RecoveryWriter,
 ): Promise<JavaScriptRecoveryResult["modules"][number]> => {
-  const { staging, source, parsed, signal } = context;
+  const { staging, sources, parsed, signal } = context;
   const artifact = await write(
     `modules/${module.filename}`,
     await readRecoveryFile(
@@ -182,6 +192,14 @@ const publishModule = async (
       "recover_javascript_sources",
       `Missing module provenance: ${module.filename}`,
     );
+  const origin = sources.find(
+    (source) => source.snapshot_path === provenance.input,
+  );
+  if (origin === undefined)
+    throw new AnalysisOutputError(
+      "recover_javascript_sources",
+      `Unselected module provenance input: ${provenance.input}`,
+    );
   return {
     reported_filename: module.filename,
     reported_status: module.status,
@@ -189,8 +207,8 @@ const publishModule = async (
     source_map: sourceMap,
     provenance: {
       reported_input: provenance.input,
-      original_path: source.path,
-      original_sha256: source.sha256,
+      original_path: origin.path,
+      original_sha256: origin.sha256,
       extraction: provenance.extraction,
       byte_ranges: recoveryRanges(provenance.ranges),
       context_byte_ranges: recoveryRanges(provenance.context_ranges ?? []),
