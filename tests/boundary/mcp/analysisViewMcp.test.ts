@@ -1,5 +1,6 @@
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import {
   createJavaScriptApplicationNode,
 } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { createServer } from "../../../src/server/createServer.js";
+import { connectGhidraMcp } from "./ghidraMcpHarness.js";
 import {
   analysisViewJavaScriptEvidence,
   analysisViewJavaScriptAnalysisWithSource,
@@ -453,6 +455,95 @@ it("retains an oversized native assembly row and permits a subsequent smaller vi
     parent_evidence_id: parent.evidence_id,
   });
   await client.ping();
+});
+
+it("reads successive native source pages directly from a completed-result transport error", async () => {
+  const pseudocode = "int fixture_add(int a, int b) { return a + b; }\n".repeat(
+    150_000,
+  );
+  const harness = await connectGhidraMcp(
+    "native-continuation",
+    async (operation) => {
+      if (operation !== "analyze_function")
+        throw new Error(`Unexpected provider operation: ${operation}`);
+      return ok({
+        value: {
+          ...functionDossierSchema.parse(ghidraFunctionDossier()),
+          pseudocode,
+        },
+        limitations: [],
+      });
+    },
+  );
+  onTestFinished(() => harness.close());
+  const { mcp: client, session, calls } = harness;
+  const failed = await client.callTool({
+    name: "analyze_function",
+    arguments: { procedure: "0x401000" },
+  });
+  expect(failed.isError).toBe(true);
+  const limits = z
+    .object({
+      error: z.object({
+        details: z.object({ reported_limits: jsonObjectSchema }),
+      }),
+    })
+    .parse(parseMcpToolError(failed)).error.details.reported_limits;
+  const reference = z
+    .object({
+      kind: z.literal("retained-evidence"),
+      evidence_id: z.string(),
+    })
+    .parse(limits.evidence_reference);
+  const parent = parseEvidence(session.evidenceById(reference.evidence_id));
+  expect(parent.operation).toBe("analyze_function");
+  expect(parent.parameters).toMatchObject({ procedure: "0x401000" });
+  const call = z
+    .object({
+      name: z.literal("inspect_analysis_view"),
+      arguments: toolContract("inspect_analysis_view").inputSchema,
+    })
+    .parse(limits.continuation);
+  expect(call.arguments.source).toEqual({
+    kind: "retained-evidence",
+    evidence_id: parent.evidence_id,
+  });
+  const first = await client.callTool(call);
+  expect(first.isError).not.toBe(true);
+  const page = toolContract("inspect_analysis_view").outputSchema.parse(
+    first.structuredContent,
+  ).normalized_result;
+  expect(page).toMatchObject({
+    parent_evidence_id: parent.evidence_id,
+    item: { text: pseudocode.slice(0, 64) },
+    coverage: { examined: 64, next_offset: 64, exhausted: false },
+  });
+  expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(
+    STDIO_DEFAULT_MAX_BUFFER_SIZE,
+  );
+  const second = await client.callTool({
+    name: call.name,
+    arguments: {
+      ...call.arguments,
+      view: {
+        kind: "native",
+        facet: "pseudocode",
+        offset: page.coverage.next_offset,
+        limit: 64,
+      },
+    },
+  });
+  expect(second.isError).not.toBe(true);
+  expect(
+    toolContract("inspect_analysis_view").outputSchema.parse(
+      second.structuredContent,
+    ).normalized_result,
+  ).toMatchObject({ item: { text: pseudocode.slice(64, 128) } });
+  expect(
+    session.evidenceById(parent.evidence_id)?.normalized_result,
+  ).toMatchObject({ pseudocode });
+  await client.ping();
+  expect(calls).toEqual(["analyze_function"]);
 });
 
 it("returns a JavaScript summary without graph payloads from a retained reference", async () => {

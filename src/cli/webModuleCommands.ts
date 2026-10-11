@@ -42,29 +42,39 @@ export const registerWebModuleCommands = (
         .describe("HTTP(S) import-map base URL"),
     }),
     run: ({ args, options }) =>
-      withCommandCancellation((signal) =>
-        logCliCommand(logger, CLI_COMMANDS.traceWebModuleImports, async () => {
-          const result = await service.trace(
-            {
-              manifest_path: args.manifestPath,
-              script_index: args.scriptIndex,
-              ...(options.importerUrl === undefined
-                ? {}
-                : { importer_url: options.importerUrl }),
-              ...(options.importMapPath === undefined &&
-              options.importMapBaseUrl === undefined
-                ? {}
-                : {
-                    import_map: {
-                      path: options.importMapPath,
-                      base_url: options.importMapBaseUrl,
-                    },
-                  }),
+      withCommandCancellation(async (signal) => {
+        try {
+          return await logCliCommand(
+            logger,
+            CLI_COMMANDS.traceWebModuleImports,
+            async () => {
+              const result = await service.trace(
+                {
+                  manifest_path: args.manifestPath,
+                  script_index: args.scriptIndex,
+                  ...(options.importerUrl === undefined
+                    ? {}
+                    : { importer_url: options.importerUrl }),
+                  ...(options.importMapPath === undefined &&
+                  options.importMapBaseUrl === undefined
+                    ? {}
+                    : {
+                        import_map: {
+                          path: options.importMapPath,
+                          base_url: options.importMapBaseUrl,
+                        },
+                      }),
+                },
+                { signal },
+              );
+              return result.ok
+                ? result.value
+                : projectAnalysisError(result.error);
             },
-            { signal },
           );
-          return result.ok ? result.value : projectAnalysisError(result.error);
-        }),
-      ),
+        } finally {
+          await service.close();
+        }
+      }),
   });
 };

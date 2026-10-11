@@ -247,6 +247,15 @@ const detectArtifactFormat = async (
   const magic = Buffer.alloc(8);
   const observed = await handle.read(magic, 0, magic.length, 0);
   throwIfTargetResolutionCancelled(signal);
+  if (
+    observed.bytesRead === 8 &&
+    magic.equals(Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]))
+  )
+    throw new BinaryTargetError(
+      path,
+      "WebAssembly v1 artifacts are not supported by the native opening route",
+      { constraint: "wasm_requires_static_inspection" },
+    );
   if (hasZipSignature(magic.subarray(0, observed.bytesRead))) {
     // The HarmonyOS App Pack suffix `.app` is a root-input concept; a nested
     // ZIP member ending in `.app` keeps the generic zip classification.

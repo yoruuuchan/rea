@@ -38,6 +38,7 @@ export interface WebModuleResolutionBatch {
 
 /** Replaceable native resolution engine, with no provider protocol in callers. */
 export interface WebModuleResolutionPort {
+  close?(): Promise<void>;
   resolve(
     input: {
       readonly importerUrl: string;

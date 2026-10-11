@@ -3,17 +3,26 @@ export const parseWabtOutput = (
   text: string,
   artifactBytes: number,
   customSectionNames: readonly string[],
+  debugModuleNames: readonly string[] = [],
 ) => {
-  const prefix =
-    /^\nmodule\.wasm:\tfile format wasm 0x1\n\nSections:\n\n/u.exec(text);
-  if (prefix === null)
+  // WABT prints module names with printf's %.*s: embedded NUL ends the display.
+  const preamble =
+    "\nmodule.wasm:\tfile format wasm 0x1\n" +
+    debugModuleNames
+      .map((name) => {
+        const displayedName = name.split("\0", 1)[0];
+        return `module name: <${displayedName}>\n`;
+      })
+      .join("");
+  const prefix = `${preamble}\nSections:\n\n`;
+  if (!text.startsWith(prefix))
     throw new Error("Unsupported WABT section header format.");
-  let offset = prefix[0].length;
+  let offset = prefix.length;
   let customIndex = 0;
   const sections = [];
   while (!text.startsWith("\nSection Details:\n", offset)) {
     const match =
-      /^[ \t]+(\w+) start=0x([\da-f]+) end=0x([\da-f]+) \(size=0x([\da-f]+)\) /u.exec(
+      /^[ \t]*(\w+) start=0x([\da-f]+) end=0x([\da-f]+) \(size=0x([\da-f]+)\) /u.exec(
         text.slice(offset),
       );
     if (match === null) throw new Error("Unrecognized WABT section row.");
@@ -61,6 +70,6 @@ export const parseWabtOutput = (
   return {
     sections,
     headers: text.slice(0, separator),
-    details: `module.wasm:\tfile format wasm 0x1\n\n${text.slice(separator)}`,
+    details: `${preamble.slice(1)}\n${text.slice(separator)}`,
   };
 };

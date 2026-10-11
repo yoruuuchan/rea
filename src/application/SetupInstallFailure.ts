@@ -11,6 +11,7 @@ export type SetupFailureCode =
   | "mount_failed"
   | "bundle_invalid"
   | "copy_failed"
+  | "skill_install_failed"
   | "cleanup_failed";
 
 export type SetupHopperInstallResult =

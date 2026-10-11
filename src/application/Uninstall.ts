@@ -24,6 +24,7 @@ import {
 import { isOwnedClientRegistrationCommand } from "./ClientRegistrationIdentity.js";
 import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { readRegularFileText } from "./RegularFileRead.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import {
   manualRegistrationRemediation,
   supportedClients,
@@ -50,9 +51,11 @@ export interface UninstallFileSystem {
   remove(path: string, recursive?: boolean): Promise<void>;
 }
 
-const systemFileSystem: UninstallFileSystem = {
-  readText: (path) => readRegularFileText(path),
-  readRegularText: readSkillFile,
+const systemFileSystem = (
+  resources: ArtifactResourceScope,
+): UninstallFileSystem => ({
+  readText: (path) => readRegularFileText(path, { resources }),
+  readRegularText: (path) => readSkillFile(path, resources),
   copy: (source, destination) =>
     copyFile(source, destination, fsConstants.COPYFILE_EXCL),
   writeText: (path, contents) =>
@@ -60,7 +63,7 @@ const systemFileSystem: UninstallFileSystem = {
   stat: (path) => lstat(path),
   realpath: (path) => realpath(path),
   remove: (path, recursive = true) => rm(path, { recursive }),
-};
+});
 
 /** One explicitly classified uninstall action. */
 export interface UninstallItem {
@@ -83,6 +86,7 @@ export interface UninstallHost {
   removeClient(client: SetupClient): Promise<UninstallItem>;
   removeSkill(): Promise<UninstallItem>;
   purgeData(): Promise<readonly UninstallItem[]>;
+  close?(): Promise<string | undefined>;
 }
 
 /**
@@ -95,35 +99,66 @@ export const runUninstall = async (
   purgeData: boolean,
   host: UninstallHost = systemUninstallHost(),
 ): Promise<UninstallResult> => {
-  const clients = await host.clients();
-  const blocked: UninstallItem[] = [];
-  for (const client of clients) {
-    const blocking = await host.inspectClient(client);
-    if (blocking !== undefined) blocked.push(blocking);
+  let result: UninstallResult | undefined;
+  let primaryFailure: unknown;
+  let failed = false;
+  try {
+    const clients = await host.clients();
+    const blocked: UninstallItem[] = [];
+    for (const client of clients) {
+      const blocking = await host.inspectClient(client);
+      if (blocking !== undefined) blocked.push(blocking);
+    }
+    const items: UninstallItem[] =
+      blocked.length > 0
+        ? [
+            ...blocked,
+            item(
+              "uninstall",
+              "skipped",
+              "No REA registration, skill, or data was removed. Repair each failed configuration, then rerun uninstall.",
+            ),
+          ]
+        : await removeAll(clients, purgeData, host);
+    items.push({
+      name: "analysis_engine",
+      status: "retained",
+      detail: "Hopper is not owned by REA uninstall.",
+    });
+    const reported = collapseUninstallItems(items);
+    result = {
+      status: reported.some(({ status }) => status === "failed")
+        ? "failed"
+        : "complete",
+      items: reported,
+    };
+  } catch (cause: unknown) {
+    failed = true;
+    primaryFailure = cause;
   }
-  const items: UninstallItem[] =
-    blocked.length > 0
-      ? [
-          ...blocked,
-          item(
-            "uninstall",
-            "skipped",
-            "No REA registration, skill, or data was removed. Repair each failed configuration, then rerun uninstall.",
-          ),
-        ]
-      : await removeAll(clients, purgeData, host);
-  items.push({
-    name: "analysis_engine",
-    status: "retained",
-    detail: "Hopper is not owned by REA uninstall.",
-  });
-  const reported = collapseUninstallItems(items);
-  return {
-    status: reported.some(({ status }) => status === "failed")
-      ? "failed"
-      : "complete",
-    items: reported,
-  };
+  let cleanupFailure: string | undefined;
+  try {
+    cleanupFailure = await host.close?.();
+  } catch (cause: unknown) {
+    cleanupFailure = `Uninstall resource cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+  if (failed) {
+    if (cleanupFailure !== undefined)
+      throw new AggregateError(
+        [primaryFailure, new Error(cleanupFailure)],
+        "Uninstall failed and its resource cleanup remains incomplete.",
+        { cause: primaryFailure },
+      );
+    throw primaryFailure;
+  }
+  if (result === undefined)
+    throw new Error("Uninstall result was not produced.");
+  if (cleanupFailure === undefined) return result;
+  const items = collapseUninstallItems([
+    ...result.items,
+    item("uninstall_cleanup", "failed", cleanupFailure),
+  ]);
+  return { status: "failed", items };
 };
 
 /**
@@ -157,12 +192,14 @@ const removeAll = async (
 /** Create uninstall effects contained to detected client configs and REA-owned paths. */
 export const systemUninstallHost = (
   selectedHome: string | undefined = undefined,
-  fileSystem: UninstallFileSystem = systemFileSystem,
+  selectedFileSystem: UninstallFileSystem | undefined = undefined,
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
   platform: NodeJS.Platform = process.platform,
 ): UninstallHost => {
   const home =
     selectedHome ?? homeDirectoryFromEnvironment(environment, platform);
+  const resources = new ArtifactResourceScope();
+  const fileSystem = selectedFileSystem ?? systemFileSystem(resources);
   return {
     clients: () =>
       Promise.resolve(
@@ -185,6 +222,14 @@ export const systemUninstallHost = (
     removeSkill: () =>
       removeManagedSkills(home, fileSystem, environment, platform),
     purgeData: () => purgeManagedData(join(home, ".rea"), fileSystem),
+    close: async () => {
+      try {
+        await resources.close();
+        return undefined;
+      } catch (cause: unknown) {
+        return `Uninstall resource cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+      }
+    },
   };
 };
 

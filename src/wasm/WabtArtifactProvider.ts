@@ -323,9 +323,8 @@ export class WabtArtifactProvider implements WasmArtifactPort {
           OPERATION,
           "Unexpected WABT decoding output.",
         );
-      const { imports, exports, customSectionNames } = parseWabtWat(
-        wat.stdout.text,
-      );
+      const { imports, exports, customSectionNames, debugModuleNames } =
+        parseWabtWat(wat.stdout.text);
       capturedOutput = {
         stdout: dump.stdout.text,
         stderr: dump.stderr.text,
@@ -335,6 +334,7 @@ export class WabtArtifactProvider implements WasmArtifactPort {
         dump.stdout.text,
         artifact.bytes,
         customSectionNames,
+        debugModuleNames,
       );
       const limitations = [
         "WAT is a decoded representation, not original source or proof of runtime behavior. Custom annotations may retain payloads, but WAT does not establish original binary layout or round-trip byte identity. Original bytes and objdump output remain authoritative.",

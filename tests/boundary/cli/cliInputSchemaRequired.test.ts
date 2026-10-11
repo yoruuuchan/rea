@@ -13,7 +13,7 @@ const registeredCommands: WeakMap<object, CommandMap> = Cli.toCommands;
 
 const advertisedGroupSchema = z
   .object({
-    properties: z.record(z.string(), z.unknown()).optional(),
+    properties: z.record(z.string(), z.unknown()),
     required: z.array(z.string()).optional(),
   })
   .loose();
@@ -70,8 +70,27 @@ describe("CLI advertised input schemas", () => {
     for (const command of createCliInventory(cli).primary) {
       const advertised = await advertisedSchema(cli, command);
       for (const group of INPUT_GROUPS) {
-        const required = (advertised[group]?.required ?? []).toSorted();
-        const rejected = omissionRejected(parserSchema(cli, command, group));
+        const parser = parserSchema(cli, command, group);
+        const advertisedGroup = advertised[group];
+        if (parser === undefined) {
+          if (advertisedGroup !== undefined)
+            mismatches.push(`${command} ${group}: advertised without parser`);
+          continue;
+        }
+        if (advertisedGroup === undefined) {
+          mismatches.push(`${command} ${group}: parser group not advertised`);
+          continue;
+        }
+        const parserProperties = Object.keys(parser.shape).toSorted();
+        const advertisedProperties = Object.keys(
+          advertisedGroup.properties,
+        ).toSorted();
+        if (advertisedProperties.join() !== parserProperties.join())
+          mismatches.push(
+            `${command} ${group}: advertised properties [${advertisedProperties.join()}], parser properties [${parserProperties.join()}]`,
+          );
+        const required = (advertisedGroup.required ?? []).toSorted();
+        const rejected = omissionRejected(parser);
         if (required.join() !== rejected.join())
           mismatches.push(
             `${command} ${group}: advertised [${required.join()}], parser rejects [${rejected.join()}]`,

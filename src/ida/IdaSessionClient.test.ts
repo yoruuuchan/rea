@@ -722,6 +722,103 @@ describe("headless IDA session ownership and cleanup", () => {
   });
 });
 
+describe("headless IDA reaped worker cleanup", () => {
+  it("recovers a reaped worker only after inventory confirms its session and private input are absent", async () => {
+    const { producer, client, root } = await fixture("headless");
+    expect((await client.execute("health", {})).ok).toBe(true);
+    const sessionId = producer.database;
+    producer.beforeCall = async (name) => {
+      if (name === "idb_close") producer.database = undefined;
+    };
+    producer.overrideCall = (name) =>
+      name === "idb_close"
+        ? { error: `Session not found: ${sessionId}` }
+        : undefined;
+
+    expect((await client.close()).ok).toBe(true);
+    expect(producer.calls.map(({ name }) => name).slice(-2)).toEqual([
+      "idb_close",
+      "idb_list",
+    ]);
+    expect(producer.closes).toBe(1);
+    expect(await readdir(root)).toEqual(["target.elf"]);
+  });
+
+  it("retains resources when an absent-session close is followed by a live private-input peer", async () => {
+    const { producer, client, root } = await fixture("headless");
+    expect((await client.execute("health", {})).ok).toBe(true);
+    const sessionId = producer.database;
+    producer.beforeCall = async (name) => {
+      if (name === "idb_close") producer.database = undefined;
+      if (name === "idb_list" && producer.database === undefined) {
+        producer.database = "unrelated-live-peer";
+        producer.owned = false;
+      }
+    };
+    producer.overrideCall = (name) =>
+      name === "idb_close"
+        ? { error: `Session not found: ${sessionId}` }
+        : undefined;
+
+    const result = await client.close();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.cleanupIncomplete).toBe(true);
+    expect(producer.closes).toBe(0);
+    expect(
+      (await readdir(root)).some((name) => name.startsWith("rea-ida-")),
+    ).toBe(true);
+  });
+
+  it("retries independent inventory verification after an absent-session response", async () => {
+    const { producer, client, root } = await fixture("headless");
+    expect((await client.execute("health", {})).ok).toBe(true);
+    const sessionId = producer.database;
+    let inventoryUnavailable = true;
+    producer.beforeCall = async (name) => {
+      if (name === "idb_close") producer.database = undefined;
+      if (name === "idb_list" && inventoryUnavailable) {
+        inventoryUnavailable = false;
+        throw new Error("Inventory temporarily unavailable");
+      }
+    };
+    producer.overrideCall = (name) =>
+      name === "idb_close"
+        ? { error: `Session not found: ${sessionId}` }
+        : undefined;
+
+    expect((await client.close()).ok).toBe(false);
+    expect(producer.closes).toBe(0);
+    expect((await client.close()).ok).toBe(true);
+    expect(
+      producer.calls.filter(({ name }) => name === "idb_close"),
+    ).toHaveLength(1);
+    expect(producer.closes).toBe(1);
+    expect(await readdir(root)).toEqual(["target.elf"]);
+  });
+
+  it("does not treat a different missing session identity as proof of release", async () => {
+    const { producer, client, root } = await fixture("headless");
+    expect((await client.execute("health", {})).ok).toBe(true);
+    producer.beforeCall = async (name) => {
+      if (name === "idb_close") producer.database = undefined;
+    };
+    producer.overrideCall = (name) =>
+      name === "idb_close"
+        ? { error: "Session not found: another-session" }
+        : undefined;
+
+    const result = await client.close();
+    expect(result.ok).toBe(false);
+    expect(
+      producer.calls.filter(({ name }) => name === "idb_list"),
+    ).toHaveLength(1);
+    expect(producer.closes).toBe(0);
+    expect(
+      (await readdir(root)).some((name) => name.startsWith("rea-ida-")),
+    ).toBe(true);
+  });
+});
+
 describe("headless IDA cleanup verification", () => {
   it("retries failed worker release through the retained connection before removing its workspace", async () => {
     const { producer, client, root } = await fixture("headless");

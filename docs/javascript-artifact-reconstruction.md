@@ -508,6 +508,12 @@ from unmatched nested targets rather than reporting array indices.
 For imports and requires, the active Node conditions include `module-sync`;
 earlier active conditions retain precedence over later ones.
 
+Package self-references use the importer's enclosing package scope before
+installed dependencies. ESM requires the parsed package name to equal the
+metadata name; a scope-only name such as `@scope` cannot capture `@scope/pkg`.
+CommonJS retains Node's raw-request name/prefix matching. Both paths preserve
+the original specifier and select exports under their own loader conditions.
+
 Exact package-private `#alias` specifiers resolve against the importer's
 enclosing `package.json` `imports` map — the nearest same-container package
 scope, stopping at a `node_modules` directory so a nested package cannot inherit
@@ -523,8 +529,15 @@ URL targets before selecting a later package-local file; an unsupported bare
 package or recursive alias keeps its unresolved outcome rather than selecting
 a later fallback.
 
-ESM relative module paths and selected package exports targets use URL suffix handling
-and one percent-decoding pass. CommonJS relative paths and legacy package main
+ESM relative module paths, legacy package subpaths without exports, and selected
+package exports targets use URL suffix handling and one percent-decoding pass.
+Bare specifiers retain their complete query/fragment text for exports key matching.
+For dependency lookup, ESM constructs a package metadata URL instead of treating
+the parsed package name as a literal directory. A root request such as `legacy?x`
+does not load either `node_modules/legacy?x` or `node_modules/legacy`; an exact
+self-reference with that metadata name can still select its exports first.
+Without an exports map, ESM subpaths select exact files; directory imports and
+extension fallback are refused. CommonJS relative paths and legacy package main
 fields retain literal filename punctuation. Exports targets must start with
 `./` and exclude `.`, `..`, and `node_modules` path segments, including their
 encoded forms, before URL normalization. Arrays skip invalid exports targets

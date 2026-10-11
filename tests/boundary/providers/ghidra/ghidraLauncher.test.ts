@@ -191,6 +191,45 @@ describe("Ghidra headless launcher", () => {
     expect(arguments_).toContain("-readOnly");
     expect(arguments_).toContain("-deleteProject");
   });
+  it("remaps soft-float storage after the no-return fix and before the bridge", () => {
+    const base = {
+      platform: "linux" as const,
+      projectRoot: "/tmp/project",
+      targetPath: "/tmp/target",
+      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+      descriptorPath: "/tmp/session.json",
+      ghidraLogPath: "/tmp/ghidra.log",
+      scriptLogPath: "/tmp/script.log",
+    };
+    const soft = "/package/bridge/ReaGhidraMipsSoftFloat.java";
+    expect(ghidraHeadlessArguments(base)).not.toContain(soft);
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      mipsSoftFloat: true,
+    });
+    expect(arguments_[arguments_.indexOf(soft) - 1]).toBe("-postScript");
+    expect(
+      arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java"),
+    ).toBeLessThan(arguments_.indexOf(soft));
+    expect(arguments_.indexOf(soft)).toBeLessThan(
+      arguments_.indexOf("/package/bridge/ReaGhidraBridge.java"),
+    );
+    for (const conflict of [
+      { psp: true as const },
+      { dosMz: true as const },
+      { dosCom: true as const },
+      {
+        rawBinary: {
+          languageId: "x86:LE:32:default",
+          compilerSpecId: "default",
+          baseAddr: "0x1000",
+        },
+      },
+    ])
+      expect(() =>
+        ghidraHeadlessArguments({ ...base, mipsSoftFloat: true, ...conflict }),
+      ).toThrow(/generic MIPS ELF/u);
+  });
 });
 
 describe("Ghidra configured import language and seeds", () => {

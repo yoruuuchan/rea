@@ -1,19 +1,137 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AnalysisOperationPort } from "../../../src/application/AnalysisProvider.js";
+import { createAnalysisExecution } from "../../../src/application/AnalysisProvider.js";
 import { EnhancedTools } from "../../../src/application/EnhancedTools.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisOutputError,
 } from "../../../src/domain/analysisErrorCore.js";
-import { err } from "../../../src/domain/result.js";
+import type { RelationshipCoverage } from "../../../src/domain/relationshipCoverage.js";
+import { err, ok as resultOk } from "../../../src/domain/result.js";
 
 import { closeEnhancedToolResources, connect } from "./enhancedToolsHarness.js";
 import { observed as ok } from "../../fixtures/analysisExecution.js";
 
 afterEach(closeEnhancedToolResources);
 
+const relationshipExecution = (
+  result: unknown,
+  limitations: readonly string[] = [],
+  relationshipCoverage?: RelationshipCoverage,
+) =>
+  resultOk(
+    createAnalysisExecution(
+      result,
+      { id: "fixture", name: "Fixture analysis provider", version: "1" },
+      {
+        limitations,
+        ...(relationshipCoverage === undefined ? {} : { relationshipCoverage }),
+      },
+    ),
+  );
+
 describe("enhanced MCP tools", () => {
+  it("preserves per-node relationship limitations and keeps observed edges", async () => {
+    const limitation = "ARM64 call targets are only partially resolved.";
+    const client = await connect({
+      execute: async (name, arguments_) => {
+        if (name === "procedure_address")
+          return relationshipExecution(String(arguments_.procedure));
+        if (name !== "procedure_callees")
+          throw new Error(`Unexpected operation: ${name}`);
+        return relationshipExecution(
+          arguments_.procedure === "0x1" ? ["0x2"] : [],
+          arguments_.procedure === "0x1" ? [limitation] : [],
+          arguments_.procedure === "0x1"
+            ? { status: "partial", limitations: [limitation] }
+            : { status: "complete" },
+        );
+      },
+    });
+    const graph = await client.callTool({
+      name: "get_call_graph",
+      arguments: { address: "0x1", direction: "forward" },
+    });
+    expect(graph.isError).not.toBe(true);
+    expect(graph.structuredContent).toMatchObject({
+      normalized_result: {
+        "0": [
+          {
+            address: "0x1",
+            status: "ok",
+            calls: ["0x2"],
+            limitations: [limitation],
+            relationship_coverage: {
+              status: "partial",
+              limitations: [limitation],
+            },
+          },
+        ],
+      },
+    });
+
+    const trace = await client.callTool({
+      name: "trace_call_path",
+      arguments: { start: "0x1", goal: "0x2" },
+    });
+    expect(trace.isError).not.toBe(true);
+    expect(trace.structuredContent).toMatchObject({
+      normalized_result: {
+        goal_status: "reached",
+        traversal_path: ["0x1", "0x2"],
+        edges: [{ source_address: "0x1", target_address: "0x2" }],
+        truncated: true,
+        residual_unknowns: [
+          `Call relationships for 0x1 are limited: ${limitation}`,
+        ],
+      },
+    });
+  });
+
+  it("keeps generic provider caveats visible without truncating complete relationships", async () => {
+    const caveat = "Decompiler output may omit indirect calls.";
+    const client = await connect({
+      execute: async (name, arguments_) => {
+        if (name === "procedure_address")
+          return relationshipExecution(String(arguments_.procedure));
+        if (name !== "procedure_callees")
+          throw new Error(`Unexpected operation: ${name}`);
+        return relationshipExecution([], [caveat], { status: "complete" });
+      },
+    });
+
+    const graph = await client.callTool({
+      name: "get_call_graph",
+      arguments: { address: "0x1", direction: "forward" },
+    });
+    expect(graph.structuredContent).toMatchObject({
+      normalized_result: {
+        "0": [
+          {
+            limitations: [caveat],
+            relationship_coverage: { status: "complete" },
+          },
+        ],
+      },
+    });
+
+    const trace = await client.callTool({
+      name: "trace_call_path",
+      arguments: { start: "0x1", goal: "0x2" },
+    });
+    expect(trace.structuredContent).toMatchObject({
+      normalized_result: {
+        truncated: false,
+        residual_unknowns: [],
+        limitations: expect.arrayContaining([expect.stringContaining(caveat)]),
+        relationship_coverage: { "0x1": { status: "complete" } },
+      },
+    });
+  });
+});
+
+describe("enhanced MCP batches", () => {
   it("returns every batch item in caller order with its own result", async () => {
     const addresses = Array.from(
       { length: 37 },

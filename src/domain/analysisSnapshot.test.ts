@@ -40,6 +40,7 @@ const snapshotWithHistoricalEvidence = () => {
       raw_result: null,
       provider: binding.provider,
       limitations: [],
+      relationship_coverage: null,
       locations: [],
       subject: {
         path: ANALYSIS_SNAPSHOT_TARGET.path,
@@ -392,7 +393,10 @@ describe("analysis snapshot Evidence binding", () => {
       workflow_entries: [],
       evidence_bundle: createEvidenceBundle([evidence]),
     };
-    expect(parseAnalysisSnapshot(snapshot)).toEqual(snapshot);
+    const parsedLegacySnapshot = parseAnalysisSnapshot(snapshot);
+    expect(
+      parsedLegacySnapshot.entries[0]?.execution.relationship_coverage,
+    ).toBeNull();
 
     expect(() =>
       parseAnalysisSnapshot({
@@ -419,6 +423,13 @@ describe("analysis snapshot Evidence binding", () => {
         const subject = altered.entries[0]?.execution.subject;
         if (subject !== null && subject !== undefined)
           subject.path = "/different/path";
+      },
+      (altered: typeof snapshot) => {
+        const entry = altered.entries[0];
+        if (entry === undefined) throw new TypeError("missing fixture entry");
+        Reflect.set(entry.execution, "relationship_coverage", {
+          status: "complete",
+        });
       },
     ];
     for (const alter of alterations) {

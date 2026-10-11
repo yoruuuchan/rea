@@ -14,6 +14,10 @@ const observe = (
   address: string,
   callees: readonly string[],
   provider = "rea-workflow",
+  options: {
+    readonly evidenceLimitations?: readonly string[];
+    readonly dossierLimitations?: readonly string[];
+  } = {},
 ): Evidence => {
   const value = functionDossierSchema.parse({
     procedure: {
@@ -49,7 +53,7 @@ const observe = (
     native_api: null,
     native_value_flow: null,
     basic_blocks: [],
-    limitations: [],
+    limitations: [...(options.dossierLimitations ?? [])],
   });
   return createEvidence(
     { path: "/tmp/a", sha256: "a".repeat(64), format: "mach-o" },
@@ -62,6 +66,9 @@ const observe = (
       result: jsonValueSchema.parse(value),
       confidence: "derived",
       authority: "shipped-artifact",
+      ...(options.evidenceLimitations === undefined
+        ? {}
+        : { limitations: options.evidenceLimitations }),
     },
   );
 };
@@ -126,6 +133,22 @@ describe("call path reconstruction", () => {
     expect(unknown.limitations).toContain(
       "No analyze_function Evidence covers reachable function 0x2000",
     );
+
+    const limitedEmpty = run([
+      observe("0x1000", [], "rea-workflow", {
+        dossierLimitations: ["Call relationships are incomplete."],
+      }),
+      observe("0x4000", []),
+    ]);
+    expect(limitedEmpty).toMatchObject({
+      status: "unknown",
+      search_scope: { exhaustive: false },
+      shortest_hops: null,
+      paths: [],
+    });
+    expect(limitedEmpty.limitations).toContain(
+      "Call relationships are incomplete.",
+    );
   });
 
   it("searches the complete supplied graph", () => {
@@ -178,6 +201,53 @@ describe("call path topology and capacity", () => {
       explored: { nodes: 4, edges: 3, depth_reached: 2 },
     });
     expect(result.limitations).toContain(
+      "No analyze_function Evidence covers reachable function 0x5000",
+    );
+  });
+
+  it("keeps reached function limitations and marks expanded coverage incomplete", () => {
+    const evidenceLimitation = "Call graph output was truncated.";
+    const dossierLimitation = "One call target could not be resolved.";
+    const result = run([
+      observe("0x1000", ["0x4000"], "rea-workflow", {
+        evidenceLimitations: [evidenceLimitation],
+        dossierLimitations: [dossierLimitation],
+      }),
+      observe("0x4000", []),
+    ]);
+
+    expect(result).toMatchObject({
+      status: "found",
+      shortest_hops: 1,
+      search_scope: { exhaustive: false },
+      paths: [
+        {
+          nodes: [{ address: "0x1000" }, { address: "0x4000" }],
+        },
+      ],
+    });
+    expect(result.limitations).toEqual(
+      expect.arrayContaining([evidenceLimitation, dossierLimitation]),
+    );
+  });
+
+  it("retains goal dossier limitations without expanding the goal", () => {
+    const goalLimitation = "The goal dossier has partial outgoing references.";
+    const result = run([
+      observe("0x1000", ["0x4000"]),
+      observe("0x4000", ["0x5000"], "rea-workflow", {
+        dossierLimitations: [goalLimitation],
+      }),
+    ]);
+
+    expect(result).toMatchObject({
+      status: "found",
+      shortest_hops: 1,
+      search_scope: { exhaustive: true },
+    });
+    expect(result.limitations).toContain(goalLimitation);
+    expect(result.explored.nodes).toBe(2);
+    expect(result.limitations).not.toContain(
       "No analyze_function Evidence covers reachable function 0x5000",
     );
   });

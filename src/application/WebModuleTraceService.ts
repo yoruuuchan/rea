@@ -69,6 +69,10 @@ export class WebModuleTraceService {
     readonly resolver: WebModuleResolutionPort,
   ) {}
 
+  close(): Promise<void> {
+    return this.resolver.close?.() ?? Promise.resolve();
+  }
+
   async trace(
     rawInput: unknown,
     options?: ExecutionOptions,

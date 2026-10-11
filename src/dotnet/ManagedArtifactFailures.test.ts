@@ -66,6 +66,7 @@ describe("managed artifact failure classification", () => {
       "System.Runtime",
       "System.Runtime",
     ]);
+    expect(artifact.attributes).toEqual([]);
     expect(artifact.coverage.issues.map(({ code }) => code)).toEqual(
       issueCodes,
     );

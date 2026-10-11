@@ -29,6 +29,7 @@ it("preserves unavailable response observations and captures completed peers", a
                   headers: { "Content-Type": "application/json" },
                   postData: '{"selected":true}',
                 },
+                initiator: { type: "script" },
               },
             },
             {
@@ -169,7 +170,339 @@ it.each([
   },
 );
 
-describe("CdpBrowserProvider: network 1", () => {
+describe("malformed CDP network request metadata", () => {
+  it("omits requests with missing required metadata and reports the malformed events", async () => {
+    const browser = await startFakeCdpBrowser({
+      commandEvents(command, origin) {
+        if (command.method !== "Network.enable") return undefined;
+        const session =
+          command.sessionId === undefined
+            ? {}
+            : { sessionId: command.sessionId };
+        return [
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "valid",
+              request: { url: `${origin}/valid`, method: "GET" },
+              initiator: { type: "future-protocol-type" },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "missing-method",
+              request: { url: `${origin}/missing-method` },
+              initiator: { type: "script" },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "empty-method",
+              request: { url: `${origin}/empty-method`, method: "" },
+              initiator: { type: "script" },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "missing-initiator-type",
+              request: {
+                url: `${origin}/missing-initiator-type`,
+                method: "POST",
+              },
+              initiator: {},
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "missing-request",
+              request: null,
+              initiator: { type: "script" },
+            },
+          },
+        ];
+      },
+    });
+    trackBrowser(browser);
+    const result = await new CdpBrowserProvider().inspectPage(
+      inspectWebPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+        observation_ms: 0,
+      }),
+    );
+
+    if (!result.ok) throw result.error;
+    expect(result.value.network.requests).toEqual([
+      expect.objectContaining({
+        request_id: "valid",
+        method: "GET",
+        initiator: expect.objectContaining({ type: "future-protocol-type" }),
+      }),
+    ]);
+    expect(result.value.completeness.excluded).toContainEqual({
+      section: "network_requests",
+      reason: "invalid_protocol_value",
+      count: 4,
+    });
+  });
+});
+
+describe("malformed reused CDP request IDs", () => {
+  it("keeps the last valid request and redirects after a malformed replacement", async () => {
+    const browser = await startFakeCdpBrowser({
+      commandEvents(command, origin) {
+        if (command.method !== "Network.enable") return undefined;
+        const session =
+          command.sessionId === undefined
+            ? {}
+            : { sessionId: command.sessionId };
+        return [
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "redirecting",
+              request: { url: `${origin}/first`, method: "POST" },
+              initiator: { type: "parser" },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "redirecting",
+              request: { url: `${origin}/second`, method: "GET" },
+              initiator: { type: "other" },
+              redirectResponse: {
+                url: `${origin}/first`,
+                status: 301,
+                mimeType: "text/plain",
+                encodedDataLength: 12,
+              },
+            },
+          },
+          {
+            ...session,
+            method: "Network.responseReceived",
+            params: {
+              requestId: "redirecting",
+              response: {
+                url: `${origin}/second`,
+                status: 202,
+                mimeType: "application/json",
+              },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "redirecting",
+              request: { url: `${origin}/third` },
+              initiator: { type: "other" },
+              redirectResponse: {
+                url: `${origin}/second`,
+                status: 302,
+                mimeType: "text/plain",
+                encodedDataLength: 18,
+              },
+            },
+          },
+          {
+            ...session,
+            method: "Network.responseReceived",
+            params: {
+              requestId: "redirecting",
+              response: {
+                url: `${origin}/third`,
+                status: 418,
+                mimeType: "application/json",
+              },
+            },
+          },
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "redirecting", encodedDataLength: 777 },
+          },
+        ];
+      },
+    });
+    trackBrowser(browser);
+    const result = await new CdpBrowserProvider().inspectPage(
+      inspectWebPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+        observation_ms: 0,
+        include_json_body_shapes: true,
+      }),
+    );
+
+    if (!result.ok) throw result.error;
+    expect(result.value.network.requests).toEqual([
+      expect.objectContaining({
+        request_id: "redirecting",
+        url: `${browser.allowedOrigin}/second`,
+        method: "GET",
+        status: 202,
+        mime_type: "application/json",
+        encoded_data_length: null,
+        redirects: [
+          expect.objectContaining({
+            url: `${browser.allowedOrigin}/first`,
+            response_url: `${browser.allowedOrigin}/first`,
+            method: "POST",
+            status: 301,
+          }),
+        ],
+      }),
+    ]);
+    expect(result.value.completeness.excluded).toContainEqual({
+      section: "network_requests",
+      reason: "invalid_protocol_value",
+      count: 1,
+    });
+    expect(result.value.completeness.excluded).toContainEqual({
+      section: "json_body_shapes",
+      reason: "invalid_protocol_value",
+      count: 1,
+    });
+    expect(
+      browser.commands.filter(
+        ({ method }) => method === "Network.getResponseBody",
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("CDP network length metadata", () => {
+  it("retains valid zero lengths and excludes malformed loading lengths", async () => {
+    const browser = await startFakeCdpBrowser({
+      commandEvents(command, origin) {
+        if (command.method !== "Network.enable") return undefined;
+        const session =
+          command.sessionId === undefined
+            ? {}
+            : { sessionId: command.sessionId };
+        const request = (requestId: string, path: string) => ({
+          ...session,
+          method: "Network.requestWillBeSent",
+          params: {
+            requestId,
+            request: { url: `${origin}${path}`, method: "GET" },
+            initiator: { type: "parser" },
+          },
+        });
+        return [
+          request("zero", "/zero"),
+          request("missing", "/missing"),
+          request("negative", "/negative"),
+          request("prior", "/prior"),
+          request("redirect-zero", "/redirect-zero-first"),
+          request("redirect-invalid", "/redirect-invalid-first"),
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "zero", encodedDataLength: 0 },
+          },
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "missing" },
+          },
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "negative", encodedDataLength: -1 },
+          },
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "prior", encodedDataLength: 27 },
+          },
+          {
+            ...session,
+            method: "Network.loadingFinished",
+            params: { requestId: "prior", encodedDataLength: -1 },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "redirect-zero",
+              request: { url: `${origin}/redirect-zero-final`, method: "GET" },
+              initiator: { type: "parser" },
+              redirectResponse: {
+                url: `${origin}/redirect-zero-first`,
+                status: 301,
+                encodedDataLength: 0,
+              },
+            },
+          },
+          {
+            ...session,
+            method: "Network.requestWillBeSent",
+            params: {
+              requestId: "redirect-invalid",
+              request: {
+                url: `${origin}/redirect-invalid-final`,
+                method: "GET",
+              },
+              initiator: { type: "parser" },
+              redirectResponse: {
+                url: `${origin}/redirect-invalid-first`,
+                status: 301,
+                encodedDataLength: -1,
+              },
+            },
+          },
+        ];
+      },
+    });
+    trackBrowser(browser);
+    const result = await new CdpBrowserProvider().inspectPage(
+      inspectWebPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+        observation_ms: 0,
+      }),
+    );
+
+    if (!result.ok) throw result.error;
+    const requests = new Map(
+      result.value.network.requests.map((item) => [item.request_id, item]),
+    );
+    expect(requests.get("zero")?.encoded_data_length).toBe(0);
+    expect(requests.get("missing")?.encoded_data_length).toBeNull();
+    expect(requests.get("negative")?.encoded_data_length).toBeNull();
+    expect(requests.get("prior")?.encoded_data_length).toBe(27);
+    expect(
+      requests.get("redirect-zero")?.redirects?.[0]?.encoded_data_length,
+    ).toBe(0);
+    expect(
+      requests.get("redirect-invalid")?.redirects?.[0]?.encoded_data_length,
+    ).toBeNull();
+    expect(result.value.completeness.excluded).toContainEqual({
+      section: "network_requests",
+      reason: "invalid_protocol_value",
+      count: 4,
+    });
+  });
+});
+
+describe("same-origin redirect chains", () => {
   it("retains same-origin redirect hops on the one final request", async () => {
     const browser = await startFakeCdpBrowser({ redirectWithinOrigin: true });
     trackBrowser(browser);
@@ -222,7 +555,9 @@ describe("CdpBrowserProvider: network 1", () => {
       count: expect.any(Number),
     });
   });
+});
 
+describe("redirect origin policy", () => {
   it("drops network evidence when a request redirects outside the approved origin", async () => {
     const browser = await startFakeCdpBrowser({
       redirectToDisallowedOrigin: true,

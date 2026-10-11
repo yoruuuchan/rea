@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type {
+  AnalysisExecution,
   AnalysisOperation,
   AnalysisOperationPort,
   ExecutionOptions,
@@ -166,6 +167,8 @@ export class EnhancedTools {
         return traceCallPath(
           (name, arguments_, operationSignal, selectorOrigin) =>
             this.#call(name, arguments_, operationSignal, selectorOrigin),
+          (name, arguments_, operationSignal, selectorOrigin) =>
+            this.#observe(name, arguments_, operationSignal, selectorOrigin),
           call.input,
           signal,
         );
@@ -359,7 +362,7 @@ export class EnhancedTools {
       const level = String(current.depth);
       graph[level] ??= [];
 
-      const result = await this.#call(
+      const result = await this.#observe(
         tool,
         { procedure: current.address },
         signal,
@@ -373,7 +376,7 @@ export class EnhancedTools {
         });
         continue;
       }
-      const related = parseRelatedAddresses(result.value, relation);
+      const related = parseRelatedAddresses(result.value.result, relation);
       if (!related.ok) {
         graph[level].push({
           address: current.address,
@@ -386,6 +389,13 @@ export class EnhancedTools {
         address: current.address,
         status: "ok",
         calls: [...related.value],
+        relationship_coverage: result.value.relationshipCoverage ?? {
+          status: "unknown",
+          reason: "Provider did not report relationship coverage.",
+        },
+        ...(result.value.limitations.length === 0
+          ? {}
+          : { limitations: [...result.value.limitations] }),
       });
       for (const address of related.value) {
         if (!discovered.has(address)) {
@@ -523,13 +533,28 @@ export class EnhancedTools {
     signal?: AbortSignal,
     selectorOrigin?: ExecutionOptions["selectorOrigin"],
   ): Promise<Result<JsonValue, AnalysisError>> {
+    const execution = await this.#observe(
+      name,
+      arguments_,
+      signal,
+      selectorOrigin,
+    );
+    return execution.ok ? ok(execution.value.result) : execution;
+  }
+
+  async #observe(
+    name: AnalysisOperation,
+    arguments_: Readonly<Record<string, JsonValue>>,
+    signal?: AbortSignal,
+    selectorOrigin?: ExecutionOptions["selectorOrigin"],
+  ): Promise<Result<AnalysisExecution, AnalysisError>> {
     if (isAborted(signal)) return err(new AnalysisCancelledError(name));
     const execution = await this.analysis.execute(name, arguments_, {
       ...(signal === undefined ? {} : { signal }),
       ...(selectorOrigin === undefined ? {} : { selectorOrigin }),
     });
     if (isAborted(signal)) return err(new AnalysisCancelledError(name));
-    return execution.ok ? ok(execution.value.result) : execution;
+    return execution;
   }
 }
 

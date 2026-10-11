@@ -229,16 +229,27 @@ const inspectSearch = ({
   const reached = new Map<string, number>([[start, 0]]);
   const queue = [start];
   const limitations: string[] = [];
+  let incompleteExpandedCoverage = false;
   for (let index = 0; index < queue.length; index += 1) {
     const node = queue[index];
     if (node === undefined) continue;
     const depth = reached.get(node) ?? 0;
-    if (node === goal) continue;
     const snapshot = snapshots.get(node);
+    if (snapshot !== undefined) {
+      limitations.push(...snapshot.limitations);
+      // The requested goal is a terminal for this search. Its outgoing edges
+      // cannot add a path to the goal, so its dossier limits are contextual
+      // but do not make the searched start-to-goal closure incomplete.
+      if (node === goal) continue;
+      if (snapshot.limitations.length > 0) incompleteExpandedCoverage = true;
+    } else if (node === goal) {
+      continue;
+    }
     if (snapshot === undefined) {
       limitations.push(
         `No analyze_function Evidence covers reachable function ${node}`,
       );
+      incompleteExpandedCoverage = true;
       continue;
     }
     const neighbors = graph.outNeighbors(node).sort(compareUnicodeCodePoints);
@@ -252,7 +263,7 @@ const inspectSearch = ({
     graph,
     snapshots,
     reached,
-    exhaustive: limitations.length === 0,
+    exhaustive: !incompleteExpandedCoverage,
     limitations,
   };
 };

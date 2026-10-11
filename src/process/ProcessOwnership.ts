@@ -223,8 +223,9 @@ const systemWindowsProcessTreeHost: WindowsProcessTreeHost = {
 export const readProcessRunId = async (
   pid: number,
   host: ProcessOwnershipHost = systemHost,
+  signal?: AbortSignal,
 ): Promise<string | undefined> =>
-  (await host.environment(pid)).REA_PROCESS_RUN_ID;
+  (await host.environment(pid, signal)).REA_PROCESS_RUN_ID;
 
 /** Token-validate every rooted POSIX process group before signaling any. */
 export const cleanupOwnedProcessGroup = async (

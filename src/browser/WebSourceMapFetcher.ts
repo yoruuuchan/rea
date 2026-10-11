@@ -20,10 +20,10 @@ import type {
 import { webSourceMapsSchema } from "../domain/webBundleAnalysis.js";
 import { createWebTextArtifact } from "../domain/webContentArtifact.js";
 import { safeParseJson } from "../domain/safeJson.js";
+import { sourceMapJsonText } from "../domain/sourceMapEnvelope.js";
 import { jsonParts } from "../domain/jsonSerialization.js";
 import {
   inspectSourceMapValue,
-  sourceMapJsonText,
   SourceMapFormatFailure,
   type SourceMapLeaf,
 } from "../javascript/sourceMaps/SourceMapFormat.js";

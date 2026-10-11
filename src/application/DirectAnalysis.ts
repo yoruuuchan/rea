@@ -15,14 +15,14 @@ import {
   isManagedToolName,
   type ManagedToolName,
 } from "../contracts/managed/managedToolContracts.js";
-import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
+import {
+  EvidenceFileError,
+  EvidenceIntegrityError,
+} from "../domain/evidenceErrors.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { access } from "node:fs/promises";
-import {
-  readAnalysisSnapshot,
-  writeAnalysisSnapshot,
-} from "./binary/AnalysisSnapshotFiles.js";
+import { readAnalysisSnapshot } from "./binary/AnalysisSnapshotFiles.js";
 import { parseBinaryTarget } from "./BinaryTargetResolver.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
@@ -177,6 +177,9 @@ const runManagedProviderAnalysis = async (
     result: value.result,
     rawResult: value.rawResult,
     limitations: value.limitations,
+    ...(value.relationshipCoverage === undefined
+      ? {}
+      : { relationshipCoverage: value.relationshipCoverage }),
     locations: value.locations,
   });
 };
@@ -331,13 +334,19 @@ const runAnalysis = async (
         const snapshot = session.exportAnalysisSnapshot();
         if (!snapshot.ok)
           return cliError(snapshot.error.retainPartialObservation(evidence));
-        const written = await writeAnalysisSnapshot(
+        const written = await session.writeAnalysisSnapshot(
           snapshot.value,
           snapshotPath,
           true,
         );
-        if (!written.ok)
-          return cliError(written.error.retainPartialObservation(evidence));
+        if (!written.ok) {
+          const recovered =
+            written.error instanceof EvidenceFileError &&
+            written.error.published !== undefined &&
+            (await session.closeWriteResources()).ok;
+          if (!recovered)
+            return cliError(written.error.retainPartialObservation(evidence));
+        }
       }
       return output;
     },
@@ -436,6 +445,9 @@ const executeAnalysisTool = async (input: {
         : { analysisProfile: result.value.analysisProfile }),
       rawResult: result.value.rawResult,
       limitations: result.value.limitations,
+      ...(result.value.relationshipCoverage === undefined
+        ? {}
+        : { relationshipCoverage: result.value.relationshipCoverage }),
       locations: result.value.locations,
       evidenceLinks:
         tool === "inspect_artifact"

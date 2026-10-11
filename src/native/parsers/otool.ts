@@ -43,6 +43,25 @@ interface ParsedLoadCommands {
   readonly flags: Set<string>;
 }
 
+const DYLIB_COMMANDS = new Set([
+  "LC_ID_DYLIB",
+  "LC_LOAD_DYLIB",
+  "LC_LOAD_WEAK_DYLIB",
+  "LC_REEXPORT_DYLIB",
+  "LC_LAZY_LOAD_DYLIB",
+  "LC_LOAD_UPWARD_DYLIB",
+]);
+
+const DYLIB_FIELDS = [
+  "cmd",
+  "cmdsize",
+  "name",
+  "current version",
+  "compatibility version",
+];
+// otool prints options for dylib_use_command and a timestamp for dylib_command.
+const DYLIB_ENCODING_FIELDS = ["time stamp", "options"];
+
 /**
  * otool emits LF, but a capture replayed from another host or toolchain can
  * carry CRLF. The section/command boundaries below match a bare `\n`, so a
@@ -57,11 +76,14 @@ const normalizeLineEndings = (output: string): string =>
 export const parseOtoolLoadCommands = (raw: string) => {
   const output = normalizeLineEndings(raw);
   const header = parseHeader(output);
-  const state = createLoadCommandState(header?.flags);
+  if (header === undefined)
+    throw new TypeError("otool output is missing the Mach header");
+  const state = createLoadCommandState(header.flags);
   for (const block of output.split(/(?=^Load command \d+$)/mu))
     parseLoadCommand(block, state);
+  validateLoadCommandFraming(header, state.commands);
   return {
-    fileType: header?.fileType ?? null,
+    fileType: header.fileType,
     flags: [...state.flags].sort(),
     uuid: state.uuid,
     commands: state.commands,
@@ -74,7 +96,14 @@ export const parseOtoolLoadCommands = (raw: string) => {
 
 const parseHeader = (
   output: string,
-): { fileType: string | null; flags: string[] } | undefined => {
+):
+  | {
+      fileType: string | null;
+      flags: string[];
+      commandCount: number;
+      commandBytes: number;
+    }
+  | undefined => {
   const lines = output.split(/\r?\n/u).map((line) => line.trim());
   const columnsLine = lines.findIndex((line) => /(?:^|\s)magic\s/u.test(line));
   if (columnsLine < 0) return undefined;
@@ -82,6 +111,10 @@ const parseHeader = (
   const dataLine = lines.slice(columnsLine + 1).find((line) => line.length > 0);
   const values = dataLine?.split(/\s+/u);
   if (columns === undefined || values === undefined) return undefined;
+  const commandCount = headerValue(columns, values, "ncmds");
+  const commandBytes = headerValue(columns, values, "sizeofcmds");
+  if (commandCount === null || commandBytes === null)
+    throw new TypeError("otool Mach header is missing valid command framing");
   const fileTypeIndex = columns.indexOf("filetype");
   const flagsIndex = columns.indexOf("flags");
   const complete = values.length >= columns.length;
@@ -92,6 +125,8 @@ const parseHeader = (
   const flagsEnd =
     flagsIndex >= 0 ? values.length - (columns.length - flagsIndex - 1) : 0;
   return {
+    commandCount,
+    commandBytes,
     fileType:
       complete && fileTypeValueIndex >= 0 && fileTypeValueIndex < values.length
         ? (values[fileTypeValueIndex] ?? null)
@@ -103,6 +138,48 @@ const parseHeader = (
             .slice(flagsIndex, flagsEnd)
             .filter((value) => value.length > 0),
   };
+};
+
+const headerValue = (
+  columns: readonly string[],
+  values: readonly string[],
+  name: string,
+): number | null => {
+  const index = columns.indexOf(name);
+  if (index < 0) return null;
+  const flagsIndex = columns.indexOf("flags");
+  const valueIndex =
+    flagsIndex >= 0 && index > flagsIndex
+      ? values.length - (columns.length - index)
+      : index;
+  const value = values[valueIndex];
+  return value === undefined ? null : numeric(value);
+};
+
+const validateLoadCommandFraming = (
+  header: { readonly commandCount: number; readonly commandBytes: number },
+  commands: readonly {
+    readonly index: number;
+    readonly fields: Readonly<Record<string, string | number | null>>;
+  }[],
+): void => {
+  if (commands.length !== header.commandCount)
+    throw new TypeError(
+      "otool load-command count does not match the Mach header",
+    );
+  let totalBytes = 0;
+  for (const [expectedIndex, command] of commands.entries()) {
+    const size = numberField(command.fields, "cmdsize");
+    if (command.index !== expectedIndex || size === null || size < 8)
+      throw new TypeError("otool load-command sequence or size is invalid");
+    totalBytes += size;
+    if (!Number.isSafeInteger(totalBytes))
+      throw new TypeError("otool load-command byte count is unsafe");
+  }
+  if (totalBytes !== header.commandBytes)
+    throw new TypeError(
+      "otool load-command sizes do not match the Mach header",
+    );
 };
 
 const createLoadCommandState = (
@@ -120,11 +197,17 @@ const createLoadCommandState = (
 const parseLoadCommand = (block: string, state: ParsedLoadCommands): void => {
   const indexText = /^Load command (\d+)/u.exec(block)?.[1];
   if (indexText === undefined) return;
+  const index = Number(indexText);
+  if (!Number.isSafeInteger(index))
+    throw new TypeError("otool load-command index is unsafe");
   const header = block.split(/\n\s*Section\n/u)[0] ?? block;
   const fields = parseFields(header);
-  const kind = stringField(fields, "cmd") ?? "unknown";
+  const kind = stringField(fields, "cmd");
+  if (kind === null) throw new TypeError("otool load command is missing cmd");
+  for (const key of scalarFields(kind)) requireUniqueField(header, key);
+  if (DYLIB_COMMANDS.has(kind)) validateDylibCommandLines(header, fields);
   state.commands.push({
-    index: Number.parseInt(indexText, 10),
+    index,
     kind,
     fields,
   });
@@ -133,6 +216,56 @@ const parseLoadCommand = (block: string, state: ParsedLoadCommands): void => {
   collectBuild(kind, block, fields, state);
   collectDependency(kind, fields, state);
   collectSegment(kind, block, fields, state);
+};
+
+const validateDylibCommandLines = (
+  block: string,
+  fields: Readonly<Record<string, string | number | null>>,
+): void => {
+  const encodingFields = DYLIB_ENCODING_FIELDS.filter((key) =>
+    Object.hasOwn(fields, key),
+  );
+  if (encodingFields.length !== 1)
+    throw new TypeError(
+      "otool dylib command must contain timestamp or options",
+    );
+  for (const key of encodingFields) requireUniqueField(block, key);
+  const allowed = new Set([...DYLIB_FIELDS, ...DYLIB_ENCODING_FIELDS]);
+  for (const rawLine of block.split("\n").slice(1)) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    const key = parseField(line)?.[0];
+    if (key === undefined || !allowed.has(key))
+      throw new TypeError(
+        "otool dylib command contains ambiguous multiline text",
+      );
+  }
+};
+
+const scalarFields = (kind: string): readonly string[] => {
+  const common = ["cmd", "cmdsize"];
+  if (DYLIB_COMMANDS.has(kind)) return DYLIB_FIELDS;
+  if (kind === "LC_LOAD_DYLINKER" || kind === "LC_ID_DYLINKER")
+    return [...common, "name"];
+  if (kind === "LC_UUID") return [...common, "uuid"];
+  if (kind === "LC_MAIN") return [...common, "entryoff"];
+  if (kind === "LC_BUILD_VERSION")
+    return [...common, "platform", "minos", "sdk", "ntools"];
+  if (kind.startsWith("LC_VERSION_MIN_")) return [...common, "version", "sdk"];
+  if (kind === "LC_SEGMENT" || kind === "LC_SEGMENT_64")
+    return [
+      ...common,
+      "segname",
+      "vmaddr",
+      "vmsize",
+      "fileoff",
+      "filesize",
+      "maxprot",
+      "initprot",
+      "nsects",
+      "flags",
+    ];
+  return common;
 };
 
 const collectUuid = (
@@ -161,11 +294,14 @@ const collectBuild = (
   state: ParsedLoadCommands,
 ): void => {
   if (kind === "LC_BUILD_VERSION") {
+    const tools = parseBuildTools(block);
+    if (numberField(fields, "ntools") !== tools.length)
+      throw new TypeError("otool build-tool count does not match ntools");
     state.builds.push({
       platform: stringField(fields, "platform"),
       minimum_os: stringField(fields, "minos"),
       sdk: stringField(fields, "sdk"),
-      tools: parseBuildTools(block),
+      tools,
     });
     return;
   }
@@ -183,13 +319,7 @@ const collectDependency = (
   fields: Readonly<Record<string, string | number | null>>,
   state: ParsedLoadCommands,
 ): void => {
-  if (
-    !kind.startsWith("LC_LOAD_") &&
-    kind !== "LC_ID_DYLIB" &&
-    kind !== "LC_REEXPORT_DYLIB" &&
-    kind !== "LC_LAZY_LOAD_DYLIB"
-  )
-    return;
+  if (!DYLIB_COMMANDS.has(kind)) return;
   state.dependencies.push({
     path: stripOffsetSuffix(stringField(fields, "name")),
     kind,
@@ -204,27 +334,47 @@ const collectSegment = (
   fields: Readonly<Record<string, string | number | null>>,
   state: ParsedLoadCommands,
 ): void => {
-  if (kind === "LC_SEGMENT" || kind === "LC_SEGMENT_64")
-    state.segments.push(parseSegment(block, fields));
+  if (kind !== "LC_SEGMENT" && kind !== "LC_SEGMENT_64") return;
+  const segment = parseSegment(block, fields);
+  if (numberField(fields, "nsects") !== segment.sections.length)
+    throw new TypeError(
+      "otool segment section count does not match its sections",
+    );
+  state.segments.push(segment);
 };
 
 const parseFields = (block: string): Record<string, string | number | null> => {
   const fields: Record<string, string | number | null> = {};
   for (const rawLine of block.split(/\r?\n/u).slice(1)) {
-    const line = rawLine.trim();
-    // Keys are `token` or a compound `token version`. `time stamp` is the one
-    // other real key, and it must be matched as a whole: treating `stamp` as a
-    // generic suffix would swallow an install name such as
-    // `name stamp plugin.dylib`, hiding the dependency path behind `unknown`.
-    const match = /^((?:time stamp)|\S+(?:\s+version)?)\s+(.+)$/u.exec(line);
-    if (match?.[1] === undefined || match[2] === undefined) continue;
-    const value = match[2].trim();
-    fields[match[1]] =
-      match[1] === "segname" || match[1] === "sectname"
+    const field = parseField(rawLine);
+    if (field === undefined) continue;
+    const [key, value] = field;
+    fields[key] =
+      key === "segname" || key === "sectname"
         ? value
         : (numeric(value) ?? value);
   }
   return fields;
+};
+
+const parseField = (rawLine: string): readonly [string, string] | undefined => {
+  const line = rawLine.trim();
+  // A dylib-use command with no flags still has an empty options row.
+  if (line === "options") return ["options", ""];
+  // Match time stamp as a whole without swallowing `name stamp plugin.dylib`.
+  const match = /^((?:time stamp)|\S+(?:\s+version)?)\s+(.+)$/u.exec(line);
+  return match?.[1] === undefined || match[2] === undefined
+    ? undefined
+    : [match[1], match[2].trim()];
+};
+
+const requireUniqueField = (block: string, key: string): void => {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const pattern = new RegExp(`^\\s*${escaped}(?:\\s|$)`, "mu");
+  let count = 0;
+  for (const line of block.split("\n")) if (pattern.test(line)) count += 1;
+  if (count !== 1)
+    throw new TypeError(`otool field ${key} is missing or repeated`);
 };
 
 const parseSegment = (
@@ -247,6 +397,16 @@ const parseSections = (block: string): ParsedSection[] =>
     .slice(1)
     .map((sectionBlock) => {
       const fields = parseFields(`Section${sectionBlock}`);
+      for (const key of [
+        "sectname",
+        "segname",
+        "addr",
+        "size",
+        "offset",
+        "align",
+        "flags",
+      ])
+        requireUniqueField(sectionBlock, key);
       return {
         segment: stringField(fields, "segname") ?? "unknown",
         name: stringField(fields, "sectname") ?? "unknown",

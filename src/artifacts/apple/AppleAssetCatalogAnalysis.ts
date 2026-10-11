@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
-import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import {
+  ArtifactReaderFailure,
+  sameArtifactSourceIdentity,
+} from "../ArtifactReader.js";
 import { analyzeInterfaceBuilderBundle } from "./InterfaceBuilderAnalysis.js";
 import {
   appleAssetCatalogInputSchema,
@@ -136,22 +139,20 @@ const inspectAssetCatalogEntry = async (input: {
 }) => {
   const { entry, reader, signal } = input;
   const sha256 = await digestBounded(reader, entry, signal);
-  const before = await lstat(entry.adapterKey);
+  const before = await lstat(entry.adapterKey, { bigint: true });
   if (
-    entry.sourceIdentity === undefined ||
-    before.dev !== entry.sourceIdentity.device ||
-    before.ino !== entry.sourceIdentity.inode
+    !before.isFile() ||
+    !sameArtifactSourceIdentity(entry.sourceIdentity, before)
   )
     throw new ArtifactReaderFailure(
       "integrity",
       `Asset catalog changed before inspection: ${entry.path}`,
     );
   const output = await input.runAssetUtil(entry.adapterKey, signal);
-  const after = await lstat(entry.adapterKey);
+  const after = await lstat(entry.adapterKey, { bigint: true });
   if (
-    before.dev !== after.dev ||
-    before.ino !== after.ino ||
-    before.size !== after.size ||
+    !after.isFile() ||
+    !sameArtifactSourceIdentity(entry.sourceIdentity, after) ||
     (await digestBounded(reader, entry, signal)) !== sha256
   )
     throw new ArtifactReaderFailure(

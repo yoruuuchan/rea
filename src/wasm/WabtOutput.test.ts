@@ -33,6 +33,132 @@ it("retains real WABT section ranges, custom section identity and original heade
       ["test"],
     ),
   ).toThrow(/Unrecognized/u);
+  expect(() =>
+    parseWabtOutput(
+      text.replace(
+        "\nSection Details:\n",
+        "\nDataCount start=0x00000040 end=0x0000004c (size=0x0000000c)\nSection Details:\n",
+      ),
+      76,
+      ["test"],
+    ),
+  ).toThrow(/Unrecognized/u);
+});
+const dataCountModuleBytes = 0x3d;
+const unpaddedDataCountRow =
+  "DataCount start=0x00000023 end=0x00000024 (size=0x00000001) count: 1";
+const dataCountDump = [
+  "",
+  "module.wasm:\tfile format wasm 0x1",
+  "",
+  "Sections:",
+  "",
+  "     Type start=0x0000000a end=0x0000000e (size=0x00000004) count: 1",
+  " Function start=0x00000010 end=0x00000012 (size=0x00000002) count: 1",
+  "   Memory start=0x00000014 end=0x00000017 (size=0x00000003) count: 1",
+  "   Export start=0x00000019 end=0x00000021 (size=0x00000008) count: 1",
+  unpaddedDataCountRow,
+  "     Code start=0x00000026 end=0x00000037 (size=0x00000011) count: 1",
+  "     Data start=0x00000039 end=0x0000003d (size=0x00000004) count: 1",
+  "",
+  "Section Details:",
+  "",
+].join("\n");
+it("accepts an unpadded DataCount row and still rejects malformed output and bad ranges", () => {
+  const parsed = parseWabtOutput(dataCountDump, dataCountModuleBytes, []);
+  expect(parsed.sections.map(({ kind }) => kind)).toEqual([
+    "Type",
+    "Function",
+    "Memory",
+    "Export",
+    "DataCount",
+    "Code",
+    "Data",
+  ]);
+  expect(parsed.sections.find(({ kind }) => kind === "DataCount")).toEqual({
+    kind: "DataCount",
+    start: 0x23,
+    end: 0x24,
+    bytes: 1,
+    description: "count: 1",
+  });
+  expect(parsed.headers).toContain(`\n${unpaddedDataCountRow}\n`);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace(unpaddedDataCountRow, "DataCount count: 1"),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/Unrecognized/u);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace(unpaddedDataCountRow, "Sections:"),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/Unrecognized/u);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace(
+        unpaddedDataCountRow,
+        "DataCount start=0x00000023 end=0x00000024 (size=0x00000001)count: 1",
+      ),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/Unrecognized/u);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace("(size=0x00000001)", "(size=0x00000002)"),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/ranges/u);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace(
+        "DataCount start=0x00000023 end=0x00000024 (size=0x00000001)",
+        "DataCount start=0x00000020 end=0x00000021 (size=0x00000001)",
+      ),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/ranges/u);
+  expect(() =>
+    parseWabtOutput(dataCountDump, dataCountModuleBytes - 1, []),
+  ).toThrow(/ranges/u);
+  expect(() =>
+    parseWabtOutput(
+      dataCountDump.replace(
+        "\nmodule.wasm:\tfile format wasm 0x1\n\nSections:\n\n",
+        "",
+      ),
+      dataCountModuleBytes,
+      [],
+    ),
+  ).toThrow(/header/u);
+});
+it.each([
+  { displayed: [], decoded: ["named"] },
+  { displayed: ["named"], decoded: [] },
+  { displayed: ["other"], decoded: ["named"] },
+])(
+  "rejects module-name headers inconsistent with decoded WAT: %j",
+  async ({ displayed, decoded }) => {
+    const text = (await golden()).replace(
+      "\n\nSections:",
+      `\n${displayed.map((name) => `module name: <${name}>\n`).join("")}\nSections:`,
+    );
+    expect(() => parseWabtOutput(text, 76, ["test"], decoded)).toThrow(
+      /header format/u,
+    );
+  },
+);
+it.each([
+  '(module (@custom "name" "\\00\\06\\05name"))',
+  '(module (@custom "name" "\\00\\05\\05name"))',
+])("rejects incomplete decoded module-name metadata: %s", (text) => {
+  expect(() => parseWabtWat(text)).toThrow(/metadata/u);
 });
 it("extracts escaped WAT import/export forms while retaining multiline producer text", async () => {
   const text = await readFile(
@@ -43,6 +169,7 @@ it("extracts escaped WAT import/export forms while retaining multiline producer 
     imports: ['(import "env" "foo" (func (;0;) (type 0)))'],
     exports: ['(export "memory" (memory 0))', '(export "run" (func 1))'],
     customSectionNames: ["test"],
+    debugModuleNames: [],
   });
   expect(
     parseWabtWat(
@@ -52,6 +179,7 @@ it("extracts escaped WAT import/export forms while retaining multiline producer 
     imports: ['(import "a.b" "c\\0aline" (func))'],
     exports: ['(export "fake\\22Export[1]:" (func 0))'],
     customSectionNames: [],
+    debugModuleNames: [],
   });
   expect(
     parseWabtWat(

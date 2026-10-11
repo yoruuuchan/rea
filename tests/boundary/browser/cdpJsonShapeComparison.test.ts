@@ -316,6 +316,7 @@ const captureBody = (source: BodySource, body: string): WebPageInspection => {
         headers: { "Content-Type": "application/json" },
         postData: source === "request" ? body : "{}",
       },
+      initiator: { type: "script" },
     },
   });
   const responseBody = source === "request" ? "{}" : body;

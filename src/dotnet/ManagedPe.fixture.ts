@@ -22,6 +22,7 @@ interface ManagedPeFixtureOptions {
   readonly malformedCustomAttributeRows?: readonly number[];
   readonly metadataExtraData?: number;
   readonly metadataValidMaskExtra?: bigint;
+  readonly methodRowCount?: number;
   readonly methodName?: string;
   readonly methodFlags?: number;
   readonly methodSignature?: Buffer;
@@ -604,7 +605,7 @@ const fixtureIndexWidths = ({
     [1, 1],
     [2, indexes.additionalTypeNames.length + 1],
     [4, 1],
-    [6, 1],
+    [6, options.methodRowCount ?? 1],
     [8, 0],
     [10, 1],
     [
@@ -707,7 +708,7 @@ const fixtureMetadataRows = ({
     ],
     [
       6,
-      [
+      repeatedRows(options.methodRowCount ?? 1, () =>
         methodDefRow({
           name: indexes.methodName,
           signature: indexes.methodSignature,
@@ -719,7 +720,7 @@ const fixtureMetadataRows = ({
             options.methodFlags ??
             (options.pinvoke === undefined ? 0x0016 : 0x2016),
         }),
-      ],
+      ),
     ],
     [
       10,

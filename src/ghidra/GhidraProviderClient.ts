@@ -56,6 +56,13 @@ import {
   GHIDRA_PSP_LIMITATIONS,
 } from "./GhidraPspProfile.js";
 import { ghidraPspExtensionSchema } from "./GhidraPspExtension.js";
+import {
+  GHIDRA_MIPS_SOFT_FLOAT_STORAGE,
+  ghidraMipsSoftFloatFailure,
+  ghidraMipsRelocatableLimitations,
+  ghidraMipsSoftFloatLimitations,
+  isGhidraMipsSoftFloatTarget,
+} from "./GhidraMipsProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraInstallationPolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
 import { attestGhidraNativeLoadImage } from "./GhidraLoadImageAttest.js";
@@ -386,6 +393,20 @@ export const createGhidraProviderClient = (input: {
         },
       }),
     );
+  const softFloat = isGhidraMipsSoftFloatTarget(target);
+  if (
+    softFloat !==
+    (committedProfile.parameters.mips_soft_float_storage ===
+      GHIDRA_MIPS_SOFT_FLOAT_STORAGE)
+  )
+    return unavailableClient(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "Resolve the soft-float MIPS storage policy into the analysis profile before opening the session.",
+        },
+      }),
+    );
   const extensionProfile = ghidraExtensionSchema
     .array()
     .safeParse(committedProfile.parameters.analysis_extensions ?? []);
@@ -465,6 +486,10 @@ export const createGhidraProviderClient = (input: {
   let extensionFailure: AnalysisError | undefined;
   // Replaced by the reported outcome once the session handshake is checked.
   const seedLimitations: string[] = [...ghidraSeedLimitations(seeds)];
+  // Replaced by the reported storage outcome once the handshake is checked.
+  const softFloatLimitations: string[] = [
+    ...ghidraMipsSoftFloatLimitations(softFloat),
+  ];
   const rawLanguage =
     target.format === "raw-binary"
       ? ghidraRawBinaryLanguage(target.architecture)
@@ -486,6 +511,7 @@ export const createGhidraProviderClient = (input: {
     ...(target.kind === "executable" && target.architecture === "mips"
       ? (target.mips.limitations ?? [])
       : []),
+    ...ghidraMipsRelocatableLimitations(target),
   ];
   const providerLimitations =
     installation.platform === "win32"
@@ -508,6 +534,7 @@ export const createGhidraProviderClient = (input: {
       ...(pspExtension?.success === true
         ? { pspExtension: pspExtension.data }
         : {}),
+      ...(softFloat ? { mipsSoftFloat: true as const } : {}),
       ...(target.format === "dos-mz" ? { dosMz: true } : {}),
       ...(target.format === "dos-com" ? { dosCom: true } : {}),
       ...(rawLanguage === undefined || target.format !== "raw-binary"
@@ -569,17 +596,36 @@ export const createGhidraProviderClient = (input: {
     operation: AnalysisOperation,
     info: GhidraSessionInfo,
   ): Promise<AnalysisError | undefined> => {
+    const softFloatReason = ghidraMipsSoftFloatFailure(
+      softFloat,
+      info.mips_soft_float_storage,
+    );
     extensionFailure =
       ghidraExtensionFailure(
         extensions,
         info.analysis_extensions ?? [],
         operation,
-      ) ?? ghidraSeedFailure(seeds, info.analysis_seeds, operation);
+      ) ??
+      ghidraSeedFailure(seeds, info.analysis_seeds, operation) ??
+      (softFloatReason === undefined
+        ? undefined
+        : new ProviderAdapterError("ghidra", operation, {
+            diagnostics: { reason: softFloatReason },
+          }));
     if (extensionFailure === undefined && info.analysis_seeds !== undefined)
       seedLimitations.splice(
         0,
         seedLimitations.length,
         ...ghidraSeedLimitations(seeds, info.analysis_seeds),
+      );
+    if (extensionFailure === undefined)
+      softFloatLimitations.splice(
+        0,
+        softFloatLimitations.length,
+        ...ghidraMipsSoftFloatLimitations(
+          softFloat,
+          info.mips_soft_float_storage,
+        ),
       );
     if (extensionFailure === undefined) return undefined;
     const closed = await client.close();
@@ -598,6 +644,7 @@ export const createGhidraProviderClient = (input: {
     ...providerLimitations,
     ...targetLimitations,
     ...(psp ? GHIDRA_PSP_LIMITATIONS : []),
+    ...softFloatLimitations,
     ...ghidraExtensionLimitations(extensions),
     ...seedLimitations,
     ...(releaseLimitation === undefined ? [] : [releaseLimitation]),
@@ -648,7 +695,7 @@ export const createGhidraProviderClient = (input: {
         ? parseGhidraFunctionInput(operation, parameters)
         : parseGhidraInventoryInput(operation, parameters);
       if (!input.ok) return input;
-      if (extensions.length > 0 || seeds !== undefined) {
+      if (extensions.length > 0 || seeds !== undefined || softFloat) {
         const started = await client.start(options?.signal, options?.progress);
         if (!started.ok)
           return err(
@@ -774,6 +821,10 @@ export const createGhidraProviderClient = (input: {
         createAnalysisExecution(normalized, committedProfile.provider, {
           rawResult: called.value,
           analysisProfile: committedProfile,
+          ...(operation === "procedure_callers" ||
+          operation === "procedure_callees"
+            ? { relationshipCoverage: { status: "complete" as const } }
+            : {}),
           limitations: [
             ...limitationsFor(operation),
             ...observationLimitations,

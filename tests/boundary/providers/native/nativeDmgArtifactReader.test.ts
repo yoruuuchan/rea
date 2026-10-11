@@ -7,14 +7,19 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 
 import { build } from "plist";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { execFileOutput } from "../../../../src/process/ExecFileOutput.js";
-import { ArtifactReaderFailure } from "../../../../src/artifacts/ArtifactReader.js";
+import {
+  ArtifactReaderFailure,
+  type ArtifactEntry,
+} from "../../../../src/artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
+import { DirectoryArtifactReader } from "../../../../src/artifacts/DirectoryArtifactReader.js";
 import {
   NativeDmgArtifactReader,
   type NativeDmgHost,
@@ -373,6 +378,186 @@ describe("native DMG lazy initialization", () => {
     expect(
       await realpath(mount.root() ?? "").catch(() => undefined),
     ).toBeUndefined();
+  });
+});
+
+describe("native DMG directory ownership", () => {
+  it("closes unread member streams and suspended traversal handles before detach", async () => {
+    const calls: string[][] = [];
+    const mount = createMountFixture();
+    let attached = false;
+    let mountPoint: string | undefined;
+    let unread: Readable | undefined;
+    let unreadHandleRejectedAtDetach = false;
+    const host: NativeDmgHost = {
+      async run(arguments_) {
+        calls.push([...arguments_]);
+        if (arguments_[0] === "info")
+          return {
+            stdout:
+              !attached || mountPoint === undefined
+                ? emptyInfoPlist
+                : infoPlist("/tmp/image.dmg", [
+                    {
+                      "dev-entry": "/dev/disk-unread",
+                      "mount-point": mountPoint,
+                    },
+                  ]),
+            exitCode: 0,
+          };
+        if (arguments_[0] === "detach") {
+          if (unread !== undefined) {
+            try {
+              await unread[Symbol.asyncIterator]().next();
+            } catch {
+              unreadHandleRejectedAtDetach = true;
+            }
+          }
+          attached = false;
+          return { stdout: "", exitCode: 0 };
+        }
+        if (arguments_[0] !== "attach") return { stdout: "", exitCode: 0 };
+        ({ mountPoint } = await mount.createVolume(arguments_, "unread bytes"));
+        attached = true;
+        return {
+          stdout: attachPlist([
+            { "dev-entry": "/dev/disk-unread", "mount-point": mountPoint },
+          ]),
+          exitCode: 0,
+        };
+      },
+    };
+    const reader = await createAttachedReader(
+      "/tmp/image.dmg",
+      process.env,
+      undefined,
+      host,
+    );
+    let fileEntry: ArtifactEntry | undefined;
+    for await (const entry of reader.entries())
+      if (entry.path.endsWith("/hello.txt")) fileEntry = entry;
+    if (fileEntry === undefined) throw new Error("expected hello.txt");
+    unread = await reader.open(fileEntry);
+    const iterator = reader.entries()[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    if (first.done) throw new Error("expected a mounted directory entry");
+    await reader.close();
+    expect(calls.filter(([operation]) => operation === "detach")).toEqual([
+      ["detach", "/dev/disk-unread"],
+    ]);
+    expect(unreadHandleRejectedAtDetach).toBe(true);
+    await expect(realpath(mount.root() ?? "")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect((await iterator.next()).done).toBe(true);
+  });
+});
+
+describe("native DMG traversal shutdown", () => {
+  it("waits for a pending directory advance before detaching", async () => {
+    const { host, state } = createOmittedInventoryHost();
+    state.inventoryMode = "listed";
+    state.detachAttempts = 4;
+    const originalEntries = DirectoryArtifactReader.prototype.entries;
+    let gateAdvance = false;
+    let markAdvanceStarted = (): void => {};
+    const advanceStarted = new Promise<void>((resolve) => {
+      markAdvanceStarted = resolve;
+    });
+    let releaseAdvance = (): void => {};
+    const advanceGate = new Promise<void>((resolve) => {
+      releaseAdvance = resolve;
+    });
+    const entriesSpy = vi
+      .spyOn(DirectoryArtifactReader.prototype, "entries")
+      .mockImplementation(async function* (
+        this: DirectoryArtifactReader,
+        signal?: AbortSignal,
+        descendInto?: (path: string) => boolean,
+      ) {
+        const iterator = originalEntries
+          .call(this, signal, descendInto)
+          [Symbol.asyncIterator]();
+        try {
+          for (;;) {
+            const next = await iterator.next();
+            if (next.done) return;
+            if (gateAdvance) {
+              markAdvanceStarted();
+              await advanceGate;
+            }
+            yield next.value;
+          }
+        } finally {
+          await iterator.return?.();
+        }
+      });
+    try {
+      const reader = await createAttachedReader(
+        "/tmp/image.dmg",
+        process.env,
+        undefined,
+        host,
+      );
+      gateAdvance = true;
+      const iterator = reader.entries()[Symbol.asyncIterator]();
+      const advancing = iterator.next();
+      await advanceStarted;
+      const closing = reader.close();
+      await Promise.resolve();
+      expect(state.detachAttempts).toBe(4);
+      releaseAdvance();
+      expect((await advancing).done).toBe(true);
+      await closing;
+      expect(state.detachAttempts).toBe(5);
+      await expect(realpath(state.mountRoot ?? "")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      entriesSpy.mockRestore();
+    }
+  });
+});
+
+describe("native DMG directory close recovery", () => {
+  it("retains a mounted directory after its close fails and retries before detach", async () => {
+    const { host, state } = createOmittedInventoryHost();
+    state.inventoryMode = "listed";
+    state.detachAttempts = 4;
+    const closeDirectory = vi
+      .spyOn(DirectoryArtifactReader.prototype, "close")
+      .mockImplementationOnce(async () => {
+        throw new Error("injected directory close failure");
+      });
+    try {
+      const reader = await createAttachedReader(
+        "/tmp/image.dmg",
+        process.env,
+        undefined,
+        host,
+      );
+      const failure = await reader.close().catch((cause: unknown) => cause);
+      expect(failure).toMatchObject({
+        reason: "io",
+        cleanup: {
+          resources: expect.arrayContaining([
+            expect.stringMatching(/^DMG mounted directory at /u),
+            expect.stringMatching(/^DMG mount root /u),
+          ]),
+        },
+      });
+      expect(state.detachAttempts).toBe(4);
+      expect(await realpath(state.mountRoot ?? "")).toBe(state.mountRoot);
+
+      await reader.close();
+      expect(closeDirectory).toHaveBeenCalledTimes(2);
+      expect(state.detachAttempts).toBe(5);
+      await expect(realpath(state.mountRoot ?? "")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      closeDirectory.mockRestore();
+    }
   });
 });
 

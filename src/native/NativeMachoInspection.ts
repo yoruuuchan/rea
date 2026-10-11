@@ -67,9 +67,8 @@ export const inspectNativeMacho = async (
   }
   const lipo = captures.find(({ tool }) => tool === "lipo");
   if (lipo === undefined) throw new TypeError("Missing lipo capture");
-  const availableArchitectures = parseLipoArchitectures(lipo.stdout).map(
-    ({ name }) => name,
-  );
+  const architectures = parseLipoArchitectures(lipo.stdout);
+  const availableArchitectures = architectures.map(({ name }) => name);
   const selection = selectArchitecture(context.target, availableArchitectures);
   if (selection.status === "absent")
     return err(
@@ -108,26 +107,68 @@ export const inspectNativeMacho = async (
   else if (optional.error._tag === "AnalysisCapabilityUnavailableError")
     limitations.push(VTOOL_UNAVAILABLE_LIMITATION);
   else return err(optional.error);
-  const normalized = normalizeMacho(captures, context.invocation, limitations);
-  const segmentOffset = segmentContainerOffset(
-    normalized,
-    selectedArchitecture,
-    /^Non-fat file:/mu.test(lipo.stdout),
+  const otool = captures.find(({ tool }) => tool === "otool");
+  if (otool === undefined) throw new TypeError("Missing otool capture");
+  let load: ReturnType<typeof parseOtoolLoadCommands>;
+  try {
+    load = parseOtoolLoadCommands(sliceOutput(otool));
+  } catch (cause: unknown) {
+    return err(
+      new AnalysisOutputError(
+        "inspect_macho",
+        "Malformed otool load-command output",
+        {
+          cause,
+          capturedOutput: {
+            stdout: otool.stdout,
+            stderr: otool.stderr,
+            truncated: false,
+            stdout_bytes: otool.stdoutBytes,
+            stderr_bytes: otool.stderrBytes,
+            exit_code: otool.exitCode,
+            signal: otool.signal,
+          },
+        },
+      ),
+    );
+  }
+  const selectedArchitectureName =
+    selectedArchitecture ??
+    (architectures.length === 1 ? (architectures[0]?.name ?? null) : null);
+  const containerOffset =
+    selectedArchitectureName === null
+      ? undefined
+      : /^Non-fat file:/mu.test(lipo.stdout)
+        ? 0
+        : (architectures.find(({ name }) => name === selectedArchitectureName)
+            ?.file_offset ?? undefined);
+  const normalized = normalizeMacho(
+    captures,
+    context.invocation,
+    limitations,
+    load,
+    architectures,
+    {
+      name: selectedArchitectureName,
+      container_file_offset: containerOffset ?? null,
+    },
   );
   const result =
-    segmentOffset === undefined
+    containerOffset === undefined
       ? inspectMachoSchema.parse({
           ...normalized,
           limitations: [
             ...normalized.limitations,
-            "Segment evidence file offsets are unavailable because the selected Mach-O slice's container offset was not observed.",
+            selectedArchitectureName === null
+              ? "The selected Mach-O slice is unknown; slice-based evidence locations are unavailable."
+              : "The selected Mach-O slice's container file offset was not observed; slice-based evidence locations are unavailable.",
           ],
         })
       : normalized;
   return ok({
     result: jsonValueSchema.parse(result),
     limitations: result.limitations,
-    locations: fileOffsetLocations(result, segmentOffset),
+    locations: fileOffsetLocations(result, containerOffset),
   });
 };
 
@@ -135,10 +176,14 @@ const normalizeMacho = (
   captures: readonly NativeCommandCapture[],
   toInvocation: (capture: NativeCommandCapture) => NativeCommandInvocation,
   additionalLimitations: readonly string[],
+  load: ReturnType<typeof parseOtoolLoadCommands>,
+  architectures: ReturnType<typeof parseLipoArchitectures>,
+  selectedArchitecture: {
+    readonly name: string | null;
+    readonly container_file_offset: number | null;
+  },
 ) => {
   const byTool = captureLookup(captures);
-  const architectures = parseLipoArchitectures(byTool("lipo").stdout);
-  const load = parseOtoolLoadCommands(sliceOutput(byTool("otool")));
   const imports = parseDyldSymbols(
     sliceOutput(byTool("dyld_info", 0)),
     "imports",
@@ -187,6 +232,7 @@ const normalizeMacho = (
   ];
   return inspectMachoSchema.parse({
     format: "mach-o",
+    selected_architecture: selectedArchitecture,
     endian: parseEndian(byTool("file").stdout),
     word_size: parseWordSize(byTool("file").stdout),
     file_type: load.fileType,
@@ -277,43 +323,29 @@ const uniqueSymbols = <Value extends { readonly name: string }>(
 
 const fileOffsetLocations = (
   macho: ReturnType<typeof inspectMachoSchema.parse>,
-  segmentOffset: number | undefined,
+  containerOffset: number | undefined,
 ): EvidenceLocation[] => {
   const locations = architectureLocations(macho.architectures.items);
-  if (segmentOffset === undefined) return locations;
+  if (containerOffset === undefined) return locations;
+  for (const entrypoint of macho.entrypoints.items)
+    locations.push({
+      kind: "file-offset",
+      offset: containerOffset + entrypoint.file_offset,
+    });
   for (const segment of macho.segments.items) {
-    if (segment.file_offset === null || segment.file_size === null) continue;
+    if (
+      segment.file_offset === null ||
+      segment.file_size === null ||
+      segment.file_size === 0
+    )
+      continue;
     locations.push({
       kind: "file-offset-range",
-      start: segmentOffset + segment.file_offset,
-      end: segmentOffset + segment.file_offset + segment.file_size,
+      start: containerOffset + segment.file_offset,
+      end: containerOffset + segment.file_offset + segment.file_size,
     });
   }
   return locations;
-};
-
-/** otool segment offsets are slice-relative; evidence addresses the input file. */
-const segmentContainerOffset = (
-  macho: ReturnType<typeof inspectMachoSchema.parse>,
-  selectedArchitecture: string | null,
-  thinInput: boolean,
-): number | undefined => {
-  const architectures = macho.architectures.items;
-  const slice =
-    selectedArchitecture === null
-      ? architectures.length === 1
-        ? architectures[0]
-        : undefined
-      : architectures.find(({ name }) => name === selectedArchitecture);
-  if (slice?.file_offset !== null && slice?.file_offset !== undefined)
-    return slice.file_offset;
-  // A thin lipo observation has no separate slice offset. Unknown FAT slice
-  // offsets must not silently become zero and identify unrelated container bytes.
-  return thinInput &&
-    selectedArchitecture === null &&
-    architectures.length === 1
-    ? 0
-    : undefined;
 };
 
 /** Project architecture slices into evidence file-offset locations. */

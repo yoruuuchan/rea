@@ -4,12 +4,10 @@ import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 
 import { expect } from "vitest";
-import { z } from "zod";
 
-import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
-import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
+import { analyzeJavaScriptDirectory } from "../../support/cli/javascriptApplication.js";
 
 const literalAliases = ["#/x", "#x%2Fy", "#x%2Ey", "#x\\y", "#x\0y"];
 const fallbackAliases = {
@@ -158,26 +156,7 @@ cliTest.for(["CLI", "stdio MCP"] as const)(
       expect.objectContaining({ code: "ERR_PACKAGE_IMPORT_NOT_DEFINED" }),
     );
 
-    let document: unknown;
-    if (surface === "CLI") {
-      const response = await cli.run({
-        arguments: ["analyze-javascript-application", root, "--format", "json"],
-        environment: { REA_LOG_LEVEL: "silent" },
-      });
-      expect(response.exitCode, response.stderr).toBe(0);
-      document = response.json;
-    } else {
-      const { call } = await connectLocalToolsMcp();
-      const response = await call("analyze_javascript_application", {
-        input_path: root,
-        format: "directory",
-      });
-      expect(response.isError, JSON.stringify(response)).not.toBe(true);
-      document = response.structuredContent;
-    }
-    const { graph } = z
-      .object({ normalized_result: javascriptApplicationAnalysisResultSchema })
-      .parse(document).normalized_result;
+    const { graph } = await analyzeJavaScriptDirectory(surface, cli, root);
     for (const specifier of resolvedAliases)
       for (const [moduleKind, sourcePath, source] of [
         ["require", "main.cjs", mainSource],

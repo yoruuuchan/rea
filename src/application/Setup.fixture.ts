@@ -8,6 +8,8 @@ import type {
 } from "./SetupTypes.js";
 import type { SetupClient } from "./SupportedClients.js";
 import type { SetupHopperInstallResult } from "./SetupInstallFailure.js";
+import { err, ok } from "../domain/result.js";
+import { SetupSkillInstallError } from "./SetupSkill.js";
 import type { DoctorCheck, DoctorReport, DoctorScope } from "./Doctor.js";
 import type { LinuxDistribution } from "./LinuxHopper.js";
 import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
@@ -122,9 +124,22 @@ export class FakeSetupHost implements SetupHost {
     );
   skillNeedsInstall = (): Promise<boolean> =>
     Promise.resolve(this.skill !== "unchanged");
-  installSkill = (): Promise<"installed" | "unchanged" | "failed"> => {
+  installSkill = () => {
     this.skillInstalls += 1;
-    return Promise.resolve(this.skill);
+    return Promise.resolve(
+      this.skill === "failed"
+        ? err(
+            new SetupSkillInstallError({
+              path: "/fixture/home/.agents/skills/reverse-engineer-anything/SKILL.md",
+              stage: "write",
+              reason: "injected skill write failure",
+              rollbackFailures: [],
+              recoveryBackupPaths: [],
+              cause: new Error("injected skill write failure"),
+            }),
+          )
+        : ok(this.skill),
+    );
   };
   doctor = (scope?: DoctorScope): Promise<DoctorReport> => {
     this.doctorCalls += 1;

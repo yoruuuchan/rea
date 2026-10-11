@@ -4,6 +4,15 @@
 local WASM bytes using caller-supplied WABT 1.0.42. No active binary target is
 required. REA does not install tools or fetch artifacts and does not execute WASM.
 
+`open_binary` is not the WASM inspection route. A recognized WASM v1 header
+returns `target_unavailable` with category `unsupported_target` and constraint
+`wasm_requires_static_inspection`, including the selected path in a valid
+`inspect_wasm_artifact` call. Use that target-free tool or
+`rea inspect-wasm-artifact <path> --format json` with the toolchain below.
+Check `binary_session` for configured capability availability. A recognized
+header is not validation of the complete module; missing WABT is reported
+separately as an unavailable capability, not as missing native engine support.
+
 Set `REA_WABT_BIN_DIRECTORY` to an absolute directory containing executable
 `wasm-validate`, `wasm-objdump` and `wasm2wat` (with `.exe` on Windows). Missing
 executables, unsupported banners and inaccessible tools produce actionable
@@ -37,7 +46,8 @@ into a private workspace as read-only `module.wasm`; its digest is rechecked
 before and after each tool. WABT validates with `--enable-all`,
 reports sections through `wasm-objdump -h -x`, and decodes through
 `wasm2wat --enable-all`. The result retains selected byte SHA-256 and size,
-section payload ranges, full header/detail output, exact import/export WAT
+section payload ranges, full header/detail output (including module-name
+preambles), exact import/export WAT
 forms, decoded WAT and its UTF-8 SHA-256. Producer format drift and invalid or
 truncated modules are failures, with validation diagnostics and partial Evidence
 retaining selected byte identity and tool provenance.

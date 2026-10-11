@@ -125,6 +125,7 @@ export class NativeDmgArtifactReader implements ArtifactReader {
   #ownershipUncertainty: string | undefined;
   #closed = false;
   #closePromise: Promise<void> | undefined;
+  readonly #activeDirectoryOperations = new Set<Promise<unknown>>();
 
   constructor(
     private readonly path: string,
@@ -141,18 +142,30 @@ export class NativeDmgArtifactReader implements ArtifactReader {
 
   async *entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry> {
     await this.#ensureAttached(signal);
-    if (this.#directory === undefined)
+    const directory = this.#directory;
+    if (directory === undefined)
       throw new ArtifactReaderFailure("unavailable", "DMG is not attached");
     const prefix = basename(this.path);
-    for await (const entry of this.#directory.entries(signal))
-      yield { ...entry, path: `${prefix}/${entry.path}` };
+    const entries = directory.entries(signal)[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        if (this.#closed) return;
+        const next = await this.#trackDirectoryOperation(() => entries.next());
+        if (this.#closed) return;
+        if (next.done) return;
+        yield { ...next.value, path: `${prefix}/${next.value.path}` };
+      }
+    } finally {
+      await entries.return?.();
+    }
   }
 
   async open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
     await this.#ensureAttached(signal);
-    if (this.#directory === undefined)
+    const directory = this.#directory;
+    if (directory === undefined)
       throw new ArtifactReaderFailure("unavailable", "DMG is not attached");
-    return this.#directory.open(entry, signal);
+    return this.#trackDirectoryOperation(() => directory.open(entry, signal));
   }
 
   provenance(): readonly ArtifactCommand[] {
@@ -172,32 +185,9 @@ export class NativeDmgArtifactReader implements ArtifactReader {
 
   async #closeOwnedResources(): Promise<void> {
     await this.#initialization?.catch(() => undefined);
-    let detachFailure = await this.#reconcileAttachState();
-    let remainingDevices: string[] = [];
-    for (const device of [...this.#devices].reverse()) {
-      const failure = await this.#detach(device);
-      if (failure !== undefined) {
-        remainingDevices.push(device);
-        detachFailure ??= failure;
-      }
-    }
-    // APFS container detach may briefly leave its backing image listed.
-    for (const delayMs of DETACH_SETTLE_DELAYS_MS) {
-      if (remainingDevices.length === 0) break;
-      await (this.host.delay ?? delay)(delayMs);
-      const stillAttached: string[] = [];
-      for (const device of remainingDevices) {
-        if (!(await this.#isAttached(device))) continue;
-        const failure = await this.#detach(device);
-        if (failure !== undefined) {
-          stillAttached.push(device);
-          detachFailure = failure;
-        }
-      }
-      remainingDevices = stillAttached;
-    }
-    if (remainingDevices.length === 0) detachFailure = undefined;
-    this.#devices = remainingDevices.reverse();
+    await Promise.allSettled(this.#activeDirectoryOperations);
+    await this.#closeMountedDirectory();
+    let detachFailure = await this.#detachOwnedDevices();
     if (
       this.#devices.length === 0 &&
       this.#mountRoot !== undefined &&
@@ -240,6 +230,55 @@ export class NativeDmgArtifactReader implements ArtifactReader {
           },
         },
       );
+  }
+
+  async #detachOwnedDevices(): Promise<unknown> {
+    let detachFailure = await this.#reconcileAttachState();
+    let remainingDevices: string[] = [];
+    for (const device of [...this.#devices].reverse()) {
+      const failure = await this.#detach(device);
+      if (failure !== undefined) {
+        remainingDevices.push(device);
+        detachFailure ??= failure;
+      }
+    }
+    // APFS container detach may briefly leave its backing image listed.
+    for (const delayMs of DETACH_SETTLE_DELAYS_MS) {
+      if (remainingDevices.length === 0) break;
+      await (this.host.delay ?? delay)(delayMs);
+      const stillAttached: string[] = [];
+      for (const device of remainingDevices) {
+        if (!(await this.#isAttached(device))) continue;
+        const failure = await this.#detach(device);
+        if (failure !== undefined) {
+          stillAttached.push(device);
+          detachFailure = failure;
+        }
+      }
+      remainingDevices = stillAttached;
+    }
+    if (remainingDevices.length === 0) detachFailure = undefined;
+    this.#devices = remainingDevices.reverse();
+    return detachFailure;
+  }
+
+  async #closeMountedDirectory(): Promise<void> {
+    if (this.#directory !== undefined) {
+      try {
+        await this.#directory.close();
+        this.#directory = undefined;
+      } catch (cause: unknown) {
+        const mountRoot = this.#mountRoot ?? this.path;
+        throw ArtifactReaderFailure.withCleanup(cause, {
+          reason: `DMG mounted directory remains owned: ${failureMessage(cause)}`,
+          resources: [
+            `DMG mounted directory at ${mountRoot}`,
+            `DMG mount root ${mountRoot}`,
+            ...this.#devices.map((device) => `DMG device ${device}`),
+          ],
+        });
+      }
+    }
   }
 
   /** Detach one device; return the failure only while it remains attached. */
@@ -292,6 +331,20 @@ export class NativeDmgArtifactReader implements ArtifactReader {
     await this.#initialization;
     if (this.#closed)
       throw new ArtifactReaderFailure("unavailable", "DMG reader is closed");
+  }
+
+  async #trackDirectoryOperation<Result>(
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    if (this.#closed)
+      throw new ArtifactReaderFailure("unavailable", "DMG reader is closed");
+    const running = Promise.resolve().then(operation);
+    this.#activeDirectoryOperations.add(running);
+    try {
+      return await running;
+    } finally {
+      this.#activeDirectoryOperations.delete(running);
+    }
   }
 
   async #attach(signal?: AbortSignal): Promise<void> {
