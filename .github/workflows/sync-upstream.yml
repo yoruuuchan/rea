@@ -12,13 +12,40 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Sync fork with upstream
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync upstream without replacing fork workflows
         env:
-          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: morluto/rea
         run: |
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            /repos/${{ github.repository }}/merge-upstream \
-            -f branch=main
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          git merge --no-commit --no-ff upstream/main || true
+
+          # Keep this fork's workflow files unchanged. The built-in GITHUB_TOKEN
+          # cannot update .github/workflows files from an Actions run.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          git add -A
+
+          if git ls-files -u | grep -q .; then
+            echo "Unresolved merge conflicts remain outside .github/workflows."
+            git status --short
+            exit 1
+          fi
+
+          git commit --allow-empty -m "chore: sync upstream"
+          git push origin HEAD:main
