@@ -53,8 +53,7 @@ it("reports an unsafe path as a hostile artifact path", async () => {
   if (result.ok) throw new Error("expected the path constraint to fail");
   expect(projectAnalysisError(result.error)).toMatchObject({
     code: "artifact_operation_failed",
-    message:
-      "Artifact contains an unsafe internal path. Inspect the reported path and correct the artifact before retrying.",
+    message: 'Artifact path is absolute or unsafe: "a\\\\b.js"',
     details: {
       operation: "inventory_artifact",
       reason: "path",
@@ -75,4 +74,11 @@ it("returns a destination case collision as the user-facing path message", () =>
     message: detail,
     details: { reason: "path", detail },
   });
+
+  expect(
+    projectAnalysisError(new ArtifactOperationError("extract_artifact", "path"))
+      .message,
+  ).toBe(
+    "Artifact contains a conflicting internal path. Inspect the reported path before retrying.",
+  );
 });

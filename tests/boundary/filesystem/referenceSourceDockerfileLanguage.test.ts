@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { importReferenceSource } from "../../../src/application/ReferenceSourceImport.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 it("imports Dockerfile-prefixed TypeScript with ordinary source evidence and uncertainty", async () => {
   const root = await createTestTempDirectory("rea-dockerfile-language-");

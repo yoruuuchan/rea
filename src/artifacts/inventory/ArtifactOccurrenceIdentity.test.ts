@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { TextReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 import { describe, expect, it } from "vitest";
 
-import { inventoryArtifact } from "./ArtifactInventory.js";
+import { inventoryArtifact } from "../../../tests/fixtures/artifactInventory.js";
 import { compareArtifacts } from "../../domain/artifactComparison.js";
 import { projectAppleApplication } from "../../domain/apple/appleApplication.js";
 import { createEvidence } from "../../domain/evidence.js";

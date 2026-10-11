@@ -1,8 +1,5 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
-
-import { parseEvidenceBundle } from "./evidenceBundle.js";
+import { digestCanonicalValue } from "./canonicalDigest.js";
+import { authenticateParsedEvidenceBundle } from "./evidenceBundle.js";
 import { readinessFindingOrder } from "./reconstructionReadinessFindingHelpers.js";
 import {
   READINESS_STAGE_IDS,
@@ -24,7 +21,7 @@ export const createReconstructionReadinessReport = (
   const input = reconstructionReadinessInputSchema.parse(inputValue);
   const sourceDigest = digest(sourceValue(input));
   const evidenceIds = new Set(
-    parseEvidenceBundle(input.evidence_bundle).records.map(
+    authenticateParsedEvidenceBundle(input.evidence_bundle).records.map(
       ({ evidence_id: evidenceId }) => evidenceId,
     ),
   );
@@ -185,8 +182,5 @@ const ratio = (numerator: number, denominator: number): number =>
   denominator === 0 ? 1 : numerator / denominator;
 
 const digest = (value: unknown): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError("Reconstruction readiness value is not canonical JSON");
-  return createHash("sha256").update(encoded).digest("hex");
+  return digestCanonicalValue(value, "Reconstruction readiness");
 };

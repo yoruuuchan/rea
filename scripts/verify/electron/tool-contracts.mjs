@@ -26,22 +26,49 @@ export async function verifyElectronToolContracts({
     await mkdtemp(join(tmpdir(), "rea-electron-e2e-")),
   );
   const main = join(root, "main.cjs");
+  const preload = join(root, "preload.cjs");
   const ready = join(root, "ready");
   const entrypoint = join(repositoryRoot, "scripts", "rea.mjs");
   const runId = randomUUID();
   await writeFile(
     main,
-    `const {app,BrowserWindow}=require("electron");
-app.whenReady().then(()=>{const window=new BrowserWindow();
-window.loadFile("renderer.html");require("node:fs").writeFileSync(${JSON.stringify(ready)},"ready");});`,
+    `const electron = require("electron");
+const path = require("node:path");
+const { app, BrowserWindow, ipcMain } = electron;
+const Window = BrowserWindow;
+const mainIpc = ipcMain;
+app.whenReady().then(() => {
+  const window = new Window({
+    webPreferences: { preload: path.join(__dirname, "preload.cjs") },
+  });
+  window.loadFile("renderer.html");
+  require("node:fs").writeFileSync(${JSON.stringify(ready)}, "ready");
+});
+mainIpc.handle("fixture:echo", (_event, value) => ({ value }));`,
   );
   await writeFile(
     join(root, "renderer.html"),
-    '<!doctype html><button id="run">Run</button><script src="renderer.js"></script>',
+    `<!doctype html>
+<button id="run">Run</button>
+<output id="result"></output>
+<script src="renderer.js"></script>`,
+  );
+  await writeFile(
+    preload,
+    `const electron = require("electron");
+const { contextBridge, ipcRenderer } = electron;
+const bridge = contextBridge;
+const rendererIpc = ipcRenderer;
+bridge.exposeInMainWorld("fixture", {
+  echo: (value) => rendererIpc.invoke("fixture:echo", value),
+});`,
   );
   await writeFile(
     join(root, "renderer.js"),
-    'document.querySelector("#run").addEventListener("click",()=>console.log("fixture-click"));',
+    `document.querySelector("#run").addEventListener("click", async () => {
+  const result = await window.fixture.echo("renderer");
+  document.querySelector("#result").textContent = result.value;
+});`,
   );
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -88,7 +115,10 @@ window.loadFile("renderer.html");require("node:fs").writeFileSync(${JSON.stringi
         ajv.compile(tool.inputSchema);
         return [
           tool.name,
-          tool.outputSchema ? ajv.compile(tool.outputSchema) : undefined,
+          tool.outputSchema
+            ? (tool.outputSchema.$id && ajv.getSchema(tool.outputSchema.$id)) ||
+              ajv.compile(tool.outputSchema)
+            : undefined,
         ];
       }),
     );
@@ -132,6 +162,25 @@ window.loadFile("renderer.html");require("node:fs").writeFileSync(${JSON.stringi
     const staticAnalysis = await call("analyze_javascript_application", {
       input_path: root,
     });
+    assert.equal(staticAnalysis.normalized_result.summary.browser_windows, 1);
+    assert.equal(
+      staticAnalysis.normalized_result.summary.preload_entrypoints,
+      1,
+    );
+    assert.equal(
+      staticAnalysis.normalized_result.summary.context_bridge_apis,
+      1,
+    );
+    assert.equal(staticAnalysis.normalized_result.summary.ipc.main_handlers, 1);
+    assert.equal(
+      staticAnalysis.normalized_result.summary.ipc.renderer_transmissions,
+      1,
+    );
+    assert.equal(
+      staticAnalysis.normalized_result.summary.ipc
+        .paired_renderer_transmissions,
+      1,
+    );
     const reconciled = await call("reconcile_javascript_runtime", {
       static_layers: [
         {
@@ -166,7 +215,7 @@ window.loadFile("renderer.html");require("node:fs").writeFileSync(${JSON.stringi
       executable_path: executable,
       application_path: main,
       application_root: root,
-      actions: [{ step_id: "settle", kind: "wait", duration_ms: 50 }],
+      actions: [{ step_id: "ipc", kind: "click", selector: "#run" }],
     };
     const active = await client.callTool(
       { name: "capture_electron_scenario", arguments: input },
@@ -189,6 +238,13 @@ window.loadFile("renderer.html");require("node:fs").writeFileSync(${JSON.stringi
       assert.equal(capture.application.cleanup, "terminated-owned-process");
     }
     assert.equal(capture.actions[0].status, "completed");
+    assert.ok(
+      capture.ipc.events.some(
+        ({ kind, channel }) =>
+          kind === "main-handler-invocation" && channel === "fixture:echo",
+      ),
+      JSON.stringify(capture.ipc),
+    );
     assert.equal(
       capture.coverage.status,
       "partial_attach",

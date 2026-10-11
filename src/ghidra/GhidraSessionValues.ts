@@ -1,8 +1,12 @@
+import { ghidraSeedReportSchema } from "./GhidraAnalysisSeeds.js";
 import { z } from "zod";
 
 import type { JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { GHIDRA_INVENTORY_OPERATIONS } from "./GhidraInventoryValues.js";
+import {
+  GHIDRA_INVENTORY_OPERATIONS,
+  GHIDRA_NAMING_OPERATIONS,
+} from "./GhidraInventoryValues.js";
 import { GHIDRA_FUNCTION_OPERATIONS } from "./GhidraFunctionValues.js";
 import { ghidraExtensionResultSchema } from "./extensions/GhidraExtensions.js";
 
@@ -13,6 +17,12 @@ export const GHIDRA_SESSION_CAPABILITIES = [
   ...GHIDRA_INVENTORY_OPERATIONS,
   ...GHIDRA_FUNCTION_OPERATIONS,
 ] as const;
+
+/** Methods that edit the session database; read-only bridges omit them. */
+export const GHIDRA_MUTATING_OPERATIONS: ReadonlySet<string> = new Set([
+  "annotate_native_function",
+  ...GHIDRA_NAMING_OPERATIONS,
+]);
 
 const capabilitySchema = z.enum(GHIDRA_SESSION_CAPABILITIES);
 
@@ -31,6 +41,7 @@ const sessionInfoSchema = z
     analysis_complete: z.boolean(),
     analysis_timed_out: z.boolean(),
     analysis_extensions: z.array(ghidraExtensionResultSchema).optional(),
+    analysis_seeds: ghidraSeedReportSchema.optional(),
     capabilities: z.array(capabilitySchema),
     target: z
       .object({
@@ -64,7 +75,7 @@ export const parseGhidraSessionInfo = (
   const parsed = sessionInfoSchema.safeParse(value);
   const readOnly = expected.expectedReadOnly ?? false;
   const expectedCapabilities = GHIDRA_SESSION_CAPABILITIES.filter(
-    (capability) => !readOnly || capability !== "annotate_native_function",
+    (capability) => !readOnly || !GHIDRA_MUTATING_OPERATIONS.has(capability),
   );
   if (
     !parsed.success ||

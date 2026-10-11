@@ -774,6 +774,46 @@ cliTest(
   },
 );
 
+describe("binary Interface Builder archive omissions", () => {
+  it("reports omitted __proto__ entries as partial decoding", async () => {
+    const placeholder = "proto_key";
+    const encoded = Buffer.from(
+      buildBinary({
+        $archiver: "NSKeyedArchiver",
+        $version: 100000,
+        $objects: ["$null"],
+        $top: {},
+        [placeholder]: "hidden",
+      }),
+    );
+    const start = encoded.indexOf(placeholder);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(encoded.indexOf(placeholder, start + placeholder.length)).toBe(-1);
+    Buffer.from("__proto__").copy(encoded, start);
+
+    const root = await createTestTempDirectory("rea-ib-test-");
+    const bundle = join(root, "Example.app");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    await writeFile(join(resources, "Prototype.nib"), encoded);
+    const result = await analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "f".repeat(64),
+    });
+
+    expect(result.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "archive_decode",
+        status: "partial",
+        reason: "dictionary_entries_omitted",
+      }),
+    );
+    expect(result.limitations).toContain(
+      "Contents/Resources/Prototype.nib: Dictionary entries keyed __proto__ were omitted because REA results cannot represent that key.",
+    );
+  });
+});
+
 describe("aggregate Interface Builder archive retention budget", () => {
   it("keeps earlier documents when the aggregate decode reservation is exhausted", async () => {
     const root = await createTestTempDirectory("rea-ib-budget-test-");

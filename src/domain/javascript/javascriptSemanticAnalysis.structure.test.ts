@@ -43,9 +43,9 @@ describe("JavaScript semantic analysis: structure 1", () => {
       specifier: "electron",
       importedPath: ["ipcMain"],
     });
-    expect(origin(topLevelBinding(ir, "assigned"))).toEqual({
-      specifier: "electron",
-      importedPath: ["ipcRenderer"],
+    expect(topLevelBinding(ir, "assigned").provenance).toMatchObject({
+      status: "ambiguous",
+      origins: [{ specifier: "electron", importedPath: ["ipcRenderer"] }],
     });
     expect(ir.moduleLinks).toEqual(
       expect.arrayContaining([
@@ -120,11 +120,15 @@ describe("JavaScript semantic analysis: structure 1", () => {
       assigned = require("electron").ipcMain;
       { const require = localLoader; require("./local.js"); }
     `);
-    for (const name of ["bus", "forwarded", "assigned"])
+    for (const name of ["bus", "forwarded"])
       expect(origin(topLevelBinding(ir, name))).toEqual({
         specifier: "electron",
         importedPath: ["ipcMain"],
       });
+    expect(topLevelBinding(ir, "assigned").provenance).toMatchObject({
+      status: "ambiguous",
+      origins: [{ specifier: "electron", importedPath: ["ipcMain"] }],
+    });
     expect(
       ir.moduleLinks.filter(({ kind }) => kind === "require"),
     ).toHaveLength(1);
@@ -337,6 +341,38 @@ describe("JavaScript semantic analysis: structure 2", () => {
       2,
     );
   });
+
+  it("resolves the value of a simple assignment expression exported through CommonJS", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      function parse() { return { kind: "result" }; }
+      const holder = {};
+      module.exports = holder.value = parse;
+    `);
+    expect(ir.moduleLinks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "commonjs-export",
+          localName: "parse",
+          exportedName: "default",
+        }),
+      ]),
+    );
+  });
+
+  it.each(["parse", "default"])(
+    "does not export a %s property write to a replaced module.exports receiver",
+    (name) => {
+      const ir = analyzeJavaScriptSemantics(`
+        module.exports.${name} = (module.exports = () => ({ kind: "result" }));
+      `);
+      expect(ir.moduleLinks).toEqual([
+        expect.objectContaining({
+          kind: "commonjs-export",
+          exportedName: "default",
+        }),
+      ]);
+    },
+  );
 
   it("classifies destructuring and loop targets as writes, not reads", () => {
     const ir = analyzeJavaScriptSemantics(`

@@ -3,6 +3,9 @@ export type FixtureCorrectness = "passed" | "failed" | "not_assessed";
 
 /** Measurements consumed by the evaluation runner's release gate. */
 export interface AgentEvaluationGateResult {
+  /** Explicit null requires a target clarification with no REA calls. */
+  readonly expectedFirstTool?: string | null;
+  readonly targetClarificationPassed?: boolean;
   readonly exitCode: number;
   readonly naturalUse: boolean;
   readonly correctFirstTool: boolean;
@@ -20,16 +23,20 @@ export const agentEvaluationPassed = (
   result: AgentEvaluationGateResult,
 ): boolean =>
   result.exitCode === 0 &&
-  result.naturalUse &&
+  (result.expectedFirstTool === null
+    ? !result.naturalUse
+    : result.naturalUse) &&
   result.correctFirstTool &&
   result.repeatedCallCount === 0 &&
   result.inputValidationFailureCount === 0 &&
   result.requiredToolSubsequenceMet &&
   result.inputTokens > 0 &&
-  (result.factualCorrectness === "passed" ||
-    (result.factualCorrectness === "not_assessed" &&
-      result.answerHeuristicsMet &&
-      result.epistemicCuePresent));
+  (result.expectedFirstTool === null
+    ? result.targetClarificationPassed === true
+    : result.factualCorrectness === "passed" ||
+      (result.factualCorrectness === "not_assessed" &&
+        result.answerHeuristicsMet &&
+        result.epistemicCuePresent));
 
 /** Keep assessed fixture outcomes and scenarios without truth oracles distinct. */
 export const summarizeFactualCorrectness = (

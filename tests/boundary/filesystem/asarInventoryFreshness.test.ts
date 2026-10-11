@@ -4,12 +4,13 @@ import { Readable } from "node:stream";
 import { buffer } from "node:stream/consumers";
 
 import { createPackage, listPackage, uncache } from "@electron/asar";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
-import { scanCanonicalArtifactInventory } from "../../../src/artifacts/inventory/scanCanonical.js";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { DirectoryArtifactReader } from "../../../src/artifacts/DirectoryArtifactReader.js";
-import { inventoryArtifact } from "../../../src/artifacts/inventory/ArtifactInventory.js";
+import { inventoryArtifact } from "../../fixtures/artifactInventory.js";
 import { AsarArtifactReader } from "../../../src/artifacts/AsarArtifactReader.js";
+import { scanCanonicalArtifactInventory as scanCanonicalArtifactInventoryOwned } from "../../../src/artifacts/inventory/scanCanonical.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const CONTENT = "module.exports = 42;\n";
@@ -170,32 +171,92 @@ describe("ASAR inventory freshness", () => {
   );
 });
 
+describe("ASAR snapshot operation ownership", () => {
+  it("waits for preparation before close and cancels a queued caller", async () => {
+    const fixture = await archiveFixture();
+    let allowRemoval: (() => void) | undefined;
+    let removalStarted: (() => void) | undefined;
+    const removalGate = new Promise<void>((resolve) => {
+      allowRemoval = resolve;
+    });
+    const removalStartedPromise = new Promise<void>((resolve) => {
+      removalStarted = resolve;
+    });
+    const reader = new AsarArtifactReader(
+      fixture.archive,
+      undefined,
+      async (path) => {
+        removalStarted?.();
+        await removalGate;
+        await rm(path, { recursive: true, force: true });
+      },
+    );
+    let prepared = false;
+    const preparing = reader.prepareContainer().then(() => {
+      prepared = true;
+    });
+    const closing = reader.close();
+    const controller = new AbortController();
+    try {
+      const closeReachedRemoval = Promise.race([
+        removalStartedPromise,
+        closing.then(() => {
+          throw new Error("close completed before snapshot removal began");
+        }),
+      ]);
+      await Promise.all([preparing, closeReachedRemoval]);
+      expect(prepared).toBe(true);
+      const queued = reader.prepareContainer(undefined, controller.signal);
+      controller.abort();
+      await expect(queued).rejects.toMatchObject({ reason: "cancelled" });
+      allowRemoval?.();
+      await Promise.all([preparing, closing]);
+      await expect(reader.prepareContainer()).resolves.toBeUndefined();
+    } finally {
+      allowRemoval?.();
+      await reader.close();
+    }
+  });
+});
+
 describe("ASAR captured-byte identity", () => {
   it("rejects same-size nested-container replacement between hashing and interpretation", async () => {
     const fixture = await archiveFixture();
     const originalSize = (await lstat(fixture.archive)).size;
     const directory = new DirectoryArtifactReader(fixture.bundle);
-    await expect(
-      scanCanonicalArtifactInventory(fixture.bundle, {}, async () => ({
-        format: directory.format,
-        entries: (signal) => directory.entries(signal),
-        provenance: () => directory.provenance(),
-        close: () => directory.close(),
-        async open(entry, signal) {
-          const source = await directory.open(entry, signal);
-          return Readable.from(
-            (async function* () {
-              yield* source;
-              await fixture.replace();
-              expect((await lstat(fixture.archive)).size).toBe(originalSize);
-            })(),
-          );
-        },
-      })),
-    ).rejects.toMatchObject({
-      reason: "integrity",
-      message: expect.stringContaining("changed before interpretation"),
-    });
+    const resourceScope = new ArtifactResourceScope();
+    onTestFinished(() => resourceScope.close());
+    try {
+      await expect(
+        scanCanonicalArtifactInventoryOwned(
+          fixture.bundle,
+          { resourceScope },
+          () => ({
+            format: directory.format,
+            entries: (signal) => directory.entries(signal),
+            provenance: () => directory.provenance(),
+            close: () => directory.close(),
+            async open(entry, signal) {
+              const source = await directory.open(entry, signal);
+              return Readable.from(
+                (async function* () {
+                  yield* source;
+                  await fixture.replace();
+                  expect((await lstat(fixture.archive)).size).toBe(
+                    originalSize,
+                  );
+                })(),
+              );
+            },
+          }),
+        ),
+      ).rejects.toMatchObject({
+        reason: "integrity",
+        message: expect.stringContaining("changed before interpretation"),
+      });
+    } finally {
+      await resourceScope.close();
+    }
   });
 
   it("isolates interleaved readers from replacement headers and packed bytes", async () => {
@@ -250,11 +311,13 @@ describe("ASAR captured-byte identity", () => {
         await rm(path, { recursive: true, force: true });
       },
     );
+    const resourceScope = new ArtifactResourceScope();
+    onTestFinished(() => resourceScope.close());
     try {
-      const failure: unknown = await scanCanonicalArtifactInventory(
+      const failure: unknown = await scanCanonicalArtifactInventoryOwned(
         fixture.archive,
-        {},
-        async () => reader,
+        { resourceScope },
+        () => reader,
       ).catch((cause: unknown) => cause);
       expect(failure).toMatchObject({
         cleanup: { resources: [attempts[0]] },
@@ -273,11 +336,11 @@ describe("ASAR captured-byte identity", () => {
       const root = attempts[0];
       if (root === undefined) throw new Error("Expected owned snapshot");
       expect((await lstat(root)).isDirectory()).toBe(true);
-      await reader.close();
+      await resourceScope.close();
       expect(attempts).toEqual([root, root]);
       await expect(lstat(root)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
-      await reader.close();
+      await resourceScope.close();
     }
   });
 });

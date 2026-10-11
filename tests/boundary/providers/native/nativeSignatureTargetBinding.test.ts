@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -102,8 +103,13 @@ describe("native signature target identity", () => {
       const runner = new Captures(async (args) => {
         if (!args.includes("--entitlements")) return;
         if (change === "remove") await rm(path);
-        else if (change === "rewrite") await writeFile(path, CONTENT);
-        else {
+        else if (change === "rewrite") {
+          const before = await lstat(path);
+          await writeFile(path, CONTENT);
+          // Identical writes may share a filesystem clock tick. Make the
+          // metadata change observed by the target guard explicit.
+          await utimes(path, before.atimeMs / 1000, before.mtimeMs / 1000 + 1);
+        } else {
           const replacement = `${path}.replacement`;
           await writeFile(replacement, CONTENT);
           await rename(replacement, path);

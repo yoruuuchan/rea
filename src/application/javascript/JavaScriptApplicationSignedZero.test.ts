@@ -7,7 +7,7 @@ import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirect
 import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascript/javascriptApplicationAnalysis.js";
 import { javaScriptSemanticQueryResultSchema } from "../../domain/javascript/javascriptSemanticQuerySchemas.js";
 import { queryJavaScriptSemanticGraph } from "../../domain/javascript/javascriptSemanticQuery.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 
 it.each([
   {

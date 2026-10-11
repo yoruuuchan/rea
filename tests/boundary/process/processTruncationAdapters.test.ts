@@ -63,30 +63,29 @@ const capture = async (
 };
 
 itWithCaptureCapability.each(["cli", "mcp"] as const)(
-  "localizes sparse rendered-state exhaustion through %s",
+  "localizes rendered-state expansion exhaustion through %s",
   async (adapter) => {
     const root = await createTestTempDirectory("rea-rendered-budget-");
+    // CSI REP expands a small raw burst into a full screen, so rendered
+    // exhaustion does not depend on how the PTY batches output chunks.
+    const output = "x\u001b[79b".repeat(24);
     const result = await capture(adapter, {
       executable: process.execPath,
       working_directory: root,
-      arguments: [
-        "-e",
-        "let n=0;const timer=setInterval(()=>{console.log('board '+String(n).padStart(2,'0')+' completed; score '+String(n*10));if(++n===65)clearInterval(timer)},20)",
-      ],
+      arguments: ["-e", `process.stdout.write(${JSON.stringify(output)})`],
+      terminal: { columns: 80, rows: 24, scrollback: 0 },
       normalization: {
         ports: false,
         pids: false,
         paths: false,
         time_bucket_ms: 1,
       },
-      limits: { output_bytes: 30_000 },
+      limits: { output_bytes: 1_000 },
     });
     const details = result.truncation_details;
     if (details === undefined) throw new Error("Expected producer coverage");
-    expect(result.frames.map(({ data }) => data).join("")).toContain(
-      "board 64 completed; score 640",
-    );
-    expect(details.raw_terminal.observed_bytes).toBe(2004);
+    expect(result.frames.map(({ data }) => data).join("")).toBe(output);
+    expect(details.raw_terminal.observed_bytes).toBe(Buffer.byteLength(output));
     expect(details.raw_terminal.retained_bytes).toBe(
       details.raw_terminal.observed_bytes,
     );
@@ -94,9 +93,7 @@ itWithCaptureCapability.each(["cli", "mcp"] as const)(
     expect(details.rendered_terminal.observed_frames).toBeGreaterThan(
       result.rendered_frames.length,
     );
-    expect(details.rendered_terminal.retained_bytes).toBeLessThanOrEqual(
-      30_000,
-    );
+    expect(details.rendered_terminal.retained_bytes).toBeLessThanOrEqual(1_000);
     expect(details.process.coverage).toBe("sampled");
     expect(processSourceTruncated(result, "terminal_raw")).toBe(false);
     expect(processSourceTruncated(result, "terminal_rendered")).toBe(true);
@@ -194,9 +191,14 @@ itWithCaptureCapability.each(["cli", "mcp"] as const)(
     expect(details.filesystem_after.enumeration_reasons).toContain(
       "files_limit",
     );
-    expect(
-      result.files_after.find(({ path }) => path === "root_0:b.txt")?.sha256,
-    ).toBeNull();
+    // The truncated subset follows filesystem enumeration order. The large
+    // file may be retained without a digest, or not enumerated at all.
+    const largeFile = result.files_after.find(
+      ({ path }) => path === "root_0:b.txt",
+    );
+    if (largeFile !== undefined) expect(largeFile.sha256).toBeNull();
+    expect(details.filesystem_after.enumeration_truncated).toBe(true);
+    expect(result.files_after.length).toBeLessThanOrEqual(3);
     expect(processSourceTruncated(result, "terminal_rendered")).toBe(true);
     expect(compareProcessCaptures(result, result)).toMatchObject({
       terminal: "unknown",

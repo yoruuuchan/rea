@@ -21,6 +21,10 @@ import {
 } from "./verify-real-ghidra-assertions.mjs";
 
 async function functionCall(client, operation, parameters) {
+  return (await functionObservationCall(client, operation, parameters)).value;
+}
+
+async function functionObservationCall(client, operation, parameters) {
   const input = parseGhidraFunctionInput(operation, parameters);
   if (!input.ok) throw input.error;
   const called = await client.callTool(operation, input.value);
@@ -153,6 +157,57 @@ export async function verifyDebugFunctionOperations(
   const denseSwitchDossier = await functionCall(client, "analyze_function", {
     procedure: denseSwitchProcedure.address,
   });
+  const terminalProcedure = requireProcedure(
+    procedures,
+    "rea_ghidra_inventory_terminal_call",
+  );
+  const terminalObservations = await Promise.all(
+    [
+      "procedure_info",
+      "procedure_assembly",
+      "read_function_instructions",
+      "procedure_pseudo_code",
+      "analyze_function",
+    ].map((operation) =>
+      functionObservationCall(client, operation, {
+        ...(operation === "analyze_function" ? {} : { document: null }),
+        procedure: terminalProcedure.address,
+      }),
+    ),
+  );
+  const terminalLimitations = terminalObservations.map((result) =>
+    result.limitations.find(
+      (limitation) =>
+        /terminal call at 0x[0-9a-f]+/i.test(limitation) &&
+        / to 0x[0-9a-f]+/i.test(limitation) &&
+        limitation.includes("abort") &&
+        limitation.includes("hasNoReturn=true"),
+    ),
+  );
+  if (
+    terminalLimitations.some((limitation) => limitation === undefined) ||
+    terminalLimitations.some(
+      (limitation) =>
+        !limitation.includes("external=") ||
+        !limitation.includes("thunk=") ||
+        !limitation.includes("fallthrough is excluded") ||
+        !limitation.includes("not an independent verification"),
+    )
+  )
+    throw new Error(
+      `Ghidra no-return boundary evidence was missing callee, address, or flag provenance: ${JSON.stringify(terminalObservations.map(({ limitations }) => limitations))}`,
+    );
+  const returningObservation = await functionObservationCall(
+    client,
+    "procedure_info",
+    { document: null, procedure: leaf.address },
+  );
+  if (
+    returningObservation.limitations.some((limitation) =>
+      limitation.includes("puts"),
+    )
+  )
+    throw new Error("Ghidra marked an ordinary returning call as terminal");
   // The debug fixture is compiled -O0, and GCC 16 and later lower dense
   // switches to compare chains at -O0, so this dossier asserts only its
   // complete shape; the optimized jump-table variant proves dense jump-table
@@ -179,6 +234,8 @@ export async function verifyDebugFunctionOperations(
     instruction_window: {
       returned: instructionWindow.instructions.length,
     },
+    terminal_call_limitations: terminalLimitations,
+    returning_call_limitations: returningObservation.limitations,
     cancellation,
     timeout,
     concurrency: concurrent,
@@ -612,6 +669,113 @@ export async function verifyRelativeSwitch(client, procedures, entrySize) {
   }
   return {
     entry_size: entrySize,
+    dispatch_address: table.dispatch_address,
+    mappings: table.mappings.length,
+  };
+}
+
+/**
+ * Oracle for relative-switch-signed.S: signed halfword byte offsets from a base
+ * inside the case bodies, a CBZ route for the zero entry, and a B.CS bound.
+ */
+const SIGNED_RELATIVE_SWITCH_CASES = [
+  { value: 0, immediate: 200 },
+  { value: 1, immediate: 201 },
+  { value: 2, immediate: 202 },
+  { value: 3, immediate: 250 },
+  { value: 4, immediate: 204 },
+];
+
+export async function verifyRelativeSignedSwitch(client, selectorBias = 0) {
+  const names = await inventoryCall(client, "list_names", {
+    document: null,
+    address: null,
+  });
+  const procedure = requireProcedure(names, "rea_relative_switch_signed");
+  const dossier = await functionCall(client, "analyze_function", {
+    procedure: procedure.address,
+  });
+  const table = dossier.native_api?.jump_tables.find((item) =>
+    item.data_sources.some(
+      (source) =>
+        source.entry_size_bytes === 2 &&
+        source.entry_count === SIGNED_RELATIVE_SWITCH_CASES.length,
+    ),
+  );
+  if (table === undefined)
+    throw new Error(
+      `Exact signed halfword relative table unavailable: ${JSON.stringify(dossier.native_api)}`,
+    );
+  const expectedValues = SIGNED_RELATIVE_SWITCH_CASES.map(
+    ({ value }) => value + selectorBias,
+  );
+  if (
+    table.mappings.some(
+      (mapping) =>
+        mapping.case_value !== null &&
+        !expectedValues.includes(mapping.case_value),
+    )
+  )
+    throw new Error(
+      `Signed relative switch emitted an unsupported case label: ${JSON.stringify(table)}`,
+    );
+  if (table.mappings.length !== SIGNED_RELATIVE_SWITCH_CASES.length)
+    throw new Error(
+      `Signed relative switch has unexpected mappings: ${JSON.stringify(table)}`,
+    );
+  if (selectorBias !== 0) {
+    if (
+      !table.limitations.some((limitation) =>
+        limitation.includes("table indices are not proven"),
+      ) ||
+      !table.mappings.some((mapping) => mapping.case_value === null) ||
+      table.mappings.some((mapping) => mapping.case_value === selectorBias + 3)
+    )
+      throw new Error(
+        `Normalized selector must retain unknown case evidence: ${JSON.stringify(table)}`,
+      );
+  }
+  for (const { value: tableIndex, immediate } of SIGNED_RELATIVE_SWITCH_CASES) {
+    const value = tableIndex + selectorBias;
+    // Without a proven relationship between the machine index and the typed
+    // switch selector, the CBZ-only case must stay unknown rather than being
+    // assigned the normalized index or Ghidra's unreachable base destination.
+    if (selectorBias !== 0 && tableIndex === 3) continue;
+    const mapping = table.mappings.find((item) => item.case_value === value);
+    if (
+      mapping === undefined ||
+      mapping.confidence !== "high" ||
+      (selectorBias !== 0 &&
+        !mapping.evidence.some(
+          (evidence) => evidence.source === "ghidra-clang-case-token",
+        ))
+    )
+      throw new Error(
+        `Signed relative switch case ${value} was not verified: ${JSON.stringify(table)}`,
+      );
+    const instruction = await functionCall(
+      client,
+      "inspect_native_instruction",
+      { address: mapping.target_address },
+    );
+    if (
+      instruction.status !== "decoded" ||
+      !instruction.operands.some((operand) =>
+        operand.components.some(
+          (component) =>
+            component.kind === "immediate" &&
+            component.value === `0x${immediate.toString(16)}`,
+        ),
+      )
+    )
+      throw new Error(
+        `Signed relative switch target does not implement source case ${value}: ${JSON.stringify(instruction)}`,
+      );
+  }
+  return {
+    entry_size: 2,
+    signed: true,
+    selector_bias: selectorBias,
     dispatch_address: table.dispatch_address,
     mappings: table.mappings.length,
   };

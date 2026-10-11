@@ -9,8 +9,8 @@ import {
   EvidenceIntegrityError,
   AnalysisSnapshotMismatchError,
 } from "../../domain/evidenceErrors.js";
-import { type AnalysisError } from "../../domain/analysisErrorBase.js";
-import { type UnknownRegistryError } from "../../domain/unknownRegistryError.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { UnknownRegistryError } from "../../domain/unknownRegistryError.js";
 import type {
   RecordUnknownInput,
   ResidualUnknown,

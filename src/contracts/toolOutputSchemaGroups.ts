@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { evidenceBundleSummarySchema } from "../domain/evidenceRecordSummary.js";
+import { BINARY_ARCHITECTURES } from "../domain/binaryTargetTypes.js";
 import { nativeFunctionAnnotationsSchema } from "../domain/native/nativeFunctionAnnotations.js";
 import { nativeLoadImageSchema } from "../domain/native/nativeLoadImage.js";
 import { nativeUiResultSchema } from "../domain/native/nativeUiObservation.js";
@@ -415,7 +417,7 @@ export const sessionOutputSchemas = {
       format: targetFormatSchema,
       kind: targetKindSchema,
       sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-      architecture: z.enum(["x86", "x86_64", "arm", "arm64"]).nullable(),
+      architecture: z.enum(BINARY_ARCHITECTURES).nullable(),
     }),
   ),
   close_binary: lifecycleResultOf(
@@ -456,7 +458,7 @@ export const sessionOutputSchemas = {
           format: targetFormatSchema,
           kind: targetKindSchema,
           sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-          architecture: z.enum(["x86", "x86_64", "arm", "arm64"]).nullable(),
+          architecture: z.enum(BINARY_ARCHITECTURES).nullable(),
         }),
       ]),
     ]),
@@ -469,7 +471,9 @@ export const sessionOutputSchemas = {
       unknowns: z.number().int().min(0),
     }),
   ),
-  get_evidence_bundle: lifecycleResultOf(evidenceBundleSchema),
+  get_evidence_bundle: lifecycleResultOf(
+    z.union([evidenceBundleSchema, evidenceBundleSummarySchema]),
+  ),
   get_navigation_context: lifecycleResultOf(
     z.object({
       document: z.string(),

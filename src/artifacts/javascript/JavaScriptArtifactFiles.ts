@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import { AsarArtifactReader } from "../AsarArtifactReader.js";
+import type { ArtifactResourceScope } from "../ArtifactResourceScope.js";
 import {
   ArtifactPathRegistry,
   normalizeArtifactPath,
@@ -39,6 +40,7 @@ interface ExpectedContainer {
 }
 
 interface ReadContext {
+  readonly resources: ArtifactResourceScope;
   readonly expected: ReadonlyMap<string, ExpectedFile>;
   readonly expectedContainers: ReadonlyMap<string, ExpectedContainer>;
   readonly registry: ArtifactPathRegistry;
@@ -59,6 +61,7 @@ interface ReadTextInput {
 export const readJavaScriptArtifactFiles = async (
   reader: ArtifactReader,
   snapshot: ArtifactInventorySnapshot,
+  resources: ArtifactResourceScope,
   signal?: AbortSignal,
 ): Promise<JavaScriptArtifactFileSet> => {
   if (reader instanceof AsarArtifactReader) {
@@ -79,6 +82,7 @@ export const readJavaScriptArtifactFiles = async (
   const inventory = expectedInventory(snapshot);
   const expected = inventory.files;
   const context: ReadContext = {
+    resources,
     expected,
     expectedContainers: inventory.containers,
     registry: new ArtifactPathRegistry(),
@@ -122,7 +126,10 @@ const visitReader = async (
       iterator: reader.entries(context.signal)[Symbol.asyncIterator](),
     },
   ];
-  const ownedReaders: ArtifactReader[] = [];
+  const ownedReaders: {
+    readonly reader: ArtifactReader;
+    readonly path: string;
+  }[] = [];
   let failure: { readonly cause: unknown } | undefined;
   try {
     while (stack.length > 0) {
@@ -174,7 +181,7 @@ const visitReader = async (
         );
         context.containers.push(inventory);
         const nested = new AsarArtifactReader(entry.adapterKey);
-        ownedReaders.push(nested);
+        ownedReaders.push({ reader: nested, path });
         stack.push({
           reader: nested,
           prefix: path,
@@ -205,24 +212,33 @@ const visitReader = async (
   } catch (cause: unknown) {
     failure = { cause };
   } finally {
-    for (const { iterator } of stack) {
+    for (const { iterator, prefix, reader } of stack.reverse()) {
       try {
         await iterator.return?.();
       } catch (cause: unknown) {
-        failure ??= { cause };
+        failure = {
+          cause: ArtifactReaderFailure.withCleanup(
+            failure === undefined ? cause : failure.cause,
+            ArtifactReaderFailure.cleanupObservation(
+              cause,
+              `JavaScript artifact traversal for ${prefix || reader.format}`,
+            ),
+          ),
+        };
       }
     }
     for (const owned of ownedReaders.reverse()) {
-      try {
-        await owned.close();
-      } catch (cause: unknown) {
+      const resource = `nested ASAR reader for ${owned.path}`;
+      const cleanup = await context.resources.release({
+        kind: "reader",
+        reader: owned.reader,
+        resource,
+      });
+      if (cleanup.kind === "failed") {
         failure = {
           cause: ArtifactReaderFailure.withCleanup(
-            failure?.cause ?? cause,
-            ArtifactReaderFailure.cleanupObservation(
-              cause,
-              `nested ASAR reader for ${prefix}`,
-            ),
+            failure === undefined ? cleanup.cause : failure.cause,
+            ArtifactReaderFailure.cleanupObservation(cleanup.cause, resource),
           ),
         };
       }

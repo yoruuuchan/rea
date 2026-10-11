@@ -1,6 +1,8 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { SafeOutputTree } from "../../../src/artifacts/SafeOutputTree.js";
+import { SafeOutputTreeCreationFailure } from "../../../src/artifacts/SafeOutputTreeCreationFailure.js";
 import { javascriptRecoveryResultSchema } from "../../../src/domain/javascript/javascriptRecovery.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
@@ -73,9 +75,10 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
         });
         if (result.ok) throw new Error("expected boundary failure");
         const error = projectAnalysisError(result.error);
-        expect(["execution_failure", "unreadable_output"]).toContain(
-          error.code,
-        );
+        expect(
+          ["execution_failure", "unreadable_output"],
+          JSON.stringify(error),
+        ).toContain(error.code);
         expect(error.details).toBeDefined();
         await expect(access(fixture.output)).rejects.toMatchObject({
           code: "ENOENT",
@@ -94,6 +97,44 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       expect(JSON.stringify(projectAnalysisError(result.error))).toContain(
         "UTF-8 byte range",
       );
+      await assertRecoveryCleanup(fixture.launches);
+    });
+
+    it("accepts a later release on the verified major line with additive report fields", async () => {
+      const fixture = await recoveryFixture("additive");
+      const result = await fixture.service.recover({
+        path: fixture.path,
+        output_directory: fixture.output,
+      });
+      if (!result.ok) throw result.error;
+      const value = javascriptRecoveryResultSchema.parse(
+        result.value.normalized_result,
+      );
+      expect(value).toMatchObject({
+        status: "complete",
+        engine: { version: "1.99.0" },
+        modules: [{ reported_status: "future_status" }],
+      });
+      expect(result.value.provider.version).toBe("1.99.0");
+      expect(
+        value.limitations.some((limitation) =>
+          limitation.includes("This session uses Wakaru 1.99.0"),
+        ),
+      ).toBe(true);
+      expect(
+        JSON.parse(await readFile(value.report.path, "utf8")),
+      ).toMatchObject({
+        future_report_field: { nested: true },
+        warnings: [{ code: "W001" }],
+      });
+      expect(value.warnings).toEqual([
+        {
+          filename: "module.js",
+          kind: "notice",
+          is_error: false,
+          message: "future warning",
+        },
+      ]);
       await assertRecoveryCleanup(fixture.launches);
     });
 
@@ -182,6 +223,9 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       expect(projectAnalysisError(result.error).code).toBe(
         "cleanup_incomplete",
       );
+      expect(result.error).toMatchObject({
+        diagnostics: { reason: "injected cleanup refusal" },
+      });
       const launch = fixture.launches[0];
       if (launch?.cwd === undefined)
         throw new Error("missing process ownership");
@@ -204,6 +248,150 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       expect(projectAnalysisError(result.error).code).toBe(
         "capability_unavailable",
       );
+      await assertRecoveryCleanup(fixture.launches);
+    });
+  },
+);
+
+describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
+  "Wakaru publication ownership",
+  () => {
+    it("retains a setup-failed publication tree for provider cleanup retry", async () => {
+      const fixture = await recoveryFixture();
+      const createTree = SafeOutputTree.create.bind(SafeOutputTree);
+      let cleanupAttempts = 0;
+      const create = vi
+        .spyOn(SafeOutputTree, "create")
+        .mockImplementationOnce(async (outputRoot, platform) => {
+          const tree = await createTree(outputRoot, platform);
+          const rollbackTree = tree.rollback.bind(tree);
+          vi.spyOn(tree, "rollback").mockImplementation(async () => {
+            cleanupAttempts += 1;
+            if (cleanupAttempts === 1)
+              throw new Error("injected first cleanup failure");
+            return rollbackTree();
+          });
+          throw new SafeOutputTreeCreationFailure(
+            new Error("injected post-acquisition setup failure"),
+            tree,
+          );
+        });
+      try {
+        const result = await fixture.service.recover({
+          path: fixture.path,
+          output_directory: fixture.output,
+        });
+        if (result.ok) throw new Error("expected setup failure");
+        expect(projectAnalysisError(result.error).code).toBe(
+          "cleanup_incomplete",
+        );
+        expect(result.error).toMatchObject({
+          diagnostics: {
+            cleanup_failures: [
+              {
+                resource: fixture.output,
+                reason: "injected first cleanup failure",
+              },
+            ],
+          },
+        });
+        await expect(access(fixture.output)).resolves.toBeUndefined();
+      } finally {
+        create.mockRestore();
+      }
+      if (fixture.provider.close === undefined)
+        throw new Error("Expected Wakaru cleanup capability");
+      await fixture.provider.close();
+      expect(cleanupAttempts).toBe(2);
+      await expect(access(fixture.output)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+
+    it("returns completed recovery when retry closes a descriptor after commit", async () => {
+      const fixture = await recoveryFixture();
+      const createTree = SafeOutputTree.create.bind(SafeOutputTree);
+      const create = vi
+        .spyOn(SafeOutputTree, "create")
+        .mockImplementationOnce(async (outputRoot, platform) => {
+          const tree = await createTree(outputRoot, platform);
+          const commit = tree.commit.bind(tree);
+          vi.spyOn(tree, "commit").mockImplementation(async () => {
+            await commit();
+            throw new Error("injected descriptor close failure");
+          });
+          return tree;
+        });
+      try {
+        const result = await fixture.service.recover({
+          path: fixture.path,
+          output_directory: fixture.output,
+        });
+        if (!result.ok) throw result.error;
+        const published = javascriptRecoveryResultSchema.parse(
+          result.value.normalized_result,
+        );
+        await expect(access(published.manifest.path)).resolves.toBeUndefined();
+        expect(published.source.published_copy.path).toContain(fixture.output);
+      } finally {
+        create.mockRestore();
+      }
+      await assertRecoveryCleanup(fixture.launches);
+    });
+
+    it("retains published recovery and its result while cleanup remains unresolved", async () => {
+      const fixture = await recoveryFixture();
+      const createTree = SafeOutputTree.create.bind(SafeOutputTree);
+      let cleanupAttempts = 0;
+      const create = vi
+        .spyOn(SafeOutputTree, "create")
+        .mockImplementationOnce(async (outputRoot, platform) => {
+          const tree = await createTree(outputRoot, platform);
+          const commit = tree.commit.bind(tree);
+          vi.spyOn(tree, "commit").mockImplementation(async () => {
+            await commit();
+            throw new Error("injected descriptor close failure");
+          });
+          const rollback = tree.rollback.bind(tree);
+          vi.spyOn(tree, "rollback").mockImplementation(async () => {
+            cleanupAttempts += 1;
+            if (cleanupAttempts === 1)
+              throw new Error("injected cleanup refusal");
+            return rollback();
+          });
+          return tree;
+        });
+      try {
+        const result = await fixture.service.recover({
+          path: fixture.path,
+          output_directory: fixture.output,
+        });
+        if (result.ok) throw new Error("Expected unresolved cleanup");
+        expect(result.error.cleanupIncomplete).toBe(true);
+        expect(result.error.partialObservation).toMatchObject({
+          kind: "javascript-recovery",
+          result: {
+            source: {
+              published_copy: {
+                path: expect.stringContaining(fixture.output),
+              },
+            },
+            manifest: { path: expect.stringContaining(fixture.output) },
+          },
+        });
+        await expect(
+          access(join(fixture.output, "manifest.json")),
+        ).resolves.toBeUndefined();
+      } finally {
+        create.mockRestore();
+      }
+      if (fixture.provider.close === undefined)
+        throw new Error("Expected Wakaru cleanup capability");
+      await fixture.provider.close();
+      expect(cleanupAttempts).toBe(2);
+      await expect(
+        access(join(fixture.output, "manifest.json")),
+      ).resolves.toBeUndefined();
       await assertRecoveryCleanup(fixture.launches);
     });
   },

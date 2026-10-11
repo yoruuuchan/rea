@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access, readdir, stat } from "node:fs/promises";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { join } from "node:path";
 
@@ -36,8 +36,6 @@ import {
   type DoctorScopeReport,
 } from "./DoctorScope.js";
 
-/** Deep provider IDs whose readiness can be selected explicitly by doctor. */
-export const DOCTOR_PROVIDER_IDS = ["hopper", "ghidra", "ida"] as const;
 /** One actionable environment diagnostic. */
 export interface DoctorCheck {
   readonly name: string;
@@ -472,6 +470,7 @@ const executableAvailable = async (
 ): Promise<boolean> => {
   try {
     await access(path, constants.X_OK);
+    if (!(await stat(path)).isFile()) return false;
     if (platform !== "linux") return true;
     const linked = await run("ldd", [path], options);
     return linuxSharedLibrariesAvailable(`${linked.stdout}\n${linked.stderr}`);

@@ -7,6 +7,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
 import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
 import { systemSetupHost } from "../../../src/application/SetupHost.js";
+import { MANAGED_SKILL_FILES } from "../../../src/application/SetupSkill.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
 import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
@@ -151,6 +152,7 @@ describe("Qwen Code profile setup", () => {
       });
       expect(await setup.installSkill([client.name])).toBe("installed");
       const skill = join(home, ".agents", "skills", PRODUCT_IDENTITY.skillName);
+      await writeFile(join(skill, "user-notes.txt"), "user-authored");
       expect(await readFile(join(skill, "SKILL.md"), "utf8")).toContain(
         "reverse-engineer-anything",
       );
@@ -173,7 +175,13 @@ describe("Qwen Code profile setup", () => {
       expect(registered).toEqual(client);
       expect((await uninstall.removeClient(client)).status).toBe("removed");
       expect((await uninstall.removeSkill()).status).toBe("removed");
-      await expect(access(skill)).rejects.toMatchObject({ code: "ENOENT" });
+      for (const relativePath of MANAGED_SKILL_FILES)
+        await expect(access(join(skill, relativePath))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      expect(await readFile(join(skill, "user-notes.txt"), "utf8")).toBe(
+        "user-authored",
+      );
       if (customHome)
         await expect(access(join(home, ".qwen"))).rejects.toMatchObject({
           code: "ENOENT",

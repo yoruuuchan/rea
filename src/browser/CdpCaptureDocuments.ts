@@ -11,6 +11,7 @@ import {
 } from "./CdpCaptureValues.js";
 import { exclusionReasonForUrl } from "./CdpCaptureEventHelpers.js";
 import type { CdpCaptureCompleteness } from "./CdpCaptureCompleteness.js";
+import { createDocumentSvgAncestry, domSvgLink } from "./CdpCaptureDomSvg.js";
 
 export type CapturedResource = Omit<
   WebPageInspection["resources"][number],
@@ -171,21 +172,27 @@ export const captureDom = (
       ? documentNodes.attributes
       : [];
     const baseIndex = nodes.length;
+    const ancestry = createDocumentSvgAncestry({
+      nodeTypes,
+      nodeNames,
+      parents,
+      strings,
+      attributes,
+    });
     total += nodeTypes.length;
     for (let index = 0; index < nodeTypes.length; index += 1) {
       const attributeIndexes = numberArray(attributes[index]);
       const parent = Math.trunc(parents[index] ?? -1);
       const nodeIndex = nodes.length;
       const nodeName = indexedString(strings, nodeNames[index]);
+      const attributeNames = uniqueAttributeNames(attributeIndexes, strings);
       nodes.push({
         index: nodeIndex,
         parent_index: parent < 0 ? -1 : baseIndex + parent,
         node_type: Math.max(0, Math.trunc(nodeTypes[index] ?? 0)),
         node_name: nodeName,
         node_value_length: indexedString(strings, nodeValues[index]).length,
-        attribute_names: attributeIndexes
-          .filter((_value, attributeIndex) => attributeIndex % 2 === 0)
-          .map((value) => indexedString(strings, value)),
+        attribute_names: attributeNames,
       });
       const metadata = domMetadata({
         strings,
@@ -196,6 +203,7 @@ export const captureDom = (
         nodeIndex,
         nodeName,
         allowedOrigins,
+        ...domSvgLink(ancestry, index),
       });
       for (const url of metadata.urls) {
         urls.push(url);
@@ -350,6 +358,21 @@ const indexedString = (strings: readonly string[], index: unknown): string => {
   return integer === undefined ? "" : (strings[Math.trunc(integer)] ?? "");
 };
 
+const uniqueAttributeNames = (
+  attributeIndexes: readonly number[],
+  strings: readonly string[],
+): string[] => {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < attributeIndexes.length; index += 2) {
+    const name = indexedString(strings, attributeIndexes[index]);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+};
+
 const numberArray = (value: unknown): readonly number[] =>
   Array.isArray(value)
     ? value.flatMap((item) => {
@@ -366,7 +389,24 @@ interface DomMetadataOptions {
   readonly nodeIndex: number;
   readonly nodeName: string;
   readonly allowedOrigins: ReadonlySet<string>;
+  readonly svgElement: boolean;
+  readonly xmlDocument: boolean;
+  readonly xlinkHref: string | undefined;
 }
+
+// Chrome reads an SVG XLink href only when href itself is absent, and an
+// empty href still wins. HTML keeps the literal attribute name `xlink:href`.
+// XML uses any prefix bound to the XLink namespace. Both are stored as href.
+const hrefAttributeValue = (
+  pairs: ReadonlyMap<string, string>,
+  attribute: string,
+  options: DomMetadataOptions,
+): string | undefined => {
+  const declared = pairs.get(attribute);
+  if (declared !== undefined) return declared;
+  if (attribute !== "href" || !options.svgElement) return undefined;
+  return options.xmlDocument ? options.xlinkHref : pairs.get("xlink:href");
+};
 
 const domMetadata = (
   options: DomMetadataOptions,
@@ -385,14 +425,15 @@ const domMetadata = (
   } = options;
   const pairs = new Map<string, string>();
   for (let index = 0; index + 1 < attributes.length; index += 2) {
-    const name = indexedString(strings, attributes[index]).toLowerCase();
+    // Chrome already folds HTML names; SVG/XML names remain case-sensitive.
+    const name = indexedString(strings, attributes[index]);
     const value = indexedString(strings, attributes[index + 1]);
     // HTML keeps the first declaration. A later repeat must not move dom_urls.
     if (!pairs.has(name)) pairs.set(name, value);
   }
   const urls: WebPageInspection["metadata"]["dom_urls"] = [];
   for (const attribute of domUrlAttributes) {
-    const value = pairs.get(attribute);
+    const value = hrefAttributeValue(pairs, attribute, options);
     if (value === undefined) continue;
     const tagName = nodeName.toLowerCase();
     // Chrome strips HTML whitespace for FORM.action, while submit controls

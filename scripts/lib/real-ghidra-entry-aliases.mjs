@@ -21,7 +21,6 @@ export async function verifyGhidraEntryAliases({
     new URL("../../tests/conformance/ghidra/entry-aliases.c", import.meta.url),
   );
   const path = join(workspace, "entry-aliases");
-  const prefix = process.platform === "darwin" ? "_" : "";
   try {
     await exec(compiler, ["-O0", "-g", "-fno-inline", source, "-o", path], {
       env,
@@ -29,7 +28,8 @@ export async function verifyGhidraEntryAliases({
     });
     const bytes = await readFile(path);
     await call("close_binary");
-    await call("open_binary", { path, provider_id: "ghidra" });
+    const imported = await call("open_binary", { path, provider_id: "ghidra" });
+    const prefix = imported.format === "mach-o" ? "_" : "";
     const names = await call("list_names");
     const alias = names.find(
       ({ value }) => value === `${prefix}rea_entry_alias`,
@@ -46,8 +46,10 @@ export async function verifyGhidraEntryAliases({
     );
     assert.ok(canonical, "Fixture alias is not at a function entry");
     const xrefsSelectors = [];
+    // CLI xrefs keeps bare hexadecimal selectors as addresses. A Mach-O
+    // primary label such as "dead" is tested below as a procedure name instead.
     for (const value of [
-      canonical.value,
+      `${prefix}rea_alias_target`,
       alias.value,
       `${prefix}rea_xrefs_data`,
       `${prefix}rea_xrefs_unreferenced`,
@@ -89,6 +91,18 @@ export async function verifyGhidraEntryAliases({
     );
     assert.ok(interior);
     assert.notEqual(interior.address, alias.address);
+    assert.equal(
+      interior.symbol.type,
+      "label",
+      "Fixture interior control must remain an imported label",
+    );
+    assert.equal(
+      (await call("list_procedures")).some(
+        ({ address }) => address === interior.address,
+      ),
+      false,
+      "Fixture interior control must not be a Ghidra procedure entry",
+    );
     const failure = await reject("procedure_address", {
       procedure: interior.value,
     });
@@ -153,7 +167,11 @@ export async function verifyGhidraEntryAliases({
           { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
         );
         const evidence = JSON.parse(stdout);
-        assert.deepEqual(evidence.normalized_result, expected);
+        assert.deepEqual(
+          evidence.normalized_result,
+          expected,
+          `CLI xrefs mismatch for ${JSON.stringify(selector)}`,
+        );
         assert.equal(evidence.parameters.address, selector.at(-1));
       }
     }

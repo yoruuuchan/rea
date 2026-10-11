@@ -67,7 +67,10 @@ cliTest.for(["CLI", "stdio MCP"] as const)(
         `new BrowserWindow({webPreferences:{${preferences}}});`,
     );
     await Promise.all([
-      writeFile(join(root, "main.js"), `${sourceLines.join("\n")}\n`),
+      writeFile(
+        join(root, "main.js"),
+        `${sourceLines.join("\n")}\nimport { BrowserWindow } from "electron";\n`,
+      ),
       writeFile(join(root, "first.js"), 'throw new Error("inert preload");\n'),
       writeFile(join(root, "last.js"), 'throw new Error("inert preload");\n'),
     ]);

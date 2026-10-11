@@ -4,12 +4,10 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import {
-  importReferenceSource,
-  normalizeHistoricalSourceParseFailures,
-} from "../../../src/application/ReferenceSourceImport.js";
+import { normalizeHistoricalSourceParseFailures } from "../../../src/application/ReferenceSourceImport.js";
 import { historicalSourceGraphSchema } from "../../../src/domain/referenceSourceGraph.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 const sources = {
   "fatal.js": 'import "./valid";\nconst = ;',

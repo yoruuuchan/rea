@@ -13,7 +13,10 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 
-/** Read-only direct inventory operations admitted by the Ghidra adapter. */
+/**
+ * Direct inventory operations admitted by the Ghidra adapter. All are reads
+ * except the naming operations, which edit the ephemeral session database.
+ */
 export const GHIDRA_INVENTORY_OPERATIONS = [
   "inspect_native_load_image",
   "read_bytes",
@@ -28,7 +31,15 @@ export const GHIDRA_INVENTORY_OPERATIONS = [
   "resolve_containing_procedure",
   "search_procedures",
   "search_strings",
+  "set_address_name",
+  "set_addresses_names",
 ] as const;
+
+/** Inventory operations that write analyst names into the session database. */
+export const GHIDRA_NAMING_OPERATIONS = [
+  "set_address_name",
+  "set_addresses_names",
+] as const satisfies readonly GhidraInventoryOperation[];
 
 /** One direct inventory operation implemented by the packaged Java bridge. */
 export type GhidraInventoryOperation =
@@ -83,6 +94,19 @@ const inputSchemas = {
     .strict(),
   search_procedures: z.object(searchInput).strict(),
   search_strings: z.object(searchInput).strict(),
+  set_address_name: z
+    .object({ document, address: explicitAddress, name: z.string().min(1) })
+    .strict(),
+  set_addresses_names: z
+    .object({
+      document,
+      names: z.record(explicitAddress, z.string().min(1)),
+    })
+    .strict()
+    .refine(
+      (value) => Object.keys(value.names).length > 0,
+      "Supply at least one address name",
+    ),
 } satisfies Readonly<Record<GhidraInventoryOperation, z.ZodType>>;
 
 /** Validate and default one provider request before it crosses the socket. */
@@ -281,6 +305,8 @@ const resultSchemas = {
   resolve_containing_procedure: containingProcedure,
   search_procedures: z.array(searchItem),
   search_strings: z.array(searchItem),
+  set_address_name: z.boolean(),
+  set_addresses_names: z.record(z.string(), z.boolean()),
 } satisfies Readonly<Record<GhidraInventoryOperation, z.ZodType>>;
 
 /** Validate exact Java-bridge output before creating Evidence. */

@@ -52,7 +52,11 @@ export const inspectJadxAvailability = async (
   signal?: AbortSignal,
 ): Promise<ProviderAvailability> => {
   try {
-    const configuration = await readJadxConfiguration(environment, signal);
+    const configuration = await readJadxConfigurationInputs(
+      environment,
+      signal,
+    );
+    await validateJadxConfigurationContents(configuration, environment, signal);
     return {
       status: "available",
       code: null,
@@ -77,52 +81,83 @@ export const inspectJadxAvailability = async (
   }
 };
 
-/** Resolve caller-selected tools and preserve the same prerequisite diagnostics. */
-export const resolveJadxConfiguration = async (
+/** Resolve caller-selected paths and JVM options without probing their contents. */
+export const resolveJadxConfigurationInputs = async (
   environment: Readonly<Record<string, string | undefined>>,
   operation: AndroidOperation,
   signal?: AbortSignal,
 ): Promise<JadxConfiguration> => {
   try {
-    return await readJadxConfiguration(environment, signal);
+    return await readJadxConfigurationInputs(environment, signal);
   } catch (cause) {
     if (signal?.aborted === true) throw cause;
     if (!(cause instanceof JadxConfigurationFailure)) throw cause;
-    const output = cause.diagnostics;
-    throw new AnalysisCapabilityUnavailableError(
-      "jadx",
-      operation,
-      cause.message,
-      {
-        cause,
-        userMessage: cause.message,
-        ...(typeof output.stdout === "string" &&
-        typeof output.stderr === "string"
-          ? {
-              capturedOutput: {
-                stdout: output.stdout,
-                stderr: output.stderr,
-                truncated: output.output_truncated === true,
-              },
-            }
-          : {}),
-      },
-    );
+    throw projectConfigurationFailure(operation, cause);
   }
 };
 
-const readJadxConfiguration = async (
+/** Probe Java and archive prerequisites before starting a new engine session. */
+export const validateJadxConfiguration = async (
+  configuration: JadxConfiguration,
+  environment: Readonly<Record<string, string | undefined>>,
+  operation: AndroidOperation,
+  signal?: AbortSignal,
+): Promise<void> => {
+  try {
+    await validateJadxConfigurationContents(configuration, environment, signal);
+  } catch (cause) {
+    if (signal?.aborted === true) throw cause;
+    if (!(cause instanceof JadxConfigurationFailure)) throw cause;
+    throw projectConfigurationFailure(operation, cause);
+  }
+};
+
+const readJadxConfigurationInputs = async (
   environment: Readonly<Record<string, string | undefined>>,
   signal?: AbortSignal,
 ): Promise<JadxConfiguration> => {
+  signal?.throwIfAborted();
   requireSupportedHost();
   const jar = await resolveJar(environment);
   const java = await resolveJava(environment, signal);
   await requireJavaHomeExecutable(environment.JAVA_HOME, java);
-  const jvmArguments = resolveJvmArguments(environment);
-  await inspectJavaRuntime(java, environment, signal);
-  await requireEngineArchive(jar, signal);
-  return { jar, java, jvmArguments };
+  signal?.throwIfAborted();
+  return { jar, java, jvmArguments: resolveJvmArguments(environment) };
+};
+
+const validateJadxConfigurationContents = async (
+  configuration: JadxConfiguration,
+  environment: Readonly<Record<string, string | undefined>>,
+  signal?: AbortSignal,
+): Promise<void> => {
+  signal?.throwIfAborted();
+  await inspectJavaRuntime(configuration.java, environment, signal);
+  await requireEngineArchive(configuration.jar, signal);
+};
+
+const projectConfigurationFailure = (
+  operation: AndroidOperation,
+  cause: JadxConfigurationFailure,
+): AnalysisCapabilityUnavailableError => {
+  const output = cause.diagnostics;
+  return new AnalysisCapabilityUnavailableError(
+    "jadx",
+    operation,
+    cause.message,
+    {
+      cause,
+      userMessage: cause.message,
+      ...(typeof output.stdout === "string" && typeof output.stderr === "string"
+        ? {
+            capturedOutput: {
+              stdout: output.stdout,
+              stderr: output.stderr,
+              truncated: output.output_truncated === true,
+            },
+          }
+        : {}),
+    },
+  );
 };
 
 const requireEngineArchive = async (

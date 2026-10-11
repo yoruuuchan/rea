@@ -6,9 +6,9 @@ export const liveProcesses = (
 ): readonly ProcessTableEntry[] =>
   members.filter(({ state }) => !state.startsWith("Z"));
 
-/** Return every live-table descendant of a launcher in breadth-first order. */
+/** Return every live-table descendant of the selected roots in breadth-first order. */
 export const descendantsOf = (
-  launcherPid: number,
+  rootPids: readonly number[],
   processes: readonly ProcessTableEntry[],
 ): ProcessTableEntry[] => {
   const childrenByParent = new Map<number, ProcessTableEntry[]>();
@@ -18,8 +18,8 @@ export const descendantsOf = (
     childrenByParent.set(process.parentPid, siblings);
   }
   const descendants: ProcessTableEntry[] = [];
-  const pending = [...(childrenByParent.get(launcherPid) ?? [])];
-  const visited = new Set<number>([launcherPid]);
+  const pending = rootPids.flatMap((pid) => childrenByParent.get(pid) ?? []);
+  const visited = new Set<number>(rootPids);
   for (const process of pending) {
     if (visited.has(process.pid)) continue;
     visited.add(process.pid);

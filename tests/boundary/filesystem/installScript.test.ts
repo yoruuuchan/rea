@@ -172,6 +172,42 @@ describe("curl installer scenarios", { timeout: 20_000 }, () => {
   });
 });
 
+describe("Linux user-prefix installer", { timeout: 20_000 }, () => {
+  it("prints the executed arguments as a reusable command with shell metacharacters", async () => {
+    const fixture = await createFixture();
+    const home = join(fixture.home, "home with 'quotes' $cash; [glob]");
+    const argvLog = join(fixture.home, "npm-argv.log");
+    const overrides = { HOME: home, FAKE_NPM_ARGV_LOG: argvLog };
+    const plan = await runInstaller(
+      fixture,
+      ["--version", "0.3.0", "--dry-run"],
+      overrides,
+    );
+    await expect(readFile(argvLog)).rejects.toMatchObject({ code: "ENOENT" });
+    const command = /^  Command: (.+)$/mu.exec(plan.stdout)?.[1];
+    expect(command).toBeDefined();
+    const printed = await execFileAsync("/bin/bash", [
+      "-c",
+      `npm() { printf '%s\\0' "$@"; }\n${command}`,
+    ]);
+    const installed = await runInstaller(
+      fixture,
+      ["--version", "0.3.0"],
+      overrides,
+    );
+    expect(installed.stdout).toContain(`  Command: ${command}\n`);
+    expect(printed.stdout.split("\0")).toEqual([
+      "install",
+      "--global",
+      "--prefix",
+      join(home, ".local"),
+      "rea-agents@0.3.0",
+      "",
+    ]);
+    expect((await readFile(argvLog)).toString()).toBe(printed.stdout);
+  });
+});
+
 describe("native macOS installer", { timeout: 20_000 }, () => {
   it("installs on Darwin with an empty prefix argument array", async () => {
     const fixture = await createFixture();
@@ -179,6 +215,9 @@ describe("native macOS installer", { timeout: 20_000 }, () => {
       FAKE_PLATFORM: "Darwin",
       FAKE_NPM_PREFIX: join(fixture.home, "npm global prefix"),
     });
+    expect(result.stdout).toContain(
+      "  Command: npm install --global rea-agents@0.3.0\n",
+    );
     expect(result.stdout).toContain("REA 0.3.0 is installed");
     expect(await readFile(fixture.npmLog, "utf8")).toBe(
       "prefix --global\ninstall --global rea-agents@0.3.0\n",
@@ -322,6 +361,7 @@ if [ "$1" = "-p" ]; then printf '%s\n' "\${FAKE_NODE_VERSION:-24.18.0}"; else ex
       join(bin, "npm"),
       `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_NPM_LOG"
+if [ -n "\${FAKE_NPM_ARGV_LOG:-}" ]; then printf '%s\\0' "$@" > "$FAKE_NPM_ARGV_LOG"; fi
 [ "$1" = "prefix" ] && { [ "\${FAKE_NPM_PREFIX_FAIL:-}" = "1" ] && exit 1; printf '%s\n' "$FAKE_NPM_PREFIX"; exit 0; }
 [ "\${FAKE_NPM_FAIL:-}" = "1" ] && exit 1
 prefix="$HOME/.local"

@@ -76,11 +76,16 @@ export interface ProviderProcessSnapshot {
   readonly diagnosticTruncated?: boolean;
   readonly stdout: {
     readonly text: string;
+    /** Bytes retained in text, limited by maxDiagnosticBytes when configured. */
     readonly bytes: number;
+    /** All bytes drained from this stream since construction or resetOutput. */
+    readonly observedBytes: number;
   };
   readonly stderr: {
     readonly text: string;
+    /** Bytes retained in text, limited by maxDiagnosticBytes when configured. */
     readonly bytes: number;
+    readonly observedBytes: number;
   };
   readonly exitCode: number | null | undefined;
   readonly signal: NodeJS.Signals | null | undefined;
@@ -268,8 +273,8 @@ export class ProviderProcessSupervisor {
   snapshot(): ProviderProcessSnapshot {
     return {
       ...(this.#diagnosticTruncated ? { diagnosticTruncated: true } : {}),
-      stdout: this.#stdout.snapshot(),
-      stderr: this.#stderr.snapshot(),
+      stdout: this.#stdout.snapshot(this.#stdoutObservedBytes),
+      stderr: this.#stderr.snapshot(this.#stderrObservedBytes),
       exitCode: this.#exitObservation?.code,
       signal: this.#exitObservation?.signal,
     };
@@ -488,11 +493,12 @@ class ProcessOutputCapture {
     this.#chunks.push(Buffer.from(chunk));
   }
 
-  snapshot(): ProviderProcessSnapshot["stdout"] {
+  snapshot(observedBytes: number): ProviderProcessSnapshot["stdout"] {
     const text = Buffer.concat(this.#chunks, this.#bytes).toString("utf8");
     return {
       text,
       bytes: this.#bytes,
+      observedBytes,
     };
   }
 }

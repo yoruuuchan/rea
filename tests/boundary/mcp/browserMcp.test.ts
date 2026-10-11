@@ -1,4 +1,5 @@
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
+import { crc32, deflateSync } from "node:zlib";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -7,10 +8,12 @@ import { afterEach, expect, it } from "vitest";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { CdpBrowserProvider } from "../../../src/browser/CdpBrowserProvider.js";
 import { webPageInspectionSchema } from "../../../src/domain/browserObservationSchemas.js";
+import { createWebScreenshotArtifact } from "../../../src/domain/webScreenshot.js";
 import { JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE } from "../../../src/contracts/javascript/javascriptRuntimeReconciliationExample.js";
 import { TOOL_CONTRACTS } from "../../../src/contracts/toolContracts.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
+import { runCliJson } from "../../fixtures/cliJsonProcess.js";
 import {
   startFakeCdpBrowser,
   type FakeCdpBrowser,
@@ -194,9 +197,9 @@ const verifySessionAndComparisonTools = async (
     normalized_result: { overall_status: "unknown" },
   });
   const parsedCapture = webPageInspectionSchema.parse(capture);
-  const socket = parsedCapture.network.websocket_events.find(
-    (event) => event.payload_shape?.json_shape != null,
-  );
+  const socket = parsedCapture.network.websocket_connections
+    .flatMap((connection) => connection.events)
+    .find((event) => event.payload_shape?.json_shape != null);
   const payload = socket?.payload_shape;
   if (socket === undefined || payload == null || payload.json_shape === null)
     throw new Error("Missing deep WebSocket JSON shape fixture");
@@ -204,18 +207,27 @@ const verifySessionAndComparisonTools = async (
     ...parsedCapture,
     network: {
       ...parsedCapture.network,
-      websocket_events: [
-        {
-          ...socket,
-          payload_shape: {
-            ...payload,
-            json_shape: {
-              ...payload.json_shape,
-              properties: [{ path: "/event", types: [42], observations: 1 }],
-            },
-          },
-        },
-      ],
+      websocket_connections: parsedCapture.network.websocket_connections.map(
+        (connection) => ({
+          ...connection,
+          events: connection.events.map((event) =>
+            event === socket
+              ? {
+                  ...event,
+                  payload_shape: {
+                    ...payload,
+                    json_shape: {
+                      ...payload.json_shape,
+                      properties: [
+                        { path: "/event", types: [42], observations: 1 },
+                      ],
+                    },
+                  },
+                }
+              : event,
+          ),
+        }),
+      ),
     },
   };
   const malformedComparison = await connected.client.callTool({
@@ -253,6 +265,8 @@ const verifySessionAndComparisonTools = async (
   expect(visual.structuredContent).toMatchObject({
     normalized_result: { status: "identical", changed_pixels: 0 },
   });
+
+  await assertScreenshotPngFailures(connected.client);
   expect(inspected.structuredContent).toMatchObject({
     normalized_result: expect.any(Object),
     operation: "inspect_web_page",
@@ -260,6 +274,149 @@ const verifySessionAndComparisonTools = async (
     parameters: expect.any(Object),
   });
 };
+
+const pngChunk = (type: string, data: Buffer): Buffer => {
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, 4, "ascii");
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(
+    crc32(chunk.subarray(4, 8 + data.length)),
+    8 + data.length,
+  );
+  return chunk;
+};
+
+const assertScreenshotPngFailures = async (client: Client): Promise<void> => {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const malformedPng = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", Buffer.from("bad")),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  const malformedArtifact = createWebScreenshotArtifact(malformedPng);
+  const malformed = await client.callTool({
+    name: "compare_web_screenshots",
+    arguments: {
+      before: malformedArtifact,
+      after: malformedArtifact,
+    },
+  });
+  expect(parseMcpToolError(malformed)).toMatchObject({
+    error: {
+      code: "invalid_request",
+      category: "invalid_input",
+      details: {
+        operation: "compare_web_screenshots",
+        issues: [{ path: [], reason: "invalid_format" }],
+      },
+    },
+  });
+
+  const grayscaleHeader = Buffer.alloc(13);
+  grayscaleHeader.writeUInt32BE(1, 0);
+  grayscaleHeader.writeUInt32BE(1, 4);
+  grayscaleHeader.set([8, 0, 0, 0, 0], 8);
+  const unsupportedPng = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", grayscaleHeader),
+    pngChunk("IDAT", deflateSync(Buffer.from([0, 30]))),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  const unsupported = createWebScreenshotArtifact(unsupportedPng);
+  const rejectedFormat = await client.callTool({
+    name: "compare_web_screenshots",
+    arguments: { before: unsupported, after: unsupported },
+  });
+  expect(parseMcpToolError(rejectedFormat)).toMatchObject({
+    error: { code: "unsupported_target", category: "unsupported_target" },
+  });
+};
+
+it("delivers the source-map response URL through authenticated MCP Evidence", async () => {
+  const terminalPath = "/maps/v1/app.js.map?revision=2&token=source-value";
+  const browser = await startFakeCdpBrowser({
+    sourceMapRedirect: terminalPath,
+    sourceMapBody: JSON.stringify({
+      version: 3,
+      names: [],
+      sources: ["../src/original.js"],
+      sourcesContent: ["export const value = 1;"],
+      mappings: "AAAA",
+    }),
+  });
+  browsers.push(browser);
+  const connected = await connectBrowser();
+  const result = await connected.client.callTool({
+    name: "analyze_web_bundle",
+    arguments: {
+      cdp_endpoint: browser.endpoint,
+      target_id: "allowed-page",
+      allowed_origins: [browser.allowedOrigin],
+      observation_ms: 0,
+      fetch_source_maps: true,
+    },
+  });
+  expect(result.isError).not.toBe(true);
+  const evidence = parseEvidence(result.structuredContent);
+  const expectedResult = {
+    observations: {
+      source_maps: {
+        status: "included",
+        items: [
+          {
+            declared_url: `${browser.allowedOrigin}/app.js.map?token=map-secret`,
+            effective_url: `${browser.allowedOrigin}${terminalPath}`,
+            original_sources: [
+              { source: `${browser.allowedOrigin}/maps/src/original.js` },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  expect(evidence.normalized_result).toMatchObject(expectedResult);
+  expect(result.content).toHaveLength(1);
+  expect(result.content[0]).toMatchObject({
+    type: "text",
+    text: JSON.stringify(evidence),
+  });
+  const cliEvidence = parseEvidence(
+    await runCliJson([
+      "analyze-web-bundle",
+      browser.endpoint,
+      "allowed-page",
+      "--allowed-origins",
+      browser.allowedOrigin,
+      "--observation-ms",
+      "0",
+      "--fetch-source-maps",
+      "--json",
+    ]),
+  );
+  expect(cliEvidence.normalized_result).toMatchObject(expectedResult);
+  const mapRequests = browser.httpRequests.filter(({ url }) =>
+    url.includes(".map"),
+  );
+  expect(mapRequests.map(({ url }) => url)).toEqual([
+    "/app.js.map?token=map-secret",
+    terminalPath,
+    "/app.js.map?token=map-secret",
+    terminalPath,
+  ]);
+  expect(
+    mapRequests.every(
+      ({ authorization, cookie, referer }) =>
+        authorization === undefined &&
+        cookie === undefined &&
+        referer === undefined,
+    ),
+  ).toBe(true);
+});
 
 it("does not attach to a target outside the request's allowed origin scope", async () => {
   const browser = await startFakeCdpBrowser();
@@ -284,6 +441,43 @@ it("does not attach to a target outside the request's allowed origin scope", asy
     },
   });
   expect(browser.commands).toHaveLength(0);
+});
+
+it("projects legal oversized PNG dimensions as a memory constraint", async () => {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(0x7fffffff, 0);
+  header.writeUInt32BE(1, 4);
+  header.set([8, 6, 0, 0, 0], 8);
+  const artifact = createWebScreenshotArtifact(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      pngChunk("IHDR", header),
+      pngChunk("IDAT", deflateSync(Buffer.from([0]))),
+      pngChunk("IEND", Buffer.alloc(0)),
+    ]),
+  );
+  const connected = await connectBrowser();
+  const result = await connected.client.callTool({
+    name: "compare_web_screenshots",
+    arguments: { before: artifact, after: artifact },
+  });
+
+  expect(parseMcpToolError(result)).toMatchObject({
+    error: {
+      code: "resource_constraint",
+      category: "resource_constraint",
+      details: {
+        operation: "compare_web_screenshots",
+        resource: "memory",
+        reported_limits: {
+          maximum_working_memory_bytes: 256 * 1024 * 1024,
+          estimated_working_memory_bytes: "34359738499",
+          before_dimensions: { width: 0x7fffffff, height: 1 },
+          after_dimensions: { width: 0x7fffffff, height: 1 },
+        },
+      },
+    },
+  });
 });
 
 const connectBrowser = async () => {

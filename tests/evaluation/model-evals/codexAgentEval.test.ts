@@ -1,6 +1,55 @@
 import { describe, expect, it } from "vitest";
 
+import { createEvidence } from "../../../src/domain/evidence.js";
+import type { JsonValue } from "../../../src/domain/jsonValue.js";
 import { evaluateCodexEvents } from "../../../src/evaluation/CodexAgentEval.js";
+
+const observation = (
+  operation = "inspect_managed_artifact",
+  result: JsonValue = { observed: true },
+  evidenceLinks: readonly string[] = [],
+) =>
+  createEvidence(
+    { path: "/tmp/app.dll", sha256: "1".repeat(64), format: "pe" },
+    { id: "managed", name: "Managed static analysis", version: null },
+    {
+      operation,
+      parameters: {},
+      result,
+      evidenceLinks,
+      authority: "shipped-artifact",
+    },
+  );
+
+const citationMetrics = (
+  result: unknown,
+  evidenceId: string,
+  tool = "inspect_managed_artifact",
+) =>
+  evaluateCodexEvents(
+    [
+      {
+        type: "item.completed",
+        item: {
+          type: "mcp_tool_call",
+          status: "completed",
+          server: "rea",
+          tool,
+          arguments: {},
+          result,
+        },
+      },
+      {
+        type: "item.completed",
+        item: {
+          type: "agent_message",
+          text: `Observed artifact evidence ${evidenceId} is cited here; runtime behavior remains unknown because no runtime authority was supplied.`,
+        },
+      },
+    ],
+    tool,
+    { requireEvidence: true },
+  );
 
 describe("Codex agent release evaluation", () => {
   it("measures natural routing, repeated calls, tokens, and answer heuristics", () => {
@@ -50,7 +99,8 @@ describe("Codex agent release evaluation", () => {
   });
 
   it("requires the final answer to cite produced Evidence when requested", () => {
-    const evidenceId = `ev_${"a".repeat(64)}`;
+    const evidence = observation();
+    const evidenceId = evidence.evidence_id;
     const events = [
       {
         type: "item.completed",
@@ -60,7 +110,7 @@ describe("Codex agent release evaluation", () => {
           server: "rea",
           tool: "inspect_managed_artifact",
           arguments: { path: "/tmp/app.dll" },
-          result: { evidence_id: evidenceId },
+          result: { structuredContent: evidence },
         },
       },
       {
@@ -82,7 +132,126 @@ describe("Codex agent release evaluation", () => {
       answerHeuristicsMet: true,
     });
   });
+});
 
+describe("Codex Evidence delivery", () => {
+  it("rejects diagnostic IDs and failed results as delivered Evidence", () => {
+    const evidenceId = `ev_${"a".repeat(64)}`;
+    for (const result of [
+      { content: [{ type: "text", text: `diagnostic: ${evidenceId}` }] },
+      { evidence_id: evidenceId },
+      { structuredContent: { metadata: { evidence_id: evidenceId } } },
+      {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: { message: evidenceId } }),
+          },
+        ],
+      },
+    ]) {
+      expect(citationMetrics(result, evidenceId)).toMatchObject({
+        evidenceIds: [],
+        finalCitesEvidence: false,
+        answerHeuristicsMet: false,
+      });
+    }
+  });
+
+  it("accepts complete text-only Evidence while rejecting truncated and tampered copies", () => {
+    const evidence = observation();
+    const text = JSON.stringify(evidence);
+    const textResult = (value: string) => ({
+      content: [{ type: "text", text: value }],
+      structured_content: null,
+    });
+    expect(
+      citationMetrics(textResult(text), evidence.evidence_id),
+    ).toMatchObject({
+      evidenceIds: [evidence.evidence_id],
+      finalCitesEvidence: true,
+      answerHeuristicsMet: true,
+    });
+    for (const result of [
+      textResult(text.slice(0, -1)),
+      textResult(
+        JSON.stringify({
+          ...evidence,
+          normalized_result: { fabricated: true },
+        }),
+      ),
+      textResult(
+        text.replace(
+          `"evidence_id":`,
+          `"evidence_id":"${evidence.evidence_id}","evidence_id":`,
+        ),
+      ),
+    ]) {
+      expect(citationMetrics(result, evidence.evidence_id).evidenceIds).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("retains authenticated nested inspection Evidence without accepting bare or tampered links", () => {
+    const nested = observation("inventory_artifact");
+    const substep = {
+      status: "completed",
+      operation: nested.operation,
+      evidence_id: nested.evidence_id,
+      evidence: nested,
+    };
+    const inspection = observation(
+      "inspect_artifact",
+      { substeps: [substep] },
+      [nested.evidence_id],
+    );
+    expect(
+      citationMetrics(
+        { structuredContent: inspection },
+        nested.evidence_id,
+        "inspect_artifact",
+      ),
+    ).toMatchObject({
+      evidenceIds: [inspection.evidence_id, nested.evidence_id],
+      finalCitesEvidence: true,
+    });
+    for (const [step, links] of [
+      [substep, []],
+      [
+        {
+          ...substep,
+          evidence: { ...nested, normalized_result: { fabricated: true } },
+        },
+        [nested.evidence_id],
+      ],
+      [{ ...substep, operation: "other_tool" }, [nested.evidence_id]],
+      [
+        { ...substep, evidence_id: `ev_${"b".repeat(64)}` },
+        [nested.evidence_id],
+      ],
+    ] as const) {
+      const parent = observation(
+        "inspect_artifact",
+        { substeps: [step] },
+        links,
+      );
+      expect(
+        citationMetrics(
+          { structuredContent: parent },
+          nested.evidence_id,
+          "inspect_artifact",
+        ),
+      ).toMatchObject({
+        evidenceIds: [parent.evidence_id],
+        finalCitesEvidence: false,
+      });
+    }
+  });
+});
+
+describe("Codex request accounting", () => {
   it("flags identical calls with distinct item identities", () => {
     const event = (id: string) => ({
       type: "item.completed",
@@ -99,6 +268,35 @@ describe("Codex agent release evaluation", () => {
       evaluateCodexEvents([event("item-1"), event("item-2")], "binary_session")
         .repeatedCallCount,
     ).toBe(1);
+  });
+
+  it("distinguishes session verification after a successful close from an unchanged retry", () => {
+    const call = (id: string, tool: string, status = "completed") => ({
+      type: "item.completed",
+      item: {
+        id,
+        type: "mcp_tool_call",
+        server: "rea",
+        tool,
+        arguments: {},
+        status,
+      },
+    });
+    for (const [status, repeats] of [
+      ["completed", 0],
+      ["failed", 1],
+    ] as const) {
+      expect(
+        evaluateCodexEvents(
+          [
+            call("before", "binary_session"),
+            call("close", "close_binary", status),
+            call("after", "binary_session"),
+          ],
+          "binary_session",
+        ).repeatedCallCount,
+      ).toBe(repeats);
+    }
   });
 
   it("counts identical arguments with reversed Unicode key insertion order", () => {
@@ -125,9 +323,123 @@ describe("Codex agent release evaluation", () => {
   });
 });
 
+describe("Codex agent routing and error evaluation", () => {
+  it("preserves an unrecognized structured failure without inventing its code", () => {
+    const metrics = evaluateCodexEvents(
+      [
+        {
+          type: "item.completed",
+          item: {
+            type: "mcp_tool_call",
+            server: "rea",
+            tool: "close_binary",
+            arguments: {},
+            result: { structured_content: { error: "unrecognized failure" } },
+          },
+        },
+      ],
+      "close_binary",
+      { requiredToolSubsequence: ["close_binary"] },
+    );
+    expect(metrics.reaCalls[0]).toMatchObject({ error: true, errorCode: null });
+    expect(metrics.requiredToolSubsequenceMet).toBe(false);
+  });
+
+  it("requires no REA call when target selection is missing", () => {
+    const events = [
+      {
+        type: "item.completed",
+        item: { type: "agent_message", text: "Which app should I inspect?" },
+      },
+    ];
+    expect(evaluateCodexEvents(events, null)).toMatchObject({
+      naturalUse: false,
+      correctFirstTool: true,
+      firstTool: null,
+    });
+    expect(
+      evaluateCodexEvents(
+        [
+          ...events,
+          {
+            type: "item.completed",
+            item: {
+              type: "mcp_tool_call",
+              server: "rea",
+              tool: "analyze_javascript_application",
+              arguments: { input_path: "/nearby/test-fixture" },
+            },
+          },
+        ],
+        null,
+      ).correctFirstTool,
+    ).toBe(false);
+  });
+
+  it("counts actual text-only REA errors and SDK-rejected schema inputs once per call", () => {
+    const source = {
+      kind: "retained-evidence",
+      evidence_id: `ev_${"a".repeat(64)}`,
+    };
+    const failed = (id: string, arguments_: unknown, text: string) => ({
+      type: "item.completed",
+      item: {
+        id,
+        type: "mcp_tool_call",
+        server: "rea",
+        tool: "inspect_analysis_view",
+        arguments: arguments_,
+        status: "failed",
+        error: null,
+        result: { content: [{ type: "text", text }], structured_content: null },
+      },
+    });
+    const metrics = evaluateCodexEvents(
+      [
+        failed(
+          "sdk",
+          { source, view: { kind: "module", path: "main.js" } },
+          "Input validation error: Invalid arguments for tool inspect_analysis_view: view.kind: Invalid discriminator value.",
+        ),
+        failed(
+          "ambiguous",
+          {
+            source,
+            view: {
+              kind: "item",
+              collection: "modules",
+              selector: { path: "main.js" },
+            },
+          },
+          JSON.stringify({
+            error: {
+              code: "invalid_request",
+              message:
+                "Multiple modules have this path; select one by node_id.",
+            },
+          }),
+        ),
+        failed(
+          "incomplete-preview",
+          { source, view: { kind: "summary" } },
+          '{"error":{"code":"invalid_request"',
+        ),
+      ],
+      "inspect_analysis_view",
+    );
+    expect(metrics.inputValidationFailureCount).toBe(2);
+    expect(metrics.reaCalls.map(({ errorCode }) => errorCode)).toEqual([
+      null,
+      "invalid_request",
+      null,
+    ]);
+  });
+});
+
 describe("Codex agent completion evaluation", () => {
   it("does not present matching answer terms as factual correctness or honesty", () => {
-    const evidenceId = `ev_${"a".repeat(64)}`;
+    const evidence = observation("analyze_javascript_application");
+    const evidenceId = evidence.evidence_id;
     const metrics = evaluateCodexEvents(
       [
         {
@@ -138,7 +450,7 @@ describe("Codex agent completion evaluation", () => {
             server: "rea",
             tool: "analyze_javascript_application",
             arguments: { input_path: "/tmp/app.asar" },
-            result: { evidence_id: evidenceId },
+            result: { structuredContent: evidence },
           },
         },
         {
@@ -238,11 +550,15 @@ describe("Codex agent completion evaluation", () => {
 
 describe("Codex agent workflow evaluation", () => {
   it("requires an ordered tool subsequence and rejects input validation failures", () => {
-    const evidenceId = `ev_${"b".repeat(64)}`;
+    const comparison = observation("compare_javascript_export_shapes");
+    const evidenceId = comparison.evidence_id;
     const call = (
       id: string,
       tool: string,
-      result: unknown = { evidence_id: evidenceId },
+      result: unknown = {
+        structuredContent:
+          tool === comparison.operation ? comparison : observation(tool),
+      },
     ) => ({
       type: "item.completed",
       item: {

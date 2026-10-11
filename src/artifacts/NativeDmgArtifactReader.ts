@@ -111,7 +111,9 @@ const createSystemHost = (
 /** Read-only macOS DMG adapter that owns attachment and reverse-order detach. */
 export class NativeDmgArtifactReader implements ArtifactReader {
   readonly format = "file" as const;
+  private readonly host: NativeDmgHost;
   readonly #provenance: ArtifactCommand[] = [];
+  #initialization: Promise<void> | undefined;
   #directory: DirectoryArtifactReader | undefined;
   #devices: string[] = [];
   #inventoryConfirmedDevices = new Set<string>();
@@ -121,33 +123,24 @@ export class NativeDmgArtifactReader implements ArtifactReader {
   #attachOutputReturned = false;
   #attachMayHaveMounted = false;
   #ownershipUncertainty: string | undefined;
+  #closed = false;
+  #closePromise: Promise<void> | undefined;
 
-  private constructor(
+  constructor(
     private readonly path: string,
-    private readonly host: NativeDmgHost,
-  ) {}
-
-  /** Verify and attach one image beneath an exclusively owned temporary root. */
-  static async create(
-    path: string,
     environment: Readonly<NodeJS.ProcessEnv>,
-    signal?: AbortSignal,
     host?: NativeDmgHost,
-  ): Promise<NativeDmgArtifactReader> {
+  ) {
     if (process.platform !== "darwin" && host === undefined)
       throw new ArtifactReaderFailure(
         "unavailable",
         "Native DMG traversal is available only on macOS",
       );
-    const reader = new NativeDmgArtifactReader(
-      path,
-      host ?? createSystemHost(environment),
-    );
-    await reader.attach(signal);
-    return reader;
+    this.host = host ?? createSystemHost(environment);
   }
 
   async *entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry> {
+    await this.#ensureAttached(signal);
     if (this.#directory === undefined)
       throw new ArtifactReaderFailure("unavailable", "DMG is not attached");
     const prefix = basename(this.path);
@@ -155,11 +148,10 @@ export class NativeDmgArtifactReader implements ArtifactReader {
       yield { ...entry, path: `${prefix}/${entry.path}` };
   }
 
-  open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
+  async open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
+    await this.#ensureAttached(signal);
     if (this.#directory === undefined)
-      return Promise.reject(
-        new ArtifactReaderFailure("unavailable", "DMG is not attached"),
-      );
+      throw new ArtifactReaderFailure("unavailable", "DMG is not attached");
     return this.#directory.open(entry, signal);
   }
 
@@ -167,7 +159,19 @@ export class NativeDmgArtifactReader implements ArtifactReader {
     return structuredClone(this.#provenance);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    this.#closed = true;
+    this.#closePromise ??= this.#closeOwnedResources().catch(
+      (cause: unknown) => {
+        this.#closePromise = undefined;
+        throw cause;
+      },
+    );
+    return this.#closePromise;
+  }
+
+  async #closeOwnedResources(): Promise<void> {
+    await this.#initialization?.catch(() => undefined);
     let detachFailure = await this.#reconcileAttachState();
     let remainingDevices: string[] = [];
     for (const device of [...this.#devices].reverse()) {
@@ -281,7 +285,16 @@ export class NativeDmgArtifactReader implements ArtifactReader {
     }
   }
 
-  async attach(signal?: AbortSignal): Promise<void> {
+  async #ensureAttached(signal?: AbortSignal): Promise<void> {
+    if (this.#closed)
+      throw new ArtifactReaderFailure("unavailable", "DMG reader is closed");
+    this.#initialization ??= this.#attach(signal);
+    await this.#initialization;
+    if (this.#closed)
+      throw new ArtifactReaderFailure("unavailable", "DMG reader is closed");
+  }
+
+  async #attach(signal?: AbortSignal): Promise<void> {
     await runChecked(this.host, ["verify", this.path], signal);
     this.#provenance.push(command(["verify", this.path], ["read"]));
     const baseline = await this.#readInfo();
@@ -361,20 +374,6 @@ export class NativeDmgArtifactReader implements ArtifactReader {
         this.#attachMayHaveMounted = false;
         this.#ownershipUncertainty = undefined;
       }
-      let cleanupFailure: unknown;
-      try {
-        await this.close();
-      } catch (cleanupCause: unknown) {
-        cleanupFailure = cleanupCause;
-      }
-      if (cleanupFailure !== undefined)
-        throw ArtifactReaderFailure.withCleanup(
-          cause,
-          ArtifactReaderFailure.cleanupObservation(
-            cleanupFailure,
-            `DMG mount root ${this.#mountRoot ?? this.path}`,
-          ),
-        );
       throw cause;
     }
   }

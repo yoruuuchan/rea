@@ -1,6 +1,10 @@
+import {
+  semanticFixtureGraph,
+  semanticGraphTestEvidence,
+  unknownSemanticGraphTestEvidence,
+} from "../../../tests/support/javascriptSemanticGraphFixture.js";
 import { expect, it } from "vitest";
 
-import type { ApplicationGraphEvidence } from "./javascriptApplicationEvidenceSchemas.js";
 import {
   JAVASCRIPT_SEMANTIC_NODE_KINDS,
   JAVASCRIPT_SEMANTIC_RELATION_FAMILIES,
@@ -8,7 +12,6 @@ import {
   type JavaScriptSemanticGraphInput,
 } from "./javascriptSemanticGraphSchemas.js";
 import {
-  createJavaScriptSemanticFingerprint,
   createJavaScriptSemanticGraph,
   createJavaScriptSemanticGraphNode,
   createJavaScriptSemanticGraphRelation,
@@ -26,76 +29,6 @@ import type { JsonValue } from "../jsonValue.js";
 
 const SHA = "a".repeat(64);
 const JAG_ID = `jag_${"b".repeat(64)}`;
-const completeCoverage = {
-  status: "complete",
-  truncated: false,
-  omitted_count: 0,
-  limits: [],
-} satisfies ApplicationGraphEvidence["coverage"];
-
-const evidence = (
-  state: "observed" | "inferred" = "observed",
-): ApplicationGraphEvidence => ({
-  authority:
-    state === "observed"
-      ? "ast-static-analysis"
-      : "static-relationship-inference",
-  state,
-  confidence: state === "observed" ? "exact" : "high",
-  artifact: { available: true, artifact_id: `art_${SHA}`, sha256: SHA },
-  location: {
-    available: true,
-    value: {
-      kind: "source-range",
-      source: "bundle.js",
-      start: { line: 1, column: 0 },
-      end: { line: 1, column: 10 },
-    },
-  },
-  extractor: {
-    name: "test",
-    version: "1",
-    operation: "recover-semantic-relation",
-    executable_sha256: null,
-  },
-  coverage: completeCoverage,
-  limitations:
-    state === "observed"
-      ? []
-      : ["Static reachability does not prove runtime execution."],
-  evidence_ids: [],
-});
-
-const unknownEvidence = (): ApplicationGraphEvidence => ({
-  authority: "unknown",
-  state: "unknown",
-  confidence: "unknown",
-  artifact: {
-    available: false,
-    reason: "unknown",
-    detail: "Unknown artifact.",
-  },
-  location: {
-    available: false,
-    reason: "unresolved",
-    detail: "Dynamic call target.",
-  },
-  extractor: {
-    name: "test",
-    version: "1",
-    operation: "retain-dynamic-call",
-    executable_sha256: null,
-  },
-  coverage: {
-    status: "unknown",
-    truncated: false,
-    omitted_count: null,
-    limits: [],
-  },
-  limitations: ["Dynamic call target remains unknown."],
-  evidence_ids: [],
-});
-
 const node = (
   kind: (typeof JAVASCRIPT_SEMANTIC_NODE_KINDS)[number],
   role: string,
@@ -119,133 +52,13 @@ const node = (
       application_node_ids: [],
       label: role,
       properties,
-      evidence: evidence(),
+      evidence: semanticGraphTestEvidence(),
     },
     evidenceContexts,
   );
-
-const fixtureGraph = (withUnknown = false): JavaScriptSemanticGraph => {
-  const evidenceContexts = new JavaScriptSemanticEvidenceContextRegistry();
-  const module = node("module", "module", evidenceContexts);
-  const literal = node("literal", "literal", evidenceContexts, {
-    value: "TOKEN",
-  });
-  const binding = node("binding", "binding", evidenceContexts);
-  const callable = node("function", "function", evidenceContexts);
-  const request = node("request", "request", evidenceContexts, {
-    endpoint: "https://example.invalid/v1",
-  });
-  const relations = [
-    createJavaScriptSemanticGraphRelation(
-      {
-        source_node_id: literal.node_id,
-        target_node_id: binding.node_id,
-        relation: "defines",
-        resolution: "resolved",
-        properties: {},
-        evidence: evidence("inferred"),
-      },
-      evidenceContexts,
-    ),
-    createJavaScriptSemanticGraphRelation(
-      {
-        source_node_id: binding.node_id,
-        target_node_id: callable.node_id,
-        relation: "captures",
-        resolution: "resolved",
-        properties: {},
-        evidence: evidence("inferred"),
-      },
-      evidenceContexts,
-    ),
-    createJavaScriptSemanticGraphRelation(
-      {
-        source_node_id: callable.node_id,
-        target_node_id: request.node_id,
-        relation: "constructs-request",
-        resolution: "resolved",
-        properties: {},
-        evidence: evidence("inferred"),
-      },
-      evidenceContexts,
-    ),
-  ];
-  const dynamic = withUnknown
-    ? createJavaScriptSemanticGraphUnknown(
-        {
-          node_id: callable.node_id,
-          family: "call-flow",
-          relation_kinds: ["calls"],
-          reason: "dynamic-call",
-          detail: "Computed callee is unresolved.",
-          candidate_node_ids: [],
-          evidence: unknownEvidence(),
-        },
-        evidenceContexts,
-      )
-    : null;
-  const unknowns = dynamic === null ? [] : [dynamic];
-  const coverageFamilies = JAVASCRIPT_SEMANTIC_RELATION_FAMILIES.map(
-    (family) => ({
-      family,
-      status:
-        withUnknown && family === "call-flow"
-          ? ("unknown" as const)
-          : ("complete" as const),
-      retained_relations: relations.filter(({ relation }) =>
-        relation === "defines"
-          ? family === "data-flow"
-          : relation === "captures"
-            ? family === "closure"
-            : family === "request",
-      ).length,
-      omitted_relations: withUnknown && family === "call-flow" ? null : 0,
-      unknown_ids:
-        dynamic !== null && family === "call-flow" ? [dynamic.unknown_id] : [],
-    }),
-  );
-  const fingerprint = createJavaScriptSemanticFingerprint(
-    {
-      function_node_id: callable.node_id,
-      algorithm: "rea.javascript-semantic-function",
-      status: "complete",
-      components: {
-        parameter_arity: 0,
-        normalized_ast_sha256: "1".repeat(64),
-        control_flow_sha256: "2".repeat(64),
-        relation_shape_sha256: "3".repeat(64),
-        literal_set_sha256: "4".repeat(64),
-        effects: ["network"],
-      },
-      limitations: [],
-      evidence: evidence("inferred"),
-    },
-    evidenceContexts,
-  );
-  return createJavaScriptSemanticGraph({
-    schema: "JavaScriptSemanticRelationGraph",
-    root_artifact_sha256: SHA,
-    application_graph_id: JAG_ID,
-    root_node_ids: [module.node_id],
-    evidence_contexts: evidenceContexts.contexts,
-    nodes: [request, callable, binding, literal, module],
-    relations,
-    fingerprints: [fingerprint],
-    unknowns,
-    coverage: {
-      status: withUnknown ? "partial" : "complete",
-      truncated: false,
-      omitted_nodes: withUnknown ? null : 0,
-      omitted_relations: withUnknown ? null : 0,
-      limits: [],
-      families: coverageFamilies,
-    },
-    limitations: withUnknown ? ["Dynamic call target remains unknown."] : [],
-  });
-};
 
 const graphWithCandidateEdge = (): JavaScriptSemanticGraph => {
-  const graph = fixtureGraph();
+  const graph = semanticFixtureGraph();
   const input = constructionInput(graph);
   const evidenceContexts = registryForGraph(graph);
   const literal = graph.nodes.find(({ kind }) => kind === "literal");
@@ -259,7 +72,7 @@ const graphWithCandidateEdge = (): JavaScriptSemanticGraph => {
       relation: "supplies-request-field",
       resolution: "candidate",
       properties: { field: "authorization" },
-      evidence: evidence("inferred"),
+      evidence: semanticGraphTestEvidence("inferred"),
     },
     evidenceContexts,
   );
@@ -303,7 +116,7 @@ const registryForGraph = (
 };
 
 it("returns every relevant unknown inline", () => {
-  const graph = fixtureGraph(true);
+  const graph = semanticFixtureGraph(true);
   const callable = graph.nodes.find(({ kind }) => kind === "function");
   if (callable === undefined) throw new Error("Expected callable node");
   const result = queryJavaScriptSemanticGraph(graph, {
@@ -316,8 +129,22 @@ it("returns every relevant unknown inline", () => {
   expect(result.unknowns).toHaveLength(1);
 });
 
+it("does not admit a semantic-node seed absent from the graph", () => {
+  const result = queryJavaScriptSemanticGraph(semanticFixtureGraph(), {
+    seed: { kind: "semantic-node", node_id: `jsrg_node_${"f".repeat(64)}` },
+    direction: "forward-influence",
+  });
+
+  expect(result).toMatchObject({
+    status: "no-match",
+    seed_node_ids: [],
+    nodes: [],
+    summary: { total_seed_matches: 0, traversed_nodes: 0 },
+  });
+});
+
 it("returns the complete deterministic forward influence result inline", () => {
-  const graph = fixtureGraph();
+  const graph = semanticFixtureGraph();
   const input = {
     seed: { kind: "literal" as const, value: "TOKEN" },
     direction: "forward-influence" as const,
@@ -334,7 +161,7 @@ it("returns the complete deterministic forward influence result inline", () => {
 });
 
 it("returns only the referenced evidence contexts with resolvable trace facts", () => {
-  const graph = fixtureGraph();
+  const graph = semanticFixtureGraph();
   const result = queryJavaScriptSemanticGraph(graph, {
     seed: { kind: "literal", value: "TOKEN" },
     direction: "forward-influence",
@@ -356,7 +183,7 @@ it("returns only the referenced evidence contexts with resolvable trace facts", 
 });
 
 it("traverses paths beyond the former fixed depth ceiling", () => {
-  const original = fixtureGraph();
+  const original = semanticFixtureGraph();
   const input = constructionInput(original);
   const evidenceContexts = registryForGraph(original);
   const request = original.nodes.find(({ kind }) => kind === "request");
@@ -372,7 +199,7 @@ it("traverses paths beyond the former fixed depth ceiling", () => {
         relation: "reads",
         resolution: "resolved",
         properties: {},
-        evidence: evidence("inferred"),
+        evidence: semanticGraphTestEvidence("inferred"),
       },
       evidenceContexts,
     ),
@@ -421,7 +248,7 @@ it("accepts deeply nested semantic properties", () => {
 });
 
 it("keeps relevant dynamic frontiers unknown", () => {
-  const result = queryJavaScriptSemanticGraph(fixtureGraph(true), {
+  const result = queryJavaScriptSemanticGraph(semanticFixtureGraph(true), {
     seed: { kind: "literal", value: "TOKEN" },
     direction: "forward-influence",
   });
@@ -488,7 +315,7 @@ it("retains all explicit unresolved candidate node identifiers", () => {
         { length: 1_001 },
         (_, index) => `jsrg_node_${index.toString(16).padStart(64, "0")}`,
       ),
-      evidence: unknownEvidence(),
+      evidence: unknownSemanticGraphTestEvidence(),
     },
     evidenceContexts,
   );
@@ -545,7 +372,7 @@ const relationBetween = (
       relation,
       resolution,
       properties: {},
-      evidence: evidence("inferred"),
+      evidence: semanticGraphTestEvidence("inferred"),
     },
     evidenceContexts,
   );

@@ -15,6 +15,7 @@ describe("JavaScript static analysis findings", () => {
   it("retains every static reference and Electron property in large literals", () => {
     const names = Array.from({ length: 10_001 }, (_, index) => `key${index}`);
     const source = [
+      'const { BrowserWindow, contextBridge } = require("electron");',
       ...names.map(
         (name, index) => `import value${index} from "./${name}.js";`,
       ),
@@ -25,7 +26,7 @@ describe("JavaScript static analysis findings", () => {
     const analysis = analyzeJavaScriptStaticSource(source);
 
     expect(analysis.parse_status).toBe("complete");
-    expect(analysis.references).toHaveLength(10_002);
+    expect(analysis.references).toHaveLength(10_003);
     expect(analysis.electron.browser_windows[0]?.web_preferences).toHaveLength(
       10_001,
     );

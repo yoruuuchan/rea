@@ -252,6 +252,65 @@ describe("trace-dylib-resolution CLI", () => {
   );
 });
 
+cliTest(
+  "retains directory requirements when resolving dylib install names",
+  async ({ cli }) => {
+    const directory = await createTestTempDirectory("rea-dylib-path-cli-");
+    const names = [
+      "@loader_path/lib/libhelper.dylib/",
+      "@loader_path/lib/libhelper.dylib/.",
+      "@rpath/libhelper.dylib/",
+      "@rpath/libhelper.dylib/.",
+      "@rpath/",
+      "@loader_path/lib/./libhelper.dylib",
+      "@loader_path/lib//libhelper.dylib",
+    ];
+    await writeFiles(directory, {
+      tool: machoImage({
+        commands: [
+          buildVersionCommand(1),
+          rpathCommand("@loader_path/lib/libhelper.dylib"),
+          rpathCommand("@loader_path/lib"),
+          ...names.map((name) => dylibCommand(LC.LOAD_DYLIB, name)),
+        ],
+      }),
+      "lib/libhelper.dylib": machoImage({
+        fileType: FILE_TYPE.dylib,
+        commands: [buildVersionCommand(1)],
+      }),
+    });
+    const result = await cli.run({
+      arguments: ["trace-dylib-resolution", join(directory, "tool"), "--json"],
+      environment: ENVIRONMENT,
+    });
+    expect(result.exitCode, JSON.stringify(result.json)).toBe(0);
+    const trace = dylibResolutionResultSchema.parse(
+      parseEvidence(result.json).normalized_result,
+    );
+    expect(
+      trace.edges.map(({ install_name, candidates, resolution }) => ({
+        install_name,
+        outcome: candidates[0]?.outcome,
+        resolution,
+      })),
+    ).toEqual(
+      names.map((name, index) => ({
+        install_name: name,
+        outcome: index < 5 ? "absent" : "resolved",
+        resolution:
+          index < 5
+            ? { status: "unresolved", image: null }
+            : { status: "resolved", image: "lib/libhelper.dylib" },
+      })),
+    );
+    expect(
+      trace.findings.map(({ kind, edge_index }) => [kind, edge_index]),
+    ).toEqual(
+      [0, 1, 2, 3, 4].map((index) => ["required-load-unresolved", index]),
+    );
+  },
+);
+
 describe.skipIf(process.getuid?.() === 0)(
   "trace-dylib-resolution permissions",
   () => {

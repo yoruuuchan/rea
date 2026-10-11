@@ -7,7 +7,7 @@ import type { ProcessCapture } from "./processCaptureParsing.js";
 import { comparableTerminalFrame } from "./processObservation.js";
 import { AnalysisInputError } from "../analysisErrorCore.js";
 import { jsonValueSchema } from "../jsonValue.js";
-import { type ProcessTraceSpecification } from "./processTraceSpecification.js";
+import type { ProcessTraceSpecification } from "./processTraceSpecification.js";
 import { processTraceComparisonResultSchema } from "./processTraceEvaluation.js";
 import {
   dimensionsForTraceSources,

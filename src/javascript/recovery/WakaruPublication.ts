@@ -22,6 +22,7 @@ import type {
   resolveWakaruCommand,
   runWakaruCommand,
 } from "./WakaruCommand.js";
+import type { WakaruVersionAdmission } from "./WakaruVersion.js";
 
 type PublicationContext = {
   tree: SafeOutputTree;
@@ -34,6 +35,7 @@ type PublicationContext = {
     bytes: number;
   };
   engine: Awaited<ReturnType<typeof resolveWakaruCommand>>;
+  admitted: Exclude<WakaruVersionAdmission, { status: "unsupported" }>;
   parsed: Awaited<ReturnType<typeof parseWakaruReports>>;
   execution: Awaited<ReturnType<typeof runWakaruCommand>>;
   signal?: AbortSignal;
@@ -48,7 +50,12 @@ export const publishWakaruArtifacts = async (
   const { tree, source, parsed, staging, signal } = context;
   const write = async (path: string, bytes: Buffer) => {
     const sha256 = recoveryDigest(bytes);
-    const file = await tree.write(path, Readable.from([bytes]), sha256, signal);
+    const file = await tree.write(
+      path,
+      Readable.from([bytes]),
+      { sha256, bytes: bytes.byteLength },
+      signal,
+    );
     return {
       path: join(tree.outputRoot, file.relativePath),
       sha256: file.sha256,
@@ -86,7 +93,7 @@ export const publishWakaruArtifacts = async (
     source: { ...source, published_copy: publishedCopy },
     engine: {
       id: "wakaru",
-      version: WAKARU_RELEASE.version,
+      version: context.admitted.version,
       executable: {
         path: context.engine.command,
         sha256: context.engine.sha256,
@@ -107,7 +114,14 @@ export const publishWakaruArtifacts = async (
     total: parsed.report.total,
     failed: parsed.report.failed,
     modules,
-    warnings: parsed.report.warnings,
+    warnings: parsed.report.warnings.map(
+      ({ filename, kind, is_error, message }) => ({
+        filename,
+        kind,
+        is_error,
+        message,
+      }),
+    ),
     report,
     provenance,
     analysis_input:
@@ -118,7 +132,12 @@ export const publishWakaruArtifacts = async (
             format: "directory" as const,
           },
     runtime_equivalence: "unknown" as const,
-    limitations: [...RECOVERY_LIMITATIONS],
+    limitations: [
+      ...RECOVERY_LIMITATIONS,
+      ...(context.admitted.status === "compatible"
+        ? [context.admitted.limitation]
+        : []),
+    ],
   };
   const manifest = await write(
     "manifest.json",

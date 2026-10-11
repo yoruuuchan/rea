@@ -1,7 +1,11 @@
 import type { JsonValue } from "../domain/jsonValue.js";
+import { redactCapturedTransportCredential } from "../process/ProviderDiagnosticRedaction.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
 import type { GhidraLaunch } from "./GhidraLauncher.js";
 import type { GhidraTransportKind } from "./GhidraTransport.js";
+
+/** Aggregate in-memory retention budget for this provider's launcher output. */
+export const GHIDRA_PROCESS_DIAGNOSTIC_BYTES = 8 * 1024 * 1024;
 
 /** Inputs needed to project bounded diagnostics for one Ghidra runtime. */
 export interface GhidraDiagnosticsOptions {
@@ -31,10 +35,6 @@ export const createGhidraDiagnostics = (
     Object.keys(options.previous).length > 0
   )
     return options.previous;
-  const redacted = (value: string): string =>
-    options.token === undefined
-      ? value
-      : value.replaceAll(options.token, "[REDACTED]");
   return {
     target_path: options.targetPath,
     target_sha256: options.targetSha256,
@@ -67,16 +67,19 @@ export const createGhidraDiagnostics = (
       : {
           exit_code: options.snapshot.exitCode ?? null,
           exit_signal: options.snapshot.signal ?? null,
-          stdout: boundedStream(options.snapshot.stdout, redacted),
-          stderr: boundedStream(options.snapshot.stderr, redacted),
+          diagnostic_truncated: options.snapshot.diagnosticTruncated === true,
+          stdout: boundedStream(options.snapshot.stdout, options.token),
+          stderr: boundedStream(options.snapshot.stderr, options.token),
         }),
   };
 };
 
 const boundedStream = (
   stream: ProviderProcessSnapshot["stdout"],
-  redact: (value: string) => string,
+  token: string | undefined,
 ): JsonValue => ({
-  text: redact(stream.text),
-  bytes: stream.bytes,
+  text: redactCapturedTransportCredential(stream, token, "[REDACTED]"),
+  // Preserve the historical total-byte counter; text is now bounded separately.
+  bytes: stream.observedBytes,
+  retained_bytes: stream.bytes,
 });

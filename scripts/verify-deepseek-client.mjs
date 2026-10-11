@@ -40,9 +40,9 @@ await Promise.all([
 ]);
 const environment = {
   PATH: process.env.PATH ?? "",
+  HOME: account,
   USERPROFILE: account,
   DSH_HOME: profile,
-  DSH_AGENTS_HOME: join(account, ".agents"),
   OPENAI_API_KEY: "local-fixture-key",
   REA_PROCESS_RUN_ID: verifier.run_id,
 };
@@ -328,7 +328,7 @@ try {
       "loopback custom OpenAI-compatible adapter; no live DeepSeek provider claim",
     modelContextWindow: 1000000,
     skillDiscovery:
-      "native DSH_AGENTS_HOME personal directory; isolated project root",
+      "native HOME shared personal directory; isolated project root",
     catalogSize: catalog?.length,
     patternCount,
     uniquePatterns: patterns.size,

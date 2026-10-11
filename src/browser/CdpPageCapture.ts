@@ -2,7 +2,7 @@ import type { InspectWebPageInput } from "../domain/browserObservation.js";
 import type { WebPageInspection } from "../domain/browserObservationSchemas.js";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
-import { type BrowserObservationOperation } from "../domain/browserObservationErrors.js";
+import type { BrowserObservationOperation } from "../domain/browserObservationErrors.js";
 import { stableWebResources } from "../domain/webInventory.js";
 import type { CdpEndpointDiscovery, CdpEndpointTarget } from "./CdpEndpoint.js";
 import { CdpConnection } from "./CdpConnection.js";
@@ -300,7 +300,7 @@ const normalizedInspection = (
   resources: [...captured.resources],
   network: {
     requests: [...state.events.network.values()],
-    websocket_events: [...state.events.websockets],
+    websocket_connections: [...state.events.webSocketConnectionsById.values()],
     coverage_started_at: state.startedAt,
     prior_activity_available: false,
   },

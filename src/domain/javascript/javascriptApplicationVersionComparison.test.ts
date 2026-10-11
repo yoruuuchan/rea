@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createEvidence } from "../evidence.js";
 import {
   createJavaScriptApplicationEdge,
   createJavaScriptApplicationGraph,
@@ -96,7 +97,137 @@ const compare = () =>
     rightNativeEvidence: [],
   });
 
+const unrelatedGraph = (artifactSha: string): JavaScriptApplicationGraph => {
+  const node = createJavaScriptApplicationNode({
+    kind: "javascript-chunk",
+    identity: {
+      strategy: "canonical-path",
+      stability: "artifact-version",
+      artifact_sha256: artifactSha,
+      path: "unrelated.js",
+    },
+    observations: [
+      {
+        label: "unrelated.js",
+        properties: {},
+        evidence: artifactEvidence(artifactSha, "unrelated.js"),
+      },
+    ],
+  });
+  return createJavaScriptApplicationGraph({
+    schema: "JavaScriptApplicationGraph",
+    root_node_ids: [node.node_id],
+    nodes: [node],
+    edges: [],
+    coverage: completeCoverage,
+    limitations: [],
+  });
+};
+
+const nativeEvidence = (sha256: string | undefined, ordinal: number) =>
+  createEvidence(
+    sha256 === undefined
+      ? undefined
+      : {
+          path: `/fixture/native-${ordinal}.js`,
+          sha256,
+          format: "javascript",
+        },
+    { id: "fixture", name: "Fixture", version: "1" },
+    {
+      operation: "analyze_javascript_module",
+      parameters: { ordinal },
+      confidence: "observed",
+      authority: "shipped-artifact",
+      result: { ordinal },
+    },
+  );
+
 describe("application version comparison result", () => {
+  it("links every exact digest observation only to its paired or unmatched item", () => {
+    const left = buildGraph(LEFT_SHA, 1);
+    const right = buildGraph(RIGHT_SHA, 2);
+    const leftEvidenceId = `ev_${"1".repeat(64)}`;
+    const rightEvidenceId = `ev_${"2".repeat(64)}`;
+    const leftBDigest = `${"0".repeat(63)}1`;
+    const leftNative = [
+      nativeEvidence(leftBDigest, 1),
+      nativeEvidence(leftBDigest, 2),
+      nativeEvidence("9".repeat(64), 3),
+    ];
+    const rightNative = [
+      nativeEvidence("0".repeat(64), 4),
+      nativeEvidence(undefined, 6),
+    ];
+    const unrelatedRight = unrelatedGraph(RIGHT_SHA);
+    const unmatched = compareJavaScriptApplicationVersions({
+      left: {
+        evidenceId: leftEvidenceId,
+        rootArtifactSha256: LEFT_SHA,
+        graph: left,
+      },
+      right: {
+        evidenceId: rightEvidenceId,
+        rootArtifactSha256: RIGHT_SHA,
+        graph: unrelatedRight,
+      },
+      leftNativeEvidence: leftNative,
+      rightNativeEvidence: rightNative,
+    });
+    const leftB = left.nodes.find(({ observations }) =>
+      observations.some(({ label }) => label === "b.js"),
+    );
+    if (leftB === undefined) throw new Error("Missing left b.js node");
+    const unmatchedB = unmatched.items.find(
+      ({ left_node_id: id }) => id === leftB.node_id,
+    );
+    expect(unmatchedB?.evidence_links).toEqual(
+      [
+        leftEvidenceId,
+        rightEvidenceId,
+        leftNative[0]!.evidence_id,
+        leftNative[1]!.evidence_id,
+      ].sort(),
+    );
+    const unrelatedItem = unmatched.items.find(
+      ({ right_node_id: id }) => id === unrelatedRight.nodes[0]?.node_id,
+    );
+    expect(unrelatedItem?.evidence_links).toEqual(
+      [leftEvidenceId, rightEvidenceId].sort(),
+    );
+
+    const paired = compareJavaScriptApplicationVersions({
+      left: {
+        evidenceId: leftEvidenceId,
+        rootArtifactSha256: LEFT_SHA,
+        graph: left,
+      },
+      right: {
+        evidenceId: rightEvidenceId,
+        rootArtifactSha256: RIGHT_SHA,
+        graph: right,
+      },
+      leftNativeEvidence: [nativeEvidence("0".repeat(64), 5)],
+      rightNativeEvidence: rightNative,
+    });
+    const leftA = left.nodes.find(({ observations }) =>
+      observations.some(({ label }) => label === "a.js"),
+    );
+    if (leftA === undefined) throw new Error("Missing left a.js node");
+    const pairedA = paired.items.find(
+      ({ left_node_id: id }) => id === leftA.node_id,
+    );
+    expect(pairedA?.match.status).toBe("matched");
+    expect(pairedA?.evidence_links).toEqual(
+      [
+        leftEvidenceId,
+        rightEvidenceId,
+        nativeEvidence("0".repeat(64), 5).evidence_id,
+        rightNative[0]!.evidence_id,
+      ].sort(),
+    );
+  });
+
   it("returns a sealed change graph that passes complete validation", () => {
     const result = compare();
     expect(

@@ -11,6 +11,7 @@ import type { Logger } from "pino";
 
 import { ok } from "../../../../src/domain/result.js";
 import { GhidraClient } from "../../../../src/ghidra/GhidraClient.js";
+import { GHIDRA_PROCESS_DIAGNOSTIC_BYTES } from "../../../../src/ghidra/GhidraDiagnostics.js";
 import { GhidraHeadlessLauncher } from "../../../../src/ghidra/GhidraLauncher.js";
 import type { GhidraDiagnostic } from "../../../../src/ghidra/GhidraClientTypes.js";
 import type {
@@ -18,7 +19,10 @@ import type {
   GhidraLauncher,
 } from "../../../../src/ghidra/GhidraLauncher.js";
 import type { GhidraTransportKind } from "../../../../src/ghidra/GhidraTransport.js";
-import { GHIDRA_SESSION_CAPABILITIES } from "../../../../src/ghidra/GhidraSessionValues.js";
+import {
+  GHIDRA_MUTATING_OPERATIONS,
+  GHIDRA_SESSION_CAPABILITIES,
+} from "../../../../src/ghidra/GhidraSessionValues.js";
 import { waitForExit as waitForChildExit } from "../../../support/process/processFixture.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 
@@ -49,7 +53,8 @@ type FixtureMode =
   | "hang_tools"
   | "exit_tools"
   | "silent"
-  | "exit";
+  | "exit"
+  | "diagnostic_output";
 
 class FixtureLauncher implements GhidraLauncher {
   #notifyStarted: ((child: ChildProcess) => void) | undefined;
@@ -141,7 +146,7 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close()));
 });
 
-describe("GhidraClient", () => {
+describe("GhidraClient captured source snapshot", () => {
   it("exposes the immutable import snapshot only during the live session", async () => {
     const client = clientFor(new FixtureLauncher());
     await expect(client.readTargetSnapshot()).resolves.toMatchObject({
@@ -149,16 +154,43 @@ describe("GhidraClient", () => {
       error: { kind: "protocol" },
     });
     await expect(client.start()).resolves.toMatchObject({ ok: true });
+    const abortedRead = new AbortController();
+    abortedRead.abort();
+    await expect(
+      client.readTargetSnapshot(1024, abortedRead.signal),
+    ).resolves.toMatchObject({ ok: false, error: { kind: "cancelled" } });
     const snapshot = await client.readTargetSnapshot();
     expect(snapshot.ok).toBe(true);
-    if (snapshot.ok) expect(snapshot.value).toEqual(readFileSync(fixturePath));
+    const expected = readFileSync(fixturePath);
+    if (snapshot.ok)
+      expect(snapshot.value).toEqual({
+        kind: "captured",
+        bytes: expected,
+      });
+    await expect(
+      client.readTargetSnapshot(expected.length),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { kind: "captured", bytes: expected },
+    });
+    const bounded = await client.readTargetSnapshot(0);
+    expect(bounded).toMatchObject({
+      ok: true,
+      value: {
+        kind: "over-capacity",
+        maximumBytes: 0,
+        sourceBytesAtLeast: readFileSync(fixturePath).length,
+      },
+    });
     await client.close();
     await expect(client.readTargetSnapshot()).resolves.toMatchObject({
       ok: false,
       error: { kind: "protocol" },
     });
   });
+});
 
+describe("GhidraClient", () => {
   it("completes an exact, fragmented post-analysis handshake", async () => {
     const launcher = new FixtureLauncher("fragmented");
     const client = clientFor(launcher);
@@ -175,7 +207,7 @@ describe("GhidraClient", () => {
         capabilities: GHIDRA_SESSION_CAPABILITIES.filter(
           (value) =>
             HOST_TRANSPORT === "unix-socket" ||
-            value !== "annotate_native_function",
+            !GHIDRA_MUTATING_OPERATIONS.has(value),
         ),
         target: {
           image_base: "0x1000",
@@ -453,6 +485,53 @@ describe("GhidraClient cleanup and diagnostics", () => {
       process_id: expect.any(Number),
       run_id: "11111111-1111-4111-8111-111111111111",
     });
+    await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("bounds long-lived launcher diagnostics without interrupting the session", async () => {
+    const launcher = new FixtureLauncher("diagnostic_output");
+    const client = clientFor(launcher);
+    await expect(client.start()).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.callTool("list_strings", { document: null }),
+    ).resolves.toMatchObject({ ok: true });
+
+    await vi.waitFor(() => {
+      expect(client.diagnostics()).toMatchObject({
+        diagnostic_truncated: true,
+      });
+    });
+    const diagnostics = client.diagnostics();
+    const stdout = diagnostics.stdout as {
+      bytes: number;
+      retained_bytes: number;
+      text: string;
+    };
+    const stderr = diagnostics.stderr as {
+      bytes: number;
+      retained_bytes: number;
+      text: string;
+    };
+    expect(stdout.bytes + stderr.bytes).toBeGreaterThan(
+      GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
+    );
+    expect(stdout.retained_bytes + stderr.retained_bytes).toBeLessThanOrEqual(
+      GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
+    );
+    expect(stdout.bytes).toBeGreaterThanOrEqual(stdout.retained_bytes);
+    expect(stderr.bytes).toBeGreaterThanOrEqual(stderr.retained_bytes);
+    expect(JSON.stringify(diagnostics)).not.toContain(launcher.tokens[0] ?? "");
+    expect(`${stdout.text}${stderr.text}`).toContain("[REDACTED]");
+    expect(
+      stderr.text.endsWith(
+        "source=/tmp/local-evidence.bin?cursor=keep&[REDACTED]",
+      ),
+    ).toBe(true);
+
+    await client.close();
+    expect(exited(launcher.processes[0])).toBe(true);
     await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
       code: "ENOENT",
     });

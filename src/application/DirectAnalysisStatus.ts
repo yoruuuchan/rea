@@ -15,7 +15,7 @@ export const runSessionStatus = async (
 ): Promise<JsonValue> => {
   const config = dependencies.readConfiguration();
   if (!config.ok) return { error: projectAnalysisError(config.error) };
-  const session = dependencies.createBinarySession(config.value, logger);
+  const session = await dependencies.createBinarySession(config.value, logger);
   try {
     return {
       ...jsonObjectSchema.parse(session.status()),

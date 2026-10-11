@@ -20,8 +20,12 @@ it.each([
     const stderr =
       "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\r\n";
     const cause = new OwnedCommandFailure("process", "Decoder failed", {
-      stdout: { text: "", bytes: 0 },
-      stderr: { text: stderr, bytes: Buffer.byteLength(stderr) },
+      stdout: { text: "", bytes: 0, observedBytes: 0 },
+      stderr: {
+        text: stderr,
+        bytes: Buffer.byteLength(stderr),
+        observedBytes: Buffer.byteLength(stderr),
+      },
       exitCode,
       signal,
     });
@@ -70,8 +74,12 @@ it.each([
       format: "har",
     });
     const cause = new OwnedCommandFailure("process", "Decoder failed", {
-      stdout: { text: "", bytes: 0 },
-      stderr: { text: stderr, bytes: Buffer.byteLength(stderr) },
+      stdout: { text: "", bytes: 0, observedBytes: 0 },
+      stderr: {
+        text: stderr,
+        bytes: Buffer.byteLength(stderr),
+        observedBytes: Buffer.byteLength(stderr),
+      },
       exitCode,
       signal,
     });
@@ -128,8 +136,16 @@ it("retains actual command status and both diagnostic streams when cleanup also 
     "process",
     "Observed command failure",
     {
-      stdout: { text: "original provider output", bytes: 24 },
-      stderr: { text: "private-marker provider reason", bytes: 30 },
+      stdout: {
+        text: "original provider output",
+        bytes: 24,
+        observedBytes: 24,
+      },
+      stderr: {
+        text: "private-marker provider reason",
+        bytes: 30,
+        observedBytes: 30,
+      },
       exitCode: 2,
       signal: null,
     },

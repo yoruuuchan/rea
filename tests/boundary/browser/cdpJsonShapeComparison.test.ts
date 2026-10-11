@@ -39,6 +39,68 @@ const equivalentBodies = [
   },
 ];
 
+it("captures all repeated array rows and empty arrays without retaining payload values", async () => {
+  const count = 6_000;
+  const body = JSON.stringify(
+    Array.from({ length: count }, (_, index) => ({
+      value: index % 2 === 0 ? index : "payload-value-excluded",
+      nested: index % 2 === 0 ? [] : [true, null],
+      empty: [],
+      "*": { "": "payload-value-excluded" },
+    })),
+  );
+  const before = captureBody("base64 response", body);
+  const shape = before.network.requests[0]?.body_shapes.response;
+  const element = { kind: "array-element" };
+  const property = (name: string) => ({ kind: "property", name });
+  expect(shape).toMatchObject({
+    root_type: "array",
+    node_count: count * 7 + 1,
+    max_depth_observed: 3,
+    properties: [
+      { path: [element], types: ["object"], observations: count },
+      {
+        path: [element, property("*")],
+        types: ["object"],
+        observations: count,
+      },
+      {
+        path: [element, property("*"), property("")],
+        types: ["string"],
+        observations: count,
+      },
+      {
+        path: [element, property("empty")],
+        types: ["array"],
+        observations: count,
+      },
+      {
+        path: [element, property("nested")],
+        types: ["array"],
+        observations: count,
+      },
+      {
+        path: [element, property("nested"), element],
+        types: ["boolean", "null"],
+        observations: count,
+      },
+      {
+        path: [element, property("value")],
+        types: ["number", "string"],
+        observations: count,
+      },
+    ],
+  });
+  expect(JSON.stringify(shape)).not.toContain("payload-value-excluded");
+  const after = captureBody("base64 response", body);
+  expect(
+    (await compareCaptures(before, after)).dimensions.network,
+  ).toMatchObject({
+    status: "unknown",
+    total_changes: 0,
+  });
+});
+
 describe.each<BodySource>(["request", "response", "base64 response"])(
   "CDP %s JSON shape comparison",
   (source) => {
@@ -323,7 +385,7 @@ const captureBody = (source: BodySource, body: string): WebPageInspection => {
     resources: [],
     network: {
       requests: [...events.network.values()],
-      websocket_events: events.websockets,
+      websocket_connections: [...events.webSocketConnectionsById.values()],
       coverage_started_at: CAPTURE_TIME,
       prior_activity_available: false,
     },

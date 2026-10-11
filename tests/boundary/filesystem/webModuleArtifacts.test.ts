@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { exportWebScripts } from "../../../src/application/WebScriptExportService.js";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { LocalWebModuleArtifacts } from "../../../src/browser/modules/WebModuleArtifacts.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { webScriptExportResultSchema } from "../../../src/domain/webScriptExport.js";
@@ -19,16 +20,21 @@ import { scriptScenarioFixture } from "../../fixtures/webScriptCapture.js";
 const fixture = async (bytes = Buffer.from('import "./dep.js";')) => {
   const root = await createTestTempDirectory("rea-module-artifacts-");
   const capturePath = join(root, "capture.json");
+  const resources = new ArtifactResourceScope();
+  onTestFinished(() => resources.close());
   await writeFile(
     capturePath,
     JSON.stringify(
       scriptScenarioFixture([{ url: "https://app.test/main.js", bytes }]),
     ),
   );
-  const response = await exportWebScripts({
-    capture_path: capturePath,
-    output_directory: join(root, "export"),
-  });
+  const response = await exportWebScripts(
+    {
+      capture_path: capturePath,
+      output_directory: join(root, "export"),
+    },
+    resources,
+  );
   if (!response.ok) throw response.error;
   const result = webScriptExportResultSchema.parse(
     response.value.normalized_result,

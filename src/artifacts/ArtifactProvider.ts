@@ -28,15 +28,17 @@ import {
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
 import { ArtifactOperationError } from "../domain/artifactOperationError.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { interfaceBuilderLimitsSchema } from "../domain/apple/interfaceBuilderGraph.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
+import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import { artifactCapabilities } from "./ArtifactProviderMetadata.js";
 import { ARTIFACT_GRAPH_PROVIDER } from "../application/InvestigationProviders.js";
 import { createEvidence } from "../domain/evidence.js";
 import { createArtifactInspection } from "../domain/artifactInspection.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 
 /** Read-only inventory and exclusively owned extraction provider. */
 export class ArtifactProvider implements AnalysisProvider {
@@ -67,6 +69,8 @@ export class ArtifactProvider implements AnalysisProvider {
 }
 
 class ArtifactClient implements AnalysisClient {
+  readonly #resourceScope = new ArtifactResourceScope();
+
   constructor(
     private readonly target: BinaryTarget,
     private readonly environment: Readonly<NodeJS.ProcessEnv>,
@@ -183,6 +187,8 @@ class ArtifactClient implements AnalysisClient {
             inputFormat: this.target.format,
             outputRoot: parsed.output_root,
             environment: this.environment,
+            integrityPolicy: parsed.integrity_policy,
+            resourceScope: this.#resourceScope,
           },
           options?.signal,
         );
@@ -219,7 +225,25 @@ class ArtifactClient implements AnalysisClient {
   }
 
   close(): Promise<Result<null, AnalysisError>> {
-    return Promise.resolve(ok(null));
+    return this.#resourceScope.close().then(
+      () => ok(null),
+      (cause: unknown) => {
+        const failure =
+          cause instanceof ArtifactReaderFailure ? cause : undefined;
+        return err(
+          new ProviderCleanupError(
+            ARTIFACT_GRAPH_PROVIDER.id,
+            failure?.cleanup?.resources ?? ["artifact resources"],
+            {
+              reason:
+                failure?.cleanup?.reason ??
+                (cause instanceof Error ? cause.message : String(cause)),
+            },
+            { cause, operation: "close_binary" },
+          ),
+        );
+      },
+    );
   }
 
   /** The active target's kind is outside this operation's supported targets. */
@@ -352,6 +376,7 @@ class ArtifactClient implements AnalysisClient {
     options?: ExecutionOptions,
   ) {
     return inventoryArtifact(this.target.sourcePath ?? this.target.path, {
+      resourceScope: this.#resourceScope,
       environment: this.environment,
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: { mode: parsed.integrity_policy },

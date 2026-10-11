@@ -7,6 +7,10 @@ import {
 import { InvestigationRecords } from "./investigation/InvestigationRecords.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
 import { err } from "../domain/result.js";
+import { nativeApiBoundarySchema } from "../domain/native/nativeApiBoundary.js";
+import { projectNativeApiInspection } from "./native/NativeApiInspection.js";
+import { functionDossierSchema } from "../domain/hopperValues.js";
+import { ghidraFunctionDossier } from "../domain/ghidraValues.fixture.js";
 
 describe("workflow residual question retention", () => {
   it("keeps questions linked to workflow Evidence and records repeats idempotently", () => {
@@ -54,3 +58,47 @@ describe("workflow residual question retention", () => {
     ).toEqual(err(error));
   });
 });
+
+it.each([
+  "  Which boundary?  ",
+  "\nWhich boundary?\t",
+  "\uFEFFWhich boundary?\uFEFF",
+])(
+  "retains contract-accepted question %j without rewriting workflow Evidence",
+  (question) => {
+    const boundary = nativeApiBoundarySchema.parse({
+      available: false,
+      reason: "Synthetic provider unavailable boundary",
+      residual_unknowns: [question],
+    });
+    const dossier = functionDossierSchema.parse(ghidraFunctionDossier());
+    const result = projectNativeApiInspection({
+      ...dossier,
+      native_api: boundary,
+    });
+    const evidence = createWorkflowEvidence({
+      target: undefined,
+      operation: "inspect_native_api",
+      parameters: { procedure: "0x1000" },
+      result,
+      upstreamProfile: undefined,
+    });
+    const records = new InvestigationRecords();
+    expect(records.recordEvidence(evidence).ok).toBe(true);
+    expect(
+      recordWorkflowUnknowns({
+        name: "inspect_native_api",
+        result,
+        evidenceId: evidence.evidence_id,
+        recordUnknown: (input) => records.recordUnknown(input),
+      }).ok,
+    ).toBe(true);
+    expect(records.listUnknowns()).toMatchObject([
+      { question: "Which boundary?" },
+    ]);
+    expect(records.evidenceById(evidence.evidence_id)).toEqual(evidence);
+    expect(evidence.normalized_result).toMatchObject({
+      residual_unknowns: [question],
+    });
+  },
+);

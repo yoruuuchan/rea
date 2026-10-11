@@ -4,7 +4,7 @@ import {
   AnalysisInputError,
   AnalysisProtocolError,
 } from "../../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   applicationGraphEvidenceInputError,
   parseApplicationGraphEvidence,

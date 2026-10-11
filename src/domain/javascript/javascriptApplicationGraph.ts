@@ -8,7 +8,10 @@ import { canonicalJson } from "../comparisonSemantics.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
-import { freezeOwnedJsonSnapshotSteps } from "../immutableJson.js";
+import {
+  freezeJsonSnapshot,
+  freezeOwnedJsonSnapshotSteps,
+} from "../immutableJson.js";
 
 import type {
   ApplicationGraphEvidence,
@@ -449,6 +452,10 @@ export const createJavaScriptApplicationNode = (
   input: unknown,
 ): ApplicationNode => {
   const parsed = applicationNodeInputSchema.parse(input);
+  // These properties are newly parsed and exclusively owned. Authenticate
+  // them before the observation/node schemas and final graph validate again.
+  for (const observation of parsed.observations)
+    freezeJsonSnapshot(observation.properties);
   const identity = normalizeIdentity(parsed.identity);
   const identifier = nodeId({ kind: parsed.kind, identity });
   const observations = parsed.observations
@@ -479,6 +486,7 @@ export const createJavaScriptApplicationEdge = (
   input: unknown,
 ): ApplicationEdge => {
   const parsed = applicationEdgeInputSchema.parse(input);
+  freezeJsonSnapshot(parsed.properties);
   const semantic = {
     ...parsed,
     evidence: normalizeEvidence(parsed.evidence),

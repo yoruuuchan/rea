@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inferJsonShape } from "./jsonShape.js";
+import { inferJsonShape, jsonShapeSchema } from "./jsonShape.js";
 
 const property = (name: string) => ({ kind: "property" as const, name });
 const element = { kind: "array-element" as const };
@@ -67,6 +67,40 @@ describe("inferJsonShape", () => {
 
   it("rejects malformed JSON", () => {
     expect(inferJsonShape("not-json")).toBeNull();
+  });
+
+  it("orders mixed array and property descendants with parents first", () => {
+    const shape = inferJsonShape('[{"z":1,"a":{"x":true}},[null],{"a":2}]');
+
+    expect(shape?.properties.map(({ path }) => path)).toEqual([
+      [element],
+      [element, element],
+      [element, property("a")],
+      [element, property("a"), property("x")],
+      [element, property("z")],
+    ]);
+    expect(shape?.properties[2]).toMatchObject({
+      types: ["number", "object"],
+      observations: 2,
+    });
+  });
+
+  it("retains deep coverage and independently owned path segments", () => {
+    const depth = 512;
+    const shape = inferJsonShape("[".repeat(depth) + "1" + "]".repeat(depth));
+    expect(shape).not.toBeNull();
+    if (shape === null) return;
+
+    expect(shape.node_count).toBe(depth + 1);
+    expect(shape.max_depth_observed).toBe(depth);
+    expect(shape.properties).toHaveLength(depth);
+    expect(shape.properties.at(-1)).toEqual({
+      path: Array.from({ length: depth }, () => element),
+      types: ["number"],
+      observations: 1,
+    });
+    expect(jsonShapeSchema.parse(shape)).toEqual(shape);
+    expect(shape.properties[0]?.path[0]).not.toBe(shape.properties[1]?.path[0]);
   });
 });
 

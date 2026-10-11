@@ -1,4 +1,5 @@
 import { z } from "incur";
+import { javaScriptAnalysisResourceControlsSchema } from "./domain/javascript/javascriptAnalysisResourceControls.js";
 
 /** Accept an agent-selected browser observation duration without an artificial ceiling. */
 export const observationDuration = (fallback: number, minimum = 0) =>
@@ -59,6 +60,9 @@ export const electronPageInspectionOptions = z.object({
 });
 
 export const javascriptApplicationOptions = z.object({
+  maxHeapMb: javaScriptAnalysisResourceControlsSchema.shape.max_heap_mb,
+  analysisTimeoutMs:
+    javaScriptAnalysisResourceControlsSchema.shape.analysis_timeout_ms,
   artifactFormat: z
     .enum(["auto", "asar", "directory"])
     .default("auto")

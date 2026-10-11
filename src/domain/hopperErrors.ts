@@ -16,8 +16,17 @@ export abstract class HopperError extends AnalysisError {}
 export type HopperLauncherOutcome = {
   readonly exit_code: number | null;
   readonly signal: string | null;
-  readonly stdout: { readonly text: string; readonly bytes: number };
-  readonly stderr: { readonly text: string; readonly bytes: number };
+  /** Total bytes drained from the stream; retained_bytes reports captured bytes. */
+  readonly stdout: {
+    readonly text: string;
+    readonly bytes: number;
+    readonly retained_bytes: number;
+  };
+  readonly stderr: {
+    readonly text: string;
+    readonly bytes: number;
+    readonly retained_bytes: number;
+  };
   readonly output_closed: boolean;
   readonly diagnostic_truncated: boolean;
 };

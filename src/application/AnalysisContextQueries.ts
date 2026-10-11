@@ -4,7 +4,7 @@ import type {
   AnalysisOperationPort,
 } from "./AnalysisProvider.js";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { analysisBookmarkSchema } from "../domain/hopperValues.js";
 import { resolveAnalysisDocument } from "./AnalysisDocument.js";

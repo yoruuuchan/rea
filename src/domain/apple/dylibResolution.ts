@@ -4,7 +4,6 @@ import {
   compatibleSlice,
   directoryOf,
   expandPrefix,
-  joinPath,
   resolveTreePath,
   type Expansion,
 } from "./dyldPaths.js";
@@ -275,7 +274,7 @@ const candidateTemplates = (
         path:
           base.scope === "outside"
             ? `${base.path.replace(/\/+$/u, "")}/${rest}`
-            : joinPath(base.path, rest),
+            : `${base.path}${base.path === "" ? "" : "/"}${rest}`,
       };
       return { expansion, source: "rpath" as const, rpath, rpathOwner: owner };
     }),

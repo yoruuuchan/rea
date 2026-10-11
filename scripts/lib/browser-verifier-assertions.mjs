@@ -65,7 +65,11 @@ function assertObservationEvents(result) {
     throw new Error(
       "Real Chrome attach-window console observation was missing",
     );
-  if (result.network.websocket_events.length < 1)
+  if (
+    !result.network.websocket_connections.some(
+      (connection) => connection.events.length > 0,
+    )
+  )
     throw new Error("Real Chrome WebSocket metadata was missing");
 }
 
@@ -77,8 +81,8 @@ function assertObservationPrivacy(result) {
     result.network.requests.some(
       (request) => request.body_shapes.status !== "not_approved",
     ) ||
-    result.network.websocket_events.some(
-      (event) => event.payload_shape !== null,
+    result.network.websocket_connections.some((connection) =>
+      connection.events.some((event) => event.payload_shape !== null),
     )
   )
     throw new Error(
@@ -246,15 +250,17 @@ export function assertSensitiveShapes(result) {
   )
     throw new Error("Real Chrome selected console text was not preserved");
   if (
-    !result.network.websocket_events.some(
-      (event) =>
-        event.payload_shape?.format === "json" &&
-        event.payload_shape.json_shape?.properties.some(
-          ({ path }) =>
-            path.length === 1 &&
-            path[0].kind === "property" &&
-            path[0].name === "token",
-        ),
+    !result.network.websocket_connections.some((connection) =>
+      connection.events.some(
+        (event) =>
+          event.payload_shape?.format === "json" &&
+          event.payload_shape.json_shape?.properties.some(
+            ({ path }) =>
+              path.length === 1 &&
+              path[0].kind === "property" &&
+              path[0].name === "token",
+          ),
+      ),
     )
   )
     throw new Error("Real Chrome WebSocket JSON shape was missing");

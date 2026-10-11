@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
+import { scanCanonicalArtifactInventory } from "../../../tests/fixtures/artifactInventory.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 
 describe("JavaScript application failure diagnostics", () => {
   it("identifies the rejected result field in caller-visible diagnostics", async () => {
@@ -152,4 +154,42 @@ describe("JavaScript application failure diagnostics", () => {
       expect(JSON.parse(JSON.stringify(projection))).toEqual(projection);
     },
   );
+});
+
+describe("JavaScript application cleanup diagnostics", () => {
+  it("preserves cleanup and a complete inventory when translating reader failures", async () => {
+    const inputPath = await createTestTempDirectory("rea-js-cleanup-failure-");
+    await writeFile(join(inputPath, "main.js"), "export const value = 1;\n");
+    const inventory = await scanCanonicalArtifactInventory(inputPath);
+    const cleanup = {
+      reason: "reader remains open",
+      resources: [`JavaScript artifact reader for ${inputPath}`],
+    };
+    const partialObservation = {
+      kind: "artifact-inventory" as const,
+      inventory,
+    };
+    const failure = new ArtifactReaderFailure("io", "Reader cleanup failed", {
+      cleanup,
+      partialObservation,
+    });
+
+    const result = await analyzeJavaScriptApplication(
+      { input_path: inputPath, format: "directory" },
+      {
+        progress: {
+          report: async () => {
+            throw failure;
+          },
+        },
+      },
+    );
+
+    if (result.ok) throw new Error("Expected reader failure");
+    expect(result.error).toMatchObject({
+      _tag: "ArtifactOperationError",
+      cleanup,
+      partialObservation,
+    });
+  });
 });

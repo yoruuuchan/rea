@@ -262,11 +262,17 @@ export const createDarwinProcessRunTokenReader = (
 
   const read = async (
     processes: readonly ProcessTableEntry[],
+    signal?: AbortSignal,
   ): Promise<ReadonlyMap<number, ProcessRunTokenObservation>> => {
+    signal?.throwIfAborted();
     if (processes.length === 0) return new Map();
-    const binary = await compile();
+    const binary = await compile(signal);
     const pids = processes.map(({ pid }) => String(pid));
-    const { stdout } = await execFileOutput(binary, pids, { timeout: 15_000 });
+    const { stdout } = await execFileOutput(binary, pids, {
+      timeout: 15_000,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    signal?.throwIfAborted();
     const decoded = safeParseJson(stdout);
     if (!decoded.ok)
       throw new Error(

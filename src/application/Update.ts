@@ -3,6 +3,7 @@ import { gt, valid } from "semver";
 import { PRODUCT_IDENTITY } from "../identity.js";
 import type { Result } from "../domain/result.js";
 import type { IntegrationMaintenance } from "./UpdateMaintenance.js";
+export { isUpdateFailure } from "./UpdateFailure.js";
 
 /** Global npm installation that owns the running package and its entry point. */
 export interface NpmInstallation {
@@ -67,24 +68,6 @@ export type UpdateResult =
       readonly installedVersion?: string;
       readonly remediation: string;
     };
-
-/** Whether the update command left the requested release unapplied. */
-export const isUpdateFailure = (result: UpdateResult): boolean => {
-  const status = result.status;
-  switch (status) {
-    case "current":
-    case "updated":
-      return false;
-    case "failed":
-      return true;
-    default: {
-      const exhaustive: never = status;
-      throw new TypeError(
-        `Unhandled update result status: ${String(exhaustive)}`,
-      );
-    }
-  }
-};
 
 /** Resolve the exact npm command for the identified prefix and release. */
 export const updateInstallCommand = (

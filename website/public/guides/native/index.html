@@ -8,40 +8,46 @@
       name="description"
       content="Recover a native calculation with REA: inspect instructions, follow a caller, read constants and check reconstructed C."
     />
+    <!-- website:sharing:start -->
+    <!-- prettier-ignore -->
     <link rel="canonical" href="https://rea.tools/guides/native/" />
+    <!-- prettier-ignore -->
     <meta property="og:type" content="website" />
+    <!-- prettier-ignore -->
     <meta property="og:site_name" content="REA" />
+    <!-- prettier-ignore -->
     <meta property="og:title" content="Native Binary Analysis — REA" />
-    <meta
-      property="og:description"
-      content="Recover a native calculation with REA: inspect instructions, follow a caller, read constants and check reconstructed C."
-    />
+    <!-- prettier-ignore -->
+    <meta property="og:description" content="Recover a native calculation with REA: inspect instructions, follow a caller, read constants and check reconstructed C." />
+    <!-- prettier-ignore -->
     <meta property="og:url" content="https://rea.tools/guides/native/" />
-    <meta
-      property="og:image"
-      content="https://rea.tools/assets/social-card.png"
-    />
+    <!-- prettier-ignore -->
+    <meta property="og:image" content="https://rea.tools/assets/social-card.png" />
+    <!-- prettier-ignore -->
     <meta property="og:image:type" content="image/png" />
+    <!-- prettier-ignore -->
     <meta property="og:image:width" content="1200" />
+    <!-- prettier-ignore -->
     <meta property="og:image:height" content="630" />
+    <!-- prettier-ignore -->
     <meta
       property="og:image:alt"
       content="REA — Find out how software works. Reverse engineering with your coding agent."
     />
+    <!-- prettier-ignore -->
     <meta name="twitter:card" content="summary_large_image" />
+    <!-- prettier-ignore -->
     <meta name="twitter:title" content="Native Binary Analysis — REA" />
-    <meta
-      name="twitter:description"
-      content="Recover a native calculation with REA: inspect instructions, follow a caller, read constants and check reconstructed C."
-    />
-    <meta
-      name="twitter:image"
-      content="https://rea.tools/assets/social-card.png"
-    />
+    <!-- prettier-ignore -->
+    <meta name="twitter:description" content="Recover a native calculation with REA: inspect instructions, follow a caller, read constants and check reconstructed C." />
+    <!-- prettier-ignore -->
+    <meta name="twitter:image" content="https://rea.tools/assets/social-card.png" />
+    <!-- prettier-ignore -->
     <meta
       name="twitter:image:alt"
       content="REA — Find out how software works. Reverse engineering with your coding agent."
     />
+    <!-- website:sharing:end -->
     <meta name="theme-color" content="#ffffff" />
     <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../../assets/styles.css" />
@@ -49,6 +55,8 @@
   </head>
   <body id="top">
     <a class="skip-link" href="#main">Skip to content</a>
+    <!-- website:header:start -->
+    <!-- prettier-ignore -->
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="../../" aria-label="REA home"
@@ -57,9 +65,10 @@
         >
         <nav class="navigation" aria-label="Main navigation">
           <a href="../../showcase/">Showcases</a>
-          <a href="../../blog/">Blog</a
-          ><a class="nav-start" href="../../get-started/">Get started</a
-          ><a href="../">Guides</a><a href="../../faq/">FAQ</a>
+          <a href="../../blog/">Blog</a>
+          <a href="../../get-started/" class="nav-start">Get started</a>
+          <a href="../../guides/" aria-current="page">Guides</a>
+          <a href="../../faq/">FAQ</a>
         </nav>
         <div class="header-social">
           <a
@@ -123,6 +132,7 @@
         </div>
       </div>
     </header>
+    <!-- website:header:end -->
     <main id="main" class="container">
       <div class="page-heading">
         <p class="breadcrumb">
@@ -158,6 +168,33 @@
               returns its instructions and callers, which give the agent a way
               to investigate the missing arithmetic.
             </p>
+            <details class="evidence-details">
+              <summary>New to these terms?</summary>
+              <ul>
+                <li>
+                  <strong>Instructions:</strong> the steps the processor runs,
+                  shown in readable form such as <code>MOV</code> or
+                  <code>ADD</code>.
+                </li>
+                <li>
+                  <strong>Decompiler result / pseudocode:</strong> an analysis
+                  tool's attempt to turn instructions back into C-like code. It
+                  can miss parts, as in this example.
+                </li>
+                <li>
+                  <strong>Caller:</strong> a function that calls this one. It
+                  shows which values are passed in.
+                </li>
+                <li>
+                  <strong>Address:</strong> a location in the program, written
+                  in hexadecimal, such as <code>0x00406400</code>.
+                </li>
+                <li>
+                  <strong>Constants:</strong> fixed numbers stored in the
+                  program, read as raw bytes and decoded.
+                </li>
+              </ul>
+            </details>
             <figure class="workflow-figure">
               <p class="figure-title">
                 Three pieces of evidence, one calculation
@@ -201,9 +238,40 @@
             <h2>Ask about the behavior</h2>
             <p>
               After
-              <a href="../../get-started/#agent">connecting REA to your agent</a
+              <a href="../../get-started/#agent"
+                >connecting REA to your agent</a
+              >
+              and
+              <a href="../../get-started/#native"
+                >setting up a native analysis tool</a
               >, provide the local executable and a question:
             </p>
+            <details class="evidence-details">
+              <summary>Which analysis tool should I use?</summary>
+              <p>REA needs one of these to read native programs:</p>
+              <ul>
+                <li>
+                  <strong>Hopper</strong> (macOS or Linux): REA's setup detects
+                  it or offers to install it. On macOS, open Hopper once and
+                  choose demo mode or activate a license before your first
+                  analysis.
+                </li>
+                <li>
+                  <strong>Ghidra</strong> (macOS or Linux; experimental on
+                  Windows): free, but needs an existing Ghidra 12.1.x
+                  installation and a 64-bit JDK 21 or newer.
+                </li>
+                <li>
+                  <strong>IDA</strong> (Windows): for an existing IDA setup with
+                  an MCP registration.
+                </li>
+              </ul>
+              <p>
+                See
+                <a href="../../get-started/#native">Set up native analysis</a>
+                for the steps.
+              </p>
+            </details>
             <div class="agent-terminal">
               <div class="terminal-header">
                 <span class="terminal-title"
@@ -229,8 +297,28 @@
             </div>
             <p class="caption">
               Example prompt. Give your agent the path to your local DX-Ball
-              1.07 executable.
+              1.07 executable. REA doesn't include DX-Ball, so use your own
+              copy, or ask the same kind of question about another small Windows
+              program you have.
             </p>
+            <details class="evidence-details">
+              <summary>How do I get a file's full path?</summary>
+              <ul>
+                <li>
+                  <strong>Windows:</strong> in File Explorer, right-click the
+                  file and choose <em>Copy as path</em>. On Windows 10, hold
+                  Shift while right-clicking.
+                </li>
+                <li>
+                  <strong>macOS:</strong> in Finder, right-click the file, hold
+                  Option and choose <em>Copy "…" as Pathname</em>.
+                </li>
+                <li>
+                  <strong>Any system:</strong> drag the file into a terminal
+                  window and its path appears.
+                </li>
+              </ul>
+            </details>
           </section>
           <section class="article-section" id="follow">
             <h2>Read the REA results</h2>
@@ -348,13 +436,14 @@ return (DxBallInt)pan;</code></pre>
         </article>
       </div>
     </main>
+    <!-- website:footer:start -->
+    <!-- prettier-ignore -->
     <footer class="site-footer">
       <div class="container footer-inner">
         <p>REA · Reverse Engineer Anything</p>
         <div class="footer-links">
           <a href="https://github.com/morluto/rea">Source</a
-          ><a href="https://github.com/morluto/rea/blob/main/LICENSE"
-            >MIT license</a
+          ><a href="https://github.com/morluto/rea/blob/main/LICENSE">MIT license</a
           ><a href="https://discord.gg/GkcryMnJDM">Join the community</a
           ><a href="https://x.com/reatools">Follow us on X</a>
         </div>
@@ -364,5 +453,6 @@ return (DxBallInt)pan;</code></pre>
     <a class="back-to-top" href="#top" aria-label="Back to top">
       <span aria-hidden="true">↑</span> Top
     </a>
+    <!-- website:footer:end -->
   </body>
 </html>

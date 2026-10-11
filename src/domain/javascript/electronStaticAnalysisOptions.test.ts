@@ -5,6 +5,7 @@ import { analyzeJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
 describe("Electron option evidence", () => {
   it("keeps the final explicit preload and service name with unrelated keys", () => {
     const analysis = analyzeJavaScriptStaticSource(`
+      const { BrowserWindow, utilityProcess } = require("electron");
       new BrowserWindow({ webPreferences: { preload: "./kept.js", sandbox: true }, title: "App" });
       utilityProcess.fork("./worker.js", [], { serviceName: "kept", cwd: "/app" });
     `);
@@ -24,8 +25,23 @@ describe("Electron option evidence", () => {
     });
   });
 
+  it("does not read an audio or video preload attribute as a preload script", () => {
+    const analysis = analyzeJavaScriptStaticSource(`
+      jsx("audio", { controls: true, preload: "metadata", src });
+      (0, React.createElement)(\`video\`, { preload: "auto" });
+      jsx("webview", { preload: "./guest.js" });
+      const options = { preload: "./preload.js" };
+    `);
+
+    expect(analysis.role_paths.map(({ path }) => path)).toEqual([
+      "./guest.js",
+      "./preload.js",
+    ]);
+  });
+
   it("keeps values unknown when a later computed key can override them", () => {
     const analysis = analyzeJavaScriptStaticSource(`
+      const { BrowserWindow, utilityProcess } = require("electron");
       new BrowserWindow({ webPreferences: { preload: "./maybe.js" }, [key]: null });
       utilityProcess.fork("./worker.js", [], { serviceName: "maybe", [key]: null });
     `);
@@ -47,6 +63,7 @@ describe("Electron option evidence", () => {
 
   it("keeps recovered templates with invalid escapes dynamic", () => {
     const source = [
+      'const { BrowserWindow } = require("electron");',
       "new BrowserWindow({ webPreferences: { sandbox: `",
       String.raw`\unicode`,
       "` } });",

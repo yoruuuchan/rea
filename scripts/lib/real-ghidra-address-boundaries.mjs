@@ -62,6 +62,36 @@ export async function verifyGhidraAddressBoundaries(client, entry, cli) {
     await query("read_bytes", { address: padded, length: 1 }),
     await query("read_bytes", { address: entry, length: 1 }),
   );
+  const aliasKeys = [entry, padded];
+  assert.deepEqual(
+    await query("set_addresses_names", {
+      names: {
+        [entry]: "rea_same_address_alias",
+        [padded]: "rea_same_address_alias",
+      },
+    }),
+    Object.fromEntries(aliasKeys.map((address) => [address, true])),
+    "Equivalent address spellings with one requested name share one edit",
+  );
+  const nameBeforeAliasedBatch = await query("address_name", {
+    address: entry,
+  });
+  assert.equal(nameBeforeAliasedBatch, "rea_same_address_alias");
+  assert.deepEqual(
+    await query("set_addresses_names", {
+      names: {
+        [entry]: "rea_first_address_alias",
+        [padded]: "rea_second_address_alias",
+      },
+    }),
+    Object.fromEntries(aliasKeys.map((address) => [address, false])),
+    "Conflicting spellings of one Ghidra address must be rejected together",
+  );
+  assert.equal(
+    await query("address_name", { address: entry }),
+    nameBeforeAliasedBatch,
+    "A rejected alias collision must leave the preexisting target name unchanged",
+  );
   for (const [command, flags, operation] of [
     ["read-bytes", ["--length", "1"], "read_bytes"],
     [

@@ -7,6 +7,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 import { expect, it, onTestFinished } from "vitest";
 
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { silentLogger } from "../../../src/logger.js";
 import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
 import { registerWebScriptTool } from "../../../src/server/registerWebScriptTool.js";
@@ -29,14 +30,17 @@ it.skipIf(process.platform === "win32")(
       undefined,
       new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE),
     );
+    const artifactResources = new ArtifactResourceScope();
     registerWebScriptTool(server, {
       logger: silentLogger,
       recordEvidence: undefined,
+      artifactResources: artifactResources,
     });
     const client = new Client({ name: "script-selection-test", version: "1" });
     onTestFinished(async () => {
       await client.close();
       await server.close();
+      await artifactResources.close();
     });
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();

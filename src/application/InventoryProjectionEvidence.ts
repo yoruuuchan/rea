@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AnalysisProtocolError } from "../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   createEvidence,
   type Evidence,

@@ -17,6 +17,7 @@ import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { clearClientLocationEnvironment } from "../../fixtures/clientEnvironment.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
+import { PRODUCT_IDENTITY } from "../../../src/identity.js";
 
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
 import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
@@ -31,6 +32,7 @@ import {
 } from "../../../src/application/Uninstall.js";
 
 const roots: string[] = [];
+const ownedSkillManifest = `---\nname: ${PRODUCT_IDENTITY.skillName}\n---\n# REA\n`;
 beforeEach(clearClientLocationEnvironment);
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -246,7 +248,7 @@ describe("Grok Build server table edits", () => {
     expect(configured).toContain("share = false");
     expect(configured).toContain("[mcp_servers.rea]");
     expect(configured).toContain("startup_timeout_sec = 30");
-    expect(configured).not.toContain('OLD = "1"');
+    expect(configured).toContain('OLD = "1"');
     expect(configured).not.toContain('command = "old"');
     expect(parseToml(configured)).toMatchObject({
       mcp_servers: {
@@ -256,6 +258,7 @@ describe("Grok Build server table edits", () => {
           args: ["mcp"],
           startup_timeout_sec: 30,
           env: {
+            OLD: "1",
             JAVA_HOME: "/opt/jdk-21",
             HOPPER_LAUNCHER_PATH: "/Hopper Path",
             GHIDRA_INSTALL_DIR: "/opt/ghidra",
@@ -505,7 +508,7 @@ describe("Grok Build text that resembles a server table", () => {
     const configured = await readFile(configPath, "utf8");
     expect(configured).not.toContain("mcp_servers . rea");
     expect(configured).not.toContain("\\u0072ea");
-    expect(configured).not.toContain('OLD = "1"');
+    expect(configured).toContain('OLD = "1"');
     expect(
       configured
         .split("\n")
@@ -513,7 +516,12 @@ describe("Grok Build text that resembles a server table", () => {
     ).toHaveLength(1);
     expect(parseToml(configured)).toMatchObject({
       mcp_servers: {
-        rea: { command: "rea", args: ["mcp"], startup_timeout_sec: 30 },
+        rea: {
+          command: "rea",
+          args: ["mcp"],
+          startup_timeout_sec: 30,
+          env: { OLD: "1" },
+        },
       },
     });
   });
@@ -1353,7 +1361,7 @@ describe("client configuration filesystem removal", () => {
         },
       }),
     );
-    await writeFile(skill, "managed");
+    await writeFile(skill, ownedSkillManifest);
     await mkdir(join(home, ".rea"), { recursive: true });
     await import("node:fs/promises").then(({ symlink }) =>
       symlink(home, join(home, ".rea/cache")),
@@ -1422,7 +1430,9 @@ describe("client configuration filesystem removal", () => {
       readFile(`${configPath}.rea.backup`, "utf8"),
     ).rejects.toThrow();
   });
+});
 
+describe("uninstall configuration preflight", () => {
   it("fails closed on malformed client configuration", async () => {
     const home = await createTestTempDirectory("rea-uninstall-bad-");
     roots.push(home);
@@ -1447,8 +1457,12 @@ describe("client configuration filesystem removal", () => {
     roots.push(home);
     const codex = join(home, ".codex/config.toml");
     const cursor = join(home, ".cursor/mcp.json");
+    const skillMarker = join(
+      home,
+      ".agents/skills/reverse-engineer-anything/marker.txt",
+    );
     const managed = [
-      join(home, ".agents/skills/reverse-engineer-anything/marker.txt"),
+      skillMarker,
       join(home, ".rea/cache/marker.txt"),
       join(home, ".rea/state/marker.txt"),
     ];
@@ -1463,6 +1477,8 @@ describe("client configuration filesystem removal", () => {
     await writeFile(codex, "[mcp_servers.rea]\ncommand = [broken\n");
     await writeFile(cursor, cursorConfig);
     for (const path of managed) await writeFile(path, "marker");
+    const manifest = join(dirname(skillMarker), "SKILL.md");
+    await writeFile(manifest, ownedSkillManifest);
 
     const stopped = await runUninstall(true, systemUninstallHost(home));
 
@@ -1478,6 +1494,7 @@ describe("client configuration filesystem removal", () => {
     expect(await readFile(cursor, "utf8")).toBe(cursorConfig);
     for (const path of managed)
       expect(await readFile(path, "utf8")).toBe("marker");
+    expect(await readFile(manifest, "utf8")).toBe(ownedSkillManifest);
 
     await writeFile(codex, "");
     const repaired = await runUninstall(true, systemUninstallHost(home));
@@ -1485,7 +1502,12 @@ describe("client configuration filesystem removal", () => {
     expect(JSON.parse(await readFile(cursor, "utf8"))).toEqual({
       mcpServers: { other: { command: "echo", args: ["hello"] } },
     });
-    for (const path of managed)
+    // Uninstall removes only the managed bundle, never arbitrary skill files.
+    expect(await readFile(skillMarker, "utf8")).toBe("marker");
+    await expect(readFile(manifest, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    for (const path of managed.slice(1))
       await expect(readFile(path, "utf8")).rejects.toThrow();
   });
 });
@@ -1625,6 +1647,7 @@ describe("client configuration filesystem failure reporting", () => {
     roots.push(home);
     const skillRoot = join(home, ".agents/skills/reverse-engineer-anything");
     await mkdir(skillRoot, { recursive: true });
+    await writeFile(join(skillRoot, "SKILL.md"), ownedSkillManifest);
     const result = await runUninstall(
       false,
       systemUninstallHost(home, {
@@ -1637,11 +1660,14 @@ describe("client configuration filesystem failure reporting", () => {
         name: "skill",
         status: "failed",
         detail: expect.stringContaining(
-          "This item could not be removed. Check file permissions, then rerun uninstall.",
+          `Managed file could not be removed: ${join(skillRoot, "SKILL.md")}`,
         ),
       }),
     );
     expect(JSON.stringify(result)).not.toContain("SECRET");
+    expect(await readFile(join(skillRoot, "SKILL.md"), "utf8")).toBe(
+      ownedSkillManifest,
+    );
   });
 
   it("uninstalls all managed skill roots, including a custom Claude Code directory", async () => {
@@ -1653,7 +1679,11 @@ describe("client configuration filesystem failure reporting", () => {
       join(customClaudeDirectory, "skills/reverse-engineer-anything"),
     ];
     await Promise.all(
-      rootsToRemove.map((path) => mkdir(path, { recursive: true })),
+      rootsToRemove.map(async (path) => {
+        await mkdir(path, { recursive: true });
+        await writeFile(join(path, "SKILL.md"), ownedSkillManifest);
+        await writeFile(join(path, "user-notes.txt"), "user-authored");
+      }),
     );
 
     const result = await systemUninstallHost(home, testFileSystem, {
@@ -1663,7 +1693,12 @@ describe("client configuration filesystem failure reporting", () => {
     expect(result).toMatchObject({ status: "removed" });
     await Promise.all(
       rootsToRemove.map(async (path) => {
-        await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(
+          readFile(join(path, "SKILL.md"), "utf8"),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        expect(await readFile(join(path, "user-notes.txt"), "utf8")).toBe(
+          "user-authored",
+        );
       }),
     );
   });

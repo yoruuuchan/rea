@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { access } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Route production MCP before importing Incur. Incur owns registration helpers
@@ -15,6 +15,21 @@ const isMcpMode =
   args.length === 1 && (args[0] === "--mcp" || args[0] === "mcp");
 const isMcpDoctorMode = args[0] === "mcp" && args[1] === "doctor";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Playwright's registry assumes one of its three desktop host platforms when
+// it chooses the browser cache directory. Termux reports `android`, although
+// its Node runtime and filesystem are POSIX-compatible. Keep the cache path
+// explicit so REA can start on Termux. Browser launch still requires a
+// caller-supplied Android-compatible Chromium executable.
+if (
+  process.platform === "android" &&
+  process.env.PLAYWRIGHT_BROWSERS_PATH === undefined
+) {
+  const cacheRoot =
+    process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? ".", ".cache");
+  process.env.PLAYWRIGHT_BROWSERS_PATH = join(cacheRoot, "ms-playwright");
+}
+
 const runtimeFiles = isMcpMode
   ? ["dist/main.js"]
   : isMcpDoctorMode

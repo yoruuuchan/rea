@@ -21,6 +21,12 @@ describe("cooperative canonical JSON digest", () => {
     ),
     { payload: `${"x".repeat(8191)}𐀀${"\n\ud800".repeat(20_000)}` },
     { [`${"x".repeat(8191)}𐀀${"\n".repeat(20_000)}`]: "value" },
+    Object.fromEntries(
+      Array.from({ length: 512 }, (_, index) => [
+        `escaped\n\"\\𐀀${"x".repeat(32)}${index}`,
+        { repeated: index },
+      ]),
+    ),
   ];
   it.each(values.map((value) => ({ value })))(
     "preserves complete canonical meaning (%#)",
@@ -53,6 +59,18 @@ describe("cooperative canonical JSON digest", () => {
     expect(steps.next().done).toBe(false);
     steps.return("abandoned");
     expect(steps.next().done).toBe(true);
+  });
+
+  it("continues object hashing when a pending property is omitted", () => {
+    const value: { [key: string]: JsonValue } = {
+      a: "x".repeat(32_768),
+      b: 1,
+      c: { retained: true },
+    };
+    const steps = canonicalJsonDigestSteps(value);
+    expect(steps.next().done).toBe(false);
+    delete value.b;
+    expect(complete(steps)).toBe(digestCanonicalValue(value));
   });
 
   it("rejects sparse arrays, nonfinite numbers and cycles", () => {

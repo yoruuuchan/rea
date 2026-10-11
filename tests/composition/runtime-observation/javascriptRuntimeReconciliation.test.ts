@@ -5,9 +5,7 @@ import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { createElectronEvidence } from "../../../src/application/javascript/ElectronEvidence.js";
 import { createElectronActiveEvidence } from "../../../src/application/javascript/ElectronActiveEvidence.js";
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
 import { reconcileJavaScriptRuntimeEvidence } from "../../../src/application/javascript/JavaScriptRuntimeReconciliationService.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
 import {
@@ -17,9 +15,14 @@ import {
 import { reconcileJavaScriptRuntimeInputSchema } from "../../../src/domain/javascript/javascriptRuntimeReconciliationSchemas.js";
 import { javascriptRuntimeReconciliationResultSchema } from "../../../src/domain/javascript/javascriptRuntimeReconciliationSchemas.js";
 import { electronActiveObservationInputSchema } from "../../../src/domain/javascript/electronActiveObservation.js";
-import { inspectElectronPageInputSchema } from "../../../src/domain/javascript/electronObservation.js";
-import { createWebTextArtifact } from "../../../src/domain/webContentArtifact.js";
 import { createElectronActiveObservationFixtureResult } from "../../../src/domain/javascript/electronActiveObservation.fixture.js";
+
+import {
+  SOURCE,
+  applicationFixture,
+  analyzeFixture,
+  electronRuntimeEvidence,
+} from "../../fixtures/javascriptRuntimeReconciliation.js";
 
 const reconcileInput = (input: unknown) =>
   reconcileJavaScriptRuntime(
@@ -27,8 +30,6 @@ const reconcileInput = (input: unknown) =>
       reconcileJavaScriptRuntimeInputSchema.parse(input),
     ),
   );
-
-const SOURCE = `const worker = new Worker("./worker.js");\nexport const observed = worker;\n`;
 
 it("preserves source-capture input paths for runtime Evidence", async () => {
   const root = await applicationFixture();
@@ -186,6 +187,40 @@ it("matches renderer, frame, script bytes, and worker without claiming execution
   );
 });
 
+it("keeps static load states unknown when one scoped capture omits scripts", async () => {
+  const fixture = await applicationFixture();
+  const staticEvidence = await analyzeFixture(fixture);
+  const result = reconcileInput({
+    static_layers: [{ role: "application", analysis: staticEvidence }],
+    runtime_observations: [
+      electronRuntimeEvidence(fixture, SOURCE, {
+        includeWorker: false,
+        targetId: "target-complete",
+      }),
+      electronRuntimeEvidence(fixture, SOURCE, {
+        includeWorker: false,
+        scriptsUnavailable: true,
+        targetId: "target-incomplete",
+      }),
+    ],
+  });
+
+  expect(
+    result.runtime_captures.map(
+      ({ scripts_complete_within_scope }) => scripts_complete_within_scope,
+    ),
+  ).toEqual(expect.arrayContaining([false, true]));
+  expect(result.summary.static_not_observed).toBe(0);
+  expect(result.static_load_states).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        status: "unknown",
+        reason: "static-or-runtime-coverage-incomplete",
+      }),
+    ]),
+  );
+});
+
 it("reports a captured digest disagreement instead of accepting a path match", async () => {
   const fixture = await applicationFixture();
   const staticEvidence = await analyzeFixture(fixture);
@@ -316,7 +351,7 @@ it("imports an operator-provided cache layer through an explicit file mapping", 
   const application = await applicationFixture();
   const cache = await createTestTempDirectory("rea-runtime-cache-static-");
   const runtimeCache = await createTestTempDirectory("rea-runtime-cache-live-");
-  const cacheSource = "export const cachedFeature = 'fixture';\n";
+  const cacheSource = SOURCE;
   await mkdir(join(cache, "mapped"));
   await Promise.all([
     writeFile(join(cache, "mapped", "chunk.js"), cacheSource),
@@ -373,152 +408,14 @@ it("imports an operator-provided cache layer through an explicit file mapping", 
     status: "unknown",
     reason: "layer-outside-runtime-scope",
   });
-});
-
-const applicationFixture = async (): Promise<string> => {
-  const root = await createTestTempDirectory("rea-runtime-reconciliation-");
-  await Promise.all([
-    writeFile(
-      join(root, "package.json"),
-      JSON.stringify({
-        name: "rea-runtime-reconciliation-fixture",
-        version: "1.0.0",
-        renderer: "index.html",
-      }),
-    ),
-    writeFile(join(root, "index.html"), "<script src='./app.js'></script>"),
-    writeFile(join(root, "app.js"), SOURCE),
-    writeFile(join(root, "worker.js"), "self.onmessage = () => undefined;\n"),
-  ]);
-  return root;
-};
-
-const analyzeFixture = async (root: string) => {
-  const result = await analyzeJavaScriptApplication({
-    input_path: root,
-  });
-  if (!result.ok) throw result.error;
-  return result.value;
-};
-
-const electronRuntimeEvidence = (
-  root: string,
-  source: string,
-  options: {
-    readonly scriptFile?: string;
-    readonly includeWorker?: boolean;
-    readonly targetId?: string;
-    readonly sourceIncluded?: boolean;
-    readonly workersUnavailable?: boolean;
-  } = {},
-) => {
-  const scriptFile = options.scriptFile ?? "app.js";
-  const includeWorker = options.includeWorker ?? true;
-  const targetId = options.targetId ?? "target-main";
-  const sourceIncluded = options.sourceIncluded ?? true;
-  const input = inspectElectronPageInputSchema.parse({
-    cdp_endpoint: "http://127.0.0.1:9223",
-    target_id: targetId,
-    observation_ms: 100,
-    include_script_sources: sourceIncluded,
-  });
-  return createElectronEvidence(
-    "inspect_electron_page",
-    input,
-    {
-      browser: {
-        product: "Electron/fixture",
-        protocol_version: "1.3",
-        revision: "fixture",
-        user_agent: "Electron fixture",
-        js_version: "13",
-      },
-      target: {
-        target_id: targetId,
-        type: "page",
-        title: "Fixture",
-        file_path: join(root, "index.html"),
-        attached: false,
-      },
-      capture_window: {
-        started_at: "2026-07-15T00:00:00.000Z",
-        ended_at: "2026-07-15T00:00:00.100Z",
-        observation_ms: 100,
-      },
-      completeness: options.workersUnavailable
-        ? {
-            ...completeCapture(),
-            status: "attach_limited" as const,
-            conditions: ["attach_limited" as const],
-            attach_limited_sections: ["workers" as const],
-            unavailable_sections: ["workers" as const],
-          }
-        : completeCapture(),
-      frames: [
-        {
-          frame_id: "frame-main",
-          parent_frame_id: null,
-          file_path: join(root, "index.html"),
-        },
-      ],
-      dom: { total_nodes: 0, nodes: [] },
-      scripts: {
-        total: 1,
-        items: [
-          {
-            script_key: `electron_script_${"1".repeat(64)}`,
-            frame_id: "frame-main",
-            file_path: join(root, scriptFile),
-            cdp_hash: "fixture",
-            length: Buffer.byteLength(source),
-            is_module: true,
-            language: "JavaScript",
-            source: {
-              included: true as const,
-              artifact: createWebTextArtifact(source, "text/javascript"),
-            },
-          },
-        ],
-      },
-      resources: [],
-      workers: includeWorker
-        ? [
-            {
-              target_id: "worker-main",
-              type: "worker",
-              file_path: join(root, "worker.js"),
-              attached: false,
-              opener_target_id: targetId,
-              parent_frame_id: "frame-main",
-            },
-          ]
-        : [],
-      limitations: ["Synthetic passive capture fixture."],
-    },
-    {
-      id: "rea-cdp-electron",
-      name: "REA Electron file-page CDP observation provider",
-      version: "1",
-    },
+  const sharedFile = result.graph.nodes.find(
+    ({ observations }) =>
+      observations.some(({ properties }) => properties.path === "app.js") &&
+      observations.some(
+        ({ properties }) => properties.path === "mapped/chunk.js",
+      ),
   );
-};
-
-const completeCapture = () => ({
-  status: "complete_within_window" as const,
-  conditions: ["complete_within_window" as const],
-  policy_filtered_sections: [],
-  attach_limited_sections: [],
-  truncated_sections: [],
-  unavailable_sections: [],
-  excluded: [],
-  dropped_events: {
-    scripts: 0,
-    network_requests: 0,
-    console_events: 0,
-    websocket_connections: 0,
-    websocket_frames: 0,
-    webmcp_tools: 0,
-    timeline_events: 0,
-    total: 0,
-  },
+  expect(
+    sharedFile?.observations.map(({ properties }) => properties.path),
+  ).toEqual(expect.arrayContaining(["app.js", "mapped/chunk.js"]));
 });

@@ -28,6 +28,11 @@ import {
   isolatedFixtureUrl,
 } from "./browser-runtime-world-e2e.mjs";
 
+// Arming, progress delivery, isolated-world proof and the page action cross
+// separate transports. Leave time for their round trips on shared CI runners;
+// coverage can include a late action even after request collection has ended.
+const executionObservationMs = 2_000;
+
 /** Exercise native browser runtime attribution through public CLI and stdio MCP, including arming. */
 export async function verifyBrowserRuntime(
   executable,
@@ -210,7 +215,7 @@ async function executionMcp(
   const response = await client.callTool(
     {
       name: "observe_web_execution",
-      arguments: { ...input, observation_ms: 300 },
+      arguments: { ...input, observation_ms: executionObservationMs },
     },
     {
       timeout: 40_000,
@@ -259,7 +264,7 @@ async function executionCli(entrypoint, input, env, action, isolatedContext) {
       input.cdp_endpoint,
       input.target_id,
       "--observation-ms",
-      "300",
+      String(executionObservationMs),
       "--json",
     ],
     { env, stdio: ["ignore", "pipe", "pipe"] },
@@ -382,7 +387,14 @@ function assertExecution(evidence, site, requireBlock = true) {
   const request = result.requests.find((item) =>
     item.url.endsWith("/evidence?marker=chosen"),
   );
-  assert.ok(request, "The selected request initiator must be retained");
+  assert.ok(
+    request,
+    `The selected request initiator must be retained: ${JSON.stringify({
+      window: result.window,
+      requests: result.requests.map((item) => item.url),
+      excluded_requests: result.excluded_requests,
+    })}`,
+  );
   assert.ok(
     request.callsites.some(
       (site) =>

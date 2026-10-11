@@ -1,4 +1,4 @@
-import { type WebSocket } from "ws";
+import type { WebSocket } from "ws";
 
 import type { FakeCdpCommand, FakeOptions } from "./fakeCdpBrowserTypes.js";
 
@@ -516,6 +516,7 @@ const emitNetworkEvents = (
     requestId: "websocket-1",
     url: `ws://127.0.0.1:${String(port)}/live?token=websocket-url-secret`,
   });
+  if (options.webSocketWithoutFrames === true) return;
   event(socket, "Network.webSocketFrameSent", command.sessionId, {
     requestId: "websocket-1",
     response: {

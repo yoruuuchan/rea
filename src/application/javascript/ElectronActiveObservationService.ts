@@ -7,7 +7,7 @@ import {
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
 } from "../../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import type { Evidence } from "../../domain/evidence.js";
 import type { ElectronActiveObservationInput } from "../../domain/javascript/electronActiveObservation.js";
 import { err, type Result } from "../../domain/result.js";

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { compareUnicodeCodePoints } from "../../../src/domain/unicodeCodePointOrder.js";
 import { digestCanonicalValue } from "../../../src/domain/canonicalDigest.js";
-import { inventoryArtifact } from "../../../src/artifacts/inventory/ArtifactInventory.js";
+import { inventoryArtifact } from "../../fixtures/artifactInventory.js";
 import { compareArtifacts } from "../../../src/domain/artifactComparison.js";
 import type { ArtifactInventoryResult } from "../../../src/domain/artifactGraph.js";
 import { createEvidence } from "../../../src/domain/evidence.js";

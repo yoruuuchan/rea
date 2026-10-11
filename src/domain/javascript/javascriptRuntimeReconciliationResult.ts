@@ -1,4 +1,4 @@
-import { type JavaScriptApplicationGraph } from "./javascriptApplicationGraph.js";
+import type { JavaScriptApplicationGraph } from "./javascriptApplicationGraph.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import type { StaticLoadStateProjection } from "./javascriptRuntimeLoadState.js";

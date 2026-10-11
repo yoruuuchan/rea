@@ -6,8 +6,10 @@ import { createPackage, createPackageWithOptions } from "@electron/asar";
 import { expect, it } from "vitest";
 
 import { ArtifactProvider } from "../../../../src/artifacts/ArtifactProvider.js";
-import { materializeArtifactInventory } from "../../../../src/artifacts/extraction/ArtifactExtraction.js";
-import { scanArtifactInventory } from "../../../../src/artifacts/inventory/ArtifactInventory.js";
+import {
+  materializeArtifactInventory,
+  scanArtifactInventory,
+} from "../../../fixtures/artifactInventory.js";
 import { artifactExtractionResultSchema } from "../../../../src/domain/artifactGraph.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
@@ -121,11 +123,8 @@ it("ignores unavailable members of a nested ASAR but refuses them as active entr
     throw new Error("Unavailable active ASAR member must fail extraction");
   expect(projectAnalysisError(activeResult.error)).toMatchObject({
     code: "artifact_operation_failed",
-    details: {
-      operation: "extract_artifact",
-      reason: "format",
-      detail: expect.stringContaining("native/addon.node"),
-    },
+    category: "unavailable",
+    details: { logical_path: "native/addon.node", unpacked: true },
   });
   await expect(access(activeOutput)).rejects.toThrow();
 });
@@ -139,6 +138,7 @@ const inventoriedExtraction = async (source: string, output: string) => {
         inputFormat: "asar",
         outputRoot: output,
         environment: process.env,
+        integrityPolicy: "fail",
       },
       source,
       snapshot,

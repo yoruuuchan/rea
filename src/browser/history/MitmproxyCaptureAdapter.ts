@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,8 @@ export class MitmproxyCaptureAdapter implements HistoricalCaptureFormatAdapter {
       );
     try {
       await access(command, constants.R_OK | constants.X_OK);
+      if (!(await stat(command)).isFile())
+        throw new TypeError("Configured path is not a regular file");
     } catch (cause: unknown) {
       const reason = `Configured mitmdump executable is unavailable: ${command}.`;
       throw new AnalysisCapabilityUnavailableError(

@@ -355,7 +355,7 @@ const semanticNodeFor = (roleKey: string) => {
     unpacked: false,
     text: { included: true, value: "" },
   };
-  const state = createSemanticGraphProjectionState({ nodes: [] });
+  const state = createSemanticGraphProjectionState();
   return constructSemanticGraphNode(
     file,
     {
@@ -565,7 +565,7 @@ it("does not mark a file truncated when it exactly fills its budget", () => {
 it("only records node loss when the budget rejects a new identity", () => {
   // The truncation signal must record blocked node creation, not a zero
   // remaining budget: a file using exactly its share drops nothing.
-  const state = createSemanticGraphProjectionState({ nodes: [] });
+  const state = createSemanticGraphProjectionState();
   state.fileNodeBudget = 2;
   state.fileNodesDropped = false;
   const first = addSemanticGraphNode(state, semanticNodeFor("first"));

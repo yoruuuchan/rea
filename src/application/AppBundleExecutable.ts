@@ -1,17 +1,21 @@
-import { execFile } from "node:child_process";
-import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
+import { parseBinary } from "plist";
 import { z } from "zod";
 
+import { preflightPropertyListDecode } from "../artifacts/apple/InterfaceBuilderDecodeBudget.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { isPathWithinRoot } from "../domain/localPath.js";
-import { parseXmlPropertyList } from "../domain/propertyListKeys.js";
+import {
+  omitPrototypeKeys,
+  parseXmlPropertyList,
+} from "../domain/propertyListKeys.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
 import { err, ok, type Result } from "../domain/result.js";
 
-const execFileAsync = promisify(execFile);
+/** Decoded representation bound for one binary Info.plist. */
+const BINARY_PLIST_DECODE_BYTES = 16 * 1024 * 1024;
 
 /** Where one app bundle layout keeps its Info.plist and program file. */
 interface BundleLayout {
@@ -156,13 +160,14 @@ const wrappedBundle = async (bundle: string): Promise<string | undefined> => {
     if (isAbsence(cause)) return undefined;
     throw cause;
   }
-  const apps = (await readdir(wrapper, { withFileTypes: true })).filter(
-    (entry) => entry.isDirectory() && entry.name.toLowerCase().endsWith(".app"),
-  );
-  const [app] = apps;
-  return apps.length === 1 && app !== undefined
-    ? join(wrapper, app.name)
-    : undefined;
+  let app: string | undefined;
+  for await (const entry of await opendir(wrapper)) {
+    if (!entry.isDirectory() || !entry.name.toLowerCase().endsWith(".app"))
+      continue;
+    if (app !== undefined) return undefined;
+    app = join(wrapper, entry.name);
+  }
+  return app;
 };
 
 const resolveLayoutExecutable = async (
@@ -192,9 +197,8 @@ const resolveLayoutExecutable = async (
   try {
     name =
       plist.subarray(0, 6).toString("ascii") === "bplist"
-        ? await (fileSystem.decodeBinaryPlist ?? readBinaryPlistExecutable)(
-            plistPath,
-          )
+        ? await (fileSystem.decodeBinaryPlist?.(plistPath) ??
+            parseBinaryPlistExecutable(plist))
         : parseXmlPlistExecutable(decodeXmlPlistText(plist));
   } catch (cause: unknown) {
     return err(
@@ -247,6 +251,10 @@ const resolveLayoutExecutable = async (
 const parseXmlPlistExecutable = (plist: string): string => {
   // An unrelated `__proto__` entry must not make the bundle unreadable.
   const { value } = parseXmlPropertyList(plist);
+  return executableName(value);
+};
+
+const executableName = (value: unknown): string => {
   const executable = executableEntrySchema.safeParse(value);
   if (!executable.success) throw new Error("CFBundleExecutable is missing");
   return executable.data.CFBundleExecutable;
@@ -254,19 +262,13 @@ const parseXmlPlistExecutable = (plist: string): string => {
 
 const executableEntrySchema = z.looseObject({ CFBundleExecutable: z.string() });
 
-const readBinaryPlistExecutable = async (plistPath: string): Promise<string> =>
-  // `-n` strips only the newline plutil appends; it requires macOS 12+.
-  (
-    await execFileAsync("/usr/bin/plutil", [
-      "-extract",
-      "CFBundleExecutable",
-      "raw",
-      "-n",
-      "-o",
-      "-",
-      plistPath,
-    ])
-  ).stdout;
+/** Decode a binary plist in-process, so no host plist tool is required. */
+const parseBinaryPlistExecutable = (plist: Buffer): string => {
+  preflightPropertyListDecode(plist, BINARY_PLIST_DECODE_BYTES);
+  // `plist` assigns a `__proto__` key as the prototype; copying drops it, as
+  // the XML path does.
+  return executableName(omitPrototypeKeys(parseBinary(plist)).value);
+};
 
 const isSafeExecutableName = (name: string): boolean =>
   name.length > 0 &&

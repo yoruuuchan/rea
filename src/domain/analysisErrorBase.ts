@@ -94,11 +94,21 @@ import type { FileOffsetPartialObservation } from "./native/fileOffsetPartialObs
 import type { NativeCallPartialObservation } from "./native/nativeCallPartialObservation.js";
 import type { ElectronActivePartialObservation } from "./javascript/electronActiveObservation.js";
 import type { JavaScriptRuntimeObservation } from "./javascript/javascriptRuntimeObservation.js";
-import type { ArtifactInventoryPartialObservation } from "./artifactPartialObservation.js";
+import type {
+  ArtifactInventoryPartialObservation,
+  ArtifactExtractionPartialObservation,
+} from "./artifactPartialObservation.js";
+import type { WebScriptExportPartialObservation } from "./webScriptExport.js";
+import type { JavaScriptRecoveryPartialObservation } from "./javascript/javascriptRecovery.js";
 import type { BrowserScenarioPartialObservation } from "./browserScenarioCapture.js";
 import type { Evidence } from "./evidence.js";
 import type { AndroidPartialObservation } from "./android/androidPartialObservation.js";
 import type { FirmwarePartialObservation } from "./firmware/firmwareAnalysis.js";
+import type {
+  AdbAcquiredFilePartialObservation,
+  AdbPackagePullPartialObservation,
+} from "./adb/adbDeviceAnalysis.js";
+import type { NativeUiObservationResult } from "./native/nativeUiObservation.js";
 
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
@@ -109,6 +119,12 @@ export type AnalysisPartialObservation =
   | BrowserScenarioPartialObservation
   | JavaScriptRuntimeObservation
   | ArtifactInventoryPartialObservation
+  | ArtifactExtractionPartialObservation
+  | WebScriptExportPartialObservation
+  | JavaScriptRecoveryPartialObservation
   | Evidence
   | AndroidPartialObservation
-  | FirmwarePartialObservation;
+  | FirmwarePartialObservation
+  | NativeUiObservationResult
+  | AdbAcquiredFilePartialObservation
+  | AdbPackagePullPartialObservation;

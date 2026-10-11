@@ -41,6 +41,7 @@ describe("CLI option aliases", () => {
   it("register only single-character short flags", async () => {
     const cli = createCli({});
     const invalid: string[] = [];
+    const undescribed: string[] = [];
     for (const command of createCliInventory(cli).primary) {
       for (const [option, short] of Object.entries(
         registeredAliases(cli, command),
@@ -52,8 +53,13 @@ describe("CLI option aliases", () => {
       const help = await serve(cli, [command, "--help"]);
       for (const match of help.stdout.matchAll(/(?:^|[\s,])-([a-z][\w-]+)/gmu))
         invalid.push(`${command} help: -${match[1] ?? ""}`);
+      const options = /^Options:\n((?: {2}.*\n?)*)/mu.exec(help.stdout)?.[1];
+      for (const line of options?.split("\n") ?? [])
+        if (/^ {2}--\S+(?: <[^>]+>)?\s*$/u.test(line))
+          undescribed.push(`${command} ${line.trim()}`);
     }
     expect(invalid).toEqual([]);
+    expect(undescribed).toEqual([]);
   });
 
   it("accepts kebab-case long options without registered aliases", async () => {

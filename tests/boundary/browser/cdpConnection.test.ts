@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CdpConnection } from "../../../src/browser/CdpConnection.js";
+import { WEB_RUNTIME_LIMITS } from "../../../src/domain/webRuntime.js";
 import {
   startFakeCdpBrowser,
   type FakeCdpBrowser,
@@ -31,16 +35,14 @@ const INVALID_REPLIES = [
   ],
 ] as const;
 
+const browsers: FakeCdpBrowser[] = [];
+
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(browsers.splice(0).map(async (browser) => browser.close()));
+});
+
 describe("CDP connection", () => {
-  const browsers: FakeCdpBrowser[] = [];
-
-  afterEach(async () => {
-    vi.useRealTimers();
-    await Promise.all(
-      browsers.splice(0).map(async (browser) => browser.close()),
-    );
-  });
-
   it("correlates concurrent command responses over a real WebSocket", async () => {
     const browser = await startFakeCdpBrowser();
     browsers.push(browser);
@@ -142,27 +144,177 @@ describe("CDP connection", () => {
       }
     },
   );
+});
 
-  it("preserves the selected payload limit reason for pending and subsequent commands", async () => {
+describe("CDP connection payload budgets", () => {
+  it("accepts an exact UTF-8 payload and rejects one byte more at the selected limit", async () => {
+    const maxPayloadBytes = 512;
+    const exactResult = cdpResultAtSize(maxPayloadBytes);
+    const oversizedResult = cdpResultAtSize(maxPayloadBytes + 1);
+    const results = [exactResult, oversizedResult];
+    let resultIndex = 0;
     const browser = await startFakeCdpBrowser({
-      commandResult: () => ({ oversized: "x".repeat(2_048) }),
+      commandResult: () => results[resultIndex++],
     });
     browsers.push(browser);
-    const connection = await CdpConnection.connect(
-      browser.browserWebSocketUrl,
-      "observe_web_execution",
-      undefined,
-      { maxPayloadBytes: 512 },
-    );
+    let connection: CdpConnection | undefined;
     try {
-      for (const method of ["Runtime.enable", "Debugger.enable"]) {
-        await expect(connection.send(method)).rejects.toMatchObject({
-          reason: "payload_limit",
-          userMessage: expect.stringContaining("512 byte protocol budget"),
-        });
-      }
-    } finally {
+      connection = await CdpConnection.connect(
+        browser.browserWebSocketUrl,
+        "observe_web_execution",
+        undefined,
+        { maxPayloadBytes },
+      );
+      await expect(connection.send("Runtime.enable")).resolves.toEqual(
+        exactResult,
+      );
       await connection.close();
+
+      connection = await CdpConnection.connect(
+        browser.browserWebSocketUrl,
+        "observe_web_execution",
+        undefined,
+        { maxPayloadBytes },
+      );
+      const disconnected = vi.fn();
+      connection.onDisconnect(disconnected);
+      const openedConnection = connection;
+      const disconnectNotification = new Promise((resolve) =>
+        openedConnection.onDisconnect(resolve),
+      );
+      await expect(connection.send("Runtime.enable")).rejects.toMatchObject({
+        reason: "payload_limit",
+        userMessage: expect.stringContaining("512 byte protocol budget"),
+      });
+      expect(await disconnectNotification).toMatchObject({
+        reason: "payload_limit",
+      });
+      expect(disconnected).toHaveBeenCalledTimes(1);
+      const lateListener = vi.fn();
+      connection.onDisconnect(lateListener);
+      expect(lateListener).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "payload_limit" }),
+      );
+      await expect(connection.send("Debugger.enable")).rejects.toMatchObject({
+        reason: "payload_limit",
+      });
+      expect(browser.commands).toHaveLength(2);
+    } finally {
+      await connection?.close();
     }
   });
+
+  it("uses the shared protocol budget by default and rejects an oversized frame header", async () => {
+    const server = await startOversizedFrameServer(
+      WEB_RUNTIME_LIMITS.protocolBytes + 1,
+    );
+    let connection: CdpConnection | undefined;
+    try {
+      connection = await CdpConnection.connect(server.url, "inspect_web_page");
+      const disconnectNotification = new Promise((resolve) =>
+        connection?.onDisconnect(resolve),
+      );
+      await expect(connection.send("Runtime.enable")).rejects.toMatchObject({
+        reason: "payload_limit",
+        userMessage: expect.stringContaining(
+          `${WEB_RUNTIME_LIMITS.protocolBytes} byte protocol budget`,
+        ),
+      });
+      expect(await disconnectNotification).toMatchObject({
+        reason: "payload_limit",
+      });
+      await expect(connection.send("Debugger.enable")).rejects.toMatchObject({
+        reason: "payload_limit",
+      });
+    } finally {
+      await connection?.close();
+      await server.close();
+    }
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 0x8000_0000])(
+    "rejects invalid explicit CDP payload budget %s",
+    async (maxPayloadBytes) => {
+      await expect(
+        CdpConnection.connect(
+          "ws://127.0.0.1:1/unused",
+          "inspect_web_page",
+          undefined,
+          { maxPayloadBytes },
+        ),
+      ).rejects.toThrow(RangeError);
+    },
+  );
 });
+
+const cdpResultAtSize = (bytes: number): Readonly<Record<string, unknown>> => {
+  const emptyReply = JSON.stringify({ id: 1, result: { value: "" } });
+  const valueBytes = bytes - Buffer.byteLength(emptyReply);
+  if (valueBytes < 0)
+    throw new RangeError("Requested fixture reply is too small");
+  const value =
+    "é".repeat(Math.floor(valueBytes / 2)) + (valueBytes % 2 === 0 ? "" : "x");
+  const result = { value };
+  const reply = JSON.stringify({ id: 1, result });
+  if (Buffer.byteLength(reply) !== bytes)
+    throw new Error("Fixture reply did not match its requested byte length");
+  return result;
+};
+
+const startOversizedFrameServer = async (payloadBytes: number) => {
+  const server = createServer();
+  const sockets = new Set<{ destroy(): void }>();
+  server.on("upgrade", (request, socket) => {
+    const key = request.headers["sec-websocket-key"];
+    if (typeof key !== "string") {
+      socket.destroy();
+      return;
+    }
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${accept}`,
+        "",
+        "",
+      ].join("\r\n"),
+    );
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    let sentOversizedHeader = false;
+    socket.on("data", () => {
+      if (sentOversizedHeader) {
+        socket.end(Buffer.from([0x88, 0]));
+        return;
+      }
+      sentOversizedHeader = true;
+      const header = Buffer.alloc(10);
+      header[0] = 0x81;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(payloadBytes), 2);
+      socket.write(header);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string")
+    throw new TypeError("Expected a TCP listener address");
+  return {
+    url: `ws://127.0.0.1:${String(address.port)}`,
+    async close(): Promise<void> {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) =>
+          error === undefined ? resolve() : reject(error),
+        ),
+      );
+    },
+  };
+};

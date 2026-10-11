@@ -183,7 +183,9 @@ export async function verifyGhidraLargeResults({
     assert.equal(dossier.procedure.name, "rea_frame_probe");
     assert.ok(dossier.comments.some(({ text }) => text === comment));
     assert.ok(
-      dossierRecord.raw_result.comments.some(({ text }) => text === comment),
+      dossierRecord.raw_result.value.comments.some(
+        ({ text }) => text === comment,
+      ),
     );
     const { stdout } = await exec(
       process.execPath,

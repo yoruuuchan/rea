@@ -187,12 +187,11 @@ describe("canonical skill transaction", () => {
     expect(installedSkill).toContain(
       `version: "${PRODUCT_IDENTITY.skillVersion}"`,
     );
-    expect(installedSkill).toContain("call available analysis tools");
-    expect(installedSkill).toContain("obtain approval before setup writes");
     expect(await readFile(`${nativeGuide}.rea.backup`, "utf8")).toBe(
       "stale filesystem-write permission grant\n",
     );
     for (const reference of [
+      "connection-and-recovery.md",
       "native-and-artifacts.md",
       "javascript-applications.md",
       "android-applications.md",
@@ -243,6 +242,7 @@ describe("canonical skill transaction", () => {
     const paths = [
       "SKILL.md",
       "references/android-applications.md",
+      "references/connection-and-recovery.md",
       "references/evidence-workflows.md",
       "references/javascript-applications.md",
       "references/native-and-artifacts.md",

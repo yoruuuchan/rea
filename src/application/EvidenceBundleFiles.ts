@@ -1,4 +1,5 @@
 import {
+  createImmutableEvidenceBundle,
   describeEvidenceBundleFailure,
   describeValidationFailure,
   parseEvidenceBundle,
@@ -19,25 +20,62 @@ import {
   canonicalJsonParts,
 } from "../domain/jsonSerialization.js";
 import { readJsonFile, writeTextParts } from "./JsonFiles.js";
+import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 
 type EvidenceReadFailure =
   | EvidenceFileError
   | EvidenceIntegrityError
-  | AnalysisResourceConstraintError;
+  | AnalysisResourceConstraintError
+  | AnalysisCancelledError;
 type EvidenceWriteFailure =
   | EvidenceFileError
   | EvidenceIntegrityError
   | AnalysisCancelledError;
 
 /** Read and validate an evidence bundle at the caller-supplied path. */
-export const readEvidenceBundle = async (
+export const readEvidenceBundle = (
   path: string,
+): Promise<Result<EvidenceBundle, EvidenceReadFailure>> =>
+  readBundle(path, parseEvidenceBundle);
+
+/** Read an authenticated immutable snapshot for a subsequent session import. */
+export const readImmutableEvidenceBundle = (
+  path: string,
+  signal?: AbortSignal,
+): Promise<Result<EvidenceBundle, EvidenceReadFailure>> =>
+  readBundle(
+    path,
+    (input) => {
+      const bundle = parseEvidenceBundle(input);
+      return createImmutableEvidenceBundle(bundle.records, bundle.unknowns);
+    },
+    signal,
+  );
+
+const readBundle = async (
+  path: string,
+  parseBundle: (input: unknown) => EvidenceBundle,
+  signal?: AbortSignal,
 ): Promise<Result<EvidenceBundle, EvidenceReadFailure>> => {
-  const loaded = await readJsonFile(path);
+  if (signal?.aborted)
+    return err(new AnalysisCancelledError("import_evidence_bundle"));
+  const loaded = await readJsonFile(path, signal).catch((cause: unknown) => {
+    // A failed close transfers a live handle owner; preserve that failure.
+    if (
+      signal?.aborted === true &&
+      !(cause instanceof RegularFileCleanupFailure)
+    )
+      return err(
+        new AnalysisCancelledError("import_evidence_bundle", { cause }),
+      );
+    throw cause;
+  });
   if (!loaded.ok) return loaded;
+  if (signal?.aborted)
+    return err(new AnalysisCancelledError("import_evidence_bundle"));
   let bundle: EvidenceBundle;
   try {
-    bundle = parseEvidenceBundle(loaded.value);
+    bundle = parseBundle(loaded.value);
   } catch (cause: unknown) {
     return err(
       new EvidenceIntegrityError("Evidence bundle validation failed", {

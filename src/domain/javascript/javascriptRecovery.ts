@@ -106,3 +106,9 @@ export type JavaScriptRecoveryInput = z.output<
 export type JavaScriptRecoveryResult = z.output<
   typeof javascriptRecoveryResultSchema
 >;
+
+/** Completed publication retained when cleanup fails after durable commit. */
+export interface JavaScriptRecoveryPartialObservation {
+  readonly kind: "javascript-recovery";
+  readonly result: JavaScriptRecoveryResult;
+}

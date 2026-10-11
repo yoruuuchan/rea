@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
+import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { DESTINATION_CASE_COLLISION_PREFIX } from "../../artifacts/ArtifactPaths.js";
 import { SafeOutputTree } from "../../artifacts/SafeOutputTree.js";
+import { SafeOutputTreeCreationFailure } from "../../artifacts/SafeOutputTreeCreationFailure.js";
 import {
   webScriptExportManifestSchema,
   webScriptExportResultSchema,
@@ -27,73 +29,105 @@ const LIMITATIONS = [
   "Captured response bytes are browser-decoded bytes; Debugger sources are the exposed text encoded as UTF-8. Redacted bytes are exported exactly as retained, and may no longer parse as JavaScript.",
 ];
 
+interface PublishWebScriptsOptions {
+  readonly resources: ArtifactResourceScope;
+  readonly signal?: AbortSignal;
+}
+
 /** Exclusively publish verified bytes and a manifest, rolling back partial work. */
 export const publishWebScripts = async (
   input: ExportWebScriptsInput,
   capture: SelectedScriptCapture & { readonly sourceEvidenceId: string | null },
   captureSha256: string,
-  signal?: AbortSignal,
-): Promise<WebScriptExportResult> => {
-  const planned = planWebScriptExport(capture.scripts);
-  const tree = await SafeOutputTree.create(input.output_directory);
-  try {
-    signal?.throwIfAborted();
-    const records: ExportedWebScript[] = [];
-    for (const [index, item] of planned.entries()) {
-      signal?.throwIfAborted();
-      records.push(await publishPlannedScript(tree, item, index, signal));
-    }
-    const manifest = webScriptExportManifestSchema.parse({
-      capture_path: input.capture_path,
-      capture_sha256: captureSha256,
-      capture_kind: capture.kind,
-      source_evidence_id: capture.sourceEvidenceId,
-      capture_completeness: capture.completeness,
-      output_directory: tree.outputRoot,
-      analysis_input: records.some(
-        ({ content }) => content.state === "exported",
-      )
-        ? { input_path: join(tree.outputRoot, "files"), format: "directory" }
-        : null,
-      scripts: records,
-      limitations: [
-        ...capture.limitations,
-        ...LIMITATIONS,
-        ...(records.some(({ content }) => content.state === "exported")
-          ? []
-          : [
-              "No script bytes were exportable. Include script sources in inspect_web_page or select response_body in capture_browser_scenario, then capture again.",
-            ]),
-      ],
-    });
-    const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    const result = webScriptExportResultSchema.parse({
-      ...manifest,
-      manifest: {
-        path: join(tree.outputRoot, "manifest.json"),
-        sha256: digest,
-        bytes: bytes.length,
-      },
-    });
-    await tree.write("manifest.json", Readable.from([bytes]), digest, signal);
-    signal?.throwIfAborted();
-    await tree.commit();
-    return result;
-  } catch (cause: unknown) {
+  options: PublishWebScriptsOptions,
+): Promise<WebScriptExportResult> =>
+  options.resources.run(async () => {
+    const planned = planWebScriptExport(capture.scripts);
+    let tree: SafeOutputTree | undefined;
+    let result: WebScriptExportResult | undefined;
     try {
-      await tree.rollback();
-    } catch (cleanupCause: unknown) {
-      throw new WebScriptExportError(
-        "io",
-        tree.outputRoot,
-        `Publication failed (${message(cause)}); rollback failed (${message(cleanupCause)}). Remove the residual output directory before retrying.`,
-        [tree.outputRoot],
+      tree = await SafeOutputTree.create(input.output_directory);
+      options.signal?.throwIfAborted();
+      const records: ExportedWebScript[] = [];
+      for (const [index, item] of planned.entries()) {
+        options.signal?.throwIfAborted();
+        records.push(
+          await publishPlannedScript(tree, item, index, options.signal),
+        );
+      }
+      const manifest = webScriptExportManifestSchema.parse({
+        capture_path: input.capture_path,
+        capture_sha256: captureSha256,
+        capture_kind: capture.kind,
+        source_evidence_id: capture.sourceEvidenceId,
+        capture_completeness: capture.completeness,
+        output_directory: tree.outputRoot,
+        analysis_input: records.some(
+          ({ content }) => content.state === "exported",
+        )
+          ? { input_path: join(tree.outputRoot, "files"), format: "directory" }
+          : null,
+        scripts: records,
+        limitations: [
+          ...capture.limitations,
+          ...LIMITATIONS,
+          ...(records.some(({ content }) => content.state === "exported")
+            ? []
+            : [
+                "No script bytes were exportable. Include script sources in inspect_web_page or select response_body in capture_browser_scenario, then capture again.",
+              ]),
+        ],
+      });
+      const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      result = webScriptExportResultSchema.parse({
+        ...manifest,
+        manifest: {
+          path: join(tree.outputRoot, "manifest.json"),
+          sha256: digest,
+          bytes: bytes.length,
+        },
+      });
+      await tree.write(
+        "manifest.json",
+        Readable.from([bytes]),
+        { sha256: digest, bytes: bytes.byteLength },
+        options.signal,
       );
+      options.signal?.throwIfAborted();
+      await tree.commit();
+      return result;
+    } catch (cause: unknown) {
+      if (cause instanceof SafeOutputTreeCreationFailure) tree = cause.tree;
+      if (tree !== undefined) {
+        const cleanup = await options.resources.release({
+          kind: "output-tree",
+          resource: tree.outputRoot,
+          tree,
+        });
+        if (cleanup.kind === "failed") {
+          const cleanupCause = cleanup.cause;
+          const diagnostic = tree.published
+            ? `Publication completed, but descriptor cleanup failed (${message(cleanupCause)}). The published output remains available.`
+            : `Publication failed (${message(cause)}); rollback failed (${message(cleanupCause)}). Remove the residual output directory before retrying.`;
+          const error = new WebScriptExportError(
+            cause instanceof ArtifactReaderFailure ? cause.reason : "io",
+            tree.outputRoot,
+            diagnostic,
+            { residualPaths: [tree.outputRoot] },
+          );
+          if (tree.published && result !== undefined)
+            error.retainPartialObservation({
+              kind: "web-script-export",
+              result,
+            });
+          throw error;
+        }
+        if (tree.published && result !== undefined) return result;
+      }
+      throw cause;
     }
-    throw cause;
-  }
-};
+  });
 
 const publishPlannedScript = async (
   tree: SafeOutputTree,
@@ -109,7 +143,7 @@ const publishPlannedScript = async (
     tree.write(
       `files/${relativePath}`,
       Readable.from([content.bytes]),
-      content.sha256,
+      { sha256: content.sha256, bytes: content.bytes.byteLength },
       signal,
     );
   try {

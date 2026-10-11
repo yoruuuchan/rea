@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 
@@ -40,6 +40,7 @@ describe("artifact Mach-O slices", () => {
         ),
     };
     const reader = new MachOSliceArtifactReader(binary, {}, runner);
+    onTestFinished(() => reader.close());
     const enumerate = async (): Promise<void> => {
       for await (const _entry of reader.entries()) {
         // Enumeration must reject out-of-bounds lipo metadata before yielding.
@@ -78,12 +79,14 @@ describe("artifact Mach-O slices", () => {
         ),
     };
     const reader = new MachOSliceArtifactReader(binary, {}, runner);
+    onTestFinished(() => reader.close());
     const entries = [];
     for await (const entry of reader.entries()) entries.push(entry);
     expect(entries).toHaveLength(2);
+    const firstEntry = entries[0];
     const secondEntry = entries[1];
-    expect(secondEntry).toBeDefined();
-    if (secondEntry === undefined) return;
+    if (firstEntry === undefined || secondEntry === undefined)
+      throw new Error("Expected both universal Mach-O slice entries");
     expect(secondEntry).toMatchObject({
       path: "slices/arm64",
       byteOffset: 8192,
@@ -93,8 +96,26 @@ describe("artifact Mach-O slices", () => {
       await expect(
         reader.open({ ...secondEntry, adapterKey }),
       ).rejects.toMatchObject({ reason: "integrity" });
+    await expect(
+      reader.open({ ...secondEntry, adapterKey: firstEntry.adapterKey }),
+    ).rejects.toMatchObject({ reason: "integrity" });
+    await expect(
+      reader.open({ ...secondEntry, path: firstEntry.path }),
+    ).rejects.toMatchObject({ reason: "integrity" });
+    await expect(
+      reader.open({ ...secondEntry, byteOffset: firstEntry.byteOffset }),
+    ).rejects.toMatchObject({ reason: "integrity" });
+    await expect(
+      reader.open({ ...secondEntry, declaredSize: arm.length + 1 }),
+    ).rejects.toMatchObject({ reason: "integrity" });
+    const originalKey = secondEntry.adapterKey;
+    Reflect.set(secondEntry, "adapterKey", firstEntry.adapterKey);
+    await expect(reader.open(secondEntry)).rejects.toMatchObject({
+      reason: "integrity",
+    });
+    Reflect.set(secondEntry, "adapterKey", originalKey);
     const chunks: Buffer[] = [];
-    const stream = await reader.open(secondEntry);
+    const stream = await reader.open({ ...secondEntry });
     for await (const chunk of stream) chunks.push(Buffer.from(chunk));
     expect(Buffer.concat(chunks)).toEqual(Buffer.from(arm));
     expect(reader.provenance()).toEqual([
@@ -105,7 +126,9 @@ describe("artifact Mach-O slices", () => {
       Reflect.set(provenance[0], "tool", "forged");
     expect(reader.provenance()[0]?.tool).toBe("lipo");
   });
+});
 
+describe("artifact Mach-O slice integrity", () => {
   it.each([
     ["CPU type", "cputype 16777223"],
     ["CPU subtype", "cpusubtype 2"],
@@ -139,6 +162,7 @@ describe("artifact Mach-O slices", () => {
         {},
         lipoRunner(`${details.join("\n")}\n`),
       );
+      onTestFinished(() => reader.close());
       await expect(async () => {
         for await (const _entry of reader.entries()) {
           // The structural comparison runs before the reader yields a slice.
@@ -161,6 +185,7 @@ describe("artifact Mach-O slices", () => {
         `architecture arm64\n cputype 16777228\n cpusubtype 0\n offset 4096\n size ${thin.length}\n align 2^12 (4096)\n`,
       ),
     );
+    onTestFinished(() => reader.close());
     await expect(async () => {
       for await (const _entry of reader.entries()) {
         // Malformed structural facts must fail before any slice is yielded.
@@ -215,6 +240,7 @@ describe("artifact Mach-O arm64e variant slices", () => {
         `architecture x86_64\n cputype CPU_TYPE_X86_64\n cpusubtype CPU_SUBTYPE_X86_64_ALL\n offset 4096\n size ${String(x86.length)}\n align 2^12 (4096)\n${lipo(arm.length)}`,
       ),
     );
+    onTestFinished(() => reader.close());
     const entries = [];
     for await (const entry of reader.entries()) entries.push(entry);
     return entries.map(({ path, byteOffset }) => [path, byteOffset]);

@@ -1,7 +1,12 @@
 import { analyzeJavaScriptApplication } from "../application/javascript/JavaScriptApplicationService.js";
+import { JAVASCRIPT_APPLICATION_PROVIDER } from "../application/InvestigationProviders.js";
 import { createProgressReporter } from "../application/ProgressReporter.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 
 /** Execute the shared one-shot CLI boundary for static JavaScript analysis. */
 export const runCliJavaScriptApplicationAnalysis = async (
@@ -14,10 +19,34 @@ export const runCliJavaScriptApplicationAnalysis = async (
     },
     { minimumIntervalMs: 0 },
   );
-  const result = await analyzeJavaScriptApplication(input, {
+  const resources = new ArtifactResourceScope();
+  const result = await analyzeJavaScriptApplication(input, resources, {
     progress,
     ...(signal === undefined ? {} : { signal }),
   });
+  try {
+    await resources.close();
+  } catch (cause: unknown) {
+    const cleanup = ArtifactReaderFailure.cleanupObservation(
+      cause,
+      "JavaScript application resources",
+    );
+    const failure = new ProviderCleanupError(
+      JAVASCRIPT_APPLICATION_PROVIDER.id,
+      cleanup.resources,
+      { reason: cleanup.reason },
+      { cause, operation: "analyze_javascript_application" },
+    );
+    return cliError(
+      result.ok
+        ? failure
+        : analysisErrorWithCleanupFailure(
+            result.error,
+            failure,
+            "analyze_javascript_application",
+          ),
+    );
+  }
   return result.ok ? result.value : cliError(result.error);
 };
 

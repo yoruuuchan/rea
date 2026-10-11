@@ -47,6 +47,7 @@ it.each(["Page.disable", "Target.detachFromTarget"])(
     expect(methods).toContain("Target.detachFromTarget");
     expect(methods).not.toContain("Target.closeTarget");
     expect(methods).not.toContain("Browser.close");
+    await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
   },
 );
 
@@ -76,6 +77,11 @@ it("releases cleanup when cancellation arrives after capture completes", async (
   expect(browser.commands.map(({ method }) => method)).toContain(
     "Target.detachFromTarget",
   );
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+  const methods = browser.commands.map(({ method }) => method);
+  expect(methods).not.toContain("Target.closeTarget");
+  expect(methods).not.toContain("Browser.close");
+  expect((await fetch(`${browser.endpoint}/json/version`)).ok).toBe(true);
 });
 
 it("closes an Electron inspection session when cleanup is cancelled", async () => {
@@ -122,11 +128,11 @@ it("closes an Electron inspection session when cleanup is cancelled", async () =
       operation: "inspect_electron_page",
     },
   });
-  expect(browser.commands.map(({ method }) => method)).toContain(
-    "Page.disable",
-  );
   const methods = browser.commands.map(({ method }) => method);
+  expect(methods).not.toContain("Page.disable");
   expect(methods).toContain("Target.detachFromTarget");
   expect(methods).not.toContain("Target.closeTarget");
   expect(methods).not.toContain("Browser.close");
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+  expect((await fetch(`${browser.endpoint}/json/version`)).ok).toBe(true);
 });

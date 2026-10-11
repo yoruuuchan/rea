@@ -1,11 +1,15 @@
-import type { BigIntStats } from "node:fs";
-import { readdir, readlink, realpath } from "node:fs/promises";
+import type { BigIntStats, Dir, Dirent } from "node:fs";
+import { opendir, readlink, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import type { ArtifactCleanupAttempt } from "../artifacts/ArtifactResourceScope.js";
+import { OwnedDirectoryHandle } from "../filesystem/OwnedDirectoryHandle.js";
+import { err, ok } from "../domain/result.js";
 
-import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import {
   cancelled,
   entryFailure,
+  failure,
   filesystemFailureDetail,
   safeSize,
 } from "./ReferenceSourceReaderErrors.js";
@@ -18,11 +22,12 @@ import {
   validateDirectory,
   bigLstat,
 } from "./ReferenceSourceReaderValidate.js";
-import {
-  type PendingDirectory,
-  type ReferenceSourceEntry,
-  type ReferenceSourceResult,
-  type TraversalState,
+import type {
+  PendingDirectory,
+  ReferenceSourceEntry,
+  ReferenceSourceEntryKind,
+  ReferenceSourceResult,
+  TraversalState,
 } from "./ReferenceSourceReaderTypes.js";
 
 export const traverseDirectory = async (
@@ -47,20 +52,90 @@ export const traverseDirectory = async (
     );
     return { ok: true, value: undefined };
   }
-  const names = await readDirectoryNames(current.path);
+  const directories: PendingDirectory[] = [];
+  let readFailure: string | undefined;
+  let handle: Dir | undefined;
+  try {
+    handle = await opendir(current.path);
+  } catch (cause: unknown) {
+    readFailure = directoryReadFailure(cause);
+  }
+  if (handle !== undefined) {
+    const owner = new OwnedDirectoryHandle(handle);
+    let result: ReferenceSourceResult<undefined> = ok(undefined);
+    let cleanup: ArtifactCleanupAttempt;
+    try {
+      for (;;) {
+        let child: Dirent | null;
+        try {
+          child = await handle.read();
+        } catch (cause: unknown) {
+          readFailure = directoryReadFailure(cause);
+          break;
+        }
+        if (child === null) break;
+        result = await processEntry(state, current, child.name, directories);
+        if (!result.ok) break;
+      }
+    } finally {
+      cleanup = await state.resources.release({
+        kind: "directory-handle",
+        handle: owner,
+        resource: current.path,
+      });
+    }
+    if (cleanup.kind === "failed") {
+      if (result.ok && !isAborted(state.signal) && readFailure !== undefined)
+        state.entries.push(
+          entryFailure(
+            pathFromRoot(state.root, current.path),
+            "directory",
+            "io",
+            readFailure,
+          ),
+        );
+      const observation = ArtifactReaderFailure.cleanupObservation(
+        cleanup.cause,
+        current.path,
+      );
+      const previous = result.ok ? undefined : result.error.cleanup;
+      const primary = result.ok
+        ? isAborted(state.signal)
+          ? cancelled()
+          : failure(
+              "io",
+              readFailure ??
+                `Reference directory cleanup failed: ${current.path}`,
+            )
+        : result.error;
+      return err({
+        ...primary,
+        cleanup:
+          previous === undefined
+            ? observation
+            : {
+                reason: `${previous.reason}; ${observation.reason}`,
+                resources: [
+                  ...new Set([...previous.resources, ...observation.resources]),
+                ],
+              },
+        cause: primary.cause ?? cleanup.cause,
+      });
+    }
+    if (!result.ok) return result;
+  }
   if (isAborted(state.signal)) return { ok: false, error: cancelled() };
-  if (!names.ok) {
+  if (readFailure !== undefined) {
     state.entries.push(
       entryFailure(
         pathFromRoot(state.root, current.path),
         "directory",
         "io",
-        names.message,
+        readFailure,
       ),
     );
     return { ok: true, value: undefined };
   }
-  if (isAborted(state.signal)) return { ok: false, error: cancelled() };
   const after = await validateDirectory(
     state.root,
     state.rootIdentity,
@@ -85,35 +160,15 @@ export const traverseDirectory = async (
       kind: "directory",
       path: pathFromRoot(state.root, current.path),
     });
-  const directories: PendingDirectory[] = [];
-  for (const name of names.value) {
-    const result = await processEntry(state, current, name, directories);
-    if (!result.ok) return result;
-  }
   directories.reverse();
   state.pending.push(...directories);
   return { ok: true, value: undefined };
 };
 
-const readDirectoryNames = async (
-  path: string,
-): Promise<
-  | { readonly ok: true; readonly value: string[] }
-  | { readonly ok: false; readonly message: string }
-> => {
-  try {
-    return {
-      ok: true,
-      value: (await readdir(path)).sort(compareUnicodeCodePoints),
-    };
-  } catch (cause: unknown) {
-    const message = filesystemFailureDetail(
-      cause,
-      "Directory could not be read",
-    );
-    if (message === undefined) throw cause;
-    return { ok: false, message };
-  }
+const directoryReadFailure = (cause: unknown): string => {
+  const message = filesystemFailureDetail(cause, "Directory could not be read");
+  if (message === undefined) throw cause;
+  return message;
 };
 
 const readMetadata = async (
@@ -143,7 +198,20 @@ const processEntry = async (
   if (isAborted(state.signal)) return { ok: false, error: cancelled() };
   const absolute = join(current.path, name);
   const path = pathFromRoot(state.root, absolute);
-  const excluded = applyExclusion(state.shouldExclude, path);
+  const metadata = await readMetadata(absolute);
+  if (isAborted(state.signal)) return { ok: false, error: cancelled() };
+  if (!metadata.ok) {
+    state.entries.push(entryFailure(path, "unknown", "io", metadata.message));
+    return { ok: true, value: undefined };
+  }
+  const kind = metadata.value.isSymbolicLink()
+    ? "symlink"
+    : metadata.value.isDirectory()
+      ? "directory"
+      : metadata.value.isFile()
+        ? "file"
+        : "other";
+  const excluded = applyExclusion(state.shouldExclude, path, kind);
   if (!excluded.ok)
     return {
       ok: false,
@@ -154,28 +222,14 @@ const processEntry = async (
       },
     };
   if (excluded.value) return { ok: true, value: undefined };
-  const metadata = await readMetadata(absolute);
   if (isAborted(state.signal)) return { ok: false, error: cancelled() };
-  if (!metadata.ok) {
-    state.entries.push(entryFailure(path, "unknown", "io", metadata.message));
-    return { ok: true, value: undefined };
-  }
-  if (isAborted(state.signal))
-    return {
-      ok: false,
-      error: {
-        tag: "reference-source-reader",
-        code: "cancelled",
-        message: "Reference source traversal cancelled",
-      },
-    };
-  if (metadata.value.isSymbolicLink())
+  if (kind === "symlink")
     state.entries.push(
       await describeSymlink(state.root, absolute, path, state.signal),
     );
-  else if (metadata.value.isDirectory()) {
+  else if (kind === "directory") {
     directories.push({ path: absolute });
-  } else if (!metadata.value.isFile())
+  } else if (kind !== "file")
     state.entries.push(
       entryFailure(
         path,
@@ -185,7 +239,7 @@ const processEntry = async (
         safeSize(metadata.value.size),
       ),
     );
-  else await processFileEntry(state, absolute, path, metadata.value);
+  else return processFileEntry(state, absolute, path, metadata.value);
   return { ok: true, value: undefined };
 };
 
@@ -194,8 +248,9 @@ const processFileEntry = async (
   absolute: string,
   path: string,
   metadata: BigIntStats,
-): Promise<void> => {
+): Promise<ReferenceSourceResult<undefined>> => {
   const result = await readStableFile({
+    resources: state.resources,
     root: state.root,
     rootIdentity: state.rootIdentity,
     absolute,
@@ -203,9 +258,24 @@ const processFileEntry = async (
     expected: metadata,
     ...(state.signal === undefined ? {} : { signal: state.signal }),
   });
-  if (result.status === "read" && result.kind === "file")
-    state.bytesRead += result.bytes.byteLength;
-  state.entries.push(result);
+  const { entry } = result;
+  if (entry.status === "read" && entry.kind === "file")
+    state.bytesRead += entry.bytes.byteLength;
+  state.entries.push(entry);
+  if (result.cleanup !== undefined)
+    return err({
+      tag: "reference-source-reader",
+      code:
+        entry.status === "failed" && entry.code === "cancelled"
+          ? "cancelled"
+          : "io",
+      message:
+        entry.status === "failed"
+          ? entry.message
+          : `Reference file cleanup failed: ${path}`,
+      cleanup: result.cleanup,
+    });
+  return ok(undefined);
 };
 
 const describeSymlink = async (
@@ -289,11 +359,14 @@ const describeSymlink = async (
 };
 
 const applyExclusion = (
-  shouldExclude: ((path: string) => boolean) | undefined,
+  shouldExclude:
+    | ((path: string, kind: ReferenceSourceEntryKind) => boolean)
+    | undefined,
   path: string,
+  kind: ReferenceSourceEntryKind,
 ): { readonly ok: true; readonly value: boolean } | { readonly ok: false } => {
   try {
-    return { ok: true, value: shouldExclude?.(path) === true };
+    return { ok: true, value: shouldExclude?.(path, kind) === true };
   } catch (cause: unknown) {
     // Exclusion predicates are caller-supplied; a throwing predicate fails
     // closed and the caller-visible `{ ok: false }` preserves the rejection

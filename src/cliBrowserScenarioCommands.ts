@@ -6,7 +6,9 @@ import { CLI_COMMANDS } from "./cliCommandNames.js";
 import { parseCliJsonInput, resolveCliJsonPaths } from "./cliJsonInput.js";
 import { logCliCommand } from "./cliLogging.js";
 import { AnalysisInputError } from "./domain/analysisErrorCore.js";
+import { AnalysisError } from "./domain/analysisErrorBase.js";
 import { projectAnalysisError } from "./domain/analysisErrorProjection.js";
+import { BrowserObservationError } from "./domain/browserObservationError.js";
 import { projectInputIssues } from "./domain/inputIssueProjection.js";
 import { browserScenarioSchema } from "./domain/browserScenario.js";
 import type { JsonValue } from "./domain/jsonValue.js";
@@ -46,11 +48,40 @@ export const registerBrowserScenarioCommands = (
         // Load Playwright only for this command, not during CLI startup.
         const { createBrowserScenarioProvider } =
           await import("./composition/browserScenario.js");
-        const result = await captureBrowserScenario(
-          createBrowserScenarioProvider(environment),
-          scenario.data,
-        );
-        return result.ok ? result.value : cliError(result.error);
+        const provider = createBrowserScenarioProvider(environment);
+        let result:
+          | Awaited<ReturnType<typeof captureBrowserScenario>>
+          | undefined;
+        try {
+          result = await captureBrowserScenario(provider, scenario.data);
+          return result.ok ? result.value : cliError(result.error);
+        } finally {
+          try {
+            await provider?.close?.();
+          } catch (cause: unknown) {
+            // Failed captures already retain their primary error and partial
+            // observations. A cleanup retry must not replace that outcome.
+            if (result?.ok)
+              throw new BrowserObservationError(OPERATION, "cleanup_failed", {
+                cause,
+                cleanup:
+                  cause instanceof AnalysisError && cause.cleanup !== undefined
+                    ? cause.cleanup
+                    : {
+                        reason:
+                          cause instanceof Error
+                            ? cause.message
+                            : String(cause),
+                        resources:
+                          cause instanceof AnalysisError &&
+                          cause.cleanupResources.length > 0
+                            ? cause.cleanupResources
+                            : ["browser_transport"],
+                      },
+                partialObservation: result.value,
+              });
+          }
+        }
       }),
   });
 };

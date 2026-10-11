@@ -38,6 +38,26 @@ Inspect separately obtained components explicitly and preserve their identities.
 A valid implementation marker establishes a candidate native boundary, not
 recovered native semantics or runtime behavior.
 
+An assembly targeting [.NET Standard](https://learn.microsoft.com/en-us/dotnet/standard/net-standard)
+declares API compatibility across multiple .NET implementations. REA preserves
+that target in `target_frameworks` and leaves `runtime_family` as `unknown`
+unless independent markers identify a runtime family, such as a ReadyToRun
+signature.
+
+### Resource admission
+
+The static provider admits regular input files up to 128 MiB before retaining
+their bytes. Reads remain bounded if a file grows after admission. Metadata,
+CIL decoding, and projected inspection records have a separate conservative
+64 MiB representation budget; shared heap strings are cached, but repeated
+output occurrences still consume that budget. These are inspection resource
+policies, not PE format limits or a hard bound on total V8 heap use.
+
+Input overflow returns a resource constraint. Decode or projection overflow
+reports `resource-limit` with unavailable or partial coverage; omitted facts do
+not become empty observations. Ambiguous PE section mappings are rejected
+rather than interpreted according to section order.
+
 ## Analysis objective
 
 REA's managed-code track is intended to answer five different questions without

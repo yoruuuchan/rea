@@ -1,8 +1,12 @@
 import { z } from "incur";
 
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
+import type { ReferenceSourcePolicy } from "../domain/referenceSourcePolicy.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { importReferenceSource } from "../application/ReferenceSourceImport.js";
 import { projectReferenceSourceImportError } from "../application/ReferenceSourceImportTypes.js";
+import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js";
 import { parseConfig } from "../config/parseConfig.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
@@ -165,7 +169,7 @@ const registerNativeCommands = (
         .string()
         .optional()
         .describe(
-          "Plist path relative to the app root (default: Contents/Info.plist)",
+          "Plist path relative to the app root, or an absolute path (default: the bundle's Info.plist)",
         ),
     }),
     run: ({ args, options }) =>
@@ -221,21 +225,110 @@ const registerReferenceSourceCommand = (
               error: "Import failed",
               ...projectAnalysisError(config.error),
             };
-          const imported = await importReferenceSource({
-            root: args.root,
-            caller: "rea-cli",
-            policy: config.value.referenceSourcePolicy,
-            importer: PRODUCT_IDENTITY.packageName,
-            importerVersion: null,
-          });
-          return imported.ok
-            ? imported.value
-            : {
-                error: "Import failed",
-                ...projectReferenceSourceImportError(imported.error),
-              };
+          return runReferenceSourceImport(
+            args.root,
+            config.value.referenceSourcePolicy,
+          );
         },
         isReferenceSourceImportCliFailure,
       ),
   });
 };
+
+const runReferenceSourceImport = async (
+  root: string,
+  policy: ReferenceSourcePolicy,
+): Promise<unknown> => {
+  const resources = new ArtifactResourceScope();
+  let outcome:
+    | {
+        readonly kind: "result";
+        readonly imported: Awaited<ReturnType<typeof importReferenceSource>>;
+      }
+    | { readonly kind: "thrown"; readonly cause: unknown };
+  try {
+    outcome = {
+      kind: "result",
+      imported: await importReferenceSource(
+        {
+          root,
+          caller: "rea-cli",
+          policy,
+          importer: PRODUCT_IDENTITY.packageName,
+          importerVersion: null,
+        },
+        resources,
+      ),
+    };
+  } catch (cause: unknown) {
+    outcome = { kind: "thrown", cause };
+  }
+
+  let closeOutcome:
+    | { readonly kind: "closed" }
+    | { readonly kind: "failed"; readonly cause: unknown };
+  try {
+    await resources.close();
+    closeOutcome = { kind: "closed" };
+  } catch (cause: unknown) {
+    closeOutcome = { kind: "failed", cause };
+  }
+
+  if (outcome.kind === "thrown") {
+    if (closeOutcome.kind === "failed")
+      throw new AggregateError(
+        [outcome.cause, closeOutcome.cause],
+        "Reference source import and cleanup both failed",
+        { cause: outcome.cause },
+      );
+    throw outcome.cause;
+  }
+
+  const imported = outcome.imported;
+  if (!imported.ok) {
+    const cleanup =
+      closeOutcome.kind === "closed"
+        ? imported.error.cleanup
+        : mergeReferenceSourceCleanup(
+            imported.error.cleanup,
+            ArtifactReaderFailure.cleanupObservation(
+              closeOutcome.cause,
+              "reference source",
+            ),
+          );
+    return {
+      error: "Import failed",
+      ...projectReferenceSourceImportError({
+        ...imported.error,
+        ...(cleanup === undefined ? {} : { cleanup }),
+      }),
+    };
+  }
+
+  if (closeOutcome.kind === "failed")
+    return {
+      error: "Import failed",
+      ...projectReferenceSourceImportError({
+        tag: "reference-source-import",
+        code: "io",
+        message: "Reference source cleanup failed after import",
+        cleanup: ArtifactReaderFailure.cleanupObservation(
+          closeOutcome.cause,
+          "reference source",
+        ),
+        cause: closeOutcome.cause,
+      }),
+    };
+  return imported.value;
+};
+
+const mergeReferenceSourceCleanup = (
+  first: AnalysisCleanupObservation | undefined,
+  second: AnalysisCleanupObservation,
+): AnalysisCleanupObservation =>
+  first === undefined
+    ? second
+    : {
+        reason: `${first.reason}; ${second.reason}`,
+        resources: [...new Set([...first.resources, ...second.resources])],
+      };

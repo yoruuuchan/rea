@@ -29,8 +29,16 @@ it("runs every managed static inspection independently of an active native targe
   );
   const path = join(directory, "fixture.dll");
   const otherPath = join(directory, "other-fixture.dll");
+  const partialPath = join(directory, "partial-method.dll");
   await writeFile(path, buildManagedPeFixture());
   await writeFile(otherPath, buildManagedPeFixture({ methodName: "Other" }));
+  await writeFile(
+    partialPath,
+    buildManagedPeFixture({
+      virtualSectionSize: 0x801,
+      ilBody: Buffer.from([0x06, 0x2a]),
+    }),
+  );
   const session = composeBinarySession(new AnalysisProviderRegistry([]), [
     new ManagedStaticProvider(),
   ]);
@@ -115,6 +123,27 @@ it("runs every managed static inspection independently of an active native targe
       operation: "inspect_managed_native_boundaries",
       provider: { id: "rea-dotnet-static" },
       subject: { local_path: path, format: "pe" },
+    });
+    const partial = structured(
+      await client.callTool({
+        name: "inspect_managed_members",
+        arguments: { path: partialPath },
+      }),
+    );
+    expect(partial).toMatchObject({
+      subject: { local_path: partialPath, format: "pe" },
+      normalized_result: {
+        methods: [
+          {
+            body: {
+              status: "malformed",
+              normalized_il_sha256: null,
+              issue: "Method body leaves file-backed PE section data",
+            },
+          },
+        ],
+        coverage: { state: "partial" },
+      },
     });
   } finally {
     await Promise.all([client.close(), server.close()]);

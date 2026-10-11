@@ -143,7 +143,7 @@ const addReferenceIssue = (
 };
 
 const pairKey = (left: string, right: string): string =>
-  [left, right].sort().join("\0");
+  left <= right ? `${left}\0${right}` : `${right}\0${left}`;
 
 const buildAdjacency = (
   language: PartialOrderLanguage,
@@ -269,7 +269,13 @@ const validateUnorderedGroups = (
     for (const [eventIndex, id] of group.events.entries())
       addReferenceIssue(context, known, id, [...path, "events", eventIndex]);
     for (const [leftIndex, leftId] of group.events.entries()) {
-      for (const rightId of group.events.slice(leftIndex + 1)) {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < group.events.length;
+        rightIndex++
+      ) {
+        const rightId = group.events[rightIndex];
+        if (rightId === undefined) continue;
         const key = pairKey(leftId, rightId);
         if (pairs.has(key))
           context.addIssue({
@@ -299,18 +305,33 @@ const validateCompletePairDeclarations = (
   unorderedPairs: ReadonlySet<string>,
   context: z.RefinementCtx,
 ): void => {
-  for (const [leftIndex, leftId] of ids.entries())
-    for (const rightId of ids.slice(leftIndex + 1))
-      if (
-        !isOrdered(relations.reachable, leftId, rightId) &&
-        !relations.notBeforePairs.has(pairKey(leftId, rightId)) &&
-        !unorderedPairs.has(pairKey(leftId, rightId))
-      )
-        context.addIssue({
-          code: "custom",
-          message: `event pair ${leftId}/${rightId} must be explicitly ordered or unordered`,
-          path: ["language"],
-        });
+  let missingPairCount = 0;
+  let firstMissingPair = "";
+  for (const [leftIndex, leftId] of ids.entries()) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < ids.length;
+      rightIndex++
+    ) {
+      const rightId = ids[rightIndex];
+      if (rightId === undefined) continue;
+      if (isOrdered(relations.reachable, leftId, rightId)) continue;
+      const key = pairKey(leftId, rightId);
+      if (!relations.notBeforePairs.has(key) && !unorderedPairs.has(key)) {
+        if (missingPairCount === 0) firstMissingPair = `${leftId}/${rightId}`;
+        missingPairCount++;
+      }
+    }
+  }
+  if (missingPairCount > 0)
+    context.addIssue({
+      code: "custom",
+      message:
+        missingPairCount === 1
+          ? `event pair ${firstMissingPair} must be explicitly ordered or unordered`
+          : `${String(missingPairCount)} event pairs must be explicitly ordered or unordered; first undeclared pair: ${firstMissingPair}`,
+      path: ["language"],
+    });
 };
 
 const validatePartialOrder = (

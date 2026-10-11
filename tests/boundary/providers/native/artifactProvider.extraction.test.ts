@@ -14,6 +14,26 @@ import {
 import type { BinaryTarget } from "../../../../src/domain/binaryTargetTypes.js";
 
 describe("artifact extraction", () => {
+  it("keeps committed files after the owning client closes", async () => {
+    const root = await createTestTempDirectory("rea-extract-client-close-");
+    const source = join(root, "source");
+    await mkdir(source);
+    await writeFile(join(source, "payload.txt"), "committed\n");
+    const output = join(root, "output");
+    const client = new ArtifactProvider(process.env).createClient(
+      target(source, "directory"),
+    );
+
+    const result = await client.execute("extract_artifact", {
+      output_root: output,
+    });
+    if (!result.ok) throw result.error;
+    await client.close();
+    expect(await readFile(join(output, "payload.txt"), "utf8")).toBe(
+      "committed\n",
+    );
+  });
+
   it("extracts all regular occurrences through an exclusively owned output tree", async () => {
     const root = await createTestTempDirectory("rea-extract-");
     const source = join(root, "source");

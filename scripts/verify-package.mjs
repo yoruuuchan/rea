@@ -38,104 +38,147 @@ let update;
 let repositorySkill;
 let report;
 
+const runStage = async (name, action) => {
+  const started = performance.now();
+  process.stderr.write(`[verify:package] ${name}: start\n`);
+  const result = await action();
+  process.stderr.write(
+    `[verify:package] ${name}: complete (${Math.round(performance.now() - started)} ms)\n`,
+  );
+  return result;
+};
+
 try {
-  repositorySkill = await verifyRepositorySkill({ root, workspace });
-  ({ tarball } = await verifyPackagePack({ root, workspace }));
-  const environmentData = await verifyPackageEnvironment({
-    root,
-    workspace,
-    evidenceRoot,
-    referenceRoot,
-  });
-  const { cli, packageRunnerCli } = await verifyPackageInstall({
-    tarball,
-    prefix: environmentData.prefix,
-    workspace,
-    environment: environmentData.environment,
-  });
-  update = await verifyPackageUpdate({
-    prefix: environmentData.prefix,
-    packageRoot: join(
-      environmentData.prefix,
-      "lib",
-      "node_modules",
-      PRODUCT_IDENTITY.packageName,
-    ),
-    tarball,
-    workspace,
-    environment: environmentData.environment,
-  });
-  mcpStartup = await measureMcpStartup({
-    command: cli,
-    args: ["mcp"],
-    environment: {
-      ...environmentData.environment,
-    },
-    policy: MCP_STARTUP_POLICY,
-  });
-  mcpModuleLoading = await profileMcpModuleLoading({
-    command: cli,
-    args: ["mcp"],
-    environment: {
-      ...environmentData.environment,
-    },
-    policy: MCP_STARTUP_POLICY,
-    packageName: PRODUCT_IDENTITY.packageName,
-  });
-  const { supportedSetupHost, hopperSetupSupported } =
-    await verifyPackageDiscovery({
+  repositorySkill = await runStage("repository skill", () =>
+    verifyRepositorySkill({ root, workspace }),
+  );
+  ({ tarball } = await runStage("package archive", () =>
+    verifyPackagePack({ root, workspace }),
+  ));
+  const environmentData = await runStage("package environment", () =>
+    verifyPackageEnvironment({
+      root,
+      workspace,
+      evidenceRoot,
+      referenceRoot,
+    }),
+  );
+  const { cli, packageRunnerCli } = await runStage("package install", () =>
+    verifyPackageInstall({
+      tarball,
+      prefix: environmentData.prefix,
+      workspace,
+      environment: environmentData.environment,
+    }),
+  );
+  update = await runStage("package update", () =>
+    verifyPackageUpdate({
+      prefix: environmentData.prefix,
+      packageRoot: join(
+        environmentData.prefix,
+        "lib",
+        "node_modules",
+        PRODUCT_IDENTITY.packageName,
+      ),
+      tarball,
+      workspace,
+      environment: environmentData.environment,
+    }),
+  );
+  mcpStartup = await runStage("MCP startup", () =>
+    measureMcpStartup({
+      command: cli,
+      args: ["mcp"],
+      environment: {
+        ...environmentData.environment,
+      },
+      policy: MCP_STARTUP_POLICY,
+    }),
+  );
+  mcpModuleLoading = await runStage("MCP module loading", () =>
+    profileMcpModuleLoading({
+      command: cli,
+      args: ["mcp"],
+      environment: {
+        ...environmentData.environment,
+      },
+      policy: MCP_STARTUP_POLICY,
+      packageName: PRODUCT_IDENTITY.packageName,
+    }),
+  );
+  const { supportedSetupHost, hopperSetupSupported } = await runStage(
+    "package discovery",
+    () =>
+      verifyPackageDiscovery({
+        cli,
+        environment: environmentData.environment,
+      }),
+  );
+  const { artifactArchive } = await runStage("artifact and Electron CLI", () =>
+    verifyPackageArtifactAndElectron({
+      cli,
+      workspace,
+      environment: environmentData.environment,
+    }),
+  );
+  await runStage("managed analysis CLI", () =>
+    verifyManaged({
+      cli,
+      workspace,
+      environment: environmentData.environment,
+    }),
+  );
+  await runStage("unknown provider CLI", () =>
+    verifyUnknownProvider({
       cli,
       environment: environmentData.environment,
-    });
-  const { artifactArchive } = await verifyPackageArtifactAndElectron({
-    cli,
-    workspace,
-    environment: environmentData.environment,
-  });
-  await verifyManaged({
-    cli,
-    workspace,
-    environment: environmentData.environment,
-  });
-  await verifyUnknownProvider({
-    cli,
-    environment: environmentData.environment,
-  });
-  await verifyPackagePlatform({
-    cli,
-    environment: environmentData.environment,
-  });
-  await verifyPackageCapabilitiesAndSearch({
-    cli,
-    environment: environmentData.environment,
-  });
-  await verifyPackageEvidence({
-    cli,
-    evidenceRoot,
-    referenceRoot,
-    environment: environmentData.environment,
-  });
-  await verifyPackageSetup({
-    cli,
-    packageRunnerCli,
-    environment: environmentData.environment,
-    home: environmentData.home,
-    npxLog: environmentData.npxLog,
-    claudeConfig: environmentData.claudeConfig,
-    codexConfig: environmentData.codexConfig,
-    cursorConfig: environmentData.cursorConfig,
-    codexTarget: environmentData.codexTarget,
-    cursorTarget: environmentData.cursorTarget,
-    supportedSetupHost,
-    hopperSetupSupported,
-    root,
-  });
-  await verifyPackageMcp({
-    cli,
-    environment: environmentData.environment,
-    evidenceRoot,
-    artifactArchive,
-  });
+    }),
+  );
+  await runStage("platform CLI", () =>
+    verifyPackagePlatform({
+      cli,
+      environment: environmentData.environment,
+    }),
+  );
+  await runStage("capabilities and search CLI", () =>
+    verifyPackageCapabilitiesAndSearch({
+      cli,
+      environment: environmentData.environment,
+    }),
+  );
+  await runStage("evidence CLI", () =>
+    verifyPackageEvidence({
+      cli,
+      evidenceRoot,
+      referenceRoot,
+      environment: environmentData.environment,
+    }),
+  );
+  await runStage("setup and uninstall CLI", () =>
+    verifyPackageSetup({
+      cli,
+      packageRunnerCli,
+      environment: environmentData.environment,
+      home: environmentData.home,
+      npxLog: environmentData.npxLog,
+      claudeConfig: environmentData.claudeConfig,
+      codexConfig: environmentData.codexConfig,
+      cursorConfig: environmentData.cursorConfig,
+      codexTarget: environmentData.codexTarget,
+      cursorTarget: environmentData.cursorTarget,
+      supportedSetupHost,
+      hopperSetupSupported,
+      root,
+    }),
+  );
+  await runStage("MCP tools and evidence", () =>
+    verifyPackageMcp({
+      cli,
+      environment: environmentData.environment,
+      evidenceRoot,
+      artifactArchive,
+    }),
+  );
   report = {
     cli: true,
     analysisCli: true,
@@ -173,8 +216,13 @@ try {
     mcpModuleLoading,
   };
 } finally {
-  await rm(workspace, { recursive: true, force: true });
+  await runStage("workspace cleanup", () =>
+    rm(workspace, { recursive: true, force: true }),
+  );
 }
+const verifierLineage = await runStage("verifier lineage", () =>
+  completeVerifierRun(verifierRun),
+);
 process.stdout.write(
-  `${JSON.stringify({ verifier_run: await completeVerifierRun(verifierRun), ...report })}\n`,
+  `${JSON.stringify({ verifier_run: verifierLineage, ...report })}\n`,
 );

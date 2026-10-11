@@ -54,6 +54,15 @@ export async function verifyGhidraNamespaceAnnotations({
       );
       return { namespace, address: procedure.address };
     });
+    const names = await call("list_names");
+    const globals = ["alpha", "outer::inner"].map((namespace) => {
+      const symbol = names.find(
+        (item) => item.value === `${namespace}::value` && item.symbol.primary,
+      );
+      assert.ok(symbol, `Missing demangled fixture global ${namespace}::value`);
+      return { namespace, address: symbol.address };
+    });
+    await verifyDuplicateAddressNames(call, procedures, names);
     const ambiguous = await reject("procedure_address", { procedure: "same" });
     assert.equal(ambiguous.code, "invalid_request");
     for (const { address } of entries)
@@ -125,6 +134,17 @@ export async function verifyGhidraNamespaceAnnotations({
       });
       assert.deepEqual(unchanged.annotations, qualified.annotations);
     }
+    await verifyAddressNames(call, [entries[0], entries[2]], "function");
+    await verifyAddressNames(call, globals, "label");
+    for (const { namespace, address } of entries) {
+      assert.equal(
+        await call("set_address_name", {
+          address,
+          name: `${namespace}::qualified`,
+        }),
+        true,
+      );
+    }
     const { stdout } = await exec(
       process.execPath,
       [
@@ -156,6 +176,179 @@ export async function verifyGhidraNamespaceAnnotations({
     await call("open_binary", { path: target.path, provider_id: "ghidra" });
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+async function verifyDuplicateAddressNames(call, procedures, names) {
+  const functionEntries = [
+    "rea_duplicate_function_a",
+    "rea_duplicate_function_b",
+  ].map((name) => {
+    const procedure = procedures.find(
+      ({ value }) => value === name || value === `_${name}`,
+    );
+    assert.ok(procedure, `Missing duplicate-name fixture function ${name}`);
+    return { address: procedure.address, original: procedure.value };
+  });
+  const labelEntries = ["rea_duplicate_label_a", "rea_duplicate_label_b"].map(
+    (name) => {
+      const symbol = names.find(
+        (item) =>
+          (item.value === name || item.value === `_${name}`) &&
+          item.symbol.primary,
+      );
+      assert.ok(symbol, `Missing duplicate-name fixture label ${name}`);
+      return { address: symbol.address, original: symbol.value };
+    },
+  );
+
+  for (const [kind, entries] of [
+    ["function", functionEntries],
+    ["label", labelEntries],
+  ]) {
+    const [owner, duplicate] = entries;
+    const name = `rea_duplicate_${kind}`;
+    assert.equal(
+      await call("set_address_name", { address: owner.address, name }),
+      true,
+    );
+    assert.equal(
+      await call("set_address_name", { address: owner.address, name }),
+      true,
+      "Renaming the current owner to its existing name remains idempotent",
+    );
+    assert.equal(
+      await call("set_address_name", { address: duplicate.address, name }),
+      false,
+    );
+    assert.equal(
+      await call("address_name", { address: duplicate.address }),
+      duplicate.original,
+      "A rejected duplicate leaves the other address unchanged",
+    );
+
+    const batchName = `rea_batch_duplicate_${kind}`;
+    assert.deepEqual(
+      await call("set_addresses_names", {
+        names: {
+          [owner.address]: batchName,
+          [duplicate.address]: batchName,
+        },
+      }),
+      { [owner.address]: true, [duplicate.address]: false },
+    );
+    assert.equal(
+      await call("address_name", { address: owner.address }),
+      batchName,
+    );
+    assert.equal(
+      await call("address_name", { address: duplicate.address }),
+      duplicate.original,
+      "A failed batch member rolls back only its own address",
+    );
+    const owners = (await call("list_names")).filter(
+      (item) => item.value === batchName && item.symbol.primary,
+    );
+    assert.deepEqual(
+      owners.map(({ address }) => address),
+      [owner.address],
+    );
+  }
+}
+
+async function verifyAddressNames(call, symbols, kind) {
+  for (const { namespace, address } of symbols) {
+    assert.equal(
+      await call("set_address_name", {
+        address,
+        name: `address_renamed_${kind}`,
+      }),
+      true,
+    );
+    const qualified = `${namespace}::address_qualified_${kind}`;
+    assert.equal(
+      await call("set_address_name", { address, name: qualified }),
+      true,
+    );
+    assert.equal(await call("address_name", { address }), qualified);
+    assert.equal(
+      await call("set_address_name", {
+        address,
+        name: `other::literal_${kind}`,
+      }),
+      true,
+    );
+    const literal = await call("address_name", { address });
+    assert.equal(literal, `${namespace}::other::literal_${kind}`);
+    assert.equal(
+      await call("set_address_name", { address, name: literal }),
+      true,
+    );
+    assert.equal(await call("address_name", { address }), literal);
+    assert.equal(
+      await call("set_address_name", { address, name: qualified }),
+      true,
+    );
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const readback = await call("address_name", { address });
+      assert.deepEqual(
+        await call("set_addresses_names", { names: { [address]: readback } }),
+        { [address]: true },
+      );
+      assert.equal(await call("address_name", { address }), qualified);
+    }
+    assert.equal(
+      await call("set_address_name", { address, name: `${namespace}::` }),
+      false,
+    );
+    const session = await call("binary_session");
+    for (const operation of [
+      "set_address_name",
+      "set_addresses_names",
+      "address_name",
+      "list_names",
+    ])
+      assert.equal(
+        session.capabilities.find((item) => item.operation === operation)
+          ?.available,
+        true,
+        `An invalid name must not mark ${operation} unavailable`,
+      );
+    assert.equal(await call("address_name", { address }), qualified);
+  }
+  const [valid, invalid] = symbols;
+  assert.deepEqual(
+    await call("set_addresses_names", {
+      names: {
+        [valid.address]: `${valid.namespace}::batch_renamed_${kind}`,
+        [invalid.address]: `${invalid.namespace}::`,
+      },
+    }),
+    { [valid.address]: true, [invalid.address]: false },
+  );
+  assert.equal(
+    await call("address_name", { address: valid.address }),
+    `${valid.namespace}::batch_renamed_${kind}`,
+  );
+  assert.equal(
+    await call("address_name", { address: invalid.address }),
+    `${invalid.namespace}::address_qualified_${kind}`,
+  );
+  const names = await call("list_names");
+  for (const { namespace, address } of symbols) {
+    const expected =
+      address === valid.address
+        ? `${namespace}::batch_renamed_${kind}`
+        : `${namespace}::address_qualified_${kind}`;
+    assert.ok(
+      names.some(
+        (item) =>
+          item.address === address &&
+          item.value === expected &&
+          item.symbol.primary,
+      ),
+      `Missing refreshed primary symbol ${expected}`,
+    );
   }
 }
 

@@ -351,6 +351,19 @@ describe("successful Evidence grounding", () => {
     ).toBe("passed");
   });
 
+  it("grades a complete text-only production Evidence response", () => {
+    const evidence = createObservation();
+    const event = delivered(evidence, {
+      result: {
+        content: resultFor(evidence).content,
+        structured_content: null,
+      },
+    });
+    expect(
+      assess([event], answer([claimFor(evidence)])).factualCorrectness,
+    ).toBe("passed");
+  });
+
   it("rejects authentic unrelated Evidence containing the same value elsewhere", () => {
     const evidence = createObservation({ unrelated: expected().expectedValue });
     expect(

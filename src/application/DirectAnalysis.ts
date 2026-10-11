@@ -1,7 +1,5 @@
 import type { ExecutableFormatHint } from "../domain/dosCom.js";
 import type { JsonValue } from "../domain/jsonValue.js";
-import { EnhancedTools } from "./EnhancedTools.js";
-import { executeFunctionAnalysisEvidence } from "./FunctionAnalysisEvidence.js";
 import type { DirectAnalysisDependencies } from "./DirectAnalysisDependencies.js";
 import type { BinarySession } from "./binary/BinarySession.js";
 import type { SessionProviderRoute } from "./binary/SessionProviderRouter.js";
@@ -18,7 +16,7 @@ import {
 } from "../contracts/managed/managedToolContracts.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { access } from "node:fs/promises";
 import {
   readAnalysisSnapshot,
@@ -138,7 +136,7 @@ export const runManagedProviderExecution = async (
   signal?: AbortSignal,
 ): Promise<Result<AnalysisExecution, AnalysisError>> =>
   withProcessCancellation(signal, async (operationSignal) => {
-    const session = dependencies.createManagedBinarySession();
+    const session = await dependencies.createManagedBinarySession();
     return withSessionCleanup(
       session,
       async () => {
@@ -194,7 +192,7 @@ const runAnalysis = async (
   const { logger, signal, snapshotPath } = options;
   const config = dependencies.readConfiguration();
   if (!config.ok) return cliError(config.error);
-  const session = dependencies.createBinarySession(config.value, logger);
+  const session = await dependencies.createBinarySession(config.value, logger);
   return withSessionCleanup(
     session,
     async () => {
@@ -332,6 +330,8 @@ const executeAnalysisTool = async (input: {
 }): Promise<{ readonly output: JsonValue; readonly evidence?: Evidence }> => {
   const { session, tool, signal, evidenceProfile } = input;
   if (tool === "analyze_function") {
+    const { executeFunctionAnalysisEvidence } =
+      await import("./FunctionAnalysisEvidence.js");
     const result = await executeFunctionAnalysisEvidence(
       session,
       input.arguments,
@@ -350,6 +350,7 @@ const executeAnalysisTool = async (input: {
     tool === "trace_native_values" ||
     tool === "trace_native_ui_action"
   ) {
+    const { EnhancedTools } = await import("./EnhancedTools.js");
     const result = await new EnhancedTools(session).execute(
       tool,
       input.arguments,
@@ -450,7 +451,7 @@ const prepareSnapshot = async (options: {
   const { path, snapshotPath } = options;
   if (snapshotPath === undefined || !(await fileExists(snapshotPath)))
     return ok({});
-  const loaded = await readAnalysisSnapshot(snapshotPath);
+  const loaded = await readAnalysisSnapshot(snapshotPath, options.signal);
   if (!loaded.ok) return loaded;
   const target = await parseBinaryTarget(path, {
     signal: options.signal,

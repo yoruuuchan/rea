@@ -3,6 +3,12 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 const positiveBudget = z.number().int().safe().positive();
+/**
+ * Maximum xterm backing cells for one visible-plus-scrollback buffer. Each
+ * xterm BufferLine stores three Uint32 words per cell (12 MB at this cap),
+ * before row objects, serialization strings, and retained frame copies.
+ */
+export const PROCESS_TERMINAL_CELL_BUDGET = 1_000_000;
 const timedEventBase = { at_ms: z.number().int().safe().nonnegative() };
 const reservedRunIdEnvironmentName = "REA_PROCESS_RUN_ID";
 const ENVIRONMENT_NAME_CHARACTER = "[^=\\x00]";
@@ -41,6 +47,14 @@ const childProcessString = z
     /^[^\x00]*$/u,
     "Values passed to operating-system APIs cannot contain NUL",
   );
+
+const fitsProcessTerminalCellBudget = (
+  columns: number,
+  rows: number,
+  scrollback: number,
+): boolean =>
+  rows + scrollback <= Math.floor(PROCESS_TERMINAL_CELL_BUDGET / columns);
+
 export const normalizationSchema = z.object({
   paths: z.boolean(),
   pids: z.boolean(),
@@ -81,11 +95,17 @@ const committedScenarioEvents = (
 export const processScenarioCommitment = (
   scenario: ProcessScenario,
   executableSha256?: string,
-): Readonly<Record<string, unknown>> => ({
-  ...scenario,
-  events: committedScenarioEvents(scenario.events, true),
-  executable_sha256: executableSha256 ?? null,
-});
+): Readonly<Record<string, unknown>> => {
+  // A zero interval is today's immediate kill; leaving it out keeps the
+  // committed identity of every scenario that predates the field unchanged.
+  const { finalization_ms: finalizationMs, ...committed } = scenario;
+  return {
+    ...committed,
+    ...(finalizationMs > 0 ? { finalization_ms: finalizationMs } : {}),
+    events: committedScenarioEvents(scenario.events, true),
+    executable_sha256: executableSha256 ?? null,
+  };
+};
 
 /** Project observation settings shared by capture and reconstruction. */
 export const processComparisonContract = (
@@ -103,6 +123,9 @@ export const processComparisonContract = (
   timeout_ms: scenario.timeout_ms,
   idle_timeout_ms: scenario.idle_timeout_ms,
   settle_ms: scenario.settle_ms,
+  ...(scenario.finalization_ms > 0
+    ? { finalization_ms: scenario.finalization_ms }
+    : {}),
   limits: scenario.limits,
   normalization: scenario.normalization,
   ...(scenario.normalization.ports
@@ -131,8 +154,11 @@ export const processScenarioSchema = z
       .strictObject({
         columns: z.number().int().min(1).max(65_535).default(80),
         rows: z.number().int().min(1).max(65_535).default(24),
-        scrollback: z.number().int().min(0).default(1_000),
+        scrollback: z.number().int().safe().nonnegative().default(1_000),
       })
+      .describe(
+        "The visible terminal and scrollback together must use at most 1,000,000 xterm renderer cells: columns × (rows + scrollback). Resize events use the same scrollback and limit.",
+      )
       .default({ columns: 80, rows: 24, scrollback: 1_000 }),
     events: z
       .array(
@@ -160,6 +186,15 @@ export const processScenarioSchema = z
     timeout_ms: positiveBudget.default(30_000),
     idle_timeout_ms: positiveBudget.default(30_000),
     settle_ms: z.number().int().safe().nonnegative().default(100),
+    finalization_ms: z
+      .number()
+      .int()
+      .safe()
+      .nonnegative()
+      .default(0)
+      .describe(
+        "Milliseconds a target may keep running after SIGTERM when timeout_ms or idle_timeout_ms fires, before SIGKILL; 0 sends SIGKILL immediately. Both signals reach the captured root only while its launch-time start identity still matches; cancellation ends the run at once.",
+      ),
     limits: z
       .strictObject({
         output_bytes: positiveBudget.default(1_000_000),
@@ -204,6 +239,30 @@ export const processScenarioSchema = z
       }),
   })
   .superRefine((scenario, context) => {
+    // Each budget is a safe integer, but their sum is not checked anywhere
+    // else. BigInt keeps the comparison exact beyond the representable range.
+    const lifecycleBudget =
+      BigInt(scenario.timeout_ms) +
+      BigInt(scenario.finalization_ms) +
+      BigInt(scenario.settle_ms);
+    if (lifecycleBudget > BigInt(Number.MAX_SAFE_INTEGER))
+      context.addIssue({
+        code: "custom",
+        message: `timeout_ms + finalization_ms + settle_ms must stay at or below ${String(Number.MAX_SAFE_INTEGER)} ms, the largest total exactly representable as a JavaScript number`,
+        path: ["timeout_ms"],
+      });
+    if (
+      !fitsProcessTerminalCellBudget(
+        scenario.terminal.columns,
+        scenario.terminal.rows,
+        scenario.terminal.scrollback,
+      )
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["terminal"],
+        message: `terminal columns × (rows + scrollback) must not exceed ${String(PROCESS_TERMINAL_CELL_BUDGET)} renderer cells`,
+      });
     for (let index = 1; index < scenario.events.length; index += 1) {
       const event = scenario.events[index];
       const previous = scenario.events[index - 1];
@@ -215,7 +274,20 @@ export const processScenarioSchema = z
         });
       }
     }
-    for (const event of scenario.events) {
+    for (const [index, event] of scenario.events.entries()) {
+      if (
+        event.type === "resize" &&
+        !fitsProcessTerminalCellBudget(
+          event.columns,
+          event.rows,
+          scenario.terminal.scrollback,
+        )
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["events", index],
+          message: `resize event at ${String(event.at_ms)} ms exceeds the ${String(PROCESS_TERMINAL_CELL_BUDGET)}-cell renderer budget with the selected scrollback`,
+        });
       if (event.at_ms > scenario.timeout_ms) {
         context.addIssue({
           code: "custom",

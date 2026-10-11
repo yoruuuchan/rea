@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { expect, test } from "vitest";
 
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 import { createJavaScriptRuntimeObservationEvidence } from "../../../src/application/javascript/JavaScriptRuntimeObservationEvidence.js";
 import { V8InspectorProvider } from "../../../src/inspector/V8InspectorProvider.js";
 import {

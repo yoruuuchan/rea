@@ -85,19 +85,22 @@ if [[ "$version" =~ \+ ]]; then
   fail "npm cannot install an exact version with build metadata. Pass a version without build metadata, then retry."
 fi
 
-prefix_args=()
+install_args=(install --global)
 if [[ "$platform" == "Linux" ]]; then
-  prefix_args=(--prefix "$HOME/.local")
+  install_args+=(--prefix "$HOME/.local")
   install_bin="$HOME/.local/bin/rea"
 else
   npm_prefix="$(npm prefix --global)" || fail "the npm global prefix could not be read. Repair the npm configuration, then retry."
   install_bin="$npm_prefix/bin/rea"
 fi
+install_args+=("$PACKAGE@$version")
 
 printf 'REA install plan\n'
 printf '  Version: %s\n' "$version"
 printf '  Runtime: Node.js %s\n' "$node_version"
-printf '  Command: npm install --global %s@%s\n' "$PACKAGE" "$version"
+printf '  Command:'
+printf ' %q' npm "${install_args[@]}"
+printf '\n'
 printf '  Binary:  %s\n' "$install_bin"
 printf '  Setup:   %s\n' "$([[ "$start_setup" == true ]] && printf 'start when a terminal is available' || printf 'skipped')"
 
@@ -107,7 +110,7 @@ if [[ "$dry_run" == true ]]; then
 fi
 
 printf 'Installing %s@%s...\n' "$PACKAGE" "$version"
-npm install --global ${prefix_args[@]+"${prefix_args[@]}"} "$PACKAGE@$version" || fail "npm could not install REA. Check registry access and npm permissions, then retry."
+npm "${install_args[@]}" || fail "npm could not install REA. Check registry access and npm permissions, then retry."
 [[ -x "$install_bin" ]] || fail "npm completed without installing the rea command. Check the npm global bin directory and PATH, then retry."
 installed_version="$("$install_bin" --version 2>/dev/null | tr -d '[:space:]')" || fail "the installed REA version could not be read. Reinstall the requested version, then retry."
 [[ "$installed_version" == "$version" ]] || fail "installed version $installed_version does not match $version. Reinstall the requested version, then retry."

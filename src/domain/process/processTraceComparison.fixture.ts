@@ -4,7 +4,7 @@ import {
   parseProcessCapture,
   type ProcessCapture,
 } from "./processCaptureParsing.js";
-import { type ProcessTraceSpecification } from "./processTraceSpecification.js";
+import type { ProcessTraceSpecification } from "./processTraceSpecification.js";
 
 export const emptyCapture = parseProcessCapture(EMPTY_PROCESS_CAPTURE_EXAMPLE);
 export const terminal = { sequence: 0, at_ms: 900, data: "Ready" };

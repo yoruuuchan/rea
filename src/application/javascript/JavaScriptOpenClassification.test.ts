@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascript/javascriptApplicationAnalysis.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 
 it("classifies overloaded open calls from lexical receiver facts", async () => {
   const inputPath = await createTestTempDirectory(

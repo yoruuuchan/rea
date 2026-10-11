@@ -6,7 +6,7 @@ import type {
   ListElectronTargetsInput,
 } from "../../domain/javascript/electronObservation.js";
 import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { createElectronEvidence } from "./ElectronEvidence.js";
 

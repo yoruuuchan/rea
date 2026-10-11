@@ -2,7 +2,7 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, and browser targets with REA. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
 metadata:
-  version: "35"
+  version: "37"
 ---
 
 # REA
@@ -25,57 +25,18 @@ a skill installed from repository main may describe capabilities absent from
 an older npm release. Keep complete inline Evidence when that server does not
 advertise retained references.
 
-When tools are absent or registration is stale:
+If tools are absent, a call is blocked by the client, or a required provider is
+unavailable, read [connection and recovery](references/connection-and-recovery.md).
+Diagnose the observed blocker, continue useful supported work, and resume the
+original task after repair. Client approval, shell PATH, registration and engine
+availability have different remedies; avoid repeating setup for all of them.
 
-1. Diagnose without changing files. For Codex, run
-   `npx -y rea-agents@latest doctor --client codex --json`. Substitute the current
-   supported client: `claude_code`, `claude_desktop`, `codex`, `cursor`,
-   `gemini_cli`, `windsurf`, `devin`, `opencode`, `antigravity`, `copilot_cli`,
-   `commandcode`, `qwen_code`, `vscode`, `grok_build`, `omp`, `pi`, `hermes`, or `grok_bot`. `grok_bot` has no local
-   file registration: doctor reports the Grok Bot chat step, and setup does not
-   write `mcp.json`. If the client is unknown, use `doctor --json` and
-   inspect its registration results before choosing a setup scope.
-2. Distinguish the reason. Missing, malformed, or stale registration needs a
-   scoped configuration repair. An aligned registration with no tools in the
-   active session needs a restart/reconnection; doctor cannot prove that the
-   current agent has connected. A missing provider affects only tasks requiring
-   that provider: static JavaScript inspection needs neither Hopper nor Ghidra,
-   and Android inspection has separate bring-your-own JADX/Java prerequisites.
-3. For a configuration repair, prepare the read-only plan:
-   `npx -y rea-agents@latest setup --client codex --dry-run --json`.
-   Use the current client's ID, show its exact proposed paths, backups, and
-   changes, and obtain approval before setup writes configuration or installs
-   Hopper. Setup normally installs the matching bundled skill too; include that
-   replacement in the reviewed plan. After approval, apply the same scope with
-   `npx -y rea-agents@latest setup --client codex --yes`. Add `--install-hopper`
-   only if that separate installation was needed and explicitly approved.
-4. Restart/reconnect the affected agent. Verify that REA tools actually appear
-   in the session, then resume the original investigation. If they remain
-   absent, inspect the client's MCP launch error rather than repeating setup.
-
-REA setup never installs or upgrades Node.js, npm, Homebrew, Java, Ghidra, IDA,
-JADX, Binwalk, or Unblob. Use existing prerequisites; do not install unrelated
-software to repair
-MCP registration. For an unsupported client, use manual stdio registration
-with a version-pinned `rea-agents` package or continue through the CLI.
-
-A concrete CLI fallback for an operator-supplied JavaScript tree or ASAR is:
-
-```bash
-npx -y rea-agents@latest analyze-javascript-application /absolute/path/to/app --json > app-evidence.json
-jq -c '{source: {kind: "inline", evidence: .}, view: {kind: "summary"}}' app-evidence.json > app-view.json
-npx -y rea-agents@latest inspect-analysis-view app-view.json
-```
-
-No MCP registration or native engine is required. The CLI returns the complete
-Evidence record directly, and a real application can produce hundreds of
-megabytes, so save it to a file rather than reading it into context. Start from
-the summary view, then request a module page
-(`{"kind": "page", "collection": "modules", "offset": 0, "limit": 32}`) or one
-module the same way, or pass the saved Evidence inline to
-`trace-application-feature`. Read graph, limitations, and unknowns with the
-same care as an MCP result. This fallback does not establish that MCP is
-configured. Native CLI tasks still require their selected engine.
+Prefer an existing `rea` CLI. When none is installed and REA package acquisition
+is within the authorized scope, use `npx -y rea-agents@latest` in its place.
+Configuration repair starts with a read-only setup plan; show paths, backups and
+skill replacement before applying authorized changes. Preserve existing approval
+and target-execution boundaries. REA setup never installs or upgrades unrelated
+software, including Node.js, npm, Homebrew, Java, Ghidra, IDA, JADX, Binwalk or Unblob.
 
 ## Route the target first
 
@@ -121,6 +82,9 @@ explicit path or endpoint and do not need it.
   Historical PIDs do not select live processes. Request `include_debugger_context`
   only when core-only mapping candidates help; see the
   [recorded crash guide](https://github.com/morluto/rea/blob/main/docs/recorded-crashes.md).
+- PE resource type/name/language trees and static icon group references:
+  `inspect_pe_resources` with an explicit path. This portable operation requires
+  no active target or engine; opaque payloads retain file ranges and SHA-256.
 - Native executable, library, or analysis database: `open_binary`, then
   use focused analysis tools directly; call `binary_overview` when metadata or
   inventory context is useful and available from the selected provider.
@@ -137,9 +101,11 @@ after opening; IDA does not supply `binary_overview`. Consult session availabili
 when composing broader workflows. Modern direct callers and unsupported dossier
 facets remain unknown; live IDA results are not replayed from snapshots.
 
-If the app is missing, ask which app to inspect. Resolve a human-readable app
-name to one clear installed artifact when possible; ask only when matches are
-ambiguous. Never choose an example app on the user's behalf.
+If the user says only "my app" without a name, path, or target already selected
+for this task, ask which app before searching for artifacts. Paths in unrelated
+saved reports and nearby test fixtures do not select the user's target. Resolve
+an actual human-readable app name to one clear installed artifact when possible;
+ask when matches are ambiguous. Never choose an example app on the user's behalf.
 
 In a target-free session, use `open_binary` to bind any archive/package or
 native target whose analysis tool operates on the active target. Do not call an
@@ -150,7 +116,15 @@ list stays complete; availability depends on the operation, target, and host.
 ## Work summary-first
 
 Start with the default result and use its inline Evidence and graph context.
-Do not repeat an identical tool call. Make a focused follow-up only when the
+For a JavaScript application or ELF layout whose size is unknown or large,
+call `analyze_javascript_application` or `inspect_binary_layout` with
+`"detail": "summary"`, then inspect the retained `parent_evidence_id` with
+`inspect_analysis_view`.
+Page module identities and select the returned `node_id` before requesting an
+item; a single file path can represent several graph roles. Do not repeat an
+identical analysis or rejected call without a changed input or resolved blocker.
+Recheck session state when a lifecycle change makes that status useful.
+Make a focused follow-up only when the
 returned result leaves a specific question unanswered.
 
 If MCP reports `resource_constraint` with `details.resource: "transport"`, call
@@ -161,6 +135,24 @@ session to a selected path. The analysis remains complete in the ledger; avoid
 repeating it merely to request the same oversized response. Complete CLI JSON
 output also streams without a single MCP frame.
 
+When the retained parent ID is unknown, use `get_evidence_bundle` with
+`detail: "summary"` and exact filters for operation, target SHA-256,
+analysis-profile digest or canonical procedure address. Select its returned
+Evidence ID for the next view instead of requesting the complete bundle.
+`retention: "complete-record"` means the whole record is stored; native
+value-flow truncation and unknown metadata remain separate. For an exported
+portable bundle, use `rea inspect-evidence-bundle` with JSON containing `path`,
+`detail: "summary"` and the same `filters`. Reading that file still requires
+validating its full contents within the local memory budget.
+
+A client can also truncate a successful tool result without a REA transport
+error. Treat that preview as incomplete; use the retained parent ID for smaller
+views or export when the full record is needed. Do not parse the preview as
+canonical JSON or repeat the producer. For JavaScript, read the
+[module-view and trace recipes](references/javascript-applications.md) before
+drilling into a large graph; a broad bidirectional trace can expand unrelated
+containment relationships even after summary analysis.
+
 Every conclusion must distinguish observations, inferences, and unknowns. Cite
 Evidence IDs, preserve limitations and incomplete coverage, and never imply
 that static analysis observed execution. Runtime requests execute the declared
@@ -168,7 +160,9 @@ target and lifecycle; do not broaden the target or action beyond those fields.
 
 Within the user's requested investigation, call available analysis tools
 directly. REA does not require permission grants or per-call approval flags.
-Follow the declared request scope and the host's actual access requirements.
+The agent client can independently require approval. Follow the declared request
+scope and the host's actual access requirements; use the recovery guide for an
+observed client-policy rejection.
 
 ## Plan broader investigations
 

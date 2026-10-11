@@ -78,6 +78,8 @@ export function* jsonValueValidationSteps(
 }
 
 const preserveJsonValue = (value: JsonValue): JsonValue => {
+  const immutableCandidate: unknown = value;
+  if (isImmutableJsonSnapshot(immutableCandidate)) return value;
   if (Array.isArray(value)) return value.map(preserveJsonValue);
   if (value !== null && typeof value === "object")
     return Object.fromEntries<JsonValue>(

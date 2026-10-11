@@ -58,11 +58,11 @@ describe("setup with configured but unavailable providers", () => {
           },
         ]),
     });
-    const host = {
+    const createHost = () => ({
       ...systemSetupHost(doctor),
       detectedClients: () => Promise.resolve([client]),
       supportedClients: () => Promise.resolve([client]),
-    };
+    });
     const selected = {
       ...options(true),
       clientIds: ["cursor"],
@@ -71,7 +71,7 @@ describe("setup with configured but unavailable providers", () => {
       // This lane checks registration effects; no deep provider is required.
       readinessScope: { clients: [], providers: [], skill: false },
     };
-    const first = await runSetup(selected, host);
+    const first = await runSetup(selected, createHost());
     expect(first.status).toBe("ready");
     expect(first.clients.cursor).toMatchObject({ status: "configured" });
     const configured = await readFile(client.configPath, "utf8");
@@ -83,7 +83,7 @@ describe("setup with configured but unavailable providers", () => {
       readFile(`${client.configPath}.rea.backup`, "utf8"),
     ).resolves.toBe(original);
 
-    const second = await runSetup(selected, host);
+    const second = await runSetup(selected, createHost());
     expect(second.status).toBe("ready");
     expect(second.plannedActions).toEqual([]);
     expect(second.appliedActions).toEqual([]);

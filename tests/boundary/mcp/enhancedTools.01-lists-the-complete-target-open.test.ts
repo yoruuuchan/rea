@@ -7,7 +7,7 @@ import { MANAGED_WORKFLOW_TOOL_CONTRACTS } from "../../../src/contracts/managed/
 import { ENHANCED_TOOL_CONTRACTS } from "../../../src/contracts/enhancedToolContracts.js";
 import { SESSION_TOOL_CONTRACTS } from "../../../src/contracts/sessionToolContracts.js";
 import { TOOL_CONTRACTS } from "../../../src/contracts/toolContracts.js";
-import {} from "../../../src/domain/jsonValue.js";
+import type {} from "../../../src/domain/jsonValue.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed as ok } from "../../fixtures/analysisExecution.js";
 import { createAnalysisExecution } from "../../../src/application/AnalysisProvider.js";

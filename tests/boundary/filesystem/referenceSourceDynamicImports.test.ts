@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { importReferenceSource } from "../../../src/application/ReferenceSourceImport.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 it("resolves dynamic source imports while retaining computed targets as unknown", async () => {
   const root = await createTestTempDirectory("rea-reference-dynamic-import-");

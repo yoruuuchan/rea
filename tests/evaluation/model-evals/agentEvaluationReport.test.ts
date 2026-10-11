@@ -77,6 +77,29 @@ async function runnerFailurePredicate(): Promise<(item: unknown) => unknown> {
 }
 
 describe("scoped factual report", () => {
+  it("requires a validated target clarification and zero REA calls for the negative route", () => {
+    const clarification = {
+      ...routingSuccess,
+      expectedFirstTool: null,
+      naturalUse: false,
+      factualCorrectness: "not_assessed" as const,
+      answerHeuristicsMet: false,
+      epistemicCuePresent: false,
+      targetClarificationPassed: true,
+    };
+    expect(agentEvaluationPassed(clarification)).toBe(true);
+    for (const change of [
+      { naturalUse: true },
+      { correctFirstTool: false },
+      { targetClarificationPassed: false },
+      { exitCode: 1 },
+      { inputTokens: 0 },
+    ])
+      expect(agentEvaluationPassed({ ...clarification, ...change })).toBe(
+        false,
+      );
+  });
+
   it("accepts correct structured facts without superficial prose cues", () => {
     expect(
       agentEvaluationPassed({

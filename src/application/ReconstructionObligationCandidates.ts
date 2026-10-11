@@ -12,7 +12,6 @@ import type {
   ReconstructionObligation,
   ReviewedReconstructionObligation,
 } from "../domain/reconstructionObligationLedgerSchemas.js";
-import { resolveJavaScriptSemanticEvidence } from "../domain/javascript/javascriptSemanticGraph.js";
 import { parseApplicationGraphEvidence } from "./javascript/JavaScriptApplicationEvidenceGraph.js";
 import {
   applicationObligationPolicy,
@@ -115,14 +114,21 @@ const deriveApplicationCandidates = (
         }),
       );
     }
-    if (source.semanticGraph !== null)
+    if (source.semanticGraph !== null) {
+      const evidenceContexts = new Map(
+        source.semanticGraph.evidence_contexts.map((context) => [
+          context.context_id,
+          context,
+        ]),
+      );
       for (const node of source.semanticGraph.nodes) {
         const candidatePolicy = semanticObligationPolicy(node.kind);
         if (candidatePolicy === undefined) continue;
-        const evidenceContext = resolveJavaScriptSemanticEvidence(
-          source.semanticGraph,
-          node.evidence,
-        );
+        const evidenceContext = evidenceContexts.get(node.evidence.context_id);
+        if (evidenceContext === undefined)
+          throw new TypeError(
+            "Semantic evidence reference names an absent context",
+          );
         addCandidate(
           candidates,
           generatedCandidate({
@@ -144,6 +150,7 @@ const deriveApplicationCandidates = (
           }),
         );
       }
+    }
     if (source.graph.coverage.status !== "complete")
       limitations.add(
         `Application graph ${source.graph.graph_id} coverage is ${source.graph.coverage.status}; omitted candidates remain unknown.`,

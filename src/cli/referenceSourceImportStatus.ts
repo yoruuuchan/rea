@@ -11,6 +11,13 @@ const referenceSourceImportFailureSchema = z.strictObject({
     "execution_failure",
   ]),
   message: z.string().min(1),
+  cleanup: z
+    .strictObject({
+      reason: z.string().min(1),
+      resources: z.array(z.string().min(1)),
+    })
+    .optional(),
+  partial: z.unknown().optional(),
 });
 
 /** Identify the historical-source import command's failed operation outputs. */

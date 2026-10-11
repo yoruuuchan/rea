@@ -61,7 +61,10 @@ describe("investigation record ownership", () => {
       value: {
         scope_digest: target.sha256,
         mutation_evidence_ids: [
-          unknownMutationEvidence(target, input).evidence_id,
+          unknownMutationEvidence(target, {
+            operation: "record_unknown",
+            input,
+          }).evidence_id,
         ],
       },
     });
@@ -71,14 +74,19 @@ describe("investigation record ownership", () => {
       value: {
         scope_digest: null,
         mutation_evidence_ids: [
-          unknownMutationEvidence(undefined, input).evidence_id,
+          unknownMutationEvidence(undefined, {
+            operation: "record_unknown",
+            input,
+          }).evidence_id,
         ],
       },
     });
     const mutation = records.evidenceById(
-      unknownMutationEvidence(undefined, input).evidence_id,
+      unknownMutationEvidence(undefined, { operation: "record_unknown", input })
+        .evidence_id,
     );
     expect(mutation?.subject).toBeNull();
+    expect(mutation?.parameters).toEqual(input);
     expect(records.listUnknowns()).toHaveLength(2);
   });
 
@@ -124,6 +132,10 @@ describe("investigation record ownership", () => {
       bundle.records.find(({ operation }) => operation === "update_unknown")
         ?.subject?.digest.sha256,
     ).toBe(target.sha256);
+    expect(
+      bundle.records.find(({ operation }) => operation === "update_unknown")
+        ?.parameters,
+    ).toEqual(input);
     expect(records.updateUnknown(input, target).ok).toBe(false);
     expect(records.exportEvidenceBundle()).toEqual(bundle);
   });
@@ -161,4 +173,60 @@ describe("investigation record ownership", () => {
     records.clear();
     expect(records.exportEvidenceBundle()).toEqual(createEvidenceBundle([]));
   });
+});
+
+it("retains complete mutation intent and distinguishes independent update requests", () => {
+  const source = new InvestigationRecords();
+  expect(source.recordEvidence(evidence).ok).toBe(true);
+  const input = {
+    ...unknownInput("Which replay establishes the answer?"),
+    supporting_evidence_ids: [evidence.evidence_id],
+    required_environment: {
+      id: "fixture",
+      platform: "linux",
+      architecture: "x86_64",
+      isolation: "process" as const,
+    },
+    recommended_probes: [
+      { operation: "inspect_native_api", rationale: "Replay" },
+    ],
+  };
+  const created = source.recordUnknown(input);
+  if (!created.ok) throw created.error;
+  const base = source.exportEvidenceBundle();
+  const creation = base.records.find(
+    ({ operation }) => operation === "record_unknown",
+  );
+  expect(creation?.parameters).toEqual(input);
+  expect(creation?.evidence_links).toEqual([evidence.evidence_id]);
+
+  const { question: _question, domain: _domain, ...details } = input;
+  const mutations = (["high", "low"] as const).map((severity) => {
+    const records = new InvestigationRecords();
+    expect(records.mergeEvidenceBundle(base).ok).toBe(true);
+    const command = updateUnknownInputSchema.parse({
+      ...details,
+      unknown_id: created.value.unknown_id,
+      expected_revision: 1,
+      status: "resolved",
+      severity,
+      resolution: {
+        disposition: "withdrawn",
+        rationale: "Caller withdrew this question",
+        evidence_ids: [evidence.evidence_id],
+      },
+    });
+    const updated = records.updateUnknown(command);
+    if (!updated.ok) throw updated.error;
+    const mutation = records
+      .exportEvidenceBundle()
+      .records.find(({ operation }) => operation === "update_unknown");
+    expect(mutation?.parameters).toEqual(command);
+    expect(mutation?.evidence_links).toEqual([evidence.evidence_id]);
+    expect(updated.value.mutation_evidence_ids).toContain(
+      mutation?.evidence_id,
+    );
+    return mutation;
+  });
+  expect(mutations[0]?.evidence_id).not.toBe(mutations[1]?.evidence_id);
 });

@@ -78,7 +78,7 @@ const classes = await mkdtemp(join(output, "classes-"));
 try {
   const sources = [
     ...(await files(join(source, "src/main/java"), ".java")),
-    ...(await files(join(root, "bridge/ghidra/extensions/nativeaot"), ".java")),
+    ...(await files(join(root, "bridge/nativeaot"), ".java")),
   ];
   const jars = await files(join(install, "Ghidra"), ".jar");
   const args = [

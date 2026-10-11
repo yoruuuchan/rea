@@ -7,7 +7,7 @@ import {
   AnalysisSnapshotMismatchError,
 } from "../../domain/evidenceErrors.js";
 import { NoBinaryOpenError } from "../../domain/configurationErrors.js";
-import { type AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
   analysisQueryId,
@@ -18,6 +18,7 @@ import {
   snapshotMatchesTarget,
   snapshotTarget,
   parseAnalysisSnapshot,
+  immutableAnalysisSnapshot,
   type AnalysisSnapshot,
   type AnalysisSnapshotEntry,
   type AnalysisSnapshotWorkflowEntry,
@@ -107,6 +108,7 @@ export class AnalysisSnapshotCache {
 
   /** Merge already-validated entries and return the new-entry count. */
   stage(snapshot: AnalysisSnapshot): number {
+    snapshot = immutableAnalysisSnapshot(snapshot);
     if (
       (this.#target !== undefined &&
         JSON.stringify(this.#target) !== JSON.stringify(snapshot.target)) ||
@@ -123,12 +125,12 @@ export class AnalysisSnapshotCache {
     for (const entry of snapshot.entries) {
       if (!this.#entries.has(entry.query_id) && !this.#hasCapacity()) continue;
       if (!this.#entries.has(entry.query_id)) imported += 1;
-      this.#entries.set(entry.query_id, structuredClone(entry));
+      this.#entries.set(entry.query_id, entry);
     }
     for (const entry of snapshot.workflow_entries) {
       if (!this.#workflowEntries.has(entry.query_id) && !this.#hasCapacity())
         continue;
-      this.#workflowEntries.set(entry.query_id, structuredClone(entry));
+      this.#workflowEntries.set(entry.query_id, entry);
     }
     return imported;
   }
@@ -186,7 +188,7 @@ export class AnalysisSnapshotCache {
   ): Result<number, AnalysisError> {
     let validated: AnalysisSnapshot;
     try {
-      validated = parseAnalysisSnapshot(snapshot);
+      validated = immutableAnalysisSnapshot(snapshot);
     } catch (cause: unknown) {
       return err(
         new EvidenceIntegrityError("Analysis snapshot validation failed", {

@@ -8,6 +8,10 @@ import { MANAGED_STATIC_PROVIDER } from "../../../src/application/InvestigationP
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { managedApplicationGraphResultSchema } from "../../../src/domain/managed/managedApplicationGraph.js";
+import {
+  managedMemberInspectionSchema,
+  managedNativeBoundaryInspectionSchema,
+} from "../../../src/domain/managed/managedArtifact.js";
 import { inspectManagedArtifactBytes } from "../../../src/dotnet/ManagedArtifactInspector.js";
 import { inspectManagedMembersBytes } from "../../../src/dotnet/ManagedMemberInspector.js";
 import { inspectManagedNativeBoundariesBytes } from "../../../src/dotnet/ManagedNativeBoundaryInspector.js";
@@ -296,6 +300,282 @@ describe("managed application graph identity facts", () => {
         ({ kind }) => kind === "managed-assembly" || kind === "managed-module",
       ),
     ).toEqual([]);
+  });
+});
+
+it("normalizes MVID casing for node identity while preserving observed values", () => {
+  const { memberEvidence, boundaryEvidence } = createManagedInteropEvidence();
+  const members = managedMemberInspectionSchema.parse(
+    parseEvidence(memberEvidence).normalized_result,
+  );
+  if (members.module === null)
+    throw new Error("Expected fixture module identity");
+  const uppercaseMvid = members.module.mvid?.toUpperCase();
+  if (uppercaseMvid === undefined || uppercaseMvid === null)
+    throw new Error("Expected fixture module MVID");
+  const uppercaseMembers = createEvidence(undefined, MANAGED_STATIC_PROVIDER, {
+    operation: "inspect_managed_members",
+    parameters: {},
+    result: {
+      ...members,
+      module: {
+        ...members.module,
+        mvid: uppercaseMvid,
+        enc_id: null,
+        enc_base_id: null,
+      },
+      identity_scope: {
+        ...members.identity_scope,
+        requires_mvid: uppercaseMvid,
+      },
+    },
+    rawResult: null,
+    limitations: members.limitations,
+  });
+  const baseline = projectManagedApplicationGraphEvidence({
+    managed_members: memberEvidence,
+    managed_native_boundaries: boundaryEvidence,
+  });
+  const uppercase = projectManagedApplicationGraphEvidence({
+    managed_members: uppercaseMembers,
+    managed_native_boundaries: boundaryEvidence,
+  });
+  if (!baseline.ok) throw baseline.error;
+  if (!uppercase.ok) throw uppercase.error;
+  const baselineResult = managedApplicationGraphResultSchema.parse(
+    parseEvidence(baseline.value).normalized_result,
+  );
+  const uppercaseResult = managedApplicationGraphResultSchema.parse(
+    parseEvidence(uppercase.value).normalized_result,
+  );
+  const baselineModule = parseJavaScriptApplicationGraph(
+    baselineResult.graph,
+  ).nodes.find(({ kind }) => kind === "managed-module");
+  const uppercaseGraph = parseJavaScriptApplicationGraph(uppercaseResult.graph);
+  const uppercaseModule = uppercaseGraph.nodes.find(
+    ({ kind }) => kind === "managed-module",
+  );
+  expect(uppercaseGraph.edges).toContainEqual(
+    expect.objectContaining({
+      relation: "imports",
+      source_node_id: uppercaseGraph.nodes.find(
+        ({ kind }) => kind === "managed-method",
+      )?.node_id,
+    }),
+  );
+  expect(uppercaseModule?.node_id).toBe(baselineModule?.node_id);
+  expect(uppercaseModule?.observations[0]?.properties.mvid).toBe(uppercaseMvid);
+});
+
+describe("managed application graph module identity consistency", () => {
+  it("rejects contradictory known module MVIDs across same-artifact inputs", () => {
+    const { artifactEvidence, memberEvidence, boundaryEvidence } =
+      createManagedInteropEvidence();
+    const boundaries = managedNativeBoundaryInspectionSchema.parse(
+      parseEvidence(boundaryEvidence).normalized_result,
+    );
+    const conflictingMvid = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    const conflictingBoundaries = createEvidence(
+      undefined,
+      MANAGED_STATIC_PROVIDER,
+      {
+        operation: "inspect_managed_native_boundaries",
+        parameters: {},
+        result: {
+          ...boundaries,
+          module:
+            boundaries.module === null
+              ? null
+              : { ...boundaries.module, mvid: conflictingMvid },
+          identity_scope: {
+            ...boundaries.identity_scope,
+            requires_mvid: conflictingMvid,
+          },
+        },
+        rawResult: null,
+        limitations: boundaries.limitations,
+      },
+    );
+
+    const projected = projectManagedApplicationGraphEvidence({
+      managed_artifact: artifactEvidence,
+      managed_members: memberEvidence,
+      managed_native_boundaries: conflictingBoundaries,
+    });
+    expect(projected.ok).toBe(false);
+    if (projected.ok) throw new Error("conflicting MVIDs were accepted");
+    expect(JSON.stringify(projected.error)).toContain(
+      "conflicting known module MVIDs or token scopes",
+    );
+  });
+
+  it("rejects contradictory known module declaration fields", () => {
+    const { artifactEvidence, memberEvidence } = createManagedInteropEvidence();
+    const members = managedMemberInspectionSchema.parse(
+      parseEvidence(memberEvidence).normalized_result,
+    );
+    if (members.module === null)
+      throw new Error("Expected fixture module identity");
+    const conflictingMembers = createEvidence(
+      undefined,
+      MANAGED_STATIC_PROVIDER,
+      {
+        operation: "inspect_managed_members",
+        parameters: {},
+        result: {
+          ...members,
+          module: {
+            ...members.module,
+            generation: members.module.generation + 1,
+          },
+        },
+        rawResult: null,
+        limitations: members.limitations,
+      },
+    );
+
+    const projected = projectManagedApplicationGraphEvidence({
+      managed_artifact: artifactEvidence,
+      managed_members: conflictingMembers,
+    });
+    expect(projected.ok).toBe(false);
+    if (projected.ok)
+      throw new Error("conflicting module declaration was accepted");
+    expect(JSON.stringify(projected.error)).toContain(
+      "conflicting module generation values",
+    );
+  });
+});
+
+describe("managed application graph token scope", () => {
+  it("checks declared token artifact and MVID scopes without a subject digest", () => {
+    const { memberEvidence } = createManagedInteropEvidence();
+    const members = managedMemberInspectionSchema.parse(
+      parseEvidence(memberEvidence).normalized_result,
+    );
+    const wrongMvidValue = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    const wrongMvidEvidence = createEvidence(
+      undefined,
+      MANAGED_STATIC_PROVIDER,
+      {
+        operation: "inspect_managed_members",
+        parameters: {},
+        result: {
+          ...members,
+          identity_scope: {
+            ...members.identity_scope,
+            requires_mvid: wrongMvidValue,
+          },
+        },
+        rawResult: null,
+        limitations: members.limitations,
+      },
+    );
+    const wrongArtifactEvidence = createEvidence(
+      undefined,
+      MANAGED_STATIC_PROVIDER,
+      {
+        operation: "inspect_managed_members",
+        parameters: {},
+        result: {
+          ...members,
+          identity_scope: {
+            ...members.identity_scope,
+            requires_artifact_sha256: "b".repeat(64),
+          },
+        },
+        rawResult: null,
+        limitations: members.limitations,
+      },
+    );
+
+    const wrongMvidResult = projectManagedApplicationGraphEvidence({
+      managed_members: wrongMvidEvidence,
+    });
+    expect(wrongMvidResult.ok).toBe(false);
+    if (wrongMvidResult.ok)
+      throw new Error("mismatched token MVID was accepted");
+    expect(JSON.stringify(wrongMvidResult.error)).toContain("token scope MVID");
+
+    const wrongArtifact = projectManagedApplicationGraphEvidence({
+      managed_members: wrongArtifactEvidence,
+    });
+    expect(wrongArtifact.ok).toBe(false);
+    if (wrongArtifact.ok)
+      throw new Error("mismatched token artifact digest was accepted");
+    expect(JSON.stringify(wrongArtifact.error)).toContain(
+      "token scope SHA-256",
+    );
+  });
+});
+
+describe("unknown managed application graph token scope", () => {
+  it("keeps absent MVID scope unknown and marks cross-source token joins partial", () => {
+    const { memberEvidence, boundaryEvidence } = createManagedInteropEvidence();
+    const members = managedMemberInspectionSchema.parse(
+      parseEvidence(memberEvidence).normalized_result,
+    );
+    const boundaries = managedNativeBoundaryInspectionSchema.parse(
+      parseEvidence(boundaryEvidence).normalized_result,
+    );
+    const unknownMembers = createEvidence(undefined, MANAGED_STATIC_PROVIDER, {
+      operation: "inspect_managed_members",
+      parameters: {},
+      result: {
+        ...members,
+        module:
+          members.module === null
+            ? null
+            : {
+                ...members.module,
+                mvid: null,
+                enc_id: null,
+                enc_base_id: null,
+              },
+        identity_scope: { ...members.identity_scope, requires_mvid: null },
+      },
+      rawResult: null,
+      limitations: members.limitations,
+    });
+
+    const projected = projectManagedApplicationGraphEvidence({
+      managed_members: unknownMembers,
+      managed_native_boundaries: boundaryEvidence,
+    });
+    if (!projected.ok) throw projected.error;
+    const result = managedApplicationGraphResultSchema.parse(
+      parseEvidence(projected.value).normalized_result,
+    );
+    const graph = parseJavaScriptApplicationGraph(result.graph);
+    expect(result.summary.modules).toBe(1);
+    expect(result.coverage.status).toBe("partial");
+    expect(result.limitations).toContain(
+      "Managed boundary tokens were not linked to member nodes because matching module MVID scope was not established.",
+    );
+    const moduleObservation = graph.nodes.find(
+      ({ kind }) => kind === "managed-module",
+    )?.observations[0];
+    expect(moduleObservation?.properties.mvid).toBe(boundaries.module?.mvid);
+    expect(moduleObservation?.evidence.extractor.operation).toBe(
+      "inspect_managed_native_boundaries",
+    );
+    const method = graph.nodes.find(
+      ({ kind, observations }) =>
+        kind === "managed-method" &&
+        observations[0]?.label === "Fixture.Program.Main",
+    );
+    expect(method).toBeDefined();
+    const importEdge = graph.edges.find(
+      ({ relation, target_node_id }) =>
+        relation === "imports" &&
+        graph.nodes.find(({ node_id }) => node_id === target_node_id)?.kind ===
+          "managed-pinvoke-import",
+    );
+    expect(importEdge).toBeDefined();
+    expect(
+      graph.nodes.find(({ node_id }) => node_id === importEdge?.source_node_id)
+        ?.kind,
+    ).toBe("artifact");
   });
 });
 

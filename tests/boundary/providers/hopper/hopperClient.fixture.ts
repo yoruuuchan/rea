@@ -28,15 +28,20 @@ export class HopperFixtureLauncher implements BridgeLauncher {
   readonly socketPaths: string[] = [];
   readonly directories: string[] = [];
   readonly runIds: string[] = [];
+  readonly tokens: string[] = [];
   readonly processes: ChildProcess[] = [];
   readonly requests: FixtureRequest[] = [];
 
-  constructor(readonly tokenOverride?: string) {}
+  constructor(
+    readonly tokenOverride?: string,
+    readonly diagnosticMode: "quiet" | "noisy" | "noisy_no_socket" = "quiet",
+  ) {}
 
   launch(session: BridgeSession) {
     this.socketPaths.push(session.socketPath);
     this.directories.push(session.directory);
     this.runIds.push(session.runId);
+    this.tokens.push(session.token);
     const child = spawn(
       process.execPath,
       [
@@ -44,8 +49,10 @@ export class HopperFixtureLauncher implements BridgeLauncher {
         session.socketPath,
         this.tokenOverride ?? session.token,
         session.runId,
+        "acknowledge",
+        this.diagnosticMode,
       ],
-      { stdio: ["ignore", "ignore", "pipe", "ipc"] },
+      { stdio: ["ignore", "pipe", "pipe", "ipc"] },
     );
     child.on("message", (value: unknown) => {
       const request = requestSchema.safeParse(value);

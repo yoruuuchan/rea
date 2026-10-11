@@ -50,6 +50,17 @@ code {
   font-size: 0.9em;
   overflow-wrap: anywhere;
 }
+kbd {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--soft);
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
 p {
   margin: 0 0 1.2rem;
 }
@@ -610,6 +621,9 @@ pre code {
 .page-heading .lede {
   max-width: 730px;
 }
+.page-heading .evidence-details {
+  max-width: 730px;
+}
 .breadcrumb {
   margin-bottom: 2rem;
   color: var(--muted);
@@ -1030,6 +1044,10 @@ pre code {
 .evidence-details h3 {
   margin-top: 1.5rem;
   font-size: 1.1rem;
+}
+.evidence-details[open]::details-content {
+  padding-left: 1rem;
+  border-left: 1px solid var(--line);
 }
 .evidence-table-wrap {
   overflow-x: auto;
@@ -2418,6 +2436,9 @@ pre code {
   .provider {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.25rem;
+  }
+  .evidence-details[open]::details-content {
+    padding-left: 0.65rem;
   }
   .guide-entry {
     grid-template-columns: 1fr;

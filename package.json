@@ -1,7 +1,7 @@
 {
   "name": "rea-agents",
   "mcpName": "io.github.morluto/rea",
-  "version": "6.3.0",
+  "version": "6.4.0",
   "description": "Reverse engineer anything from your terminal or agent with one CLI and MCP server.",
   "license": "MIT",
   "repository": {
@@ -30,6 +30,9 @@
     "access": "public"
   },
   "type": "module",
+  "imports": {
+    "#javascript-analysis-worker": "./dist/composition/javascriptAnalysisWorkerProcess.js"
+  },
   "bin": {
     "rea": "scripts/rea.mjs",
     "rea-agents": "scripts/rea.mjs"
@@ -50,6 +53,8 @@
     "bridge/ghidra/ReaGhidraBridge.java",
     "bridge/ghidra/ReaGhidraExtensions.java",
     "bridge/ghidra/ReaGhidraPrepareCom.java",
+    "bridge/ghidra/ReaGhidraApplySeeds.java",
+    "bridge/ghidra/ReaGhidraNoReturnFix.java",
     "bridge/android/ReaJadxBridge.java",
     "bridge/mitmproxy/capture.py",
     "scripts/rea.mjs",
@@ -76,9 +81,11 @@
     "bridge/pwndbg/launch_impl.py",
     "bridge/pwndbg/core_context.py",
     "third_party/pwndbg/README.md",
-    "third_party/pwndbg/LICENSE.md"
+    "third_party/pwndbg/LICENSE.md",
+    "licenses/nativeaot-parser-MIT.txt"
   ],
   "scripts": {
+    "release:notes": "node scripts/release-notes.mjs",
     "deps:check": "node scripts/check-dependency-install.mjs",
     "metadata:generate": "node scripts/run-exclusive.mjs artifacts node scripts/generate-package-metadata.mjs",
     "metadata:check": "node scripts/generate-package-metadata.mjs --check",
@@ -100,6 +107,8 @@
     "precheck:ci": "npm run deps:check",
     "check:ci": "node scripts/run-exclusive.mjs artifacts turbo run typecheck lint format:check knip metadata:check jscpd scan:todos && npm run verify:architecture-guards",
     "build:cached": "node scripts/check-dependency-install.mjs && node scripts/run-exclusive.mjs artifacts turbo run artifacts:skills",
+    "build:termux": "node scripts/run-exclusive.mjs artifacts npm run build:termux:run",
+    "build:termux:run": "npm run compile:termux && npm run artifacts:skills",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint && npm run verify:module-boundaries",
@@ -146,7 +155,11 @@
     "verify:macos-bundle": "npm run build:cached && node scripts/verify/apple/macos-bundle.mjs",
     "verify:legacy-simulator": "npm run build:cached && node scripts/verify/apple/legacy-simulator.mjs",
     "verify:architecture-guards": "node scripts/verify/architecture-guards.mjs",
+    "verify:apktool": "npm run build:cached && node scripts/verify-apktool.mjs",
+    "verify:adb": "npm run build:cached && node scripts/verify-adb.mjs",
     "verify:ghidra": "npm run build:cached && node scripts/verify-real-ghidra.mjs",
+    "verify:ghidra:seeds": "npm run build:cached && node scripts/verify/ghidra/seeds.mjs",
+    "verify:ghidra:mips": "npm run build:cached && node scripts/verify-real-ghidra-mips.mjs",
     "verify:ghidra:swift": "npm run build:cached && node scripts/verify-real-ghidra-swift.mjs",
     "verify:ida": "npm run build:cached && node scripts/verify-real-ida.mjs",
     "verify:ghidra:switch": "npm run build:cached && node scripts/verify-real-ghidra-switch.mjs",
@@ -169,6 +182,7 @@
     "verify:firmware": "npm run build:cached && node scripts/verify/firmware/analysis.mjs",
     "fixtures:firmware": "node scripts/fixtures/firmware/generate.mjs",
     "verify:android": "npm run build:cached && node scripts/verify/android/analysis.mjs",
+    "verify:jeb": "npm run build:cached && node scripts/verify-jeb.mjs",
     "fixtures:android": "node scripts/fixtures/android/fetch.mjs",
     "verify:agent": "npm run build:cached && node scripts/verify-agent-experience.mjs",
     "verify:hopper:linux": "npm run verify:fixtures && npm run build:cached && node scripts/verify-real-hopper-linux.mjs",
@@ -180,6 +194,13 @@
     "verify:package": "npm run build:cached && node scripts/verify-package.mjs",
     "verify:package:windows": "npm run build:cached && node scripts/verify-windows-package.mjs",
     "verify:qwen-client": "npm run build:cached && node scripts/verify-qwen-client.mjs",
+    "verify:gemini-client": "npm run build:cached && node scripts/verify-gemini-client.mjs",
+    "verify:opencode-client": "npm run build:cached && node scripts/verify-opencode-client.mjs",
+    "verify:grok-client": "npm run build:cached && node scripts/verify-grok-client.mjs",
+    "verify:commandcode-client": "npm run build:cached && node scripts/verify-commandcode-client.mjs",
+    "verify:omp-client": "npm run build:cached && node scripts/verify-omp-client.mjs",
+    "verify:copilot-client": "npm run build:cached && node scripts/verify-copilot-client.mjs",
+    "verify:claude-client": "npm run build:cached && node scripts/verify-claude-client.mjs",
     "verify:pi-client": "npm run build:cached && node scripts/verify-native-agent-client.mjs pi",
     "verify:hermes-client": "npm run build:cached && node scripts/verify-native-agent-client.mjs hermes",
     "verify:deepseek-client": "npm run build:cached && node scripts/verify-deepseek-client.mjs",
@@ -224,6 +245,7 @@
     "verify:recorded:crash": "npm run build:cached && node scripts/verify-recorded-crash.mjs",
     "mcp-catalog:check:built": "node scripts/generate-mcp-tool-catalog.mjs --check",
     "compile": "node scripts/clean-build-output.mjs && tsc -p tsconfig.build.json",
+    "compile:termux": "node scripts/clean-build-output.mjs && node --max-old-space-size=3072 node_modules/typescript-termux/lib/tsc.js -p tsconfig.build.json",
     "artifacts:mcp-catalog": "node scripts/generate-mcp-tool-catalog.mjs",
     "artifacts:skills": "node scripts/generate-skill-metadata.mjs",
     "artifacts:product-catalog": "node scripts/generate-product-catalog.mjs",
@@ -249,6 +271,7 @@
     "@lydell/node-pty": "1.1.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/server": "2.3.1",
+    "@xmldom/xmldom": "0.9.12",
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
     "@zip.js/zip.js": "2.15.0",
@@ -269,6 +292,7 @@
     "plist": "5.0.0",
     "semver": "7.8.5",
     "smol-toml": "1.9.0",
+    "stream-chain": "4.2.6",
     "stream-json": "3.7.0",
     "write-file-atomic": "7.0.0",
     "ws": "8.21.0",
@@ -297,6 +321,7 @@
     "oxlint": "1.87.0",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
+    "typescript-termux": "npm:typescript@5.9.3",
     "vitepress": "1.6.4",
     "vitest": "5.0.3"
   }

@@ -81,11 +81,7 @@ const seedMatches = (
     return node.application_node_ids.includes(seed.node_id);
   if (seed.kind === "function") return fingerprintFunctions.has(node.node_id);
   if (seed.kind === "literal")
-    return (
-      node.kind === "literal" &&
-      canonicalJavaScriptSemanticQueryJson(node.properties.value) ===
-        canonicalJavaScriptSemanticQueryJson(seed.value)
-    );
+    return node.kind === "literal" && node.properties.value === seed.value;
   if (seed.kind === "property")
     return node.kind === "property-slot" && node.properties.name === seed.name;
   if (seed.kind === "endpoint")

@@ -32,6 +32,7 @@ interface ManagedPeFixtureOptions {
   readonly targetFramework?: string | null;
   readonly typeName?: string;
   readonly typeNamespace?: string;
+  readonly virtualSectionSize?: number;
 }
 
 const textEncoder = new TextEncoder();
@@ -846,7 +847,8 @@ const buildManagedFixtureImage = (
         readyToRunOffset === null ? 0 : readyToRunOffset - 0x0200 + 4,
       ) / 0x0200,
     ) * 0x0200;
-  const virtualSectionSize = Math.max(0x1000, rawSectionSize);
+  const virtualSectionSize =
+    options.virtualSectionSize ?? Math.max(0x1000, rawSectionSize);
   const image = Buffer.alloc(0x0200 + rawSectionSize);
   image.write("MZ", 0, "ascii");
   image.writeUInt32LE(0x80, 0x3c);

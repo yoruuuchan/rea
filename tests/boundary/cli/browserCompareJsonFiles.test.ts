@@ -98,6 +98,14 @@ describe("browser comparison JSON file inputs", () => {
   );
 
   it(
+    "reports malformed PNG chunks as invalid input and valid unsupported PNGs as unsupported targets",
+    async () => {
+      await assertPngInputErrorProjections();
+    },
+    INTEGRATION_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "identifies a missing capture file instead of reporting malformed JSON",
     async () => {
       const root = await createTestTempDirectory("rea-capture-missing-");
@@ -123,3 +131,105 @@ describe("browser comparison JSON file inputs", () => {
     INTEGRATION_TEST_TIMEOUT_MS,
   );
 });
+
+const assertPngInputErrorProjections = async (): Promise<void> => {
+  const damagedBytes = noisePng(1, 1);
+  damagedBytes[29] = (damagedBytes[29] ?? 0) ^ 1;
+  const damaged = JSON.stringify(createWebScreenshotArtifact(damagedBytes));
+  expect(
+    await runCli(["compare-web-screenshots", damaged, damaged, "--json"]),
+  ).toMatchObject({
+    code: "invalid_request",
+    details: {
+      operation: "compare_web_screenshots",
+      issues: [
+        { path: [], reason: "invalid_format", message: expect.any(String) },
+      ],
+    },
+  });
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const malformedDeflate = JSON.stringify(
+    createWebScreenshotArtifact(
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        pngChunk("IHDR", header),
+        pngChunk("IDAT", Buffer.from("bad")),
+        pngChunk("IEND", Buffer.alloc(0)),
+      ]),
+    ),
+  );
+  expect(
+    await runCli([
+      "compare-web-screenshots",
+      malformedDeflate,
+      malformedDeflate,
+      "--json",
+    ]),
+  ).toMatchObject({
+    code: "invalid_request",
+    details: {
+      operation: "compare_web_screenshots",
+      issues: [{ path: [], reason: "invalid_format" }],
+    },
+  });
+
+  const grayscaleHeader = Buffer.alloc(13);
+  grayscaleHeader.writeUInt32BE(1, 0);
+  grayscaleHeader.writeUInt32BE(1, 4);
+  grayscaleHeader.set([8, 0, 0, 0, 0], 8);
+  const grayscale = JSON.stringify(
+    createWebScreenshotArtifact(
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        pngChunk("IHDR", grayscaleHeader),
+        pngChunk("IDAT", deflateSync(Buffer.from([0, 30]))),
+        pngChunk("IEND", Buffer.alloc(0)),
+      ]),
+    ),
+  );
+  expect(
+    await runCli(["compare-web-screenshots", grayscale, grayscale, "--json"]),
+  ).toMatchObject({
+    code: "unsupported_target",
+    details: { operation: "compare_web_screenshots" },
+  });
+
+  const oversizedHeader = Buffer.alloc(13);
+  oversizedHeader.writeUInt32BE(0x7fffffff, 0);
+  oversizedHeader.writeUInt32BE(1, 4);
+  oversizedHeader.set([8, 6, 0, 0, 0], 8);
+  const hugeDimensions = JSON.stringify(
+    createWebScreenshotArtifact(
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        pngChunk("IHDR", oversizedHeader),
+        pngChunk("IDAT", deflateSync(Buffer.from([0]))),
+        pngChunk("IEND", Buffer.alloc(0)),
+      ]),
+    ),
+  );
+  expect(
+    await runCli([
+      "compare-web-screenshots",
+      hugeDimensions,
+      hugeDimensions,
+      "--json",
+    ]),
+  ).toMatchObject({
+    code: "resource_constraint",
+    details: {
+      operation: "compare_web_screenshots",
+      resource: "memory",
+      reported_limits: {
+        maximum_working_memory_bytes: 256 * 1024 * 1024,
+        estimated_working_memory_bytes: "34359738499",
+        before_dimensions: { width: 0x7fffffff, height: 1 },
+        after_dimensions: { width: 0x7fffffff, height: 1 },
+      },
+    },
+  });
+};

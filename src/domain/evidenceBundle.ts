@@ -234,11 +234,33 @@ export const describeValidationFailure = (cause: unknown): string => {
 
 /** Parse records, verify semantic IDs, and reject inconsistent manifests. */
 export const parseEvidenceBundle = (input: unknown): EvidenceBundle => {
+  return parseBundle(input, false);
+};
+
+/** Authenticate and seal file-owned payloads once for downstream zero-copy reuse. */
+export const parseImmutableEvidenceBundle = (
+  input: unknown,
+): EvidenceBundle => {
+  return parseBundle(input, true);
+};
+
+const parseBundle = (input: unknown, seal: boolean): EvidenceBundle => {
   if (typeof input === "object" && input !== null) {
     const owned = immutableBundles.get(input);
     if (owned !== undefined) return owned;
   }
-  const parsed = evidenceBundleSchema.parse(input);
+  return authenticateBundle(evidenceBundleSchema.parse(input), seal);
+};
+
+/** Authenticate evidence and bundle invariants after the bundle shape is parsed. */
+export const authenticateParsedEvidenceBundle = (
+  parsed: EvidenceBundle,
+): EvidenceBundle => authenticateBundle(parsed, false);
+
+const authenticateBundle = (
+  parsed: EvidenceBundle,
+  seal: boolean,
+): EvidenceBundle => {
   const recordIds = parsed.records.map(({ evidence_id: id }) => id);
   if (new Set(recordIds).size !== recordIds.length)
     throw new TypeError("Evidence bundle contains duplicate record IDs");
@@ -246,7 +268,12 @@ export const parseEvidenceBundle = (input: unknown): EvidenceBundle => {
   const canonical = createEvidenceBundle(
     parsed.records.map((record, index) => {
       try {
-        return parseEvidence(record);
+        if (!seal) return parseEvidence(record);
+        // Schema parsing gave this boundary exclusive ownership. Register only
+        // validated payloads before authenticating the complete record envelope.
+        record.normalized_result = freezeJsonSnapshot(record.normalized_result);
+        record.raw_result = freezeJsonSnapshot(record.raw_result);
+        return immutableEvidence(record);
       } catch (cause: unknown) {
         if (cause instanceof z.ZodError)
           throw new z.ZodError(
@@ -262,6 +289,10 @@ export const parseEvidenceBundle = (input: unknown): EvidenceBundle => {
   );
   if (JSON.stringify(parsed) !== JSON.stringify(canonical))
     throw new TypeError("Evidence bundle manifests are not canonical");
+  if (seal) {
+    freezeJsonSnapshot(canonical);
+    immutableBundles.set(canonical, canonical);
+  }
   return canonical;
 };
 

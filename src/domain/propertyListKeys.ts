@@ -10,8 +10,10 @@ export interface PropertyListWithoutPrototypeKeys {
 }
 
 /** Limitation for results whose source plist held `__proto__` entries. */
-export const omittedPrototypeKeysLimitation = (count: number): string =>
-  `${String(count)} dictionary ${count === 1 ? "entry" : "entries"} keyed __proto__ ${count === 1 ? "was" : "were"} omitted because REA results cannot represent that key.`;
+export const omittedPrototypeKeysLimitation = (count: number | null): string =>
+  count === null
+    ? "Dictionary entries keyed __proto__ were omitted because REA results cannot represent that key."
+    : `${String(count)} dictionary ${count === 1 ? "entry" : "entries"} keyed __proto__ ${count === 1 ? "was" : "were"} omitted because REA results cannot represent that key.`;
 
 const withoutKey = (
   value: unknown,

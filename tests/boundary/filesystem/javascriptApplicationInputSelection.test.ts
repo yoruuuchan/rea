@@ -5,7 +5,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 
 const analyzeFailure = async (input: Record<string, unknown>) => {

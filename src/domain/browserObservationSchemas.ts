@@ -173,17 +173,21 @@ const browserConsoleEventSchema = z.object({
     retained_bytes: z.number().int().min(0),
   }),
 });
-const browserWebSocketEventSchema = z.object({
-  request_id: z.string(),
+const browserWebSocketFrameSchema = z.object({
   direction: z.enum(["sent", "received"]),
   opcode: z.number().int().min(0),
-  payload_bytes: z.number().int().min(0),
+  payload_bytes: z.number().int().min(0).nullable(),
   payload_shape: z
     .object({
       format: z.enum(["json", "text", "binary"]),
       json_shape: jsonShapeSchema.nullable(),
     })
     .nullable(),
+});
+const browserWebSocketConnectionSchema = z.object({
+  request_id: z.string(),
+  url: z.string(),
+  events: z.array(browserWebSocketFrameSchema),
 });
 const browserWorkerSchema = z.object({
   target_id: z.string(),
@@ -296,7 +300,7 @@ export const webPageInspectionSchema = z.object({
   resources: z.array(browserResourceSchema),
   network: z.object({
     requests: z.array(browserNetworkRequestSchema),
-    websocket_events: z.array(browserWebSocketEventSchema),
+    websocket_connections: z.array(browserWebSocketConnectionSchema),
     coverage_started_at: z.iso.datetime(),
     prior_activity_available: z.literal(false),
   }),

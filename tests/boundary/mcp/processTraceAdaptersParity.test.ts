@@ -91,6 +91,29 @@ const captureEvidence = (side: "left" | "right") =>
     locations: [{ kind: "artifact-path", path: `/fixture/${side}` }],
   });
 
+const comparisonClient = async (
+  left: ReturnType<typeof captureEvidence>,
+  right: ReturnType<typeof captureEvidence>,
+) => {
+  const session = createTestBinarySession(
+    (_path) =>
+      ({
+        execute: () => Promise.resolve(ok(null)),
+        close: () => Promise.resolve(resultOk(null)),
+      }) satisfies AnalysisClient,
+  );
+  expect(session.recordEvidence(left).ok).toBe(true);
+  expect(session.recordEvidence(right).ok).toBe(true);
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "trace-parity", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  resources.push(client, server);
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return client;
+};
+
 afterEach(async () => {
   await Promise.all(resources.splice(0).map((resource) => resource.close()));
   await Promise.all(
@@ -117,22 +140,7 @@ describe("declared trace adapter parity", () => {
     const cliEvidence = parseEvidence(
       await compareProcessEvidenceFiles(leftPath, rightPath, specificationPath),
     );
-    const session = createTestBinarySession(
-      (_path) =>
-        ({
-          execute: () => Promise.resolve(ok(null)),
-          close: () => Promise.resolve(resultOk(null)),
-        }) satisfies AnalysisClient,
-    );
-    expect(session.recordEvidence(left).ok).toBe(true);
-    expect(session.recordEvidence(right).ok).toBe(true);
-    const server = createServer({ kind: "session", session });
-    const client = new Client({ name: "trace-parity", version: "1" });
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    resources.push(client, server);
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
+    const client = await comparisonClient(left, right);
     const response = await client.callTool({
       name: "compare_process_captures",
       arguments: {
@@ -156,5 +164,55 @@ describe("declared trace adapter parity", () => {
       { kind: "artifact-path", path: "/fixture/left" },
       { kind: "artifact-path", path: "/fixture/right" },
     ]);
+  });
+
+  it("reports one complete missing-pair diagnostic through CLI and MCP", async () => {
+    const left = captureEvidence("left");
+    const right = captureEvidence("right");
+    const incompleteSpecification = {
+      events: Array.from({ length: 200 }, (_, index) => ({
+        id: `e${String(index)}`,
+        source: "lifecycle",
+        exact: { fixture: index },
+        cardinality: { kind: "optional" },
+      })),
+      language: { kind: "partial_order" },
+    };
+    const root = await createTestTempDirectory("rea-trace-diagnostics-");
+    temporaryRoots.push(root);
+    const leftPath = join(root, "left.json");
+    const rightPath = join(root, "right.json");
+    const specificationPath = join(root, "trace.json");
+    await Promise.all([
+      writeFile(leftPath, JSON.stringify(left)),
+      writeFile(rightPath, JSON.stringify(right)),
+      writeFile(specificationPath, JSON.stringify(incompleteSpecification)),
+    ]);
+    const message =
+      "19900 event pairs must be explicitly ordered or unordered; first undeclared pair: e0/e1";
+    const cli = await compareProcessEvidenceFiles(
+      leftPath,
+      rightPath,
+      specificationPath,
+    );
+    expect(cli).toMatchObject({
+      category: "invalid_input",
+      details: {
+        issues: [{ path: ["trace_spec", "language"], message }],
+      },
+    });
+    const client = await comparisonClient(left, right);
+    const response = await client.callTool({
+      name: "compare_process_captures",
+      arguments: { left, right, trace_spec: incompleteSpecification },
+    });
+    expect(response.isError).toBe(true);
+    const text = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+    expect(text).toContain(message);
+    expect(text.match(/first undeclared pair/g)).toHaveLength(1);
+    await client.ping();
   });
 });

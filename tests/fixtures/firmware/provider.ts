@@ -5,6 +5,7 @@ import { expect, onTestFinished } from "vitest";
 import { createFirmwareAnalysisProvider } from "../../../src/composition/firmware.js";
 import { FirmwareAnalysisService } from "../../../src/application/firmware/FirmwareAnalysisService.js";
 import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
+import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
 import { createTestTempDirectory } from "../temporaryDirectory.js";
 
 /** Exercise real subprocess ownership with synthetic pinned producer representations. */
@@ -18,6 +19,7 @@ export const firmwareFixture = async (mode = "normal", banner?: string) => {
     pid: number | undefined;
     args: readonly string[];
   }[] = [];
+  let cleanupUnverified = mode === "cleanup-failure";
   const provider = createFirmwareAnalysisProvider(
     {
       ...process.env,
@@ -54,21 +56,29 @@ export const firmwareFixture = async (mode = "normal", banner?: string) => {
         args: options.arguments,
       });
       if (mode === "cleanup-failure") {
-        onTestFinished(async () => {
-          if (options.cwd !== undefined)
-            await rm(options.cwd, { recursive: true, force: true });
-        });
         return {
           ...spawned,
-          cleanup: async () => ({
-            cleaned: false,
-            reason: "injected ownership failure",
-          }),
+          cleanup: () =>
+            cleanupUnverified
+              ? Promise.resolve({
+                  cleaned: false,
+                  reason: "injected ownership failure",
+                })
+              : cleanupOwnedProcessGroup(spawned.ownership),
         };
       }
       return spawned;
     },
   );
+  const close = async () => {
+    if (provider.close === undefined)
+      throw new Error("Expected firmware provider cleanup capability");
+    await provider.close();
+  };
+  onTestFinished(async () => {
+    cleanupUnverified = false;
+    await close();
+  });
   return {
     provider,
     service: new FirmwareAnalysisService(provider),
@@ -76,6 +86,10 @@ export const firmwareFixture = async (mode = "normal", banner?: string) => {
     output: join(root, "output"),
     root,
     launches,
+    close,
+    restoreCleanup: () => {
+      cleanupUnverified = false;
+    },
   };
 };
 

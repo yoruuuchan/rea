@@ -166,9 +166,16 @@ rea import-reference-source /absolute/path/to/source
 ```
 
 The import records hashes and metadata for the supplied files, separately
-from observations of the current app. File names do not automatically exclude
-files. Set `REA_REFERENCE_SECRET_PATTERNS_JSON` to a JSON array of ignore
-patterns when you want to exclude selected paths.
+from observations of the current app. It honors the source tree's `.gitignore`
+and applies default exclusions for common generated and dependency paths such
+as `node_modules/`, `dist/`, and `*.log`. Pattern-based exclusions record the
+matched pattern and whether it came from project, default, caller, or sensitive
+path policy. Set `REA_REFERENCE_SECRET_PATTERNS_JSON` to a JSON array of ignore
+patterns when you want to mark selected paths as sensitive; those patterns are
+reported separately as configured-secret exclusions.
+
+Re-import saved graphs whose pattern-based exclusions lack `pattern` before
+using them in source-to-bundle comparisons.
 
 JavaScript and TypeScript import parsing requires valid UTF-8. Malformed source
 bytes retain their original hashes and sizes with a decoding diagnostic; REA

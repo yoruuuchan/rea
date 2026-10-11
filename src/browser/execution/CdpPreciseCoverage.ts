@@ -1,34 +1,30 @@
+import type { z } from "zod";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import type { WebExecution } from "../../domain/webExecution.js";
 import type { WebRuntimeSource } from "../../domain/webRuntime.js";
-import { preciseCoverageSchema } from "./CdpRuntimeProtocol.js";
+import type { preciseCoverageSchema } from "./CdpRuntimeProtocol.js";
 import type { CdpRuntimeSources } from "./CdpRuntimeSources.js";
 
 /** Validate source-range bounds against exact retained UTF-16 text without flattening nested counts. */
 export const normalizePreciseCoverage = (
-  raw: unknown,
+  parsed: z.infer<typeof preciseCoverageSchema>,
   sources: CdpRuntimeSources,
   retained: readonly WebRuntimeSource[],
 ): {
   readonly coverage: WebExecution["coverage"];
   readonly timestamp: number;
 } => {
-  const parsed = preciseCoverageSchema.safeParse(raw);
-  if (!parsed.success)
-    throw new AnalysisOutputError(
-      sources.session.operation,
-      `Malformed precise coverage: ${parsed.error.message}`,
-    );
+  const retainedSources = new Map(
+    retained.map(({ script_id, source }) => [script_id, source]),
+  );
   const scripts: WebExecution["coverage"]["scripts"] = [];
   let excluded = 0;
-  for (const script of parsed.data.result) {
+  for (const script of parsed.result) {
     if (!sources.belongsToDocument(script.scriptId)) {
       excluded += 1;
       continue;
     }
-    const source = retained.find(
-      (item) => item.script_id === script.scriptId,
-    )?.source;
+    const source = retainedSources.get(script.scriptId);
     scripts.push({
       script_id: script.scriptId,
       reported_url: sources.sourceUrl(script.scriptId, script.url),
@@ -57,7 +53,7 @@ export const normalizePreciseCoverage = (
     });
   }
   return {
-    timestamp: parsed.data.timestamp,
+    timestamp: parsed.timestamp,
     coverage: {
       state: "captured",
       reason: null,

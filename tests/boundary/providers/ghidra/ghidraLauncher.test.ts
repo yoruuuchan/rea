@@ -1,5 +1,5 @@
 import { access, chmod, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -134,6 +134,7 @@ describe("Ghidra headless launcher", () => {
   });
   it("builds a read-only ephemeral import with its bridge descriptor", () => {
     const arguments_ = ghidraHeadlessArguments({
+      platform: "darwin",
       projectRoot: "/tmp/project",
       targetPath: "/tmp/target",
       bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
@@ -147,13 +148,113 @@ describe("Ghidra headless launcher", () => {
       ["-log", "/tmp/ghidra.log"],
       ["-scriptlog", "/tmp/script.log"],
       ["-scriptPath", "/package/bridge"],
-      ["-postScript", "/package/bridge/ReaGhidraBridge.java"],
+      ["-postScript", "/package/bridge/ReaGhidraNoReturnFix.java"],
     ]);
-    expect(arguments_[arguments_.indexOf("-postScript") + 2]).toBe(
-      "/tmp/session.json",
-    );
+    // The no-return repair must finish before the bridge starts serving.
+    const fix = arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java");
+    const bridge = arguments_.indexOf("/package/bridge/ReaGhidraBridge.java");
+    expect(fix).toBeLessThan(bridge);
+    expect(arguments_[bridge + 1]).toBe("/tmp/session.json");
     expect(arguments_).toContain("-readOnly");
     expect(arguments_).toContain("-deleteProject");
+  });
+});
+
+describe("Ghidra configured import language and seeds", () => {
+  const base = {
+    platform: "darwin" as const,
+    projectRoot: "/tmp/project",
+    targetPath: "/tmp/target",
+    bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+    descriptorPath: "/tmp/session.json",
+    ghidraLogPath: "/tmp/ghidra.log",
+    scriptLogPath: "/tmp/script.log",
+  };
+
+  it("passes a configured language and compiler spec to the import", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      languageOverride: {
+        languageId: "x86:LE:32:default",
+        compilerSpecId: "borlandcpp",
+      },
+    });
+    expectOptions(arguments_, [
+      ["-processor", "x86:LE:32:default"],
+      ["-cspec", "borlandcpp"],
+    ]);
+    expect(arguments_).not.toContain("-loader");
+    expect(arguments_.indexOf("-processor")).toBeGreaterThan(
+      arguments_.indexOf("-import"),
+    );
+  });
+
+  it("lets Ghidra choose the language default compiler spec", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      languageOverride: { languageId: "x86:LE:32:default" },
+    });
+    expectOptions(arguments_, [["-processor", "x86:LE:32:default"]]);
+    expect(arguments_).not.toContain("-cspec");
+  });
+
+  it("never combines a configured language with a DOS import", () => {
+    expect(() =>
+      ghidraHeadlessArguments({
+        ...base,
+        dosMz: true,
+        languageOverride: { languageId: "x86:LE:32:default" },
+      }),
+    ).toThrow(/cannot be combined with a DOS import/u);
+  });
+
+  it.each(["darwin", "win32"] as const)(
+    "applies seeds after loader preparation and before analysis scripts on %s",
+    (platform) => {
+      const path = platform === "win32" ? win32 : posix;
+      const bridgeDirectory = path.join("/package", "bridge");
+      const seedPath = path.join("/tmp/runtime/seeds", "seeds.tsv");
+      const arguments_ = ghidraHeadlessArguments({
+        ...base,
+        platform,
+        bridgeScriptPath: path.join(bridgeDirectory, "ReaGhidraBridge.java"),
+        dosCom: true,
+        seedPath,
+      });
+      const prepare = arguments_.indexOf(
+        path.join(bridgeDirectory, "ReaGhidraPrepareCom.java"),
+      );
+      const seeds = arguments_.indexOf(
+        path.join(bridgeDirectory, "ReaGhidraApplySeeds.java"),
+      );
+      expect(prepare).toBeGreaterThanOrEqual(0);
+      expect(arguments_[seeds - 1]).toBe("-preScript");
+      expect(arguments_[seeds + 1]).toBe(seedPath);
+      expect(prepare).toBeLessThan(seeds);
+      expect(seeds).toBeLessThan(arguments_.indexOf("-postScript"));
+    },
+  );
+
+  it("adds no seed script without a seed snapshot", () => {
+    expect(ghidraHeadlessArguments(base)).not.toContain(
+      posix.join("/package/bridge", "ReaGhidraApplySeeds.java"),
+    );
+  });
+});
+
+describe("Ghidra Windows launcher", () => {
+  it("keeps analysis repair outside Windows P0 authority", () => {
+    const args = ghidraHeadlessArguments({
+      platform: "win32",
+      projectRoot: "/tmp/project",
+      targetPath: "/tmp/target",
+      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+      descriptorPath: "/tmp/session.json",
+      ghidraLogPath: "/tmp/ghidra.log",
+      scriptLogPath: "/tmp/script.log",
+    });
+    expect(args).not.toContain("/package/bridge/ReaGhidraNoReturnFix.java");
+    expect(args).toContain("/package/bridge/ReaGhidraBridge.java");
   });
 
   it("wraps the Windows batch launcher without enabling a Node shell", () => {

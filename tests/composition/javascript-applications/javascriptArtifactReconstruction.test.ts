@@ -3,7 +3,7 @@ import {
   primitiveByteExpansionSource,
 } from "../../fixtures/javascriptPrimitiveExpansion.js";
 import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createPackageWithOptions } from "@electron/asar";
@@ -11,7 +11,10 @@ import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { reconstructJavaScriptArtifact } from "../../../src/application/javascript/JavaScriptArtifactReconstruction.js";
+import {
+  reconstructJavaScriptArtifact,
+  readJavaScriptArtifactFiles,
+} from "../../support/javascriptApplicationScope.js";
 import {
   analyzeJavaScriptArtifactFiles,
   analyzeAndProjectJavaScriptArtifactFiles,
@@ -20,14 +23,31 @@ import { buildJavaScriptArtifactGraph } from "../../../src/application/javascrip
 import {
   buildJavaScriptSemanticGraph,
   createJavaScriptSemanticGraphProjection,
+  projectJavaScriptSemanticFileSteps,
 } from "../../../src/application/javascript/JavaScriptSemanticGraphBuilder.js";
+import {
+  projectJavaScriptModuleSemantics,
+  type JavaScriptModuleSemanticIr,
+} from "../../../src/domain/javascript/javascriptModuleSemanticIr.js";
+import type { JavaScriptStaticAnalysis } from "../../../src/domain/javascript/javascriptStaticAnalysisTypes.js";
+import type { JavaScriptArtifactFile } from "../../../src/domain/javascript/javascriptArtifactFiles.js";
+import { completeJavaScriptAnalysisSteps } from "../../../src/application/javascript/JavaScriptAnalysisControl.js";
+import {
+  writeJavaScriptAnalysisTransfer,
+  readJavaScriptAnalysisTransfer,
+} from "../../../src/javascript/analysis/JavaScriptAnalysisTransfer.js";
+import { javaScriptWorkerStaticAnalysisSchema } from "../../../src/javascript/analysis/JavaScriptAnalysisWorkerSchemas.js";
 import { createJavaScriptArtifactReader } from "../../../src/artifacts/javascript/JavaScriptArtifactReader.js";
-import { readJavaScriptArtifactFiles } from "../../../src/artifacts/javascript/JavaScriptArtifactFiles.js";
-import { scanCanonicalArtifactInventory } from "../../../src/artifacts/inventory/scanCanonical.js";
-import { scanArtifactInventory } from "../../../src/artifacts/inventory/ArtifactInventory.js";
+import {
+  scanCanonicalArtifactInventory,
+  scanArtifactInventory,
+} from "../../fixtures/artifactInventory.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
-import { createJavaScriptSemanticGraph } from "../../../src/domain/javascript/javascriptSemanticGraph.js";
+import {
+  createJavaScriptSemanticGraph,
+  isValidatedImmutableJavaScriptSemanticGraph,
+} from "../../../src/domain/javascript/javascriptSemanticGraph.js";
 import { parseJavaScriptSemanticGraph } from "../../../src/domain/javascript/javascriptSemanticGraphSerialization.js";
 import { writeJavaScriptArtifactFixture } from "../../fixtures/javascriptArtifactApplication.js";
 
@@ -44,7 +64,10 @@ it("reports file progress and honors cancellation before the next source", async
         }
       },
     }),
-  ).rejects.toMatchObject({ reason: "cancelled" });
+  ).rejects.toMatchObject({
+    _tag: "AnalysisCancelledError",
+    partialObservation: { operation: "analyze_javascript_application" },
+  });
   expect(progress).toHaveLength(2);
   expect(progress[0]).not.toBe(progress[1]);
 });
@@ -57,6 +80,7 @@ it("preserves graph commitments and export shapes when consuming file-local IR",
     import { readFile } from "node:fs";
     export { readFile as read };
     export function create(value) { return { value, nested: { enabled: true } }; }
+    export function configured(condition) { return { values: [1, null, undefined], choice: condition ? 1 : 2, ...external }; }
     function unexported() { return "private"; }
   `,
   );
@@ -92,6 +116,7 @@ it("preserves graph commitments and export shapes when consuming file-local IR",
     );
     expect(exported?.semantic?.ir.callables.map(({ name }) => name)).toEqual([
       "create",
+      "configured",
     ]);
     expect(
       full.files
@@ -99,10 +124,120 @@ it("preserves graph commitments and export shapes when consuming file-local IR",
         ?.semantic?.ir.callables.map(({ name }) => name),
     ).toContain("unexported");
     expect(parseJavaScriptSemanticGraph(semantic)).toEqual(semantic);
+    const transferred = createJavaScriptSemanticGraphProjection();
+    const wireRoot = await createTestTempDirectory("rea-javascript-transfer-");
+    const decodedModules = new Map<string, JavaScriptModuleSemanticIr>();
+    const decodedStatic = new Map<string, JavaScriptStaticAnalysis>();
+    let rejectedInvalidTransfer = false;
+    for (const [index, analyzed] of full.files.entries()) {
+      if (analyzed.javascript !== null) {
+        const raw: unknown = JSON.parse(JSON.stringify(analyzed.javascript));
+        const decodedFacts = javaScriptWorkerStaticAnalysisSchema.parse(raw);
+        expect(decodedFacts).toEqual(analyzed.javascript);
+        decodedStatic.set(analyzed.file.path, decodedFacts);
+      }
+      if (analyzed.semantic === null) continue;
+      const fragment = await completeJavaScriptAnalysisSteps(
+        projectJavaScriptSemanticFileSteps(
+          analyzed.file,
+          analyzed.semantic.ir,
+          transferred.remainingFileNodeBudget(),
+        ),
+      );
+      const module = projectJavaScriptModuleSemantics(analyzed.semantic.ir);
+      const wirePath = join(wireRoot, `${String(index)}.jsonl`);
+      const descriptor = await writeJavaScriptAnalysisTransfer(
+        wirePath,
+        module,
+        fragment,
+      );
+      const decoded = await readJavaScriptAnalysisTransfer(
+        wirePath,
+        descriptor,
+        analyzed.file,
+      );
+      expect(decoded.module).toEqual(module);
+      decodedModules.set(analyzed.file.path, decoded.module);
+      transferred.adoptFileProjection(decoded.projection);
+      if (!rejectedInvalidTransfer) {
+        await rejectInvalidTransfer(
+          wirePath,
+          descriptor,
+          analyzed.file,
+          wireRoot,
+        );
+        rejectedInvalidTransfer = true;
+      }
+    }
+    const decodedGraph = buildJavaScriptArtifactGraph(snapshot, files, {
+      ...compact,
+      files: compact.files.map((analyzed) => {
+        const module = decodedModules.get(analyzed.file.path);
+        return {
+          ...analyzed,
+          javascript:
+            decodedStatic.get(analyzed.file.path) ?? analyzed.javascript,
+          semantic: module === undefined ? analyzed.semantic : { ir: module },
+        };
+      }),
+    });
+    expect(decodedGraph).toEqual(graph);
+    const resealed = await completeJavaScriptAnalysisSteps(
+      transferred.finishImmutableSteps(
+        snapshot.manifest.root_sha256,
+        decodedGraph,
+      ),
+    );
+    expect(resealed).toEqual(semantic);
+    expect(isValidatedImmutableJavaScriptSemanticGraph(resealed)).toBe(true);
   } finally {
     await reader.close();
   }
 });
+
+const rejectInvalidTransfer = async (
+  wirePath: string,
+  descriptor: Awaited<ReturnType<typeof writeJavaScriptAnalysisTransfer>>,
+  file: JavaScriptArtifactFile,
+  wireRoot: string,
+): Promise<void> => {
+  await expect(
+    readJavaScriptAnalysisTransfer(wirePath, descriptor, {
+      ...file,
+      sha256: "0".repeat(64),
+    }),
+  ).rejects.toThrow("different artifact source");
+  await expect(
+    readJavaScriptAnalysisTransfer(
+      wirePath,
+      { ...descriptor, sha256: "0".repeat(64) },
+      file,
+    ),
+  ).rejects.toThrow("digest does not match");
+  const wire = await readFile(wirePath, "utf8");
+  const duplicate = wire
+    .split("\n")
+    .find((line) => line.startsWith('{"kind":"node"'));
+  if (duplicate === undefined)
+    throw new Error("Fixture emitted no semantic node record");
+  const invalid = `${wire}${duplicate}\n`;
+  const invalidPath = join(wireRoot, "duplicate.jsonl");
+  await writeFile(invalidPath, invalid);
+  await expect(
+    readJavaScriptAnalysisTransfer(
+      invalidPath,
+      {
+        ...descriptor,
+        bytes: Buffer.byteLength(invalid),
+        records: descriptor.records + 1,
+        graph_bytes: descriptor.graph_bytes + Buffer.byteLength(duplicate) + 1,
+        graph_records: descriptor.graph_records + 1,
+        sha256: createHash("sha256").update(invalid).digest("hex"),
+      },
+      file,
+    ),
+  ).rejects.toThrow("Duplicate JavaScript transfer node identity");
+};
 
 it("reports semantic value resource limits in application graph coverage", async () => {
   const root = await createTestTempDirectory("rea-javascript-semantic-limit-");

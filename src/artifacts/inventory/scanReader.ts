@@ -17,7 +17,8 @@ import {
   classifyArtifactBytes,
   createArtifactNode,
   createOccurrence,
-  nearestParent,
+  noteUnreadContainerSuffix,
+  resolveOccurrenceParents,
   type MutableOccurrence,
 } from "./ArtifactGraphConstruction.js";
 import {
@@ -90,13 +91,11 @@ export const scanReader = async (
   await visitArtifactEntries(context, reader, "");
   // Archive directories may appear after their children. Resolve containment
   // against the complete index before directory identities are materialized.
-  for (const occurrence of occurrences)
-    occurrence.parent_occurrence_id =
-      nearestParent(
-        occurrence.logical_path,
-        context.occurrenceByPath,
-        context.expandedContainerIds,
-      )?.occurrence_id ?? null;
+  resolveOccurrenceParents(
+    occurrences,
+    context.occurrenceByPath,
+    context.expandedContainerIds,
+  );
   return {
     nodes,
     occurrences,
@@ -121,6 +120,7 @@ const visitArtifactEntries = async (
       iterator: currentReader.entries(context.signal)[Symbol.asyncIterator](),
     },
   ];
+  let failure: { readonly cause: unknown } | undefined;
   try {
     while (stack.length > 0) {
       const frame = stack.at(-1);
@@ -161,7 +161,8 @@ const visitArtifactEntries = async (
         occurrence.hash_status = "unavailable";
         occurrence.limitations.push(UNAVAILABLE_UNPACKED_LIMITATION);
       }
-      if (digested !== undefined) {
+      if (digested === undefined) noteUnreadContainerSuffix(occurrence);
+      else {
         context.nodes.set(digested.node.artifact_id, digested.node);
         occurrence.artifact_id = digested.node.artifact_id;
         occurrence.artifact_kind = digested.classification.kind;
@@ -176,7 +177,12 @@ const visitArtifactEntries = async (
       }
       context.occurrences.push(occurrence);
       context.occurrenceByPath.set(logicalPath, occurrence);
-      if (expandableAsar && digested !== undefined && !digested.mismatched) {
+      if (
+        expandableAsar &&
+        digested !== undefined &&
+        digested.classification.format === "asar" &&
+        !digested.mismatched
+      ) {
         const nested = new AsarArtifactReader(entry.adapterKey);
         context.ownedReaders.push(nested);
         await nested.prepareContainer(digested.node.sha256, context.signal);
@@ -189,10 +195,27 @@ const visitArtifactEntries = async (
         });
       }
     }
+  } catch (cause: unknown) {
+    failure = { cause };
   } finally {
     // Readers remain owned by the inventory until its complete observation is built.
-    for (const { iterator } of stack) await iterator.return?.();
+    for (const { iterator, prefix, reader } of stack.reverse()) {
+      try {
+        await iterator.return?.();
+      } catch (cause: unknown) {
+        failure = {
+          cause: ArtifactReaderFailure.withCleanup(
+            failure === undefined ? cause : failure.cause,
+            ArtifactReaderFailure.cleanupObservation(
+              cause,
+              `artifact traversal for ${prefix || reader.format}`,
+            ),
+          ),
+        };
+      }
+    }
   }
+  if (failure !== undefined) throw failure.cause;
 };
 
 const digestArtifactEntry = async (

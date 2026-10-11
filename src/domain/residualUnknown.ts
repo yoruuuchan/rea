@@ -82,6 +82,70 @@ const residualUnknownObjectSchema = z.object({
   mutation_evidence_ids: z.array(evidenceIdSchema).min(1),
 });
 
+type UnknownRevision = Omit<
+  z.infer<typeof residualUnknownObjectSchema>,
+  "revision_digest"
+>;
+
+const refineRevision = (value: UnknownRevision, context: z.RefinementCtx) => {
+  if ((value.revision === 1) !== (value.previous_revision_digest === null))
+    context.addIssue({
+      code: "custom",
+      message: "Only the first revision has no predecessor",
+      path: ["previous_revision_digest"],
+    });
+  if ((value.status === "resolved") !== (value.resolution !== null))
+    context.addIssue({
+      code: "custom",
+      message: "Only resolved unknowns carry a resolution",
+      path: ["resolution"],
+    });
+  if (
+    value.status === "contradicted" &&
+    value.contradicting_evidence_ids.length === 0
+  )
+    context.addIssue({
+      code: "custom",
+      message: "Contradicted status requires contradicting evidence",
+      path: ["contradicting_evidence_ids"],
+    });
+  if (
+    value.relationships.some(
+      (relationship) => relationship.unknown_id === value.unknown_id,
+    )
+  )
+    context.addIssue({
+      code: "custom",
+      message: "An unknown cannot relate to itself",
+      path: ["relationships"],
+    });
+  for (const ids of [
+    value.supporting_evidence_ids,
+    value.contradicting_evidence_ids,
+    value.mutation_evidence_ids,
+  ])
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({
+        code: "custom",
+        message: "Evidence IDs must be unique",
+      });
+  const contradictingEvidence = new Set(value.contradicting_evidence_ids);
+  if (value.supporting_evidence_ids.some((id) => contradictingEvidence.has(id)))
+    context.addIssue({
+      code: "custom",
+      message: "Evidence cannot simultaneously support and contradict",
+    });
+  const relationships = value.relationships.map(
+    (relationship) => `${relationship.type}:${relationship.unknown_id}`,
+  );
+  if (new Set(relationships).size !== relationships.length)
+    context.addIssue({
+      code: "custom",
+      message: "Relationships must be unique",
+      path: ["relationships"],
+    });
+};
+
 export const residualUnknownSchema = residualUnknownObjectSchema.superRefine(
   (value, context) => {
     if (computeRevisionDigest(value) !== value.revision_digest)
@@ -90,66 +154,13 @@ export const residualUnknownSchema = residualUnknownObjectSchema.superRefine(
         message: "Residual unknown revision digest does not match",
         path: ["revision_digest"],
       });
-    if ((value.revision === 1) !== (value.previous_revision_digest === null))
-      context.addIssue({
-        code: "custom",
-        message: "Only the first revision has no predecessor",
-        path: ["previous_revision_digest"],
-      });
-    if ((value.status === "resolved") !== (value.resolution !== null))
-      context.addIssue({
-        code: "custom",
-        message: "Only resolved unknowns carry a resolution",
-        path: ["resolution"],
-      });
-    if (
-      value.status === "contradicted" &&
-      value.contradicting_evidence_ids.length === 0
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Contradicted status requires contradicting evidence",
-        path: ["contradicting_evidence_ids"],
-      });
-    if (
-      value.relationships.some(
-        (relationship) => relationship.unknown_id === value.unknown_id,
-      )
-    )
-      context.addIssue({
-        code: "custom",
-        message: "An unknown cannot relate to itself",
-        path: ["relationships"],
-      });
-    for (const ids of [
-      value.supporting_evidence_ids,
-      value.contradicting_evidence_ids,
-      value.mutation_evidence_ids,
-    ])
-      if (new Set(ids).size !== ids.length)
-        context.addIssue({
-          code: "custom",
-          message: "Evidence IDs must be unique",
-        });
-    const contradictingEvidence = new Set(value.contradicting_evidence_ids);
-    if (
-      value.supporting_evidence_ids.some((id) => contradictingEvidence.has(id))
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Evidence cannot simultaneously support and contradict",
-      });
-    const relationships = value.relationships.map(
-      (relationship) => `${relationship.type}:${relationship.unknown_id}`,
-    );
-    if (new Set(relationships).size !== relationships.length)
-      context.addIssue({
-        code: "custom",
-        message: "Relationships must be unique",
-        path: ["relationships"],
-      });
+    refineRevision(value, context);
   },
 );
+
+const generatedRevisionSchema = residualUnknownObjectSchema
+  .omit({ revision_digest: true })
+  .superRefine(refineRevision);
 
 export type ResidualUnknown = z.infer<typeof residualUnknownSchema>;
 export type UnknownStatus = ResidualUnknown["status"];
@@ -200,9 +211,10 @@ export const createResidualUnknown = (
   mutationEvidenceId: string,
   scopeDigest: string | null,
 ): ResidualUnknown => {
-  const question = input.question.replace(/\s+/gu, " ");
+  const question = input.question.replace(/\s+/gu, " ").trim();
+  const domain = input.domain.trim();
   const identity = canonicalJson({
-    domain: input.domain,
+    domain,
     question,
     scope_digest: scopeDigest,
   });
@@ -214,15 +226,12 @@ export const createResidualUnknown = (
     question,
     status:
       input.contradicting_evidence_ids.length > 0 ? "contradicted" : "open",
-    domain: input.domain,
+    domain,
     ...projectRevisionDetails(input),
     resolution: null,
     mutation_evidence_ids: [mutationEvidenceId],
   } satisfies Omit<ResidualUnknown, "revision_digest">;
-  return residualUnknownSchema.parse({
-    ...revision,
-    revision_digest: computeRevisionDigest(revision),
-  });
+  return createRevision(revision);
 };
 
 /** Apply a complete, revision-guarded replacement while preserving identity. */
@@ -246,10 +255,13 @@ export const updateResidualUnknown = (
       mutationEvidenceId,
     ]),
   } satisfies Omit<ResidualUnknown, "revision_digest">;
-  return residualUnknownSchema.parse({
-    ...revision,
-    revision_digest: computeRevisionDigest(revision),
-  });
+  return createRevision(revision);
+};
+
+/** Validate and normalize owned revision fields before computing their digest. */
+const createRevision = (value: UnknownRevision): ResidualUnknown => {
+  const revision = generatedRevisionSchema.parse(value);
+  return { ...revision, revision_digest: computeRevisionDigest(revision) };
 };
 
 type RevisionDetailsInput = Pick<

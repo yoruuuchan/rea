@@ -52,6 +52,8 @@ const sourceMapMappingSchema = z.object({
 const sourceMapContextShape = {
   script_key: z.string(),
   declared_url: z.string(),
+  // Older saved observations omit this field; current fetches emit string/null.
+  effective_url: z.string().nullable().optional(),
 };
 const parsedSourceMapShape = {
   artifact: webTextArtifactSchema,

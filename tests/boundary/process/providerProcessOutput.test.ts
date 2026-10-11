@@ -29,6 +29,12 @@ it("bounds capture before diagnostic callbacks while draining both output stream
     expect(
       diagnostics.some((event) => event.type === "output" && event.truncated),
     ).toBe(true);
+    const snapshot = supervisor.snapshot();
+    expect(snapshot.stdout.observedBytes).toBe(70_000);
+    expect(snapshot.stderr.observedBytes).toBe(70_000);
+    expect(snapshot.stdout.bytes + snapshot.stderr.bytes).toBeLessThanOrEqual(
+      1024,
+    );
     for (const stream of ["stdout", "stderr"])
       expect(
         diagnostics

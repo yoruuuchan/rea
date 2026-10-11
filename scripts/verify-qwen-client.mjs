@@ -45,6 +45,7 @@ await Promise.all([
 ]);
 const baseEnvironment = {
   PATH: process.env.PATH ?? "",
+  HOME: account,
   USERPROFILE: account,
   QWEN_HOME: profile,
   QWEN_RUNTIME_DIR: runtime,
@@ -71,9 +72,6 @@ const original = JSON.stringify(
     },
     telemetry: { enabled: false },
     model: { name: "rea-client-fixture" },
-    // Qwen uses os.homedir(), while REA's isolated CLI account uses USERPROFILE.
-    // This caller-owned setting lets the real client load the REA-installed bundle.
-    skills: { directories: [sharedSkills] },
     mcpServers: { other: { command: "unrelated-server", disabled: true } },
   },
   null,
@@ -112,7 +110,7 @@ const configured = JSON.parse(
   await readFile(join(profile, "settings.json"), "utf8"),
 );
 assert.deepEqual(configured.model, { name: "rea-client-fixture" });
-assert.deepEqual(configured.skills, { directories: [sharedSkills] });
+assert.equal(configured.skills, undefined);
 assert.deepEqual(configured.mcpServers.other, {
   command: "unrelated-server",
   disabled: true,
@@ -384,7 +382,7 @@ try {
     modelFixture:
       "loopback deterministic OpenAI-compatible endpoint; no live model-provider claim",
     skillDiscovery:
-      "caller-configured isolated shared directory; default OS home discovery unverified",
+      "native HOME shared personal directory; no explicit skill setting",
     catalogSize: TOOL_CONTRACTS.length,
     requests: fixture.requests,
     probes: fixture.probes,

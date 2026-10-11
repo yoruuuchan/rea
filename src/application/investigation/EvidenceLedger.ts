@@ -417,8 +417,9 @@ export class EvidenceLedger {
     unknowns: ReadonlyMap<string, ResidualUnknown>,
   ): Result<void, EvidenceIntegrityError | UnknownRegistryError> {
     try {
-      parseEvidenceBundle(
-        createEvidenceBundle([...records.values()], [...unknowns.values()]),
+      createImmutableEvidenceBundle(
+        [...records.values()],
+        [...unknowns.values()],
       );
     } catch (cause: unknown) {
       return err(new UnknownRegistryError("integrity", { cause }));

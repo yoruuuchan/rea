@@ -42,6 +42,14 @@ const writes = {
     "const methods = [...[], () => shared]; methods[0]().x = 2;",
   classMethod:
     "class Box { get() { return shared; } } const box = new Box(); box.get().x = 2;",
+  objectGetter:
+    "const box = { get value() { return shared; } }; box.value.x = 2;",
+  instanceGetter:
+    "class Box { get value() { return shared; } } const box = new Box(); box.value.x = 2;",
+  staticGetter:
+    "class Box { static get value() { return shared; } } Box.value.x = 2;",
+  copiedGetter:
+    "const box = { get value() { return shared; } }; const alias = box.value; alias.x = 2;",
   staticMethod:
     "class Box { static get() { return shared; } } Box.get().x = 2;",
   constructor:
@@ -57,6 +65,24 @@ const source = [
     ([name, body]) =>
       `export ${name === "asyncAwait" ? "async " : ""}function ${name}(){ const shared = {x: 1}; ${body} return shared.x; }`,
   ),
+  "export function plainGetterRead(){ const shared = {x: 1}; const box = {get value() { return shared; }}; box.value; return shared.x; }",
+  "export function objectGetterLastWins(){ const shared = {x: 1}; const box = {get value(){return shared;}, get value(){return {x: 2};}}; box.value.x = 3; return shared.x; }",
+  "export function objectDataReplacesGetter(){ const shared = {x: 1}; const box = {get value(){return shared;}, value: {x: 2}}; box.value.x = 3; return shared.x; }",
+  "export function objectSpreadReplacesGetter(){ const shared = {x: 1}; const box = {get value(){return shared;}, ...{value: {x: 2}}}; box.value.x = 3; return shared.x; }",
+  "export function dynamicObjectGetter(){ const shared = {x: 1}; const key = 'value'; const box = {get value(){return {x: 2};}, get [key](){return shared;}}; box.value.x = 3; return shared.x; }",
+  "export function dynamicClassGetter(){ const shared = {x: 1}; const key = getKey(); class Box { get value(){return shared;} } const box = new Box(); box[key].x = 2; return shared.x; }",
+  "export function dynamicStaticGetter(){ const shared = {x: 1}; const key = getKey(); class Box { static get value(){return shared;} } Box[key].x = 2; return shared.x; }",
+  "export function inheritedGetter(){ const shared = {x: 1}; class Base { get value(){return shared;} } class Derived extends Base {} new Derived().value.x = 2; return shared.x; }",
+  "export function conditionalSuperGetter(){ const shared = {x: 1}; class Fresh { get value(){return {x: 2};} } class Shared { get value(){return shared;} } class Derived extends (flag ? Fresh : Shared) {} new Derived().value.x = 2; return shared.x; }",
+  "export function computedClassGetterOverride(){ const shared = {x: 1}; const key = getKey(); class Box { get value(){return {x: 2};} get [key](){return shared;} } new Box().value.x = 3; return shared.x; }",
+  "export function aliasedClassGetter(){ const shared = {x: 1}; class Box { get value(){return shared;} } const Alias = Box; new Alias().value.x = 2; return shared.x; }",
+  "export function inlineClassGetter(){ const shared = {x: 1}; new (class { get value(){return shared;} })().value.x = 2; return shared.x; }",
+  "export function instanceGetterAssignment(){ const shared = {x: 1}; class Box { get value(){return shared;} } const box = new Box(); try { box.value = {}; } catch {} return shared.x; }",
+  "export function instanceGetterDeletion(){ const shared = {x: 1}; class Box { get value(){return shared;} } const box = new Box(); delete box.value; return shared.x; }",
+  "export function staticGetterAssignment(){ const shared = {x: 1}; class Box { static get value(){return shared;} } try { Box.value = {}; } catch {} return shared.x; }",
+  "export function staticGetterDeletion(){ const shared = {x: 1}; class Box { static get value(){return shared;} } delete Box.value; return shared.x; }",
+  "export function freshGetterRead(){ const box = {get value(){return {x: 1};}}; const first = box.value; first.x = 2; return box.value.x; }",
+  "export function savedFreshGetter(){ const box = {get value(){return {x: 1};}}; const saved = box.value; saved.x = 2; return saved.x; }",
   "export function directSibling(){ const shared = {x: 1}; const parent = {shared, keep: 7}; const get = () => parent.shared; get().x = 2; return {x: shared.x, keep: parent.keep}; }",
   "export function primitive(){ const n = 1; const get = () => n; const t = get(); return n; }",
   "export function copy(){ const shared = {x: 1}; const get = () => ({...shared}); get().x = 2; return shared.x; }",
@@ -75,6 +101,44 @@ const assertReturns = (fields: JavaScriptReturnFields): void => {
     expect(field?.state, name).toMatch(/^(unknown|literal)$/);
     if (field?.state === "literal") expect(field.value, name).toBe(2);
   }
+  for (const name of [
+    "objectGetter",
+    "instanceGetter",
+    "staticGetter",
+    "copiedGetter",
+  ])
+    expect(fields(name), name).toContainEqual(
+      expect.objectContaining({ path: "", state: "unknown" }),
+    );
+  for (const name of [
+    "plainGetterRead",
+    "objectGetterLastWins",
+    "objectDataReplacesGetter",
+  ])
+    expect(fields(name)).toContainEqual(
+      expect.objectContaining({ path: "", state: "literal", value: 1 }),
+    );
+  for (const name of [
+    "instanceGetterAssignment",
+    "instanceGetterDeletion",
+    "staticGetterAssignment",
+    "staticGetterDeletion",
+  ])
+    expect(fields(name), name).toContainEqual(
+      expect.objectContaining({ path: "", state: "literal", value: 1 }),
+    );
+  for (const name of [
+    "inheritedGetter",
+    "aliasedClassGetter",
+    "inlineClassGetter",
+  ])
+    expect(fields(name)).toContainEqual(
+      expect.objectContaining({ path: "", state: "unknown" }),
+    );
+  for (const name of ["freshGetterRead", "savedFreshGetter"])
+    expect(fields(name)).toContainEqual(
+      expect.objectContaining({ path: "", state: "unknown" }),
+    );
   const changed = fields("directSibling").find(({ path }) => path === "/x");
   expect(changed?.state).toMatch(/^(unknown|literal)$/);
   if (changed?.state === "literal") expect(changed.value).toBe(2);
@@ -113,5 +177,41 @@ const assertReturns = (fields: JavaScriptReturnFields): void => {
 cliTest(
   "preserves mutation uncertainty for objects returned by local calls",
   ({ cli }) => verifyJavaScriptReturnShapes(cli, source, assertReturns),
+  120_000,
+);
+
+cliTest(
+  "analyzes wide receiver returns without losing escaped reference facts",
+  ({ cli }) => {
+    const width = 160_000;
+    const object = Array.from(
+      { length: width },
+      (_, index) => `p${index}:0`,
+    ).join(",");
+    const array = "0,".repeat(width);
+    const wideSource = [
+      ["wideObject", `{${object},last:shared}`],
+      ["wideArray", `[${array}shared]`],
+    ]
+      .map(
+        ([name, value]) =>
+          `export function ${name}(){const shared={x:1};const box={wide(){return ${value}},noop(){}};box.noop();return {x:shared.x,keep:7};}`,
+      )
+      .join("\n");
+    return verifyJavaScriptReturnShapes(cli, wideSource, (fields) => {
+      for (const name of ["wideObject", "wideArray"]) {
+        expect(fields(name)).toContainEqual(
+          expect.objectContaining({ path: "/x", state: "unknown" }),
+        );
+        expect(fields(name)).toContainEqual(
+          expect.objectContaining({
+            path: "/keep",
+            state: "literal",
+            value: 7,
+          }),
+        );
+      }
+    });
+  },
   120_000,
 );

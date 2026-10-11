@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 
-import { analysisErrorWithCleanupFailure } from "../application/binary/AnalysisClientCleanup.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 import {
   HopperCancelledError,
@@ -17,7 +17,7 @@ import {
   HopperStartError,
   HopperTimeoutError,
 } from "../domain/hopperErrors.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   hopperStartupFailure,
   type HopperStartupFailureDiagnostic,
@@ -35,6 +35,7 @@ import { silentLogger } from "../logger.js";
 import type { Logger } from "pino";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { ProviderStartupDeadline } from "../process/ProviderDeadline.js";
+import { redactCapturedTransportCredential } from "../process/ProviderDiagnosticRedaction.js";
 import { ProviderRunLineage } from "../process/ProviderRunLineage.js";
 import {
   type ProviderProcessDiagnostic,
@@ -63,6 +64,9 @@ import {
   type HopperBridgeMessage,
   responseResult,
 } from "./protocol.js";
+
+/** Aggregate in-memory retention budget for this provider's launcher output. */
+export const HOPPER_PROCESS_DIAGNOSTIC_BYTES = 8 * 1024 * 1024;
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 const SESSION_ROOT = process.platform === "darwin" ? "/tmp" : tmpdir();
@@ -609,15 +613,27 @@ export class HopperClient {
     const snapshot = this.#resources.processSupervisor?.snapshot();
     const token = this.#token;
     if (snapshot === undefined) return undefined;
-    const redact = (text: string): string =>
-      token === undefined
-        ? text
-        : text.replaceAll(token, "[redacted transport credential]");
     return {
       exit_code: snapshot.exitCode ?? null,
       signal: snapshot.signal ?? null,
-      stdout: { ...snapshot.stdout, text: redact(snapshot.stdout.text) },
-      stderr: { ...snapshot.stderr, text: redact(snapshot.stderr.text) },
+      stdout: {
+        text: redactCapturedTransportCredential(
+          snapshot.stdout,
+          token,
+          "[redacted transport credential]",
+        ),
+        bytes: snapshot.stdout.observedBytes,
+        retained_bytes: snapshot.stdout.bytes,
+      },
+      stderr: {
+        text: redactCapturedTransportCredential(
+          snapshot.stderr,
+          token,
+          "[redacted transport credential]",
+        ),
+        bytes: snapshot.stderr.observedBytes,
+        retained_bytes: snapshot.stderr.bytes,
+      },
       output_closed: outputClosed,
       diagnostic_truncated: snapshot.diagnosticTruncated === true,
     };
@@ -743,6 +759,7 @@ export class HopperClient {
 
   #attachLauncher(launch: BridgeLaunch): void {
     this.#resources.processSupervisor = new ProviderProcessSupervisor(launch, {
+      maxDiagnosticBytes: HOPPER_PROCESS_DIAGNOSTIC_BYTES,
       onDiagnostic: (event) => this.#onLauncherDiagnostic(launch, event),
     });
   }

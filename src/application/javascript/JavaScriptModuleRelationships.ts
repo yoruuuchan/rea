@@ -1,6 +1,9 @@
 import { posix } from "node:path";
 
-import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
+import {
+  compareUnicodeCodePoints,
+  compositeKey,
+} from "../../domain/unicodeCodePointOrder.js";
 import type { ApplicationNode } from "../../domain/javascript/javascriptApplicationGraphSchemas.js";
 import {
   completeApplicationCoverage,
@@ -177,7 +180,7 @@ const addExportRelationship = (
     identity: artifactLocalIdentity(
       file.sha256,
       "module-export",
-      `${file.container_sha256}:${file.path}:${link.exportedName}`,
+      compositeKey([file.container_sha256, file.path, link.exportedName]),
     ),
     observations: [
       {
@@ -376,7 +379,9 @@ const relationshipProperties = (
   resolution_status: target?.status ?? null,
   target_file_kind: target?.file?.kind ?? null,
   target_json_status:
-    target?.file?.kind === "json" ? jsonStatus(target.file) : null,
+    target?.file?.kind === "json" || target?.file?.kind === "package-json"
+      ? jsonStatus(target.file)
+      : null,
 });
 
 const relationshipEvidence = (

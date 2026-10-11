@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { _electron as electron } from "playwright-core";
+import type { _electron as electron } from "playwright-core";
 
 import type {
   ExecutionOptions,
@@ -60,8 +60,9 @@ type ElectronPaths = {
 export class PlaywrightElectronActiveProvider implements ElectronActiveObservationPort {
   constructor(
     private readonly environment: Readonly<Record<string, string | undefined>>,
-    private readonly launch: typeof electron.launch = (options) =>
-      electron.launch(options),
+    // Load Playwright only when a capture launches; MCP startup stays off its module graph.
+    private readonly launch: typeof electron.launch = async (options) =>
+      (await import("playwright-core"))._electron.launch(options),
   ) {}
 
   identity(): ProviderIdentity {
@@ -259,21 +260,30 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
   }
 }
 
-const cleanupElectronProcesses = async (
+/** Clean up an Electron launch. Windows signals a process only after lineage is verified. */
+export const cleanupElectronProcesses = async (
   ownership: OwnedProcessGroup,
   lineage: ProcessLineageObservation | undefined,
+  host: {
+    readonly platform: NodeJS.Platform;
+    readonly terminateTree: typeof cleanupWindowsProcessTree;
+  } = {
+    platform: process.platform,
+    terminateTree: cleanupWindowsProcessTree,
+  },
 ): Promise<ProcessCleanupResult> => {
-  if (process.platform === "win32") {
-    const root = await cleanupWindowsProcessTree(ownership.leaderPid);
-    if (!root.cleaned) return root;
+  if (host.platform === "win32") {
+    // An empty Windows process table is not ownership proof for this PID.
     if (lineage?.status !== "verified")
       return {
         cleaned: false,
         reason:
           "owned Electron lineage was unavailable; helper cleanup was not proven",
       };
+    const root = await host.terminateTree(ownership.leaderPid);
+    if (!root.cleaned) return root;
     for (const descendant of lineage.lineage.descendants) {
-      const result = await cleanupWindowsProcessTree(descendant.pid);
+      const result = await host.terminateTree(descendant.pid);
       if (!result.cleaned) return result;
     }
     return root;

@@ -26,6 +26,9 @@ export function* canonicalJsonDigestSteps(
   const hash = createHash("sha256");
   const ancestors = new Set<object>();
   const stack: DigestFrame[] = [{ kind: "value", value }];
+  const encodedKeys = new Map<string, string>();
+  // Keep reusable key encodings within one existing digest-buffer quantum.
+  let remainingKeyCodeUnits = 8192;
   let buffered = "";
   let flushed = false;
   const emit = (part: string): void => {
@@ -69,22 +72,22 @@ export function* canonicalJsonDigestSteps(
         stack.push(frame);
         continue;
       }
+      let item: JsonValue;
       if (frame.kind === "array") {
         if (frame.index === frame.length) {
           emit("]");
           ancestors.delete(frame.value);
           continue;
         }
-        const item = frame.value[frame.index];
-        if (item === undefined)
+        const element = frame.value[frame.index];
+        if (element === undefined)
           throw new TypeError(
             "Canonical JSON digest requires dense JSON arrays",
           );
         if (frame.index++ > 0) emit(",");
-        stack.push(frame, { kind: "value", value: item });
-        continue;
-      }
-      if (frame.kind === "object") {
+        stack.push(frame);
+        item = element;
+      } else if (frame.kind === "object") {
         if (frame.index === frame.keys.length) {
           emit("}");
           ancestors.delete(frame.value);
@@ -93,25 +96,42 @@ export function* canonicalJsonDigestSteps(
         const key = frame.keys[frame.index++];
         if (key === undefined)
           throw new TypeError("Canonical JSON object changed during hashing");
-        const item = frame.value[key];
-        if (item === undefined) continue;
+        const property = frame.value[key];
+        if (property === undefined) {
+          stack.push(frame);
+          continue;
+        }
         if (frame.written++ > 0) emit(",");
         if (key.length > 8192) {
           emit('"');
           stack.push(
             frame,
-            { kind: "value", value: item },
+            { kind: "value", value: property },
             { kind: "separator" },
             { kind: "string", value: key, index: 0 },
           );
           continue;
         }
-        emit(JSON.stringify(key));
+        let encodedKey = encodedKeys.get(key);
+        if (encodedKey === undefined) {
+          encodedKey = JSON.stringify(key);
+          if (encodedKey.length <= remainingKeyCodeUnits) {
+            encodedKeys.set(key, encodedKey);
+            remainingKeyCodeUnits -= encodedKey.length;
+          }
+        }
+        emit(encodedKey);
         emit(":");
-        stack.push(frame, { kind: "value", value: item });
-        continue;
+        stack.push(frame);
+        item = property;
+      } else {
+        item = frame.value;
       }
-      const item = frame.value;
+      // Resume containers directly; scalar members need no temporary value frame.
+      if (flushed) {
+        flushed = false;
+        yield;
+      }
       if (typeof item === "string" && item.length > 8192) {
         emit('"');
         stack.push({ kind: "string", value: item, index: 0 });
@@ -151,6 +171,7 @@ export function* canonicalJsonDigestSteps(
   } finally {
     stack.length = 0;
     ancestors.clear();
+    encodedKeys.clear();
     buffered = "";
   }
 }

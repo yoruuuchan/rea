@@ -5,7 +5,7 @@ import { buildCaptureResult } from "./ProcessCaptureLifecycle.js";
 import { isInitializedPtyRoot, readLinuxChildren } from "./ProcessSampling.js";
 import { TerminalRenderer } from "./TerminalRenderer.js";
 import { parseProcessScenario } from "../../domain/process/processScenario.js";
-import { type ProcessCapture } from "../../domain/process/processCaptureParsing.js";
+import type { ProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import type { ProcessCaptureTruncationDetails } from "../../domain/process/processCaptureCoverage.js";
 import { emptyProcessCapture as emptyCapture } from "../../domain/process/processCapture.fixture.js";
 

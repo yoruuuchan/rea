@@ -36,8 +36,8 @@ const writeBlockingCompiler = async (directory: string) => {
   const statePath = join(directory, "compile-state.json");
   const releasePath = join(directory, "release-compiler");
   const source = `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
+const fs = process.getBuiltinModule("node:fs");
+const path = process.getBuiltinModule("node:path");
 const statePath = ${JSON.stringify(statePath)};
 const releasePath = ${JSON.stringify(releasePath)};
 const state = fs.existsSync(statePath)
@@ -69,14 +69,14 @@ const writeBlockingIdentityCompiler = async (directory: string) => {
   const executable = join(directory, "fake-identity-xcrun");
   const statePath = join(directory, "identity-helper-state.json");
   const helperSource = `#!/usr/bin/env node
-const fs = require("node:fs");
+const fs = process.getBuiltinModule("node:fs");
 fs.writeFileSync(${JSON.stringify(statePath)}, JSON.stringify({
-  root: __dirname,
+  root: process.getBuiltinModule("node:path").dirname(fs.realpathSync(process.argv[1])),
 }));
 setInterval(() => {}, 1000);
 `;
   const compilerSource = `#!/usr/bin/env node
-const fs = require("node:fs");
+const fs = process.getBuiltinModule("node:fs");
 const outputIndex = process.argv.indexOf("-o");
 const output = process.argv[outputIndex + 1];
 fs.writeFileSync(output, ${JSON.stringify(helperSource)});
@@ -309,14 +309,14 @@ const writeTemporaryObjectCompiler = async (directory: string) => {
   const executable = join(directory, "fake-temporary-xcrun");
   const statePath = join(directory, "temporary-state.json");
   const source = `#!/usr/bin/env node
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { spawn } = require("node:child_process");
+const fs = process.getBuiltinModule("node:fs");
+const os = process.getBuiltinModule("node:os");
+const path = process.getBuiltinModule("node:path");
+const { spawn } = process.getBuiltinModule("node:child_process");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "TemporaryDirectory."));
 const object = path.join(temporary, "ProcessRunTokenReader-1.o");
 const job = spawn(process.execPath, ["-e",
-  "setTimeout(() => { const fs = require('node:fs'); fs.mkdirSync(" + JSON.stringify(temporary) +
+  "setTimeout(() => { const fs = process.getBuiltinModule('node:fs'); fs.mkdirSync(" + JSON.stringify(temporary) +
   ", { recursive: true }); fs.writeFileSync(" + JSON.stringify(object) + ", 'object'); }, 300)"],
   { detached: true, stdio: "ignore" });
 job.unref();
@@ -567,9 +567,9 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it.skipIf(process.platform === "win32")(
-  "preserves cancellation through system-host baseline identity inspection",
-  async () => {
+it.skipIf(process.platform === "win32").each(["baseline", "tokens"] as const)(
+  "preserves cancellation through system-host %s inspection",
+  async (kind) => {
     const directory = await mkdtemp(
       join(tmpdir(), "rea-process-baseline-abort-test-"),
     );
@@ -579,8 +579,23 @@ it.skipIf(process.platform === "win32")(
     });
     const controller = new AbortController();
     let helperRoot: string | undefined;
+    const inspection =
+      kind === "baseline"
+        ? host.captureBaseline?.(controller.signal)
+        : host.runTokens?.(
+            [
+              {
+                pid: process.pid,
+                parentPid: process.ppid,
+                processGroupId: process.pid,
+                state: "S",
+                command: process.execPath,
+              },
+            ],
+            controller.signal,
+          );
     const baseline =
-      host.captureBaseline?.(controller.signal).then(
+      inspection?.then(
         () => ({ state: "fulfilled" as const }),
         (cause: unknown) => ({ state: "rejected" as const, cause }),
       ) ?? Promise.resolve({ state: "missing" as const });

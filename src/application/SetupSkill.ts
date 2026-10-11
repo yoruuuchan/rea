@@ -1,18 +1,29 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, rm } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { dirname, join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
+import { NonRegularFileReadError } from "../filesystem/RegularFile.js";
+import { readRegularFileText } from "./RegularFileRead.js";
 import { clientSkillDirectories } from "./SupportedClients.js";
 
-const SKILL_FILES = [
+export const MANAGED_SKILL_FILES = [
   "SKILL.md",
+  "references/connection-and-recovery.md",
   "references/native-and-artifacts.md",
   "references/javascript-applications.md",
   "references/android-applications.md",
   "references/runtime-observation.md",
   "references/evidence-workflows.md",
 ] as const;
+
+export const isManagedSkillManifest = (content: string): boolean =>
+  content.startsWith(`---\nname: ${PRODUCT_IDENTITY.skillName}\n`) ||
+  content.startsWith(`---\r\nname: ${PRODUCT_IDENTITY.skillName}\r\n`);
+
+export const readSkillFile = (path: string): Promise<string> =>
+  readRegularFileText(path, { symlinks: "reject" });
 
 interface CanonicalSkillFile {
   readonly content: string;
@@ -47,9 +58,38 @@ export const skillDestinations = (
     }),
   );
 
+/** Resolve existing REA-owned skill roots using setup's canonical destinations. */
+export const existingSkillDestinations = async (
+  home: string,
+  environment: Readonly<NodeJS.ProcessEnv> = {},
+  platform: NodeJS.Platform = process.platform,
+): Promise<readonly SkillDestination[]> => {
+  const existing: SkillDestination[] = [];
+  for (const destination of skillDestinations(
+    home,
+    undefined,
+    environment,
+    platform,
+  )) {
+    try {
+      const root = await lstat(destination.path);
+      if (root.isSymbolicLink() || !root.isDirectory()) continue;
+      const manifest = join(destination.path, "SKILL.md");
+      const content = await readSkillFile(manifest);
+      if (isManagedSkillManifest(content)) existing.push(destination);
+    } catch (cause: unknown) {
+      if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
+        continue;
+      if (cause instanceof NonRegularFileReadError) continue;
+      throw cause;
+    }
+  }
+  return existing;
+};
+
 const readOptionalText = async (path: string): Promise<string | undefined> => {
   try {
-    return await readFile(path, "utf8");
+    return await readSkillFile(path);
   } catch (cause: unknown) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
       return undefined;
@@ -66,7 +106,7 @@ const canonicalSkillFiles = async (
   Promise.all(
     skillDestinations(home, clientIds, environment, platform).flatMap(
       ({ path: root }) =>
-        SKILL_FILES.map(async (relativePath) => {
+        MANAGED_SKILL_FILES.map(async (relativePath) => {
           const destination = join(root, relativePath);
           return {
             destination,
@@ -104,6 +144,19 @@ export const canonicalSkillNeedsInstall = async (
 const writeText = (path: string, content: string): Promise<void> =>
   writeFileAtomic(path, content, { encoding: "utf8", mode: 0o600 });
 
+const preserveSkillBackup = async (
+  source: string,
+  destination: string,
+): Promise<void> => {
+  try {
+    await copyFile(source, destination, fsConstants.COPYFILE_EXCL);
+  } catch (cause: unknown) {
+    if (cause instanceof Error && "code" in cause && cause.code === "EEXIST")
+      return;
+    throw cause;
+  }
+};
+
 const restoreSkillFiles = async (
   changed: readonly CanonicalSkillFile[],
 ): Promise<void> => {
@@ -134,12 +187,12 @@ export const installCanonicalSkill = async (
     for (const { destination, original } of changed) {
       await mkdir(dirname(destination), { recursive: true });
       if (original !== undefined)
-        await writeText(`${destination}.rea.backup`, original);
+        await preserveSkillBackup(destination, `${destination}.rea.backup`);
     }
     for (const { destination, content } of changed)
       await writeText(destination, content);
     for (const { destination, content } of changed)
-      if ((await readFile(destination, "utf8")) !== content)
+      if ((await readSkillFile(destination)) !== content)
         throw new Error(`skill readback mismatch: ${destination}`);
     return "installed";
   } catch (cause: unknown) {
@@ -171,7 +224,7 @@ export const readInstalledSkillIdentity = async (
   let content: string | undefined;
   for (const destination of destinations) {
     try {
-      content = await readFile(join(destination.path, "SKILL.md"), "utf8");
+      content = await readSkillFile(join(destination.path, "SKILL.md"));
       break;
     } catch {
       // Another selected copy may provide metadata; canonical validation below

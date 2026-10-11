@@ -27,8 +27,7 @@ export const ingestResponseBodyShape = (
     invalidResponseBodyShape(state, requestId);
     return;
   }
-  const inferred = inferBodyShape(decoded);
-  updateResponseBodyShape(state, requestId, inferred.shape);
+  updateResponseBodyShape(state, requestId, inferJsonShape(decoded));
 };
 
 export const requestBodyShape = (
@@ -40,10 +39,10 @@ export const requestBodyShape = (
   const body = cdpStringValue(request.postData);
   if (!isJsonContentType(recordValue(request.headers)) || body === undefined)
     return { status: "unavailable", request: null, response: null };
-  const inferred = inferBodyShape(body);
+  const shape = inferJsonShape(body);
   return {
-    status: inferred.shape === null ? "unavailable" : "included",
-    request: inferred.shape,
+    status: shape === null ? "unavailable" : "included",
+    request: shape,
     response: null,
   };
 };
@@ -66,10 +65,6 @@ export const updateResponseBodyShape = (
     ...current,
     body_shapes: { status, request, response },
   });
-};
-
-const inferBodyShape = (text: string): { readonly shape: JsonShape | null } => {
-  return { shape: inferJsonShape(text) };
 };
 
 const invalidResponseBodyShape = (

@@ -1,3 +1,11 @@
+import { javascriptApplicationAnalysisResultSchema } from "../domain/javascript/javascriptApplicationAnalysis.js";
+import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "../contracts/javascript/javascriptRuntimeReconciliationExample.js";
+import {
+  createJavaScriptSemanticGraph,
+  createJavaScriptSemanticGraphNode,
+  JavaScriptSemanticEvidenceContextRegistry,
+} from "../domain/javascript/javascriptSemanticGraph.js";
+import { proofEvidence } from "./ReconstructionObligationLedger.fixture.js";
 import { describe, expect, it } from "vitest";
 
 import { createEvidence } from "../domain/evidence.js";
@@ -170,4 +178,116 @@ describe("reconstruction obligation candidates", () => {
       `Process capture ${evidence.evidence_id} has no validated executable artifact identity; packaged-process lifecycle obligation was not bound to an artifact.`,
     );
   });
+});
+
+it("keeps each semantic candidate bound to its own file and authority context", () => {
+  const contexts = new JavaScriptSemanticEvidenceContextRegistry();
+  const base = javascriptApplicationAnalysisResultSchema.parse(
+    JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE.normalized_result,
+  );
+  const sourceRecords = [
+    proofEvidence("first-file"),
+    proofEvidence("second-file"),
+  ];
+  const module = createJavaScriptSemanticGraphNode(
+    {
+      kind: "module",
+      identity: {
+        artifact_sha256: base.root_artifact_sha256,
+        module_path: "app.js",
+        source_range: null,
+        role_key: "module",
+      },
+      function_node_id: null,
+      application_node_ids: [],
+      label: "app.js",
+      properties: {},
+      evidence: artifactEvidence(base.root_artifact_sha256, "app.js"),
+    },
+    contexts,
+  );
+  const requests = sourceRecords.flatMap((source, fileIndex) =>
+    [1, 2].map((line) => {
+      const sha256 = String(fileIndex + 4).repeat(64);
+      const path = `file-${String(fileIndex)}.js`;
+      return createJavaScriptSemanticGraphNode(
+        {
+          kind: "request",
+          identity: {
+            artifact_sha256: sha256,
+            module_path: path,
+            source_range: {
+              start: { line, column: 0 },
+              end: { line, column: 8 },
+            },
+            role_key: `request-${String(line)}`,
+          },
+          function_node_id: null,
+          application_node_ids: [],
+          label: `${path}:${String(line)}`,
+          properties: {},
+          evidence: {
+            ...artifactEvidence(sha256, path, "ast-static-analysis"),
+            evidence_ids: [source.evidence_id],
+          },
+        },
+        contexts,
+      );
+    }),
+  );
+  const { graph_id: _graphId, ...semantic } = base.semantic_graph;
+  const semanticGraph = createJavaScriptSemanticGraph({
+    ...semantic,
+    root_node_ids: [module.node_id],
+    nodes: [module, ...requests],
+    evidence_contexts: contexts.contexts,
+  });
+  const example = JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE;
+  const application = createEvidence(
+    {
+      path: base.input_path,
+      sha256: base.root_artifact_sha256,
+      format: base.format,
+    },
+    example.provider,
+    {
+      predicateType: example.predicate_type,
+      operation: example.operation,
+      parameters: example.parameters,
+      result: jsonValueSchema.parse({ ...base, semantic_graph: semanticGraph }),
+      confidence: "derived",
+      authority: "shipped-artifact",
+      evidenceLinks: sourceRecords.map(({ evidence_id }) => evidence_id),
+    },
+  );
+  const generated = deriveReconstructionObligationCandidates(
+    createEvidenceBundle([...sourceRecords, application]),
+    [],
+  );
+  expect(generated.limitations).toEqual([]);
+  expect(generated.candidates).toHaveLength(requests.length);
+  for (const [index, node] of requests.entries()) {
+    const source = sourceRecords[Math.floor(index / 2)];
+    expect(
+      generated.candidates.find(
+        ({ target }) => target.semantic_node_id === node.node_id,
+      ),
+    ).toMatchObject({
+      title: node.label,
+      family: "request",
+      source_state: "candidate",
+      target: {
+        artifact_sha256: node.identity.artifact_sha256,
+        semantic_node_id: node.node_id,
+      },
+      authority_references: [
+        {
+          evidence_id: source?.evidence_id,
+          authority: "controlled-replay",
+          state: "candidate",
+          location: `${semanticGraph.graph_id}/node/${node.node_id}`,
+        },
+      ],
+    });
+  }
 });

@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascript/javascriptApplicationAnalysis.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 
 const graphIdentities = async (source: string) => {
   const inputPath = await createTestTempDirectory("rea-js-template-literal-");
@@ -31,7 +31,16 @@ const graphIdentities = async (source: string) => {
         ...(identity.strategy === "artifact-local-key"
           ? {
               namespace: identity.namespace,
-              key: identity.key.replace(/^[0-9a-f]{64}:/u, ""),
+              // Module-export identity is a JSON tuple whose first entry
+              // binds the whole container; only that digest changes here.
+              key:
+                identity.namespace === "module-export"
+                  ? JSON.stringify(
+                      (JSON.parse(identity.key) as unknown[]).slice(1),
+                    )
+                  : identity.namespace === "source-module"
+                    ? identity.key.replace(/^[0-9a-f]{64}:/u, "")
+                    : identity.key,
             }
           : {}),
       }))

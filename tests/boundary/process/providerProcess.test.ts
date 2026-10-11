@@ -202,9 +202,11 @@ describe("provider process output and cleanup primitives", () => {
     expect(snapshot).toMatchObject({
       stdout: {
         bytes: outputBytes,
+        observedBytes: outputBytes,
       },
       stderr: {
         bytes: outputBytes,
+        observedBytes: outputBytes,
       },
       exitCode: 23,
       signal: null,

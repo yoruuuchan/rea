@@ -60,12 +60,16 @@ describe("Linux Hopper host classification", () => {
     ['ID=nobara\nVERSION_ID="44"\nID_LIKE="rhel centos fedora"\n', "rpm"],
     ["ID=arch\n", "arch"],
     ["ID=cachyos\nID_LIKE=arch\n", "arch"],
-  ] as const)("accepts an official Hopper distribution", (document, family) => {
-    expect(parseLinuxDistribution(document)).toMatchObject({
-      packageFamily: family,
-      supported: true,
-    });
-  });
+    ['ID=omarchy\nID_LIKE=arch\nVERSION_ID="4.0.4"\n', "arch"],
+  ] as const)(
+    "accepts an explicitly supported distribution",
+    (document, family) => {
+      expect(parseLinuxDistribution(document)).toMatchObject({
+        packageFamily: family,
+        supported: true,
+      });
+    },
+  );
 
   it("detects unresolved or loader-reported shared libraries", () => {
     expect(
@@ -93,6 +97,8 @@ describe("Linux Hopper host classification", () => {
     'ID=debian\nVERSION_ID="13"\nID_LIKE=debian\n',
     "ID=manjaro\nID_LIKE=arch\n",
     "ID=garuda\nID_LIKE=arch\n",
+    "ID=omarchy\n",
+    "ID=omarchy\nID_LIKE=debian\n",
   ])("rejects unsupported vendor/version combinations", (document) => {
     expect(parseLinuxDistribution(document).supported).toBe(false);
   });

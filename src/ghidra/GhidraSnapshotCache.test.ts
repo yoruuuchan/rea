@@ -104,8 +104,13 @@ const fixture = (version = "12.1.4") => {
               persists_after_close: false,
             },
           });
+        const value =
+          operation === "procedure_pseudo_code" ? dossier.pseudocode : dossier;
         return ok(
-          operation === "procedure_pseudo_code" ? dossier.pseudocode : dossier,
+          operation === "procedure_pseudo_code" ||
+            operation === "analyze_function"
+            ? { value, limitations: [] }
+            : value,
         );
       },
       close: async () => ok(null),

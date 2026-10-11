@@ -38,6 +38,7 @@ import {
   verifyJumpTableDenseSwitch,
   verifyNativeTypeLayout,
   verifyRelativeSwitch,
+  verifyRelativeSignedSwitch,
   verifyNativeValueTrace,
 } from "./verify-real-ghidra-function.mjs";
 const exec = promisify(execFile);
@@ -169,6 +170,36 @@ try {
         crossTargets.push([
           targetPath,
           `relative-${entrySize}`,
+          { format, architecture: "arm64" },
+        ]);
+      }
+    }
+    const signedRelativeSource = fileURLToPath(
+      new URL(
+        "../tests/conformance/ghidra/relative-switch-signed.S",
+        import.meta.url,
+      ),
+    );
+    for (const selectorBias of [0, 2, 10]) {
+      for (const format of [
+        "elf",
+        ...(expectedNativeTarget.architecture === "arm64" ? ["mach-o"] : []),
+      ]) {
+        const targetPath = join(
+          fixtureRoot,
+          `relative-signed-${selectorBias}-${format}.o`,
+        );
+        await exec(clang, [
+          ...(format === "elf" ? ["--target=aarch64-linux-gnu"] : []),
+          `-DREA_SELECTOR_BIAS=${selectorBias}`,
+          "-c",
+          signedRelativeSource,
+          "-o",
+          targetPath,
+        ]);
+        crossTargets.push([
+          targetPath,
+          `relative-signed-${selectorBias}`,
           { format, architecture: "arm64" },
         ]);
       }
@@ -522,25 +553,30 @@ async function verifyTarget(targetPath, variant, expectedTarget = null) {
             client,
           })
         : null;
-    const probes = variant.startsWith("relative-")
-      ? await verifyRelativeSwitch(
+    const probes = variant.startsWith("relative-signed-")
+      ? await verifyRelativeSignedSwitch(
           client,
-          procedures,
-          Number(variant.slice(-1)),
+          Number(variant.split("-").at(-1)),
         )
-      : variant === "type-layout"
-        ? await verifyNativeTypeLayout(client, names)
-        : variant === "jump-table"
-          ? await verifyJumpTableDenseSwitch(client, procedures)
-          : variant === "custom" || variant === "aarch64-jump-table"
-            ? null
-            : await verifyInventoryOperations({
-                client,
-                variant,
-                procedures,
-                names,
-                strings,
-              });
+      : variant.startsWith("relative-")
+        ? await verifyRelativeSwitch(
+            client,
+            procedures,
+            Number(variant.slice(-1)),
+          )
+        : variant === "type-layout"
+          ? await verifyNativeTypeLayout(client, names)
+          : variant === "jump-table"
+            ? await verifyJumpTableDenseSwitch(client, procedures)
+            : variant === "custom" || variant === "aarch64-jump-table"
+              ? null
+              : await verifyInventoryOperations({
+                  client,
+                  variant,
+                  procedures,
+                  names,
+                  strings,
+                });
     const nativeValues =
       variant === "debug"
         ? await verifyNativeValueTrace(client, procedures, parsedTarget.value)

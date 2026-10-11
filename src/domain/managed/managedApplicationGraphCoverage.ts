@@ -4,6 +4,7 @@ import type {
   ManagedMemberInspection,
   ManagedNativeBoundaryInspection,
 } from "./managedArtifact.js";
+import { managedTokenScopesMatch } from "./managedInspectionEvidence.js";
 
 type ManagedCoverageState = "complete" | "partial" | "unavailable";
 
@@ -17,6 +18,7 @@ export interface ManagedGraphCoverageSources {
 /** Whether any supplied source has incomplete coverage. */
 export interface ManagedGraphProjectionOmissions {
   readonly partialInput: boolean;
+  readonly unscopedTokenRelationships: boolean;
 }
 
 const completeCoverage = (): ApplicationGraphEvidence["coverage"] => ({
@@ -43,6 +45,17 @@ export const managedSourceCoverage = (
 export const assessManagedGraphOmissions = (
   sources: ManagedGraphCoverageSources,
 ): ManagedGraphProjectionOmissions => ({
+  unscopedTokenRelationships:
+    sources.members !== null &&
+    sources.boundaries !== null &&
+    (sources.boundaries.pinvoke_imports.some(
+      ({ member_token }) => member_token !== null,
+    ) ||
+      sources.boundaries.native_implementations.length > 0) &&
+    !managedTokenScopesMatch(
+      sources.members.identity_scope.requires_mvid,
+      sources.boundaries.identity_scope.requires_mvid,
+    ),
   partialInput: [
     sources.members?.coverage.state,
     sources.boundaries?.coverage.state,
@@ -54,7 +67,7 @@ export const assessManagedGraphOmissions = (
 export const managedGraphEvidenceCoverage = (
   omissions: ManagedGraphProjectionOmissions,
 ): ApplicationGraphEvidence["coverage"] =>
-  omissions.partialInput
+  omissions.partialInput || omissions.unscopedTokenRelationships
     ? {
         status: "partial",
         truncated: false,
@@ -67,7 +80,8 @@ export const managedGraphEvidenceCoverage = (
 export const managedGraphResultCoverage = (
   omissions: ManagedGraphProjectionOmissions,
 ) => ({
-  status: omissions.partialInput
-    ? ("partial" as const)
-    : ("complete-within-inputs" as const),
+  status:
+    omissions.partialInput || omissions.unscopedTokenRelationships
+      ? ("partial" as const)
+      : ("complete-within-inputs" as const),
 });

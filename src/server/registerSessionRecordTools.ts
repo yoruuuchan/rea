@@ -2,12 +2,14 @@ import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import {
-  readEvidenceBundle,
+  readImmutableEvidenceBundle,
   writeEvidenceBundle,
 } from "../application/EvidenceBundleFiles.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import type { EvidenceBundle } from "../domain/evidenceBundle.js";
-import { ok } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { inspectEvidenceBundle } from "../application/investigation/InspectEvidenceBundle.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 
 interface EvidenceToolRegistration {
@@ -72,9 +74,9 @@ const registerSnapshotEvidenceTool = ({
   server.registerTool(
     snapshotContract.name,
     toolRegistrationOptions(snapshotContract),
-    () =>
+    (input) =>
       server.delivery.toCallToolResult(
-        ok(bundleForSerialization(session)),
+        inspectEvidenceBundle(bundleForSerialization(session), input),
         snapshotContract,
       ),
   );
@@ -88,9 +90,10 @@ const registerImportEvidenceTool = ({
   server.registerTool(
     importContract.name,
     toolRegistrationOptions(importContract),
-    async (input) => {
+    async (input, context) => {
       const path = input.path;
-      const loaded = await readEvidenceBundle(path);
+      const signal = context.mcpReq.signal;
+      const loaded = await readImmutableEvidenceBundle(path, signal);
       if (!loaded.ok)
         return server.delivery.toCallToolResult(loaded, importContract);
       const retainedUnknownRevisions = new Set(
@@ -98,6 +101,11 @@ const registerImportEvidenceTool = ({
           unknownRevisionKey(unknown),
         ),
       );
+      if (signal.aborted)
+        return server.delivery.toCallToolResult(
+          err(new AnalysisCancelledError("import_evidence_bundle")),
+          importContract,
+        );
       const imported = session.importEvidenceBundle(loaded.value);
       return imported.ok
         ? server.delivery.toCallToolResult(

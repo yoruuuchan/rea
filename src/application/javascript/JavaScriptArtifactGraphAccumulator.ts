@@ -6,36 +6,62 @@ import type {
   ApplicationEdge,
   ApplicationNode,
 } from "../../domain/javascript/javascriptApplicationGraphSchemas.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
-/** Deduplicate graph entities while retaining distinct evidence observations. */
+/**
+ * Own live construction nodes and deduplicate their evidence observations.
+ * Consumers retain references but must not mutate the owned observations;
+ * nodes() finalizes their canonical order before graph validation/output.
+ */
 export class JavaScriptArtifactGraphAccumulator {
-  readonly #nodes = new Map<string, ApplicationNode>();
+  readonly #nodes = new Map<string, AccumulatedNode>();
   readonly #edges = new Map<string, ApplicationEdge>();
 
-  /** Create or merge one canonical node. */
+  /** Merge observations into a stable live node; order is finalized by nodes(). */
   addNode<Input extends DisplayableNodeInput>(input: Input): ApplicationNode {
     const created = createJavaScriptApplicationNode(displayableNode(input));
     const existing = this.#nodes.get(created.node_id);
     if (existing === undefined) {
-      this.#nodes.set(created.node_id, created);
+      this.#nodes.set(created.node_id, {
+        node: created,
+        observationIndices: new Map(
+          created.observations.map((observation, index) => [
+            observation.observation_id,
+            index,
+          ]),
+        ),
+        dirty: false,
+      });
       return created;
     }
-    const bySemanticId = new Map(
-      [...existing.observations, ...created.observations].map((observation) => [
-        observation.observation_id,
-        observationInput(observation),
-      ]),
-    );
-    const observations = [...bySemanticId.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([, observation]) => observation);
-    const merged = createJavaScriptApplicationNode({
-      kind: existing.kind,
-      identity: existing.identity,
-      observations,
-    });
-    this.#nodes.set(merged.node_id, merged);
-    return merged;
+    const observations = existing.node.observations;
+    // The first factory input can contain duplicate IDs. As before, a later
+    // merge retains only their last occurrences without replacing the array.
+    if (existing.observationIndices.size !== observations.length) {
+      let retained = 0;
+      for (const [index, observation] of observations.entries()) {
+        if (
+          existing.observationIndices.get(observation.observation_id) !== index
+        )
+          continue;
+        observations[retained] = observation;
+        existing.observationIndices.set(observation.observation_id, retained);
+        retained += 1;
+      }
+      observations.length = retained;
+    }
+    for (const observation of created.observations) {
+      const index = existing.observationIndices.get(observation.observation_id);
+      if (index === undefined) {
+        existing.observationIndices.set(
+          observation.observation_id,
+          observations.length,
+        );
+        observations.push(observation);
+        existing.dirty = true;
+      } else observations[index] = observation;
+    }
+    return existing.node;
   }
 
   /** Create or replace one canonical edge by semantic identifier. */
@@ -45,9 +71,20 @@ export class JavaScriptArtifactGraphAccumulator {
     return edge;
   }
 
-  /** Return all accumulated canonical nodes. */
+  /** Finalize observation order in place and return all canonical nodes. */
   nodes(): readonly ApplicationNode[] {
-    return [...this.#nodes.values()];
+    return [...this.#nodes.values()].map((entry) => {
+      if (entry.dirty) {
+        entry.node.observations.sort((left, right) =>
+          compareUnicodeCodePoints(left.observation_id, right.observation_id),
+        );
+        entry.observationIndices.clear();
+        for (const [index, observation] of entry.node.observations.entries())
+          entry.observationIndices.set(observation.observation_id, index);
+        entry.dirty = false;
+      }
+      return entry.node;
+    });
   }
 
   /** Return all accumulated canonical edges. */
@@ -56,16 +93,11 @@ export class JavaScriptArtifactGraphAccumulator {
   }
 }
 
-const observationInput = (
-  observation: ApplicationNode["observations"][number],
-) => {
-  const {
-    observation_id: _observationId,
-    identifier_strategy: _strategy,
-    ...input
-  } = observation;
-  return input;
-};
+interface AccumulatedNode {
+  readonly node: ApplicationNode;
+  readonly observationIndices: Map<string, number>;
+  dirty: boolean;
+}
 
 /** Node fields whose display form is normalized before validation. */
 interface DisplayableNodeInput {

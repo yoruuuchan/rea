@@ -1,6 +1,7 @@
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import type { Client } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
+import { Ajv2020 } from "ajv/dist/2020.js";
 
 import type { BinarySession } from "../../../src/application/binary/BinarySession.js";
 import {
@@ -13,6 +14,7 @@ import {
   createApplicationMcpHarness,
   type ApplicationMcpHarness,
 } from "../../fixtures/applicationMcpHarness.js";
+import { createHistoricalSourceGraph } from "../../../src/domain/referenceSourceGraph.js";
 
 async function runInlineWorkflowScenarios(
   harness: ApplicationMcpHarness,
@@ -87,6 +89,57 @@ async function runInlineWorkflowScenarios(
           candidates: [],
         },
       ],
+    },
+  });
+
+  const referenceWithExclusion = createHistoricalSourceGraph({
+    ...SOURCE_TO_BUNDLE_COMPARISON_EXAMPLE.reference,
+    root_sha256: undefined,
+    inventory_state: "partial",
+    exclusions: [
+      {
+        path: "vendor/removed.ts",
+        reason: "project-ignored",
+        pattern: "vendor/",
+      },
+    ],
+  });
+  const argumentsWithExclusion = {
+    ...SOURCE_TO_BUNDLE_COMPARISON_EXAMPLE,
+    reference: referenceWithExclusion,
+  };
+  const advertised = (await harness.client.listTools()).tools.find(
+    ({ name }) => name === "compare_source_to_bundle",
+  );
+  if (advertised === undefined) throw new Error("Comparison tool is missing");
+  const ajv = new Ajv2020({ strict: false, validateFormats: false });
+  expect(ajv.validateSchema(advertised.inputSchema)).toBe(true);
+  const validate = ajv.compile(advertised.inputSchema);
+  expect(validate(argumentsWithExclusion)).toBe(true);
+  const missingPattern = {
+    ...argumentsWithExclusion,
+    reference: {
+      ...referenceWithExclusion,
+      exclusions: [{ path: "vendor/removed.ts", reason: "project-ignored" }],
+    },
+  };
+  expect(validate(missingPattern)).toBe(false);
+  const rejectedExclusion = await harness.client.callTool({
+    name: "compare_source_to_bundle",
+    arguments: missingPattern,
+  });
+  expect(rejectedExclusion.isError).toBe(true);
+  const sourceComparedWithExclusion = await harness.client.callTool({
+    name: "compare_source_to_bundle",
+    arguments: argumentsWithExclusion,
+  });
+  expect(sourceComparedWithExclusion.isError).not.toBe(true);
+  expect(sourceComparedWithExclusion.structuredContent).toMatchObject({
+    normalized_result: {
+      reference: {
+        root_sha256: referenceWithExclusion.root_sha256,
+        inventory_state: "partial",
+      },
     },
   });
   expect(harness.session.exportEvidenceBundle().records.length).toBeGreaterThan(

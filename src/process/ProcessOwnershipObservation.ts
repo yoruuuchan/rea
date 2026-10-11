@@ -5,6 +5,7 @@ import { launcherIdentityFailure } from "./ProcessOwnershipIdentity.js";
 import { descendantsOf, liveProcesses } from "./ProcessOwnershipProcessTree.js";
 import { execFileOutput } from "./ExecFileOutput.js";
 import { createDarwinProcessRunTokenReader } from "./DarwinProcessRunTokenReader.js";
+import { readProcessRunTokens } from "./ProcessRunTokenObservations.js";
 import type {
   OwnedProcessGroup,
   ProcessGroupObservation,
@@ -15,49 +16,78 @@ import type {
   ProcessTableEntry,
 } from "./ProcessOwnership.js";
 
-/** Observe one group without signaling it, failing closed on identity doubt. */
-export const observeOwnedProcessGroup = async (
-  ownership: OwnedProcessGroup,
+/** Observe multiple groups from one process snapshot and one token batch. */
+export const observeOwnedProcessGroups = async (
+  runId: string,
+  processGroupIds: readonly number[],
   host: ProcessOwnershipHost = systemProcessOwnershipHost,
   signal?: AbortSignal,
-): Promise<ProcessGroupObservation> => {
+): Promise<ReadonlyMap<number, ProcessGroupObservation>> => {
   signal?.throwIfAborted();
-  let members: readonly ProcessTableEntry[];
+  const groupIds = [...new Set(processGroupIds)];
+  if (groupIds.length === 0) return new Map();
+  let processes: readonly ProcessTableEntry[];
   try {
-    members = (await host.listProcesses(signal)).filter(
-      ({ processGroupId }) => processGroupId === ownership.processGroupId,
-    );
+    processes = liveProcesses(await host.listProcesses(signal));
   } catch (cause: unknown) {
     signal?.throwIfAborted();
-    return {
-      state: "unverifiable",
+    const failure = {
+      state: "unverifiable" as const,
       reason: `process group could not be inspected: ${errorMessage(cause)}`,
     };
+    return new Map(groupIds.map((groupId) => [groupId, failure]));
   }
   signal?.throwIfAborted();
-  const liveMembers = liveProcesses(members);
-  if (liveMembers.length === 0) return { state: "empty" };
-  for (const member of liveMembers) {
-    signal?.throwIfAborted();
-    try {
-      const runId = (await host.environment(member.pid)).REA_PROCESS_RUN_ID;
-      signal?.throwIfAborted();
-      if (runId !== ownership.runId)
-        return {
+  const membersByGroup = new Map(
+    groupIds.map((groupId) => [groupId, [] as ProcessTableEntry[]]),
+  );
+  for (const process of processes)
+    membersByGroup.get(process.processGroupId)?.push(process);
+  const observations = new Map<number, ProcessGroupObservation>(
+    groupIds.map((groupId) => [
+      groupId,
+      (membersByGroup.get(groupId)?.length ?? 0) > 0
+        ? { state: "alive" }
+        : { state: "empty" },
+    ]),
+  );
+  const liveMembers = groupIds.flatMap(
+    (groupId) => membersByGroup.get(groupId) ?? [],
+  );
+  const pendingGroups = new Set(
+    groupIds.filter(
+      (groupId) => (membersByGroup.get(groupId)?.length ?? 0) > 0,
+    ),
+  );
+  for await (const { process: member, observation } of readProcessRunTokens(
+    host,
+    liveMembers,
+    signal,
+  )) {
+    if (!pendingGroups.has(member.processGroupId)) continue;
+    if (observation.state === "readable") {
+      if (observation.runId !== runId) {
+        observations.set(member.processGroupId, {
           state: "unverifiable",
           reason: "process ownership did not match",
-        };
-    } catch (cause: unknown) {
+        });
+        pendingGroups.delete(member.processGroupId);
+      }
+    } else {
+      const gone = await processIsGone(host, member.pid);
       signal?.throwIfAborted();
-      if (!(await processIsGone(host, member.pid))) {
-        return {
+      if (!gone) {
+        observations.set(member.processGroupId, {
           state: "unverifiable",
-          reason: `process ownership could not be revalidated for PID ${member.pid}: ${errorMessage(cause)}`,
-        };
+          reason: `process ownership could not be revalidated for PID ${member.pid}: ${observation.reason}`,
+        });
+        pendingGroups.delete(member.processGroupId);
       }
     }
+    if (pendingGroups.size === 0) break;
   }
-  return { state: "alive" };
+  signal?.throwIfAborted();
+  return observations;
 };
 
 /**
@@ -86,20 +116,20 @@ export const observeOwnedProcessLineage = async (
   const identityFailure = launcherIdentityFailure(launcher, ownership);
   if (identityFailure !== null)
     return unavailableLineage(ownership, identityFailure);
-  const descendants = descendantsOf(launcher.pid, processes);
+  const descendants = descendantsOf([launcher.pid], processes);
   const verifiedDescendants: ProcessTableEntry[] = [];
-  for (const member of [launcher, ...descendants]) {
-    try {
-      if (
-        (await host.environment(member.pid)).REA_PROCESS_RUN_ID !==
-        ownership.runId
-      )
+  for await (const { process: member, observation } of readProcessRunTokens(
+    host,
+    [launcher, ...descendants],
+  )) {
+    if (observation.state === "readable") {
+      if (observation.runId !== ownership.runId)
         return unavailableLineage(
           ownership,
           "process lineage contains an unowned or PID-reused process",
         );
       if (member.pid !== launcher.pid) verifiedDescendants.push(member);
-    } catch (cause: unknown) {
+    } else {
       if (await processIsGone(host, member.pid)) {
         if (member.pid === launcher.pid)
           return unavailableLineage(
@@ -110,7 +140,7 @@ export const observeOwnedProcessLineage = async (
       }
       return unavailableLineage(
         ownership,
-        `process ownership could not be revalidated for PID ${member.pid}: ${errorMessage(cause)}`,
+        `process ownership could not be revalidated for PID ${member.pid}: ${observation.reason}`,
       );
     }
   }
@@ -330,18 +360,21 @@ export const createSystemProcessOwnershipHost = (
       }
     },
     listProcesses,
-    async environment(pid) {
+    async environment(pid, signal) {
+      signal?.throwIfAborted();
       if (platform === "linux")
         return parseProcessEnvironment(
-          await readFile(`/proc/${pid}/environ`, "utf8"),
+          await readFile(`/proc/${pid}/environ`, { encoding: "utf8", signal }),
         );
       if (platform === "darwin") {
-        const process = (await listProcesses()).find(
+        const process = (await listProcesses(signal)).find(
           (entry) => entry.pid === pid,
         );
         if (process === undefined)
           throw new Error(`process ${String(pid)} is not live`);
-        const observation = (await darwinTokens?.read([process]))?.get(pid);
+        const observation = (await darwinTokens?.read([process], signal))?.get(
+          pid,
+        );
         if (observation === undefined || observation.state === "unavailable")
           throw new Error(
             observation?.reason ?? "process run token could not be read",
@@ -355,6 +388,7 @@ export const createSystemProcessOwnershipHost = (
         ["eww", "-p", String(pid)],
         {
           env: hostEnvironment,
+          ...(signal === undefined ? {} : { signal }),
         },
       );
       const observedEnvironment: Record<string, string> = {};
@@ -366,11 +400,13 @@ export const createSystemProcessOwnershipHost = (
       }
       return observedEnvironment;
     },
-    async runTokens(processes) {
+    async runTokens(processes, signal) {
+      signal?.throwIfAborted();
       if (platform !== "darwin" || processes.length === 0) return new Map();
       try {
-        return (await darwinTokens?.read(processes)) ?? new Map();
+        return (await darwinTokens?.read(processes, signal)) ?? new Map();
       } catch (cause: unknown) {
+        if (isExpectedAbort(cause, signal)) throw cause;
         void cause;
         return new Map(
           processes.map(({ pid }) => [
@@ -395,10 +431,15 @@ export const createSystemProcessOwnershipHost = (
 
 export const systemProcessOwnershipHost = createSystemProcessOwnershipHost();
 
-/** Observe the current OS start identity for one live PID, when supported. */
+/**
+ * Observe a live PID's start identity, optionally binding it to an owned run.
+ * Token validation is bracketed by identity reads so PID reuse cannot supply
+ * the first identity of a different process for an owned launch.
+ */
 export const observeProcessStartIdentity = async (
   pid: number,
   host: ProcessOwnershipHost = systemProcessOwnershipHost,
+  expectedRunId?: string,
 ): Promise<ProcessIdentityObservation | undefined> => {
   const process = (await host.listProcesses()).find(
     (entry) => entry.pid === pid,
@@ -407,12 +448,42 @@ export const observeProcessStartIdentity = async (
     return undefined;
   if (host.processIdentities === undefined)
     return { state: "unavailable", reason: "process identity is unsupported" };
-  return (
-    (await host.processIdentities([process])).get(pid) ?? {
+  const identity: ProcessIdentityObservation = (
+    await host.processIdentities([process])
+  ).get(pid) ?? {
+    state: "unavailable",
+    reason: "process identity was not returned",
+  };
+  if (expectedRunId === undefined || identity.state !== "readable")
+    return identity;
+  let owned = false;
+  for await (const { observation } of readProcessRunTokens(host, [process])) {
+    if (observation.state === "unavailable")
+      return {
+        state: "unavailable",
+        reason: `process ownership token could not be read for PID ${String(pid)}: ${observation.reason}`,
+      };
+    if (observation.runId !== expectedRunId)
+      return {
+        state: "unavailable",
+        reason: `process ownership token did not match the captured run for PID ${String(pid)}`,
+      };
+    owned = true;
+  }
+  if (!owned)
+    return {
       state: "unavailable",
-      reason: "process identity was not returned",
-    }
-  );
+      reason: `process ownership token was not returned for PID ${String(pid)}`,
+    };
+  const confirmed = await observeProcessStartIdentity(pid, host);
+  if (confirmed === undefined || confirmed.state !== "readable")
+    return confirmed;
+  return confirmed.identity === identity.identity
+    ? identity
+    : {
+        state: "unavailable",
+        reason: `process identity changed while validating the captured run token for PID ${String(pid)}`,
+      };
 };
 
 /** Revalidate a launch-time start identity immediately before signaling a PID. */

@@ -2,7 +2,7 @@ import type { ExecutionOptions } from "./AnalysisProvider.js";
 import type { BrowserScenarioCapturePort } from "./BrowserScenarioCapturePort.js";
 import { createBrowserScenarioEvidence } from "./BrowserScenarioEvidence.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { Evidence } from "../domain/evidence.js";
 import type { BrowserScenario } from "../domain/browserScenario.js";
 import { err, type Result } from "../domain/result.js";

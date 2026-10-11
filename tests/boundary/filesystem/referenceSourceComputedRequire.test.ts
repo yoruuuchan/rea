@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 
 import { expect, it } from "vitest";
 
-import { importReferenceSource } from "../../../src/application/ReferenceSourceImport.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 it("distinguishes computed require member values from literal members in source evidence", async () => {
   const root = await createTestTempDirectory("rea-reference-require-members-");

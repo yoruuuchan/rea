@@ -9,6 +9,53 @@ import { cliTest } from "../../support/cli/cliFixture.js";
 import { analysisViewLayoutEvidence } from "../../fixtures/analysisView.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
+import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
+import { inspectEvidenceBundle } from "../../../src/application/investigation/InspectEvidenceBundle.js";
+
+cliTest(
+  "discovers native records from a complete portable bundle using the shared workflow",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-evidence-discovery-cli-");
+    const parent = createEvidence(
+      { path: "/fixtures/native.exe", format: "pe", sha256: "a".repeat(64) },
+      { id: "ghidra", name: "Ghidra", version: "12.1.4" },
+      {
+        operation: "analyze_function",
+        parameters: {},
+        result: ghidraFunctionDossier(),
+      },
+    );
+    const bundle = createEvidenceBundle([parent]);
+    const path = join(root, "evidence.json");
+    await writeFile(path, JSON.stringify(bundle));
+    const options = {
+      detail: "summary" as const,
+      filters: { evidence_id: parent.evidence_id },
+    };
+    const result = await cli.run({
+      arguments: [
+        "inspect-evidence-bundle",
+        JSON.stringify({ path, ...options }),
+        "--json",
+      ],
+      environment: { HOME: root, XDG_CONFIG_HOME: root, XDG_CACHE_HOME: root },
+    });
+    expect(result.exitCode).toBe(0);
+    const expected = inspectEvidenceBundle(bundle, options);
+    if (!expected.ok) throw expected.error;
+    expect(result.json).toEqual(expected.value);
+    const complete = await cli.run({
+      arguments: [
+        "inspect-evidence-bundle",
+        JSON.stringify({ path }),
+        "--json",
+      ],
+      environment: { HOME: root, XDG_CONFIG_HOME: root, XDG_CACHE_HOME: root },
+    });
+    expect(complete.exitCode).toBe(0);
+    expect(complete.json).toEqual(bundle);
+  },
+);
 cliTest(
   "projects one section from a JSON file of inline layout Evidence",
   async ({ cli }) => {

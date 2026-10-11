@@ -3,8 +3,8 @@
 import { readFile, realpath } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { analyzeJavaScriptApplication } from "../../../dist/application/javascript/JavaScriptApplicationService.js";
 import { reconcileJavaScriptRuntimeEvidence } from "../../../dist/application/javascript/JavaScriptRuntimeReconciliationService.js";
+import { analyzeJavaScriptApplicationWithOwnedScope } from "../../lib/javascript-application-analysis.mjs";
 import {
   completeVerifierRun,
   createVerifierRun,
@@ -44,14 +44,13 @@ const canonicalLayers = await Promise.all(
 );
 const staticLayers = [];
 for (const layer of canonicalLayers) {
-  const analyzed = await analyzeJavaScriptApplication({
+  const analyzed = await analyzeJavaScriptApplicationWithOwnedScope({
     input_path: layer.path,
     format: "auto",
   });
-  if (!analyzed.ok) throw analyzed.error;
   staticLayers.push({
     role: layer.role,
-    analysis: analyzed.value,
+    analysis: analyzed,
     runtime_mappings: [],
   });
 }

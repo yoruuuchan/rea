@@ -16,8 +16,11 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { parseUtf8Json } from "./Utf8JsonInput.js";
-import { readRegularFile } from "./RegularFileRead.js";
+import {
+  readJsonInputFile,
+  readJsonObjectFile,
+  type JsonObjectMemberReader,
+} from "./JsonInputFile.js";
 import { NonRegularFileReadError } from "../filesystem/RegularFile.js";
 
 /** Request control and its owning operation for an interruptible atomic write. */
@@ -32,17 +35,62 @@ type TextWriteResult<Failure = EvidenceFileError | AnalysisCancelledError> =
 /** Read JSON data from a regular file at the caller-supplied path. */
 export const readJsonFile = async (
   path: string,
+  signal?: AbortSignal,
 ): Promise<
   Result<unknown, EvidenceFileError | AnalysisResourceConstraintError>
+> =>
+  readJsonFileInput(
+    path,
+    (selected) => readJsonInputFile(selected, "read_evidence_file", signal),
+    signal,
+  );
+
+/** Read selected JSON members through the same regular-file error boundary. */
+export const readJsonObjectMembersFile = (
+  path: string,
+  scans: readonly ReadonlyMap<string, JsonObjectMemberReader>[],
+  signal?: AbortSignal,
+): Promise<
+  Result<
+    void,
+    EvidenceFileError | AnalysisResourceConstraintError | AnalysisCancelledError
+  >
+> =>
+  readJsonFileInput(
+    path,
+    (selected) =>
+      readJsonObjectFile(selected, "read_evidence_file", scans, signal),
+    signal,
+  );
+
+const readJsonFileInput = async <Value>(
+  path: string,
+  read: (
+    selected: string,
+  ) => Promise<
+    Result<
+      Value,
+      | import("../domain/analysisErrorCore.js").AnalysisInputError
+      | AnalysisResourceConstraintError
+    >
+  >,
+  signal?: AbortSignal,
+): Promise<
+  Result<Value, EvidenceFileError | AnalysisResourceConstraintError>
 > => {
   const requestedPath = resolve(path);
   try {
-    const encoded = await readRegularFile(requestedPath);
-    const decoded = parseUtf8Json(encoded, "read_evidence_file", requestedPath);
+    const decoded = await read(requestedPath);
     if (!decoded.ok) {
+      if (decoded.error instanceof AnalysisResourceConstraintError)
+        return err(decoded.error);
       return err(
         new EvidenceFileError("read", "invalid-json", {
-          cause: decoded.cause,
+          cause:
+            decoded.error.cause ??
+            new SyntaxError(
+              decoded.error.issues[0]?.message ?? decoded.error.message,
+            ),
           path: requestedPath,
         }),
       );
@@ -50,6 +98,7 @@ export const readJsonFile = async (
     return ok(decoded.value);
   } catch (cause: unknown) {
     if (cause instanceof AnalysisResourceConstraintError) return err(cause);
+    if (signal?.aborted === true) throw cause;
     return err(
       new EvidenceFileError(
         "read",

@@ -10,7 +10,7 @@ import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascri
 import { matchJavaScriptApplicationVersions } from "../../domain/javascript/javascriptApplicationVersionKeys.js";
 import { findApplicationFeatureSeeds } from "../../domain/javascript/javascriptFeatureSeed.js";
 import { traceApplicationFeatureInputSchema } from "../../domain/javascript/javascriptFeatureTraceSchemas.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 
 const analyzeSource = async (
   source: string,

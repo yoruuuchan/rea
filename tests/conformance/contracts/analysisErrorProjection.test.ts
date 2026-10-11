@@ -7,7 +7,7 @@ import { EvidenceFileError } from "../../../src/domain/evidenceErrors.js";
 import { HopperRemoteError } from "../../../src/domain/hopperErrors.js";
 import { UnknownRegistryError } from "../../../src/domain/unknownRegistryError.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
-import { type AnalysisError } from "../../../src/domain/analysisErrorBase.js";
+import type { AnalysisError } from "../../../src/domain/analysisErrorBase.js";
 
 describe("analysis error projection contract", () => {
   it("accepts every closed error-reason variant", () => {

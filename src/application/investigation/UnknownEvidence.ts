@@ -7,43 +7,54 @@ import type {
 import type { ProviderIdentity } from "../AnalysisProvider.js";
 
 /** Provider identity for analyst-authored residual-unknown mutations. */
-export const UNKNOWN_REGISTRY_PROVIDER: ProviderIdentity = {
+const UNKNOWN_REGISTRY_PROVIDER: ProviderIdentity = {
   id: "rea-unknown-registry",
   name: "REA residual unknown registry",
   version: "1",
 };
 
+type UnknownMutation =
+  | { readonly operation: "record_unknown"; readonly input: RecordUnknownInput }
+  | {
+      readonly operation: "update_unknown";
+      readonly input: UpdateUnknownInput;
+    };
+
 /** Create immutable evidence for one approved residual-unknown mutation. */
 export const unknownMutationEvidence = (
   target: BinaryTarget | undefined,
-  input: RecordUnknownInput,
+  mutation: UnknownMutation,
 ): Evidence =>
   createEvidence(target, UNKNOWN_REGISTRY_PROVIDER, {
     predicateType: "rea.residual-unknown-mutation",
-    operation: "record_unknown",
-    parameters: { domain: input.domain, severity: input.severity },
-    result: {
-      action: "record",
-      question: input.question,
-      required_authority: input.required_authority,
-      required_confidence: input.required_confidence,
-    },
+    operation: mutation.operation,
+    parameters: { ...mutation.input },
+    result:
+      mutation.operation === "record_unknown"
+        ? {
+            action: "record",
+            question: mutation.input.question,
+            required_authority: mutation.input.required_authority,
+            required_confidence: mutation.input.required_confidence,
+          }
+        : { action: "update", status: mutation.input.status },
     confidence: "derived",
     authority: "analyst-inference",
-    evidenceLinks: unknownEvidenceLinks(input),
+    evidenceLinks: unknownEvidenceLinks(mutation.input),
     limitations: [
       "Registry mutation evidence records analyst intent, not proof of the answer.",
     ],
   });
 
 /** Deduplicate evidence links carried by an unknown mutation. */
-export const unknownEvidenceLinks = (
+const unknownEvidenceLinks = (
   input: RecordUnknownInput | UpdateUnknownInput,
-): string[] =>
-  [
+): string[] => [
+  ...new Set([
     ...input.supporting_evidence_ids,
     ...input.contradicting_evidence_ids,
     ...("resolution" in input && input.resolution !== null
       ? input.resolution.evidence_ids
       : []),
-  ].filter((id, index, values) => values.indexOf(id) === index);
+  ]),
+];

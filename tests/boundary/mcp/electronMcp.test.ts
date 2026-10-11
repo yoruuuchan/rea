@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -13,7 +13,7 @@ import { createStrippedAsarAddon } from "../../fixtures/strippedAsarAddon.js";
 
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import type { ElectronActiveObservationPort } from "../../../src/application/javascript/ElectronActiveObservationPort.js";
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 import { CdpElectronProvider } from "../../../src/browser/CdpElectronProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
@@ -24,10 +24,63 @@ import {
 import { writeElectronBoundaryFixture } from "../../fixtures/electronBoundaryApplication.js";
 import { createElectronActiveObservationFixtureResult } from "../../../src/domain/javascript/electronActiveObservation.fixture.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
+import { AsarArtifactReader } from "../../../src/artifacts/AsarArtifactReader.js";
 
 const browsers: FakeCdpBrowser[] = [];
 const resources: Array<{ close(): Promise<unknown> }> = [];
 const temporary: string[] = [];
+
+it("retains failed JavaScript inventory cleanup through server shutdown retries", async () => {
+  const { archive } = await createStrippedAsarAddon();
+  const session = createTestBinarySession(() => ({
+    execute: () => Promise.resolve(observed(null)),
+    close: () => Promise.resolve(resultOk(null)),
+  }));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "javascript-cleanup-owner", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const originalClose = AsarArtifactReader.prototype.close;
+  const owners = new Set<AsarArtifactReader>();
+  let blocked = true;
+  const close = vi
+    .spyOn(AsarArtifactReader.prototype, "close")
+    .mockImplementation(function (this: AsarArtifactReader) {
+      owners.add(this);
+      if (blocked) return Promise.reject(new Error("snapshot cleanup blocked"));
+      return originalClose.call(this);
+    });
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const response = await client.callTool({
+      name: "analyze_javascript_application",
+      arguments: {
+        input_path: archive,
+        integrity_policy: "record-and-continue",
+      },
+    });
+    expect(parseMcpToolError(response)).toMatchObject({
+      error: {
+        code: "cleanup_incomplete",
+        details: {
+          resources: [expect.stringContaining(archive)],
+          partial_observation: { kind: "artifact-inventory" },
+        },
+      },
+    });
+    expect(owners.size).toBe(1);
+    await expect(server.close()).rejects.toThrow();
+    blocked = false;
+    await server.close();
+    expect(owners.size).toBe(1);
+    expect(close.mock.calls.length).toBeGreaterThanOrEqual(3);
+  } finally {
+    blocked = false;
+    await Promise.all([client.close(), server.close(), session.close()]);
+    close.mockRestore();
+  }
+});
 
 afterEach(async () => {
   await Promise.all(resources.splice(0).map(async (item) => item.close()));

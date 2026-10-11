@@ -198,6 +198,12 @@ const registerJavaScriptApplicationCommand = (
               input_path: args.path,
               format: options.artifactFormat,
               integrity_policy: options.integrityPolicy,
+              ...(options.maxHeapMb === undefined
+                ? {}
+                : { max_heap_mb: options.maxHeapMb }),
+              ...(options.analysisTimeoutMs === undefined
+                ? {}
+                : { analysis_timeout_ms: options.analysisTimeoutMs }),
             },
             signal,
           ),

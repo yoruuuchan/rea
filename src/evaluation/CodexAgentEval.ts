@@ -1,9 +1,11 @@
 import {
+  deliveredCodexEvidence,
   evaluateKnownAnswers,
   type FixtureClaimExpectation,
   type KnownAnswerAssessment,
 } from "./KnownAnswerEvaluation.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
+import { TOOL_CONTRACTS } from "../contracts/toolContracts.js";
 
 /** One REA MCP invocation observed in a Codex JSONL transcript. */
 interface CodexMcpCall {
@@ -66,13 +68,35 @@ const canonicalValue = (value: unknown): unknown => {
   );
 };
 
-const evidenceIdsFrom = (value: unknown): readonly string[] => {
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) return [];
-  return [...new Set(encoded.match(/ev_[a-f0-9]{64}/gu) ?? [])];
+const toolResultError = (
+  item: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const result = record(item.result ?? item.output);
+  const structured = record(
+    result?.structured_content ?? result?.structuredContent,
+  );
+  const direct = record(structured?.error ?? result?.error ?? item.error);
+  if (direct !== undefined || structured !== undefined) return direct;
+  // Codex preserves some REA failures only as one complete JSON text block.
+  // A client-truncated preview or SDK prose is not a structured error record.
+  const content = result?.content;
+  if (!Array.isArray(content) || content.length !== 1) return undefined;
+  const block = record(content[0]);
+  if (block?.type !== "text" || typeof block.text !== "string")
+    return undefined;
+  try {
+    return record(record(JSON.parse(block.text))?.error);
+  } catch (cause) {
+    if (cause instanceof SyntaxError || cause instanceof RangeError)
+      return undefined;
+    throw cause;
+  }
 };
 
-const toolResultFailed = (item: Record<string, unknown>): boolean => {
+const toolResultFailed = (
+  item: Record<string, unknown>,
+  error: Record<string, unknown> | undefined,
+): boolean => {
   if (
     item.status === "failed" ||
     (item.error !== undefined && item.error !== null)
@@ -82,31 +106,37 @@ const toolResultFailed = (item: Record<string, unknown>): boolean => {
   const structured = record(
     result?.structured_content ?? result?.structuredContent,
   );
-  return result?.isError === true || structured?.error !== undefined;
-};
-
-const toolResultErrorCode = (item: Record<string, unknown>): string | null => {
-  const result = record(item.result ?? item.output);
-  const structured = record(
-    result?.structured_content ?? result?.structuredContent,
+  return (
+    result?.isError === true ||
+    structured?.error !== undefined ||
+    error !== undefined
   );
-  const error = record(structured?.error ?? result?.error ?? item.error);
-  return textValue(error?.code) ?? null;
 };
 
-const callFromItem = (value: unknown): CodexMcpCall | undefined => {
-  const item = record(value);
+const callFromEvent = (
+  event: Record<string, unknown>,
+): CodexMcpCall | undefined => {
+  const item = record(
+    event.type === "item.completed"
+      ? event.item
+      : event.type === "mcp_tool_call"
+        ? event
+        : undefined,
+  );
   if (item?.type !== "mcp_tool_call") return undefined;
   const tool = textValue(item.tool) ?? textValue(item.name);
   if (tool === undefined) return undefined;
+  const error = toolResultError(item);
   return {
     id: textValue(item.id) ?? null,
     server: textValue(item.server) ?? textValue(item.server_name) ?? null,
     tool,
     arguments: item.arguments ?? item.input ?? {},
-    evidenceIds: evidenceIdsFrom(item.result ?? item.output),
-    error: toolResultFailed(item),
-    errorCode: toolResultErrorCode(item),
+    evidenceIds: deliveredCodexEvidence(event).map(
+      ({ evidence_id }) => evidence_id,
+    ),
+    error: toolResultFailed(item, error),
+    errorCode: textValue(error?.code) ?? null,
   };
 };
 
@@ -138,9 +168,7 @@ const consumeEvent = (state: EvaluationState, value: unknown): void => {
   if (event === undefined) return;
   const completedItem =
     event.type === "item.completed" ? event.item : undefined;
-  const call =
-    callFromItem(completedItem) ??
-    (event.type === "mcp_tool_call" ? callFromItem(event) : undefined);
+  const call = callFromEvent(event);
   if (call !== undefined) {
     const identity =
       call.id ??
@@ -171,7 +199,7 @@ const consumeEvent = (state: EvaluationState, value: unknown): void => {
 /** Measure agent routing, repetition, model usage, and explicitly limited answer heuristics. */
 export const evaluateCodexEvents = (
   events: readonly unknown[],
-  expectedFirstTool: string,
+  expectedFirstTool: string | null,
   options: {
     readonly requireEvidence?: boolean;
     readonly requiredAnswerTermGroups?: readonly (readonly string[])[];
@@ -194,16 +222,31 @@ export const evaluateCodexEvents = (
     ({ server }) => server === null || server.toLowerCase() === "rea",
   );
   const signatures = new Map<string, number>();
+  let targetRevision = 0;
   for (const call of reaCalls) {
-    const signature = `${call.tool}:${JSON.stringify(canonicalValue(call.arguments))}`;
+    // A status read before and after a successful target lifecycle change is
+    // useful verification, not a duplicate analysis or unchanged failed retry.
+    const context =
+      call.tool === "binary_session" ? `${String(targetRevision)}:` : "";
+    const signature = `${context}${call.tool}:${JSON.stringify(canonicalValue(call.arguments))}`;
     signatures.set(signature, (signatures.get(signature) ?? 0) + 1);
+    if (
+      !call.error &&
+      (call.tool === "open_binary" || call.tool === "close_binary")
+    )
+      targetRevision += 1;
   }
   const repeatedCallCount = [...signatures.values()].reduce(
     (total, count) => total + Math.max(0, count - 1),
     0,
   );
   const inputValidationFailureCount = reaCalls.filter(
-    ({ errorCode }) => errorCode === "invalid_request",
+    (call) =>
+      call.errorCode === "invalid_request" ||
+      (call.error &&
+        TOOL_CONTRACTS.find(
+          ({ name }) => name === call.tool,
+        )?.inputSchema.safeParse(call.arguments).success === false),
   ).length;
   const requiredToolSubsequenceMet = containsOrderedSubsequence(
     reaCalls.filter(({ error }) => !error).map(({ tool }) => tool),
@@ -234,7 +277,7 @@ export const evaluateCodexEvents = (
   );
   return {
     naturalUse: reaCalls.length > 0,
-    correctFirstTool: reaCalls[0]?.tool === expectedFirstTool,
+    correctFirstTool: (reaCalls[0]?.tool ?? null) === expectedFirstTool,
     firstTool: reaCalls[0]?.tool ?? null,
     reaCalls,
     repeatedCallCount,

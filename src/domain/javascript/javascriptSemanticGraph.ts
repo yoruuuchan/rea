@@ -19,15 +19,12 @@ import {
   JAVASCRIPT_SEMANTIC_RELATION_FAMILIES,
   JAVASCRIPT_SEMANTIC_RELATION_FAMILY,
   javaScriptSemanticFingerprintInputSchema,
-  javaScriptSemanticFingerprintSchema,
+  javaScriptSemanticEvidenceContextSchema,
   javaScriptSemanticGraphInputSchema,
   javaScriptSemanticGraphRecordSchema,
   javaScriptSemanticNodeInputSchema,
-  javaScriptSemanticNodeSchema,
   javaScriptSemanticRelationInputSchema,
-  javaScriptSemanticRelationSchema,
   javaScriptSemanticUnknownInputSchema,
-  javaScriptSemanticUnknownSchema,
   type JavaScriptSemanticGraphInput,
   type JavaScriptSemanticGraphNode,
   type JavaScriptSemanticGraphRelation,
@@ -113,6 +110,33 @@ export class JavaScriptSemanticEvidenceContextRegistry {
     this.#contexts.clear();
     this.#idsByCanonicalContext.clear();
   }
+
+  /** Validate and intern provenance decoded in this realm from an analysis worker. */
+  adopt(input: unknown): void {
+    const context = javaScriptSemanticEvidenceContextSchema.parse(input);
+    const { context_id: identifier, ...value } = context;
+    if (identifier !== evidenceContextId(value))
+      throw new TypeError(
+        "Transferred semantic evidence context identifier is stale",
+      );
+    const canonical = canonicalJson(
+      value,
+      "JavaScript semantic evidence context",
+    );
+    const existing = this.#contexts.get(identifier);
+    if (existing !== undefined) {
+      const { context_id: _existingIdentifier, ...existingValue } = existing;
+      if (
+        canonical !==
+        canonicalJson(existingValue, "JavaScript semantic evidence context")
+      )
+        throw new TypeError(
+          "Transferred semantic evidence context digest collision",
+        );
+    }
+    this.#contexts.set(identifier, context);
+    this.#idsByCanonicalContext.set(canonical, identifier);
+  }
 }
 
 /** Derive a semantic node ID from its kind and exact artifact identity. */
@@ -132,10 +156,10 @@ export const createJavaScriptSemanticGraphNode = (
     application_node_ids: uniqueSorted(parsed.application_node_ids),
     evidence: evidenceContexts.intern(parsed.evidence),
   };
-  return javaScriptSemanticNodeSchema.parse({
+  return {
     ...semantic,
     node_id: javaScriptSemanticNodeId(semantic),
-  });
+  };
 };
 
 /** Normalize one semantic relationship and derive its exact identifier. */
@@ -148,10 +172,10 @@ export const createJavaScriptSemanticGraphRelation = (
     ...parsed,
     evidence: evidenceContexts.intern(parsed.evidence),
   };
-  return javaScriptSemanticRelationSchema.parse({
+  return {
     ...semantic,
     relation_id: `jsrg_relation_${digestCanonicalValue(semantic, "JavaScript semantic graph")}`,
-  });
+  };
 };
 
 /** Normalize one unresolved semantic frontier and derive its identifier. */
@@ -166,10 +190,10 @@ export const createJavaScriptSemanticGraphUnknown = (
     candidate_node_ids: uniqueSorted(parsed.candidate_node_ids),
     evidence: evidenceContexts.intern(parsed.evidence),
   };
-  return javaScriptSemanticUnknownSchema.parse({
+  return {
     ...semantic,
     unknown_id: `jsrg_unknown_${digestCanonicalValue(semantic, "JavaScript semantic graph")}`,
-  });
+  };
 };
 
 /** Normalize one function fingerprint and derive its component commitment. */
@@ -191,7 +215,7 @@ export const createJavaScriptSemanticFingerprint = (
     semantic.components,
     "JavaScript semantic graph",
   );
-  return javaScriptSemanticFingerprintSchema.parse({
+  return {
     ...semantic,
     fingerprint_sha256: fingerprintSha256,
     fingerprint_id: `jsrg_fingerprint_${digestCanonicalValue(
@@ -202,7 +226,7 @@ export const createJavaScriptSemanticFingerprint = (
       },
       "JavaScript semantic graph",
     )}`,
-  });
+  };
 };
 
 type GraphRecord = z.infer<typeof javaScriptSemanticGraphRecordSchema>;

@@ -1,9 +1,9 @@
 /** Generated from package.json and package-lock.json; do not edit. */
 export const PACKAGE_METADATA = {
   name: "rea-agents",
-  version: "6.3.0", // x-release-please-version
+  version: "6.4.0", // x-release-please-version
   serverSdkVersion: "2.3.1",
   clientSdkVersion: "2.3.1",
   coreSdkVersion: "2.3.1",
-  skillVersion: "35",
+  skillVersion: "37",
 } as const;

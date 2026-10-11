@@ -3,8 +3,11 @@ import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 
 import type { ToolContract } from "../contracts/toolContractTypes.js";
 import type { Evidence } from "../domain/evidence.js";
-import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import {
+  projectAnalysisError,
+  type AnalysisErrorProjection,
+} from "../domain/analysisErrorProjection.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { Result } from "../domain/result.js";
 import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
@@ -64,7 +67,33 @@ export class ToolResultDelivery {
 
   /** Project an error without allocating oversized repeated MCP text. */
   toErrorToolResult(error: AnalysisError): CallToolResult {
-    const structuredContent = { error: projectAnalysisError(error) };
+    return this.projectedErrorResult(projectAnalysisError(error));
+  }
+
+  /** Deliver the original failure with the producer-acknowledged partial Evidence reference. */
+  toRecordedPartialErrorToolResult(
+    error: AnalysisError,
+    evidenceId: string,
+    recorded: Result<unknown, AnalysisError>,
+  ): CallToolResult {
+    if (!recorded.ok) return this.toErrorToolResult(error);
+    const projected = projectAnalysisError(error);
+    return this.projectedErrorResult({
+      ...projected,
+      details: {
+        ...projected.details,
+        partial_observation: {
+          kind: "retained-evidence",
+          evidence_id: evidenceId,
+        },
+      },
+    });
+  }
+
+  private projectedErrorResult(
+    projected: AnalysisErrorProjection,
+  ): CallToolResult {
+    const structuredContent = { error: projected };
     // Errors reach the wire as text only; the structured copy is a private
     // carrier the transport removes after its own budget check.
     const encoded = encodeToolResult(

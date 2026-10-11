@@ -16,9 +16,11 @@ export interface CdpCaptureEventsState {
   readonly network: Map<string, NetworkState>;
   readonly networkRequestTimestamps: Map<string, number>;
   readonly malformedRedirectRequestIds: Set<string>;
-  readonly allowedWebSockets: Set<string>;
+  readonly webSocketConnectionsById: Map<
+    string,
+    WebPageInspection["network"]["websocket_connections"][number]
+  >;
   console: WebPageInspection["console"]["events"];
-  websockets: WebPageInspection["network"]["websocket_events"];
   responseMetadata: WebPageInspection["metadata"]["responses"];
   agentHints: WebPageInspection["metadata"]["agent_hints"];
   readonly completeness: CdpCaptureCompleteness;

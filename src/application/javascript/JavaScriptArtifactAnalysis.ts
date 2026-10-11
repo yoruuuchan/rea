@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
 
 import { resolveJavaScriptSourceMapReference } from "../../domain/javascript/javascriptSourceMapPaths.js";
-import { analyzeParsedJavaScriptStaticSource } from "../../domain/javascript/javascriptStaticAnalysis.js";
+import { analyzeParsedJavaScriptStaticSourceSteps } from "../../domain/javascript/javascriptStaticAnalysis.js";
 import {
-  analyzeParsedJavaScriptSemantics,
-  classifyParsedJavaScriptOpenReceivers,
+  analyzeParsedJavaScriptSemanticsSteps,
+  classifyParsedJavaScriptOpenReceiversSteps,
 } from "../../domain/javascript/javascriptSemanticAnalysis.js";
 import type { JavaScriptSemanticIr } from "../../domain/javascript/javascriptSemanticIr.js";
+import { projectJavaScriptModuleSemantics } from "../../domain/javascript/javascriptModuleSemanticIr.js";
 import { parseJavaScriptSource } from "../../domain/javascript/javascriptSourceParser.js";
 import { hasValidSourceMapContents } from "../../domain/sourceMapContents.js";
 import { flattenSourceMapLeaves } from "../../domain/sourceMapEnvelope.js";
@@ -35,6 +36,15 @@ import type {
 import { analyzeJavaScriptJsonModule } from "./JavaScriptJsonModules.js";
 import { completeJavaScriptAnalysisSteps } from "./JavaScriptAnalysisControl.js";
 import { htmlArtifactReferences } from "../../domain/javascript/htmlArtifactReferences.js";
+import type { JavaScriptSourceAnalysisPort } from "../../domain/javascript/javascriptSourceAnalysis.js";
+import type { JavaScriptSemanticGraphProjection } from "./JavaScriptSemanticGraphBuilder.js";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
+import {
+  AnalysisCancelledError,
+  AnalysisResourceConstraintError,
+  AnalysisTimeoutError,
+} from "../../domain/analysisErrorCore.js";
 
 interface MutableArtifactAnalysis<
   SemanticIr extends JavaScriptModuleSemanticIr,
@@ -95,27 +105,7 @@ export const analyzeAndProjectJavaScriptArtifactFiles = async (
   ): Generator<void, JavaScriptModuleSemanticIr> {
     const projection = projectSemantics(file, ir);
     if (projection !== undefined) while (projection.next().done !== true) yield;
-    const programScopes = ir.scopes.filter(({ kind }) => kind === "program");
-    const programScopeId = programScopes[0]?.scopeId;
-    const localNames = new Set(
-      ir.moduleLinks.map(({ localName }) => localName),
-    );
-    const callableIds = new Set(
-      ir.moduleLinks.map(({ callableId }) => callableId),
-    );
-    return {
-      scopes: programScopes,
-      bindings: ir.bindings.filter(
-        ({ name, scopeId }) =>
-          scopeId === programScopeId && localNames.has(name),
-      ),
-      callables: ir.callables.filter(({ callableId }) =>
-        callableIds.has(callableId),
-      ),
-      moduleLinks: ir.moduleLinks,
-      coverage: ir.coverage,
-      limitations: ir.limitations,
-    };
+    return projectJavaScriptModuleSemantics(ir);
   };
   const context = { state, projectSemantics: projectFileSemantics };
   for (const [index, file] of fileSet.files.entries()) {
@@ -128,6 +118,174 @@ export const analyzeAndProjectJavaScriptArtifactFiles = async (
     );
   }
   return finalizeArtifactAnalysis(state);
+};
+
+/** Analyze sources behind a hard heap boundary, retaining collected facts on interruption. */
+export const analyzeAndAdoptJavaScriptArtifactFiles = async (
+  fileSet: JavaScriptArtifactFileSet,
+  worker: Pick<JavaScriptSourceAnalysisPort, "analyze">,
+  projection: JavaScriptSemanticGraphProjection,
+  beforeFile: (
+    file: JavaScriptArtifactFile,
+    completed: number,
+    total: number,
+  ) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<{
+  readonly analysis: JavaScriptModuleArtifactAnalysis;
+  readonly interruption: AnalysisError | null;
+}> => {
+  const state = emptyArtifactAnalysis<JavaScriptModuleSemanticIr>();
+  let interruption: AnalysisError | null = null;
+  for (const [index, file] of fileSet.files.entries()) {
+    try {
+      await setImmediate();
+      await beforeFile(file, index, fileSet.files.length);
+      if (signal?.aborted === true)
+        throw new AnalysisCancelledError("analyze_javascript_application");
+      if (file.kind !== "javascript" || !file.text.included) {
+        const steps = analyzeArtifactFileSteps(file, {
+          state,
+          projectSemantics: function* (_file, ir) {
+            yield;
+            return projectJavaScriptModuleSemantics(ir);
+          },
+        });
+        await completeJavaScriptAnalysisSteps(steps, signal);
+        continue;
+      }
+      const result = await worker.analyze(
+        file,
+        projection.remainingFileNodeBudget(),
+        signal,
+      );
+      const facts = result.ok ? result.value : result.error;
+      const applicationProjectionFailure = facts.applicationProjectionFailure;
+      if (facts.projection !== null)
+        projection.adoptFileProjection(facts.projection);
+      const error = result.ok ? null : result.error.error;
+      const limits =
+        error instanceof AnalysisResourceConstraintError
+          ? error.reportedLimits
+          : error instanceof AnalysisTimeoutError
+            ? { worker_timeout_ms: error.timeoutMs }
+            : null;
+      const failure =
+        error === null
+          ? undefined
+          : {
+              reason: `${file.path}: ${error.message}`,
+              error: projectAnalysisError(error),
+              limits,
+            };
+      state.files.push({
+        file,
+        javascript: facts.javascript,
+        semantic: facts.module === null ? null : { ir: facts.module },
+        ...(failure === undefined ? {} : { analysis_failure: failure }),
+        ...(applicationProjectionFailure === undefined
+          ? {}
+          : {
+              application_projection_failure: {
+                reason: applicationProjectionFailure.message,
+                error: projectAnalysisError(applicationProjectionFailure),
+                limits: applicationProjectionFailure.reportedLimits,
+              },
+            }),
+      });
+      if (failure !== undefined && facts.projection === null)
+        projection.recordUnavailableFile(
+          file,
+          failure.reason,
+          failure.limits,
+          error instanceof AnalysisResourceConstraintError ||
+            error instanceof AnalysisTimeoutError
+            ? "resource-limit"
+            : "incomplete-module",
+        );
+      if (facts.javascript !== null) {
+        state.visitedNodes += facts.javascript.visited_ast_nodes;
+        state.findings +=
+          findingCount(facts.javascript) +
+          (facts.module?.moduleLinks.length ?? 0);
+        state.modules += facts.javascript.bundler_registrations.reduce(
+          (count, item) => count + item.modules.length,
+          0,
+        );
+        if (facts.javascript.parse_status === "failed")
+          state.parseFailures += 1;
+      }
+      if (
+        error !== null &&
+        (!(error instanceof AnalysisResourceConstraintError) ||
+          error.reportedLimits?.parent_result_budget_exhausted === true)
+      ) {
+        interruption = error;
+        break;
+      }
+    } catch (cause: unknown) {
+      if (signal?.aborted !== true && !(cause instanceof AnalysisError))
+        throw cause;
+      interruption =
+        signal?.aborted === true
+          ? new AnalysisCancelledError("analyze_javascript_application")
+          : cause instanceof AnalysisError
+            ? cause
+            : null;
+      if (interruption !== null) {
+        state.files.push({
+          file,
+          javascript: null,
+          semantic: null,
+          analysis_failure: {
+            reason: `${file.path}: ${interruption.message}`,
+            error: projectAnalysisError(interruption),
+            limits: null,
+          },
+        });
+        projection.recordUnavailableFile(
+          file,
+          interruption.message,
+          null,
+          "incomplete-module",
+        );
+      }
+      break;
+    }
+  }
+  if (interruption !== null) {
+    const analyzedPaths = new Set(state.files.map(({ file }) => file.path));
+    const failure = {
+      reason: `Source analysis was interrupted: ${interruption.message}`,
+      error: projectAnalysisError(interruption),
+      limits:
+        interruption instanceof AnalysisResourceConstraintError
+          ? interruption.reportedLimits
+          : interruption instanceof AnalysisTimeoutError
+            ? { worker_timeout_ms: interruption.timeoutMs }
+            : null,
+    };
+    for (const file of fileSet.files) {
+      if (analyzedPaths.has(file.path)) continue;
+      state.files.push({
+        file,
+        javascript: null,
+        semantic: null,
+        analysis_failure: failure,
+      });
+      if (file.kind === "javascript")
+        projection.recordUnavailableFile(
+          file,
+          failure.reason,
+          failure.limits,
+          interruption instanceof AnalysisResourceConstraintError ||
+            interruption instanceof AnalysisTimeoutError
+            ? "resource-limit"
+            : "incomplete-module",
+        );
+    }
+  }
+  return { analysis: finalizeArtifactAnalysis(state), interruption };
 };
 
 const analyzeArtifactFiles = <SemanticIr extends JavaScriptModuleSemanticIr>(
@@ -161,6 +319,12 @@ const finalizeArtifactAnalysis = <
     limitations: [
       "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
       "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+      ...state.files.flatMap(
+        ({ analysis_failure, application_projection_failure }) =>
+          [analysis_failure, application_projection_failure].flatMap(
+            (failure) => (failure === undefined ? [] : [failure.reason]),
+          ),
+      ),
     ],
   };
 };
@@ -188,8 +352,9 @@ function* analyzeArtifactFileSteps<
     state.parseFailures += 1;
     return;
   }
-  const openReceiverFacts = classifyParsedJavaScriptOpenReceivers(parsed);
-  const analysis = analyzeParsedJavaScriptStaticSource(
+  const openReceiverFacts =
+    yield* classifyParsedJavaScriptOpenReceiversSteps(parsed);
+  const analysis = yield* analyzeParsedJavaScriptStaticSourceSteps(
     file.text.value,
     parsed,
     openReceiverFacts,
@@ -198,7 +363,7 @@ function* analyzeArtifactFileSteps<
   yield;
   const semantics =
     analysis.parse_status === "complete" || analysis.parse_status === "partial"
-      ? analyzeParsedJavaScriptSemantics(parsed)
+      ? yield* analyzeParsedJavaScriptSemanticsSteps(parsed)
       : null;
   const projected =
     semantics === null

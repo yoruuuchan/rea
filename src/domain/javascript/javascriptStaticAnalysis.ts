@@ -1,6 +1,13 @@
 import * as t from "@babel/types";
+import {
+  ELECTRON_IDENTITY_LIMITATION,
+  ELECTRON_MODULE,
+} from "./javascriptElectronMemberWrites.js";
 
-import { traverseJavaScriptAst } from "./javascriptSemanticTraversal.js";
+import {
+  completeSemanticSteps,
+  traverseJavaScriptAstSteps,
+} from "./javascriptSemanticTraversal.js";
 
 import { inspectElectronStaticNode } from "./electronStaticAnalysis.js";
 import {
@@ -16,6 +23,7 @@ import {
   inspectCall,
   inspectRouteProperty,
   inspectRoleProperty,
+  inspectRpcNode,
 } from "./javascriptStaticAnalysisCalls.js";
 import {
   inspectBundlerRegistration,
@@ -29,7 +37,8 @@ import {
 } from "./javascriptStaticAnalysisState.js";
 import type { JavaScriptStaticAnalysis } from "./javascriptStaticAnalysisTypes.js";
 import {
-  classifyParsedJavaScriptElectronBindings,
+  classifyParsedJavaScriptElectronBindingsSteps,
+  classifyParsedJavaScriptRpcClientRootsSteps,
   classifyParsedJavaScriptOpenReceivers,
   type JavaScriptOpenReceiverFact,
 } from "./javascriptSemanticAnalysis.js";
@@ -37,6 +46,8 @@ import {
   parseJavaScriptSource,
   type ParsedJavaScriptSource,
 } from "./javascriptSourceParser.js";
+
+import { createJavaScriptRpcScan } from "./javascriptRpcEndpoints.js";
 
 /** Parse one JavaScript artifact and recover static structure only. */
 export const analyzeJavaScriptStaticSource = (
@@ -57,30 +68,44 @@ export const analyzeParsedJavaScriptStaticSource = (
   source: string,
   file: ParsedJavaScriptSource,
   openReceiverFacts?: ReadonlyMap<number, JavaScriptOpenReceiverFact>,
-): JavaScriptStaticAnalysis => {
+): JavaScriptStaticAnalysis =>
+  completeSemanticSteps(
+    analyzeParsedJavaScriptStaticSourceSteps(source, file, openReceiverFacts),
+  );
+
+/** Static analysis that yields during its source traversal; results are unchanged. */
+export function* analyzeParsedJavaScriptStaticSourceSteps(
+  source: string,
+  file: ParsedJavaScriptSource,
+  openReceiverFacts?: ReadonlyMap<number, JavaScriptOpenReceiverFact>,
+): Generator<void, JavaScriptStaticAnalysis> {
   const accumulator = createJavaScriptAnalysisAccumulator(source.length);
-  traverseStaticSource(file, {
+  const electronBindings =
+    yield* classifyParsedJavaScriptElectronBindingsSteps(file);
+  const clientRoots = yield* classifyParsedJavaScriptRpcClientRootsSteps(file);
+  yield* traverseStaticSourceSteps(file, {
     source,
     accumulator,
     ...(openReceiverFacts === undefined ? {} : { openReceiverFacts }),
-    electronBindings: classifyParsedJavaScriptElectronBindings(file),
+    electronBindings,
+    rpcScan: createJavaScriptRpcScan(source, clientRoots),
   });
   addSourceMapDirectives(source, file.comments ?? [], accumulator);
   return finalizeStaticAnalysis(source, file, accumulator);
-};
+}
 
-const traverseStaticSource = (
+function* traverseStaticSourceSteps(
   file: ParsedJavaScriptSource,
   findings: JavaScriptFindingContext,
-): void => {
-  traverseJavaScriptAst(file, {
+): Generator<void, void> {
+  yield* traverseJavaScriptAstSteps(file, {
     enter: (node) => {
       findings.accumulator.visitedNodes += 1;
       inspectNode(node, findings);
       return undefined;
     },
   });
-};
+}
 
 const finalizeStaticAnalysis = (
   source: string,
@@ -99,6 +124,12 @@ const finalizeStaticAnalysis = (
       : [
           "One or more static keys, expressions, or Electron boundary values were dynamic and remain unknown.",
         ]),
+    ...(accumulator.references.some(
+      ({ value }) =>
+        value.specifier !== null && ELECTRON_MODULE.test(value.specifier),
+    )
+      ? [ELECTRON_IDENTITY_LIMITATION]
+      : []),
     "JavaScript syntax was parsed as data and was never evaluated.",
   ];
   return {
@@ -198,4 +229,5 @@ const inspectNode = (
     inspectRouteProperty(node, findings);
     inspectRoleProperty(node, findings);
   }
+  inspectRpcNode(node, findings);
 };

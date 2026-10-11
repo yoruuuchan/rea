@@ -59,8 +59,6 @@ export const evmInterfaceFailure = (
             message: cause.message,
             exit_code: cause.snapshot?.exitCode ?? null,
             signal: cause.snapshot?.signal ?? null,
-            stdout: cause.snapshot?.stdout.text ?? null,
-            stderr: cause.snapshot?.stderr.text ?? null,
           },
         },
         { operation: "inspect_evm_interface", cause },

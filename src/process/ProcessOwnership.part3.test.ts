@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { type ProcessOwnershipHost } from "./ProcessOwnership.js";
+import type { ProcessOwnershipHost } from "./ProcessOwnership.js";
 import { observeOwnedProcessLineage } from "./ProcessOwnershipObservation.js";
 const ownership = {
   runId: "run-token",

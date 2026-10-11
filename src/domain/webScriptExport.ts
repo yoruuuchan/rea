@@ -104,6 +104,12 @@ export type WebScriptExportResult = z.output<
   typeof webScriptExportResultSchema
 >;
 
+/** Completed publication retained when cleanup fails after durable commit. */
+export interface WebScriptExportPartialObservation {
+  readonly kind: "web-script-export";
+  readonly result: WebScriptExportResult;
+}
+
 /** Adapter input to the provider-neutral path planner and publisher. */
 export interface CapturedWebScript {
   readonly source: ExportedWebScript["source"];

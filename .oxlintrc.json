@@ -22,7 +22,8 @@
     ],
     "max-params": ["warn", 4],
     "no-var": "warn",
-    "no-var-requires": "error"
+    "no-var-requires": "error",
+    "typescript/no-import-type-side-effects": "error"
   },
   "overrides": [
     {

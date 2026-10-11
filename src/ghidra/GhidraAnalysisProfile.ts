@@ -3,12 +3,27 @@ import type {
   ProviderIdentity,
 } from "../application/AnalysisProvider.js";
 import { createAnalysisProfile } from "../domain/analysisProfile.js";
+import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
-import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisUnsupportedTargetError,
+} from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { GhidraInstallationInspection } from "./GhidraInstallation.js";
+import {
+  ghidraMipsProfileParameters,
+  ghidraMipsUnsupportedReason,
+} from "./GhidraMipsProfile.js";
+import {
+  NATIVE_AOT_MAX_REPORT_BYTES,
+  NATIVE_AOT_MAX_SOURCE_BYTES,
+  NATIVE_AOT_MAX_WORKING_MEMORY_BYTES,
+  NATIVE_AOT_MAX_WORK_UNITS,
+  NATIVE_AOT_PROFILE_CONTRACT_REVISION,
+} from "../domain/native/nativeAotPe.js";
 
 /** Resolve version-bound, deterministic semantics before Ghidra imports a target. */
 export const resolveGhidraAnalysisProfile = (
@@ -16,6 +31,7 @@ export const resolveGhidraAnalysisProfile = (
   identity: ProviderIdentity,
   installation: GhidraInstallationInspection,
   signal?: AbortSignal,
+  languageOverride?: GhidraLanguageOverride,
 ): Promise<Result<AnalysisProfileResolution, AnalysisError>> => {
   if (signal?.aborted === true)
     return Promise.resolve(err(new AnalysisCancelledError("open_binary")));
@@ -25,10 +41,32 @@ export const resolveGhidraAnalysisProfile = (
     return Promise.resolve(
       err(new ProviderAdapterError(identity.id, "resolve_analysis_profile")),
     );
+  const mipsReason = ghidraMipsUnsupportedReason(target);
+  if (mipsReason !== null)
+    return Promise.resolve(
+      err(
+        new AnalysisUnsupportedTargetError(
+          "resolve_analysis_profile",
+          target.path,
+          mipsReason,
+        ),
+      ),
+    );
   const provider = { ...identity, version: installation.providerVersion };
   const dosMz = target.format === "dos-mz";
   const dosCom = target.format === "dos-com";
   const dos = dosMz || dosCom;
+  // DOS imports already force an admitted loader, language, and context.
+  if (dos && languageOverride !== undefined)
+    return Promise.resolve(
+      err(
+        new AnalysisUnsupportedTargetError(
+          "resolve_analysis_profile",
+          target.path,
+          "REA_GHIDRA_LANGUAGE_ID cannot override the admitted DOS real-mode import.",
+        ),
+      ),
+    );
   return Promise.resolve(
     ok({
       profile: createAnalysisProfile(provider, {
@@ -38,6 +76,13 @@ export const resolveGhidraAnalysisProfile = (
           ? {
               executable_role: target.executableRole ?? null,
               managed: target.managed ?? null,
+              native_aot_metadata: {
+                contract_revision: NATIVE_AOT_PROFILE_CONTRACT_REVISION,
+                source_bytes: NATIVE_AOT_MAX_SOURCE_BYTES,
+                work_units: NATIVE_AOT_MAX_WORK_UNITS,
+                working_memory_bytes: NATIVE_AOT_MAX_WORKING_MEMORY_BYTES,
+                report_bytes: NATIVE_AOT_MAX_REPORT_BYTES,
+              },
             }
           : {}),
         architecture: target.architecture ?? null,
@@ -49,8 +94,14 @@ export const resolveGhidraAnalysisProfile = (
         load_image_observations: "source-mappings-entry-context-v2",
         function_body_evidence: "complete-inclusive-ranges-v1",
         function_references: "complete-body-and-entry-reference-manager-v2",
+        string_inventory_evidence: "defined-data-coverage-v1",
         location_resolution: "explicit-address-exact-entry-symbol-first-v3",
         instruction_flow_evidence: "decoded-return-pcode-v1",
+        function_boundary_observations: "ghidra-terminal-call-limitations-v1",
+        no_return_repair:
+          installation.platform === "win32"
+            ? "disabled-windows-p0"
+            : "returning-imports-decoded-return-v2",
         process_launch:
           installation.platform === "win32"
             ? "official-headless-script-v1"
@@ -69,8 +120,17 @@ export const resolveGhidraAnalysisProfile = (
           : dosCom
             ? "BinaryLoader"
             : "auto-from-header",
-        language_id: dos ? "x86:LE:16:Real Mode" : "auto-from-header",
-        compiler_spec_id: dos ? "default" : "auto-default",
+        language_id: dos
+          ? "x86:LE:16:Real Mode"
+          : (languageOverride?.languageId ?? "auto-from-header"),
+        compiler_spec_id: dos
+          ? "default"
+          : languageOverride === undefined
+            ? "auto-default"
+            : (languageOverride.compilerSpecId ?? "language-default"),
+        ...(languageOverride === undefined
+          ? {}
+          : { language_selection: "configured-v1" }),
         ...(dos
           ? {
               load_segment: "0x1000",
@@ -90,7 +150,30 @@ export const resolveGhidraAnalysisProfile = (
             }
           : {}),
         analyzer_preset: "ghidra-default",
+        ...ghidraMipsProfileParameters(target),
       }),
     }),
   );
 };
+
+/** Read the import-language commitment back from a resolved profile. */
+export const ghidraProfileLanguageOverride = (
+  parameters: Readonly<Record<string, unknown>>,
+): GhidraLanguageOverride | undefined => {
+  if (parameters.language_selection !== "configured-v1") return undefined;
+  const languageId = parameters.language_id;
+  const compilerSpecId = parameters.compiler_spec_id;
+  if (typeof languageId !== "string" || typeof compilerSpecId !== "string")
+    return undefined;
+  return compilerSpecId === "language-default"
+    ? { languageId }
+    : { languageId, compilerSpecId };
+};
+
+/** Whether a committed profile and the active configuration select the same language. */
+export const sameGhidraLanguageOverride = (
+  left: GhidraLanguageOverride | undefined,
+  right: GhidraLanguageOverride | undefined,
+): boolean =>
+  left?.languageId === right?.languageId &&
+  left?.compilerSpecId === right?.compilerSpecId;

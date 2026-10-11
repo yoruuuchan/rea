@@ -1,5 +1,5 @@
 import { constants } from "node:buffer";
-import { type Writable } from "node:stream";
+import type { Writable } from "node:stream";
 
 import { Cli, Filter } from "incur";
 

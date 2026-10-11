@@ -25,6 +25,7 @@ export const resolveTreePath = async (
   let hops = 0;
   while (pending.length > 0) {
     const segment = pending.shift() ?? "";
+    if (segment === ".") continue;
     if (segment === "..") {
       if (resolved.length === 0) return { kind: "escapes" };
       resolved.pop();
@@ -50,8 +51,12 @@ export const resolveTreePath = async (
     : { kind: "not-file" };
 };
 
-const segmentsOf = (path: string): string[] =>
-  path.split("/").filter((segment) => segment !== "" && segment !== ".");
+const segmentsOf = (path: string): string[] => {
+  const segments = path.split("/").filter((segment) => segment !== "");
+  // a trailing slash requires a directory, just like a final dot component.
+  if (path.endsWith("/")) segments.push(".");
+  return segments;
+};
 
 export const directoryOf = (path: string): string => {
   const index = path.lastIndexOf("/");

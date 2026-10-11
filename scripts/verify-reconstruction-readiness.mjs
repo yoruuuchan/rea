@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -25,8 +24,6 @@ const electronPath = join(fixtureRoot, "electron");
 const environment = {
   ...process.env,
 };
-const temporaryRoot = await mkdtemp(join(tmpdir(), "rea-readiness-"));
-
 await access(nativePath);
 const nativeEvidence = await runCli(["inspect-artifact", nativePath, "--json"]);
 const javascriptCliEvidence = await runCli([
@@ -135,7 +132,6 @@ try {
   );
 } finally {
   await client.close();
-  await rm(temporaryRoot, { recursive: true, force: true });
 }
 
 async function runCli(arguments_) {

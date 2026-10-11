@@ -1342,7 +1342,8 @@ const serializeHermesConfiguration = (
   if (entry === undefined)
     yamlDocument.deleteIn([serversKey, PRODUCT_IDENTITY.mcpServerKey]);
   else yamlDocument.setIn([serversKey, PRODUCT_IDENTITY.mcpServerKey], entry);
-  return yamlDocument.toString();
+  // Editing REA must not reflow unrelated user prompts or other YAML scalars.
+  return yamlDocument.toString({ lineWidth: 0 });
 };
 
 /** Build the stdio entry shape expected by one client's configuration dialect. */

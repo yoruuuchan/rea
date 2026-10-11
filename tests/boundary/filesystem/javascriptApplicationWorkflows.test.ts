@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { compareApplicationVersionsRequestSchema } from "../../../src/contracts/javascript/applicationWorkflowInputContracts.js";
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 import {
   compareApplicationVersionsEvidence,
   traceApplicationFeatureEvidence,

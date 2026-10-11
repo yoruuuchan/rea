@@ -6,7 +6,6 @@ import {
   AnalysisInputError,
   AnalysisUnsupportedTargetError,
 } from "../../domain/analysisErrorCore.js";
-import type { JsonValue } from "../../domain/jsonValue.js";
 import { projectPlistValue } from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
@@ -51,20 +50,27 @@ export const decodeKeyedArchiveBytes = (
   // plist.parseBinary recurses on every object reference and copies shared
   // containers, so a few hundred bytes can exhaust memory or the stack.
   // RangeError reports a resource limit; a reference cycle is malformed.
-  if (binary)
-    estimateBinaryPlistExpansion(bytes, MAX_DECODE_BYTES, {
-      budget: "the keyed archive decode budget",
-      fail: (kind, message) =>
-        kind === "cycle"
-          ? new TypeError(
-              "binary plist object references form a cycle, which a property list cannot represent",
-            )
-          : new RangeError(message),
-      bounds: "decoder",
-    });
-  const parsed = binary
-    ? { value: parseBinary(bytes), omittedPrototypeKeys: 0 }
-    : parseXmlPropertyList(xmlText ?? "");
+  const binaryExpansion = binary
+    ? estimateBinaryPlistExpansion(bytes, MAX_DECODE_BYTES, {
+        budget: "the keyed archive decode budget",
+        fail: (kind, message) =>
+          kind === "cycle"
+            ? new TypeError(
+                "binary plist object references form a cycle, which a property list cannot represent",
+              )
+            : new RangeError(message),
+        bounds: "decoder",
+      })
+    : undefined;
+  const parsed =
+    binaryExpansion !== undefined
+      ? {
+          value: parseBinary(bytes),
+          omittedPrototypeKeys: binaryExpansion.binaryPrototypeKeyObserved
+            ? null
+            : 0,
+        }
+      : parseXmlPropertyList(xmlText ?? "");
   const { value: plistValue, unknownRealCount } = projectPlistValue(
     parsed.value,
   );
@@ -147,29 +153,33 @@ export const inspectBundleKeyedArchive = async (input: {
   try {
     // Match inventory spelling while retaining the raw path for I/O and evidence.
     const wanted = selected.path.normalize("NFC");
-    const matches: ArtifactEntry[] = [];
-    for await (const entry of reader.entries(input.signal)) {
-      if (entry.path.normalize("NFC") !== wanted) continue;
-      matches.push(entry);
+    let entry: ArtifactEntry | undefined;
+    for await (const candidate of reader.entries(input.signal, (directory) =>
+      wanted.startsWith(`${directory.normalize("NFC")}/`),
+    )) {
+      if (candidate.path.normalize("NFC") !== wanted) continue;
+      if (candidate.kind !== "file")
+        throw archivePathError(
+          "invalid_value",
+          `Archive path selects a ${candidate.kind}, not a regular file: ${selected.path}`,
+        );
+      if ((candidate.declaredSize ?? 0) > MAX_BYTES)
+        throw new ArtifactReaderFailure(
+          "limit",
+          "Keyed archive exceeds 64 MiB",
+        );
+      if (entry !== undefined)
+        throw archivePathError(
+          "invalid_value",
+          `Archive path matches multiple Unicode-equivalent bundle entries; selection is ambiguous: ${selected.path}`,
+        );
+      entry = candidate;
     }
-    if (matches.length > 1)
-      throw archivePathError(
-        "invalid_value",
-        `Archive path matches ${String(matches.length)} Unicode-equivalent bundle entries; selection is ambiguous: ${selected.path}`,
-      );
-    const entry = matches[0];
     if (entry === undefined)
       throw archivePathError(
         "invalid_value",
         `No regular file exists at ${selected.path} in the active app bundle.`,
       );
-    if (entry.kind !== "file")
-      throw archivePathError(
-        "invalid_value",
-        `Archive path selects a ${entry.kind}, not a regular file: ${selected.path}`,
-      );
-    if ((entry.declaredSize ?? 0) > MAX_BYTES)
-      throw new ArtifactReaderFailure("limit", "Keyed archive exceeds 64 MiB");
     const stream = await reader.open(entry, input.signal);
     const chunks: Buffer[] = [];
     let size = 0;

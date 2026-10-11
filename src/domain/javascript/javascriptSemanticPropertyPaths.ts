@@ -60,23 +60,7 @@ export class SemanticPropertyPathCoverage {
 
   /** Retain a path only when no previously retained prefix covers it. */
   retain(path: JavaScriptSemanticPropertyPath): boolean {
-    const pending = [{ node: this.#root, offset: 0 }];
-    while (pending.length > 0) {
-      const current = pending.pop();
-      if (current === undefined) break;
-      if (current.node.terminal) return false;
-      const key = path[current.offset];
-      if (key === undefined) continue;
-      if (key !== null && typeof key !== "object") {
-        const exact = current.node.exact.get(String(key));
-        if (exact !== undefined)
-          pending.push({ node: exact, offset: current.offset + 1 });
-      }
-      for (const selected of current.node.selectors.values()) {
-        if (keyCovers(selected.key, key))
-          pending.push({ node: selected.node, offset: current.offset + 1 });
-      }
-    }
+    if (this.covers(path)) return false;
     let node = this.#root;
     for (const key of path) {
       if (key !== null && typeof key !== "object") {
@@ -101,6 +85,28 @@ export class SemanticPropertyPathCoverage {
     node.exact.clear();
     node.selectors.clear();
     return true;
+  }
+
+  /** Query retained prefixes without changing the coverage index. */
+  covers(path: JavaScriptSemanticPropertyPath): boolean {
+    const pending = [{ node: this.#root, offset: 0 }];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (current === undefined) break;
+      if (current.node.terminal) return true;
+      const key = path[current.offset];
+      if (key === undefined) continue;
+      if (key !== null && typeof key !== "object") {
+        const exact = current.node.exact.get(String(key));
+        if (exact !== undefined)
+          pending.push({ node: exact, offset: current.offset + 1 });
+      }
+      for (const selected of current.node.selectors.values()) {
+        if (keyCovers(selected.key, key))
+          pending.push({ node: selected.node, offset: current.offset + 1 });
+      }
+    }
+    return false;
   }
 }
 

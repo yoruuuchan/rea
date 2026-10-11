@@ -53,7 +53,7 @@ import {
 
 interface EvaluationContext {
   readonly state: JavaScriptSemanticAnalysisState;
-  readonly bindings: ReadonlySet<string>;
+  readonly bindings: Set<string>;
   readonly expressionDepth: number;
   readonly capturePoint?: t.Node;
   readonly primitiveBindingValues: Map<string, JavaScriptSemanticValue>;
@@ -196,20 +196,26 @@ const evaluateBinding = (
   const initializer = binding.initializers[0];
   if (initializer === undefined)
     return { status: "unknown", reason: "Missing binding initializer." };
-  const nested = nestedContext(context, binding.bindingId);
-  let value = projectValue(
-    evaluateExpression(initializer.node, nested),
-    initializer.projection,
-  );
-  if (!isPrimitive(value)) {
-    const captureContext = primitiveCaptureContext(initializer.node, nested);
-    if (captureContext !== undefined) {
-      const captured = projectValue(
-        evaluateExpression(initializer.node, captureContext),
-        initializer.projection,
-      );
-      if (isPrimitive(captured)) value = captured;
+  context.bindings.add(binding.bindingId);
+  let value: JavaScriptSemanticValue;
+  try {
+    const nested = nestedContext(context);
+    value = projectValue(
+      evaluateExpression(initializer.node, nested),
+      initializer.projection,
+    );
+    if (!isPrimitive(value)) {
+      const captureContext = primitiveCaptureContext(initializer.node, nested);
+      if (captureContext !== undefined) {
+        const captured = projectValue(
+          evaluateExpression(initializer.node, captureContext),
+          initializer.projection,
+        );
+        if (isPrimitive(captured)) value = captured;
+      }
     }
+  } finally {
+    context.bindings.delete(binding.bindingId);
   }
   let projected = invalidateSemanticMutationPaths(value, binding.mutatedPaths);
   for (const escape of binding.escapedPaths) {
@@ -562,6 +568,30 @@ const provenanceForBinding = (
   binding: JavaScriptSemanticBindingState,
   context: EvaluationContext,
 ): JavaScriptBindingProvenance => {
+  const provenance = provenanceForBindingValue(binding, context);
+  const assigned = binding.definitions.some(
+    ({ kind }) => kind === "assignment",
+  );
+  const conditionallyInitialized = binding.initializers.some(({ node }) =>
+    context.state.conditionalInitializers.has(node),
+  );
+  if (
+    provenance.status !== "module" ||
+    (!assigned && !conditionallyInitialized)
+  )
+    return provenance;
+  return semanticAmbiguousProvenance(
+    provenance.origins,
+    assigned
+      ? `Binding ${binding.name} may be reassigned.`
+      : `Binding ${binding.name} is conditionally initialized.`,
+  );
+};
+
+const provenanceForBindingValue = (
+  binding: JavaScriptSemanticBindingState,
+  context: EvaluationContext,
+): JavaScriptBindingProvenance => {
   if (context.bindings.has(binding.bindingId))
     return semanticUnresolvedProvenance(
       "cycle",
@@ -586,10 +616,16 @@ const provenanceForBinding = (
       "unknown",
       "Dynamic provenance projection.",
     );
-  const resolved = provenanceForExpression(
-    initializer.node,
-    nestedContext(context, binding.bindingId),
-  );
+  context.bindings.add(binding.bindingId);
+  let resolved: JavaScriptBindingProvenance;
+  try {
+    resolved = provenanceForExpression(
+      initializer.node,
+      nestedContext(context),
+    );
+  } finally {
+    context.bindings.delete(binding.bindingId);
+  }
   if (resolved.status !== "module" || initializer.projection.length === 0)
     return resolved;
   return semanticOriginsProvenance(
@@ -718,20 +754,14 @@ const mergeValues = (
     : { status: "ambiguous", reason: "Branches have incompatible values." };
 };
 
-const nestedContext = (
-  context: EvaluationContext,
-  bindingId?: string,
-): EvaluationContext => ({
+const nestedContext = (context: EvaluationContext): EvaluationContext => ({
   state: context.state,
   primitiveBindingValues: context.primitiveBindingValues,
   ...(context.capturePoint === undefined
     ? {}
     : { capturePoint: context.capturePoint }),
   expressionDepth: context.expressionDepth + 1,
-  bindings:
-    bindingId === undefined
-      ? context.bindings
-      : new Set([...context.bindings, bindingId]),
+  bindings: context.bindings,
 });
 
 const isPrimitive = (value: JavaScriptSemanticValue): boolean =>

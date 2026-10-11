@@ -205,7 +205,7 @@ const analyzePathConsumers = (expression: string) => {
     windowExpression,
     utilityExpression,
     analysis: analyzeJavaScriptStaticSource(
-      `${genericPrefix}${property} };\n${windowExpression};\n${utilityExpression};`,
+      `${genericPrefix}${property} }; const { BrowserWindow, utilityProcess } = require("electron");\n${windowExpression};\n${utilityExpression};`,
     ),
   };
 };

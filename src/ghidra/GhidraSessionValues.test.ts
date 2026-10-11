@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GHIDRA_SESSION_CAPABILITIES,
+  GHIDRA_MUTATING_OPERATIONS,
   parseGhidraSessionInfo,
 } from "./GhidraSessionValues.js";
 
@@ -81,7 +82,7 @@ describe("Ghidra mutation handshake", () => {
       ...value,
       read_only: true,
       capabilities: value.capabilities.filter(
-        (c) => c !== "annotate_native_function",
+        (c) => !GHIDRA_MUTATING_OPERATIONS.has(c),
       ),
     };
     expect(
@@ -91,5 +92,25 @@ describe("Ghidra mutation handshake", () => {
     expect(
       parseGhidraSessionInfo(value, { ...expected, expectedReadOnly: true }).ok,
     ).toBe(false);
+  });
+  it("treats address naming as database mutation", () => {
+    expect([...GHIDRA_MUTATING_OPERATIONS].sort()).toEqual([
+      "annotate_native_function",
+      "set_address_name",
+      "set_addresses_names",
+    ]);
+    const value = session();
+    for (const naming of ["set_address_name", "set_addresses_names"]) {
+      expect(value.capabilities).toContain(naming);
+      expect(
+        parseGhidraSessionInfo(
+          {
+            ...value,
+            capabilities: value.capabilities.filter((c) => c !== naming),
+          },
+          expected,
+        ).ok,
+      ).toBe(false);
+    }
   });
 });

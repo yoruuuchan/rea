@@ -250,6 +250,49 @@ describe("dyld path expansion", () => {
   });
 });
 
+it("keeps directory requirements in symlink targets", async () => {
+  const names = [
+    "@loader_path/alias-slash",
+    "@loader_path/alias-dot",
+    "@loader_path/alias-directory/lib.dylib",
+  ];
+  const trace = await traceDylibLoading(
+    memoryView(
+      {
+        [MAIN]: executable({
+          dependencies: names.map((name) => dependency(name)),
+        }),
+        "Contents/MacOS/lib.dylib": parsed(slice()),
+      },
+      {
+        "Contents/MacOS/alias-slash": "lib.dylib/",
+        "Contents/MacOS/alias-dot": "lib.dylib/.",
+        "Contents/MacOS/alias-directory": "./",
+      },
+    ),
+    { roots: [MAIN] },
+  );
+  expect(
+    trace.edges.map(({ install_name, candidates, resolution }) => ({
+      install_name,
+      outcome: candidates[0]?.outcome,
+      resolution,
+    })),
+  ).toEqual(
+    names.map((name, index) => ({
+      install_name: name,
+      outcome: index < 2 ? "absent" : "resolved",
+      resolution:
+        index < 2
+          ? { status: "unresolved", image: null }
+          : { status: "resolved", image: "Contents/MacOS/lib.dylib" },
+    })),
+  );
+  expect(
+    trace.findings.map(({ kind, edge_index }) => [kind, edge_index]),
+  ).toEqual([0, 1].map((index) => ["required-load-unresolved", index]));
+});
+
 describe("dyld resolution outcomes: deriving path and weak-load outcomes", () => {
   it("keeps paths outside the root undetermined and in-root fallbacks conditional", async () => {
     const trace = await traceDylibLoading(

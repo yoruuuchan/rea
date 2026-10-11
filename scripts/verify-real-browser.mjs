@@ -45,6 +45,7 @@ import { verifyBrowserDomDestinations } from "./lib/browser-dom-destinations-e2e
 import { verifyBrowserCaptureMetadataBudget } from "./lib/browser-capture-metadata-budget-e2e.mjs";
 import { artifactCliEvidence, artifactMcpResult } from "./lib/artifact-e2e.mjs";
 import { verifyScenarioEnvironment } from "./lib/browser-scenario-environment-e2e.mjs";
+import { verifyScenarioStorage } from "./lib/browser-scenario-storage-e2e.mjs";
 
 const REAL_BROWSER_STARTUP_TIMEOUT_MS = 60_000;
 const SCENARIO_SECRET_VALUE = "rea-browser-verifier-secret";
@@ -64,6 +65,7 @@ try {
     executable,
     [
       "--headless=new",
+      "--password-store=basic",
       ...(process.env.REA_BROWSER_NO_SANDBOX === "true"
         ? ["--no-sandbox"]
         : []),
@@ -275,11 +277,18 @@ try {
     throw new Error("Scenario attachment terminated its external browser");
 
   const profilesBefore = await scenarioProfiles();
+  process.stderr.write("Browser verifier: scenario environment\n");
   const scenarioEnvironment = await verifyScenarioEnvironment(
     endpoint,
     target,
     site.origin,
   );
+  process.stderr.write("Browser verifier: scenario storage\n");
+  const scenarioStorage = await verifyScenarioStorage({
+    executable,
+    endpoint,
+    targetId: target,
+  });
   const launchedScenario = await createBrowserScenarioProvider(
     process.env,
   ).captureScenario(
@@ -332,7 +341,9 @@ try {
         `Browser scenario included unselected structured value: ${unselectedValue}`,
       );
 
+  process.stderr.write("Browser verifier: large screenshot\n");
   const largeScreenshot = await verifyLargeScreenshotE2e(endpoint, site.origin);
+  process.stderr.write("Browser verifier: popup coverage\n");
   const popupEvents = await verifyPopupEventCoverage(executable);
   const networkEvidence = await verifyBrowserNetworkEvidence(
     executable,
@@ -354,7 +365,11 @@ try {
     scripts: observed.value.scripts.items.length,
     networkRequests: observed.value.network.requests.length,
     consoleEvents: observed.value.console.events.length,
-    websocketEvents: observed.value.network.websocket_events.length,
+    websocketConnections: observed.value.network.websocket_connections.length,
+    websocketFrames: observed.value.network.websocket_connections.reduce(
+      (total, connection) => total + connection.events.length,
+      0,
+    ),
     bundleScripts: bundle.capture.scripts_analyzed,
     sourceMaps: bundle.observations.source_maps.processed,
     bundle_cli_and_stdio_mcp: true,
@@ -373,6 +388,7 @@ try {
     browserScenarioLaunchCleanup: "terminated-owned-process",
     scenarioFailure,
     scenarioEnvironment,
+    scenarioStorage,
     verified: true,
   };
 } finally {

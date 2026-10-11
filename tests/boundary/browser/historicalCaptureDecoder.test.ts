@@ -2,8 +2,10 @@ import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import {
   access,
   chmod,
+  mkdir,
   mkdtemp,
   rm,
+  symlink,
   truncate,
   writeFile,
 } from "node:fs/promises";
@@ -11,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { HistoricalCaptureDecoder } from "../../../src/browser/history/HistoricalCaptureDecoder.js";
+import { MitmproxyCaptureAdapter } from "../../../src/browser/history/MitmproxyCaptureAdapter.js";
 import { HAR_CAPTURE_PROVIDER_IDENTITY } from "../../../src/browser/history/CaptureRelease.js";
 import {
   inspectWebNetworkCaptureInputSchema,
@@ -19,6 +22,41 @@ import {
 import { historicalHar } from "../../fixtures/historicalHar.js";
 import { decodeHarCapture } from "../../../src/browser/history/HarCapture.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+
+const linux = it.skipIf(process.platform !== "linux");
+
+linux("refuses a directory configured as the mitmdump executable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-mitmdump-command-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const command = join(root, "mitmdump");
+  await mkdir(command);
+
+  await expect(
+    new MitmproxyCaptureAdapter({ REA_MITMDUMP_COMMAND: command }).command(
+      join(root, "request.json"),
+      join(root, "runtime"),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalysisCapabilityUnavailableError",
+    reason: expect.stringContaining(command),
+  });
+});
+
+linux("allows a symlink to a regular mitmdump executable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-mitmdump-command-symlink-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const command = join(root, "mitmdump");
+  const target = join(root, "mitmdump-bin");
+  await writeFile(target, "#!/bin/sh\n", { mode: 0o700 });
+  await symlink(target, command);
+
+  await expect(
+    new MitmproxyCaptureAdapter({ REA_MITMDUMP_COMMAND: command }).command(
+      join(root, "request.json"),
+      join(root, "runtime"),
+    ),
+  ).resolves.toMatchObject({ command });
+});
 
 it.each([true, false])(
   "binds decoder replies to the complete selected provider identity (matching name: %s)",

@@ -54,6 +54,7 @@ await writeFile(
 );
 const environment = {
   PATH: process.env.PATH ?? "",
+  HOME: account,
   USERPROFILE: account,
   [client === "pi" ? "PI_CODING_AGENT_DIR" : "HERMES_HOME"]: profile,
   PI_OFFLINE: "1",
@@ -71,13 +72,6 @@ const original =
       })
     : "# Keep caller settings.\nmcp_servers:\n  other:\n    command: unrelated-server\n    enabled: false\n";
 await writeFile(configPath, original);
-if (client === "pi") {
-  // The CLI fixture account and native os.homedir() differ; use Pi's caller-owned skill setting.
-  await writeFile(
-    join(profile, "settings.json"),
-    JSON.stringify({ skills: [join(account, ".agents", "skills")] }),
-  );
-}
 const clientVersion = (
   await exec(command, ["--version"], { env: environment, timeout: 30_000 })
 ).stdout.trim();
@@ -448,7 +442,7 @@ try {
       "loopback deterministic OpenAI-compatible endpoint; no live provider claim",
     skillDiscovery:
       client === "pi"
-        ? "caller-configured isolated shared directory; default OS home discovery unverified"
+        ? "native HOME shared personal directory; no explicit skill setting"
         : "native HERMES_HOME personal directory",
     stickyHermes,
     catalogSize: catalog?.length,

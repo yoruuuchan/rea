@@ -1,17 +1,22 @@
 import { err, ok, type Result } from "../domain/result.js";
-import { readFile } from "node:fs/promises";
+import {
+  RegularFileCleanupFailure,
+  readRegularFileText,
+} from "./RegularFileRead.js";
 import {
   effectiveClientServer,
   parseClientConfiguration,
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
 import type { SetupClient } from "./SupportedClients.js";
+import { clientRegistrationEnvironment } from "./ClientRegistrationEnvironment.js";
 
 /** A named source failure that setup can explain without losing the bad path. */
 export interface ClientConfigurationFileError {
   readonly kind: "unreadable" | "malformed";
   readonly path: string;
   readonly detail: string;
+  readonly cleanupFailure?: RegularFileCleanupFailure;
 }
 
 /** Preserve named read failures and distinguish a missing source from an empty file. */
@@ -19,7 +24,7 @@ export const readConfigurationText = async (
   path: string,
 ): Promise<Result<string | undefined, ClientConfigurationFileError>> => {
   try {
-    return ok(await readFile(path, "utf8"));
+    return ok(await readRegularFileText(path));
   } catch (cause: unknown) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
       return ok(undefined);
@@ -27,6 +32,9 @@ export const readConfigurationText = async (
       kind: "unreadable",
       path,
       detail: `Configuration ${path} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ...(cause instanceof RegularFileCleanupFailure
+        ? { cleanupFailure: cause }
+        : {}),
     });
   }
 };
@@ -63,7 +71,16 @@ export const readClientConfigurationFiles = async (
   for (const path of client.configPaths ?? [client.configPath]) {
     const document = await readConfigurationFile(path, client.format);
     if (!document.ok) return document;
-    if (document.value !== undefined) documents.push(document.value);
+    if (document.value !== undefined) {
+      const environment = clientRegistrationEnvironment(document.value);
+      if (!environment.ok)
+        return err({
+          kind: "malformed",
+          path,
+          detail: `Configuration ${path} has an invalid REA server environment: ${environment.error.settings.map(({ setting, constraint }) => `${setting}: ${constraint}`).join("; ")}. Repair it before rerunning setup.`,
+        });
+      documents.push(document.value);
+    }
   }
   return ok(documents);
 };

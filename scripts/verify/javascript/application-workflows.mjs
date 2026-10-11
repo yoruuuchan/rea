@@ -3,7 +3,7 @@
 import { realpath } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { analyzeJavaScriptApplication } from "../../../dist/application/javascript/JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplicationWithOwnedScope } from "../../lib/javascript-application-analysis.mjs";
 import {
   compareApplicationVersionsEvidence,
   compareJavaScriptExportShapesEvidence,
@@ -199,9 +199,5 @@ function selectorKey(selector) {
 }
 
 async function analyze(path) {
-  const result = await analyzeJavaScriptApplication({
-    input_path: path,
-  });
-  if (!result.ok) throw result.error;
-  return result.value;
+  return analyzeJavaScriptApplicationWithOwnedScope({ input_path: path });
 }

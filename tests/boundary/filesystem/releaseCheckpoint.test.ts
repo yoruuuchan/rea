@@ -1,10 +1,15 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
 import { z } from "zod";
 import { parse } from "yaml";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import {
+  createTestWorkspace,
+  removeTestWorkspace,
+  type TestWorkspace,
+} from "../../support/workspace/workspaceFixture.js";
 import {
   executeWorkflowFixture as execFileAsync,
   workflowGit as git,
@@ -52,27 +57,72 @@ async function metadata(
   );
 }
 
+interface ReleaseSeed {
+  readonly directory: string;
+  readonly releasedSha: string;
+}
+
+const seedWorkspaces: TestWorkspace[] = [];
+const seedPromises = new Map<string, Promise<ReleaseSeed>>();
+
+const releaseSeed = (versioning?: string): Promise<ReleaseSeed> => {
+  const key = versioning ?? "default";
+  const existing = seedPromises.get(key);
+  if (existing !== undefined) return existing;
+
+  const pending = (async (): Promise<ReleaseSeed> => {
+    const workspace = await createTestWorkspace("rea-release-checkpoint-seed-");
+    seedWorkspaces.push(workspace);
+    const directory = workspace.path(key);
+    await mkdir(directory, { recursive: true });
+    await git(directory, ["init", "--initial-branch=main"]);
+    await metadata(directory, "4.0.0", "Initial release", versioning);
+    await git(directory, ["add", "."]);
+    await git(
+      directory,
+      ["commit", "-m", "chore: seed"],
+      "2026-01-01T00:00:00Z",
+    );
+    await git(directory, ["switch", "-c", "release/5.0.0"]);
+    await metadata(directory, "5.0.0", "Previous release", versioning);
+    await git(directory, ["add", "."]);
+    await git(
+      directory,
+      ["commit", "-m", "chore: release 5.0.0"],
+      "2026-01-03T00:00:00Z",
+    );
+    const releasedSha = await git(directory, ["rev-parse", "HEAD"]);
+    await git(directory, ["tag", "rea-agents-5.0.0"]);
+    await git(directory, ["switch", "main"]);
+    return { directory, releasedSha };
+  })();
+  seedPromises.set(key, pending);
+  return pending;
+};
+
+afterAll(async () => {
+  await Promise.allSettled(seedPromises.values());
+  const cleanup = await Promise.allSettled(
+    seedWorkspaces.map(({ root }) => removeTestWorkspace(root)),
+  );
+  const failures = cleanup.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (failures.length > 0)
+    throw new AggregateError(
+      failures,
+      "Could not remove release checkpoint seeds",
+    );
+});
+
 async function fixture(
   subject = "fix(contracts)!: require absolute paths (#948)",
   footer = "",
   options: { mergePullRequest?: boolean; versioning?: string } = {},
 ) {
+  const seed = await releaseSeed(options.versioning);
   const directory = await createTestTempDirectory("rea-release-ancestry-");
-  await git(directory, ["init", "--initial-branch=main"]);
-  await metadata(directory, "4.0.0", "Initial release", options.versioning);
-  await git(directory, ["add", "."]);
-  await git(directory, ["commit", "-m", "chore: seed"], "2026-01-01T00:00:00Z");
-  await git(directory, ["switch", "-c", "release/5.0.0"]);
-  await metadata(directory, "5.0.0", "Previous release", options.versioning);
-  await git(directory, ["add", "."]);
-  await git(
-    directory,
-    ["commit", "-m", "chore: release 5.0.0"],
-    "2026-01-03T00:00:00Z",
-  );
-  const releasedSha = await git(directory, ["rev-parse", "HEAD"]);
-  await git(directory, ["tag", "rea-agents-5.0.0"]);
-  await git(directory, ["switch", "main"]);
+  await cp(seed.directory, directory, { recursive: true, dereference: true });
   if (options.mergePullRequest) {
     await git(directory, ["switch", "-c", "change/contracts"]);
   }
@@ -115,7 +165,7 @@ async function fixture(
     directory,
     sourceSha,
     changedSha,
-    releasedSha,
+    releasedSha: seed.releasedSha,
     versioning: options.versioning,
   };
 }

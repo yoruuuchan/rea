@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
-import { reconstructJavaScriptArtifact } from "../../../src/application/javascript/JavaScriptArtifactReconstruction.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
+import { reconstructJavaScriptArtifact } from "../../support/javascriptApplicationScope.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { analyzeJavaScriptApplicationInputSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
@@ -72,12 +72,16 @@ describe("static Electron application analysis", () => {
 
     const result = await reconstructJavaScriptArtifact({ input_path: root });
     const graph = parseJavaScriptApplicationGraph(result.graph);
-    const requestedMembers = graph.nodes.flatMap((node) =>
+    // Computed access keeps no known members; the unknown access is an
+    // explicit dynamic flag rather than a "*" sentinel inside members.
+    const accesses = graph.nodes.flatMap((node) =>
       node.kind === "native-export"
-        ? node.observations.flatMap(({ properties }) => {
-            const members = properties.requested_members;
-            return Array.isArray(members) ? members : [];
-          })
+        ? node.observations.map(({ properties }) => ({
+            members: Array.isArray(properties.requested_members)
+              ? properties.requested_members
+              : [],
+            dynamicMemberAccess: properties.dynamic_member_access ?? false,
+          }))
         : [],
     );
 
@@ -86,7 +90,7 @@ describe("static Electron application analysis", () => {
       native_addon_bindings: 1,
       resolved_native_addon_bindings: 1,
     });
-    expect(requestedMembers).toEqual(["*"]);
+    expect(accesses).toEqual([{ members: [], dynamicMemberAccess: true }]);
   });
 
   it("maps Electron boundaries through bundler-renamed bindings", async () => {

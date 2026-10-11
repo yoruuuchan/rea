@@ -94,9 +94,9 @@ export const captureWebExecution = async (
       sources.belongsToDocument(id),
     );
     const sample =
-      raw === undefined
-        ? undefined
-        : normalizePreciseCoverage(raw, sources, retained);
+      parsed?.success === true
+        ? normalizePreciseCoverage(parsed.data, sources, retained)
+        : undefined;
     await session.options.progress?.report({
       phase: "browser_execution",
       completed: 2,

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { classifyArtifactContent } from "../../../src/artifacts/inventory/ArtifactGraphConstruction.js";
 import { ARTIFACT_CLASSIFICATION_PREFIX_BYTES } from "../../../src/artifacts/ArtifactHash.js";
-import { scanCanonicalArtifactInventory } from "../../../src/artifacts/inventory/scanCanonical.js";
+import { scanCanonicalArtifactInventory } from "../../fixtures/artifactInventory.js";
 import { artifactInventoryResultSchema } from "../../../src/domain/artifactGraph.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 

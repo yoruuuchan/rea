@@ -1,31 +1,26 @@
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { EvidenceBundle } from "../domain/evidenceBundle.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { compareBundles } from "../domain/bundleComparison.js";
-import { EvidenceLedger } from "./investigation/EvidenceLedger.js";
 import {
   readEvidenceBundle,
   writeEvidenceBundle,
 } from "./EvidenceBundleFiles.js";
 
-/** Validate and merge one bundle using the session Evidence ledger. */
+/** Validate a standalone bundle and report its complete record/revision counts. */
 export const importEvidenceBundleCommand = async (
   path: string,
 ): Promise<Result<JsonValue, AnalysisError>> => {
   const loaded = await readEvidenceBundle(path);
   if (!loaded.ok) return loaded;
-  const ledger = createLedger();
-  const imported = ledger.import(loaded.value);
-  return imported.ok
-    ? ok({
-        imported: imported.value.recordsAdded,
-        unknowns_added: imported.value.unknownsAdded,
-        total: ledger.export().records.length,
-      })
-    : imported;
+  return ok({
+    imported: loaded.value.records.length,
+    unknowns_added: loaded.value.unknowns.length,
+    total: loaded.value.records.length,
+  });
 };
 
 /** Validate a source bundle and atomically export canonical bytes. */
@@ -63,8 +58,6 @@ export const compareEvidenceBundlesCommand = async (input: {
     );
   }
 };
-
-const createLedger = (): EvidenceLedger => new EvidenceLedger();
 
 const projectWrite = (
   bundle: EvidenceBundle,

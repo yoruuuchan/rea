@@ -177,12 +177,12 @@ const englishUnicodeCaseCollisions = (
     if (path.length === 0 || path === ".") continue;
     let node = root;
     for (const part of path.split("/")) {
-      const folded = englishCaseFold(part);
-      const spellings = node.spellingsByFold.get(folded);
-      if (spellings === undefined) node.spellingsByFold.set(folded, [part]);
-      else if (!spellings.includes(part)) spellings.push(part);
       let child = node.bySpelling.get(part);
       if (child === undefined) {
+        const folded = englishCaseFold(part);
+        const spellings = node.spellingsByFold.get(folded);
+        if (spellings === undefined) node.spellingsByFold.set(folded, [part]);
+        else spellings.push(part);
         child = emptyCaseNode();
         node.bySpelling.set(part, child);
       }

@@ -1,10 +1,10 @@
 import { compareUnicodeCodePoints } from "./unicodeCodePointOrder.js";
 import { z } from "zod";
 
-import {
-  type ArtifactInventoryResult,
-  type ArtifactNode,
-  type ArtifactOccurrence,
+import type {
+  ArtifactInventoryResult,
+  ArtifactNode,
+  ArtifactOccurrence,
 } from "./artifactGraph.js";
 import { evidenceSchema } from "./evidence.js";
 import {

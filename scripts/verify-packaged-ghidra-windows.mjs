@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { requireMcpOperationResult } from "./lib/mcp-verifier-results.mjs";
+import { verifyGhidraCompactReferences } from "./lib/real-ghidra-compact-references.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -171,7 +172,12 @@ const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const runtimeParent = join(workspace, "runtime with spaces");
 await mkdir(runtimeParent);
 const callerDirectory = join(workspace, "caller cwd with spaces");
-const scriptCollisions = ["ReaGhidraBridge.java", "ReaGhidraPrepareCom.java"];
+const scriptCollisions = [
+  "ReaGhidraBridge.java",
+  "ReaGhidraPrepareCom.java",
+  "ReaGhidraApplySeeds.java",
+  "ReaGhidraNoReturnFix.java",
+];
 await mkdir(callerDirectory);
 for (const name of scriptCollisions) await mkdir(join(callerDirectory, name));
 const environment = {
@@ -358,6 +364,36 @@ try {
     await call("inspect_native_data_type", { type: "/undefined8" });
     await call("inspect_native_instruction", { address: procedure.address });
     await call("resolve_native_call_targets", { address: procedure.address });
+    // Explicit caller-selected targets need not contain our fixture instructions.
+    const controlledTargets = [
+      "rea-ghidra-windows.exe",
+      "rea-ghidra-windows-x86.exe",
+    ].map((name) => resolve("build", "fixtures", name));
+    if (controlledTargets.includes(target))
+      report.compactReferences = await verifyGhidraCompactReferences(
+        call,
+        target === controlledTargets[1],
+        async (command, address) => {
+          const result = await exec(
+            process.execPath,
+            [entry, command, target, address, "--provider", "ghidra", "--json"],
+            {
+              env: environment,
+              cwd: callerDirectory,
+              timeout: 360_000,
+              maxBuffer: 8 * 1024 * 1024,
+            },
+          );
+          const evidence = JSON.parse(result.stdout);
+          assert.ok(evidence.error === undefined, `CLI ${command} failed`);
+          const contract = TOOL_CONTRACTS.find(
+            ({ name }) => name === command.replaceAll("-", "_"),
+          );
+          assert.ok(contract, `Missing CLI ${command} contract`);
+          contract.outputSchema.parse(evidence);
+          return evidence.normalized_result;
+        },
+      );
     const expected = (
       await import(
         pathToFileURL(join(packageRoot, "dist/ghidra/GhidraSessionValues.js"))

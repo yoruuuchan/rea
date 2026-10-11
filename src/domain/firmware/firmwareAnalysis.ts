@@ -99,6 +99,8 @@ const chunk = z.strictObject({
 export interface FirmwarePartialObservation {
   readonly kind: "firmware";
   readonly result: JsonValue;
+  /** Completed producer data, artifact identity and analysis metadata. */
+  readonly provenance?: JsonValue;
 }
 
 /** Portable results retain reported boundaries, unknowns and extraction lineage. */

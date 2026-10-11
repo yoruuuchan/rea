@@ -8,7 +8,11 @@ import { expect, it, onTestFinished } from "vitest";
 import { compareProcessEvidenceFiles } from "../../../src/application/process/ProcessCli.js";
 import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
-import { createEvidence } from "../../../src/domain/evidence.js";
+import {
+  createEvidence,
+  parseEvidence,
+  type EvidenceProvider,
+} from "../../../src/domain/evidence.js";
 import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
 import { digestProcessCommitment } from "../../../src/domain/process/processScenario.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -18,8 +22,9 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 const captureEvidence = (
   side: "left" | "right",
   comparisonContract: Readonly<Record<string, string>> = {},
+  provider: EvidenceProvider = PROCESS_PROVIDER,
 ) =>
-  createEvidence(undefined, PROCESS_PROVIDER, {
+  createEvidence(undefined, provider, {
     predicateType: "rea.process-capture",
     operation: "capture_process_scenario",
     parameters: { side },
@@ -55,6 +60,118 @@ const connect = async () => {
   await client.connect(clientTransport);
   return client;
 };
+
+const compareViaCli = async (
+  left: ReturnType<typeof captureEvidence>,
+  right: ReturnType<typeof captureEvidence>,
+) => {
+  const root = await createTestTempDirectory("rea-process-provider-");
+  const leftPath = join(root, "left.json");
+  const rightPath = join(root, "right.json");
+  await Promise.all([
+    writeFile(leftPath, JSON.stringify(left)),
+    writeFile(rightPath, JSON.stringify(right)),
+  ]);
+  return compareProcessEvidenceFiles(leftPath, rightPath);
+};
+
+it.each(
+  (["left", "right"] as const).flatMap((side) =>
+    [
+      { id: "unrelated-provider" },
+      { version: "1" },
+      { name: "unrelated provider" },
+    ].map((change) => ({ side, change })),
+  ),
+)(
+  "rejects an authenticated $side capture with provider $change",
+  async ({ side, change }) => {
+    const wrongProvider = captureEvidence(
+      side,
+      {},
+      { ...PROCESS_PROVIDER, ...change },
+    );
+    expect(parseEvidence(wrongProvider)).toEqual(wrongProvider);
+    const left = side === "left" ? wrongProvider : captureEvidence("left");
+    const right = side === "right" ? wrongProvider : captureEvidence("right");
+    const issue = {
+      path: [side, "provider"],
+      reason: "invalid_value",
+      message: expect.stringContaining("process capture provider"),
+    };
+    expect(await compareViaCli(left, right)).toMatchObject({
+      category: "invalid_input",
+      details: { operation: "compare_process_captures", issues: [issue] },
+    });
+    const client = await connect();
+    const response = await client.callTool({
+      name: "compare_process_captures",
+      arguments: { left, right },
+    });
+    expect(response.isError).toBe(true);
+    expect(parseMcpToolError(response)).toMatchObject({
+      error: { code: "invalid_request", details: { issues: [issue] } },
+    });
+    await client.ping();
+  },
+);
+
+it.each([PROCESS_PROVIDER.name, "REA deterministic process harness"])(
+  "preserves authenticated CLI/MCP comparison Evidence for provider name %s",
+  async (name) => {
+    const provider = { ...PROCESS_PROVIDER, name };
+    const left = captureEvidence("left", {}, provider);
+    const right = captureEvidence("right", {}, provider);
+    const cli = parseEvidence(await compareViaCli(left, right));
+    const client = await connect();
+    const response = await client.callTool({
+      name: "compare_process_captures",
+      arguments: { left, right },
+    });
+    expect(response.isError).not.toBe(true);
+    expect(parseEvidence(response.structuredContent)).toEqual(cli);
+    const text = response.content.find((block) => block.type === "text");
+    expect(text?.type).toBe("text");
+    if (text?.type !== "text") throw new Error("Missing comparison text");
+    expect(JSON.parse(text.text)).toEqual(cli);
+    expect(cli.evidence_links).toEqual([left.evidence_id, right.evidence_id]);
+  },
+);
+
+it.each(["left", "right"] as const)(
+  "authenticates the %s Evidence before provider admission",
+  async (side) => {
+    const mismatched = captureEvidence(
+      side,
+      {},
+      { ...PROCESS_PROVIDER, id: "unrelated-provider" },
+    );
+    const tampered = { ...mismatched, parameters: { side: "tampered" } };
+    const left = side === "left" ? tampered : captureEvidence("left");
+    const right = side === "right" ? tampered : captureEvidence("right");
+    expect(await compareViaCli(left, right)).toMatchObject({
+      category: "invalid_input",
+      details: {
+        issues: [
+          {
+            path: ["evidence_id"],
+            message: expect.stringContaining(
+              "Evidence semantic identifier does not match its record",
+            ),
+          },
+        ],
+      },
+    });
+    const client = await connect();
+    const response = await client.callTool({
+      name: "compare_process_captures",
+      arguments: { left, right },
+    });
+    expect(parseMcpToolError(response)).toMatchObject({
+      error: { code: "evidence_integrity_mismatch" },
+    });
+  },
+);
 
 it("names differing comparison contract fields through MCP and the CLI", async () => {
   const client = await connect();

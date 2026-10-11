@@ -23,13 +23,26 @@ interface ItemContext {
   readonly rightGraph: JavaScriptApplicationGraph;
   readonly leftEvidenceId: string;
   readonly rightEvidenceId: string;
-  readonly leftNativeEvidence: readonly Evidence[];
-  readonly rightNativeEvidence: readonly Evidence[];
+  readonly leftNativeEvidenceByDigest: ReadonlyMap<string, readonly string[]>;
+  readonly rightNativeEvidenceByDigest: ReadonlyMap<string, readonly string[]>;
   readonly pairByLeft: ReadonlyMap<string, string>;
   readonly pairByRight: ReadonlyMap<string, string>;
   readonly leftRelationships: RelationshipIndex;
   readonly rightRelationships: RelationshipIndex;
 }
+
+type ItemContextInput = Omit<
+  ItemContext,
+  | "leftNativeEvidenceByDigest"
+  | "rightNativeEvidenceByDigest"
+  | "pairByLeft"
+  | "pairByRight"
+  | "leftRelationships"
+  | "rightRelationships"
+> & {
+  readonly leftNativeEvidence: readonly Evidence[];
+  readonly rightNativeEvidence: readonly Evidence[];
+};
 
 interface IndexedRelationship {
   readonly direction: "in" | "out";
@@ -66,10 +79,7 @@ type ComparisonItemSemantic<
 /** Classify matched, unmatched, and ambiguous nodes without inventing absence. */
 export const classifyJavaScriptApplicationVersions = (
   matching: ApplicationVersionMatchingProjection,
-  context: Omit<
-    ItemContext,
-    "pairByLeft" | "pairByRight" | "leftRelationships" | "rightRelationships"
-  >,
+  context: ItemContextInput,
 ): ApplicationVersionItemProjection => {
   const pairByLeft = new Map(
     matching.pairs.map(({ left, right }) => [
@@ -84,7 +94,14 @@ export const classifyJavaScriptApplicationVersions = (
     ]),
   );
   const fullContext: ItemContext = {
-    ...context,
+    leftGraph: context.leftGraph,
+    rightGraph: context.rightGraph,
+    leftEvidenceId: context.leftEvidenceId,
+    rightEvidenceId: context.rightEvidenceId,
+    leftNativeEvidenceByDigest: indexNativeEvidence(context.leftNativeEvidence),
+    rightNativeEvidenceByDigest: indexNativeEvidence(
+      context.rightNativeEvidence,
+    ),
     pairByLeft,
     pairByRight,
     leftRelationships: indexRelationships(context.leftGraph),
@@ -426,24 +443,33 @@ const itemEvidenceLinks = (
     ...new Set([
       context.leftEvidenceId,
       context.rightEvidenceId,
-      ...nativeLinks(left, context.leftNativeEvidence),
-      ...nativeLinks(right, context.rightNativeEvidence),
+      ...nativeLinks(left, context.leftNativeEvidenceByDigest),
+      ...nativeLinks(right, context.rightNativeEvidenceByDigest),
     ]),
   ].sort(compareUnicodeCodePoints);
 
 const nativeLinks = (
   node: ApplicationNode | undefined,
+  evidenceByDigest: ReadonlyMap<string, readonly string[]>,
+): readonly string[] => {
+  const identity = node === undefined ? null : contentIdentity(node);
+  if (identity === null) return [];
+  const digest = identity.replace(/^content:/u, "");
+  return evidenceByDigest.get(digest) ?? [];
+};
+
+const indexNativeEvidence = (
   evidence: readonly Evidence[],
-): string[] => {
-  const digest =
-    node === undefined
-      ? null
-      : contentIdentity(node)?.replace(/^content:/u, "");
-  return digest === null
-    ? []
-    : evidence
-        .filter(({ subject }) => subject?.digest.sha256 === digest)
-        .map(({ evidence_id: id }) => id);
+): ReadonlyMap<string, readonly string[]> => {
+  const evidenceByDigest = new Map<string, string[]>();
+  for (const { evidence_id: id, subject } of evidence) {
+    const digest = subject?.digest.sha256;
+    if (digest === undefined) continue;
+    const ids = evidenceByDigest.get(digest);
+    if (ids === undefined) evidenceByDigest.set(digest, [id]);
+    else ids.push(id);
+  }
+  return evidenceByDigest;
 };
 
 const pairLimitations = (

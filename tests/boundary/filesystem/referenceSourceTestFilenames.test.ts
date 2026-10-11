@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { importReferenceSource } from "../../../src/application/ReferenceSourceImport.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 it("imports test-suffixed filenames with unchanged paths, hashes, and languages", async () => {
   const root = await createTestTempDirectory("rea-reference-test-filenames-");

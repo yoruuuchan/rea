@@ -14,14 +14,13 @@ it("analyzes direct returns after deep source without exhausting the default pro
     `export function render() { object${".property".repeat(20_000)}; function nested() { return "nested"; } class Inner { method() { return "method"; } } return "ready"; }`,
   );
   const service = new URL(
-    "../../../dist/application/javascript/JavaScriptApplicationService.js",
+    "../../../scripts/lib/javascript-application-analysis.mjs",
     import.meta.url,
   ).href;
   const script = `
-    import { analyzeJavaScriptApplication } from ${JSON.stringify(service)};
-    const result = await analyzeJavaScriptApplication({ input_path: ${JSON.stringify(root)}, format: "directory" });
-    if (!result.ok) throw result.error;
-    const nodes = result.value.normalized_result.semantic_graph.nodes;
+    import { analyzeJavaScriptApplicationWithOwnedScope } from ${JSON.stringify(service)};
+    const evidence = await analyzeJavaScriptApplicationWithOwnedScope({ input_path: ${JSON.stringify(root)}, format: "directory" });
+    const nodes = evidence.normalized_result.semantic_graph.nodes;
     console.log(JSON.stringify(nodes.filter(node => node.kind === "return-site").map(node => node.function_node_id)));
   `;
   const { stdout, stderr } = await promisify(execFile)(

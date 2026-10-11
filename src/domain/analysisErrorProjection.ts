@@ -1,4 +1,5 @@
 import { jsonValueSchema, type JsonValue } from "./jsonValue.js";
+import { isImmutableJsonSnapshot } from "./immutableJson.js";
 
 import {
   analysisErrorCategory,
@@ -39,10 +40,7 @@ import { ProviderAdapterError } from "./providerAdapterError.js";
 import { ProviderSelectionError } from "./providerSelectionError.js";
 import { UnknownRegistryError } from "./unknownRegistryError.js";
 import { providerRetryAction } from "./providerOperationHealth.js";
-import {
-  type AnalysisError,
-  type AnalysisErrorTag,
-} from "./analysisErrorBase.js";
+import type { AnalysisError, AnalysisErrorTag } from "./analysisErrorBase.js";
 
 /** Project expected failures into exhaustive, secret-safe caller fields. */
 export const projectAnalysisError = (
@@ -71,7 +69,9 @@ export const projectAnalysisError = (
     ...(error.partialObservation === undefined
       ? {}
       : {
-          partial_observation: jsonValueSchema.parse(error.partialObservation),
+          partial_observation: isImmutableJsonSnapshot(error.partialObservation)
+            ? error.partialObservation
+            : jsonValueSchema.parse(error.partialObservation),
         }),
   };
   return {

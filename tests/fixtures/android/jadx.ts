@@ -1,4 +1,11 @@
-import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, onTestFinished } from "vitest";
@@ -27,10 +34,11 @@ export const createJadxProtocolFixture = async (
   const javaHome = join(root, "jdk");
   const javaBin = join(javaHome, "bin");
   const java = join(javaBin, "java");
+  const javaProbeLog = join(root, "java-probes.log");
   await mkdir(javaBin, { recursive: true });
   await writeFile(
     java,
-    `#!/usr/bin/env node\nif (process.argv[2] === "--list-modules") console.log("java.base@21.0.0\\njdk.compiler@21.0.0");\n`,
+    `#!/usr/bin/env node\nif (process.argv[2] === "--list-modules") { require("node:fs").appendFileSync(${JSON.stringify(javaProbeLog)}, "probe\\n"); console.log("java.base@21.0.0\\njdk.compiler@21.0.0"); }\n`,
   );
   await chmod(java, 0o755);
   await writeOrderedZip(apk, ["AndroidManifest.xml", "classes.dex"]);
@@ -76,9 +84,20 @@ export const createJadxProtocolFixture = async (
           });
           // The SDK can close the child transport before process exit settles.
           // Retry retained ownership without bypassing the supervisor's proof.
+          // Retain the entire stop result so an incomplete teardown failure reports its reason.
           await expect
-            .poll(() => supervisor.stop(), { timeout: 5_000 })
-            .not.toMatchObject({ status: "incomplete" });
+            .poll(
+              async () => {
+                const stopped = await supervisor.stop();
+                if (stopped.status === "incomplete")
+                  throw new Error(
+                    `Owned process cleanup incomplete: ${stopped.reason}`,
+                  );
+                return stopped.status;
+              },
+              { timeout: 5_000 },
+            )
+            .not.toBe("incomplete");
           if (options.cwd !== undefined)
             await rm(options.cwd, { recursive: true, force: true });
         });
@@ -115,6 +134,10 @@ export const createJadxProtocolFixture = async (
     jar,
     environment,
     launches,
+    javaProbeCount: async () => {
+      const contents = await readFile(javaProbeLog, "utf8");
+      return contents.split("\n").filter(Boolean).length;
+    },
   };
 };
 

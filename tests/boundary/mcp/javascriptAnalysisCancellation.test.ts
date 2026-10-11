@@ -12,9 +12,10 @@ import {
 } from "../../fixtures/binarySession.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-it("stops a cancelled SDK request on the server, retains prior Evidence, and accepts subsequent work", async () => {
+it("retains completed source facts and prior Evidence after SDK cancellation, then accepts subsequent work", async () => {
   const root = await createTestTempDirectory("rea-mcp-js-cancellation-");
   await writeFile(join(root, "main.js"), "export const observed = 1;\n");
+  await writeFile(join(root, "second.js"), "export const pending = 2;\n");
   const session = createTestBinarySession(() => {
     throw new Error(
       "Static JavaScript analysis must not start a binary provider",
@@ -74,7 +75,12 @@ it("stops a cancelled SDK request on the server, retains prior Evidence, and acc
     },
     {
       signal: controller.signal,
-      onprogress() {
+      onprogress(update) {
+        if (
+          !update.message?.startsWith("parse_javascript_source:") ||
+          !update.message.includes("second.js")
+        )
+          return;
         requested = true;
         controller.abort(new Error("SDK cancellation verification"));
       },
@@ -89,15 +95,38 @@ it("stops a cancelled SDK request on the server, retains prior Evidence, and acc
     name: "get_evidence_bundle",
     arguments: {},
   });
+  const records = z
+    .object({
+      result: z.object({
+        records: z.array(z.object({ evidence_id: z.string() })),
+      }),
+    })
+    .parse(bundle.structuredContent).result.records;
+  expect(records).toContainEqual({ evidence_id: prior.evidence_id });
+  const partial = records.find(
+    ({ evidence_id }) => evidence_id !== prior.evidence_id,
+  );
+  if (partial === undefined)
+    throw new Error("Cancelled analysis discarded its completed source facts");
   expect(
     z
       .object({
-        result: z.object({
-          records: z.array(z.object({ evidence_id: z.string() })),
+        statistics: z.object({
+          parsed_javascript_files: z.number(),
+          parse_failures: z.number(),
         }),
       })
-      .parse(bundle.structuredContent).result.records,
-  ).toEqual([{ evidence_id: prior.evidence_id }]);
+      .parse(session.evidenceById(partial.evidence_id)?.normalized_result)
+      .statistics,
+  ).toEqual({ parsed_javascript_files: 1, parse_failures: 0 });
+  const view = await client.callTool({
+    name: "inspect_analysis_view",
+    arguments: {
+      source: { kind: "retained-evidence", evidence_id: partial.evidence_id },
+      view: { kind: "summary" },
+    },
+  });
+  expect(view.isError, JSON.stringify(view)).not.toBe(true);
   const next = await client.callTool({
     name: "analyze_javascript_application",
     arguments: {

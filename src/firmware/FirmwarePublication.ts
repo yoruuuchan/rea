@@ -2,8 +2,10 @@ import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
 import { SafeOutputTree } from "../artifacts/SafeOutputTree.js";
+import { SafeOutputTreeCreationFailure } from "../artifacts/SafeOutputTreeCreationFailure.js";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { jsonValueSchema } from "../domain/jsonValue.js";
 import { firmwareResultSchemas } from "../domain/firmware/firmwareAnalysis.js";
 import { hashFirmwareFile, type FirmwareEntry } from "./FirmwareFiles.js";
 import type { normalizeUnblobReport } from "./FirmwareReports.js";
@@ -16,8 +18,12 @@ export const publishFirmwareExtraction = async (context: {
   selection: { offset: number; length: number; sha256: string };
   engine: z.infer<typeof firmwareResultSchemas.extract_firmware>["engine"];
   signal: AbortSignal;
+  retainCleanup: (tree: SafeOutputTree) => void;
 }) => {
   let tree: SafeOutputTree | undefined;
+  let result:
+    | z.infer<typeof firmwareResultSchemas.extract_firmware>
+    | undefined;
   try {
     const materialized = new Set(
       context.entries
@@ -60,7 +66,7 @@ export const publishFirmwareExtraction = async (context: {
       await tree.write(
         entry.relativePath,
         createReadStream(entry.path),
-        sha256,
+        { sha256, bytes: entry.size },
         context.signal,
       );
       files.push({
@@ -75,7 +81,7 @@ export const publishFirmwareExtraction = async (context: {
         original_file_range: null,
       });
     }
-    const result = firmwareResultSchemas.extract_firmware.parse({
+    result = firmwareResultSchemas.extract_firmware.parse({
       engine: context.engine,
       selection: context.selection,
       output_directory: tree.outputRoot,
@@ -93,9 +99,18 @@ export const publishFirmwareExtraction = async (context: {
     await tree.commit();
     return result;
   } catch (cause: unknown) {
+    if (cause instanceof SafeOutputTreeCreationFailure) tree = cause.tree;
     try {
       await tree?.rollback();
     } catch (cleanupCause: unknown) {
+      if (tree !== undefined) context.retainCleanup(tree);
+      const publishedResult =
+        tree?.published === true && result !== undefined
+          ? {
+              kind: "firmware" as const,
+              result: jsonValueSchema.parse(result),
+            }
+          : undefined;
       throw new ProviderCleanupError(
         "unblob",
         [context.outputDirectory],
@@ -107,9 +122,16 @@ export const publishFirmwareExtraction = async (context: {
           previous_error:
             cause instanceof Error ? cause.message : String(cause),
         },
-        { cause: cleanupCause },
+        {
+          cause: cleanupCause,
+          operation: "extract_firmware",
+          ...(publishedResult === undefined
+            ? {}
+            : { partialObservation: publishedResult }),
+        },
       );
     }
+    if (tree?.published === true && result !== undefined) return result;
     throw cause;
   }
 };

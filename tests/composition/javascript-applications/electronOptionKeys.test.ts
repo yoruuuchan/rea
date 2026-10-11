@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { reconstructJavaScriptArtifact } from "../../../src/application/javascript/JavaScriptArtifactReconstruction.js";
+import { reconstructJavaScriptArtifact } from "../../support/javascriptApplicationScope.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 
@@ -164,8 +164,14 @@ const windowPreloadNodes = (result: Reconstruction) =>
 const reconstructSource = async (source: string): Promise<Reconstruction> => {
   const root = await createTestTempDirectory("rea-electron-option-keys-");
   await Promise.all([
-    writeFile(join(root, "package.json"), JSON.stringify({ main: "main.js" })),
-    writeFile(join(root, "main.js"), source),
+    writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ main: "main.js", type: "module" }),
+    ),
+    writeFile(
+      join(root, "main.js"),
+      `${source}\nimport { BrowserWindow, utilityProcess } from "electron";\n`,
+    ),
     writeFile(join(root, "preload.js"), "void 0;"),
     writeFile(join(root, "worker.js"), "void 0;"),
   ]);

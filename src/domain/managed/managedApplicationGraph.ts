@@ -134,6 +134,7 @@ export const projectManagedApplicationGraph = (
   const parsed = parseManagedInputs(input);
   const artifactIdentity = chooseArtifact(parsed);
   assertSameArtifact(parsed, artifactIdentity.sha256);
+  assertConsistentModuleIdentity(parsed);
   const evidenceLinks = [
     parsed.artifact?.evidence.evidence_id,
     parsed.members?.evidence.evidence_id,
@@ -258,6 +259,52 @@ const assertSameArtifact = (
       );
 };
 
+/** Reject contradictory known module identities while leaving null fields unknown. */
+const assertConsistentModuleIdentity = (
+  parsed: ParsedManagedGraphInput,
+): void => {
+  const mvidClaims = [
+    parsed.artifact?.result.module?.mvid,
+    parsed.members?.result.module?.mvid,
+    parsed.members?.result.identity_scope.requires_mvid,
+    parsed.boundaries?.result.module?.mvid,
+    parsed.boundaries?.result.identity_scope.requires_mvid,
+  ]
+    .filter((mvid): mvid is string => mvid !== undefined && mvid !== null)
+    .map((mvid) => mvid.toLowerCase());
+  if (new Set(mvidClaims).size > 1)
+    throw new TypeError(
+      "Managed graph inputs report conflicting known module MVIDs or token scopes",
+    );
+
+  const modules = [
+    parsed.artifact?.result.module,
+    parsed.members?.result.module,
+    parsed.boundaries?.result.module,
+  ].filter(
+    (module): module is NonNullable<ManagedArtifactInspection["module"]> =>
+      module !== undefined && module !== null,
+  );
+  for (const field of ["name", "generation", "token", "row_offset"] as const) {
+    const values = new Set(modules.map((module) => module[field]));
+    if (values.size > 1)
+      throw new TypeError(
+        `Managed graph inputs report conflicting module ${field} values`,
+      );
+  }
+  for (const field of ["enc_id", "enc_base_id"] as const) {
+    const values = new Set(
+      modules
+        .map((module) => module[field]?.toLowerCase())
+        .filter((value): value is string => value !== undefined),
+    );
+    if (values.size > 1)
+      throw new TypeError(
+        `Managed graph inputs report conflicting module ${field} values`,
+      );
+  }
+};
+
 const omittedCounts = (parsed: ParsedManagedGraphInput) =>
   assessManagedGraphOmissions({
     artifact: parsed.artifact?.result ?? null,
@@ -287,5 +334,10 @@ const projectionLimitations = (
     : []),
   ...(omissions.partialInput
     ? ["At least one supplied managed Evidence record has partial coverage."]
+    : []),
+  ...(omissions.unscopedTokenRelationships
+    ? [
+        "Managed boundary tokens were not linked to member nodes because matching module MVID scope was not established.",
+      ]
     : []),
 ];

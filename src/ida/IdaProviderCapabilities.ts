@@ -37,6 +37,18 @@ export const IDA_LIMITATIONS = Object.freeze([
   "Complete function body ranges, typed references, unresolved indirect calls, referenced data, and basic blocks are unavailable in this adapter. Empty unsupported dossier facets are unknown, not observed absence.",
 ]);
 
+/**
+ * Attached mode requires the legacy 1.4 profile, whose `disassemble_function`
+ * jumps to the function and whose `decompile_function` opens or reuses a
+ * pseudocode view whenever an IDA window is active.
+ */
+const ATTACHED_GUI_NAVIGATION_OPERATIONS: ReadonlySet<IdaOperation> = new Set([
+  "procedure_pseudo_code",
+  "procedure_assembly",
+  "read_function_instructions",
+  "analyze_function",
+]);
+
 /** Advertise live observations and configured lifecycle effects truthfully. */
 export const idaCapabilities = (
   mode: "attached" | "headless",
@@ -56,7 +68,9 @@ export const idaCapabilities = (
     effects: {
       mutatesArtifact: false,
       launchesProcess: stdio || mode === "headless",
-      mayShowUi: false,
+      mayShowUi:
+        mode === "attached" &&
+        ATTACHED_GUI_NAVIGATION_OPERATIONS.has(operation),
       mayAccessNetwork: true,
       mayWriteFilesystem: stdio || mode === "headless",
       changesPermissions: false,

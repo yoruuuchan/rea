@@ -7,10 +7,11 @@ import type { ApplicationGraphEvidence } from "../javascript/javascriptApplicati
 import type { ApplicationNode } from "../javascript/javascriptApplicationGraphSchemas.js";
 import { managedSourceCoverage } from "./managedApplicationGraphCoverage.js";
 import type { Evidence } from "../evidence.js";
-import {
-  type ManagedArtifactInspection,
-  type ManagedMemberInspection,
-  type ManagedNativeBoundaryInspection,
+import { managedTokenScopesMatch } from "./managedInspectionEvidence.js";
+import type {
+  ManagedArtifactInspection,
+  ManagedMemberInspection,
+  ManagedNativeBoundaryInspection,
 } from "./managedArtifact.js";
 import type {
   GraphBuildState,
@@ -106,7 +107,7 @@ export const addArtifactIdentityNodes = (
       identity: artifactLocalIdentity(
         state.artifactSha256,
         "managed-module",
-        module.mvid ?? module.token,
+        module.mvid?.toLowerCase() ?? module.token,
       ),
       observations: [
         {
@@ -138,25 +139,32 @@ interface ManagedModuleSource {
 const selectModuleSource = (
   parsed: ParsedManagedGraphInput,
 ): ManagedModuleSource | null => {
-  if (parsed.artifact?.result.module != null)
-    return {
-      module: parsed.artifact.result.module,
-      evidence: parsed.artifact.evidence,
-      coverageState: parsed.artifact.result.coverage.state,
-    };
-  if (parsed.members?.result.module != null)
-    return {
-      module: parsed.members.result.module,
-      evidence: parsed.members.evidence,
-      coverageState: parsed.members.result.coverage.state,
-    };
-  if (parsed.boundaries?.result.module != null)
-    return {
-      module: parsed.boundaries.result.module,
-      evidence: parsed.boundaries.evidence,
-      coverageState: parsed.boundaries.result.coverage.state,
-    };
-  return null;
+  const sources = [
+    parsed.artifact?.result.module == null
+      ? null
+      : {
+          module: parsed.artifact.result.module,
+          evidence: parsed.artifact.evidence,
+          coverageState: parsed.artifact.result.coverage.state,
+        },
+    parsed.members?.result.module == null
+      ? null
+      : {
+          module: parsed.members.result.module,
+          evidence: parsed.members.evidence,
+          coverageState: parsed.members.result.coverage.state,
+        },
+    parsed.boundaries?.result.module == null
+      ? null
+      : {
+          module: parsed.boundaries.result.module,
+          evidence: parsed.boundaries.evidence,
+          coverageState: parsed.boundaries.result.coverage.state,
+        },
+  ].filter((source): source is ManagedModuleSource => source !== null);
+  return (
+    sources.find(({ module }) => module.mvid !== null) ?? sources[0] ?? null
+  );
 };
 
 /** Add managed type, method, and field nodes from member evidence. */
@@ -332,11 +340,17 @@ export const addBoundaryNodes = (
     boundaryInput.evidence,
     boundaries.coverage.state,
   );
+  const canJoinMemberTokens =
+    parsed.members !== null &&
+    managedTokenScopesMatch(
+      parsed.members.result.identity_scope.requires_mvid,
+      boundaries.identity_scope.requires_mvid,
+    );
   for (const pinvoke of pinvokes) {
     const node = pinvokeNode(state, pinvoke, sourceEvidence);
     state.nodes.push(node);
     const method =
-      pinvoke.member_token === null
+      pinvoke.member_token === null || !canJoinMemberTokens
         ? undefined
         : state.methodNodes.get(pinvoke.member_token);
     const memberEvidence =
@@ -370,7 +384,10 @@ export const addBoundaryNodes = (
       sourceEvidence,
     );
     state.nodes.push(node);
-    const owner = state.methodNodes.get(implementation.token) ?? artifactNode;
+    const owner =
+      (canJoinMemberTokens
+        ? state.methodNodes.get(implementation.token)
+        : undefined) ?? artifactNode;
     addContainsEdge(state, owner, node, {
       kind: "declares-managed-native-implementation",
       coverage: implementationCoverage,

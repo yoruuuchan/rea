@@ -33,6 +33,15 @@ export const jsonShapeSchema = z.object({
 });
 export type JsonShape = z.infer<typeof jsonShapeSchema>;
 
+const arrayElementKey = Symbol("array-element");
+
+interface ShapeNode {
+  readonly path: JsonShapePathSegment[];
+  readonly types: Set<JsonValueType>;
+  observations: number;
+  children?: Map<string | typeof arrayElementKey, ShapeNode>;
+}
+
 /** Parse approved JSON and immediately discard values after iterative shape inference. */
 export const inferJsonShape = (text: string): JsonShape | null => {
   let root: unknown;
@@ -43,48 +52,50 @@ export const inferJsonShape = (text: string): JsonShape | null => {
     void cause;
     return null;
   }
-  const properties = new Map<
-    string,
-    {
-      readonly path: JsonShapePathSegment[];
-      readonly types: Set<JsonValueType>;
-      observations: number;
-    }
-  >();
+  const rootShape: ShapeNode = {
+    path: [],
+    types: new Set(),
+    observations: 0,
+  };
+  // Each structural path owns one accumulator, shared by all matching array rows.
+  const childShape = (
+    parent: ShapeNode,
+    key: string | typeof arrayElementKey,
+  ): ShapeNode => {
+    const children = (parent.children ??= new Map());
+    const existing = children.get(key);
+    if (existing !== undefined) return existing;
+    const node: ShapeNode = {
+      path: [
+        ...parent.path,
+        typeof key === "string"
+          ? { kind: "property", name: key }
+          : { kind: "array-element" },
+      ],
+      types: new Set(),
+      observations: 0,
+    };
+    children.set(key, node);
+    return node;
+  };
   const pending: Array<{
     readonly value: unknown;
-    readonly path: JsonShapePathSegment[];
-    readonly depth: number;
-  }> = [{ value: root, path: [], depth: 0 }];
+    readonly shape: ShapeNode;
+  }> = [{ value: root, shape: rootShape }];
   let nodeCount = 0;
   let maxDepthObserved = 0;
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) break;
     nodeCount += 1;
-    maxDepthObserved = Math.max(maxDepthObserved, current.depth);
-    if (current.path.length > 0) {
-      const key = JSON.stringify(current.path);
-      const type = jsonValueType(current.value);
-      const existing = properties.get(key);
-      if (existing === undefined)
-        properties.set(key, {
-          path: current.path,
-          types: new Set([type]),
-          observations: 1,
-        });
-      else {
-        existing.types.add(type);
-        existing.observations += 1;
-      }
-    }
+    maxDepthObserved = Math.max(maxDepthObserved, current.shape.path.length);
+    current.shape.types.add(jsonValueType(current.value));
+    current.shape.observations += 1;
     if (Array.isArray(current.value)) {
+      if (current.value.length === 0) continue;
+      const shape = childShape(current.shape, arrayElementKey);
       for (let index = current.value.length - 1; index >= 0; index -= 1)
-        pending.push({
-          value: current.value[index],
-          path: [...current.path, { kind: "array-element" }],
-          depth: current.depth + 1,
-        });
+        pending.push({ value: current.value[index], shape });
       continue;
     }
     if (!isRecord(current.value)) continue;
@@ -93,25 +104,29 @@ export const inferJsonShape = (text: string): JsonShape | null => {
       const entry = allEntries[index];
       if (entry === undefined) continue;
       const [name, value] = entry;
-      const path: JsonShapePathSegment[] = [
-        ...current.path,
-        { kind: "property", name },
-      ];
-      pending.push({ value, path, depth: current.depth + 1 });
+      pending.push({ value, shape: childShape(current.shape, name) });
     }
   }
-  return jsonShapeSchema.parse({
+  // Preorder over sorted siblings gives canonical paths without repeatedly
+  // comparing their shared prefixes. Each returned path owns its segments.
+  const properties: JsonShape["properties"] = [];
+  const shapes = orderedChildren(rootShape);
+  while (shapes.length > 0) {
+    const shape = shapes.pop();
+    if (shape === undefined) break;
+    properties.push({
+      path: shape.path.map((segment) => ({ ...segment })),
+      types: [...shape.types].sort(),
+      observations: shape.observations,
+    });
+    for (const child of orderedChildren(shape)) shapes.push(child);
+  }
+  return {
     root_type: jsonValueType(root),
     node_count: nodeCount,
     max_depth_observed: maxDepthObserved,
-    properties: [...properties.values()]
-      .map((value) => ({
-        path: value.path,
-        types: [...value.types].sort(),
-        observations: value.observations,
-      }))
-      .sort((left, right) => compareShapePaths(left.path, right.path)),
-  });
+    properties,
+  };
 };
 
 const jsonValueType = (value: unknown): JsonValueType => {
@@ -132,20 +147,16 @@ const jsonValueType = (value: unknown): JsonValueType => {
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const compareShapePaths = (
-  left: readonly JsonShapePathSegment[],
-  right: readonly JsonShapePathSegment[],
-): number => {
-  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
-    const a = left[index];
-    const b = right[index];
-    if (a === undefined || b === undefined) break;
-    const order =
-      compareUnicodeCodePoints(a.kind, b.kind) ||
-      (a.kind === "property" && b.kind === "property"
-        ? compareUnicodeCodePoints(a.name, b.name)
-        : 0);
-    if (order !== 0) return order;
-  }
-  return left.length - right.length;
-};
+/** Reverse sibling order for the traversal stack; array elements sort first. */
+const orderedChildren = (node: ShapeNode): ShapeNode[] =>
+  [...(node.children ?? [])]
+    .sort(([left], [right]) =>
+      left === right
+        ? 0
+        : left === arrayElementKey
+          ? 1
+          : right === arrayElementKey
+            ? -1
+            : compareUnicodeCodePoints(right, left),
+    )
+    .map(([, child]) => child);

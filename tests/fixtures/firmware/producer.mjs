@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, symlink } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 const args = process.argv.slice(2);
 const mode = process.env.REA_FIRMWARE_FIXTURE_MODE;
@@ -125,8 +125,19 @@ if (args.includes("--version")) {
     ];
     await writeFile(
       reportPath,
-      mode === "malformed" ? "[" : JSON.stringify(records),
+      mode === "malformed" || mode === "workspace-cleanup-failure-malformed"
+        ? "["
+        : JSON.stringify(records),
     );
     if (mode === "dependency") process.exitCode = 1;
+    if (
+      mode === "workspace-cleanup-failure" ||
+      mode === "workspace-cleanup-failure-malformed"
+    ) {
+      const blocked = join(process.cwd(), "cleanup-blocked");
+      await mkdir(blocked);
+      await writeFile(join(blocked, "retained"), "owned workspace bytes");
+      await chmod(blocked, 0);
+    }
   }
 }

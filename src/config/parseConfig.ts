@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { join } from "node:path";
 
 import { ConfigurationError } from "../domain/configurationErrors.js";
-import { ok, type Result } from "../domain/result.js";
+import { err, ok, type Result } from "../domain/result.js";
 import { parseEnvironment } from "./environment.js";
 import { homeDirectoryFromEnvironment } from "./homeDirectory.js";
 import { parseStringArray, parseLoaderArgs } from "./parsers.js";
@@ -46,6 +46,21 @@ export const parseConfig = (
     "REA_REFERENCE_SECRET_PATTERNS_JSON",
   );
   if (!secretPatterns.ok) return secretPatterns;
+  // Ghidra's analyzeHeadless accepts -cspec only together with -processor.
+  if (
+    env.REA_GHIDRA_COMPILER_SPEC_ID !== undefined &&
+    env.REA_GHIDRA_LANGUAGE_ID === undefined
+  )
+    return err(
+      new ConfigurationError("Invalid REA environment configuration", {
+        settings: [
+          {
+            setting: "REA_GHIDRA_COMPILER_SPEC_ID",
+            constraint: "requires REA_GHIDRA_LANGUAGE_ID",
+          },
+        ],
+      }),
+    );
   return ok({
     ...(env.REA_MCP_MAX_RESPONSE_BYTES === undefined
       ? {}
@@ -60,6 +75,19 @@ export const parseConfig = (
     ghidraInstallDir: env.GHIDRA_INSTALL_DIR,
     ghidraJavaHome: env.JAVA_HOME,
     ghidraStartupTimeoutMs: env.REA_GHIDRA_STARTUP_TIMEOUT_MS,
+    ...(env.REA_GHIDRA_LANGUAGE_ID === undefined
+      ? {}
+      : {
+          ghidraLanguageOverride: {
+            languageId: env.REA_GHIDRA_LANGUAGE_ID,
+            ...(env.REA_GHIDRA_COMPILER_SPEC_ID === undefined
+              ? {}
+              : { compilerSpecId: env.REA_GHIDRA_COMPILER_SPEC_ID }),
+          },
+        }),
+    ...(env.REA_GHIDRA_SEED_FILE === undefined
+      ? {}
+      : { ghidraSeedFile: env.REA_GHIDRA_SEED_FILE }),
     ...(env.REA_GHIDRA_NATIVEAOT_JAR === undefined
       ? {}
       : { ghidraNativeAotJar: env.REA_GHIDRA_NATIVEAOT_JAR }),

@@ -44,6 +44,15 @@ describe("ghidraSessionRoot", () => {
     ).toBe(posixBase("Users", "operator"));
   });
 
+  it("can select a filesystem root when the inherited temp starts with a dot-prefixed element", () => {
+    expect(
+      ghidraSessionRoot({
+        base: posixBase(".Tmp", "scratch"),
+        platform: "win32",
+      }),
+    ).toBe(resolve(sep));
+  });
+
   it.skipIf(!POSIX)("prefers the platform temp directory by default", () => {
     expect(
       ghidraSessionRoot({ base: posixBase("home", "operator", ".cache") }),

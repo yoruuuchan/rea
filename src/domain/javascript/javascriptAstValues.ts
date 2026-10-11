@@ -86,6 +86,31 @@ export const semanticObjectPatternKeys = (
     return key === null ? [] : [key];
   });
 
+/** Visit member write targets in direct and destructuring assignment forms. */
+export function* semanticMemberWriteTargets(
+  root: t.Node,
+): Generator<t.MemberExpression | t.OptionalMemberExpression> {
+  const pending = [root];
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (next === undefined) break;
+    const node = unwrapJavaScriptExpression(next).node;
+    if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node))
+      yield node;
+    else if (t.isRestElement(node)) pending.push(node.argument);
+    else if (t.isAssignmentPattern(node)) pending.push(node.left);
+    else if (t.isArrayPattern(node)) {
+      for (const element of node.elements.toReversed())
+        if (element !== null) pending.push(element);
+    } else if (t.isObjectPattern(node)) {
+      for (const property of node.properties.toReversed())
+        pending.push(
+          t.isRestElement(property) ? property.argument : property.value,
+        );
+    }
+  }
+}
+
 /**
  * Display an exact JavaScript string as nonempty label text. Graph labels and
  * artifact-local keys are nonempty, so the legal empty value is shown as `""`;

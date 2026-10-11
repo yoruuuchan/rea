@@ -188,6 +188,107 @@ describe("runtime window and producer granularity", () => {
   });
 });
 
+it("joins a reordered multi-script coverage sample by identity and preserves unavailable bounds", async () => {
+  const texts = new Map(
+    Array.from({ length: 256 }, (_, index) => [
+      `script-${index}`,
+      `// 🔥\r\n${" ".repeat(index)}function f(){return ${index};}`,
+    ]),
+  );
+  const { browser, provider, execution } = await fixture({
+    commandEvents: (command, origin) =>
+      command.method === "Debugger.enable"
+        ? [...texts.keys(), "foreign-script"].map((scriptId) => ({
+            ...(command.sessionId === undefined
+              ? {}
+              : { sessionId: command.sessionId }),
+            method: "Debugger.scriptParsed",
+            params: {
+              scriptId,
+              url: `${origin}/shared.js`,
+              executionContextId: scriptId === "foreign-script" ? 99 : 1,
+              startLine: 0,
+              startColumn: 0,
+              endLine: 1,
+              endColumn: 0,
+            },
+          }))
+        : undefined,
+    commandError: (command) =>
+      command.method === "Debugger.getScriptSource" &&
+      command.params.scriptId === "script-128"
+        ? { code: -32000, message: "Selected source is unavailable" }
+        : undefined,
+    commandResult: (command, origin) => {
+      if (command.method === "Debugger.getScriptSource")
+        return { scriptSource: texts.get(String(command.params.scriptId)) };
+      if (command.method !== "Profiler.takePreciseCoverage") return undefined;
+      return {
+        timestamp: 13,
+        result: [...texts]
+          .reverse()
+          .map(([scriptId, text]) => ({
+            scriptId,
+            url: `${origin}/shared.js`,
+            functions: [
+              {
+                functionName: "f",
+                isBlockCoverage: true,
+                ranges: [
+                  { startOffset: 0, endOffset: text.length, count: 1 },
+                  { startOffset: 8, endOffset: 9, count: 0 },
+                ],
+              },
+            ],
+          }))
+          .concat([
+            {
+              scriptId: "foreign-script",
+              url: `${origin}/shared.js`,
+              functions: [],
+            },
+          ]),
+      };
+    },
+  });
+  const result = await provider.observeExecution(execution);
+  if (!result.ok) throw result.error;
+  expect(result.value.coverage.excluded_scripts).toBe(1);
+  expect(
+    result.value.coverage.scripts.map(({ script_id }) => script_id),
+  ).toEqual([...texts.keys()].reverse());
+  for (const script of result.value.coverage.scripts) {
+    expect(script.functions[0]?.ranges).toEqual([
+      {
+        start_offset: 0,
+        end_offset: texts.get(script.script_id)?.length,
+        count: 1,
+        source_bounds:
+          script.script_id === "script-128" ? "unknown" : "verified",
+      },
+      {
+        start_offset: 8,
+        end_offset: 9,
+        count: 0,
+        source_bounds:
+          script.script_id === "script-128" ? "unknown" : "verified",
+      },
+    ]);
+  }
+  expect(
+    result.value.sources.find(({ script_id }) => script_id === "script-128")
+      ?.source,
+  ).toMatchObject({ state: "unavailable" });
+  expect(
+    browser.commands.some(
+      ({ method }) => method === "Profiler.stopPreciseCoverage",
+    ),
+  ).toBe(true);
+  expect(
+    browser.commands.some(({ method }) => method === "Target.detachFromTarget"),
+  ).toBe(true);
+});
+
 describe("runtime source and listener identity", () => {
   it("retains same-URL script identities, UTF-16 bounds, nested zero counts and actual cleanup", async () => {
     const { browser, provider, execution } = await fixture();

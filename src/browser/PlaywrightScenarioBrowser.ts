@@ -2,15 +2,11 @@ import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-} from "playwright-core";
+import type { Browser, BrowserContext, Page, chromium } from "playwright-core";
 
 import type { BrowserScenario } from "../domain/browserScenario.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { isLiteralLoopbackHostname } from "../domain/browserObservation.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { withPlaywrightExecutionBoundary } from "./PlaywrightExecutionBoundary.js";
 
@@ -46,6 +42,10 @@ export class PlaywrightScenarioBrowserCleanupOwner {
   /** Keep the narrow provider actions needed to release one opened browser. */
   constructor(private readonly resources: PlaywrightScenarioCleanupResources) {
     this.#profileRemoved = resources.removeProfile === undefined;
+  }
+
+  get browserClosed(): boolean {
+    return this.#browserClosed;
   }
 
   close(
@@ -97,6 +97,9 @@ export class PlaywrightScenarioBrowserCleanupOwner {
     try {
       await eventFinalization;
     } catch (cause: unknown) {
+      // A failed finalization stays failed: the memoized attempt rejects on
+      // every retry so cleanup can never report success for unfinalized
+      // events.
       failures.push(cause);
     }
     if (!this.#browserClosed) {
@@ -186,8 +189,14 @@ const createAttachedScenarioRelease = (
 export const attachedScenarioLeaseKey = (
   endpoint: string,
   targetId: string,
-): string =>
-  JSON.stringify([new URL("/json/version", endpoint).href, targetId]);
+): string => {
+  const discovery = new URL("/json/version", endpoint);
+  // One CDP browser serves every loopback stack on one port, so spellings that
+  // reach it through 127.0.0.1 or ::1 must share a single admission.
+  if (isLiteralLoopbackHostname(discovery.hostname))
+    discovery.hostname = "127.0.0.1";
+  return JSON.stringify([discovery.href, targetId]);
+};
 
 const acquireAttachedScenario = (
   scenario: Extract<BrowserScenario["browser"], { readonly mode: "connect" }>,
@@ -263,13 +272,26 @@ const allowedBrowserEnvironment = (
     "XAUTHORITY",
     "XDG_RUNTIME_DIR",
   ];
-  return Object.fromEntries(
+  const selected = Object.fromEntries(
     allowed
       .map((name) => [name, environment[name]] as const)
       .filter(
         (entry): entry is readonly [string, string] => entry[1] !== undefined,
       ),
   );
+  if (process.platform !== "android") return selected;
+
+  // Android rejects execve() for binaries below Termux's application data
+  // directory. Termux supplies an exec interceptor that rewrites those calls
+  // through the system linker and removes itself for the launched program.
+  // Playwright must retain it for its Chromium child process.
+  const prefix = environment.PREFIX;
+  if (prefix === undefined) return selected;
+  return {
+    ...selected,
+    LD_PRELOAD: `${prefix}/lib/libtermux-exec.so`,
+    TERMUX_EXEC__PROC_SELF_EXE: process.execPath,
+  };
 };
 const findConnectedPage = async (
   browser: Pick<Browser, "contexts">,
@@ -380,6 +402,7 @@ const openAttachedScenarioBrowser = async (
   environment: BrowserScenario["environment"],
   launcher: ScenarioBrowserLauncher,
   signal: AbortSignal | undefined,
+  retainCleanup: ((close: () => Promise<unknown>) => void) | undefined,
 ): Promise<OpenedScenarioBrowser> => {
   const lease = await acquireAttachedScenario(browserRequest, signal);
   let cleanupOwner: PlaywrightScenarioBrowserCleanupOwner | undefined;
@@ -431,7 +454,13 @@ const openAttachedScenarioBrowser = async (
       throw cause;
     }
     const cleanup = cleanupOwner;
-    return failBrowserScenarioOperation(() => cleanup.close(), cause);
+    const close = () => cleanup.close();
+    try {
+      return await failBrowserScenarioOperation(close, cause);
+    } catch (failure: unknown) {
+      if (failure !== cause) retainCleanup?.(close);
+      throw failure;
+    }
   }
 };
 
@@ -442,15 +471,19 @@ export const openPlaywrightScenarioBrowser = async (
   options: {
     readonly launcher?: ScenarioBrowserLauncher;
     readonly signal?: AbortSignal | undefined;
+    readonly retainCleanup?: (close: () => Promise<unknown>) => void;
   } = {},
 ): Promise<OpenedScenarioBrowser> => {
-  const launcher = options.launcher ?? chromium;
+  // Load Playwright only when a scenario opens; MCP startup stays off its module graph.
+  const launcher =
+    options.launcher ?? (await import("playwright-core")).chromium;
   if (scenario.browser.mode === "connect")
     return openAttachedScenarioBrowser(
       scenario.browser,
       scenario.environment,
       launcher,
       options.signal,
+      options.retainCleanup,
     );
 
   const profilePath = await mkdtemp(join(tmpdir(), "rea-browser-scenario-"));
@@ -476,13 +509,25 @@ export const openPlaywrightScenarioBrowser = async (
       handleSIGINT: false,
       handleSIGTERM: false,
       timeout: 0,
+      // Termux's Chromium cannot create its renderer process through Android's
+      // executable boundary. Single-process mode keeps the browser and page in
+      // the Termux-launched process so scenario navigation remains available.
+      args:
+        process.platform === "android"
+          ? ["--no-sandbox", "--single-process"]
+          : [],
     });
   } catch (cause: unknown) {
-    return failBrowserScenarioOperation(
-      () => rm(profilePath, { recursive: true, force: true, maxRetries: 3 }),
-      cause,
-      ["browser_profile"],
-    );
+    const cleanup = () =>
+      rm(profilePath, { recursive: true, force: true, maxRetries: 3 });
+    try {
+      return await failBrowserScenarioOperation(cleanup, cause, [
+        "browser_profile",
+      ]);
+    } catch (failure: unknown) {
+      if (failure !== cause) options.retainCleanup?.(cleanup);
+      throw failure;
+    }
   }
   const cleanup = new PlaywrightScenarioBrowserCleanupOwner({
     closeBrowser: () => context.close(),
@@ -502,6 +547,12 @@ export const openPlaywrightScenarioBrowser = async (
       cleanup,
     };
   } catch (cause: unknown) {
-    return failBrowserScenarioOperation(() => cleanup.close(), cause);
+    const close = () => cleanup.close();
+    try {
+      return await failBrowserScenarioOperation(close, cause);
+    } catch (failure: unknown) {
+      if (failure !== cause) options.retainCleanup?.(close);
+      throw failure;
+    }
   }
 };

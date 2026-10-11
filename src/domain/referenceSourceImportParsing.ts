@@ -8,6 +8,7 @@ import type {
 } from "@babel/types";
 import { traverseJavaScriptAst } from "./javascript/javascriptSemanticTraversal.js";
 import { parserPluginsForPath } from "./javascript/javascriptSourceParser.js";
+import { unshadowedReferenceSourceRequireCalls } from "./referenceSourceRequireBindings.js";
 import {
   isCallExpression,
   isExportAllDeclaration,
@@ -206,6 +207,7 @@ const extractRequireAndDynamicImports = (
   body: readonly Node[],
   from_path: string,
   relationships: ReferenceSourceImportRelationship[],
+  unshadowedRequireCalls: ReadonlySet<CallExpression>,
 ): void => {
   // Single traversal owner: iterative, VISITOR_KEYS-gated, no recursion over
   // loc/comment objects. Survives deeply nested generated member chains that
@@ -232,7 +234,11 @@ const extractRequireAndDynamicImports = (
       continue;
     }
     const first = call.arguments[0];
-    if (isRequireCallee(call.callee) && isModuleExpression(first)) {
+    if (
+      isRequireCallee(call.callee) &&
+      unshadowedRequireCalls.has(call) &&
+      isModuleExpression(first)
+    ) {
       const result = moduleSpecifierFromExpression(first);
       if (result !== undefined) {
         appendRelationship(relationships, {
@@ -332,7 +338,12 @@ export const parseReferenceSourceImports = (
 
   const relationships: ReferenceSourceImportRelationship[] = [];
   extractImportDeclarations(ast.program.body, path, relationships);
-  extractRequireAndDynamicImports(ast.program.body, path, relationships);
+  extractRequireAndDynamicImports(
+    ast.program.body,
+    path,
+    relationships,
+    unshadowedReferenceSourceRequireCalls(ast, path),
+  );
 
   return {
     relationships: relationships.map((relationship) => ({

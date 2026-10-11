@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { readReferenceSource } from "../../../src/reference/ReferenceSourceReader.js";
+import { readReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
 describe("readReferenceSource entries", () => {
   it("returns explicit entries in canonical code-point path order", async () => {
@@ -127,22 +127,25 @@ describe("readReferenceSource entries", () => {
 });
 
 describe("readReferenceSource failures and exclusions", () => {
-  it("applies exclusions to normalized paths before reading entries", async () => {
+  it("applies exclusions to normalized paths after no-follow type inspection", async () => {
     const root = await createTestTempDirectory("rea-reference-");
     await mkdir(join(root, "ignored"));
     await writeFile(join(root, "ignored", "secret"), "secret");
     await writeFile(join(root, "kept"), "kept");
-    const checked: string[] = [];
+    const checked: Array<[string, string]> = [];
 
     const result = await readReferenceSource(root, {
-      shouldExclude: (path) => {
-        checked.push(path);
+      shouldExclude: (path, kind) => {
+        checked.push([path, kind]);
         return path === "ignored";
       },
     });
 
     if (!result.ok) throw result.error;
-    expect(checked).toEqual(["ignored", "kept"]);
+    expect(checked).toEqual([
+      ["ignored", "directory"],
+      ["kept", "file"],
+    ]);
     expect(result.value.entries.map(({ path }) => path)).toEqual(["kept"]);
   });
 
@@ -155,12 +158,17 @@ describe("readReferenceSource failures and exclusions", () => {
       },
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
       error: {
         tag: "reference-source-reader",
         code: "io",
         message: "Reference source exclusion check failed",
+        partial: {
+          root,
+          entries: [],
+          bytesRead: 0,
+        },
       },
     });
   });

@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
 import { resolveArtifactPathByContext } from "./JavaScriptArtifactPathResolution.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
+import { analyzeJavaScriptApplication } from "../../../tests/support/javascriptApplicationScope.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../domain/javascript/javascriptApplicationAnalysis.js";
 
 const filesFor = (paths: readonly string[]) =>

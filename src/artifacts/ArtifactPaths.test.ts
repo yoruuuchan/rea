@@ -60,6 +60,30 @@ describe("English Unicode case collisions", () => {
     ]);
   });
 
+  it("retains every spelling in a high-cardinality folded sibling group", () => {
+    const count = 8_192;
+    const variants = caseVariants("abcdefghijklm", count);
+    const { limitation, byPath } = annotate(variants);
+    const ordered = [...variants].sort();
+    const first = ordered[0];
+    const second = ordered[1];
+    const original = variants[0];
+    if (first === undefined || second === undefined || original === undefined) {
+      throw new Error("Expected at least two case variants");
+    }
+    expect(limitation).toBe(ENGLISH_UNICODE_CASE_INVENTORY_LIMITATION);
+    expect(byPath.size).toBe(count);
+    expect(byPath.get(first)).toEqual([
+      `Logical path ${first} collides under English (en-US) Unicode case folding with ${second} and ${String(count - 2)} other spellings; ${NOTE}`,
+    ]);
+    expect(byPath.get(original)?.[0]).toContain(
+      `with ${first} and ${String(count - 2)} other spellings;`,
+    );
+    expect(
+      [...byPath.values()].every((limitations) => limitations.length === 1),
+    ).toBe(true);
+  });
+
   it("stays linear for large case-variant subtrees", () => {
     const count = 5_000;
     const paths = Array.from({ length: count }, (_, index) => [
@@ -81,3 +105,12 @@ describe("English Unicode case collisions", () => {
     expect(byPath.get(deep)).toEqual([]);
   });
 });
+
+const caseVariants = (lowercase: string, count: number): string[] =>
+  Array.from({ length: count }, (_, mask) =>
+    [...lowercase]
+      .map((character, index) =>
+        (mask & (1 << index)) === 0 ? character : character.toUpperCase(),
+      )
+      .join(""),
+  );

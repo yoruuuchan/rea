@@ -16,7 +16,7 @@ import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { parseCliJsonInput } from "../cliJsonInput.js";
 import { logCliCommand } from "../cliLogging.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { androidApplicationProjectionInputSchema } from "../domain/android/androidApplication.js";
 import { appleApplicationProjectionInputSchema } from "../domain/apple/appleApplication.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";

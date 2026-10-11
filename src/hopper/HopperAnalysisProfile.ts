@@ -14,7 +14,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
-import { type AnalysisError } from "../domain/analysisErrorBase.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
 
 import {
@@ -110,6 +110,14 @@ export const hopperLoaderArgsForTarget = (
   if (target.kind !== "executable")
     return err(new ProviderAdapterError("hopper", "resolve_analysis_profile"));
   const architecture = target.architecture;
+  if (architecture === "mips")
+    return err(
+      new AnalysisCapabilityUnavailableError(
+        "hopper",
+        "resolve_analysis_profile",
+        "REA's Hopper adapter does not admit MIPS targets. Select a verified Ghidra MIPS profile instead.",
+      ),
+    );
   const flag = hopperArchitectureFlag(architecture);
   switch (target.format) {
     case "mach-o":
@@ -138,7 +146,9 @@ export const hopperLoaderArgsForTarget = (
   }
 };
 
-const hopperArchitectureFlag = (architecture: BinaryArchitecture): string => {
+const hopperArchitectureFlag = (
+  architecture: Exclude<BinaryArchitecture, "mips">,
+): string => {
   switch (architecture) {
     case "x86":
       return "--intel-32";

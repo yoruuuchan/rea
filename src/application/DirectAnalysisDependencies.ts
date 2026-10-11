@@ -10,6 +10,8 @@ export interface DirectAnalysisDependencies {
   readonly createBinarySession: (
     config: AppConfig,
     logger: Logger,
-  ) => BinarySession;
-  readonly createManagedBinarySession: () => BinarySession;
+  ) => BinarySession | Promise<BinarySession>;
+  readonly createManagedBinarySession: () =>
+    | BinarySession
+    | Promise<BinarySession>;
 }

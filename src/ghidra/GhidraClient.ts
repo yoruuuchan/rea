@@ -24,7 +24,10 @@ import type {
 } from "./GhidraClientTypes.js";
 import type { GhidraInventoryOperation } from "./GhidraInventoryValues.js";
 import type { GhidraFunctionOperation } from "./GhidraFunctionValues.js";
-import { createGhidraDiagnostics } from "./GhidraDiagnostics.js";
+import {
+  createGhidraDiagnostics,
+  GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
+} from "./GhidraDiagnostics.js";
 import { GhidraLaunchError, type GhidraLaunch } from "./GhidraLauncher.js";
 import { GhidraResponseBuffer } from "./GhidraResponseBuffer.js";
 import { GhidraResponseRouter } from "./GhidraResponseRouter.js";
@@ -40,6 +43,21 @@ import {
 } from "./GhidraSessionValues.js";
 import { createGhidraTargetSnapshot } from "./GhidraTargetSnapshot.js";
 import { readFile } from "node:fs/promises";
+import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
+import {
+  openRegularFile,
+  RegularFileChangedError,
+  sameRegularFileState,
+} from "../filesystem/RegularFile.js";
+import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+
+export type GhidraTargetSnapshot =
+  | { readonly kind: "captured"; readonly bytes: Buffer }
+  | {
+      readonly kind: "over-capacity";
+      readonly sourceBytesAtLeast: number;
+      readonly maximumBytes: number;
+    };
 import { connectGhidraSocket } from "./GhidraSocketConnection.js";
 import {
   createGhidraEndpoint,
@@ -76,6 +94,7 @@ export class GhidraClient {
   #socketRoot: PrivateRuntimeRoot | undefined;
   #endpointPath: string | undefined;
   #snapshotPath: string | undefined;
+  readonly #snapshotOwners = new Set<OwnedFileHandle>();
   #targetAdmission: JsonValue | undefined;
   #token: string | undefined;
   // Retain authentication identities for diagnostics from late request settlement.
@@ -224,7 +243,10 @@ export class GhidraClient {
   }
 
   /** Read the private immutable source for independent import verification. */
-  async readTargetSnapshot(): Promise<Result<Buffer, GhidraSessionError>> {
+  async readTargetSnapshot(
+    maximumBytes?: number,
+    signal?: AbortSignal,
+  ): Promise<Result<GhidraTargetSnapshot, GhidraSessionError>> {
     if (this.#snapshotPath === undefined)
       return err(
         this.#failure(
@@ -233,11 +255,80 @@ export class GhidraClient {
         ),
       );
     try {
-      return ok(await readFile(this.#snapshotPath));
+      if (maximumBytes !== undefined) {
+        signal?.throwIfAborted();
+        if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0)
+          throw new RangeError("Snapshot byte limit must be a safe integer");
+        const handle = await openRegularFile(this.#snapshotPath, {
+          symlinks: "reject",
+        });
+        const owner = new OwnedFileHandle(handle);
+        this.#snapshotOwners.add(owner);
+        let result: GhidraTargetSnapshot;
+        let readFailure: unknown;
+        try {
+          const metadata = await handle.stat();
+          signal?.throwIfAborted();
+          if (metadata.size > maximumBytes)
+            result = {
+              kind: "over-capacity",
+              sourceBytesAtLeast: metadata.size,
+              maximumBytes,
+            };
+          else {
+            const bytes = await readBoundedFileBytes(
+              handle,
+              maximumBytes,
+              signal,
+              metadata.size,
+            );
+            signal?.throwIfAborted();
+            const after = await handle.stat();
+            if (
+              bytes !== undefined &&
+              bytes.length === metadata.size &&
+              sameRegularFileState(metadata, after)
+            ) {
+              result = { kind: "captured", bytes };
+            } else if (
+              bytes === undefined &&
+              after.isFile() &&
+              after.size > maximumBytes
+            ) {
+              result = {
+                kind: "over-capacity",
+                sourceBytesAtLeast: after.size,
+                maximumBytes,
+              };
+            } else {
+              throw new RegularFileChangedError(this.#snapshotPath);
+            }
+          }
+        } catch (cause: unknown) {
+          readFailure = cause;
+        }
+        try {
+          await owner.close();
+          this.#snapshotOwners.delete(owner);
+        } catch (closeFailure: unknown) {
+          throw new AggregateError(
+            readFailure === undefined
+              ? [closeFailure]
+              : [readFailure, closeFailure],
+            "Ghidra target snapshot read or descriptor cleanup failed",
+          );
+        }
+        if (readFailure !== undefined) throw readFailure;
+        return ok(result!);
+      }
+      return ok({
+        kind: "captured",
+        bytes: await readFile(this.#snapshotPath),
+      });
     } catch (cause: unknown) {
       return err(
         this.#failure(
-          "protocol",
+          signal?.aborted === true ? "cancelled" : "protocol",
           "Ghidra target snapshot could not be read for load-image verification",
           cause,
         ),
@@ -432,6 +523,7 @@ export class GhidraClient {
       if (partialLaunch !== undefined) {
         this.#launch = partialLaunch;
         this.#process = new ProviderProcessSupervisor(partialLaunch, {
+          maxDiagnosticBytes: GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
           onDiagnostic: (event) => this.#onProcessDiagnostic(event),
         });
       }
@@ -444,6 +536,7 @@ export class GhidraClient {
     }
     this.#launch = launched.value;
     this.#process = new ProviderProcessSupervisor(launched.value, {
+      maxDiagnosticBytes: GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
       onDiagnostic: (event) => this.#onProcessDiagnostic(event),
     });
     const connected = await this.#connect(endpoint, deadline);
@@ -597,6 +690,10 @@ export class GhidraClient {
       this.#lastDiagnostics = this.#diagnostics();
       this.#process = undefined;
       this.#launch = undefined;
+      for (const owner of this.#snapshotOwners) {
+        await owner.close();
+        this.#snapshotOwners.delete(owner);
+      }
       try {
         await this.#removeRuntimeRoots();
       } catch (cause: unknown) {

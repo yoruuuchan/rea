@@ -21,6 +21,7 @@ export const traceNativeValues = async (
 ): EnhancedResult => {
   const input = nativeValueTraceInputSchema.parse(parameters);
   const nodes: typeof nativeValueTraceSchema._output.nodes = [];
+  const nodeIds = new Set<string>();
   const edges: typeof nativeValueTraceSchema._output.edges = [];
   const procedures: typeof nativeValueTraceSchema._output.procedures = [];
   const unknowns: typeof nativeValueTraceSchema._output.unknowns = [];
@@ -154,25 +155,28 @@ export const traceNativeValues = async (
       bytes += size;
       ids.add(operation.id);
       nodes.push(node);
+      nodeIds.add(node.id);
     }
     for (const parameter of flow.parameters) {
       if (nodes.length >= input.max_nodes) {
         truncated = true;
         break;
       }
+      const id = `${address}/parameter:${parameter.ordinal}`;
       nodes.push({
-        id: `${address}/parameter:${parameter.ordinal}`,
+        id,
         procedure: address,
         evidence_id: evidenceId,
         kind: "parameter",
         operation: null,
         parameter,
       });
+      nodeIds.add(id);
     }
     for (const use of flow.parameter_uses) {
       if (
         !ids.has(use.use) ||
-        !nodes.some((node) => node.id === `${address}/parameter:${use.ordinal}`)
+        !nodeIds.has(`${address}/parameter:${use.ordinal}`)
       )
         continue;
       if (edges.length >= input.max_edges) {
@@ -301,10 +305,24 @@ export const traceNativeValues = async (
         "No seed function could be analyzed",
       ),
     );
+  const parametersByProcedure = new Map<string, typeof nodes>();
+  const returnsByProcedure = new Map<string, typeof nodes>();
+  for (const node of nodes) {
+    if (node.kind === "parameter") {
+      const parameters = parametersByProcedure.get(node.procedure) ?? [];
+      parameters.push(node);
+      parametersByProcedure.set(node.procedure, parameters);
+    } else if (
+      node.operation?.opcode === "RETURN" &&
+      node.operation.inputs.length > 1
+    ) {
+      const returns = returnsByProcedure.get(node.procedure) ?? [];
+      returns.push(node);
+      returnsByProcedure.set(node.procedure, returns);
+    }
+  }
   for (const binding of callBindings) {
-    const parameters = nodes.filter(
-      (node) => node.procedure === binding.callee && node.kind === "parameter",
-    );
+    const parameters = parametersByProcedure.get(binding.callee) ?? [];
     if (parameters.length === 0)
       unknowns.push({
         procedure: binding.caller,
@@ -335,12 +353,7 @@ export const traceNativeValues = async (
       });
     }
     if (binding.output)
-      for (const node of nodes.filter(
-        (node) =>
-          node.procedure === binding.callee &&
-          node.operation?.opcode === "RETURN" &&
-          node.operation.inputs.length > 1,
-      )) {
+      for (const node of returnsByProcedure.get(binding.callee) ?? []) {
         if (edges.length >= input.max_edges) {
           truncated = true;
           break;

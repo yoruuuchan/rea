@@ -18,6 +18,7 @@ export async function startRuntimeFixtureBrowser(executable, origin) {
       command: executable,
       arguments: [
         "--headless=new",
+        "--password-store=basic",
         ...(process.env.REA_BROWSER_NO_SANDBOX === "true"
           ? ["--no-sandbox"]
           : []),

@@ -9,7 +9,7 @@ import {
 } from "../../domain/propertyListKeys.js";
 import { decodeNibArchive, type NibArchiveDocument } from "./NibArchive.js";
 import {
-  estimatePropertyListDecodeBytes,
+  preflightPropertyListDecode,
   InterfaceBuilderDecodeBudget,
   InterfaceBuilderDecodeBudgetExceeded,
 } from "./InterfaceBuilderDecodeBudget.js";
@@ -25,6 +25,7 @@ import {
   type NibHierarchyNode,
 } from "./NibViewHierarchy.js";
 import { jsonValueSchema, type JsonValue } from "../../domain/jsonValue.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
 import { decodeXmlPlistText } from "../../domain/propertyListXmlText.js";
 
@@ -46,10 +47,9 @@ export const analyzeInterfaceBuilderBundle = async (input: {
   const omittedArchives: Array<{ path: string; reason: string }> = [];
   let unreportedOmittedArchives = 0;
   const incompleteHierarchies = new Map<string, number>();
-  const prototypeKeyOmissions = new Map<string, number>();
+  const prototypeKeyOmissions = new Map<string, number | null>();
   let omitted = 0;
   let attempted = 0;
-  let candidates = 0;
   let aggregateInputBytes = 0;
   const decodeBudget = new InterfaceBuilderDecodeBudget(
     MAX_AGGREGATE_DECODE_BYTES,
@@ -60,15 +60,16 @@ export const analyzeInterfaceBuilderBundle = async (input: {
     else unreportedOmittedArchives += 1;
   };
   try {
-    for await (const entry of reader.entries(input.signal)) {
-      if (entry.kind !== "file" || !isInterfaceBuilderArchive(entry.path))
-        continue;
-      candidates += 1;
-      if (candidates > limits.max_documents) {
-        omitted += 1;
-        recordOmittedArchive(entry.path, "max_documents");
-        continue;
-      }
+    const selection = await selectInterfaceBuilderCandidates(
+      reader,
+      input.signal,
+      limits.max_documents,
+    );
+    omitted = selection.omitted;
+    for (const entry of selection.omittedSamples)
+      recordOmittedArchive(entry.path, "max_documents");
+    unreportedOmittedArchives += selection.unreportedOmitted;
+    for (const entry of selection.selected) {
       try {
         const remainingInputBytes =
           MAX_AGGREGATE_INPUT_BYTES - aggregateInputBytes;
@@ -92,6 +93,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
           bytes.subarray(0, 10).toString("ascii") === "NIBArchive";
         let nib: ReturnType<typeof projectNibArchive> | null = null;
         let xmlText: string | undefined;
+        let binaryPrototypeKeyObserved = false;
         if (isNibArchive) {
           const documentBudget = new InterfaceBuilderDecodeBudget(
             decodeBudget.remainingBytes,
@@ -108,23 +110,25 @@ export const analyzeInterfaceBuilderBundle = async (input: {
         } else {
           if (bytes.subarray(0, 8).toString("ascii") !== "bplist00")
             xmlText = decodeXmlPlistText(bytes);
-          const decodedReservation = estimatePropertyListDecodeBytes(
+          const decodedReservation = preflightPropertyListDecode(
             bytes,
             decodeBudget.remainingBytes,
             xmlText,
           );
           decodeBudget.reserve(
-            decodedReservation,
+            decodedReservation.estimatedBytes,
             "plist representation exceeds the aggregate Interface Builder decode budget",
           );
+          binaryPrototypeKeyObserved =
+            decodedReservation.binaryPrototypeKeyObserved;
         }
         const { value: raw, omittedPrototypeKeys } =
           nib === null
-            ? decodePlist(bytes, xmlText)
+            ? decodePlist(bytes, xmlText, binaryPrototypeKeyObserved)
             : { value: nib.raw, omittedPrototypeKeys: 0 };
         if (nib !== null && nib.omitted > 0)
           incompleteHierarchies.set(entry.path, nib.omitted);
-        if (omittedPrototypeKeys > 0)
+        if (omittedPrototypeKeys !== 0)
           prototypeKeyOmissions.set(entry.path, omittedPrototypeKeys);
         const documentHash = createHash("sha256").update(bytes).digest("hex");
         documents.push({
@@ -167,11 +171,65 @@ export const analyzeInterfaceBuilderBundle = async (input: {
   });
 };
 
+/** Select lexically earliest document paths independent of host traversal order. */
+const selectInterfaceBuilderCandidates = async (
+  reader: DirectoryArtifactReader,
+  signal: AbortSignal | undefined,
+  maximumDocuments: number,
+): Promise<{
+  readonly selected: readonly ArtifactEntry[];
+  readonly omittedSamples: readonly ArtifactEntry[];
+  readonly omitted: number;
+  readonly unreportedOmitted: number;
+}> => {
+  const capacity = maximumDocuments + MAX_REPORTED_OMITTED_ARCHIVES;
+  const candidates: ArtifactEntry[] = [];
+  let total = 0;
+  for await (const entry of reader.entries(signal)) {
+    if (entry.kind !== "file" || !isInterfaceBuilderArchive(entry.path))
+      continue;
+    total += 1;
+    retainCandidate(candidates, entry, capacity);
+  }
+  const omittedSamples = candidates.slice(maximumDocuments, capacity);
+  return {
+    selected: candidates.slice(0, maximumDocuments),
+    omittedSamples,
+    omitted: Math.max(0, total - maximumDocuments),
+    unreportedOmitted: Math.max(
+      0,
+      total - maximumDocuments - omittedSamples.length,
+    ),
+  };
+};
+
+/** Keep the earliest bounded path set; directory iteration order is host-defined. */
+const retainCandidate = (
+  candidates: ArtifactEntry[],
+  entry: ArtifactEntry,
+  maximum: number,
+): void => {
+  let low = 0;
+  let high = candidates.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const existing = candidates[middle];
+    if (
+      existing !== undefined &&
+      compareUnicodeCodePoints(existing.path, entry.path) < 0
+    )
+      low = middle + 1;
+    else high = middle;
+  }
+  candidates.splice(low, 0, entry);
+  if (candidates.length > maximum) candidates.pop();
+};
+
 const finalizeHierarchyCoverage = (
   result: ReturnType<typeof buildInterfaceBuilderAnalysis>,
   counts: {
     incompleteHierarchies: ReadonlyMap<string, number>;
-    prototypeKeyOmissions: ReadonlyMap<string, number>;
+    prototypeKeyOmissions: ReadonlyMap<string, number | null>;
     invalid: readonly string[];
     omittedArchives: readonly { path: string; reason: string }[];
     unreportedOmittedArchives: number;
@@ -586,11 +644,18 @@ const readEntry = async (
 /** Project decoded plist data and dates while retaining omitted-key coverage. */
 const decodePlist = (
   bytes: Buffer,
-  xmlText?: string,
-): { readonly value: JsonValue; readonly omittedPrototypeKeys: number } => {
-  const { value, omittedPrototypeKeys } =
-    bytes.subarray(0, 8).toString("ascii") === "bplist00"
-      ? { value: parseBinary(bytes), omittedPrototypeKeys: 0 }
-      : parseXmlPropertyList(xmlText ?? decodeXmlPlistText(bytes));
+  xmlText: string | undefined,
+  binaryPrototypeKeyObserved: boolean,
+): {
+  readonly value: JsonValue;
+  readonly omittedPrototypeKeys: number | null;
+} => {
+  const binary = bytes.subarray(0, 8).toString("ascii") === "bplist00";
+  const { value, omittedPrototypeKeys } = binary
+    ? {
+        value: parseBinary(bytes),
+        omittedPrototypeKeys: binaryPrototypeKeyObserved ? null : 0,
+      }
+    : parseXmlPropertyList(xmlText ?? decodeXmlPlistText(bytes));
   return { value: projectPlistValue(value).value, omittedPrototypeKeys };
 };

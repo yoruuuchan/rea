@@ -282,26 +282,27 @@ describe("MCP investigation history snapshot replay", () => {
       const foreignEvidence = toolContract("list_strings").outputSchema.parse(
         unrelated.structuredContent,
       );
+      const updateInput = {
+        unknown_id: unknown.unknown_id,
+        expected_revision: unknown.revision,
+        status: "resolved",
+        severity: input.severity,
+        supporting_evidence_ids: resolutionEvidenceIds,
+        contradicting_evidence_ids: input.contradicting_evidence_ids,
+        required_authority: input.required_authority,
+        required_confidence: input.required_confidence,
+        required_environment: input.required_environment,
+        recommended_probes: input.recommended_probes,
+        relationships: input.relationships,
+        resolution: {
+          disposition,
+          rationale: "Disposition recorded after further investigation.",
+          evidence_ids: resolutionEvidenceIds,
+        },
+      };
       const updated = await mcp.callTool({
         name: "update_unknown",
-        arguments: {
-          unknown_id: unknown.unknown_id,
-          expected_revision: unknown.revision,
-          status: "resolved",
-          severity: input.severity,
-          supporting_evidence_ids: resolutionEvidenceIds,
-          contradicting_evidence_ids: input.contradicting_evidence_ids,
-          required_authority: input.required_authority,
-          required_confidence: input.required_confidence,
-          required_environment: input.required_environment,
-          recommended_probes: input.recommended_probes,
-          relationships: input.relationships,
-          resolution: {
-            disposition,
-            rationale: "Disposition recorded after further investigation.",
-            evidence_ids: resolutionEvidenceIds,
-          },
-        },
+        arguments: updateInput,
       });
       expect(updated.isError, JSON.stringify(updated.content)).not.toBe(true);
       const resolved = toolContract("update_unknown").outputSchema.parse(
@@ -327,6 +328,7 @@ describe("MCP investigation history snapshot replay", () => {
       expect(snapshot.value.evidence_bundle.records).toContainEqual(
         expect.objectContaining({
           operation: "update_unknown",
+          parameters: updateInput,
           subject: expect.objectContaining({ local_path: secondPath }),
         }),
       );

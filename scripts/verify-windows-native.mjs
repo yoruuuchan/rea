@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   access,
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,7 +17,7 @@ import {
   open,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { verifyWindowsProtocolInput } from "./lib/windows-protocol-input.mjs";
 
@@ -31,6 +32,9 @@ const { requireWindowsNativeAuthority } = await import(
 const native = requireWindowsNativeAuthority();
 const { WindowsPrivateRuntime, windowsPrivateRuntime } = await import(
   pathToFileURL(join(packageRoot, "dist/windows/WindowsPrivateRuntime.js"))
+);
+const { ghidraSessionRoot } = await import(
+  pathToFileURL(join(packageRoot, "dist/ghidra/GhidraSessionRoot.js"))
 );
 const workspace = await mkdtemp(join(tmpdir(), "rea-native-conformance-"));
 const environment = Object.entries(process.env)
@@ -77,6 +81,31 @@ const wait = async (child) => {
 };
 const report = { ok: false, artifact: "verified", controls: {}, processes: {} };
 try {
+  // Exercise the loader in a process whose image is not named node.exe. The
+  // ordinary Windows lane otherwise cannot detect eager Node-API imports.
+  const renamedHost = join(workspace, "rea-renamed-node.exe");
+  const renamedHostFixture = join(workspace, "renamed-host.mjs");
+  const loaderUrl = pathToFileURL(
+    join(packageRoot, "dist/windows/WindowsNativeLoader.js"),
+  ).href;
+  await copyFile(process.execPath, renamedHost);
+  await writeFile(
+    renamedHostFixture,
+    `import {basename} from 'node:path';
+import {requireWindowsNativeAuthority} from ${JSON.stringify(loaderUrl)};
+const {inspection}=requireWindowsNativeAuthority();
+process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVersion:inspection.abiVersion}));\n`,
+  );
+  const renamedHostResult = execFileSync(renamedHost, [renamedHostFixture], {
+    encoding: "utf8",
+    timeout: 20_000,
+    windowsHide: true,
+  });
+  assert.deepEqual(JSON.parse(renamedHostResult), {
+    executable: "rea-renamed-node.exe",
+    abiVersion: 1,
+  });
+  report.controls.renamedHostNodeApi = true;
   const sourceDirectory = join(workspace, "source");
   await mkdir(sourceDirectory);
   const source = join(sourceDirectory, "target.bin");
@@ -110,6 +139,47 @@ try {
   ])
     assert.throws(() => native.call("open", [rejected]));
   report.controls.ordinaryDriveSeparatorsAndRequestedIdentity = true;
+  const driveRoot = parse(workspace).root;
+  const runtimeParent = ghidraSessionRoot({
+    base: join(driveRoot, ".Tmp", "scratch"),
+  });
+  assert.equal(runtimeParent, driveRoot);
+  const driveRootRuntime = native.call("runtime_create", [
+    runtimeParent,
+    "rea-drive-root-",
+  ]);
+  try {
+    assert.equal(driveRootRuntime.path.startsWith(`${driveRoot}\\`), false);
+    assert.equal(dirname(driveRootRuntime.path), driveRoot);
+    const snapshot = await native.call("runtime_snapshot", [
+      driveRootRuntime.handle,
+      source,
+      "probe.bin",
+    ]);
+    const sourceBytes = await readFile(source);
+    assert.equal(
+      snapshot.sha256,
+      createHash("sha256").update(sourceBytes).digest("hex"),
+    );
+    assert.equal(snapshot.source.requestedPath, source);
+    const readback = native.call("runtime_open", [
+      driveRootRuntime.handle,
+      "probe.bin",
+    ]);
+    try {
+      assert.equal(readback.size, sourceBytes.byteLength);
+      assert.deepEqual(
+        native.call("read", [readback.handle, 0, 65536]),
+        sourceBytes.subarray(0, 65536),
+      );
+    } finally {
+      native.call("close", [readback.handle]);
+    }
+  } finally {
+    native.call("runtime_close", [driveRootRuntime.handle]);
+  }
+  assert.equal(await exists(driveRootRuntime.path), false);
+  report.controls.driveRootRuntimeParent = true;
   const snapshotOwner = WindowsPrivateRuntime.create(
     workspace.replace(/\\/u, "/"),
     "single-flight-",

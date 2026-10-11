@@ -387,14 +387,54 @@ const resultSchemas = {
   xrefs: z.array(ghidraCanonicalAddressSchema),
 } satisfies Readonly<Record<GhidraFunctionOperation, z.ZodType>>;
 
+const functionBoundaryObservationOperations: ReadonlySet<GhidraFunctionOperation> =
+  new Set([
+    "analyze_function",
+    "procedure_assembly",
+    "procedure_info",
+    "procedure_pseudo_code",
+    "read_function_instructions",
+  ]);
+
+const functionObservationEnvelope = z.strictObject({
+  value: z.unknown(),
+  limitations: z.array(z.string()),
+});
+
+export interface ParsedGhidraFunctionResult {
+  readonly value: JsonValue;
+  readonly limitations: readonly string[];
+}
+
 /** Require exact, bounded Java-bridge function output before creating Evidence. */
 export const parseGhidraFunctionResult = (
   operation: GhidraFunctionOperation,
   value: JsonValue,
-): Result<JsonValue, AnalysisOutputError> => {
-  const parsed = resultSchemas[operation].safeParse(value);
+): Result<ParsedGhidraFunctionResult, AnalysisOutputError> => {
+  let observation: {
+    readonly value: unknown;
+    readonly limitations: readonly string[];
+  };
+  if (functionBoundaryObservationOperations.has(operation)) {
+    const envelope = functionObservationEnvelope.safeParse(value);
+    if (!envelope.success)
+      return err(
+        new AnalysisOutputError(
+          operation,
+          "Ghidra bridge omitted the function observation envelope",
+          { cause: envelope.error },
+        ),
+      );
+    observation = envelope.data;
+  } else {
+    observation = { value, limitations: [] };
+  }
+  const parsed = resultSchemas[operation].safeParse(observation.value);
   return parsed.success
-    ? ok(jsonValueSchema.parse(parsed.data))
+    ? ok({
+        value: jsonValueSchema.parse(parsed.data),
+        limitations: observation.limitations,
+      })
     : err(
         new AnalysisOutputError(
           operation,

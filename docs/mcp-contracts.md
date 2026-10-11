@@ -26,7 +26,16 @@ health transition leaves that catalog unchanged and does not emit
 Advertised input and output schemas contain no reachable recursive references.
 Schemas share repeated definitions through schema-local references while
 preserving complete nested fields and validation rules. Input properties retain
-their descriptions and literal examples. Root object unions are presented as
+their descriptions and literal examples.
+
+Hosts forward input schemas to the model with every request, so advertised
+examples never copy complete producer Evidence. An embedded Evidence record is
+shown as its exact `{"kind":"retained-evidence","evidence_id":"ev_..."}`
+reference where the tool accepts one. An example that can only carry inline
+Evidence stays in the canonical contract and its executable tests, but is not
+advertised. Every advertised example is a distinct valid canonical input.
+
+Root object unions are presented as
 one object without root `anyOf`, `oneOf`, or `allOf` for model API compatibility.
 The projection merges properties, retains shared required fields and
 group-specific field dependencies, and describes the accepted input groups.
@@ -144,6 +153,12 @@ if retention is unavailable or fails, the diagnostic reports that reason.
 REA accepts ordinary `tools/call` progress tokens. Updates are monotonic,
 rate-bounded to at most one intermediate update per 100 ms, and always allow a
 terminal update. Unknown totals are omitted; REA does not fabricate percentages.
+`capture_process_scenario` uses that boundary only when the client supplies a
+progress token. Notifications set `progress` to the count of collected terminal
+frames, process samples, and interaction events, omit `total`, and put the
+lifecycle phase, elapsed time, and final cleanup status in `message`. A client
+that does not send a progress token receives no progress notifications. The
+tool result is unchanged either way.
 Provider calls receive the request cancellation signal. Artifact traversal,
 hashing, version comparisons, Hopper requests, and process capture
 check the same signal. Cancellation is distinct from timeout. A cleanup failure
@@ -152,6 +167,9 @@ Native call tracing and process capture retain available observations in
 `details.partial_observation` on failure, including when cleanup succeeds.
 The observation reports its partial coverage; cleanup details describe host
 state separately from the execution failure.
+A process capture that fails during a finalization interval keeps every signal
+attempt and its delivery result in `details.partial_observation`, with
+`elapsed_ms` and `exit_code` null when no exit was observed.
 Derived comparisons and reconstruction verification yield before computation
 and before publication, so cancellation cannot race with successful Evidence.
 
@@ -290,6 +308,23 @@ that reference for a summary, one section/module, or a stable page, or call
 bundle exports stream canonical JSON into an atomically published file. A broad
 follow-up or `get_evidence_bundle` can also exceed the response budget; exporting
 preserves the complete session without sending it through a single MCP frame.
+To discover existing records without their large payloads, call
+`get_evidence_bundle` with `detail: "summary"`. Its `result.records` contain
+Evidence IDs, artifact/provider identities, analysis-profile digests and native
+procedure metadata. Optional `filters` match exact `evidence_id`, `operation`,
+`target_sha256`, `analysis_profile_digest` or `procedure_address`. Use a discovered
+ID with `inspect_analysis_view`; neither discovery nor retained selection starts
+a provider. `retention: "complete-record"` describes stored Evidence, while
+`native_dossier.value_flow` independently reports truncation, unavailable or
+unknown metadata. Missing omission counts remain null. Summary output carries
+every matching record; actual transport admission still applies. Omitted
+`detail` preserves complete canonical bundle delivery; filters require summary.
+
+For a portable exported bundle, the CLI shares this projection:
+`rea inspect-evidence-bundle '{"path":"/tmp/evidence.json","detail":"summary","filters":{"operation":"analyze_function"}}' --format json`.
+The CLI validates and materializes that local bundle under its existing memory
+budget; summary delivery does not make arbitrary large files cheap to import.
+
 Cancelling an export stops further serialization and removes its staging file.
 The destination changes only when a complete export is atomically published.
 
@@ -302,6 +337,15 @@ It does not change the client's buffer, analysis coverage, or retained content.
 Ordinary responses keep their existing complete result contract.
 
 ## Retained application Evidence inputs
+
+`analyze_javascript_application` and `inspect_binary_layout` accept `detail`:
+`complete` (default) returns the complete analysis Evidence; `summary` records
+that complete Evidence in the session and returns the derived
+`inspect_analysis_view` summary Evidence instead. Its
+`normalized_result.parent_evidence_id` and `evidence_links` name the retained
+analysis, so later views and application workflows read it without repeating
+analysis or moving the complete record through the response. A server without
+session retention refuses summary detail with `capability_unavailable`.
 
 `inspect_analysis_view` projects a caller-selected view of already completed
 `inspect_binary_layout`, `analyze_javascript_application`, or `analyze_function`
@@ -425,3 +469,15 @@ and reconstruction cannot treat it as unchanged.
 canonical `integrity_contradictions` records and marks application graph
 coverage partial when any mismatch is continued. Contradicted nested ASARs
 remain opaque.
+
+`extract_artifact` accepts the same policy in MCP and as `--integrity-policy`
+on `rea extract-artifact`. With `record-and-continue` it writes the observed
+bytes and returns the `integrity_contradictions` records for the extracted
+files. An active ASAR unpacked entry whose companion file is absent cannot be
+materialized; extraction fails as `unavailable` with that logical path.
+
+Packaging tools commonly sign or strip `.asar.unpacked` native binaries after
+writing the archive header, so their declared hashes no longer match. Electron
+does not check unpacked companions against those hashes at runtime. Integrity
+failures for such entries name this cause and the operation to rerun with
+`record-and-continue`; REA does not exempt unpacked entries silently.

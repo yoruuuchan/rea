@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseProcessCapture } from "./processCaptureParsing.js";
-import { type ProcessTraceSpecification } from "./processTraceSpecification.js";
+import type { ProcessTraceSpecification } from "./processTraceSpecification.js";
 import { processTraceComparisonResultSchema } from "./processTraceEvaluation.js";
 import {
   capture,

@@ -14,6 +14,45 @@ const input = (
   ...overrides,
 });
 
+describe("readiness bundle authentication", () => {
+  it("authenticates each Evidence record after parsing the readiness contract", () => {
+    const value = input();
+    const record = value.evidence_bundle.records[0];
+    if (record === undefined) throw new TypeError("Missing Evidence record");
+    value.evidence_bundle.records[0] = {
+      ...record,
+      evidence_id: `ev_${"0".repeat(64)}`,
+    };
+
+    expect(() => createReconstructionReadinessReport(value)).toThrow(
+      /Evidence semantic identifier does not match its record/u,
+    );
+  });
+
+  it("rejects a noncanonical bundle manifest after readiness parsing", () => {
+    const value = input();
+    const provider = value.evidence_bundle.providers[0];
+    if (provider === undefined)
+      throw new TypeError("Missing provider manifest");
+    value.evidence_bundle.providers.push(provider);
+
+    expect(() => createReconstructionReadinessReport(value)).toThrow(
+      /Evidence bundle manifests are not canonical/u,
+    );
+  });
+
+  it("rejects duplicate Evidence record IDs after readiness parsing", () => {
+    const value = input();
+    const record = value.evidence_bundle.records[0];
+    if (record === undefined) throw new TypeError("Missing Evidence record");
+    value.evidence_bundle.records.push(record);
+
+    expect(() => createReconstructionReadinessReport(value)).toThrow(
+      /Evidence bundle contains duplicate record IDs/u,
+    );
+  });
+});
+
 describe("reconstruction readiness report", () => {
   it("accepts every caller supplied capability", () => {
     const capability = RECONSTRUCTION_READINESS_EXAMPLE.capabilities[0];

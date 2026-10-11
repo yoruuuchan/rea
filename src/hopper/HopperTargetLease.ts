@@ -131,6 +131,10 @@ const tryAcquireLease = async (
   owner: HopperTargetLeaseOwner,
 ): Promise<HopperTargetLeaseAcquisition | "missing" | "stale"> => {
   const server = createServer((socket) => sendOwner(socket, owner));
+  // The lease lives exactly as long as its owning process. A lease retained
+  // after unconfirmed cleanup must not keep a completed one-shot command
+  // alive; process exit leaves a stale socket that later acquirers recover.
+  server.unref();
   if (!(await bind(server, socketPath))) {
     const existingOwner = await readOwner(socketPath);
     return typeof existingOwner === "string"

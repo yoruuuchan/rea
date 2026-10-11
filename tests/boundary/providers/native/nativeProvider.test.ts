@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -18,6 +20,7 @@ import { parseLipoArchitectures } from "../../../../src/native/parsers/lipo.js";
 import { parseCodeSignature } from "../../../../src/native/parsers/codesign.js";
 import { prepareProcessOwnershipInspection } from "../../../../src/process/ProcessOwnershipObservation.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
+import { ProviderProcessSupervisor } from "../../../../src/process/ProviderProcess.js";
 
 import {
   NativeFixtureRunner as FixtureRunner,
@@ -25,6 +28,27 @@ import {
   nativeMachoTarget as machoTarget,
   nativeMachoTargetForFile,
 } from "../../../fixtures/nativeCommands.js";
+
+const cleanupOwner = (runId: string): ProviderProcessSupervisor => {
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: () => true,
+  });
+  return new ProviderProcessSupervisor({
+    process: child,
+    ownsProcessLifetime: true,
+    ownership: {
+      runId,
+      leaderPid: 46_000,
+      processGroupId: 46_000,
+      expectedParentPid: process.pid,
+    },
+    cleanup: async () => ({ cleaned: false, reason: "still running" }),
+  });
+};
 
 beforeAll(() => prepareProcessOwnershipInspection());
 
@@ -312,6 +336,97 @@ describe("native command failure capture and limits", () => {
       (result.error.capture?.stdoutBytes ?? 0) +
         (result.error.capture?.stderrBytes ?? 0),
     ).toBeLessThanOrEqual(NATIVE_COMMAND_OUTPUT_BUDGET_BYTES);
+  });
+});
+
+describe("native command cleanup lifecycle", () => {
+  it("waits for an active command before retrying its failed owner at close", async () => {
+    let finishCommand!: (
+      result: Awaited<ReturnType<NativeCommandRunner["run"]>>,
+    ) => void;
+    let commandStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      commandStarted = resolve;
+    });
+    const command = new Promise<
+      Awaited<ReturnType<NativeCommandRunner["run"]>>
+    >((resolve) => {
+      finishCommand = resolve;
+    });
+    let cleanupRetries = 0;
+    const runner: NativeCommandRunner = {
+      run: () => {
+        commandStarted();
+        return command;
+      },
+      retryCleanup: async () => {
+        cleanupRetries += 1;
+        return cleanupRetries === 1
+          ? [
+              {
+                owner: cleanupOwner("run:first"),
+                reason: "first process group remains live",
+                resources: ["run:first", "process-group:1234"],
+              },
+              {
+                owner: cleanupOwner("run:second"),
+                reason: "second process group remains live",
+                resources: ["run:second", "process-group:5678"],
+              },
+            ]
+          : [];
+      },
+    };
+    const client = new NativeMacOSProvider({}, runner, "darwin").createClient(
+      machoTarget("/private/fixture"),
+    );
+
+    const execution = client.execute("list_architectures", {});
+    await started;
+    const closing = client.close();
+    await Promise.resolve();
+    expect(cleanupRetries).toBe(0);
+    finishCommand(
+      err(
+        new NativeCommandFailure("lipo", "timeout", null, undefined, {
+          stdout: "partial architecture output",
+          stderr: "partial diagnostic",
+          stdoutBytes: 27,
+          stderrBytes: 19,
+          exitCode: null,
+          signal: null,
+          truncated: false,
+        }),
+      ),
+    );
+
+    const [observed, closed] = await Promise.all([execution, closing]);
+    expect(observed.ok).toBe(false);
+    expect(closed.ok).toBe(false);
+    expect(cleanupRetries).toBe(1);
+    if (!closed.ok) {
+      expect(closed.error.cleanupResources).toEqual([
+        "run:first",
+        "process-group:1234",
+        "run:second",
+        "process-group:5678",
+      ]);
+      expect(closed.error).toHaveProperty("diagnostics", {
+        reason: "Native command process cleanup remains incomplete",
+        failures: [
+          {
+            reason: "first process group remains live",
+            resources: ["run:first", "process-group:1234"],
+          },
+          {
+            reason: "second process group remains live",
+            resources: ["run:second", "process-group:5678"],
+          },
+        ],
+      });
+    }
+    await expect(client.close()).resolves.toMatchObject({ ok: true });
+    expect(cleanupRetries).toBe(2);
   });
 });
 

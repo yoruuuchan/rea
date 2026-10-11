@@ -377,7 +377,7 @@ describe("process identity during token validation", () => {
     expect(reusedDuringFinalRead).toBe(true);
   });
 
-  it("fails closed when a candidate PID changes identity during token reading", async () => {
+  it("fails closed when candidate PIDs change identity during token reading", async () => {
     let identityReads = 0;
     const process: ProcessTableEntry = {
       pid: 911,
@@ -386,8 +386,10 @@ describe("process identity during token validation", () => {
       state: "S",
       command: "reused-during-token-read",
     };
+    const processes = [process, { ...process, pid: 912, processGroupId: 912 }];
+    const listProcesses = vi.fn(async () => processes);
     const host: ProcessOwnershipHost = {
-      listProcesses: () => Promise.resolve([process]),
+      listProcesses,
       environment: () => Promise.resolve({}),
       processIdentities: (entries) => {
         identityReads += 1;
@@ -414,21 +416,24 @@ describe("process identity during token validation", () => {
     };
 
     await expect(
-      verifyNoTokenOwnedProcesses("run-token", host, [
-        { pid: process.pid, identity: "old-start" },
-      ]),
+      verifyNoTokenOwnedProcesses(
+        "run-token",
+        host,
+        processes.map(({ pid }) => ({ pid, identity: "old-start" })),
+      ),
     ).resolves.toEqual({
       cleaned: false,
       reason: "process identity could not be revalidated",
-      failures: [
-        {
-          pid: process.pid,
-          reason: "process-identity-unavailable",
-          diagnostic:
-            "process identity changed or became unavailable during token validation",
-        },
-      ],
+      failures: processes.map(({ pid }) => ({
+        pid,
+        reason: "process-identity-unavailable",
+        diagnostic:
+          "process identity changed or became unavailable during token validation",
+      })),
     });
+    // Initial observation, final token classification, then one fresh recheck
+    // shared by both changed identities.
+    expect(listProcesses).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 import { traceSourceMap } from "./TraceSourceMap.js";
 
@@ -12,6 +14,20 @@ const leaf = {
 };
 const trace = (map: unknown, position = point) =>
   traceSourceMap(JSON.stringify(map), url, position);
+
+it("traces BOM-prefixed maps with a source-map transport prefix ending in CR", () => {
+  const text = `\uFEFF)]}'transport prefix\r${JSON.stringify(leaf)}`;
+  const report = traceSourceMap(text, url, point);
+  expect(report).toMatchObject({
+    source_map_sha256: createHash("sha256").update(text).digest("hex"),
+    matches: [
+      {
+        reported_source: "app.ts",
+        content: { text: "original" },
+      },
+    ],
+  });
+});
 
 describe("upstream source-map point evidence", () => {
   it("preserves every duplicate-column/source-URL candidate and its own embedded bytes", () => {

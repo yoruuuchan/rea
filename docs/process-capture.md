@@ -51,6 +51,34 @@ format is TOON. The file contains the complete capture Evidence record.
 Choose an output file distinct from the scenario input: shell redirection opens
 and truncates the output before REA reads the scenario.
 
+While the capture runs, REA writes live status to stderr as one JSON object per
+line. Stdout stays the final Evidence document:
+
+```json
+{
+  "rea_progress": {
+    "phase": "running",
+    "completed": 3,
+    "total": null,
+    "message": "elapsed_ms=1200 frames=1 samples=2 interactions=0",
+    "sequence": 4
+  }
+}
+```
+
+`phase` is the observed lifecycle stage: `prepare`, `running`, `settling`, or
+`cleanup`. `completed` counts collected terminal frames, process samples, and
+interaction events. `total` stays null; REA does not invent a unit total or a
+percentage. `message` reports elapsed time and those counts. The final line uses
+`phase` `cleanup`, sets `terminal` to true, and adds `disposition` (`exited`,
+`timeout`, `idle_timeout`, `cancelled`, or `failed`) plus the owned-process,
+renderer, and temporary-root cleanup states. Updates use the shared progress
+boundary and are limited to one intermediate line per 100 ms; the terminal line
+is always emitted. If a receiver is slow, intermediate observations are merged
+into the latest status, and stale live observations are discarded before final
+cleanup status. Progress never copies child output. Child output remains in the
+capture Evidence on stdout.
+
 For example:
 
 ```json
@@ -85,6 +113,12 @@ from launch, must be ordered, and must fall within `timeout_ms`. Inputs marked
 `sensitive` are sent to the process but persisted as a byte-count placeholder.
 Environment overrides are recorded in the scenario commitment; inherited
 values are not copied into Evidence.
+
+Terminal dimensions must satisfy `columns × (rows + scrollback) ≤ 1,000,000`.
+Every scheduled resize uses the same selected scrollback and must fit this
+working-buffer budget. REA rejects oversized scenarios before launching the
+command; it never clamps the requested dimensions. This limit is independent
+of `limits.output_bytes`, which bounds retained terminal observations.
 
 The capture contains raw PTY output chunks and rendered terminal states,
 interaction dispatch outcomes, exit reason, sampled process-tree observations,
@@ -147,6 +181,100 @@ run the same owned-process cleanup path. Settlement reports whether the
 sampled process group quiesced or whether cleanup was needed or unverifiable;
 sampling cannot prove that every short-lived or detached descendant was seen.
 
+### Finalization interval
+
+By default a deadline sends `SIGKILL` at once. Set `finalization_ms` to give the
+target time to finish: when `timeout_ms` or `idle_timeout_ms` fires, REA sends
+`SIGTERM`, keeps capturing output and selected files, and sends `SIGKILL` once
+if the interval ends first. Cancellation is not delayed: it sends `SIGKILL`
+immediately, also during finalization, and ends the run as cancelled.
+
+```json
+{
+  "executable": "node",
+  "arguments": ["./job.mjs"],
+  "filesystem_observation_paths": ["./reports"],
+  "timeout_ms": 30000,
+  "finalization_ms": 1500
+}
+```
+
+REA binds the captured root's first start identity to its ownership token,
+checking the identity before and after reading that token. A missing or
+mismatched token, or an identity change during validation, leaves the identity
+unverified rather than adopting a replacement process. Both finalization
+signals recheck that retained identity immediately before the call; the check
+and signal remain separate operating-system operations. REA does not fall back
+to a bare PID kill for either finalization signal; failed identity or ownership
+validation is recorded as `unverified` with its reason. Cancellation before any
+deadline keeps the existing terminal kill. Descendants are not signalled during
+finalization; owned-process cleanup handles them afterwards.
+
+`exit.reason` keeps the initiating deadline (`timeout` or `idle_timeout`).
+`exit.code` is `null` for every deadline exit; the code of an exit observed
+during finalization is `exit.finalization.exit_code`, and the observed signal
+stays in `exit.signal`. `exit.finalization` records what was observed and is
+absent when no finalization was attempted:
+
+```json
+{
+  "code": null,
+  "signal": 0,
+  "reason": "timeout",
+  "finalization": {
+    "requested_ms": 1500,
+    "elapsed_ms": 12,
+    "exit_code": 0,
+    "signals": [
+      { "signal": "SIGTERM", "sent_at_ms": 0, "delivery": "signaled" }
+    ]
+  }
+}
+```
+
+- `signals` lists each attempt in order: `SIGTERM` first, at most one `SIGKILL`.
+  `sent_at_ms` is the attempt time on a monotonic clock, relative to the start of
+  finalization, also for an attempt that could not be delivered.
+- `delivery` is `signaled` (the identity matched and the signal call returned),
+  `gone` (no live process matched), `identity-changed` (the PID now belongs to a
+  different process, which was not signalled) or `unverified` (the identity could
+  not be established or the call failed). None of them proves the process
+  exited.
+  An `unverified` attempt may carry a `reason` string naming why: an unavailable
+  identity and its reason, an inspection or signal error, or delivery that did
+  not settle within the bound (1000 ms). An attempt recorded `unverified` after
+  that bound can still complete later; it stays identity-checked, and its late
+  result is not added to the record.
+- `elapsed_ms` is when REA observed the exit, relative to the start of
+  finalization, or `null` when no exit was observed. The PTY layer can deliver the
+  exit slightly after the operating system ended the process.
+- `exit_code` is the code the PTY reported when the exit was observed during
+  finalization and was not caused by a signal (`exit.signal` is `0`); a
+  finalizer that exits with `3` records `3`, one that exits cleanly records `0`.
+  It is `null` when no exit was observed or the target ended on a signal, and it
+  is never inferred. A target that exited on its own near the deadline is
+  recorded the same way.
+- The observed signal stays in `exit.signal`; `exit.code` is `null` for every
+  deadline exit. The record does not attribute an exit to a particular signal,
+  and a `SIGKILL` from a scenario event next to the escalation cannot be told
+  apart from it.
+- If the `SIGKILL` cannot be delivered, REA stops waiting for an exit, keeps every
+  observation collected so far with the delivery results, and releases the run
+  through owned-process cleanup.
+- The `SIGKILL` is not sequenced after the `SIGTERM` delivery result: the two
+  deliveries are independent, because cancellation must not wait for a slow
+  identity check.
+
+`timeout_ms + finalization_ms + settle_ms` must stay at or below
+`Number.MAX_SAFE_INTEGER` (9007199254740991), the largest total exactly
+representable as a JavaScript number; the scenario is rejected otherwise. This is
+a representability limit, not a timer limit. The nominal lifecycle budget is that
+sum; polling, snapshotting and cleanup lie outside it. Scenario `events` keep
+being dispatched during finalization and are recorded as usual. `finalization_ms`
+of `0`, the default, keeps today's behaviour and the committed identity of every
+existing scenario. `elapsed_ms` and `sent_at_ms` are timing data and take part in
+exit comparison like `settlement.elapsed_ms`.
+
 Every capture requires `truncation_details`, with separate accounting for:
 
 - `raw_terminal`: original UTF-8 PTY chunk bytes and observed/retained chunk
@@ -159,6 +287,10 @@ Every capture requires `truncation_details`, with separate accounting for:
   input, so raw omissions also limit rendered coverage.
 - `filesystem_before` and `filesystem_after`: file-count/depth limits,
   enumeration failures, whole-file hash budget and bytes successfully hashed.
+  Directory names are read incrementally within the remaining entry capacity.
+  When a directory exceeds that capacity, the retained subset follows filesystem
+  enumeration order and is then sorted; it is explicitly incomplete and cannot
+  establish that an omitted path is absent.
   Each retained regular file without a digest has an aliased path, size,
   remaining budget and reason: `file_bytes_budget`,
   `file_changed_or_short_read`, or `file_unavailable`. Its `system_code` is

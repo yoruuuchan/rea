@@ -24,6 +24,29 @@ REA can attach to a user-owned Chrome-family browser through the Chrome DevTools
 
 Target discovery returns the complete in-scope target array in one result.
 
+## Screenshot comparison memory budget
+
+`compare_web_screenshots` admits both PNGs against a 256 MiB estimated
+working-memory budget before inflating either image. This is a processing
+buffer budget for this operation, not a PNG dimension limit, CDP transport
+limit, or process RSS guarantee. Header-valid dimensions that exceed the
+budget return `resource_constraint` with `details.resource: "memory"` and the
+estimated and maximum working-set bytes. Invalid PNG structure remains
+malformed input; encodings outside supported pixel-comparison coverage remain
+unsupported-target errors.
+
+The conservative estimate includes the two decoder-owned decoded input
+buffers, the current image's concatenated IDAT buffer, Node zlib's default
+16 KiB output chunk backing rounded up for retained chunks, the concatenated
+inflate result while its output chunks are retained, one possible extra output
+chunk before zlib checks `maxOutputLength`, unfiltered scanline storage,
+RGB-to-RGBA expansion, and the first retained RGBA image while the second is
+decoded. RGBA output aliases its unfiltered buffer and is counted once.
+Admission uses checked integer arithmetic before image-sized allocation.
+Caller-owned JSON/base64 strings, input parsing and validation, transport
+buffers, garbage-collector behavior, and other runtime memory are outside this
+estimate; the budget does not promise a bound on total process memory.
+
 Electron `file://` pages use a separate provider and target boundary; see [electron-observation.md](electron-observation.md).
 
 ## Provider authorities
@@ -53,7 +76,18 @@ google-chrome \
 
 REA does not launch, own, or terminate this browser. Use a dedicated profile and stop it yourself when the investigation is complete. Do not expose the debugging port on a non-loopback interface.
 
+On Linux, a reachable but locked desktop keyring can stall Chrome before its
+first navigation. For a dedicated investigation profile, add
+`--password-store=basic` to bypass that keyring. Empty or placeholder frame URLs
+then describe an unloaded page; REA continues to require an allowed, committed
+URL. See [the startup investigation](https://github.com/morluto/rea/issues/1384#issuecomment-6093781686).
+
 ## Request boundary
+
+CDP connections enforce the shared 64 MiB limit per WebSocket message. A larger
+reply, including a valid reply from Chrome, fails with `payload_limit`. The limit
+counts message bytes before JSON parsing; it does not bound the memory used by
+decoded strings or JSON objects.
 
 Discovery supplies a literal loopback CDP endpoint and returns all eligible
 page targets unless an exact HTTP(S) origin filter narrows the result. Follow-up
@@ -164,6 +198,17 @@ CDP discovery, WebSocket connection, and commands continue until the peer respon
 Network and console coverage starts only after REA attaches and enables the relevant CDP domains. `prior_activity_available` is always `false`; absence from these arrays is not evidence that an event never occurred. If CDP reuses a request ID without supplying redirect metadata, REA retains the predecessor observation and marks network coverage incomplete.
 
 Source maps are not fetched by inspection. Bundle analysis fetches them only when `fetch_source_maps` is selected, with exact-origin redirect checks and no credentials, cookies, or referrer. Each fetch operation has a 30-second deadline and a 64 MiB aggregate streamed-response budget across redirects. A deadline or byte-limit failure remains explicitly unavailable and makes bundle completeness partial. Source-map decoding also bounds raw resolved identities to 64 MiB and aggregate inline evidence to 32 MiB. Failed maps preserve their failure context when it fits; if another context cannot fit, collection stops with the full requested count, the returned processed count, and an explicit unknown-results limitation. Retained mappings and original sources are returned inline. See [source-location limits](web-source-location.md) for the structural decoder bounds. Original source artifacts with `.ts`, `.tsx`, `.mts`, or `.cts` suffixes carry `text/typescript`; other source names retain `text/javascript`.
+
+source-map items retain the script's `declared_url` separately from the observed
+`effective_url`. successful maps use the latter as their source-resolution base.
+failed fetches retain the last response URL observed within the approved origins;
+`effective_url` is `null` when no response was observed. query parameters are
+preserved, and both URLs count toward the inline evidence budget.
+Current fetches emit a string or null; historical observations may omit
+`effective_url` without changing their stored content or Evidence identity.
+An observed URL must fit before its response body is read. If it cannot fit,
+remaining map results are explicitly unknown; failed cancellation retains its
+cleanup context and resource constraint.
 
 ## Non-goals and threat model
 
