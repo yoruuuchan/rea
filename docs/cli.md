@@ -62,6 +62,14 @@ unpack .NET single-file hosts or decode IL2CPP metadata. NativeAOT method bodies
 require native analysis. See the [managed-code guide](managed-code-analysis.md)
 for supported deployment forms, selection semantics, and coverage limits.
 
+## SQLite snapshots
+
+For a local database snapshot, use `rea inspect-sqlite-database PATH --json`.
+Add `--table NAME --row-limit 20` to read a bounded sample from an ordinary
+table. This command does not require a native analysis provider. See
+[SQLite database snapshots](sqlite-databases.md) for database/WAL identity,
+source-file handling and row-value semantics.
+
 ## Native analysis
 
 Inspect embedded Go build metadata without installing Go or configuring a
@@ -93,7 +101,7 @@ a function dossier; `decompile` returns pseudocode. For assembly instructions
 alone, use `rea instructions`. A macOS `.app` bundle can be supplied directly.
 
 Run `rea --help` or a command's `--help` for arguments and output options.
-The [generated catalog](product-catalog.json) lists all CLI commands and MCP
+The [generated catalog](mcp-contracts.md#generated-catalog) lists all CLI commands and MCP
 tools. Provider-specific target support is described in the
 [native guide](native-investigation.md), [DOS guide](ghidra-dos.md),
 [raw binary guide](raw-binary.md), and

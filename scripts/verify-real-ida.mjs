@@ -16,6 +16,8 @@ const { values } = parseArgs({
   options: {
     target: { type: "string" },
     procedure: { type: "string", default: "rea_fixture_add" },
+    "second-procedure": { type: "string" },
+    "second-marker": { type: "string" },
     "package-root": { type: "string" },
     report: { type: "string" },
   },
@@ -23,6 +25,14 @@ const { values } = parseArgs({
 if (values.target === undefined || process.env.REA_IDA_MCP_CONFIG === undefined)
   throw new Error(
     "IDA verification requires --target and REA_IDA_MCP_CONFIG; see docs/ida-provider.md. No toolchain is installed by this lane.",
+  );
+if (
+  (values["second-procedure"] === undefined) !==
+    (values["second-marker"] === undefined) ||
+  values["second-marker"] === ""
+)
+  throw new Error(
+    "IDA verification requires --second-procedure and a nonempty --second-marker together; choose a marker unique to the second function's pseudocode.",
   );
 const packageRoot = resolve(
   values["package-root"] ?? fileURLToPath(new URL("..", import.meta.url)),
@@ -47,6 +57,14 @@ const [
 const registration = readIdaConfiguration(process.env.REA_IDA_MCP_CONFIG);
 if (!registration.ok) throw registration.error;
 const config = registration.value;
+if (
+  config.protocol === "native" &&
+  (values["second-procedure"] === undefined ||
+    values["second-marker"] === undefined)
+)
+  throw new Error(
+    "Native IDA verification requires --second-procedure and --second-marker to verify distinct-function switching; see docs/ida-provider.md.",
+  );
 const environment = Object.fromEntries(
   Object.entries({
     ...process.env,
@@ -57,6 +75,8 @@ const environment = Object.fromEntries(
 const report = {
   passed: false,
   mode: config.mode,
+  protocol:
+    config.protocol ?? (config.mode === "attached" ? "legacy" : "modern"),
   checks: [],
   observations: [],
 };
@@ -75,6 +95,8 @@ const observe = (input) => {
   assert.equal(evidence.analysis_profile.parameters.cache_policy, "live");
   assert.equal(evidence.analysis_profile.parameters.engine_version, null);
   assert.ok(evidence.limitations.length > 0);
+  if (config.protocol === "native" && evidence.operation === "analyze_function")
+    assert.equal(evidence.relationship_coverage?.status, "unknown");
   assert.ok(
     evidence.locations.some((location) => location.kind === "artifact-path"),
   );
@@ -156,7 +178,7 @@ const mcp = async (cliDossier) => {
       ["procedure_address", { procedure: dossier.procedure.name }],
       ["procedure_assembly", { procedure: dossier.procedure.address }],
       ["procedure_callees", { procedure: dossier.procedure.address }],
-      ...(config.mode === "attached"
+      ...(config.mode === "attached" && config.protocol !== "native"
         ? [["procedure_callers", { procedure: dossier.procedure.address }]]
         : []),
       ["search_procedures", { pattern: dossier.procedure.name }],
@@ -167,6 +189,38 @@ const mcp = async (cliDossier) => {
     ]) {
       const result = await call(name, args);
       observe(result);
+    }
+    if (values["second-procedure"] !== undefined) {
+      const secondAddress = observe(
+        await call("procedure_address", {
+          procedure: values["second-procedure"],
+        }),
+      );
+      assert.notEqual(secondAddress, dossier.procedure.address);
+      const secondCode = observe(
+        await call("procedure_pseudo_code", {
+          procedure: values["second-procedure"],
+        }),
+      );
+      assert.equal(typeof secondCode, "string");
+      assert.ok(secondCode.length > 0);
+      assert.ok(
+        !dossier.pseudocode.includes(values["second-marker"]),
+        "The second marker also appears in the first function's pseudocode.",
+      );
+      assert.ok(
+        secondCode.includes(values["second-marker"]),
+        "The second function's pseudocode omitted its expected marker.",
+      );
+      const restored = observe(
+        await call("procedure_pseudo_code", {
+          procedure: dossier.procedure.address,
+        }),
+      );
+      assert.equal(restored, dossier.pseudocode);
+      report.checks.push(
+        "second-function pseudocode identity and return to the original function",
+      );
     }
     const invalid = await client.callTool({
       name: "xrefs",
@@ -195,7 +249,10 @@ const cleanup = async () => {
   try {
     await upstream.connect();
     if (config.mode === "attached") {
-      const metadata = await upstream.call("get_metadata", {});
+      const metadata =
+        config.protocol === "native"
+          ? await upstream.readResource("ida://idb/metadata")
+          : await upstream.call("get_metadata", {});
       assert.equal(metadata.sha256.toLowerCase(), await digest());
       report.checks.push(
         "existing GUI target remains open with the original input identity",

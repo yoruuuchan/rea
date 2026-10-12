@@ -53,7 +53,7 @@ export const registerBinaryDiagnosticsCommands = (
     run: ({ args }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectBinaryLayout, async () => {
-          const result = await service.inspect(
+          const result = await service.inspectAndClose(
             { path: resolve(args.path) },
             { signal },
           );
@@ -75,7 +75,7 @@ export const registerBinaryDiagnosticsCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectRecordedCrash, async () => {
-          const result = await recorded.inspect(
+          const result = await recorded.inspectAndClose(
             {
               path: resolve(args.path),
               include_debugger_context: options.debuggerContext,

@@ -21,13 +21,22 @@ export class AnalysisUnsupportedTargetError extends AnalysisError {
 }
 
 /** An analysis or transport resource failure, distinct from malformed input or unsupported coverage. */
+export const ANALYSIS_RESOURCE_KINDS = [
+  "memory",
+  "cpu",
+  "file-size",
+  "transport",
+  "capacity",
+] as const;
+
+/** A measured resource constraint or bounded admission refusal. */
 export class AnalysisResourceConstraintError extends AnalysisError {
   readonly _tag = "AnalysisResourceConstraintError";
   readonly remediationAction: string | undefined;
 
   constructor(
     readonly operation: string,
-    readonly resource: "memory" | "cpu" | "file-size" | "transport",
+    readonly resource: (typeof ANALYSIS_RESOURCE_KINDS)[number],
     readonly reason: string,
     readonly reportedLimits: Readonly<Record<string, JsonValue>> | null,
     options?: AnalysisErrorOptions & { readonly remediationAction?: string },

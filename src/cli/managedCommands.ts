@@ -16,6 +16,7 @@ import { logCliCommand } from "../cliLogging.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { registerProjectManagedApplicationGraph } from "./managedProjectGraphCommand.js";
+import { managedMembersInputSchema } from "../contracts/managed/managedToolContracts.js";
 
 export const registerManagedCommands = (
   cli: CliInstance,
@@ -60,12 +61,9 @@ const registerInspectManagedMembers = (
       path: z.string().describe("Managed PE executable or assembly path"),
     }),
     options: z.object({
-      type: z
-        .array(z.string())
-        .optional()
-        .describe(
-          "Inspect only members declared by this exact type full name, such as System.Threading.Monitor; a nested type is named by its bare name, which selects every nested type of that name (repeatable)",
-        ),
+      type: managedMembersInputSchema.shape.type_names.describe(
+        "Inspect only members declared by this exact type full name, such as System.Threading.Monitor; a nested type is named by its bare name, which selects every nested type of that name (repeatable)",
+      ),
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "inspect-managed-members", () =>

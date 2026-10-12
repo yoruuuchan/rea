@@ -14,10 +14,13 @@ import type { BrowserScenarioAction } from "../domain/browserScenarioValues.js";
 import {
   browserStepArtifactsSchema,
   type BrowserScenarioEvent,
+  type BrowserScenarioEventFamily,
   type BrowserStepArtifacts,
 } from "../domain/browserScenarioCaptureValues.js";
 import { PLAYWRIGHT_RESPONSE_BODY_PROVENANCE_LIMITATION } from "../domain/browserNetworkEvidence.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { compareBrowserScenarios } from "../domain/browserScenarioDiff.js";
+import { compareBrowserScenariosInputSchema } from "../domain/browserScenarioDiffValues.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
@@ -370,6 +373,56 @@ describe("PlaywrightBrowserScenarioProvider", () => {
       missing_sections: ["events"],
     });
     expect(session.closeCalls).toBe(1);
+  });
+});
+
+describe("PlaywrightBrowserScenarioProvider comparison coverage", () => {
+  it("keeps quiet captures with different event families from comparing unchanged", async () => {
+    const capture = async (events: readonly BrowserScenarioEventFamily[]) => {
+      const provider = new PlaywrightBrowserScenarioProvider(() =>
+        Promise.resolve(new FakeSession("launch")),
+      );
+      const result = await provider.captureScenario(scenario({ events }));
+      if (!result.ok) throw result.error;
+      return result.value;
+    };
+    const compare = async (
+      before: readonly BrowserScenarioEventFamily[],
+      after: readonly BrowserScenarioEventFamily[],
+    ) =>
+      compareBrowserScenarios(
+        compareBrowserScenariosInputSchema.parse({
+          before_scenario: await capture(before),
+          after_scenario: await capture(after),
+        }),
+      );
+
+    const recorded = await capture(["page-errors", "console", "console"]);
+    expect(recorded.completeness.equality_eligible).toBe(true);
+    expect(recorded.scenario.event_families).toEqual([
+      "console",
+      "page-errors",
+    ]);
+    for (const [before, after] of [
+      [[], ["console"]],
+      [["console"], ["page-errors"]],
+    ] as const) {
+      const compared = await compare(before, after);
+      expect(compared.overall_status).toBe("unknown");
+      expect(
+        compared.steps.flatMap((step) => step.artifact_diffs),
+      ).toContainEqual(
+        expect.objectContaining({
+          artifact: "events",
+          status: "unknown",
+          reason: expect.stringContaining("Event family selections differ"),
+        }),
+      );
+    }
+    expect(
+      (await compare(["console", "page-errors"], ["page-errors", "console"]))
+        .overall_status,
+    ).toBe("unchanged");
   });
 });
 

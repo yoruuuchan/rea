@@ -179,6 +179,9 @@ it("discovers an oversized native dossier by exact metadata and reads its retain
 it("advertises exact schemas and projects one layout section from retained Evidence", async () => {
   const layout = analysisViewLayoutFixture();
   const service = new BinaryLayoutService({
+    inspectAndClose(input, options) {
+      return this.inspect(input, options);
+    },
     identity: BINARY_LAYOUT_TEST_PROVIDER,
     inspect: () => Promise.resolve(ok(layout)),
   });

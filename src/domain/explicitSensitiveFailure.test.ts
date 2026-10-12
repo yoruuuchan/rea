@@ -3,13 +3,73 @@ import { expect, it } from "vitest";
 import {
   AnalysisInputError,
   AnalysisCapabilityUnavailableError,
+  AnalysisCancelledError,
+  AnalysisTimeoutError,
+  AnalysisArtifactChangedError,
+  AnalysisOutputError,
+  AnalysisResourceConstraintError,
 } from "./analysisErrorCore.js";
 import { projectAnalysisError } from "./analysisErrorProjection.js";
 import { ProviderCleanupError } from "./providerCleanupError.js";
+import { ProviderAdapterError } from "./providerAdapterError.js";
 import {
   redactExplicitFailure,
   redactExplicitPointer,
 } from "./explicitSensitiveFailure.js";
+
+const context = {
+  diagnostics: {
+    note: "explicit-secret warning",
+    nested: { "explicit-secret-key": 5, observed: 7 },
+    caller_path: "/tmp/password-fixture?token=public-value",
+  },
+  capturedOutput: {
+    stdout: "explicit-secret output",
+    stderr: "public stderr",
+    stdout_bytes: 22,
+    truncated: false,
+  },
+};
+
+it.each([
+  new AnalysisCancelledError("inspect", context),
+  new AnalysisTimeoutError("inspect", 250, context),
+  new AnalysisInputError("inspect", context),
+  new AnalysisAccessDeniedError("inspect", "/public", "EACCES", context),
+  new AnalysisArtifactChangedError("inspect", "/public", "changed", context),
+  new AnalysisOutputError("inspect", "invalid", context),
+  new AnalysisCapabilityUnavailableError(
+    "provider",
+    "inspect",
+    "unsupported",
+    context,
+  ),
+  new AnalysisResourceConstraintError(
+    "inspect",
+    "memory",
+    "capacity",
+    null,
+    context,
+  ),
+  new ProviderAdapterError("provider", "inspect", context),
+])("preserves sanitized common context for $._tag", (error) => {
+  const sanitized = redactExplicitFailure(error, ["explicit-secret"]);
+  expect(sanitized._tag).toBe(error._tag);
+  const projected = projectAnalysisError(sanitized);
+  expect(projected.details).toMatchObject({
+    diagnostics: {
+      note: "[REDACTED] warning",
+      nested: { observed: 7 },
+      caller_path: context.diagnostics.caller_path,
+    },
+    captured_output: {
+      stdout: "[REDACTED] output",
+      stdout_bytes: 22,
+      stderr: "public stderr",
+    },
+  });
+  expect(JSON.stringify(projected)).not.toContain("explicit-secret");
+});
 
 it.each([
   ["/metadata/private~1~0/numeric", ["private/~"], "/metadata"],

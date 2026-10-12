@@ -1,3 +1,5 @@
+import type { JsonValue } from "./jsonValue.js";
+
 /** Stable tags exposed by safe analysis-error projections. */
 const ANALYSIS_ERROR_TAGS = [
   "AnalysisProtocolError",
@@ -51,6 +53,8 @@ export interface AnalysisCleanupObservation {
 
 /** Optional provider-neutral context that must survive typed error projection. */
 export interface AnalysisErrorOptions extends ErrorOptions {
+  /** Producer-owned, caller-safe facts retained through every typed projection. */
+  readonly diagnostics?: Readonly<Record<string, JsonValue>> | undefined;
   readonly capturedOutput?: AnalysisCapturedOutput | undefined;
   readonly cleanup?: AnalysisCleanupObservation | undefined;
   readonly partialObservation?: AnalysisPartialObservation | undefined;
@@ -58,12 +62,17 @@ export interface AnalysisErrorOptions extends ErrorOptions {
 
 /** Base class for expected analysis, provider, and session failures. */
 export abstract class AnalysisError extends Error {
+  readonly diagnostics: Readonly<Record<string, JsonValue>> | undefined;
   readonly capturedOutput: AnalysisCapturedOutput | undefined;
   readonly cleanup: AnalysisCleanupObservation | undefined;
   readonly cleanupIncomplete: boolean;
   readonly cleanupResources: readonly string[];
   constructor(message: string, options?: AnalysisErrorOptions) {
     super(message, options);
+    this.diagnostics =
+      options?.diagnostics === undefined
+        ? undefined
+        : structuredClone(options.diagnostics);
     this.capturedOutput =
       options?.capturedOutput === undefined
         ? undefined
@@ -109,6 +118,11 @@ import type {
   AdbPackagePullPartialObservation,
 } from "./adb/adbDeviceAnalysis.js";
 import type { NativeUiObservationResult } from "./native/nativeUiObservation.js";
+import type { BinaryLayout } from "./native/binaryLayout.js";
+import type {
+  RecordedCrash,
+  RecordedCrashPartialObservation,
+} from "./native/recordedCrash.js";
 
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
@@ -123,6 +137,9 @@ export type AnalysisPartialObservation =
   | WebScriptExportPartialObservation
   | JavaScriptRecoveryPartialObservation
   | Evidence
+  | BinaryLayout
+  | RecordedCrash
+  | RecordedCrashPartialObservation
   | AndroidPartialObservation
   | FirmwarePartialObservation
   | NativeUiObservationResult

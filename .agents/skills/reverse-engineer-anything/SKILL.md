@@ -2,7 +2,7 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, and browser targets with REA. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
 metadata:
-  version: "39"
+  version: "40"
 ---
 
 # REA
@@ -67,6 +67,13 @@ explicit path or endpoint and do not need it.
   [historical captures](https://github.com/morluto/rea/blob/main/docs/web-network-captures.md) for the exact upstream
   profile and credential exclusions.
 - User-owned Electron runtime already open: `list_electron_targets`.
+- Recorded packet captures: `inspect_packet_capture` with selected TShark fields,
+  display filters and decode-as rules. Requires Linux, util-linux prlimit and `REA_TSHARK_COMMAND`; see
+  [capture guide](https://github.com/morluto/rea/blob/main/docs/packet-captures.md).
+  Packet limits count input packets before filtering. Output defaults to 50 matching
+  frames; use `match_offset` / `match_limit` for later pages, or explicit null
+  limit for complete matching output. Preserve the source digest across pages.
+  This does not perform live capture.
 - Explicit local WebAssembly artifact: `inspect_wasm_artifact`. Supply WABT 1.0.42
   through `REA_WABT_BIN_DIRECTORY`; retain exact byte/tool identity and decoded WAT.
   Select JavaScript glue and candidate paths explicitly and preserve URL/path
@@ -75,7 +82,11 @@ explicit path or endpoint and do not need it.
 - Explicit local EVM bytecode carrier: `inspect_evm_interface` with caller-selected
   `raw` or `hex` encoding. Preserve carrier/decoded digests and treat selectors,
   argument strings and mutability as inferred candidates; this performs no chain
-  lookup or target execution. See the
+  lookup or target execution. For the complete inferred interface without hex or
+  duplicate stdout, discover support and select `detail: "summary"`; complete
+  Evidence stays retained under its original identity. Use the returned
+  `parent_evidence_id` for exact function or `bytecode_hex`/stdout/stderr pages.
+  Candidate coverage does not establish interface completeness. See the
   [EVM bytecode guide](https://github.com/morluto/rea/blob/main/docs/evm-bytecode.md).
 - Embedded Go compiler, module or build-setting metadata: `inspect_go_binary`
   with the explicit local file. This built-in target-free inspection requires no
@@ -83,6 +94,15 @@ explicit path or endpoint and do not need it.
   absent metadata does not prove a binary is not Go, and unparsed text records
   remain explicit. See the
   [Go binary guide](https://github.com/morluto/rea/blob/main/docs/go-binaries.md).
+
+- Explicit local SQLite database snapshot: `inspect_sqlite_database`. Inspect
+  with Node.js 24.x >=24.15 or 26+ providing native SQLite limits. Read schema
+  first (compact inventory by default), or select an exact ordinary table
+  and `columns` when rows are needed. Defaults are selected-table schema and
+  20 rows; request `schema_scope: "database"` for the complete stored schema. Preserve both database and existing sibling WAL identity; row samples
+  report truncation and have unspecified order. Use a quiescent snapshot rather
+  than assuming a live database/WAL pair was copied atomically. See the
+  [SQLite guide](https://github.com/morluto/rea/blob/main/docs/sqlite-databases.md).
 - Explicit Linux ELF file for offline layout, symbols, relocations or static
   mitigation evidence: `inspect_binary_layout`. This target-free operation uses
   caller-supplied pwntools without opening a disassembler database. Preserve its

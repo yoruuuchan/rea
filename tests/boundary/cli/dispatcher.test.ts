@@ -25,15 +25,15 @@ describe("executable dispatcher", () => {
         ),
         workspace.write(
           "dist/cli-runtime/cli.js",
-          'export const createCli = () => ({ serve: (args) => process.stdout.write(JSON.stringify({ adapter: "cli", args })) });\n',
+          'export const cliConfigurationError = () => undefined; export const createCli = () => ({ serve: (args) => process.stdout.write(JSON.stringify({ adapter: "cli", args })) });\n',
         ),
         workspace.write(
           "dist/cli-runtime/cliOutput.js",
           "export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
         ),
         workspace.write(
-          "dist/cli-runtime/streamedJsonOutput.js",
-          "export const createStreamedCliJsonOutput = () => undefined;\n",
+          "dist/cli-runtime/cliResultOutput.js",
+          "export const createCliResultOutput = () => undefined;\n",
         ),
         workspace.write(
           "dist/cli-runtime/mcpDoctor.js",

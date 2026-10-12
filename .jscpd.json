@@ -1,5 +1,4 @@
 {
-  "_comment": "Test files remain included so the gate measures duplication across both src/ and tests/. The 3.0% limit leaves headroom for ordinary changes while keeping duplication visible.",
   "threshold": 3.0,
   "reporters": ["consoleFull"],
   "ignore": [

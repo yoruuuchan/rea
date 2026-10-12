@@ -148,6 +148,11 @@ existing analysis families directly, for example
 - Cancellation during a package pull preserves caller-selected output. The
   error includes partial observations identifying completed artifacts and the
   interrupted local path; remaining APKs were not attempted.
+- Bugreports collect into isolated staging and publish with exclusive creation;
+  filename collisions select the next numeric suffix. If publication fails, the
+  completed archive remains in staging. The error's partial observation gives
+  its recoverable `local_path`, the original `adb_reported_path`, and an unknown
+  digest status. Later operations and shutdown preserve this retained evidence.
 - Failed package acquisition rollback retains its directory identity and retries
   cleanup before later work and during shutdown. Cleanup refuses a replacement
   directory. Terminal shutdown stops admission and drains active operations.

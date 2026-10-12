@@ -17,14 +17,14 @@ import {
   type RecordedCrash,
 } from "../../domain/native/recordedCrash.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
-import { runOwnedCommand } from "../../process/OwnedCommand.js";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   capturedPwntoolsOutput,
   pwntoolsDecoderFailure,
 } from "../pwntools/PwntoolsFailures.js";
 import { PWNTOOLS_LIMITS } from "../pwntools/PwntoolsRelease.js";
 import { readPwntoolsFailureEvidence } from "../pwntools/PwntoolsResourceLimits.js";
-import type { PwntoolsLauncher } from "../pwntools/PwntoolsDecoder.js";
+import type { PwntoolsCommand } from "../pwntools/PwntoolsDecoder.js";
 
 const OPERATION = "inspect_recorded_crash";
 const replySchema = z.discriminatedUnion("ok", [
@@ -48,14 +48,14 @@ export const inspectPwndbgCore = async ({
   rootPath,
   diagnostics,
   options,
-  launcher,
+  runCommand,
   probePath,
 }: {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly rootPath: string;
   readonly diagnostics: AnalysisCapturedOutput;
   readonly options: ExecutionOptions | undefined;
-  readonly launcher?: PwntoolsLauncher;
+  readonly runCommand: PwntoolsCommand;
   readonly probePath?: (
     path: string,
     kind: "file" | "directory",
@@ -126,9 +126,23 @@ export const inspectPwndbgCore = async ({
     { flag: "wx", mode: 0o600 },
   );
   let output: AnalysisCapturedOutput | undefined;
+  const failureContext = {
+    operation: OPERATION,
+    providerId: "pwndbg-core",
+    precedingOutput: diagnostics,
+  };
+  const failure = (cause: unknown) =>
+    pwntoolsDecoderFailure(
+      cause,
+      "debugger",
+      gdb,
+      environment.REA_PWNTOOLS_PYTHON ?? "",
+      {},
+      failureContext,
+    );
   try {
     options?.signal?.throwIfAborted();
-    const execution = await runOwnedCommand(
+    const execution = await runCommand(
       {
         command: environment.REA_PWNTOOLS_PYTHON ?? "",
         arguments: [
@@ -155,14 +169,7 @@ export const inspectPwndbgCore = async ({
           OMP_NUM_THREADS: "1",
         },
       },
-      {
-        timeoutMs: PWNTOOLS_LIMITS.timeoutMs,
-        diagnosticBytes: PWNTOOLS_LIMITS.diagnosticBytes,
-      },
-      {
-        ...(options?.signal === undefined ? {} : { signal: options.signal }),
-        ...(launcher === undefined ? {} : { launcher }),
-      },
+      failure,
     );
     output = capturedPwntoolsOutput(execution);
     let reply: z.output<typeof replySchema>;
@@ -218,6 +225,7 @@ export const inspectPwndbgCore = async ({
       );
     return { ...reply.value, diagnostics: output };
   } catch (cause: unknown) {
+    if (cause instanceof AnalysisError && cause.cleanupIncomplete) throw cause;
     if (
       options?.signal?.aborted &&
       (cause === options.signal.reason ||
@@ -232,11 +240,7 @@ export const inspectPwndbgCore = async ({
       gdb,
       environment.REA_PWNTOOLS_PYTHON ?? "",
       await readPwntoolsFailureEvidence(cause, stage),
-      {
-        operation: OPERATION,
-        providerId: "pwndbg-core",
-        precedingOutput: diagnostics,
-      },
+      failureContext,
     );
   }
 };

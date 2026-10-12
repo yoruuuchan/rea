@@ -61,8 +61,19 @@ export const createEvidenceToolHandler =
         const result = await logToolExecution(logger, name, () =>
           operation(input, { signal: context.mcpReq.signal }),
         );
-        if (!result.ok)
+        if (!result.ok) {
+          const partial = result.error.partialObservation;
+          if (partial !== undefined && "evidence_id" in partial) {
+            const recorded = recordEvidence?.(partial);
+            if (recorded !== undefined)
+              return server.delivery.toRecordedPartialErrorToolResult(
+                result.error,
+                partial.evidence_id,
+                recorded,
+              );
+          }
           return server.delivery.toCallToolResult(result, contract);
+        }
         const recorded = recordEvidence?.(result.value);
         return server.delivery.toEvidenceToolResult(
           result.value,

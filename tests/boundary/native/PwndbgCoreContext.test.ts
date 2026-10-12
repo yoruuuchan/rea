@@ -43,6 +43,9 @@ it.each(["pre-aborted", "aborted-during-probe"] as const)(
         diagnostics,
         options: { signal: controller.signal },
         probePath,
+        runCommand: () => {
+          throw new Error("No process should exist before cancellation");
+        },
       }),
     ).rejects.toBeInstanceOf(AnalysisCancelledError);
     expect(probes).toBe(scenario === "pre-aborted" ? 0 : 1);

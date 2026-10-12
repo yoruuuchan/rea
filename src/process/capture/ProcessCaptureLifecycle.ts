@@ -662,6 +662,7 @@ export const observeSettlement = async (
   }
   const started = Date.now();
   let consecutiveEmpty = 0;
+  let sawLive = false;
   let deadlineReached = false;
   while (!deadlineReached) {
     onLiveProgress?.();
@@ -685,13 +686,20 @@ export const observeSettlement = async (
         recordEvent("lifecycle", 1);
         return { state: "quiesced", elapsed_ms: Date.now() - started };
       }
-    } else consecutiveEmpty = 0;
+    } else {
+      consecutiveEmpty = 0;
+      sawLive = true;
+    }
     deadlineReached = Date.now() - started >= settleMs;
     if (deadlineReached) break;
     await delay(50, undefined, { signal });
   }
   recordEvent("lifecycle", 1);
-  return { state: "alive_at_deadline", elapsed_ms: Date.now() - started };
+  // A lone empty observation proves neither liveness nor quiescence; only an
+  // observed live member justifies alive_at_deadline.
+  return sawLive
+    ? { state: "alive_at_deadline", elapsed_ms: Date.now() - started }
+    : { state: "unverifiable", elapsed_ms: Date.now() - started };
 };
 
 /** Name why an attempt is unverified; a blank message never reaches the capture schema. */

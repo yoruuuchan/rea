@@ -105,7 +105,7 @@ const inspectWebPageInputFacts = {
 
 const inspectWebPageWithoutSourceSchema = z.strictObject({
   ...inspectWebPageInputFacts,
-  include_script_sources: z.literal(false).default(false),
+  include_script_sources: z.literal(false).optional().default(false),
 });
 
 const inspectWebPageWithSourceShapeSchema = z.strictObject({
@@ -134,10 +134,17 @@ export const inspectWebPageWithSourceInputSchema =
   inspectWebPageWithSourceShapeSchema.superRefine(refineInspectWebPageInput);
 
 /** Caller-visible schema for one passive inspection. */
-export const inspectWebPageInputSchema = z.union([
-  inspectWebPageWithoutSourceSchema.superRefine(refineInspectWebPageInput),
-  inspectWebPageWithSourceInputSchema,
-]);
+export const inspectWebPageInputSchema = z.discriminatedUnion(
+  "include_script_sources",
+  [
+    inspectWebPageWithoutSourceSchema.superRefine(refineInspectWebPageInput),
+    inspectWebPageWithSourceShapeSchema
+      .extend({
+        include_script_sources: z.literal(true),
+      })
+      .superRefine(refineInspectWebPageInput),
+  ],
+);
 
 export type ListBrowserTargetsInput = z.infer<
   typeof listBrowserTargetsInputSchema

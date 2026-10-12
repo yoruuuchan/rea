@@ -74,7 +74,7 @@ msgstr "Başlangıç N0zoM1z0 * 10 Ekim 2026"
 #: website/public/guides/browser/index.html:494
 #: website/public/guides/index.html:278
 #: website/public/guides/javascript/index.html:499
-#: website/public/guides/native/index.html:505 website/public/index.html:1182
+#: website/public/guides/native/index.html:505 website/public/index.html:1187
 #: website/public/showcase/aegis/index.html:804
 #: website/public/showcase/ctf/index.html:773
 #: website/public/showcase/dx-ball/index.html:781
@@ -5968,7 +5968,7 @@ msgctxt "page:index.html"
 msgid "On this page"
 msgstr "Bu sayfada"
 
-#: website/public/index.html:193 website/public/index.html:242
+#: website/public/index.html:193 website/public/index.html:247
 msgctxt "page:index.html"
 msgid "Set up REA"
 msgstr "REA'YU ayarlama"
@@ -6068,7 +6068,7 @@ msgstr ""
 
 #. {ph0}: <a href="#analysis-guides">
 #. {ph1}: </a>
-#: website/public/index.html:232
+#: website/public/index.html:237
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Already know RE? {ph0}Skip to analysis guides →{ph1}"
@@ -6076,13 +6076,13 @@ msgstr "RE'Yİ zaten biliyor musun? {ph0}Analiz kılavuzlarına atla →{ph1}"
 
 #. {ph0}: <a href="blog/">
 #. {ph1}: </a>
-#: website/public/index.html:236
+#: website/public/index.html:241
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Want to go deeper? {ph0}Read the Blog →{ph1}"
 msgstr "Daha derine inmek ister misin? {ph0}Blogu Oku →{ph1}"
 
-#: website/public/index.html:243
+#: website/public/index.html:248
 msgctxt "page:index.html"
 msgid "Copy this into your coding agent:"
 msgstr "Bu istemi kodlama ajanınıza yapıştırın:"
@@ -6095,39 +6095,39 @@ msgstr "Bu istemi kodlama ajanınıza yapıştırın:"
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:246
+#: website/public/index.html:251
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Your coding agent"
 msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Kodlama aracınız"
 
-#: website/public/index.html:251 website/public/index.html:273
-#: website/public/index.html:488 website/public/index.html:656
-#: website/public/index.html:892 website/public/index.html:1054
-#: website/public/index.html:1082
+#: website/public/index.html:256 website/public/index.html:278
+#: website/public/index.html:493 website/public/index.html:661
+#: website/public/index.html:897 website/public/index.html:1059
+#: website/public/index.html:1087
 msgctxt "page:index.html"
 msgid "Copy"
 msgstr "Kopyala"
 
-#: website/public/index.html:270
+#: website/public/index.html:275
 msgctxt "page:index.html"
 msgid "Or run this in your terminal:"
 msgstr "Ya da terminalde şu komutu çalıştırın:"
 
-#: website/public/index.html:282
+#: website/public/index.html:287
 msgctxt "page:index.html"
 msgid "Approve the setup plan, then restart your agent."
 msgstr ""
 "Kurulum planını inceleyip onaylayın, ardından ajanınızı yeniden başlatın."
 
-#: website/public/index.html:297
+#: website/public/index.html:302
 msgctxt "page:index.html"
 msgid "What is reverse engineering?"
 msgstr "Tersine mühendislik nedir?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:298
+#: website/public/index.html:303
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6142,7 +6142,7 @@ msgstr ""
 #. {ph3}: </mark>
 #. {ph4}: <mark class="prose-highlight">
 #. {ph5}: </mark>
-#: website/public/index.html:303
+#: website/public/index.html:308
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6154,7 +6154,7 @@ msgstr ""
 
 #. {ph0}: <strong class="prose-highlight">
 #. {ph1}: </strong>
-#: website/public/index.html:321
+#: website/public/index.html:326
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Before REA · You investigate it {ph0}yourself{ph1}"
@@ -6162,7 +6162,7 @@ msgstr "REA’dan önce · {ph0}Kendiniz{ph1} araştırırsınız"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:330
+#: website/public/index.html:335
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}01{ph1} Decode branches"
@@ -6170,7 +6170,7 @@ msgstr "{ph0}01{ph1} Dalları çöz"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:338
+#: website/public/index.html:343
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}02{ph1} Trace calls"
@@ -6178,7 +6178,7 @@ msgstr "{ph0}02{ph1} İzleme çağrıları"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:346
+#: website/public/index.html:351
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}03{ph1} Recover the rule"
@@ -6188,20 +6188,20 @@ msgstr "{ph0}03{ph1} Kuralı kurtar"
 #. {ph1}: </span>
 #. {ph2}: <span class="assembly-disclosure" aria-hidden="true">
 #. {ph3}: </span>
-#: website/public/index.html:361
+#: website/public/index.html:366
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Original x64 · selected instructions{ph1} {ph2}{ph3}"
 msgstr "{ph0}Orijinal x64 * seçilen talimatlar{ph1}{ph2}{ph3}"
 
-#: website/public/index.html:400
+#: website/public/index.html:405
 msgctxt "page:index.html"
 msgid "01 · Which branch?"
 msgstr "01 * Hangi şube?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:401
+#: website/public/index.html:406
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6210,29 +6210,29 @@ msgid ""
 msgstr ""
 "“{ph0}0x5b? 0x5c?{ph1} Aynı yere iki atlayış. Bunlar hangi operatörler?”"
 
-#: website/public/index.html:405
+#: website/public/index.html:410
 msgctxt "page:index.html"
 msgid "Look up the command IDs, then label the branch."
 msgstr "Komut kimliklerine bakın, ardından dalı etiketleyin."
 
-#: website/public/index.html:411
+#: website/public/index.html:416
 msgctxt "page:index.html"
 msgid "Divide ÷"
 msgstr "Böl ÷"
 
-#: website/public/index.html:415
+#: website/public/index.html:420
 msgctxt "page:index.html"
 msgid "Multiply ×"
 msgstr "Çarpın ×"
 
-#: website/public/index.html:420
+#: website/public/index.html:425
 msgctxt "page:index.html"
 msgid "02 · What do the calls do?"
 msgstr "02 · Çağrılan işlevler ne yapıyor?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong >
-#: website/public/index.html:421
+#: website/public/index.html:426
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6242,24 +6242,24 @@ msgstr ""
 "“100 açıktır. Aramalar sadece adres. {ph0}Hangisi bölünüyor? Hangi değer "
 "giriyor?{ph1}”"
 
-#: website/public/index.html:426
+#: website/public/index.html:431
 msgctxt "page:index.html"
 msgid "Inspect the helpers and trace the stored values."
 msgstr "Yardımcı işlevleri inceleyin ve depolanan değerleri izleyin."
 
-#: website/public/index.html:436
+#: website/public/index.html:441
 msgctxt "page:index.html"
 msgid "Divide"
 msgstr "Bölmek"
 
-#: website/public/index.html:441
+#: website/public/index.html:446
 msgctxt "page:index.html"
 msgid "03 · What is the rule?"
 msgstr "03 * Kural nedir?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:442
+#: website/public/index.html:447
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6269,19 +6269,19 @@ msgstr ""
 "\"Bu yol diğer girdiyle çarpılır. Yani% 10, + 'dan sonra {ph0}200'ün% 10'u "
 "anlamına{ph1} gelir.”"
 
-#: website/public/index.html:446
+#: website/public/index.html:451
 msgctxt "page:index.html"
 msgid "Name the operands and check both operator paths."
 msgstr "İşlenenleri adlandırın ve her iki operatör yolunu da kontrol edin."
 
-#: website/public/index.html:462 website/public/index.html:390
+#: website/public/index.html:467 website/public/index.html:395
 msgctxt "page:index.html"
 msgid "Illustrative expert reasoning"
 msgstr "Açıklayıcı uzman akıl yürütme"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
-#: website/public/index.html:465
+#: website/public/index.html:470
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6293,20 +6293,20 @@ msgstr ""
 
 #. {ph0}: <strong class="prose-highlight">
 #. {ph1}: </strong>
-#: website/public/index.html:473
+#: website/public/index.html:478
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "With REA · You ask {ph0}your agent{ph1}"
 msgstr "REA ile · {ph0}Ajanınıza{ph1} sorarsınız"
 
-#: website/public/index.html:477
+#: website/public/index.html:482
 msgctxt "page:index.html"
 msgid "One prompt."
 msgstr "Tek bir istem."
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:478
+#: website/public/index.html:483
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Ask your agent {ph0}in plain English.{ph1}"
@@ -6320,43 +6320,43 @@ msgstr "Ajanınıza {ph0}günlük dille{ph1} sorun."
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:483
+#: website/public/index.html:488
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Calculator"
 msgstr ""
 "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Örnek bilgi istemi * Hesap Makinesi"
 
-#: website/public/index.html:505
+#: website/public/index.html:510
 msgctxt "page:index.html"
 msgid "Example answer · based on the findings"
 msgstr "Örnek cevap · bulgulara dayanarak"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:508
+#: website/public/index.html:513
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
 "After +, the % button takes {ph0}a percentage of the first number.{ph1}"
 msgstr "+ 'Dan sonra, % düğmesi {ph0}ilk sayının bir yüzdesini alır.{ph1}"
 
-#: website/public/index.html:520
+#: website/public/index.html:525
 msgctxt "page:index.html"
 msgid "REA supplies"
 msgstr "REA’nın sağladıkları"
 
-#: website/public/index.html:521
+#: website/public/index.html:526
 msgctxt "page:index.html"
 msgid "The handler’s instructions, decompiled code and calls."
 msgstr "İşleyicinin talimatları, derlenmiş kod ve çağrılar."
 
-#: website/public/index.html:526
+#: website/public/index.html:531
 msgctxt "page:index.html"
 msgid "Your agent explains"
 msgstr "Ajanınızın açıklaması"
 
-#: website/public/index.html:527
+#: website/public/index.html:532
 msgctxt "page:index.html"
 msgid "Which branch applies, what it calculates and how to rebuild it."
 msgstr ""
@@ -6364,7 +6364,7 @@ msgstr ""
 
 #. {ph0}: <a href="#calculator">
 #. {ph1}: </a>
-#: website/public/index.html:534
+#: website/public/index.html:539
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6376,7 +6376,7 @@ msgstr ""
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:545
+#: website/public/index.html:550
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6386,37 +6386,37 @@ msgstr ""
 "{ph0}İki örnek deneyelim.{ph1} Bir oyunun hızını değiştirin, ardından Hesap "
 "Makinesine dönün ve% düğmesini yeniden oluşturun."
 
-#: website/public/index.html:551
+#: website/public/index.html:556
 msgctxt "page:index.html"
 msgid "Example 01 · Chrome’s dinosaur game"
 msgstr "Örnek 01 * Chrome'nun dinozor oyunu"
 
-#: website/public/index.html:552
+#: website/public/index.html:557
 msgctxt "page:index.html"
 msgid "Why does the dinosaur get faster?"
 msgstr "Dinozor neden hızlanıyor?"
 
-#: website/public/index.html:556 website/public/index.html:794
+#: website/public/index.html:561 website/public/index.html:799
 msgctxt "page:index.html"
 msgid "Goal"
 msgstr "Hedef"
 
 #. {ph0}: <mark class="prose-highlight">
 #. {ph1}: </mark>
-#: website/public/index.html:557
+#: website/public/index.html:562
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Rebuild the game with {ph0}adjustable speed.{ph1}"
 msgstr "Oyunu {ph0}ayarlanabilir hızda yeniden oluşturun.{ph1}"
 
-#: website/public/index.html:563 website/public/index.html:801
+#: website/public/index.html:568 website/public/index.html:806
 msgctxt "page:index.html"
 msgid "Why reverse engineer it?"
 msgstr "Neden tersine mühendislik?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:564
+#: website/public/index.html:569
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6426,49 +6426,49 @@ msgstr ""
 "İvmesini yeniden üretmek için {ph0}koşu oyununda kurala{ph1} ihtiyacımız "
 "var: ne kadar hızlı başladığı, ne kadar arttığı ve ne zaman durduğu."
 
-#: website/public/index.html:573
+#: website/public/index.html:578
 msgctxt "page:index.html"
 msgid "Play the reconstruction"
 msgstr "Yeniden oluşturulan oyunu oyna"
 
-#: website/public/index.html:605
+#: website/public/index.html:610
 msgctxt "page:index.html"
 msgid "Play"
 msgstr "Oyna"
 
-#: website/public/index.html:608
+#: website/public/index.html:613
 msgctxt "page:index.html"
 msgid "Jump ↑"
 msgstr "Zıpla ↑"
 
-#: website/public/index.html:609
+#: website/public/index.html:614
 msgctxt "page:index.html"
 msgid "Restart"
 msgstr "Yeniden başlat"
 
-#: website/public/index.html:612
+#: website/public/index.html:617
 msgctxt "page:index.html"
 msgid "Speed"
 msgstr "Hız"
 
-#: website/public/index.html:622
+#: website/public/index.html:627
 msgctxt "page:index.html"
 msgid "Use the recovered acceleration rule"
 msgstr "Kurtarılan hızlanma kuralını kullanın"
 
-#: website/public/index.html:626
+#: website/public/index.html:631
 msgctxt "page:index.html"
 msgid "Original rule: start at 6, then increase toward 13."
 msgstr "Orijinal kural: 6'dan başlayın, ardından 13'e doğru artırın."
 
-#: website/public/index.html:629
+#: website/public/index.html:634
 msgctxt "page:index.html"
 msgid "Move the slider to set your own speed. Space or Jump clears a cactus."
 msgstr ""
 "Kendi hızınızı ayarlamak için kaydırıcıyı hareket ettirin. Boşluk veya "
 "Atlama bir kaktüsü temizler."
 
-#: website/public/index.html:634
+#: website/public/index.html:639
 msgctxt "page:index.html"
 msgid ""
 "Enable JavaScript to play the reconstruction. The code and explanation above"
@@ -6477,14 +6477,14 @@ msgstr ""
 "Yeniden yapılandırmayı oynatmak için JavaScript'YU etkinleştirin. Yukarıdaki"
 " kod ve açıklama okunabilir durumda kalır."
 
-#: website/public/index.html:642 website/public/index.html:872
+#: website/public/index.html:647 website/public/index.html:877
 msgctxt "page:index.html"
 msgid "REA returned"
 msgstr "REA’nın döndürdüğü sonuç"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:643
+#: website/public/index.html:648
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6502,7 +6502,7 @@ msgstr ""
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:651
+#: website/public/index.html:656
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Dinosaur game"
@@ -6514,7 +6514,7 @@ msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Örnek istemi * Dinozor oyunu"
 #. {ph3}: </span >
 #. {ph4}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph5}: </span>
-#: website/public/index.html:665
+#: website/public/index.html:670
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6528,7 +6528,7 @@ msgstr ""
 
 #. {ph0}: <a href="https://wayou.github.io/t-rex-runner/" >
 #. {ph1}: </a >
-#: website/public/index.html:674
+#: website/public/index.html:679
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Inspected target: {ph0}wayou’s Chromium-derived browser edition{ph1}."
@@ -6542,7 +6542,7 @@ msgstr ""
 #. {ph3}: </strong>
 #. {ph4}: <strong>
 #. {ph5}: </strong>
-#: website/public/index.html:691
+#: website/public/index.html:696
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6552,12 +6552,12 @@ msgstr ""
 "{ph0}6'dan başla.{ph1} Hız {ph2}13{ph3}'ün altındayken çarpışma olmadan her "
 "güncellemeye {ph4}0,001{ph5} ekleyin."
 
-#: website/public/index.html:696
+#: website/public/index.html:701
 msgctxt "page:index.html"
 msgid "Open the speed lab →"
 msgstr "Hız laboratuvarını açın"
 
-#: website/public/index.html:702
+#: website/public/index.html:707
 msgctxt "page:index.html"
 msgid "What each part does"
 msgstr "Her bölüm ne yapar"
@@ -6568,7 +6568,7 @@ msgstr "Her bölüm ne yapar"
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:704
+#: website/public/index.html:709
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6584,7 +6584,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:711
+#: website/public/index.html:716
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6601,7 +6601,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:719
+#: website/public/index.html:724
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6611,13 +6611,13 @@ msgstr ""
 "{ph0}03 *{ph1}{ph2} Hızı değiştirir ve oynarsınız{ph3}{ph4} Orijinal ivmeyi "
 "deneyin, ardından kendi hızınızı seçin.{ph5}"
 
-#: website/public/index.html:730
+#: website/public/index.html:735
 msgctxt "page:index.html"
 msgid "See the script, checks and how to try the analysis"
 msgstr "Komut dosyasına, kontrollere ve analizin nasıl deneneceğine bakın"
 
 #. {ph0}: <code>index.js</code>
-#: website/public/index.html:733
+#: website/public/index.html:738
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6627,7 +6627,7 @@ msgstr ""
 "REA, HTTP tarayıcı sürümünü yerel bir hata ayıklama bağlantısı aracılığıyla "
 "denetledi ve yüklenen {ph0}, kaynağı ve özeti dahil."
 
-#: website/public/index.html:746
+#: website/public/index.html:751
 msgctxt "page:index.html"
 msgid ""
 "We called the original game’s update function in a controlled browser check,"
@@ -6641,7 +6641,7 @@ msgstr ""
 
 #. {ph0}: <a href="examples/dino-lab/">
 #. {ph1}: </a>
-#: website/public/index.html:752
+#: website/public/index.html:757
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6657,7 +6657,7 @@ msgstr ""
 #. {ph1}: </a>
 #. {ph2}: <a href="https://wayou.github.io/t-rex-runner/" >
 #. {ph3}: </a >
-#: website/public/index.html:758
+#: website/public/index.html:763
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6675,7 +6675,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <a href="assets/licenses/dinosaur.txt" >
 #. {ph3}: </a >
-#: website/public/index.html:767
+#: website/public/index.html:772
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6683,19 +6683,19 @@ msgid ""
 msgstr ""
 "{ph0}Denetlenen hız kodu{ph1} * {ph2}Chromium Yazarları · BSD lisansı{ph3}"
 
-#: website/public/index.html:784
+#: website/public/index.html:789
 msgctxt "page:index.html"
 msgid "Example 02 · Windows Calculator"
 msgstr "Örnek 02 * Windows Hesap Makinesi"
 
-#: website/public/index.html:785
+#: website/public/index.html:790
 msgctxt "page:index.html"
 msgid "Rebuild Calculator’s % button."
 msgstr "Hesap Makinesi’nin % düğmesini yeniden oluşturun."
 
 #. {ph0}: <mark class="prose-highlight">
 #. {ph1}: </mark>
-#: website/public/index.html:795
+#: website/public/index.html:800
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6706,7 +6706,7 @@ msgstr ""
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:802
+#: website/public/index.html:807
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6716,29 +6716,29 @@ msgstr ""
 "Aynı düğme {ph0}+ ve × 'den sonra farklı kurallar kullanır.{ph1} Yüzdenin "
 "hangi sayıya uygulandığını bulmak için yüklü uygulamayı inceliyoruz."
 
-#: website/public/index.html:811
+#: website/public/index.html:816
 msgctxt "page:index.html"
 msgid "Try the calculation"
 msgstr "Hesaplamayı deneyin"
 
-#: website/public/index.html:855
+#: website/public/index.html:860
 msgctxt "page:index.html"
 msgid "Reset"
 msgstr "Sıfırla"
 
-#: website/public/index.html:863
+#: website/public/index.html:868
 msgctxt "page:index.html"
 msgid "10% of 200 = 20. Then 200 + 20 = 220."
 msgstr "200'ün% 10'u = 20. Sonra 200 + 20 = 220."
 
-#: website/public/index.html:866
+#: website/public/index.html:871
 msgctxt "page:index.html"
 msgid "Interactive illustration of the inspected percentage rule."
 msgstr "Denetlenen yüzde kuralının etkileşimli gösterimi."
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
-#: website/public/index.html:873
+#: website/public/index.html:878
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6750,7 +6750,7 @@ msgstr ""
 
 #. {ph0}: <code>previous = 200</code>
 #. {ph1}: <code>current = 10</code>
-#: website/public/index.html:881
+#: website/public/index.html:886
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "For this example, {ph0} and {ph1}."
@@ -6764,7 +6764,7 @@ msgstr "Bu örnek için {ph0} ve {ph1}."
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:887
+#: website/public/index.html:892
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6780,7 +6780,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph5}: </span>
-#: website/public/index.html:901
+#: website/public/index.html:906
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6792,7 +6792,7 @@ msgstr ""
 "kullanın. Kuralları + ve × 'den sonra kurtarın, ardından her ikisini de "
 "kullanan küçük bir hesap makinesi oluşturun.{ph3}{ph4}{ph5}"
 
-#: website/public/index.html:922
+#: website/public/index.html:927
 msgctxt "page:index.html"
 msgid "With +"
 msgstr "İle +"
@@ -6800,13 +6800,13 @@ msgstr "İle +"
 #. {ph0}: <strong>
 #. {ph1}: </strong >
 #. {ph2}: <code>10% of 200 = 20 → 200 + 20 = 220</code>
-#: website/public/index.html:923
+#: website/public/index.html:928
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Take 10% of the first number.{ph1}{ph2}"
 msgstr "{ph0}İlk sayının% 10'unu alın.{ph1}{ph2}"
 
-#: website/public/index.html:929
+#: website/public/index.html:934
 msgctxt "page:index.html"
 msgid "With ×"
 msgstr "İle ×"
@@ -6814,13 +6814,13 @@ msgstr "İle ×"
 #. {ph0}: <strong>
 #. {ph1}: </strong >
 #. {ph2}: <code>200 × 0.1 = 20</code>
-#: website/public/index.html:930
+#: website/public/index.html:935
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Turn 10% into 0.1.{ph1}{ph2}"
 msgstr "{ph0}% 10'u 0.1.200 × 0.1 = 20'ye çevirin{ph1}{ph2}"
 
-#: website/public/index.html:939
+#: website/public/index.html:944
 msgctxt "page:index.html"
 msgid "From the installed app to a working % button"
 msgstr "Yüklü uygulamadan çalışan bir% düğmesine"
@@ -6832,7 +6832,7 @@ msgstr "Yüklü uygulamadan çalışan bir% düğmesine"
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: <code>100</code>
 #. {ph6}: </span >
-#: website/public/index.html:952
+#: website/public/index.html:957
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6850,7 +6850,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:960
+#: website/public/index.html:965
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6862,12 +6862,12 @@ msgstr ""
 "çoğaltın{ph3}{ph4} Dalı Microsoft'un kaynağıyla çapraz kontrol edin, "
 "ardından + ve × üstünü deneyin.{ph5}"
 
-#: website/public/index.html:971
+#: website/public/index.html:976
 msgctxt "page:index.html"
 msgid "See the real code and how the answer was checked"
 msgstr "Gerçek kodu ve cevabın nasıl kontrol edildiğini görün"
 
-#: website/public/index.html:997
+#: website/public/index.html:1002
 msgctxt "page:index.html"
 msgid ""
 "Inspected with REA 4.1.0: Windows Calculator 11.2508.4.0, x64. The readable "
@@ -6888,7 +6888,7 @@ msgstr ""
 #. {ph3}: </a >
 #. {ph4}: <a href="guides/native/">
 #. {ph5}: </a>
-#: website/public/index.html:1002
+#: website/public/index.html:1007
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6898,17 +6898,17 @@ msgstr ""
 "{ph0}Yüzde uygulaması{ph1} * {ph2}Microsoft'un test durumları{ph3} * "
 "{ph4}Yerel kurulum kılavuzu{ph5}"
 
-#: website/public/index.html:1021
+#: website/public/index.html:1026
 msgctxt "page:index.html"
 msgid "Your first investigation"
 msgstr "İlk soruşturmanız"
 
-#: website/public/index.html:1022
+#: website/public/index.html:1027
 msgctxt "page:index.html"
 msgid "Try REA on a small app."
 msgstr "Küçük bir uygulamada REA'yu deneyin."
 
-#: website/public/index.html:1023
+#: website/public/index.html:1028
 msgctxt "page:index.html"
 msgid ""
 "Download our Notes example, trace its CSV export, and check one changed "
@@ -6917,12 +6917,12 @@ msgstr ""
 "Notlar örneğimizi indirin, CSV dışa aktarımını izleyin ve değiştirilen bir "
 "girişi kontrol edin."
 
-#: website/public/index.html:1028
+#: website/public/index.html:1033
 msgctxt "page:index.html"
 msgid "Try the guided example"
 msgstr "Kılavuzlu örneği deneyin"
 
-#: website/public/index.html:1037
+#: website/public/index.html:1042
 msgctxt "page:index.html"
 msgid "Want to go deeper?"
 msgstr "Daha derine inmek ister misiniz?"
@@ -6931,7 +6931,7 @@ msgstr "Daha derine inmek ister misiniz?"
 #. {ph1}: </strong>
 #. {ph2}: <strong>
 #. {ph3}: </strong>
-#: website/public/index.html:1038
+#: website/public/index.html:1043
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6952,14 +6952,14 @@ msgstr ""
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:1049
+#: website/public/index.html:1054
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Website"
 msgstr ""
 "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Örnek bilgi istemi * Web sitesi"
 
-#: website/public/index.html:1072
+#: website/public/index.html:1077
 msgctxt "page:index.html"
 msgid "Yes, this one."
 msgstr "Evet, bu."
@@ -6972,7 +6972,7 @@ msgstr "Evet, bu."
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:1077
+#: website/public/index.html:1082
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6986,7 +6986,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph5}: </span>
-#: website/public/index.html:1091
+#: website/public/index.html:1096
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -7000,23 +7000,23 @@ msgstr ""
 
 #. {ph0}: <a href="showcase/dx-ball/">
 #. {ph1}: </a>
-#: website/public/index.html:1100
+#: website/public/index.html:1105
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}See the DX-Ball case study →{ph1}"
 msgstr "{ph0}DX-Ball örnek olay incelemesine bakın →{ph1}"
 
-#: website/public/index.html:1105
+#: website/public/index.html:1110
 msgctxt "page:index.html"
 msgid "For setup and analysis steps, choose your target:"
 msgstr "Kurulum ve analiz adımları için hedefinizi seçin:"
 
-#: website/public/index.html:1110
+#: website/public/index.html:1115
 msgctxt "page:index.html"
 msgid "Native binaries"
 msgstr "Makine kodu programları"
 
-#: website/public/index.html:1111
+#: website/public/index.html:1116
 msgctxt "page:index.html"
 msgid ""
 "Inspect functions, strings, references and call relationships in executables"
@@ -7025,17 +7025,17 @@ msgstr ""
 "Yürütülebilir dosyalar ve kitaplıklardaki işlevleri, dizeleri, referansları "
 "ve işlev çağrısı ilişkilerini inceleyin."
 
-#: website/public/index.html:1115
+#: website/public/index.html:1120
 msgctxt "page:index.html"
 msgid "Native analysis guide"
 msgstr "Makine kodu programlarının analizi kılavuzu"
 
-#: website/public/index.html:1118
+#: website/public/index.html:1123
 msgctxt "page:index.html"
 msgid "JavaScript & Electron"
 msgstr "JavaScript VE Electron"
 
-#: website/public/index.html:1119
+#: website/public/index.html:1124
 msgctxt "page:index.html"
 msgid ""
 "Map modules, routes, IPC and native dependencies from an application folder "
@@ -7044,17 +7044,17 @@ msgstr ""
 "Modülleri, rotaları, ıpc'yi ve yerel bağımlılıkları bir uygulama klasöründen"
 " veya ASAR arşivinden eşleyin."
 
-#: website/public/index.html:1123
+#: website/public/index.html:1128
 msgctxt "page:index.html"
 msgid "Application workflows"
 msgstr "Uygulama iş akışları"
 
-#: website/public/index.html:1126
+#: website/public/index.html:1131
 msgctxt "page:index.html"
 msgid "Browser & runtime activity"
 msgstr "Tarayıcı ve çalışma zamanı etkinliği"
 
-#: website/public/index.html:1127
+#: website/public/index.html:1132
 msgctxt "page:index.html"
 msgid ""
 "Capture selected browser or process activity, then compare the results "
@@ -7063,12 +7063,12 @@ msgstr ""
 "Seçilen tarayıcıyı veya işlem etkinliğini yakalayın, ardından sonuçları "
 "koşular arasında karşılaştırın."
 
-#: website/public/index.html:1131
+#: website/public/index.html:1136
 msgctxt "page:index.html"
 msgid "Browser observation guide"
 msgstr "Tarayıcı gözlem kılavuzu"
 
-#: website/public/index.html:1138
+#: website/public/index.html:1143
 msgctxt "page:index.html"
 msgid "Any questions?"
 msgstr "Sorunuz var mı?"
@@ -7079,7 +7079,7 @@ msgstr "Sorunuz var mı?"
 #. {ph3}: </a>
 #. {ph4}: <a href="https://github.com/morluto/rea/issues/new/choose" >
 #. {ph5}: </a >
-#: website/public/index.html:1139
+#: website/public/index.html:1144
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -7089,12 +7089,12 @@ msgstr ""
 "{ph0}Sss'yi okuyun{ph1}, Discord'DA {ph2}bizimle sohbet{ph3} edin veya "
 "hatalar ve özellik istekleri için {ph4}bir GitHub sorunu açın{ph5}."
 
-#: website/public/index.html:1152 website/public/index.html:1158
+#: website/public/index.html:1157 website/public/index.html:1163
 msgctxt "page:index.html"
 msgid "Join the community"
 msgstr "Topluluğa katıl"
 
-#: website/public/index.html:1153
+#: website/public/index.html:1158
 msgctxt "page:index.html"
 msgid ""
 "Share investigations and get help from other REA users on Discord. Follow "
@@ -7118,27 +7118,27 @@ msgstr ""
 "tersine mühendislik yapın. Net kılavuzları izleyin ve REA ile etkileşimli "
 "örnekleri deneyin."
 
-#: website/public/index.html:251
+#: website/public/index.html:256
 msgctxt "page:index.html"
 msgid "Copy REA installation prompt"
 msgstr "REA kurulum istemini kopyalayın"
 
-#: website/public/index.html:273
+#: website/public/index.html:278
 msgctxt "page:index.html"
 msgid "Copy setup command"
 msgstr "Kurulum komutunu kopyala"
 
-#: website/public/index.html:325
+#: website/public/index.html:330
 msgctxt "page:index.html"
 msgid "Follow the manual Calculator analysis"
 msgstr "Manuel Hesap Makinesi analizini takip edin"
 
-#: website/public/index.html:488
+#: website/public/index.html:493
 msgctxt "page:index.html"
 msgid "Copy Calculator percentage question"
 msgstr "Hesap Makinesi yüzdesi sorusunu kopyala"
 
-#: website/public/index.html:595
+#: website/public/index.html:600
 msgctxt "page:index.html"
 msgid ""
 "Dinosaur mini-game. Use the Jump button or press Space while the game is "
@@ -7147,32 +7147,32 @@ msgstr ""
 "Dinozor mini oyunu. Oyun odaklanırken Atlama düğmesini kullanın veya Boşluk "
 "tuşuna basın."
 
-#: website/public/index.html:656
+#: website/public/index.html:661
 msgctxt "page:index.html"
 msgid "Copy dinosaur analysis prompt"
 msgstr "Dinozor analizi istemini kopyala"
 
-#: website/public/index.html:812
+#: website/public/index.html:817
 msgctxt "page:index.html"
 msgid "Choose the calculation"
 msgstr "Hesaplamayı seçin"
 
-#: website/public/index.html:892
+#: website/public/index.html:897
 msgctxt "page:index.html"
 msgid "Copy Calculator analysis prompt"
 msgstr "Hesap makinesi analiz istemini kopyala"
 
-#: website/public/index.html:1054
+#: website/public/index.html:1059
 msgctxt "page:index.html"
 msgid "Copy website project prompt"
 msgstr "Web sitesi proje istemini kopyala"
 
-#: website/public/index.html:1082
+#: website/public/index.html:1087
 msgctxt "page:index.html"
 msgid "Copy game reconstruction prompt"
 msgstr "Oyun yeniden yapılandırma istemini kopyala"
 
-#: website/public/index.html:1182
+#: website/public/index.html:1187
 msgctxt "page:index.html"
 msgid "Back to top"
 msgstr "Başa dön"
@@ -11604,26 +11604,6 @@ msgctxt "figure:th04-bullet-ring.svg"
 msgid "Same spacing: 256 ÷ 16 = 16 angle units = 22.5°"
 msgstr "Aynı aralık: 256 ÷ 16 = 16 açı birimi = 22,5 °"
 
-#: website/public/blog/index.html:118
-#: website/public/blog/touhou-reconstruction/index.html:118
-#: website/public/examples/dino-lab/index.html:119
-#: website/public/faq/index.html:118
-#: website/public/first-investigation/index.html:118
-#: website/public/get-started/index.html:118
-#: website/public/guides/browser/index.html:118
-#: website/public/guides/index.html:118
-#: website/public/guides/javascript/index.html:118
-#: website/public/guides/native/index.html:118 website/public/index.html:120
-#: website/public/showcase/aegis/index.html:119
-#: website/public/showcase/ctf/index.html:118
-#: website/public/showcase/dx-ball/index.html:118
-#: website/public/showcase/index.html:118
-#: website/public/showcase/notion/index.html:118
-#: website/public/showcase/th04/index.html:118
-msgctxt "shared"
-msgid "Showcases"
-msgstr "Örnekler"
-
 #: website/public/blog/index.html:119
 #: website/public/blog/touhou-reconstruction/index.html:119
 #: website/public/examples/dino-lab/index.html:120
@@ -11641,8 +11621,8 @@ msgstr "Örnekler"
 #: website/public/showcase/notion/index.html:119
 #: website/public/showcase/th04/index.html:119
 msgctxt "shared"
-msgid "Blog"
-msgstr "Blog"
+msgid "Showcases"
+msgstr "Örnekler"
 
 #: website/public/blog/index.html:120
 #: website/public/blog/touhou-reconstruction/index.html:120
@@ -11660,6 +11640,26 @@ msgstr "Blog"
 #: website/public/showcase/index.html:120
 #: website/public/showcase/notion/index.html:120
 #: website/public/showcase/th04/index.html:120
+msgctxt "shared"
+msgid "Blog"
+msgstr "Blog"
+
+#: website/public/blog/index.html:118
+#: website/public/blog/touhou-reconstruction/index.html:118
+#: website/public/examples/dino-lab/index.html:119
+#: website/public/faq/index.html:118
+#: website/public/first-investigation/index.html:118
+#: website/public/get-started/index.html:118
+#: website/public/guides/browser/index.html:118
+#: website/public/guides/index.html:118
+#: website/public/guides/javascript/index.html:118
+#: website/public/guides/native/index.html:118 website/public/index.html:120
+#: website/public/showcase/aegis/index.html:119
+#: website/public/showcase/ctf/index.html:118
+#: website/public/showcase/dx-ball/index.html:118
+#: website/public/showcase/index.html:118
+#: website/public/showcase/notion/index.html:118
+#: website/public/showcase/th04/index.html:118
 msgctxt "shared"
 msgid "Get started"
 msgstr "Başlangıç"
@@ -11693,7 +11693,7 @@ msgstr "Rehberler"
 #: website/public/guides/browser/index.html:486
 #: website/public/guides/index.html:270
 #: website/public/guides/javascript/index.html:491
-#: website/public/guides/native/index.html:497 website/public/index.html:1174
+#: website/public/guides/native/index.html:497 website/public/index.html:1179
 #: website/public/showcase/aegis/index.html:796
 #: website/public/showcase/ctf/index.html:765
 #: website/public/showcase/dx-ball/index.html:773
@@ -11713,7 +11713,7 @@ msgstr "Kaynak kod"
 #: website/public/guides/browser/index.html:487
 #: website/public/guides/index.html:271
 #: website/public/guides/javascript/index.html:492
-#: website/public/guides/native/index.html:498 website/public/index.html:1175
+#: website/public/guides/native/index.html:498 website/public/index.html:1180
 #: website/public/showcase/aegis/index.html:797
 #: website/public/showcase/ctf/index.html:766
 #: website/public/showcase/dx-ball/index.html:774
@@ -11733,7 +11733,7 @@ msgstr "MIT lisansı"
 #: website/public/guides/browser/index.html:488
 #: website/public/guides/index.html:272
 #: website/public/guides/javascript/index.html:493
-#: website/public/guides/native/index.html:499 website/public/index.html:1176
+#: website/public/guides/native/index.html:499 website/public/index.html:1181
 #: website/public/showcase/aegis/index.html:798
 #: website/public/showcase/ctf/index.html:767
 #: website/public/showcase/dx-ball/index.html:775
@@ -11753,7 +11753,7 @@ msgstr "Topluluğa katıl"
 #: website/public/guides/browser/index.html:489
 #: website/public/guides/index.html:273
 #: website/public/guides/javascript/index.html:494
-#: website/public/guides/native/index.html:500 website/public/index.html:1177
+#: website/public/guides/native/index.html:500 website/public/index.html:1182
 #: website/public/showcase/aegis/index.html:799
 #: website/public/showcase/ctf/index.html:768
 #: website/public/showcase/dx-ball/index.html:776
@@ -11864,37 +11864,32 @@ msgctxt "page:index.html"
 msgid "See how REA works ↓"
 msgstr "REA’nın nasıl çalıştığını görün ↓"
 
-#: website/public/index.html:229
-msgctxt "page:index.html"
-msgid "Setup guide"
-msgstr "Kurulum rehberi"
-
-#: website/public/index.html:230
+#: website/public/index.html:235
 msgctxt "page:index.html"
 msgid "Showcases →"
 msgstr "Vitrinler →"
 
-#: website/public/index.html:740
+#: website/public/index.html:745
 msgctxt "page:index.html"
 msgid "Selected settings from the inspected script"
 msgstr "Denetlenen komut dosyasından seçilen ayarlar"
 
-#: website/public/index.html:912
+#: website/public/index.html:917
 msgctxt "page:index.html"
 msgid "Readable summary of the % handler"
 msgstr "% işleyicisinin okunabilir özeti"
 
-#: website/public/index.html:976
+#: website/public/index.html:981
 msgctxt "page:index.html"
 msgid "REA · selected original instructions"
 msgstr "REA * seçilen orijinal talimatlar"
 
-#: website/public/index.html:987
+#: website/public/index.html:992
 msgctxt "page:index.html"
 msgid "Operator IDs · Microsoft’s source"
 msgstr "Operatör Kimlikleri * Microsoft'un kaynağı"
 
-#: website/public/index.html:1161
+#: website/public/index.html:1166
 msgctxt "page:index.html"
 msgid "Follow @reatools on X"
 msgstr "X'te @reatools'u takip edin"
@@ -12304,7 +12299,7 @@ msgstr ""
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/index.html:260
+#: website/public/index.html:265
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12323,7 +12318,7 @@ msgstr ""
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/index.html:1063
+#: website/public/index.html:1068
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12549,7 +12544,7 @@ msgstr ""
 #. {ph0}: <span translate="no">Node.js</span>
 #. {ph1}: <a href="get-started/">
 #. {ph2}: </a>
-#: website/public/index.html:285
+#: website/public/index.html:290
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12562,7 +12557,7 @@ msgstr ""
 #. {ph0}: <strong >
 #. {ph1}: <span translate="no">200 + 10%</span>
 #. {ph2}: </strong >
-#: website/public/index.html:309
+#: website/public/index.html:314
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "One question: {ph0}why does Calculator give 220 for {ph1}?{ph2}"
@@ -12576,7 +12571,7 @@ msgstr ""
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/index.html:497
+#: website/public/index.html:502
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12587,7 +12582,7 @@ msgstr ""
 " {ph3}220 veriyor?{ph4}{ph5}{ph6}"
 
 #. {ph0}: <span translate="no">index.js</span>
-#: website/public/index.html:682
+#: website/public/index.html:687
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "REA · loaded {ph0} · selected lines"
@@ -12596,7 +12591,7 @@ msgstr "REA * yüklendi {ph0}* seçili satırlar"
 #. {ph0}: <strong>
 #. {ph1}: <span translate="no">200 + 10%</span>
 #. {ph2}: </strong>
-#: website/public/index.html:786
+#: website/public/index.html:791
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12614,7 +12609,7 @@ msgstr ""
 #. {ph5}: <span class="flow-note" >
 #. {ph6}: <code>ms-calculator:</code>
 #. {ph7}: </span >
-#: website/public/index.html:943
+#: website/public/index.html:948
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12672,6 +12667,20 @@ msgstr "main /{ph0} * işleyici yardımcısı"
 msgctxt "page:showcase/notion/index.html"
 msgid "main/{ph0} · clipboard receiver"
 msgstr "ana /{ph0} * pano alıcısı"
+
+# Use the same label as the Get started navigation link. The arrow is
+# decorative.
+#. {ph0}: <span class="button-arrow" aria-hidden="true" data-i18n-skip
+#. >→</span >
+#: website/public/index.html:229
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "Get started {ph0}"
+msgstr "Başlangıç {ph0}"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Setup guide"
+#~ msgstr "Kurulum rehberi"
 
 #~ msgctxt "page:get-started/index.html"
 #~ msgid "Windows PowerShell"

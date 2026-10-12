@@ -89,6 +89,7 @@ export const browserScenarioCaptureData = (input: {
         .map(({ secret_id: id }) => id)
         .sort(),
       network_content: input.scenario.capture.network,
+      event_families: [...new Set(input.scenario.capture.events)].sort(),
     },
     duration_ms: Date.now() - input.startedAt,
     steps: [...input.steps],

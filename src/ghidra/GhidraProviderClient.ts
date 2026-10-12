@@ -14,6 +14,7 @@ import {
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
 import {
+  ghidraPinnedLanguage,
   ghidraProfileDisabledAnalyzers,
   ghidraProfileLanguageOverride,
   sameGhidraDisabledAnalyzers,
@@ -61,10 +62,10 @@ import {
   ghidraMipsSoftFloatFailure,
   ghidraMipsRelocatableLimitations,
   ghidraMipsSharedLimitations,
-  ghidraMipsSharedLanguageOverride,
   ghidraMipsSoftFloatLimitations,
   isGhidraMipsSoftFloatTarget,
 } from "./GhidraMipsProfile.js";
+import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraInstallationPolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
 import { attestGhidraNativeLoadImage } from "./GhidraLoadImageAttest.js";
@@ -453,7 +454,7 @@ export const createGhidraProviderClient = (input: {
   if (
     !sameGhidraLanguageOverride(
       languageOverride,
-      config.ghidraLanguageOverride ?? ghidraMipsSharedLanguageOverride(target),
+      config.ghidraLanguageOverride ?? ghidraPinnedLanguage(target),
     )
   )
     return unavailableClient(
@@ -523,6 +524,7 @@ export const createGhidraProviderClient = (input: {
       : []),
     ...ghidraMipsRelocatableLimitations(target),
     ...ghidraMipsSharedLimitations(target),
+    ...ghidraRiscvLimitations(target),
   ];
   const providerLimitations =
     installation.platform === "win32"
@@ -539,6 +541,9 @@ export const createGhidraProviderClient = (input: {
       environment: input.environment,
       analyzeHeadlessPath: prerequisites.value.analyzeHeadlessPath,
       javaHome: prerequisites.value.javaHome,
+      ...(installation.javaVmName === undefined
+        ? {}
+        : { javaVmName: installation.javaVmName }),
       bridgeScriptPath: fileURLToPath(
         new URL("../../bridge/ghidra/ReaGhidraBridge.java", import.meta.url),
       ),
@@ -978,37 +983,40 @@ const projectPrimarySessionError = (
   failure: GhidraSessionError,
   startupTimeoutMs: number,
 ): AnalysisError => {
+  const context = { cause: failure, diagnostics: failure.diagnostics };
   if (failure.cause instanceof AnalysisAccessDeniedError)
     return new AnalysisAccessDeniedError(
       operation,
       failure.cause.path,
       failure.cause.systemCode,
-      { cause: failure },
+      context,
     );
   if (failure.cause instanceof AnalysisArtifactChangedError)
     return new AnalysisArtifactChangedError(
       operation,
       failure.cause.path,
       failure.cause.reason,
-      { cause: failure },
+      context,
     );
   if (
     operation === "annotate_native_function" &&
     failure.kind === "remote" &&
     failure.remoteCode === "invalid_function_name"
   )
-    return new AnalysisInputError(operation, { cause: failure }, [
+    return new AnalysisInputError(operation, context, [
       { path: ["name"], reason: "invalid_value", message: failure.message },
     ]);
-  if (failure.kind === "cancelled")
-    return new AnalysisCancelledError(operation);
+  if (
+    failure.kind === "cancelled" ||
+    (failure.kind === "remote" && failure.remoteCode === "decompile_cancelled")
+  )
+    return new AnalysisCancelledError(operation, context);
   if (failure.kind === "timeout" || failure.kind === "analysis_timeout")
     return new AnalysisTimeoutError(
       operation,
       failure.timeoutMs ?? startupTimeoutMs,
+      context,
     );
-  if (failure.kind === "remote" && failure.remoteCode === "decompile_cancelled")
-    return new AnalysisCancelledError(operation);
   if (
     failure.kind === "remote" &&
     failure.remoteCode === "regex_stack_exhausted"
@@ -1019,7 +1027,7 @@ const projectPrimarySessionError = (
       failure.message,
       null,
       {
-        cause: failure,
+        ...context,
         remediationAction:
           "Retry this search in literal mode or simplify the regex. The active analysis session and annotations remain available.",
       },
@@ -1030,7 +1038,7 @@ const projectPrimarySessionError = (
       failure.remoteCode ?? "",
     )
   )
-    return new AnalysisInputError(operation, { cause: failure }, [
+    return new AnalysisInputError(operation, context, [
       { path: [], reason: "invalid_value", message: failure.message },
     ]);
   if (failure.kind === "remote" && failure.remoteCode === "method_unavailable")
@@ -1038,9 +1046,7 @@ const projectPrimarySessionError = (
       "ghidra",
       operation,
       failure.message,
+      context,
     );
-  return new ProviderAdapterError("ghidra", operation, {
-    cause: failure,
-    diagnostics: failure.diagnostics,
-  });
+  return new ProviderAdapterError("ghidra", operation, context);
 };

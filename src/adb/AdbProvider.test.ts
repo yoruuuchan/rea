@@ -508,6 +508,44 @@ it("reads a bounded logcat dump with the caller count and buffer", async () => {
   ]);
 });
 
+it("reports UTF-8 byte counts in total_bytes for non-ASCII logcat output", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      logcat:
+        "08-10 13:00:00.000 I/Tag( 1): 中文\n08-10 13:00:00.000 I/Tag( 1): 😀\n",
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "read_adb_logcat",
+    input: { serial: "emulator-5554", count: 500, buffer: "main" },
+  });
+  expect(result.lines).toEqual([
+    "08-10 13:00:00.000 I/Tag( 1): 中文",
+    "08-10 13:00:00.000 I/Tag( 1): 😀",
+  ]);
+  // 30-byte prefix + 6-byte CJK + LF = 37; 30-byte prefix + 4-byte emoji + LF = 35.
+  expect(result.total_bytes).toBe(72);
+});
+
+it("counts raw captured bytes in total_bytes for malformed UTF-8 logcat output", async () => {
+  const { binary } = await writeAdbStub(
+    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$3" = "shell" ]; then
+  printf '%b' '08-10 13:00:00.000 I/Tag( 1): A\\377B\\n'
+  exit 0
+fi
+printf 'unexpected arguments: %s\\n' "$@"
+exit 1`,
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "read_adb_logcat",
+    input: { serial: "emulator-5554", count: 500, buffer: "main" },
+  });
+  // 30-byte prefix + "A" + one raw 0xff byte + "B" + LF = 34 captured bytes.
+  // Re-encoding the decoded U+FFFD replacement would report 36.
+  expect(result.total_bytes).toBe(34);
+});
+
 it("projects package details from dumpsys package output", async () => {
   const { binary } = await writeAdbStub(
     shellStub({
@@ -1086,10 +1124,10 @@ it("rejects mistyped intent extras before touching the device", async () => {
 
 it("collects a device bugreport archive with its digest", async () => {
   const { binary, root } = await writeAdbStub(
-    (root) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$3" = "bugreport" ]; then
-  printf 'bugreport-bytes' > "${join(root, "bugreport test.zip")}"
-  printf 'Bug report copied to ${join(root, "bugreport test.zip")}\\n'
+  printf 'bugreport-bytes' > "$4/bugreport test.zip"
+  printf 'Bug report copied to %s/bugreport test.zip\\n' "$4"
   exit 0
 fi
 exit 1`,
@@ -1103,7 +1141,7 @@ exit 1`,
     local_path: join(root, "bugreport test.zip"),
     bytes: 15,
     sha256: digest,
-    adb_reported_path: join(root, "bugreport test.zip"),
+    adb_reported_path: expect.stringContaining(".rea-bugreport-"),
   });
 });
 

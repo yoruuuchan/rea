@@ -13,10 +13,14 @@ const EXECUTION_WORDING =
   /\b(?:run|runs|running|launch|launches|launching|execute|executes|executing|execution|start|starts|install|installs|uninstall|uninstalls)\b/iu;
 
 const EXECUTION_WORDING_EXCEPTIONS: Readonly<Record<string, string>> = {
+  start_frida_session:
+    "spawned targets remain suspended until resume_frida_session",
   inspect_native_load_image: "states that it does not execute the target",
   resolve_native_call_targets: "states that it does not execute code",
   inspect_pe_resources: "states that it does not execute the image",
   inspect_go_binary: "reads embedded metadata without executing the target",
+  inspect_sqlite_database:
+    "uses a trusted inspector worker without executing application code or caller SQL",
   inspect_binary_layout:
     "parses the binary offline with operator-configured pwntools",
   inspect_recorded_crash: "inspects a core file without launching its target",
@@ -25,6 +29,11 @@ const EXECUTION_WORDING_EXCEPTIONS: Readonly<Record<string, string>> = {
     "decodes bytecode in REA's bundled worker without executing it",
   inspect_wasm_artifact:
     "WABT validates and decompiles the module without executing it",
+  identify_flutter_build:
+    "identifies the build through execution-free APK parsing",
+  inspect_dart_aot: "inspects snapshot bytes without executing them",
+  inspect_analysis_view:
+    "reports retained WASM execution/network states without performing execution",
   inspect_managed_artifact: "reads metadata without executing target code",
   inspect_managed_members: "reads metadata without executing target code",
   inspect_managed_native_boundaries:
@@ -115,8 +124,11 @@ describe("tool effects", () => {
       "capture_native_ui_scenario",
       "capture_process_scenario",
       "install_adb_package",
+      "instrument_with_frida",
+      "load_frida_script",
       "observe_native_calls",
       "push_adb_file",
+      "resume_frida_session",
       "start_adb_activity",
       "start_adb_app",
       "stop_adb_app",

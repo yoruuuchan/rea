@@ -37,7 +37,7 @@ const runtimeFiles = isMcpMode
     : [
         "dist/cli-runtime/cli.js",
         "dist/cli-runtime/cliOutput.js",
-        "dist/cli-runtime/streamedJsonOutput.js",
+        "dist/cli-runtime/cliResultOutput.js",
       ];
 
 if (!(await compiledRuntimeExists(runtimeFiles))) {
@@ -58,21 +58,26 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   process.stdout.write(result.output);
   process.exitCode = result.exitCode;
 } else {
-  const { createCli } = await import("../dist/cli-runtime/cli.js");
-  const { createStreamedCliJsonOutput } =
-    await import("../dist/cli-runtime/streamedJsonOutput.js");
+  const { cliConfigurationError, createCli } =
+    await import("../dist/cli-runtime/cli.js");
+  const { createCliResultOutput } =
+    await import("../dist/cli-runtime/cliResultOutput.js");
   const {
     renderCliOutputArgumentError,
     renderEmptyFilteredCliOutput,
     validateCliOutputArguments,
   } = await import("../dist/cli-runtime/cliOutput.js");
   const outputArguments = validateCliOutputArguments(args);
-  if (!outputArguments.ok) {
+  const configurationError = cliConfigurationError(process.env);
+  if (configurationError !== undefined) {
+    process.stderr.write(`${configurationError}\n`);
+    process.exitCode = 1;
+  } else if (!outputArguments.ok) {
     process.stdout.write(renderCliOutputArgumentError(outputArguments));
     process.exitCode = 1;
   } else {
     let wroteOutput = false;
-    const resultOutput = createStreamedCliJsonOutput(args, process.stdout);
+    const resultOutput = createCliResultOutput(args, process.stdout);
     await createCli(process.env, resultOutput).serve(args, {
       stdout: (output) => {
         if (resultOutput?.handled) {

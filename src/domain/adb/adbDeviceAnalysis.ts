@@ -709,7 +709,7 @@ export type AdbPackagePullPartialObservation = {
   readonly result: z.infer<typeof adbResultSchemas.pull_adb_package>;
 };
 
-/** A completed acquisition whose digest read was cancelled before verification. */
+/** Acquired file facts retained when publication, digest verification or cleanup fails. */
 export type AdbAcquiredFilePartialObservation =
   | {
       readonly provider_id: "adb";
@@ -727,13 +727,15 @@ export type AdbAcquiredFilePartialObservation =
   | {
       readonly provider_id: "adb";
       readonly operation: "collect_adb_bugreport";
-      readonly result: {
-        readonly client: z.infer<
-          typeof adbResultSchemas.collect_adb_bugreport
-        >["client"];
-        readonly serial: string;
-        readonly local_path: string;
-        readonly adb_reported_path: string;
-        readonly digest_status: "unknown";
-      };
+      readonly result:
+        | z.infer<typeof adbResultSchemas.collect_adb_bugreport>
+        | {
+            readonly client: z.infer<
+              typeof adbResultSchemas.collect_adb_bugreport
+            >["client"];
+            readonly serial: string;
+            readonly local_path: string;
+            readonly adb_reported_path: string;
+            readonly digest_status: "unknown";
+          };
     };

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseBinary } from "plist";
 
+import { appleResourceKeyFields } from "../../domain/apple/appleAssetCatalog.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
 import { projectPlistValue } from "../../domain/apple/plistValue.js";
 import {
@@ -459,18 +460,27 @@ const projectNibArchive = (
           break;
         }
         budget.reserveJsonStringOccurrence(name);
+        const nibValues = Object.fromEntries(
+          Object.entries(object.values).map(([key, value]) => {
+            budget.reserveJsonPropertyNameOccurrence(key);
+            return [key, dereference(value) ?? null];
+          }),
+        );
+        // Normalize only recognized scalar fields at the format owner. A keyed
+        // archive's authored nibValues dictionary must not gain this meaning.
+        const resourceFields = appleResourceKeyFields(nibValues);
+        for (const [field, value] of resourceFields) {
+          budget.reserveJsonPropertyNameOccurrence(field);
+          budget.reserveJsonStringOccurrence(value);
+        }
         return [
           String(object.id),
           {
             customClass: className,
             label: name,
             objectID: String(object.id),
-            nibValues: Object.fromEntries(
-              Object.entries(object.values).map(([key, value]) => {
-                budget.reserveJsonPropertyNameOccurrence(key);
-                return [key, dereference(value) ?? null];
-              }),
-            ),
+            nibValues,
+            ...Object.fromEntries(resourceFields),
           },
         ];
       }),

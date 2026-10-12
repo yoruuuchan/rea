@@ -5,7 +5,7 @@ import type { ProcessScenario } from "../../domain/process/processScenario.js";
 import { parseProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
-import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   describeProcessCaptureExecutionFailure,
   ProcessCaptureError,
@@ -864,7 +864,7 @@ export const captureProcessScenario = async (
       const executionFailureReason =
         describeProcessCaptureExecutionFailure(cause);
       return err(
-        failure instanceof ProcessCaptureError
+        failure instanceof AnalysisError
           ? failure
           : new ProcessCaptureError("process capture failed", {
               cause,
@@ -882,7 +882,7 @@ export const captureProcessScenario = async (
       const failure = normalizeCaptureFailure(cause, signal);
       const executionFailure = describeProcessCaptureExecutionFailure(cause);
       return err(
-        failure instanceof ProcessCaptureError
+        failure instanceof AnalysisError
           ? failure
           : new ProcessCaptureError("process capture lifecycle failed", {
               cause,

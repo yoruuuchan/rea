@@ -294,6 +294,9 @@ const detectArtifactFormat = async (
     if (lower.endsWith(".app")) return "app-pack";
     return zipPackageFormatForPath(lower) ?? "zip";
   }
+  // Binary plists, including keyed archives, often use other extensions.
+  if (observed.bytesRead === 8 && magic.equals(Buffer.from("bplist00")))
+    return "plist";
   const named = namedArtifactFormat(lower);
   if (named !== undefined) return named;
   if (

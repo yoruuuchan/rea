@@ -29,6 +29,8 @@ export const toolFamilyCatalog = (sources) => {
         ...sources.evmContracts.EVM_TOOL_CONTRACTS,
         ...sources.goContracts.GO_TOOL_CONTRACTS,
         ...sources.wasmContracts.WASM_TOOL_CONTRACTS,
+        ...sources.sqliteContracts.SQLITE_TOOL_CONTRACTS,
+        ...sources.captureContracts.CAPTURE_TOOL_CONTRACTS,
       ],
     },
     {
@@ -48,6 +50,16 @@ export const toolFamilyCatalog = (sources) => {
       id: "android",
       surface: "android-provider",
       contracts: sources.androidContracts.ANDROID_TOOL_CONTRACTS,
+    },
+    {
+      id: "flutter",
+      surface: "flutter-provider",
+      contracts: sources.flutterContracts.FLUTTER_TOOL_CONTRACTS,
+    },
+    {
+      id: "frida",
+      surface: "instrumentation-provider",
+      contracts: sources.fridaContracts.FRIDA_TOOL_CONTRACTS,
     },
     {
       id: "apktool",
@@ -146,6 +158,10 @@ export const providerCatalog = (sources) => {
   } = electronContractSlices(sources);
   return [
     {
+      identity: sources.fridaProvider.FRIDA_PROVIDER_IDENTITY,
+      contracts: sources.fridaContracts.FRIDA_TOOL_CONTRACTS,
+    },
+    {
       identity: sources.hopperProvider.HOPPER_PROVIDER_IDENTITY,
       contracts: declaredContracts(
         "hopper",
@@ -182,6 +198,10 @@ export const providerCatalog = (sources) => {
         ),
     },
     {
+      identity: sources.captureProvider.TSHARK_PROVIDER_IDENTITY,
+      contracts: sources.captureContracts.CAPTURE_TOOL_CONTRACTS,
+    },
+    {
       identity: sources.wasmProvider.WABT_PROVIDER_IDENTITY,
       contracts: sources.wasmContracts.WASM_TOOL_CONTRACTS,
     },
@@ -192,6 +212,10 @@ export const providerCatalog = (sources) => {
     {
       identity: sources.goProvider.GO_BINARY_PROVIDER_IDENTITY,
       contracts: sources.goContracts.GO_TOOL_CONTRACTS,
+    },
+    {
+      identity: sources.sqliteDomain.SQLITE_PROVIDER_IDENTITY,
+      contracts: sources.sqliteContracts.SQLITE_TOOL_CONTRACTS,
     },
     {
       identity: sources.artifactProviders.ARTIFACT_GRAPH_PROVIDER,
@@ -221,6 +245,10 @@ export const providerCatalog = (sources) => {
     {
       identity: sources.androidProvider.JADX_PROVIDER_IDENTITY,
       contracts: sources.androidContracts.ANDROID_TOOL_CONTRACTS,
+    },
+    {
+      identity: sources.flutterProvider.FLUTTER_PROVIDER_IDENTITY,
+      contracts: sources.flutterContracts.FLUTTER_TOOL_CONTRACTS,
     },
     {
       identity: sources.apktoolProvider.APKTOOL_PROVIDER_IDENTITY,
