@@ -9,6 +9,7 @@ import {
   type SymbolicFunction,
 } from "./javascriptSymbolicValues.js";
 import type { JavaScriptSemanticAnalysisState } from "./javascriptSemanticState.js";
+import type { JavaScriptElectronIdentity } from "./javascriptSemanticAnalysis.js";
 import type { JavaScriptAnalysisAccumulator } from "./javascriptStaticAnalysisState.js";
 import type {
   ElectronCallPath,
@@ -48,11 +49,12 @@ export const collectElectronWrappedCallPaths = (
   state: JavaScriptSemanticAnalysisState,
   source: string,
   accumulator: JavaScriptAnalysisAccumulator,
+  identity: JavaScriptElectronIdentity,
 ): readonly ElectronCallPath[] => {
   // Bounds repeated interprocedural expansion independently of bundle bytes.
   // Exhaustion is reported as unknown coverage, never as a negative finding.
   let remainingVisits = 1_000_000;
-  const resolver = new JavaScriptSymbolicBindings(state, program);
+  const resolver = new JavaScriptSymbolicBindings(state, program, identity);
   const paths: ElectronCallPath[] = [];
   const seen = new Set<string>();
   const step = (
@@ -390,7 +392,7 @@ export const collectElectronWrappedCallPaths = (
       } else if (callee.kind === "external") {
         const path = callee.path;
         const endpoint = path.join(".");
-        if (/^electron(?:\/(?:main|renderer|common))?$/u.test(path[0] ?? "")) {
+        if (identity.intactExport(path)) {
           const descriptor = ipcDescriptor(path.slice(1));
           if (descriptor)
             ipc(

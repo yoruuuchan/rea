@@ -5,6 +5,13 @@ import {
   stringify as stringifyYaml,
 } from "yaml";
 import { isDeepStrictEqual } from "node:util";
+
+import {
+  parseDshCordisDocument,
+  serializeDshDocument,
+  editDshDocument,
+  dshClientRegistrationEntry,
+} from "./DshCordisPatch.js";
 import {
   applyEdits,
   findNodeAtLocation,
@@ -131,6 +138,8 @@ export const parseClientConfiguration = (
 ): ClientConfigurationDocument => {
   if (format === undefined || format === "unsupported")
     throw new TypeError("client does not have a supported MCP config format");
+  // DeepSeek Harness stores a Cordis patch list, not a server table.
+  if (format === "dsh") return parseDshCordisDocument(text);
   const document = parseDocument(text, format);
   const serversKey = clientConfigurationServersKey(format);
   const value = document[serversKey];
@@ -184,6 +193,14 @@ export const withClientServers = (
   servers: Record<string, unknown>,
   removeLegacy?: string,
 ): Record<string, unknown> => {
+  // The Harness patch list upserts or removes by entry id, not by table.
+  if (parsed.dialect === "dsh")
+    return Object.hasOwn(servers, PRODUCT_IDENTITY.mcpServerKey)
+      ? editDshDocument(
+          parsed,
+          objectSchema.parse(servers[PRODUCT_IDENTITY.mcpServerKey]),
+        )
+      : editDshDocument(parsed);
   const [key = "", nested] = parsed.serversPath;
   if (nested === undefined) return { ...parsed.document, [key]: servers };
   const outer = { ...objectSchema.parse(parsed.document[key]) };
@@ -1280,6 +1297,7 @@ export const serializeClientConfiguration = (
     return serializeGrokConfiguration(document, originalText);
   if (format === "hermes")
     return serializeHermesConfiguration(document, originalText);
+  if (format === "dsh") return serializeDshDocument(document);
   // An empty original holds no comments or settings to preserve. Writing a
   // fresh document also keeps a lone BOM from shifting past the closing brace.
   if (
@@ -1398,6 +1416,8 @@ export const clientRegistrationEntry = (
         args,
         ...(Object.keys(environment).length === 0 ? {} : { env: environment }),
       };
+    case "dsh":
+      return dshClientRegistrationEntry(command, environment);
     case "hermes":
       // Hermes reads stdio servers from `mcp_servers.<name>` and connects them
       // unless `enabled` is false, so the entry states it explicitly.

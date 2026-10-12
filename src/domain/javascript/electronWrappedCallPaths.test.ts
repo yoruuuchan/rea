@@ -503,6 +503,38 @@ it("resolves renamed default and namespace import helpers from their syntax", ()
       .every((step) => step.label.length > 0),
   ).toBe(true);
 });
+it("resolves an empty bootstrap module key through an exported Electron bridge", () => {
+  const result = analyzeJavaScriptStaticSource(`(() => {
+    const modules = {
+      ""(module) { module.exports = require("electron"); },
+      9(module, exports, load) {
+        const electron = load("");
+        electron.contextBridge.exposeInMainWorld("desktop", {
+          copy: () => electron.ipcRenderer.send("test:empty-module"),
+        });
+      },
+    };
+    function load(id) {
+      const module = { exports: {} };
+      modules[id].call(module.exports, module, module.exports, load);
+      return module.exports;
+    }
+    load(9);
+  })();`);
+  expect(result.bundler_registrations).toMatchObject([
+    {
+      entry_module_keys: ["9"],
+      modules: [{ module_key: "" }, { module_key: "9" }],
+    },
+  ]);
+  expect(result.electron.call_paths).toContainEqual(
+    expect.objectContaining({
+      entry: "desktop.copy",
+      channel: "test:empty-module",
+      terminal: "electron.ipcRenderer.send",
+    }),
+  );
+});
 it("does not trust helper names or follow returns after a definite throw", () => {
   for (const helper of [
     `function __toESM() {return {ipcRenderer:{send(){}}}}`,
@@ -519,4 +551,34 @@ it("does not trust helper names or follow returns after a definite throw", () =>
       `);
     expect(result.electron.call_paths ?? []).toEqual([]);
   }
+});
+
+describe("wrapped Electron API identity", () => {
+  it("does not restore rejected Electron identities through wrapper substitution", () => {
+    for (const source of [
+      `const e=require("electron");e.ipcMain={on(){}};e.ipcMain.on("bad",event=>event.sender.copy());`,
+      `function require(){return {ipcMain:{on(){}}}};const e=require("electron");e.ipcMain.on("bad",event=>event.sender.copy());`,
+      `const e=require("electron");const ipc=e.ipcRenderer,alias=ipc;delete alias.send;function send(channel){ipc.send(channel)}send("bad");`,
+      `require("electron/renderer").ipcRenderer={};const e=require("electron");function send(channel){e.ipcRenderer.send(channel)}send("bad");`,
+      `const e=require("electron");[e.ipcRenderer]=replacements;function send(channel){e.ipcRenderer.send(channel)}send("bad");`,
+      `const e=require("electron");for(e.contextBridge of replacements){}function expose(api){e.contextBridge.exposeInMainWorld("api",api)}expose({copy:()=>navigator.clipboard.writeText("bad")});`,
+      `const e=require("electron");const ipc=e.ipcRenderer;Reflect.deleteProperty(ipc,"send");function send(channel){ipc.send(channel)}send("bad");`,
+    ]) {
+      const { electron } = analyzeJavaScriptStaticSource(source);
+      expect(electron.call_paths ?? []).toEqual([]);
+      expect(electron.ipc).toEqual([]);
+      expect(electron.context_bridge_apis).toEqual([]);
+    }
+  });
+  it("keeps unaffected Electron methods available after a sibling method write", () => {
+    const { electron } = analyzeJavaScriptStaticSource(`
+      const e=require("electron");
+      delete e.ipcRenderer.send;
+      function invoke(channel){e.ipcRenderer.invoke(channel)}
+      invoke("good");
+    `);
+    expect(electron.ipc).toContainEqual(
+      expect.objectContaining({ channel: "good", operation: "invoke" }),
+    );
+  });
 });

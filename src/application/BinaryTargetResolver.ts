@@ -207,16 +207,24 @@ export const parseBinaryTarget = async (
     if (cause instanceof AnalysisCancelledError) return err(cause);
     if (cause instanceof BinaryTargetError) return err(cause);
     if (!(cause instanceof Error)) throw cause;
-    const code = filesystemErrorCode(cause);
-    if (code === undefined) throw cause;
-    return err(
-      new BinaryTargetError(
-        candidate,
-        targetFailureReason(code, cause.message),
-        { cause },
-      ),
-    );
+    const failure = classifyBinaryTargetFilesystemFailure(candidate, cause);
+    if (failure === undefined) throw cause;
+    return err(failure);
   }
+};
+
+/** Classify a filesystem failure while reading a previously selected target. */
+export const classifyBinaryTargetFilesystemFailure = (
+  path: string,
+  cause: unknown,
+): BinaryTargetError | undefined => {
+  if (!(cause instanceof Error)) return undefined;
+  const code = filesystemErrorCode(cause);
+  return code === undefined
+    ? undefined
+    : new BinaryTargetError(path, targetFailureReason(code, cause.message), {
+        cause,
+      });
 };
 
 const filesystemErrorCode = (cause: Error): string | undefined => {
@@ -291,7 +299,7 @@ const detectArtifactFormat = async (
   if (
     lower.endsWith(".pkg") &&
     observed.bytesRead >= 4 &&
-    magic.subarray(0, 4).toString("ascii") === "xar!"
+    magic.subarray(0, 4).equals(Buffer.from("xar!"))
   )
     return "pkg";
   if (lower.endsWith(".dmg")) {
@@ -302,7 +310,7 @@ const detectArtifactFormat = async (
       const trailer = Buffer.alloc(4);
       const read = await handle.read(trailer, 0, trailer.length, size - 512);
       throwIfTargetResolutionCancelled(signal);
-      if (read.bytesRead === 4 && trailer.toString("ascii") === "koly")
+      if (read.bytesRead === 4 && trailer.equals(Buffer.from("koly")))
         return "dmg";
     }
   }

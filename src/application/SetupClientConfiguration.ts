@@ -12,6 +12,7 @@ import {
   withClientServers,
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
+import { dshDocument, DshCordisDocument } from "./DshCordisPatch.js";
 import { constants as fsConstants } from "node:fs";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -58,6 +59,13 @@ const configureClientDocument = async (
     throwCleanupFailure(files.error);
     return { status: "failed", reason: "readback" };
   }
+  const existing = files.value.at(-1);
+  const editabilityError =
+    existing?.dialect === "dsh"
+      ? dshDocument(existing.document).editabilityError
+      : undefined;
+  if (editabilityError !== undefined)
+    return { status: "failed", reason: "readback" };
   const policy = await readClientPolicyBlock(
     client,
     undefined,
@@ -89,7 +97,10 @@ const configureClientDocument = async (
   let parsed: ClientConfigurationDocument;
   try {
     parsed = parseClientConfiguration(
-      original ?? (format === "toml" || format === "grok" ? "" : "{}"),
+      original ??
+        (format === "toml" || format === "grok" || format === "dsh"
+          ? ""
+          : "{}"),
       format,
     );
     const policy = await readClientPolicyBlock(
@@ -280,15 +291,20 @@ export const inspectClientConfiguration = async (
       remediation: files.error.detail,
     };
   }
+  const existing = files.value.at(-1);
+  const editabilityError =
+    existing?.dialect === "dsh"
+      ? dshDocument(existing.document).editabilityError
+      : undefined;
+  if (editabilityError !== undefined)
+    return {
+      status: "invalid",
+      remediation: editabilityError.message,
+    };
   const policy = await readClientPolicyBlock(
     client,
     undefined,
-    clientConfigurationDesired(
-      client,
-      providerEnvironment,
-      command,
-      files.value.at(-1),
-    ),
+    clientConfigurationDesired(client, providerEnvironment, command, existing),
   );
   if (!policy.ok) {
     throwCleanupFailure(policy.error);
@@ -396,6 +412,7 @@ const registrationCurrent = (
   parsed: ClientConfigurationDocument,
   desired: unknown,
 ): boolean =>
+  (parsed.dialect !== "dsh" || dshDocument(parsed.document).ready) &&
   clientConfigurationValuesEqual(
     parsed.servers[PRODUCT_IDENTITY.mcpServerKey],
     desired,
@@ -410,6 +427,17 @@ const clientConfigurationDesired = (
   parsed?: ClientConfigurationDocument,
 ) => {
   const format = parsed?.dialect ?? client.format ?? "json";
+  const launcher =
+    command.length === 0 ? [PRODUCT_IDENTITY.cliBinary, "mcp"] : command;
+  if (format === "dsh") {
+    const desired = (
+      parsed === undefined
+        ? new DshCordisDocument("")
+        : dshDocument(parsed.document)
+    ).desired(launcher, providerEnvironment);
+    if (!desired.ok) throw desired.error;
+    return desired.value;
+  }
   // Preserve explicitly configured server settings, never the ambient process
   // environment. Newly discovered provider paths win only for their own keys.
   const environment = clientRegistrationEnvironment(
@@ -419,7 +447,7 @@ const clientConfigurationDesired = (
   if (!environment.ok) throw environment.error;
   const registration = clientRegistrationEntry(
     format,
-    command.length === 0 ? [PRODUCT_IDENTITY.cliBinary, "mcp"] : command,
+    launcher,
     environment.value,
   );
   return {

@@ -138,6 +138,44 @@ it("accepts an unpadded DataCount row and still rejects malformed output and bad
     ),
   ).toThrow(/header/u);
 });
+it("bounds section header bytes while accepting a five-byte size LEB", () => {
+  const paddedCustomDump = [
+    "",
+    "module.wasm:\tfile format wasm 0x1",
+    "",
+    "Sections:",
+    "",
+    '   Custom start=0x0000000e end=0x0000000f (size=0x00000001) ""',
+    "",
+    "Section Details:",
+    "",
+    "Custom:",
+    ' - name: ""',
+    "",
+  ].join("\n");
+  expect(parseWabtOutput(paddedCustomDump, 15, [""]).sections).toMatchObject([
+    { kind: "Custom", start: 14, end: 15, bytes: 1 },
+  ]);
+
+  for (const gap of [0, 1, 7]) {
+    const start = 11 + gap;
+    const malformed = [
+      "",
+      "module.wasm:\tfile format wasm 0x1",
+      "",
+      "Sections:",
+      "",
+      "     Type start=0x0000000a end=0x0000000b (size=0x00000001) count: 0",
+      `   Custom start=0x${start.toString(16).padStart(8, "0")} end=0x${(start + 1).toString(16).padStart(8, "0")} (size=0x00000001) "\"`,
+      "",
+      "Section Details:",
+      "",
+    ].join("\n");
+    expect(() => parseWabtOutput(malformed, start + 1, [""])).toThrow(
+      /ranges/u,
+    );
+  }
+});
 it.each([
   { displayed: [], decoded: ["named"] },
   { displayed: ["named"], decoded: [] },

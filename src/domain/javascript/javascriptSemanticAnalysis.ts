@@ -10,6 +10,7 @@ import {
 import {
   collectSemanticModuleLink,
   collectSemanticCallable,
+  semanticImportEqualsSpecifier,
   collectSemanticReferences,
   collectSemanticReferencesSteps,
   immutableSemanticBindings,
@@ -378,9 +379,24 @@ export const classifyParsedJavaScriptElectronBindings = (
 export function* classifyParsedJavaScriptElectronBindingsSteps(
   file: ParsedJavaScriptSource,
 ): Generator<void, ReadonlyMap<number, readonly string[]>> {
-  const facts = new Map<number, readonly string[]>();
   const state = createState(file.program);
   yield* collectDefinitionsSteps(file.program, state);
+  return (yield* indexJavaScriptElectronIdentitySteps(file.program, state))
+    .bindings;
+}
+
+/** Shared lexical identity and visible-write proof for direct and wrapped calls. */
+export interface JavaScriptElectronIdentity {
+  readonly bindings: ReadonlyMap<number, readonly string[]>;
+  readonly intactExport: (path: readonly (string | null)[]) => boolean;
+  readonly exportPath: (root: t.Node) => readonly string[] | undefined;
+}
+
+export function* indexJavaScriptElectronIdentitySteps(
+  program: t.Program,
+  state: JavaScriptSemanticAnalysisState,
+): Generator<void, JavaScriptElectronIdentity> {
+  const facts = new Map<number, readonly string[]>();
   const interop = createSemanticModuleInterop(state);
   const writes = new SemanticPropertyPathCoverage();
   let collectedWrites = false;
@@ -411,7 +427,7 @@ export function* classifyParsedJavaScriptElectronBindingsSteps(
       : undefined;
   };
   yield* collectJavaScriptIdentityWritesSteps(
-    file.program,
+    program,
     (root, kind) => {
       if (kind === "opaque-call") return interop.opaqueMutationPath(root);
       const exported = kind === "binding" ? undefined : rootExport(root);
@@ -431,7 +447,10 @@ export function* classifyParsedJavaScriptElectronBindingsSteps(
     },
   );
   collectedWrites = true;
-  yield* traverseJavaScriptAstSteps(file.program, {
+  const intactExport = (path: readonly (string | null)[]): boolean =>
+    ELECTRON_MODULE.test(path[0] ?? "") &&
+    !writes.covers(["electron", ...path.slice(1)]);
+  yield* traverseJavaScriptAstSteps(program, {
     enter: (node) => {
       if (
         !t.isCallExpression(node) &&
@@ -443,12 +462,12 @@ export function* classifyParsedJavaScriptElectronBindingsSteps(
       const exported = rootExport(root);
       if (
         exported !== undefined &&
-        !writes.covers(["electron", ...exported, ...members])
+        intactExport(["electron", ...exported, ...members])
       )
         facts.set(root.start ?? -1, exported);
     },
   });
-  return facts;
+  return { bindings: facts, intactExport, exportPath: rootExport };
 }
 
 // Read import and require origins directly; general value evaluation is
@@ -734,6 +753,8 @@ const bindInnerDeclaration = (
   state: JavaScriptSemanticAnalysisState,
 ): void => {
   if (t.isImportDeclaration(node)) bindImports(node, scope, state);
+  else if (t.isTSImportEqualsDeclaration(node))
+    bindImportEquals(node, scope, state);
   else if (t.isVariableDeclarator(node))
     bindPattern({
       pattern: node.id,
@@ -765,6 +786,25 @@ const bindInnerDeclaration = (
       mutable: true,
       kind: "catch",
     });
+};
+
+const bindImportEquals = (
+  node: t.TSImportEqualsDeclaration,
+  scope: JavaScriptSemanticScopeState,
+  state: JavaScriptSemanticAnalysisState,
+): void => {
+  const specifier = semanticImportEqualsSpecifier(node);
+  if (specifier === null) return;
+  addBinding({
+    state,
+    scope,
+    name: node.id.name,
+    kind: "import",
+    mutable: false,
+    definitionNode: node.id,
+    initializer: null,
+    directOrigin: { specifier, importedPath: [] },
+  });
 };
 
 const bindAssignment = (

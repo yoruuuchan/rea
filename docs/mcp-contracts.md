@@ -354,7 +354,9 @@ node and coverage is `unknown`. An empty call list with partial or unknown
 coverage is not proof that the function has no calls.
 `trace_call_path` reports each limited expansion in `residual_unknowns` and
 sets `truncated: true`; any path already supported by observed edges remains
-visible. Tool errors remain in their existing error or failure fields.
+visible. When a requested goal is not reached but an expansion is unresolved,
+`goal_status` is `unknown`; `not_reached` means traversal exhausted without
+unresolved relationship reads. Cancellation remains a tool error.
 
 REA prepares complete MCP results within the pinned stdio client's 10 MiB
 receive-buffer budget, including both text and structured representations and
@@ -418,6 +420,13 @@ that complete Evidence in the session and returns the derived
 analysis, so later views and application workflows read it without repeating
 analysis or moving the complete record through the response. A server without
 session retention refuses summary detail with `capability_unavailable`.
+
+`inspect_analysis_view` also accepts `api-surface` for retained HAR capture Evidence,
+grouping request lines by method, origin and format-rule path template. Templated
+segments are inferences. Because paging follows the full grouping, every page is
+inferred Evidence whenever any group is templated, and derived Evidence only when
+no group was templated.
+See [derived API surfaces](web-network-captures.md#derived-api-surface).
 
 `inspect_analysis_view` projects a caller-selected view of already completed
 `inspect_binary_layout`, `analyze_javascript_application`, or `analyze_function`

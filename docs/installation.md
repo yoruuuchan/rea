@@ -89,8 +89,11 @@ running server or its registration.
 
 The npm release checked on **2026-10-11** was **6.4.0**, published from
 [`a56f7bb6`](https://github.com/morluto/rea/commit/a56f7bb668ab23fec8d33f7af353ac7ed2fe1895).
-The actual registry package accepted dry-run setup plans for all 17 client IDs
-listed below, including Qwen Code, Pi and Hermes. OpenCode's plan selected
+The actual registry package accepted dry-run setup plans for the 17 client IDs
+in that release, including Qwen Code, Pi and Hermes. DeepSeek Harness (`dsh`)
+is on main and is not in npm 6.4.0; `rea setup --client dsh` against `@latest`
+reports an unsupported client until a release containing it is published.
+OpenCode's plan selected
 `OPENCODE_CONFIG_DIR` even when that directory did not yet exist. These checks
 used an isolated home on macOS with Node 24; they verify planning and argument
 admission, without writing client configuration or establishing live integration
@@ -162,6 +165,10 @@ listed after the table because its connector is not one of these files:
 | OMP                | `omp`            |
 | Pi                 | `pi`             |
 | Hermes             | `hermes`         |
+| DeepSeek Harness   | `dsh`            |
+
+`dsh` is main-only until a release after 6.4.0. The registry check above does
+not cover it.
 
 For GitHub Copilot CLI 1.0.95, `gpt-4.1` model metadata can block ordinary
 chat with REA's full input-schema profile before sending a model request
@@ -181,6 +188,35 @@ settings, then restart the client. Compact advertisements can reduce nested
 schema constraints; REA still validates complete canonical inputs. Full-profile
 `gpt-5.4` metadata is also verified locally. Live model API acceptance and
 Windows remain unverified; see [native client verification](testing.md).
+
+Claude Code normally defers MCP tool definitions through tool search. It
+[turns tool search off](https://code.claude.com/docs/en/mcp#configure-tool-search)
+when `ANTHROPIC_BASE_URL` points to a non-first-party host, such as DeepSeek's
+Anthropic-compatible endpoint. It then sends every REA tool's name, description
+and input schema with every request
+([#2019](https://github.com/morluto/rea/issues/2019)). On main at 04089d5be,
+with 172 tools, that payload measured about 496 KB with the default profile and
+about 290 KB with `compact`. By the o200k and cl100k tokenizers, that is roughly
+120k and 68k tokens. Compaction cannot remove tool definitions. If they nearly
+fill the window Claude Code assumes, the context refills after every compaction
+and Claude Code reports that autocompact is thrashing. To avoid this:
+
+- Make Claude Code assume the model's actual context window. DeepSeek's Claude
+  Code guide selects `deepseek-flash[1m]`; the `[1m]` suffix makes Claude Code
+  assume a one-million-token window. For other unrecognized model IDs, set
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the window the provider documents.
+- If the endpoint forwards `tool_reference` blocks, set `ENABLE_TOOL_SEARCH=true`
+  to restore deferred loading. DeepSeek's Anthropic API guide does not list
+  `tool_reference` among its supported content blocks, so this setting may cause
+  its requests to fail.
+- To shrink the upfront catalog, add
+  `"REA_MCP_INPUT_SCHEMA_PROFILE": "compact"` to the `env` object of the
+  `mcpServers.rea` entry in `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json`
+  when that variable is set), then restart Claude Code. Setup keeps this
+  override.
+
+The sizes above come from REA's own `tools/list`. A live Claude Code session
+against DeepSeek's API is unverified.
 
 For [Pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md),
 setup writes a `type: "stdio"` entry under `mcpServers.rea` in the user-level
@@ -259,11 +295,15 @@ configuration and skill destinations; doctor and uninstall use those same paths.
 
 ### DeepSeek Harness
 
-DeepSeek Harness uses a Cordis YAML patch sequence rather than a `mcpServers`
-object. REA's `setup --client` does not edit this format. For Harness
-`0.2.0-rc.2`, append the following entry to `$DSH_HOME/cordis.patch.yml`
-(`~/.dsh/cordis.patch.yml` when `DSH_HOME` is unset). Preserve existing patches
-and replace the executable paths with absolute paths from your installation:
+DeepSeek Harness registers MCP clients through a Cordis YAML patch sequence
+rather than a `mcpServers` object. `rea setup --client dsh` appends (or
+replaces) the REA entry in the home patch `$DSH_HOME/cordis.patch.yml`
+(`~/.dsh/cordis.patch.yml` when `DSH_HOME` is unset), preserving unrelated
+patches and comments. `rea doctor --client dsh` checks that same entry id.
+`rea uninstall` removes it by scanning supported clients; uninstall takes no
+`--client` flag. The home patch applies to every Harness profile, so the
+registration is written once and no per-profile edit is needed. The written
+entry is:
 
 ```yaml
 - insert:
@@ -274,17 +314,20 @@ and replace the executable paths with absolute paths from your installation:
         transport: stdio
         command: /absolute/path/to/node
         args: ["/absolute/path/to/rea/scripts/rea.mjs", mcp]
-        cwd: !!js process.cwd()
 ```
 
+Setup preserves caller-owned Cordis expressions and replaces launcher fields
+with literal values that doctor can verify. It refuses to edit an expression
+that produces the entire REA config, or a group-targeted REA insertion. Use a
+literal config and a root-level insertion as shown above.
+
 For a global npm installation, the launcher is under
-`$(npm root -g)/rea-agents/scripts/rea.mjs`. Check the Node executable with
-`command -v node`. Register `serverName: rea` only once in each active profile,
-then restart Harness. It exposes tools as `mcp__rea__<tool_name>`.
-Run `rea setup --skill --dry-run`, review the destination, then
-`rea setup --skill --yes` to install the workflow in `~/.agents/skills`.
-Harness discovers that directory, or `$DSH_AGENTS_HOME/skills` when configured;
-its native `skill` tool can load `reverse-engineer-anything`.
+`$(npm root -g)/rea-agents/scripts/rea.mjs`. Restart Harness after setup; it
+exposes tools as `mcp__rea__<tool_name>`. Run `rea setup --skill --dry-run`,
+review the destination, then `rea setup --skill --yes` to install the workflow
+in `~/.agents/skills` (`$DSH_AGENTS_HOME/skills` when configured); Harness
+discovers that directory, and its native `skill` tool can load
+`reverse-engineer-anything`.
 
 REA's optional [native client verification](testing.md#end-to-end-integration-and-golden-evidence)
 checks headless chat, skill loading, all tool input schemas and actual analysis
@@ -742,7 +785,7 @@ Ghidra's default analysis settings, and loads its packaged Java
 bridge via `-scriptPath`; it never opens an existing user project. Linux and
 macOS use a current-user-only local bridge socket and descriptor. The
 project remains under the selected temporary directory. If its Unix socket
-pathname would exceed the host's byte limit, REA allocates a separate mode-0700
+pathname would exceed the host's byte limit, REA allocates a separate owner-only
 socket directory under `/tmp` and removes it on close, cancellation, or failure.
 Diagnostics retain the actual endpoint and both owned directories.
 On Linux and macOS, REA starts the inspected JVM directly using Ghidra's own LaunchSupport
