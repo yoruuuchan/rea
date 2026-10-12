@@ -14,6 +14,7 @@ import {
   createAnalysisSnapshotWorkflowEntry,
   parseAnalysisSnapshot,
   serializeAnalysisSnapshot,
+  snapshotEvidenceForQuery,
   snapshotBinding,
   snapshotTarget,
 } from "../../domain/analysisSnapshot.js";
@@ -30,6 +31,7 @@ import {
   SNAPSHOT_CACHE_ENTRY_CEILING,
   isSnapshotCacheable,
 } from "./AnalysisSnapshotCache.js";
+import { enhancedOutputSchemas } from "../../contracts/toolOutputSchemaGroups.js";
 
 it("exports independent nested query, workflow and Evidence payloads", () => {
   const cache = new AnalysisSnapshotCache();
@@ -505,7 +507,10 @@ describe("relationship coverage snapshot replay", () => {
     const cache = new AnalysisSnapshotCache();
     const operation = "procedure_callees" as const;
     const parameters = { procedure: "0x1000", document: "fixture" };
-    const coverage = { status: "complete" as const };
+    const coverage = {
+      status: "complete" as const,
+      diagnostics: ["The provider retained an unresolved call target."],
+    };
     const execution = createAnalysisExecution(
       ["0x2000"],
       ANALYSIS_SNAPSHOT_PROVIDER,
@@ -561,8 +566,8 @@ describe("relationship coverage snapshot replay", () => {
     const tamperedEntry = tampered.entries[0];
     if (tamperedEntry === undefined) throw new Error("snapshot entry missing");
     tamperedEntry.execution.relationship_coverage = {
-      status: "partial",
-      limitations: ["forged coverage"],
+      status: "complete",
+      diagnostics: ["forged coverage"],
     };
     expect(
       new AnalysisSnapshotCache().import(tampered, undefined, () => ok(0)).ok,
@@ -600,4 +605,59 @@ describe("relationship coverage snapshot replay", () => {
       reason: "Snapshot entry does not report relationship coverage.",
     });
   });
+});
+
+it("does not replay pre-envelope call graphs under the revised workflow profile", () => {
+  const cache = new AnalysisSnapshotCache();
+  const target = ANALYSIS_SNAPSHOT_TARGET;
+  const profile = ANALYSIS_SNAPSHOT_PROFILE;
+  const operation = "get_call_graph" as const;
+  const parameters = { address: "0x1000", direction: "forward" };
+  const oldProfile = workflowAnalysisProfile(profile);
+  const revisedProfile = workflowAnalysisProfile(profile, operation);
+  const oldResult = { "0": [] };
+  cache.recordWorkflow({
+    target,
+    profile,
+    operation,
+    parameters,
+    execution: {
+      ...createAnalysisExecution(oldResult, REA_WORKFLOW_PROVIDER, {
+        subject: target,
+        rawResult: oldResult,
+      }),
+      analysisProfile: oldProfile,
+    },
+  });
+  const evidence = createEvidence(target, REA_WORKFLOW_PROVIDER, {
+    operation,
+    confidence: "derived",
+    parameters,
+    result: oldResult,
+    rawResult: oldResult,
+    analysisProfile: oldProfile,
+  });
+  const exported = cache.export(
+    target,
+    profile,
+    createEvidenceBundle([evidence]),
+  );
+  if (!exported.ok) throw exported.error;
+  const snapshot = parseAnalysisSnapshot(exported.value);
+
+  expect(
+    snapshotEvidenceForQuery(snapshot, {
+      target,
+      bindingProfile: profile,
+      operation,
+      parameters,
+      provider: REA_WORKFLOW_PROVIDER,
+      evidenceProfile: revisedProfile,
+    }),
+  ).toBeUndefined();
+  expect(
+    enhancedOutputSchemas.get_call_graph?.safeParse({
+      normalized_result: oldResult,
+    }).success,
+  ).toBe(false);
 });

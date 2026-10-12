@@ -51,6 +51,7 @@ const architectureSchema = z.enum(BINARY_ARCHITECTURES);
 const formatSchema = z.enum([
   "analysis-database",
   "mach-o",
+  "mach-o-universal",
   "elf",
   "pe",
   "dos-mz",
@@ -81,7 +82,6 @@ const subjectSchema = z.object({
     "directory",
     "file",
     "unknown",
-    "mach-o-universal",
     "javascript-bundle",
     "entitlements",
   ]),

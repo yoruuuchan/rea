@@ -157,6 +157,11 @@ const expandAddress = async (
     reason: "Provider did not report relationship coverage.",
   };
   state.relationshipCoverage.set(address, coverage);
+  for (const diagnostic of "diagnostics" in coverage &&
+  Array.isArray(coverage.diagnostics)
+    ? coverage.diagnostics
+    : [])
+    state.limitations.add(diagnostic);
   if (coverage.status === "partial")
     for (const limitation of coverage.limitations)
       state.residual.add(

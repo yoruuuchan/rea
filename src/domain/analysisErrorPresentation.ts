@@ -78,6 +78,16 @@ export const analysisErrorRemediationAction = (
     return "For a JavaScript/Electron application directory, call analyze_javascript_application with input_path or run `rea analyze <directory>`. For binary analysis, select its executable file.";
   if (
     error instanceof BinaryTargetError &&
+    error.constraint === "load_selection_rejected"
+  )
+    return "Correct the reported load argument (--target-format, --architecture, or --entry-point on the CLI; format, architecture, or entry_point through MCP) and retry.";
+  if (
+    error instanceof BinaryTargetError &&
+    error.constraint === "file_format_rejected"
+  )
+    return "Review the reported file-format reason and select a supported, well-formed target.";
+  if (
+    error instanceof BinaryTargetError &&
     error.constraint === "wasm_requires_static_inspection"
   )
     return `For static inspection, call inspect_wasm_artifact with ${JSON.stringify({ path: error.path })} or run \`rea inspect-wasm-artifact <path> --format json\`. This separate lane requires caller-supplied WABT 1.0.42 via absolute REA_WABT_BIN_DIRECTORY; check its availability in binary_session. REA does not execute WASM or install tools, and the header alone does not establish that the complete module is valid.`;
@@ -102,7 +112,13 @@ export const analysisErrorCategory = (
 ): AnalysisErrorProjection["category"] => {
   if (
     error instanceof BinaryTargetError &&
-    error.constraint === "wasm_requires_static_inspection"
+    error.constraint === "load_selection_rejected"
+  )
+    return "invalid_input";
+  if (
+    error instanceof BinaryTargetError &&
+    (error.constraint === "wasm_requires_static_inspection" ||
+      error.constraint === "file_format_rejected")
   )
     return "unsupported_target";
   if (
@@ -231,7 +247,10 @@ export const analysisErrorUserMessage = (error: AnalysisError): string => {
   if (error instanceof BinaryTargetError)
     return error.constraint === "directory_requires_file"
       ? "open_binary accepts files and macOS app bundles. This target is a directory; JavaScript/Electron application directories can be analyzed directly with analyze_javascript_application or `rea analyze <directory>`."
-      : `${error.message}. Check that the path exists, is readable, and points to a supported file.`;
+      : error.constraint === "file_format_rejected" ||
+          error.constraint === "load_selection_rejected"
+        ? `${error.message}.`
+        : `${error.message}. Check that the path exists, is readable, and points to a supported file.`;
   if (error._tag === "ProcessCaptureError")
     return (
       error.userMessage ??

@@ -142,14 +142,7 @@ export class BinarySession
         }
       }
     }
-    const profile = this.#active?.profile;
-    return structuredClone(
-      profile !== null &&
-        profile !== undefined &&
-        profile.provider.id === selected.id
-        ? profile.provider
-        : selected,
-    );
+    return structuredClone(selected);
   }
 
   /** External live state cannot be replayed by a direct or composed CLI workflow. */

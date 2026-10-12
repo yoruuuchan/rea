@@ -56,21 +56,23 @@ describe("enhanced MCP tools", () => {
     expect(graph.isError).not.toBe(true);
     expect(graph.structuredContent).toMatchObject({
       normalized_result: {
-        "0": [
-          {
-            address: "0x1",
-            status: "ok",
-            calls: ["0x2"],
-            limitations: [limitation],
-            relationship_coverage: {
-              status: "partial",
+        graph: {
+          "0": [
+            {
+              address: "0x1",
+              status: "ok",
+              calls: ["0x2"],
               limitations: [limitation],
+              relationship_coverage: {
+                status: "partial",
+                limitations: [limitation],
+              },
             },
-          },
-        ],
+          ],
+        },
+        limitations: [limitation],
       },
     });
-
     const trace = await client.callTool({
       name: "trace_call_path",
       arguments: { start: "0x1", goal: "0x2" },
@@ -97,7 +99,11 @@ describe("enhanced MCP tools", () => {
           return relationshipExecution(String(arguments_.procedure));
         if (name !== "procedure_callees")
           throw new Error(`Unexpected operation: ${name}`);
-        return relationshipExecution([], [caveat], { status: "complete" });
+        return relationshipExecution(
+          arguments_.procedure === "0x1" ? ["0x2"] : [],
+          [caveat],
+          { status: "complete" },
+        );
       },
     });
 
@@ -107,14 +113,20 @@ describe("enhanced MCP tools", () => {
     });
     expect(graph.structuredContent).toMatchObject({
       normalized_result: {
-        "0": [
-          {
-            limitations: [caveat],
-            relationship_coverage: { status: "complete" },
-          },
-        ],
+        graph: {
+          "0": [
+            { status: "ok", relationship_coverage: { status: "complete" } },
+          ],
+          "1": [
+            { status: "ok", relationship_coverage: { status: "complete" } },
+          ],
+        },
+        limitations: [caveat],
       },
     });
+    expect(JSON.stringify(graph.structuredContent)?.split(caveat)).toHaveLength(
+      2,
+    );
 
     const trace = await client.callTool({
       name: "trace_call_path",
@@ -126,6 +138,41 @@ describe("enhanced MCP tools", () => {
         residual_unknowns: [],
         limitations: expect.arrayContaining([expect.stringContaining(caveat)]),
         relationship_coverage: { "0x1": { status: "complete" } },
+      },
+    });
+  });
+
+  it("keeps unclassified legacy caveats on nodes with unknown coverage", async () => {
+    const caveat = "This legacy provider does not classify call limitations.";
+    const client = await connect({
+      execute: async (name, arguments_) => {
+        if (name === "procedure_address")
+          return relationshipExecution(String(arguments_.procedure));
+        if (name !== "procedure_callees")
+          throw new Error(`Unexpected operation: ${name}`);
+        return relationshipExecution([], [caveat]);
+      },
+    });
+
+    const graph = await client.callTool({
+      name: "get_call_graph",
+      arguments: { address: "0x1", direction: "forward" },
+    });
+    expect(graph.structuredContent).toMatchObject({
+      normalized_result: {
+        graph: {
+          "0": [
+            {
+              status: "ok",
+              relationship_coverage: { status: "unknown" },
+              limitations: [
+                "Provider did not report relationship coverage.",
+                caveat,
+              ],
+            },
+          ],
+        },
+        limitations: [caveat],
       },
     });
   });

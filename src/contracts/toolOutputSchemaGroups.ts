@@ -304,7 +304,12 @@ export const enhancedOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
       failed: z.number().int().min(0),
     }),
   ),
-  get_call_graph: evidenceResultOf(z.record(z.string(), z.array(graphNode))),
+  get_call_graph: evidenceResultOf(
+    z.strictObject({
+      graph: z.record(z.string(), z.array(graphNode)),
+      limitations: z.array(z.string()),
+    }),
+  ),
   analyze_swift_types: evidenceResultOf(
     z.object({
       total: z.number().int().min(0),

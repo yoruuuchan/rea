@@ -40,34 +40,41 @@ it("shows the callee edges of an ARM64 procedure in the call graph", async () =>
       result.value,
       "the root lists both observed callees instead of an empty observed list",
     ).toMatchObject({
-      "0": [
-        {
-          address: "0x1000",
-          status: "ok",
-          calls: ["0x2000", "0x3000"],
-          limitations: expect.arrayContaining([
-            "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
-          ]),
-        },
-      ],
-      "1": [
-        {
-          address: "0x2000",
-          status: "ok",
-          calls: [],
-          limitations: expect.arrayContaining([
-            "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
-          ]),
-        },
-        {
-          address: "0x3000",
-          status: "ok",
-          calls: [],
-          limitations: expect.arrayContaining([
-            "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
-          ]),
-        },
-      ],
+      graph: {
+        "0": [
+          {
+            address: "0x1000",
+            status: "ok",
+            calls: ["0x2000", "0x3000"],
+            limitations: expect.arrayContaining([
+              "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
+            ]),
+          },
+        ],
+        "1": [
+          {
+            address: "0x2000",
+            status: "ok",
+            calls: [],
+            limitations: expect.arrayContaining([
+              "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
+            ]),
+          },
+          {
+            address: "0x3000",
+            status: "ok",
+            calls: [],
+            limitations: expect.arrayContaining([
+              "This relationship read does not establish calls to targets IDA does not recognize as functions; imports and other non-function call targets remain unknown.",
+            ]),
+          },
+        ],
+      },
+      limitations: expect.arrayContaining([
+        expect.stringContaining(
+          "Provider version identifies the REA IDA adapter.",
+        ),
+      ]),
     });
     expect(
       requestedRoots(producer),
@@ -183,15 +190,17 @@ it("preserves missing callgraph coverage through direct, graph, and trace workfl
     });
     if (!graph.ok) throw graph.error;
     expect(graph.value).toMatchObject({
-      "0": [
-        {
-          status: "ok",
-          calls: [],
-          limitations: expect.arrayContaining([
-            expect.stringContaining("callgraph was unavailable"),
-          ]),
-        },
-      ],
+      graph: {
+        "0": [
+          {
+            status: "ok",
+            calls: [],
+            limitations: expect.arrayContaining([
+              expect.stringContaining("callgraph was unavailable"),
+            ]),
+          },
+        ],
+      },
     });
 
     const trace = await application.execute("trace_call_path", {
@@ -239,13 +248,18 @@ it("records a failed ARM64 call graph read as the node's error, not as a complet
       result.value,
       "the transport-truncated graph is a recorded failure and no callee list is invented",
     ).toEqual({
-      "0": [
-        {
-          address: "0x1000",
-          status: "error",
-          error: expect.objectContaining({ code: "unreadable_output" }),
-        },
-      ],
+      graph: {
+        "0": [
+          {
+            address: "0x1000",
+            status: "error",
+            error: expect.objectContaining({ code: "unreadable_output" }),
+          },
+        ],
+      },
+      limitations: expect.arrayContaining([
+        expect.stringContaining("Live results are never replayed"),
+      ]),
     });
   } finally {
     expect((await client.close()).ok).toBe(true);
@@ -273,12 +287,15 @@ it("preserves an explicit root cap below the edge limit through every relationsh
     });
     if (!graph.ok) throw graph.error;
     expect(graph.value).toMatchObject({
-      "0": [
-        {
-          calls: ["0x2000"],
-          limitations: expect.arrayContaining([limitation]),
-        },
-      ],
+      graph: {
+        "0": [
+          {
+            calls: ["0x2000"],
+            limitations: expect.arrayContaining([limitation]),
+          },
+        ],
+      },
+      limitations: expect.arrayContaining([limitation]),
     });
     const trace = await application.execute("trace_call_path", {
       start: "main",

@@ -121,6 +121,15 @@ export const analyzeParsedJavaScriptReferences = (
   return collectSemanticReferences(file.program, state, name);
 };
 
+/** Share the lexical index with bounded, demand-driven boundary analyses. */
+export function* indexJavaScriptBindingsSteps(
+  program: t.Program,
+): Generator<void, JavaScriptSemanticAnalysisState> {
+  const state = createState(program);
+  yield* collectDefinitionsSteps(program, state);
+  return state;
+}
+
 /** Recover semantics from an already parsed JavaScript artifact. */
 export const analyzeParsedJavaScriptSemantics = (
   file: ParsedJavaScriptSource,

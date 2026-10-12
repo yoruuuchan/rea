@@ -346,9 +346,12 @@ directly to `compare_functions`, and `inspect_artifact` Evidence to
 `compare_artifacts`. Use `get_evidence_bundle` when the task needs broader
 retained session history or an explicit bundle for transfer.
 
-`get_call_graph` keeps provider-limited relationship reads on their node as
-`limitations`, alongside any observed `calls`. An empty call list with such a
-limitation is incomplete coverage, not proof that the function has no calls.
+`get_call_graph` returns a `graph` keyed by traversal depth and a top-level
+`limitations` array with deduplicated execution caveats. Each node keeps its
+relationship coverage and read-specific `limitations`, alongside observed
+`calls`. When a provider does not classify its caveats, they remain on that
+node and coverage is `unknown`. An empty call list with partial or unknown
+coverage is not proof that the function has no calls.
 `trace_call_path` reports each limited expansion in `residual_unknowns` and
 sets `truncated: true`; any path already supported by observed edges remains
 visible. Tool errors remain in their existing error or failure fields.

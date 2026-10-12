@@ -48,6 +48,39 @@ it("rejects a repeated options field even when the duplicate has no value", asyn
   expect(() => parseOtoolLoadCommands(output)).toThrow(/otool/u);
 });
 
+it.each([
+  "vmaddr",
+  "vmsize",
+  "uuid",
+  "entryoff",
+  "addr",
+  "current version",
+  "time stamp",
+])(
+  "rejects a required %s label with no value and retains its producer output",
+  async (field) => {
+    const original = await nativeFixture("otool-load.txt");
+    const output = original.replace(
+      new RegExp(`^([ \\t]*${field})[ \\t]+\\S[^\\n]*$`, "mu"),
+      "$1",
+    );
+    if (output === original) throw new Error(`Fixture has no ${field} value`);
+    const runner = new NativeFixtureRunner({ "otool:-h": output });
+    const client = new NativeMacOSProvider({}, runner, "darwin").createClient(
+      nativeMachoTarget("/owned/fixture"),
+    );
+    const result = await client.execute("inspect_macho", {});
+    if (result.ok) throw new Error(`Expected missing ${field} value rejection`);
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisOutputError",
+      capturedOutput: { stdout: output, stderr: "", truncated: false },
+    });
+    expect(result.error.cause).toMatchObject({
+      message: expect.stringContaining(field),
+    });
+  },
+);
+
 it("collects the actual Mach header alongside the native load commands", async () => {
   // The provider always invokes `otool -h -l`, which the runner resolves
   // via the "otool:-h" key; no bare `otool` override is needed.

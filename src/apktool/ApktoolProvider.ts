@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createWriteStream, constants as fsConstants } from "node:fs";
+import { createWriteStream } from "node:fs";
 import {
   access,
   chmod,

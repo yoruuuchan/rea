@@ -80,8 +80,6 @@ export const ADB_PROVIDER_IDENTITY = {
   version: null,
 } as const;
 
-const VERSION_TIMEOUT_MS = 10_000;
-const VERSION_MAX_OUTPUT_BYTES = 64 * 1024;
 const DEVICES_TIMEOUT_MS = 20_000;
 const DEVICES_MAX_OUTPUT_BYTES = 1024 * 1024;
 const SHELL_TIMEOUT_MS = 30_000;

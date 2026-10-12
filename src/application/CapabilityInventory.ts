@@ -19,6 +19,7 @@ import {
 } from "../contracts/toolOutputSchemaPrimitives.js";
 import type { ToolKind } from "../contracts/toolContractTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { isMachOFormat } from "../domain/binaryTargetTypes.js";
 import type { ProviderAvailability } from "./AnalysisProvider.js";
 import { TOOL_CONTRACTS } from "../contracts/toolContracts.js";
 import {
@@ -549,7 +550,7 @@ const targetAvailability = ({
   if (
     targetOpen &&
     MACHO_TARGET_OPERATIONS.has(name) &&
-    (targetKind !== "executable" || targetFormat !== "mach-o")
+    (targetKind !== "executable" || !isMachOFormat(targetFormat))
   )
     return {
       reason: "target_unsupported",

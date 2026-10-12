@@ -7,7 +7,7 @@ import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver
 import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import type { MipsElfMetadata } from "../../../src/domain/binaryTargetTypes.js";
-import { readMipsElfAbiFlags } from "../../../src/application/MipsElfAbiFlags.js";
+import { readMipsElfMetadata } from "../../../src/application/MipsElfMetadata.js";
 import { ok } from "../../../src/domain/result.js";
 import {
   ghidraMipsProfileParameters,
@@ -85,7 +85,7 @@ const inspect = async (
   const path = await writeFixture(bytes);
   const handle = await open(path, "r");
   try {
-    const result = await readMipsElfAbiFlags(
+    const result = await readMipsElfMetadata(
       handle,
       metadata(little),
       checkCancelled,

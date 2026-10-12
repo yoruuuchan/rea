@@ -53,6 +53,7 @@ export const targetFormatSchema = z.enum([
   "hopper",
   "analysis-database",
   "mach-o",
+  "mach-o-universal",
   "elf",
   "pe",
   "dos-mz",

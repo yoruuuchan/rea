@@ -98,6 +98,26 @@ const entry = (
 };
 
 describe("capability failure reasons", () => {
+  it("admits physical universal Mach-O targets for native Mach-O operations", () => {
+    expect(
+      entry(
+        "inspect_native_dispatch_metadata",
+        status({
+          open: true,
+          kind: "executable",
+          format: "mach-o-universal",
+          capabilities: [
+            {
+              operation: "inspect_native_dispatch_metadata",
+              available: true,
+              reason: null,
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({ available: false, reason: "provider_missing" });
+  });
+
   it.each([
     {
       label: "requires a target",

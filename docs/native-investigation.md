@@ -8,7 +8,10 @@ coverage and unknowns. The CLI and MCP use the same application workflows.
 
 `inspect_macho.selected_architecture` identifies the exact selected lipo slice
 and its `container_file_offset` in the input file. A thin Mach-O has a known
-offset of zero; an unknown universal-slice offset stays null. Architecture
+offset of zero; an unknown universal-slice offset stays null. The Evidence
+subject format describes the input container: `mach-o-universal` for FAT files,
+including those with one slice. The normalized result describes the selected
+Mach-O image. Architecture
 `file_offset` values are container-relative. Entrypoint, segment and section
 `file_offset` values retain their source meaning and are relative to the
 selected Mach-O slice. Raw load-command fields retain their original values.
@@ -202,8 +205,14 @@ rea inspect-native-data-type <binary> --address <typed-data-address> --provider 
 Instruction facts include bytes, length, decoder text, ordered register/scalar/
 address tokens, typed references and flow destinations. Mid-instruction, data,
 outside-memory and undecodable addresses have separate outcomes. Effective
-memory base/index/displacement roles and per-instruction context mode remain
-unavailable; `mode` is the program language variant.
+memory base/index/displacement roles remain unavailable. Ghidra reports its program
+language variant in `mode`; other providers retain their own mode label. Ghidra
+MIPS results additionally expose `decoder_context`
+with the observed `ISA_MODE` register at the queried address and its provider
+source. A null value is unavailable, not mode zero; an empty array reports no
+available context register, and omission preserves older captures or providers
+that do not expose this facet. The context is an analysis observation, not proof
+of a runtime processor state.
 
 `inspect_native_instruction` also returns `incoming_references` to the exact
 queried address, including data, interior-instruction and undecodable addresses.
