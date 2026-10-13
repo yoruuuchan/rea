@@ -71,6 +71,7 @@ import {
   parseBugreportCopiedPath,
   parseDumpsysPackageOutput,
   parseFeatureListOutput,
+  packageChangeFailureReason,
   parsePackageChangeOutput,
   parseProcessListOutput,
   parsePngDimensions,
@@ -246,6 +247,31 @@ const runAdb = async (
     // sequences replaced by U+FFFD still report their true captured size.
     stdoutBytes: captured.value.stdout.byteLength,
   });
+};
+
+/**
+ * adb exits nonzero when the device refuses a package change, printing the
+ * `Failure [...]` verdict to stderr (install) or stdout (uninstall). Read the
+ * refusal from that failed run so it is not reported as unreadable output.
+ */
+const packageChangeRefusal = (
+  operation: string,
+  serial: string,
+  error: AnalysisError,
+): Result<never, AnalysisError> | undefined => {
+  if (!(error instanceof AnalysisProtocolError)) return undefined;
+  const failure = execFileOutputFailure(error.cause);
+  if (failure === undefined) return undefined;
+  const reason = packageChangeFailureReason(
+    `${failure.stdout}\n${failure.stderr}`,
+  );
+  return reason === null
+    ? undefined
+    : err(
+        new AnalysisUnsupportedTargetError(operation, serial, reason, {
+          cause: error,
+        }),
+      );
 };
 
 const clientIdentityResult = (
@@ -1623,17 +1649,15 @@ export class AdbProvider {
       { timeoutMs: SETTINGS_TIMEOUT_MS, maxOutputBytes: 1024 },
       signal,
     );
-    let deviceExists: boolean;
-    if (existsProbe.ok) deviceExists = true;
-    else if (existsProbe.error instanceof AnalysisProtocolError)
-      deviceExists = false;
-    else if (existsProbe.error instanceof AnalysisTimeoutError)
+    // `test -e` exits nonzero with no adb diagnosis when the path is absent.
+    // Any other probe failure leaves existence unknown, so it is reported as
+    // is rather than read as an existing path or followed by a push.
+    if (
+      !existsProbe.ok &&
+      !(existsProbe.error instanceof AnalysisProtocolError)
+    )
       return existsProbe;
-    else if (existsProbe.error instanceof AnalysisCancelledError)
-      return existsProbe;
-    else if (existsProbe.error instanceof AnalysisResourceConstraintError)
-      return existsProbe;
-    else deviceExists = true; // authorization/refusal states surface on push instead
+    const deviceExists = existsProbe.ok;
     if (deviceExists && !input.overwrite)
       return err(
         new AnalysisOutputError(
@@ -1756,7 +1780,11 @@ export class AdbProvider {
       { timeoutMs: PULL_TIMEOUT_MS, maxOutputBytes: PULL_MAX_OUTPUT_BYTES },
       signal,
     );
-    if (!installed.ok) return installed;
+    if (!installed.ok)
+      return (
+        packageChangeRefusal(operation, input.serial, installed.error) ??
+        installed
+      );
     const verdict = parsePackageChangeOutput(installed.value.stdout);
     if (verdict.status === "failure")
       return err(
@@ -1805,7 +1833,11 @@ export class AdbProvider {
       },
       signal,
     );
-    if (!uninstalled.ok) return uninstalled;
+    if (!uninstalled.ok)
+      return (
+        packageChangeRefusal(operation, input.serial, uninstalled.error) ??
+        uninstalled
+      );
     const verdict = parsePackageChangeOutput(uninstalled.value.stdout);
     if (verdict.status === "failure")
       return err(

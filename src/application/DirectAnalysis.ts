@@ -23,6 +23,7 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { access } from "node:fs/promises";
 import { readAnalysisSnapshot } from "./binary/AnalysisSnapshotFiles.js";
+import { requiresNativeSourceAdmissionBeforeReplay } from "./binary/AnalysisSnapshotCache.js";
 import { parseBinaryTarget } from "./BinaryTargetResolver.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
@@ -59,6 +60,7 @@ type DirectAnalysisTool =
   | "annotate_native_function"
   | "inspect_native_load_image"
   | "read_bytes"
+  | "search_bytes"
   | "address_to_file_offset"
   | "binary_overview"
   | "procedure_pseudo_code"
@@ -254,9 +256,14 @@ const runAnalysis = async (
         const route = preview.value.route;
         const bindingProfile = route.profile ?? undefined;
         const evidenceProfile = analysisProfileForRoute(route, tool);
+        // A parsed Windows path does not prove Ghidra's native snapshot owner
+        // admitted the selected source; CLI replay must wait for that client.
         if (
           bindingProfile !== undefined &&
           evidenceProfile !== undefined &&
+          !requiresNativeSourceAdmissionBeforeReplay(
+            route.binding?.identity.id,
+          ) &&
           allowsSnapshotReplay(route, tool)
         ) {
           const cached = snapshotEvidenceForQuery(snapshot, {

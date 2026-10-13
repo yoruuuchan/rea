@@ -2,6 +2,7 @@ import { z } from "incur";
 
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
 import type { ReferenceSourcePolicy } from "../domain/referenceSourcePolicy.js";
+import { createHistoricalSourceSummary } from "../domain/referenceSourceSummary.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { importReferenceSource } from "../application/ReferenceSourceImport.js";
@@ -32,87 +33,114 @@ export const registerUtilityCommands = (
   registerCapabilityCommands(cli, logger, analysis);
   registerNativeCommands(cli, logger, runProviderAnalysis);
   registerNativeCallCommands(cli, logger, runProviderAnalysis);
-  for (const [command, operation] of [
-    [CLI_COMMANDS.observeNativeUi, "observe_native_ui"],
-    [CLI_COMMANDS.captureNativeUiScenario, "capture_native_ui_scenario"],
-  ] as const) {
-    cli.command(command, {
-      description:
-        "Observe or run a scenario in one exact native application window",
-      args: z.object({
-        path: z.string().describe("Local native executable or app path"),
-      }),
-      options: z.object({
-        pid: z.number().int().positive().describe("Existing application PID"),
-        windowId: z
-          .number()
-          .int()
-          .positive()
-          .describe("Exact selected application window ID"),
-        steps: z
-          .string()
-          .optional()
-          .describe("JSON array of declarative AX actions or waits"),
-        screenshot: z
-          .boolean()
-          .default(true)
-          .describe("Capture only the selected window"),
-        accessibility: z
-          .boolean()
-          .default(true)
-          .describe("Read the selected window accessibility tree"),
-        maxNodes: z
-          .number()
-          .int()
-          .positive()
-          .safe()
-          .default(500)
-          .describe("Maximum accessibility nodes per capture"),
-      }),
-      run: ({ args, options }) =>
-        logCliCommand(logger, command, async () => {
-          const parameters = {
-            pid: options.pid,
-            window_id: options.windowId,
-            screenshot: options.screenshot,
-            accessibility: options.accessibility,
-            max_nodes: options.maxNodes,
-          };
-          if (operation === "capture_native_ui_scenario") {
-            const decoded =
-              options.steps === undefined
-                ? { ok: true as const, value: undefined }
-                : safeParseJson(options.steps);
-            if (!decoded.ok)
-              return invalidNativeUiScenarioInput(operation, [
-                { path: ["steps"], reason: "invalid_format", expected: "JSON" },
-              ]);
-            const parsed = nativeUiScenarioInputSchema.safeParse({
-              ...parameters,
-              steps: decoded.value,
-            });
-            if (!parsed.success)
-              return invalidNativeUiScenarioInput(
-                operation,
-                projectInputIssues(parsed.error.issues, {
-                  ...parameters,
-                  ...(options.steps === undefined
-                    ? {}
-                    : { steps: decoded.value }),
-                }),
-              );
-            return runProviderAnalysis(
-              args.path,
-              operation,
-              parsed.data,
-              logger,
-            );
-          }
-          return runProviderAnalysis(args.path, operation, parameters, logger);
-        }),
-    });
-  }
+  registerNativeUiCommands(cli, logger, runProviderAnalysis);
   registerReferenceSourceCommand(cli, logger, environment);
+};
+
+const nativeUiScopeOptions = {
+  pid: z.number().int().positive().describe("Existing application PID"),
+  windowId: z
+    .number()
+    .int()
+    .positive()
+    .describe("Exact selected application window ID"),
+  screenshot: z
+    .boolean()
+    .default(true)
+    .describe("Capture only the selected window"),
+  accessibility: z
+    .boolean()
+    .default(true)
+    .describe("Read the selected window accessibility tree"),
+  maxNodes: z
+    .number()
+    .int()
+    .positive()
+    .safe()
+    .default(500)
+    .describe("Maximum accessibility nodes per capture"),
+};
+
+const nativeUiScope = (options: {
+  readonly pid: number;
+  readonly windowId: number;
+  readonly screenshot: boolean;
+  readonly accessibility: boolean;
+  readonly maxNodes: number;
+}) => ({
+  pid: options.pid,
+  window_id: options.windowId,
+  screenshot: options.screenshot,
+  accessibility: options.accessibility,
+  max_nodes: options.maxNodes,
+});
+
+/**
+ * Passive observation and active scenarios have different input contracts.
+ * Only the scenario command accepts steps, so passive observation rejects
+ * them as an unknown flag instead of silently dropping them.
+ */
+const registerNativeUiCommands = (
+  cli: CliInstance,
+  logger: Logger,
+  runProviderAnalysis: DirectAnalysis["runProviderAnalysis"],
+): void => {
+  const pathArgument = z.object({
+    path: z.string().describe("Local native executable or app path"),
+  });
+  cli.command(CLI_COMMANDS.observeNativeUi, {
+    description:
+      "Observe one already-running native application window by PID and window ID",
+    args: pathArgument,
+    options: z.object(nativeUiScopeOptions),
+    run: ({ args, options }) =>
+      logCliCommand(logger, CLI_COMMANDS.observeNativeUi, () =>
+        runProviderAnalysis(
+          args.path,
+          "observe_native_ui",
+          nativeUiScope(options),
+          logger,
+        ),
+      ),
+  });
+  const operation = "capture_native_ui_scenario";
+  cli.command(CLI_COMMANDS.captureNativeUiScenario, {
+    description:
+      "Run declarative AX actions or waits in one exact native application window",
+    args: pathArgument,
+    options: z.object({
+      ...nativeUiScopeOptions,
+      steps: z
+        .string()
+        .optional()
+        .describe("JSON array of declarative AX actions or waits"),
+    }),
+    run: ({ args, options }) =>
+      logCliCommand(logger, CLI_COMMANDS.captureNativeUiScenario, async () => {
+        const parameters = nativeUiScope(options);
+        const decoded =
+          options.steps === undefined
+            ? { ok: true as const, value: undefined }
+            : safeParseJson(options.steps);
+        if (!decoded.ok)
+          return invalidNativeUiScenarioInput(operation, [
+            { path: ["steps"], reason: "invalid_format", expected: "JSON" },
+          ]);
+        const parsed = nativeUiScenarioInputSchema.safeParse({
+          ...parameters,
+          steps: decoded.value,
+        });
+        if (!parsed.success)
+          return invalidNativeUiScenarioInput(
+            operation,
+            projectInputIssues(parsed.error.issues, {
+              ...parameters,
+              ...(options.steps === undefined ? {} : { steps: decoded.value }),
+            }),
+          );
+        return runProviderAnalysis(args.path, operation, parsed.data, logger);
+      }),
+  });
 };
 
 const invalidNativeUiScenarioInput = (
@@ -214,11 +242,48 @@ const registerReferenceSourceCommand = (
         .string()
         .describe("Local source directory to import as historical reference"),
     }),
-    run: ({ args }) =>
+    options: z.object({
+      detail: z
+        .enum(["full", "summary"])
+        .default("full")
+        .describe(
+          "Complete committed graph or compact historical-source summary",
+        ),
+      outlineDepth: z
+        .number()
+        .int()
+        .nonnegative()
+        .safe()
+        .optional()
+        .describe(
+          "Summary outline path depth (default: 2; 0 omits entries); requires --detail summary",
+        ),
+    }),
+    run: ({ args, options }) =>
       logCliCommand(
         logger,
         "import-reference-source",
         async () => {
+          if (
+            options.outlineDepth !== undefined &&
+            options.detail !== "summary"
+          )
+            return {
+              error: "Import failed",
+              ...projectAnalysisError(
+                new AnalysisInputError(
+                  "import-reference-source",
+                  { userMessage: "--outline-depth requires --detail summary" },
+                  [
+                    {
+                      path: ["outlineDepth"],
+                      reason: "invalid_value",
+                      message: "--outline-depth requires --detail summary",
+                    },
+                  ],
+                ),
+              ),
+            };
           const config = parseConfig(environment);
           if (!config.ok)
             return {
@@ -228,6 +293,9 @@ const registerReferenceSourceCommand = (
           return runReferenceSourceImport(
             args.root,
             config.value.referenceSourcePolicy,
+            options.detail === "summary"
+              ? (options.outlineDepth ?? 2)
+              : undefined,
           );
         },
         isReferenceSourceImportCliFailure,
@@ -238,6 +306,7 @@ const registerReferenceSourceCommand = (
 const runReferenceSourceImport = async (
   root: string,
   policy: ReferenceSourcePolicy,
+  outlineDepth: number | undefined,
 ): Promise<unknown> => {
   const resources = new ArtifactResourceScope();
   let outcome:
@@ -319,7 +388,9 @@ const runReferenceSourceImport = async (
         cause: closeOutcome.cause,
       }),
     };
-  return imported.value;
+  return outlineDepth === undefined
+    ? imported.value
+    : createHistoricalSourceSummary(imported.value, outlineDepth);
 };
 
 const mergeReferenceSourceCleanup = (

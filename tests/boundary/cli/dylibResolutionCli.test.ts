@@ -4,11 +4,13 @@ import { dirname, join } from "node:path";
 import { describe, expect } from "vitest";
 
 import {
+  CPU,
   FILE_TYPE,
   LC,
   buildVersionCommand,
   dylibCommand,
   dyldEnvironmentCommand,
+  fatImage,
   machoImage,
   rpathCommand,
 } from "../../../src/artifacts/apple/MachoImage.fixture.js";
@@ -178,14 +180,17 @@ describe("trace-dylib-resolution CLI", () => {
       // A root below a symlinked directory that points outside the bundle.
       const outside = await createTestTempDirectory("rea-dylib-outside-");
       await writeFiles(outside, { Tool: machoImage({}) });
-      await symlink(outside, join(app, "Contents/Linked"));
+      await symlink(outside, join(app, "Contents/Linked"), "dir");
       for (const [root, reason, message] of [
         ["../outside", "invalid_format", "Use a normalized path"],
         ["Contents/Info.plist", "invalid_value", "is not a Mach-O image"],
         [
           "Contents/Linked/Tool",
           "invalid_value",
-          "resolves outside the analyzed root",
+          // Windows link text is outside the POSIX dyld path representation.
+          process.platform === "win32"
+            ? "is not a regular file in the analyzed root"
+            : "resolves outside the analyzed root",
         ],
       ] as const) {
         await expectRootInputError(cli, { app, root, reason, message });
@@ -376,7 +381,8 @@ cliTest(
   },
 );
 
-describe.skipIf(process.getuid?.() === 0)(
+// This permission fixture requires POSIX mode bits and a non-root caller.
+describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "trace-dylib-resolution permissions",
   () => {
     cliTest(
@@ -467,6 +473,64 @@ cliTest(
         expect(trace.findings[0]?.explanation).toContain(
           "does not establish which image dyld will load",
         );
+    }
+  },
+);
+
+cliTest(
+  "reports each same-named slice's own embedded dyld environment",
+  async ({ cli }) => {
+    // arm64e and arm64e.x1 slices both report the architecture name arm64e.
+    // A plain x86_64 slice keeps the bundle openable on x64 hosts.
+    for (const [settings, expected] of [
+      [[null, "DYLD_PRINT_RPATHS=1"], ["DYLD_PRINT_RPATHS=1"]],
+      [
+        ["DYLD_PRINT_LIBRARIES=1", "DYLD_PRINT_RPATHS=1"],
+        ["DYLD_PRINT_LIBRARIES=1", "DYLD_PRINT_RPATHS=1"],
+      ],
+    ] as const) {
+      const app = await fixtureApp();
+      await writeFiles(app, {
+        "Contents/MacOS/App": fatImage([
+          ...[CPU.arm64e, CPU.arm64eX1].map((cpu, index) => {
+            const setting = settings[index];
+            return {
+              cpu,
+              bytes: machoImage({
+                cpu,
+                commands:
+                  setting === null || setting === undefined
+                    ? []
+                    : [dyldEnvironmentCommand(setting)],
+              }),
+            };
+          }),
+          { cpu: CPU.x86_64, bytes: machoImage({ cpu: CPU.x86_64 }) },
+        ]),
+      });
+      const result = await cli.run({
+        arguments: [
+          "trace-dylib-resolution",
+          app,
+          "--root",
+          "Contents/MacOS/App",
+          "--architecture",
+          "arm64e",
+          "--json",
+        ],
+        environment: ENVIRONMENT,
+      });
+      expect(result.exitCode, JSON.stringify(result.json)).toBe(0);
+      const trace = dylibResolutionResultSchema.parse(
+        parseEvidence(result.json).normalized_result,
+      );
+      expect(trace.roots).toHaveLength(2);
+      const environments = trace.findings
+        .filter(({ kind }) => kind === "dyld-environment-present")
+        .map(({ explanation }) =>
+          expected.filter((setting) => explanation.includes(setting)),
+        );
+      expect(environments).toEqual(expected.map((setting) => [setting]));
     }
   },
 );

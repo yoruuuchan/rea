@@ -476,8 +476,11 @@ the tool fails with a `debugger-attach-denied` reason.
 Install a Ghidra 12.1.x release and the 64-bit full JDK it declares, then configure REA to
 use them. Ghidra analysis supports Linux x64/arm64 and macOS x64/arm64; each installation requires
 the matching native decompiler. Experimental Windows x64 P0 admits native
-x86 and x86-64 PE applications and DLLs on local NTFS using bundled Job Object ownership,
-protected runtime DACLs, and handle-based path admission. See [Windows Ghidra P0](windows-ghidra-p0.md) and
+x86 and x86-64 PE applications and DLLs, plus explicitly selected
+[raw NMOS 6502 images](raw-binary.md#nmos-6502) with a caller-supplied load address,
+on fixed local NTFS volumes. Other raw CPU families remain unsupported on Windows.
+The boundary uses bundled Job Object ownership, protected runtime DACLs, and
+handle-based path admission. See [Windows Ghidra P0](windows-ghidra-p0.md) and
 [issue #527](https://github.com/morluto/rea/issues/527).
 On Linux and macOS, `annotate_native_function` atomically edits a function name
 and entry comments in the ephemeral database, returning refreshed analysis
@@ -546,3 +549,17 @@ Value projection preserves serialized node kinds, IDs, references and pagination
 Exact and ambiguous value counts describe emitted root/object value instances;
 a root and an object may contain the same value. Archive digests identify the
 original bytes.
+
+## Locate a byte signature
+
+Use `search_bytes` after opening a target with Ghidra to locate a known constant
+or instruction sequence. For example, `{"pattern":"48 8B ?? ?? 89","limit":100}`
+returns ordered addresses with segments, source file offsets and containing
+procedures. The CLI equivalent is
+`rea search-bytes ./program '48 8B ?? ?? 89' --provider ghidra`.
+Use `start`/`end` to constrain the inclusive address window, and continue with
+`next_cursor` until `complete` is true. Inspect `searched` for page coverage and
+skipped uninitialized blocks. A missing match does not establish absence from
+uninitialized memory or across block boundaries. See
+[Ghidra byte search](ghidra-provider.md#masked-byte-search) for mask and coverage
+semantics. This query never executes or modifies target bytes.

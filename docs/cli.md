@@ -174,7 +174,9 @@ rea analyze /absolute/path/to/program --provider ghidra --snapshot /absolute/pat
 rea analyze /absolute/path/to/program --provider ghidra --snapshot /absolute/path/to/analysis/program.json
 ```
 
-An exact CLI cache hit is read before starting a provider process.
+An exact CLI cache hit is normally read before starting a provider process.
+On Windows, Ghidra first admits the selected source through its native snapshot
+owner, so replay can start that provider.
 In MCP, `open_binary` accepts `snapshot_path` to import a snapshot atomically
 for its matching target; an MCP provider may still start before returning a
 cached result. `close_binary` accepts `snapshot_path` and optional
@@ -212,7 +214,35 @@ Import an older source tree to compare with the current artifact:
 
 ```bash
 rea import-reference-source /absolute/path/to/source
+rea import-reference-source /absolute/path/to/source --detail summary --outline-depth 2 --json
 ```
+
+The default (`--detail full`) returns the complete `HistoricalSourceGraph`.
+Choose `--detail summary` for a `HistoricalSourceSummary` of that same committed
+inventory: its `HistoricalSourceManifest` contains the full graph and root
+digests, with provenance, VCS facts, languages, manifest paths, entry and
+relationship counts, parse-failure counts, file/directory states, exclusions
+and limitations. The summary is a presentation view, not a graph accepted by
+source-to-bundle comparison; keep the full output for that workflow.
+
+`--outline-depth` requires `--detail summary` and accepts a nonnegative safe
+integer. Depth 1 shows root children, depth 2 (the default) also shows their
+children, and depth 0 omits all outline entries. Paths retain canonical Unicode
+code-point order. `outline.omitted_entry_count` counts only inventoried entries
+hidden by the chosen depth; it does not count unexamined children of excluded or
+unreadable directories, or change `inventory_state`. Exclusions and source
+limitations remain separate from this presentation omission.
+
+`file_sizes.known_bytes` is the exact sum of known inventoried file sizes as
+decimal text, so large sums cannot lose integer precision. Unknown sizes count
+in `file_sizes.unknown_file_count`; excluded or unexamined paths are not included
+in that total. A zero known-byte sum therefore does not establish an empty source
+tree. Full output retains individual file hashes, relationships and parse-failure
+diagnostics. Summary mode performs the same import and cleanup, then projects
+the committed result without rereading source files. It reduces the selected
+output, not the amount of source examined. A shallow tree or many exclusions can
+still produce a large summary; depth 0 removes the outline but preserves the
+other facts. No fixed output-size or runtime improvement is promised.
 
 The import records hashes and metadata for the supplied files, separately
 from observations of the current app. For a directory inside a Git checkout,

@@ -324,17 +324,25 @@ const resolveChildCandidates = (
     ? []
     : (spawnsByBinding.get(binding.bindingId) ?? []);
 };
-
 const spawnOptions = (candidate: SpawnCandidate): t.ObjectExpression | null => {
-  const index = candidate.method === "exec" ? 1 : 2;
-  const value = candidate.node.arguments[index];
+  const args = candidate.node.arguments;
+
+  const value =
+    candidate.method === "exec"
+      ? args[1]
+      : t.isObjectExpression(args[1])
+        ? args[1]
+        : args[2];
+
   return t.isObjectExpression(value) ? value : null;
 };
-
 const spawnArgvCount = (candidate: SpawnCandidate): number | null => {
   if (candidate.method === "exec") return null;
   const args = candidate.node.arguments[1];
-  return t.isArrayExpression(args) ? args.elements.length : null;
+  return t.isArrayExpression(args) &&
+    !args.elements.some((element) => t.isSpreadElement(element))
+    ? args.elements.length
+    : null;
 };
 
 const objectHasProperty = (

@@ -1,4 +1,9 @@
+import {
+  advertisedMcpToolSchemas,
+  assertRecordedMcpEvidence,
+} from "../../fixtures/advertisedMcpTool.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { createHash } from "node:crypto";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { EvmInterfaceService } from "../../../src/application/evm/EvmInterfaceService.js";
@@ -10,6 +15,7 @@ import {
 } from "../../../src/domain/analysisErrorCore.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { evmInterfaceSummaryViewResultSchema } from "../../../src/domain/analysisView/analysisView.js";
+import { inspectSolidityMetadata } from "../../../src/evm/SolidityMetadata.js";
 import { err, ok } from "../../../src/domain/result.js";
 import { silentLogger } from "../../../src/logger.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -26,8 +32,21 @@ import {
   evmInterfaceExecution,
 } from "../../fixtures/evm/interface.js";
 
-it("advertises exact valid schemas and records inline EVM interface evidence without a binary target", async () => {
+const decodedMetadataFixture = () => {
+  const bytes = Buffer.from("00a1011bffffffffffffffff000b", "hex");
   const value = evmInterfaceFixture();
+  value.bytecode = {
+    ...value.bytecode,
+    hex: bytes.toString("hex"),
+    bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    metadata: inspectSolidityMetadata(bytes),
+  };
+  return value;
+};
+
+it("advertises exact valid schemas and records inline EVM interface evidence without a binary target", async () => {
+  const value = decodedMetadataFixture();
   const inspect = vi.fn(() =>
     Promise.resolve(ok(evmInterfaceExecution(value))),
   );
@@ -51,16 +70,11 @@ it("advertises exact valid schemas and records inline EVM interface evidence wit
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const advertised = (await client.listTools()).tools.find(
-    (tool) => tool.name === "inspect_evm_interface",
+  const schemas = await advertisedMcpToolSchemas(
+    client,
+    "inspect_evm_interface",
   );
-  if (advertised?.outputSchema === undefined)
-    throw new Error("EVM interface inspection must publish both schemas");
-  const ajv = new Ajv2020({ strict: false, validateFormats: false });
-  const inputSchema: Record<string, unknown> = advertised.inputSchema;
-  const outputSchema: Record<string, unknown> = advertised.outputSchema;
-  expect(ajv.validateSchema(inputSchema)).toBe(true);
-  expect(ajv.validateSchema(outputSchema)).toBe(true);
+  const { ajv, inputSchema } = schemas;
   expect(
     ajv.validate(inputSchema, { path: value.artifact.path, encoding: "hex" }),
   ).toBe(true);
@@ -84,19 +98,14 @@ it("advertises exact valid schemas and records inline EVM interface evidence wit
     name: "inspect_evm_interface",
     arguments: { path: value.artifact.path, encoding: "hex" },
   });
-  expect(response.isError).not.toBe(true);
-  expect(
-    ajv.validate(outputSchema, response.structuredContent),
-    JSON.stringify(ajv.errors),
-  ).toBe(true);
-  const parsed = toolContract("inspect_evm_interface").outputSchema.parse(
-    response.structuredContent,
+  assertRecordedMcpEvidence(
+    response,
+    "inspect_evm_interface",
+    schemas,
+    session,
+    value,
+    "inferred",
   );
-  const evidence = parseEvidence(parsed);
-  expect(evidence.confidence).toBe("inferred");
-  expect(evidence.subject?.digest.sha256).toBe(value.artifact.sha256);
-  expect(parsed.normalized_result).toEqual(value);
-  expect(session.evidenceById(evidence.evidence_id)).toEqual(evidence);
   expect(
     (
       await client.callTool({
@@ -280,7 +289,8 @@ it("settles the admitted EVM operation after SDK cancellation and accepts a subs
 });
 
 it("returns the exact inferred interface summary while preserving complete defaults and retained source", async () => {
-  const value = evmInterfaceFixture();
+  const value = decodedMetadataFixture();
+  expect(value.bytecode.metadata?.status).toBe("decoded");
   value.functions = [
     {
       selector: "0x11223344",
@@ -419,6 +429,7 @@ it.each(["valid", "wrong-subject", "no-subject"])(
   "preserves historical portable EVM Evidence and rejects incompatible identity: %s",
   async (scenario) => {
     const value = evmInterfaceFixture();
+    const { metadata: _metadata, ...historicalBytecode } = value.bytecode;
     const source = createEvidence(
       scenario === "no-subject"
         ? undefined
@@ -434,7 +445,7 @@ it.each(["valid", "wrong-subject", "no-subject"])(
       {
         operation: "inspect_evm_interface",
         parameters: { path: value.artifact.path, encoding: "hex" },
-        result: value,
+        result: { ...value, bytecode: historicalBytecode },
         confidence: "inferred",
         rawResult: { original: true },
       },
@@ -463,6 +474,7 @@ it.each(["valid", "wrong-subject", "no-subject"])(
       expect(view.parent_evidence_id).toBe(source.evidence_id);
       expect(view.summary.functions).toEqual([]);
       expect(view.summary.discovery_completeness).toBe("unknown");
+      expect(view.summary.bytecode.metadata).toBeNull();
       expect(view.coverage).toMatchObject({
         total: 0,
         examined: 0,

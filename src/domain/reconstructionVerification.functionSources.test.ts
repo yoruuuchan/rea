@@ -53,6 +53,7 @@ const source = (
   digit: string,
   observation: Partial<EvidenceObservation> = {},
   hasSubject = true,
+  hasCoverage = true,
 ): Evidence =>
   createEvidence(
     hasSubject
@@ -69,7 +70,9 @@ const source = (
       result: dossier,
       confidence: "derived",
       authority: "shipped-artifact",
-      relationshipCoverage: { status: "complete" },
+      ...(hasCoverage
+        ? { relationshipCoverage: { status: "complete" as const } }
+        : {}),
       ...observation,
     },
   );
@@ -195,6 +198,118 @@ describe("function reconstruction source parameters", () => {
       },
     ]);
   });
+});
+
+describe("historical calls-only reconstruction changes", () => {
+  it.each(["missing", "unknown", "partial", "unresolved"] as const)(
+    "keeps historical calls-only changes unknown with %s call coverage",
+    (coverage) => {
+      const changedDossier = functionDossierSchema.parse({
+        ...functionDossierSchema.parse(dossier),
+        callees: [
+          {
+            address: "0x2000",
+            name: "puts",
+            classification: null,
+            body: { available: false, reason: "External function." },
+          },
+        ],
+      });
+      const complete = source("8", {
+        result: jsonValueSchema.parse(changedDossier),
+      });
+      const incomplete = source(
+        "9",
+        {
+          result: jsonValueSchema.parse({
+            ...changedDossier,
+            ...(coverage === "unresolved"
+              ? {
+                  unresolved_calls: [
+                    {
+                      address: "0x1004",
+                      reason: "Computed target unresolved.",
+                    },
+                  ],
+                }
+              : {}),
+          }),
+          ...(coverage === "missing"
+            ? {}
+            : {
+                relationshipCoverage:
+                  coverage === "unknown"
+                    ? { status: "unknown", reason: "Call graph unavailable." }
+                    : coverage === "partial"
+                      ? {
+                          status: "partial",
+                          limitations: ["Additional edges omitted."],
+                        }
+                      : { status: "complete" },
+              }),
+        },
+        true,
+        coverage !== "missing",
+      );
+      const historicalResult = compareFunctions(left, complete);
+      expect(historicalResult).toMatchObject({
+        status: "changed",
+        summary: { changed: 1 },
+      });
+      expect(historicalResult.changes).toMatchObject([
+        { dimension: "calls", status: "changed" },
+      ]);
+      const completeComparison = comparison(
+        {
+          left_evidence_id: left.evidence_id,
+          right_evidence_id: complete.evidence_id,
+        },
+        {},
+        [left, complete],
+        {},
+        historicalResult,
+      );
+      expect(
+        admittedVerification(completeComparison, [left, complete], "overall")()
+          .status,
+      ).toBe("fail");
+      const evidence = comparison(
+        {
+          left_evidence_id: left.evidence_id,
+          right_evidence_id: incomplete.evidence_id,
+        },
+        {},
+        [left, incomplete],
+        {},
+        historicalResult,
+      );
+      const before = JSON.stringify(evidence);
+      for (const dimension of ["calls", "overall"] as const) {
+        expect(
+          admittedVerification(evidence, [left, incomplete], dimension)(),
+        ).toMatchObject({
+          status: "unknown",
+          summary: { total: 1, passed: 0, failed: 0, unknown: 1 },
+          claims: {
+            items: [
+              expect.objectContaining({
+                status: "unknown",
+                observed_status: "changed",
+                limitations: expect.arrayContaining([
+                  expect.stringContaining(`Source ${incomplete.evidence_id}:`),
+                ]),
+              }),
+            ],
+          },
+        });
+      }
+      expect(
+        admittedVerification(evidence, [left, incomplete], "pseudocode")()
+          .status,
+      ).toBe("pass");
+      expect(JSON.stringify(evidence)).toBe(before);
+    },
+  );
 });
 
 describe("function reconstruction call coverage", () => {

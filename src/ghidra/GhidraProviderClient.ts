@@ -20,6 +20,7 @@ import {
   sameGhidraDisabledAnalyzers,
   sameGhidraLanguageOverride,
 } from "./GhidraAnalysisProfile.js";
+import { ghidraPinnedMipsLanguage } from "./GhidraMipsProfile.js";
 import type { AnalysisProfileCommitment } from "../domain/analysisProfile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
@@ -32,6 +33,7 @@ import {
   AnalysisTimeoutError,
 } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import type { EvidenceLocation } from "../domain/evidence.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -76,10 +78,7 @@ import {
   parseNativeAotPe,
   type NativeAotPeResult,
 } from "../domain/native/nativeAotPe.js";
-import {
-  ABORTED,
-  waitForAbortable,
-} from "../application/binary/AbortablePromise.js";
+import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
 import { nativeLoadImageObservationSchema } from "../domain/native/nativeLoadImage.js";
 import {
   GHIDRA_PROVIDER_IDENTITY,
@@ -89,7 +88,10 @@ import {
   relationshipCoverageFor,
 } from "./GhidraProviderCapabilities.js";
 import type { GhidraSessionError } from "./GhidraSessionError.js";
-import type { GhidraSessionInfo } from "./GhidraSessionValues.js";
+import {
+  ghidraPdbLimitations,
+  type GhidraSessionInfo,
+} from "./GhidraSessionValues.js";
 import { ghidraExtensionFailure } from "./extensions/GhidraExtensionFailures.js";
 import {
   ghidraExtensionSchema,
@@ -448,13 +450,39 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const seeds = seedProfile.data;
-  const languageOverride = ghidraProfileLanguageOverride(
+  const parameterLanguage = ghidraProfileLanguageOverride(
     committedProfile.parameters,
   );
+  const pinnedLanguage = ghidraPinnedMipsLanguage(committedProfile.parameters);
+  const targetLanguage = ghidraPinnedLanguage(target);
+  if (pinnedLanguage !== undefined && targetLanguage === undefined)
+    return unavailableClient(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "The committed profile pins a MIPS language that the current target does not establish; reopen an admitted target to resolve a new profile.",
+        },
+      }),
+    );
+  // Provider-pinned profiles declare their language through the same
+  // parameter slot caller-configured profiles use, so only an environment
+  // override conflicts with the legacy pin; the slot itself carries it.
+  if (
+    pinnedLanguage !== undefined &&
+    config.ghidraLanguageOverride !== undefined
+  )
+    return unavailableClient(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "The committed legacy MIPS profile pins its import language; REA_GHIDRA_LANGUAGE_ID/REA_GHIDRA_COMPILER_SPEC_ID cannot be combined with it. Reopen the target without the override.",
+        },
+      }),
+    );
   if (
     !sameGhidraLanguageOverride(
-      languageOverride,
-      config.ghidraLanguageOverride ?? ghidraPinnedLanguage(target),
+      parameterLanguage,
+      config.ghidraLanguageOverride ?? targetLanguage,
     )
   )
     return unavailableClient(
@@ -465,6 +493,9 @@ export const createGhidraProviderClient = (input: {
         },
       }),
     );
+  // Both caller-selected and provider-pinned languages use the validated
+  // committed slot; the profile cannot supply its own applicability proof.
+  const importLanguage = parameterLanguage;
   const disabledAnalyzers = ghidraProfileDisabledAnalyzers(
     committedProfile.parameters,
   );
@@ -482,6 +513,7 @@ export const createGhidraProviderClient = (input: {
         },
       }),
     );
+
   const invalidProfile = validateGhidraExtensionProfile(
     extensions,
     config,
@@ -497,6 +529,7 @@ export const createGhidraProviderClient = (input: {
   let extensionFailure: AnalysisError | undefined;
   // Replaced by the reported outcome once the session handshake is checked.
   const seedLimitations: string[] = [...ghidraSeedLimitations(seeds)];
+  const pdbLimitations: string[] = [];
   // Replaced by the reported storage outcome once the handshake is checked.
   const softFloatLimitations: string[] = [
     ...ghidraMipsSoftFloatLimitations(softFloat),
@@ -515,12 +548,19 @@ export const createGhidraProviderClient = (input: {
     ...(target.format === "raw-binary"
       ? [
           "Headerless raw-binary analysis uses the caller-supplied architecture and entry address; file offset 0 is mapped at that address. Headers are not discovered from file bytes.",
-          "Little-endian generic Ghidra languages are used for x86, x86_64, arm, and arm64. Big-endian, Thumb-only, Cortex-M, and other processor variants are unsupported in this increment.",
+          "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502. Big-endian, Thumb-only, Cortex-M, 65C02, 65816, and other processor variants are unsupported in this increment.",
           "Static analysis does not emulate reset vectors, memory-mapped I/O, or firmware boot sequences.",
         ]
       : []),
     ...(target.kind === "executable" && target.architecture === "mips"
       ? (target.mips.limitations ?? [])
+      : []),
+    ...(committedProfile.parameters.mips_abi_basis ===
+    "inferred-o32-assumption-v1"
+      ? [
+          "The ELF header declares no ABI field and no ABI flags record was observed; o32 calling conventions are an analysis assumption of this lane, not a declared fact.",
+          "Floating-point ABI semantics are unverified for this recordless legacy admission.",
+        ]
       : []),
     ...ghidraMipsRelocatableLimitations(target),
     ...ghidraMipsSharedLimitations(target),
@@ -562,7 +602,9 @@ export const createGhidraProviderClient = (input: {
               baseAddr: target.entryPoint,
             },
           }),
-      ...(languageOverride === undefined ? {} : { languageOverride }),
+      ...(importLanguage === undefined
+        ? {}
+        : { languageOverride: importLanguage }),
       ...(config.ghidraDisabledAnalyzers === undefined
         ? {}
         : { disabledAnalyzers: config.ghidraDisabledAnalyzers }),
@@ -587,13 +629,13 @@ export const createGhidraProviderClient = (input: {
           expectedCompilerSpecId: "default",
         }
       : rawLanguage === undefined
-        ? languageOverride === undefined
+        ? importLanguage === undefined
           ? {}
           : {
-              expectedLanguageId: languageOverride.languageId,
-              ...(languageOverride.compilerSpecId === undefined
+              expectedLanguageId: importLanguage.languageId,
+              ...(importLanguage.compilerSpecId === undefined
                 ? {}
-                : { expectedCompilerSpecId: languageOverride.compilerSpecId }),
+                : { expectedCompilerSpecId: importLanguage.compilerSpecId }),
             }
         : {
             expectedLanguageId: rawLanguage.languageId,
@@ -608,10 +650,16 @@ export const createGhidraProviderClient = (input: {
     ...(context === undefined ? {} : { runId: context.runId }),
     logger: logger.child({ layer: "ghidra-bridge" }),
   });
-  const checkExtensions = async (
+  const checkSessionObservations = async (
     operation: AnalysisOperation,
     info: GhidraSessionInfo,
   ): Promise<AnalysisError | undefined> => {
+    if (target.format === "pe")
+      pdbLimitations.splice(
+        0,
+        pdbLimitations.length,
+        ...ghidraPdbLimitations(info.pdb),
+      );
     const softFloatReason = ghidraMipsSoftFloatFailure(
       softFloat,
       info.mips_soft_float_storage,
@@ -663,6 +711,7 @@ export const createGhidraProviderClient = (input: {
     ...softFloatLimitations,
     ...ghidraExtensionLimitations(extensions),
     ...seedLimitations,
+    ...pdbLimitations,
     ...(releaseLimitation === undefined ? [] : [releaseLimitation]),
   ];
   const nativeAotOwner =
@@ -678,10 +727,12 @@ export const createGhidraProviderClient = (input: {
     normalized: JsonValue,
     rawResult: JsonValue,
     observationLimitations: readonly string[] = [],
+    locations: readonly EvidenceLocation[] = [],
   ) => {
     const relationshipCoverage = relationshipCoverageFor(operation);
     return createAnalysisExecution(normalized, committedProfile.provider, {
       rawResult,
+      locations,
       analysisProfile: committedProfile,
       ...(relationshipCoverage === undefined ? {} : { relationshipCoverage }),
       limitations: [
@@ -732,7 +783,7 @@ export const createGhidraProviderClient = (input: {
               config.ghidraStartupTimeoutMs,
             ),
           );
-        const failed = await checkExtensions(operation, started.value);
+        const failed = await checkSessionObservations(operation, started.value);
         if (failed !== undefined) return err(failed);
         return ok(
           createAnalysisExecution(started.value, committedProfile.provider, {
@@ -745,7 +796,12 @@ export const createGhidraProviderClient = (input: {
         ? parseGhidraFunctionInput(operation, parameters)
         : parseGhidraInventoryInput(operation, parameters);
       if (!input.ok) return input;
-      if (extensions.length > 0 || seeds !== undefined || softFloat) {
+      if (
+        target.format === "pe" ||
+        extensions.length > 0 ||
+        seeds !== undefined ||
+        softFloat
+      ) {
         const started = await client.start(options?.signal, options?.progress);
         if (!started.ok)
           return err(
@@ -755,7 +811,7 @@ export const createGhidraProviderClient = (input: {
               config.ghidraStartupTimeoutMs,
             ),
           );
-        const failed = await checkExtensions(operation, started.value);
+        const failed = await checkSessionObservations(operation, started.value);
         if (failed !== undefined) return err(failed);
       }
       const called = await client.callTool(operation, input.value, {
@@ -776,11 +832,13 @@ export const createGhidraProviderClient = (input: {
         );
       let normalized: JsonValue;
       let observationLimitations: readonly string[] = [];
+      let observationLocations: readonly EvidenceLocation[] = [];
       if (isGhidraFunctionOperation(operation)) {
         const result = parseGhidraFunctionResult(operation, called.value);
         if (!result.ok) return result;
         normalized = result.value.value;
         observationLimitations = result.value.limitations;
+        observationLocations = result.value.locations ?? [];
       } else {
         const result = parseGhidraInventoryResult(operation, called.value);
         if (!result.ok) return result;
@@ -875,6 +933,7 @@ export const createGhidraProviderClient = (input: {
           normalized,
           called.value,
           observationLimitations,
+          observationLocations,
         ),
       );
     },

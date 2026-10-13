@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { byteSearchResultSchema } from "../domain/native/bytePattern.js";
 import {
   artifactInventorySummaryViewResultSchema,
   machoSummaryViewResultSchema,
@@ -108,6 +109,7 @@ const bookmarkFacetSchema = z.discriminatedUnion("state", [
 
 /** Exact structured-content schemas shared by direct analysis providers. */
 export const officialOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
+  search_bytes: evidenceResultOf(byteSearchResultSchema),
   annotate_native_function: evidenceResultOf(nativeFunctionAnnotationsSchema),
   inspect_native_load_image: evidenceResultOf(nativeLoadImageSchema),
   inspect_native_data_type: evidenceResultOf(nativeDataTypeSchema),
@@ -357,18 +359,20 @@ export const enhancedOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
   binary_overview: evidenceResultOf(
     z.object({
       document: z.string(),
+      image_base: z.string().min(1).optional(),
       segments: z.array(
         z.object({
           name: z.string(),
           start: z.string(),
           end: z.string(),
           length: z.number().min(0),
+          image_base: z.string().exactOptional(),
+          address_space: z.string().exactOptional(),
         }),
       ),
       segment_count: z.number().int().min(0),
       procedure_count: z.number().int().min(0),
       string_count: z.number().int().min(0),
-      image_base: z.string().min(1).optional(),
     }),
   ),
   analyze_function: functionDossierOutput,
@@ -442,11 +446,11 @@ const lifecycleTargetFields = {
   path: z.string(),
   kind: targetKindSchema,
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  architecture: z.enum(BINARY_ARCHITECTURES).nullable(),
 };
 const detectedLifecycleTargetSchema = z.object({
   ...lifecycleTargetFields,
   format: targetFormatSchema.exclude(["raw-binary"]),
+  architecture: z.enum(BINARY_ARCHITECTURES).exclude(["6502"]).nullable(),
 });
 const rawLifecycleTargetSchema = z.object({
   ...lifecycleTargetFields,

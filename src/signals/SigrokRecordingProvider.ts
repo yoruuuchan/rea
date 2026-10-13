@@ -7,6 +7,8 @@ import {
   parseDecoderDiscovery,
 } from "./parseDecoderDiscovery.js";
 import {
+  BOUNDED_PRODUCER_LIMITS as LIMITS,
+  prlimitArgumentVector,
   readLinuxResourceLimits,
   type LinuxResourceLimits,
 } from "../process/LinuxResourceLimits.js";
@@ -58,15 +60,6 @@ export const SIGROK_PROVIDER_IDENTITY = {
   id: "sigrok-recording",
   name: "REA sigrok recording adapter",
   version: "sigrok-cli@0.7.2",
-} as const;
-// Bound the resident input copy and retained text before allocation/collection.
-const LIMITS = {
-  input_bytes: 32 * 1024 * 1024,
-  output_bytes: 4 * 1024 * 1024,
-  command_timeout_ms: 30_000,
-  address_space_bytes: 1024 * 1024 * 1024,
-  file_bytes: 64 * 1024 * 1024,
-  cpu_seconds: 30,
 } as const;
 type Launcher = NonNullable<Parameters<typeof runOwnedCommand>[2]>["launcher"];
 
@@ -163,17 +156,10 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
         options?.signal,
       );
       effectiveLimits = await this.#resources.readLimits(LIMITS);
-      const limitArguments = [
-        `--as=${effectiveLimits.address_space_bytes}:${effectiveLimits.address_space_bytes}`,
-        `--fsize=${effectiveLimits.file_bytes}:${effectiveLimits.file_bytes}`,
-        `--cpu=${effectiveLimits.cpu_seconds}:${effectiveLimits.cpu_seconds}`,
-        "--core=0:0",
-        "--",
-        command,
-      ];
+      const limitArguments = prlimitArgumentVector(effectiveLimits, command);
       phase = "workspace";
       root = await this.createRuntime();
-      this.#resources.retain(root, undefined, operation);
+      this.#resources.retain(root, undefined);
       const snapshotPath = join(root.path, "recording");
       const execute = async (args: readonly string[]) => {
         const output = await runOwnedCommand(
@@ -371,7 +357,7 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
         cause instanceof OwnedCommandFailure &&
         cause.cleanupOwner !== undefined
       )
-        this.#resources.retain(root, cause.cleanupOwner, operation);
+        this.#resources.retain(root, cause.cleanupOwner);
       result = err(
         this.#failure(
           cause,

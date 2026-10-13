@@ -48,7 +48,10 @@ const registerOverviewCommands = (
   cli.command(CLI_COMMANDS.analyze, {
     description: "Get an overview of an app",
     args: z.object({
-      path: z.string().describe("App, program, or analysis database path"),
+      path: z
+        .string()
+        .min(1)
+        .describe("App, program, or analysis database path"),
     }),
     options: overviewOptions.extend({
       integrityPolicy: javascriptApplicationOptions.shape.integrityPolicy,
@@ -137,6 +140,13 @@ const registerDecompileCommand = (
         .describe(
           "Procedure name or address; use --procedure=<value> for leading dashes",
         ),
+      "file-offset": z
+        .string()
+        .regex(/^0x[0-9a-fA-F]+$/u)
+        .optional()
+        .describe(
+          "Ghidra source-file byte offset; mapped internally to an analysis address",
+        ),
       snapshot: z
         .string()
         .min(1)
@@ -152,8 +162,17 @@ const registerDecompileCommand = (
           {
             procedure: resolveCliAnalysisSelector(
               args.address,
-              options.procedure,
-              "procedure",
+              options["file-offset"] === undefined
+                ? options.procedure
+                : resolveCliAnalysisSelector(
+                    options.procedure,
+                    `file-offset:${options["file-offset"]}`,
+                    "file-offset",
+                    "procedure_pseudo_code",
+                  ),
+              options["file-offset"] === undefined
+                ? "procedure"
+                : "file-offset",
               "procedure_pseudo_code",
             ),
           },

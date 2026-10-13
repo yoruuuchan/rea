@@ -21,6 +21,20 @@ directly to `compare_functions`, and `inspect_artifact` Evidence to
 `compare_artifacts`. Use `get_evidence_bundle` when the task needs broader
 retained session history or an explicit bundle for transfer.
 
+Function dossiers can declare per-facet coverage in the optional
+`normalized_result.facet_availability` map. Each supplied facet is either
+`{ "available": true }` or `{ "available": false, "reason": "..." }`.
+Supported keys are `pseudocode`, `assembly`, `comments`, `callers`, `callees`,
+`references`, `strings_names`, and `cfg`. Availability describes whether that
+facet was observed, not whether its collection contains any entries.
+
+`compare_functions` keeps a dimension `unknown` with null counts when either
+side declares a required facet unavailable. An empty legacy facet without a
+coverage declaration is also unknown. A producer that actually observed an
+empty facet can declare it available so observed absence remains comparable.
+Call comparison additionally retains the Evidence relationship coverage
+checks. IDA declares the facets its selected adapter cannot provide; an empty
+unsupported array does not prove observed absence.
 Evidence and bundle imports reject unsupported fields in their envelopes,
 identities, manifests and other fixed metadata before authentication. Imports
 leave retained session state unchanged when validation fails. Keep application
@@ -51,7 +65,7 @@ unresolved relationship reads. Cancellation remains a tool error.
 REA prepares complete MCP results within the pinned stdio client's 10 MiB
 receive-buffer budget, including both text and structured representations and
 room for the JSON-RPC envelope. Tool errors carry only their text
-representation, so only that text counts against the budget. Response budget settings are captured at startup;
+representation and `isError` flag, so only those count against the budget. Response budget settings are captured at startup;
 restart or recreate the server to apply changes. If a result cannot fit, REA returns
 `resource_constraint` with `details.resource: "transport"` before constructing
 a document-sized string. Analysis Evidence remains complete in the current
@@ -257,9 +271,11 @@ Evidence remain complete inline, and both input forms pass the same semantic,
 identity, authority, and provenance checks without running the producer again.
 
 References belong to the current connection's Evidence ledger. Opening another
-target preserves retained records; `close_binary` clears them, even when no
-binary is active. A fresh connection has its own ledger. A missing reference
-reports its exact ID and `details.reason: "missing"`; the server cannot infer
+target or restarting the current target preserves retained records, including
+when provider cleanup fails; records remain available for export and retry.
+`close_binary` clears them, even when no binary is active. A fresh connection
+has its own ledger. A missing reference reports its exact ID and
+`details.reason: "missing"`; the server cannot infer
 whether it was never recorded, cleared, or retained by another connection.
 Supply complete inline Evidence, repeat its producer, or import an exported
 Evidence bundle before referencing that imported record. Export a bundle before
@@ -588,8 +604,12 @@ failures for such entries name this cause and the operation to rerun with
 
 Advertised input and output schemas contain no reachable recursive references.
 Schemas share repeated definitions through schema-local references while
-preserving complete nested fields and validation rules. Input properties retain
-their descriptions and literal examples.
+preserving complete nested fields and validation rules. Input schemas whose
+shared definitions would exhaust a client's declaration-rendering reference
+budget (Pi 1.1.0 code-mode shares 32 reference expansions across an input and
+renders every later reference as `unknown`) are re-projected without shared
+definitions, so every advertised field renders with complete structure.
+Input properties retain their descriptions and literal examples.
 
 When a host forwards input schemas to the model, their examples consume context.
 REA's advertised examples therefore never copy complete producer Evidence.
@@ -636,7 +656,7 @@ JSON Schema:
   objects or arrays.
 - The few schemas whose validation structure alone exceeds the budget
   (`compare_web_captures`, `build_reconstruction_obligation_ledger`,
-  `evaluate_reconstruction_coverage`, `project_managed_application_graph`,
+  `evaluate_reconstruction_coverage`,
   `compare_application_versions`, `capture_browser_scenario`) are advertised
   in a reduced form: property names, reference-resolved types (including union
   alternatives), first-level guidance, and the root's required-field constraints,
@@ -646,8 +666,7 @@ JSON Schema:
   instead of silent acceptance.
 
 Boundary tests pin every advertised compact schema to the budget, keep them
-valid JSON Schema that still accepts every canonical example, and hold the
-set of six reduced presentations as contracts evolve. Client verification
+valid JSON Schema that still accepts every canonical example. Client verification
 also checks provider-facing sizes and canonical examples after conversion by
 the actual Kimi Code CLI; local captures do not establish Moonshot acceptance.
 

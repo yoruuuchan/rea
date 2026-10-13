@@ -44,6 +44,10 @@ import {
   retryRegularFileCleanup,
 } from "./RegularFileRead.js";
 import { providerRegistrationEnvironment } from "./SetupRegistrationEnvironment.js";
+import {
+  msixPackagesDirectory,
+  packagePrivateLauncherBlocker,
+} from "./MsixPackageStorage.js";
 import type {
   SetupHost,
   SetupInitialState,
@@ -65,6 +69,31 @@ export const setupRegistrationCommand = (
           "mcp",
         ]
       : [resolve(process.argv[1] ?? PRODUCT_IDENTITY.cliBinary), "mcp"];
+
+/**
+ * The launcher setup registers, and why it must not be registered when it
+ * exists only inside one MSIX package's private storage.
+ */
+const setupRegistration = (
+  platform: NodeJS.Platform,
+  homeDirectory: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+): Pick<SetupHost, "registrationCommand" | "registrationCommandBlocker"> => {
+  const registrationCommand = setupRegistrationCommand(
+    platform,
+    invokingPackageRunner(environment, platform),
+  );
+  const registrationCommandBlocker =
+    platform === "win32"
+      ? packagePrivateLauncherBlocker(
+          registrationCommand,
+          msixPackagesDirectory(homeDirectory, environment),
+        )
+      : undefined;
+  return registrationCommandBlocker === undefined
+    ? { registrationCommand }
+    : { registrationCommand, registrationCommandBlocker };
+};
 
 export const filterClientsNeedingConfigure = async (
   host: SetupHost,
@@ -95,7 +124,8 @@ export const hostRemediation = async (
       ? "Upgrade to macOS 12 or newer."
       : undefined;
   }
-  if ((await host.linuxDistribution())?.supported === true) return undefined;
+  if ((await host.linuxDistribution())?.hopperSetupSupported === true)
+    return undefined;
   return "Automated Hopper setup supports Ubuntu 24.04+, Fedora 41+, Nobara 44+, 64-bit Arch Linux, CachyOS, and Omarchy; configure an existing supported provider instead.";
 };
 
@@ -117,10 +147,7 @@ export const systemSetupHost = (
     homeDirectory,
     skillDestinations: (clientIds) =>
       skillDestinations(homeDirectory, clientIds, environment, platform),
-    registrationCommand: setupRegistrationCommand(
-      platform,
-      invokingPackageRunner(environment, platform),
-    ),
+    ...setupRegistration(platform, homeDirectory, environment),
     nodeVersion: process.versions.node,
     macosVersion: () => doctorHost.macosVersion(),
     linuxDistribution: readLinuxDistribution,
