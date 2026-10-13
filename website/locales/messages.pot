@@ -131,7 +131,7 @@ msgstr ""
 #: website/public/examples/dino-lab/index.html:467 website/public/faq/index.html:565
 #: website/public/first-investigation/index.html:515
 #: website/public/get-started/index.html:874
-#: website/public/guides/browser/index.html:490 website/public/guides/index.html:274
+#: website/public/guides/browser/index.html:499 website/public/guides/index.html:274
 #: website/public/guides/javascript/index.html:495
 #: website/public/guides/native/index.html:501 website/public/index.html:1183
 #: website/public/showcase/aegis/index.html:800
@@ -148,7 +148,7 @@ msgstr ""
 #: website/public/examples/dino-lab/index.html:468 website/public/faq/index.html:566
 #: website/public/first-investigation/index.html:516
 #: website/public/get-started/index.html:875
-#: website/public/guides/browser/index.html:491 website/public/guides/index.html:275
+#: website/public/guides/browser/index.html:500 website/public/guides/index.html:275
 #: website/public/guides/javascript/index.html:496
 #: website/public/guides/native/index.html:502 website/public/index.html:1184
 #: website/public/showcase/aegis/index.html:801
@@ -165,7 +165,7 @@ msgstr ""
 #: website/public/examples/dino-lab/index.html:469 website/public/faq/index.html:567
 #: website/public/first-investigation/index.html:517
 #: website/public/get-started/index.html:876
-#: website/public/guides/browser/index.html:492 website/public/guides/index.html:276
+#: website/public/guides/browser/index.html:501 website/public/guides/index.html:276
 #: website/public/guides/javascript/index.html:497
 #: website/public/guides/native/index.html:503 website/public/index.html:1185
 #: website/public/showcase/aegis/index.html:802
@@ -182,7 +182,7 @@ msgstr ""
 #: website/public/examples/dino-lab/index.html:470 website/public/faq/index.html:568
 #: website/public/first-investigation/index.html:518
 #: website/public/get-started/index.html:877
-#: website/public/guides/browser/index.html:493 website/public/guides/index.html:277
+#: website/public/guides/browser/index.html:502 website/public/guides/index.html:277
 #: website/public/guides/javascript/index.html:498
 #: website/public/guides/native/index.html:504 website/public/index.html:1186
 #: website/public/showcase/aegis/index.html:803
@@ -201,7 +201,7 @@ msgstr ""
 #: website/public/examples/dino-lab/index.html:475 website/public/faq/index.html:573
 #: website/public/first-investigation/index.html:523
 #: website/public/get-started/index.html:882
-#: website/public/guides/browser/index.html:498 website/public/guides/index.html:282
+#: website/public/guides/browser/index.html:507 website/public/guides/index.html:282
 #: website/public/guides/javascript/index.html:503
 #: website/public/guides/native/index.html:509 website/public/index.html:1191
 #: website/public/showcase/aegis/index.html:808
@@ -4299,6 +4299,18 @@ msgid ""
 "workflow{ph1} to follow files and process boundaries."
 msgstr ""
 
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/web-network-
+#. captures.md" >
+#. {ph1}: </a >
+#: website/public/guides/browser/index.html:480
+#, python-brace-format
+msgctxt "page:guides/browser/index.html"
+msgid ""
+"For HTTP request and response bodies, use {ph0}Fiddler Everywhere: SAZ captures, MCP "
+"and public skills{ph1}. Export SAZ or HAR 1.2 for offline REA capture Evidence, or "
+"connect Everywhere's MCP server to inspect captured traffic with your agent."
+msgstr ""
+
 #: website/public/guides/browser/index.html:6
 msgctxt "page:guides/browser/index.html"
 msgid "Browser and Network Analysis — REA"
@@ -4346,7 +4358,7 @@ msgctxt "page:guides/browser/index.html"
 msgid "Copy read the loaded scripts"
 msgstr ""
 
-#: website/public/guides/browser/index.html:498
+#: website/public/guides/browser/index.html:507
 msgctxt "page:guides/browser/index.html"
 msgid "Back to top"
 msgstr ""

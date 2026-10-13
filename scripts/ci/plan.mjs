@@ -108,98 +108,123 @@ function classifyPackage(base, head) {
 }
 
 const event = process.env.GITHUB_EVENT_NAME;
-let files = [];
-if (
-  event === "push" ||
+if (!["pull_request", "push", "schedule", "workflow_dispatch"].includes(event))
+  throw new Error(`Unsupported CI event: ${event}`);
+const tier =
   event === "schedule" ||
   event === "workflow_dispatch" ||
   process.env.CI_FULL === "true"
-) {
+    ? "full"
+    : "fast";
+let files = [];
+if (tier === "full") {
   full("Full baseline requested by event or ci:full label");
-} else if (event === "pull_request") {
-  const base = git("merge-base", process.env.BASE_SHA, process.env.HEAD_SHA);
+} else if (event === "pull_request" || event === "push") {
   const head = process.env.HEAD_SHA;
-  // Disable rename detection so both the removed and added paths participate.
-  files = git("diff", "--name-only", "--no-renames", "-z", base, head)
-    .split("\0")
-    .filter(Boolean);
-  for (const file of files) {
-    if (
-      /^(README(?:_[^/]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md|native\/windows\/README\.md|\.github\/pull_request_template\.md)$/.test(
-        file,
-      ) ||
-      file.startsWith("docs/") ||
-      file.startsWith(".github/ISSUE_TEMPLATE/")
-    ) {
-      selected.docs = true;
-      selected.website ||= matchesAny(file, SCOPES.website);
-      continue;
-    }
-    if (/^(src|tests)\/.*\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file)) {
-      selected.code = true;
-      for (const owner of NATIVE_TEST_OWNERS)
-        selected[owner] ||= matchesAny(file, SCOPES[owner]);
-      continue;
-    }
-    if (matchesAny(file, MANUAL_VERIFIERS)) {
-      selected.code = true;
-      continue;
-    }
-    const owners = Object.entries(SCOPES)
-      .filter(([, patterns]) =>
-        patterns.some((pattern) => matchesGlob(file, pattern)),
-      )
-      .map(([owner]) => owner);
-    for (const owner of owners) selected[owner] = true;
-    if (
-      file.startsWith(".github/workflows/") ||
-      file === ".github/actionlint.yaml"
-    ) {
-      selected.workflows = true;
-      if (GUARDED_WORKFLOWS.has(file)) selected.code = true;
-      if (file !== ".github/workflows/ci.yml") continue;
-    }
-    if (owners.length === 1 && owners[0] === "website") continue;
-    if (/^src\/(contracts|domain)\//.test(file)) selected.docs = true;
-    if (file === "package.json") {
-      classifyPackage(base, head);
-      continue;
-    }
-    selected.code = true;
-    if (matchesAny(file, FIXTURE_SOURCES)) {
-      selected.fixtures = true;
-      selected.readiness = true;
-    }
-    if (matchesAny(file, READINESS_SOURCES)) selected.readiness = true;
-    if (file.startsWith("tests/")) continue;
-    if (
-      /^(src\/process\/|src\/filesystem\/|src\/contracts\/tool|src\/server\/createServer|src\/cli\.ts|scripts\/ci\/)/.test(
-        file,
-      )
-    ) {
-      full(`Shared boundary: ${file}`);
-    } else if (owners.length) {
-      if (file.startsWith("src/") || file.startsWith("bridge/"))
-        selected.runtime = true;
-    } else if (/^(src|bridge)\//.test(file)) {
-      // Unowned runtime sources keep the Linux x64 installed-package baseline;
-      // ci:full, main pushes and manual dispatch retain every native host.
-      selected.runtime = true;
-      reasons.push(`Unowned runtime source: ${file}`);
-    } else if (file.startsWith(".agents/skills/")) {
-      selected.runtime = true;
-      selected.docs = true;
-    } else {
-      full(`Unclassified input: ${file}`);
+  let base;
+  if (event === "pull_request") {
+    base = git("merge-base", process.env.BASE_SHA, head);
+  } else {
+    const candidate = process.env.BASE_SHA;
+    const baselineReason = process.env.BASELINE_REASON;
+    try {
+      if (!candidate || !/^[0-9a-f]{40}$/i.test(candidate))
+        throw new Error(
+          baselineReason || "No valid successful push baseline was found",
+        );
+      execFileSync("git", ["merge-base", "--is-ancestor", candidate, head], {
+        stdio: "ignore",
+      });
+      base = candidate;
+    } catch {
+      full(
+        baselineReason ||
+          "No valid successful push baseline ancestor; selecting all lanes",
+      );
     }
   }
-} else throw new Error(`Unsupported CI event: ${event}`);
+  if (base) {
+    // Disable rename detection so both the removed and added paths participate.
+    files = git("diff", "--name-only", "--no-renames", "-z", base, head)
+      .split("\0")
+      .filter(Boolean);
+    for (const file of files) {
+      if (
+        /^(README(?:_[^/]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md|native\/windows\/README\.md|\.github\/pull_request_template\.md)$/.test(
+          file,
+        ) ||
+        file.startsWith("docs/") ||
+        file.startsWith(".github/ISSUE_TEMPLATE/")
+      ) {
+        selected.docs = true;
+        selected.website ||= matchesAny(file, SCOPES.website);
+        continue;
+      }
+      if (/^(src|tests)\/.*\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file)) {
+        selected.code = true;
+        for (const owner of NATIVE_TEST_OWNERS)
+          selected[owner] ||= matchesAny(file, SCOPES[owner]);
+        continue;
+      }
+      if (matchesAny(file, MANUAL_VERIFIERS)) {
+        selected.code = true;
+        continue;
+      }
+      const owners = Object.entries(SCOPES)
+        .filter(([, patterns]) =>
+          patterns.some((pattern) => matchesGlob(file, pattern)),
+        )
+        .map(([owner]) => owner);
+      for (const owner of owners) selected[owner] = true;
+      if (
+        file.startsWith(".github/workflows/") ||
+        file === ".github/actionlint.yaml"
+      ) {
+        selected.workflows = true;
+        if (GUARDED_WORKFLOWS.has(file)) selected.code = true;
+        if (file !== ".github/workflows/ci.yml") continue;
+      }
+      if (owners.length === 1 && owners[0] === "website") continue;
+      if (/^src\/(contracts|domain)\//.test(file)) selected.docs = true;
+      if (file === "package.json") {
+        classifyPackage(base, head);
+        continue;
+      }
+      selected.code = true;
+      if (matchesAny(file, FIXTURE_SOURCES)) {
+        selected.fixtures = true;
+        selected.readiness = true;
+      }
+      if (matchesAny(file, READINESS_SOURCES)) selected.readiness = true;
+      if (file.startsWith("tests/")) continue;
+      if (
+        /^(src\/process\/|src\/filesystem\/|src\/contracts\/tool|src\/server\/createServer|src\/cli\.ts|scripts\/ci\/)/.test(
+          file,
+        )
+      ) {
+        full(`Shared boundary: ${file}`);
+      } else if (owners.length) {
+        if (file.startsWith("src/") || file.startsWith("bridge/"))
+          selected.runtime = true;
+      } else if (/^(src|bridge)\//.test(file)) {
+        // Unowned runtime sources keep the Linux x64 installed-package baseline;
+        // full qualification retains every native host.
+        selected.runtime = true;
+        reasons.push(`Unowned runtime source: ${file}`);
+      } else if (file.startsWith(".agents/skills/")) {
+        selected.runtime = true;
+        selected.docs = true;
+      } else {
+        full(`Unclassified input: ${file}`);
+      }
+    }
+  }
+}
 selected.runtime ||= selected.package;
 const linux = { os: "ubuntu-latest", platform: "linux", architecture: "x64" };
-// macOS x64 is the slowest package host. Pull requests run it only with ci:full;
-// main pushes, schedules and manual dispatch always include it.
+// macOS x64 is the slowest package host. Fast qualification omits it.
 const intel =
-  event !== "pull_request" || process.env.CI_FULL === "true"
+  tier === "full"
     ? [{ os: "macos-15-intel", platform: "darwin", architecture: "x64" }]
     : [];
 const matrix = {
@@ -212,17 +237,17 @@ const matrix = {
       ]
     : [linux],
 };
-const plan = { ...selected, matrix, files, reasons };
+const plan = { ...selected, tier, matrix, files, reasons };
 if (process.env.GITHUB_OUTPUT)
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    Object.entries({ ...selected, matrix: JSON.stringify(matrix) })
+    Object.entries({ ...selected, tier, matrix: JSON.stringify(matrix) })
       .map(([key, value]) => `${key}=${value}\n`)
       .join(""),
   );
 if (process.env.GITHUB_STEP_SUMMARY)
   appendFileSync(
     process.env.GITHUB_STEP_SUMMARY,
-    `### Selected CI lanes\n\n${flags.filter((flag) => selected[flag]).join(", ") || "Formatting only"}\n\n${reasons.join("\n\n")}\n`,
+    `### Selected CI lanes (${tier})\n\n${flags.filter((flag) => selected[flag]).join(", ") || "Formatting only"}\n\n${reasons.join("\n\n")}\n`,
   );
 console.log(JSON.stringify(plan));

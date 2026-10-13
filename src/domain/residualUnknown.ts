@@ -12,7 +12,7 @@ import { functionComparisonDimensionNameSchema } from "./functionComparisonSchem
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const unknownIdSchema = prefixedDigestSchema("unk");
 const text = z.string().trim().min(1);
-const environmentRequirementSchema = z.object({
+const environmentRequirementSchema = z.strictObject({
   id: z.string().min(1).nullable(),
   platform: z.string().min(1).nullable(),
   architecture: z.string().min(1).nullable(),
@@ -39,7 +39,7 @@ const stableUnknownId = (
     )
     .digest("hex")}`;
 
-const probeSchema = z.object({
+const probeSchema = z.strictObject({
   operation: z.string().min(1),
   rationale: text,
 });
@@ -60,17 +60,17 @@ const comparisonConclusionScopeSchema = z
         message: "Comparison dimensions must be sorted and unique",
       });
   });
-const relationshipSchema = z.object({
+const relationshipSchema = z.strictObject({
   type: z.enum(["depends-on", "related-to", "contradicts"]),
   unknown_id: unknownIdSchema,
 });
 const resolutionSchema = z.discriminatedUnion("disposition", [
-  z.object({
+  z.strictObject({
     disposition: z.literal("verified"),
     rationale: text,
     evidence_ids: z.array(evidenceIdSchema).min(1),
   }),
-  z.object({
+  z.strictObject({
     disposition: z.enum(["withdrawn", "out-of-scope"]),
     rationale: text,
     evidence_ids: z.array(evidenceIdSchema),
@@ -78,7 +78,7 @@ const resolutionSchema = z.discriminatedUnion("disposition", [
 ]);
 
 /** Strict durable record for one unresolved or evidence-qualified question. */
-const residualUnknownObjectSchema = z.object({
+const residualUnknownObjectSchema = z.strictObject({
   unknown_id: unknownIdSchema,
   revision: z.number().int().min(1),
   previous_revision_digest: z

@@ -2,6 +2,7 @@ import { visit } from "jsonc-parser";
 import { LosslessNumber } from "lossless-json";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
 import { CaptureFormatError } from "./CaptureFormatError.js";
+import { TextDecoder } from "node:util";
 
 type Frame =
   | {
@@ -13,7 +14,10 @@ type Frame =
   | { kind: "array"; pointer: string; items: unknown[] };
 
 /** Materialize upstream JSON events without duplicate folding, prototype setters or numeric rounding. */
-export const parseHarJson = (text: string): unknown => {
+export const parseCaptureJson = (
+  text: string,
+  format: "HAR" | "qlog",
+): unknown => {
   const frames: Frame[] = [];
   let result: unknown;
   const valuePointer = (): string => {
@@ -29,7 +33,7 @@ export const parseHarJson = (text: string): unknown => {
     if (frames.length > WEB_NETWORK_CAPTURE_LIMITS.depth)
       throw new CaptureFormatError(
         "input-limit",
-        "HAR exceeds the 64-level complete-evidence nesting budget.",
+        `${format} exceeds the 64-level complete-evidence nesting budget.`,
         valuePointer(),
       );
   };
@@ -69,7 +73,7 @@ export const parseHarJson = (text: string): unknown => {
         if (frame.members.has(key))
           throw new CaptureFormatError(
             "format",
-            "HAR JSON contains duplicate object members.",
+            `${format} JSON contains duplicate object members.`,
           );
         frame.pendingKey = key;
       },
@@ -103,7 +107,7 @@ export const parseHarJson = (text: string): unknown => {
           throw new TypeError("JSON visitor emitted an unsupported literal.");
       },
       onError: () => {
-        throw new CaptureFormatError("format", "HAR is malformed JSON.");
+        throw new CaptureFormatError("format", `${format} is malformed JSON.`);
       },
     },
     {
@@ -113,4 +117,19 @@ export const parseHarJson = (text: string): unknown => {
     },
   );
   return result;
+};
+
+/** UTF-8 JSON decoding skips one permitted BOM and rejects malformed bytes. */
+export const decodeCaptureText = (
+  bytes: Uint8Array,
+  format: "HAR" | "qlog",
+): string => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new CaptureFormatError(
+      "format",
+      `${format} is not valid UTF-8 JSON.`,
+    );
+  }
 };

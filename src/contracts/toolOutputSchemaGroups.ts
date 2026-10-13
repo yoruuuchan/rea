@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   artifactInventorySummaryViewResultSchema,
+  machoSummaryViewResultSchema,
   managedArtifactSummaryViewResultSchema,
 } from "../domain/analysisView/analysisView.js";
 import { evidenceBundleSummarySchema } from "../domain/evidenceRecordSummary.js";
@@ -381,7 +382,9 @@ export const nativeOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
   observe_native_ui: evidenceResultOf(nativeUiResultSchema),
   capture_native_ui_scenario: evidenceResultOf(nativeUiResultSchema),
   observe_native_calls: evidenceResultOf(nativeCallObservationResultSchema),
-  inspect_macho: evidenceResultOf(inspectMachoSchema),
+  inspect_macho: evidenceResultOf(
+    z.union([inspectMachoSchema, machoSummaryViewResultSchema]),
+  ),
   inspect_signature: evidenceResultOf(inspectSignatureSchema),
   inspect_plist: evidenceResultOf(inspectPlistSchema),
   list_architectures: evidenceResultOf(listArchitecturesSchema),

@@ -116,6 +116,24 @@ it("keeps unsupported profile reasons distinct from malformed input", () => {
   expect(JSON.stringify(projectAnalysisError(result))).not.toContain("private");
 });
 
+it("preserves a retryable capability failure through explicit-value redaction", () => {
+  // Retryability is a semantic field of the error, not presentation: dropping
+  // it turns a transient admission failure into a permanent one and changes
+  // the remediation the caller is shown.
+  const error = new AnalysisCapabilityUnavailableError(
+    "mitmproxy",
+    "inspect_web_network_capture",
+    "Runtime admission for /targets/private/capture failed transiently",
+    { retryable: true },
+  );
+  expect(projectAnalysisError(error).retryable).toBe(true);
+  const result = redactExplicitFailure(error, ["private"]);
+  expect(result).toBeInstanceOf(AnalysisCapabilityUnavailableError);
+  expect((result as AnalysisCapabilityUnavailableError).retryable).toBe(true);
+  expect(projectAnalysisError(result).retryable).toBe(true);
+  expect(JSON.stringify(projectAnalysisError(result))).not.toContain("private");
+});
+
 it("coarsens format issue pointers without creating replacement coordinates", () => {
   const error = new AnalysisInputError(
     "inspect_web_network_capture",

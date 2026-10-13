@@ -12,12 +12,14 @@ import {
   detectReferenceSourceLanguage,
 } from "../domain/referenceSourceClassification.js";
 import type { HistoricalSourceGraphInput } from "../domain/referenceSourceGraph.js";
-import { parseReferenceSourceImports } from "../domain/referenceSourceImportParsing.js";
+import {
+  parseReferenceSourceImports,
+  PARSEABLE_REFERENCE_SOURCE_LANGUAGES,
+} from "../domain/referenceSourceImportParsing.js";
 import type {
   ReferenceSourceEntry,
   ReferenceSourceRead,
 } from "../reference/ReferenceSourceReaderTypes.js";
-import { PARSEABLE_REFERENCE_SOURCE_LANGUAGES } from "./ReferenceSourceImportTypes.js";
 import { typescriptEmittedSourceCandidates } from "./TypeScriptEmittedSourceCandidates.js";
 
 export interface ParsedReferenceSourceEntries {
@@ -102,7 +104,11 @@ const resolveInternalSpecifier = (
   ]);
   // Retain present runtime files first; substitute only a missing counterpart.
   // Counterparts cover explicit filenames, not directory/index resolution.
-  candidates.push(...typescriptEmittedSourceCandidates(fromPath, normalized));
+  candidates.push(
+    ...typescriptEmittedSourceCandidates(fromPath, normalized).map(
+      ({ path }) => path,
+    ),
+  );
   const match = lookupPath.resolveCandidates(candidates);
   return match === undefined
     ? { to: normalized, resolution: "unresolved" }

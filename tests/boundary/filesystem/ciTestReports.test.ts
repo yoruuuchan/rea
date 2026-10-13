@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { parseTestDurations } from "../../ciTestSequencer.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { workflowGit } from "../../support/workflowGit.js";
 
 const execute = promisify(execFile);
 const script = new URL("../../../scripts/ci/test-report.mjs", import.meta.url);
@@ -77,11 +78,55 @@ it("keeps diagnosis available after merge failure and publishes only complete su
   const history = steps.find((step) => step.with?.name === "test-timings");
   expect(history?.if).toContain("success()");
   expect(history?.if).toContain("needs.test-shard.result == 'success'");
+  expect(history?.if).toContain("needs.changes.outputs.tier == 'full'");
   expect(history?.with?.path).toBe(".cache/ci-test-history/test-results.json");
   const download = (await workflow()).build!.steps.find(
     (step) => step.name === "Download previous timing report",
   );
   expect(download?.with?.name).toBe(history?.with?.name);
+});
+
+it("rejects successful shard reports with missing or duplicate portable files", async () => {
+  const root = await createTestTempDirectory("rea-ci-report-inventory-");
+  await workflowGit(root, ["init"]);
+  await mkdir(join(root, "tests"));
+  for (const name of ["first", "second"])
+    await writeFile(join(root, `tests/${name}.test.ts`), "// fixture\n");
+  await workflowGit(root, ["add", "tests"]);
+  const run = async (names: readonly string[]) => {
+    await writeFile(
+      join(root, "test-results.json"),
+      JSON.stringify({
+        success: true,
+        numFailedTests: 0,
+        testResults: names.map((name) => ({ name, startTime: 0, endTime: 1 })),
+      }),
+    );
+    return execute(process.execPath, [fileURLToPath(script)], {
+      cwd: root,
+      env: {
+        ...process.env,
+        SHARD_RESULT: "success",
+        MERGE_RESULT: "success",
+        CI_VERIFY_TEST_INVENTORY: "true",
+      },
+    });
+  };
+  await expect(
+    run(["tests/first.test.ts", "tests/second.test.ts"]),
+  ).resolves.toMatchObject({ stderr: "" });
+  for (const names of [
+    ["tests/first.test.ts"],
+    ["tests/first.test.ts", "tests/second.test.ts", "tests/unplanned.test.ts"],
+    ["tests/first.test.ts", "tests/first.test.ts", "tests/second.test.ts"],
+  ]) {
+    await expect(run(names)).rejects.toMatchObject({
+      stderr: expect.stringContaining("Incomplete portable test inventory"),
+    });
+    await expect(
+      readFile(join(root, ".cache/ci-test-history/test-results.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  }
 });
 
 it("runs the existing onboarding and Python producer guards from their selected CI owners", async () => {

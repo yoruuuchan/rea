@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -136,6 +136,36 @@ it("keeps lint errors failing and visible alongside the retained warnings", asyn
       expect.objectContaining({ severity: "error" }),
     ]),
   );
+});
+
+it("excludes translation staging while retaining authored website errors", async () => {
+  const root = await fixture();
+  for (const name of [".gitignore", ".oxlintrc.json"])
+    await writeFile(join(root, name), await readFile(join(repository, name)));
+  const authored = "website/public/assets/authored.js";
+  const staged =
+    "website/.i18n-regression/site/examples/notes-electron/main.js";
+  for (const name of [authored, staged]) {
+    const path = join(root, name);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      'const source = require("node:fs");\nconsole.log(source);\n',
+    );
+  }
+
+  const result = invoke(root, "lint");
+  expect(result.error).toBeUndefined();
+  expect(result.status).toBe(1);
+  expect(result.stdout).toContain("1 errors, 0 warnings");
+  expect(result.stderr).toContain(authored);
+  expect(await lintDiagnostics(root)).toEqual([
+    expect.objectContaining({
+      severity: "error",
+      code: "typescript(no-var-requires)",
+      filename: authored,
+    }),
+  ]);
 });
 
 it("keeps malformed source failing with its parser diagnostic", async () => {

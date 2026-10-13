@@ -281,7 +281,7 @@ it("pages filtered unknown heads through the public MCP contract", async () => {
       supporting_evidence_ids: [],
       contradicting_evidence_ids: [],
     });
-    expect(result.ok).toBe(true);
+    if (!result.ok) throw result.error;
   }
 
   const defaultPage = structured(
@@ -372,12 +372,11 @@ it("pages filtered unknown heads through the public MCP contract", async () => {
     .result as typeof defaultPage;
   expect(first).toMatchObject({ total: 3, offset: 0, next_offset: 2 });
   expect(first.items).toHaveLength(2);
-  const second = structured(
-    await client.callTool({
-      ...request,
-      arguments: { ...request.arguments, offset: first.next_offset ?? 0 },
-    }),
-  ).result as typeof defaultPage;
+  const secondResponse = await client.callTool({
+    ...request,
+    arguments: { ...request.arguments, offset: first.next_offset ?? 0 },
+  });
+  const second = structured(secondResponse).result as typeof defaultPage;
   expect(second).toMatchObject({ total: 3, offset: 2, next_offset: null });
   expect(second.items).toHaveLength(1);
   expect(
@@ -389,7 +388,7 @@ it("pages filtered unknown heads through the public MCP contract", async () => {
   );
   expect(
     toolContract("list_unknowns").outputSchema.safeParse(
-      (await client.callTool(request)).structuredContent,
+      secondResponse.structuredContent,
     ).success,
   ).toBe(true);
 

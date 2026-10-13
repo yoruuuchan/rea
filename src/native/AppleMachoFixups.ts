@@ -42,6 +42,8 @@ export interface PointerFixups {
   readonly issues: readonly DecodeIssue[];
   /** Fixup segments or bind streams this reader walked. */
   readonly examined: number;
+  /** Fully decoded fixup segments or bind streams, in the same units as `examined`. */
+  readonly decoded: number;
   /** Rebase opcode bytes present in the load command and not decoded. */
   readonly unreadRebaseBytes: number;
   /** Decode the pointer stored at `address` whose raw 64-bit value is `raw`. */
@@ -260,6 +262,7 @@ const readChainedPage = (
 const chainedFixups = (
   image: FixupImage,
   range: { readonly offset: number; readonly size: number },
+  unreadRebaseBytes: number,
 ): PointerFixups => {
   const { bytes, segments, dylibs, baseAddress } = image;
   const base = range.offset;
@@ -400,19 +403,25 @@ const chainedFixups = (
         ]
       : [],
   );
-  const examinedViews = new Set<string>();
-  for (const chain of ranges) {
+  const examinedViews = new Map<string, boolean>();
+  const decodedRanges = new Set<number>();
+  for (const [chainIndex, chain] of ranges.entries()) {
     // Unknown formats retain their compact starts table; only a queried page
     // needs its NONE/presence value. Do not expand unsupported declarations.
     if (POINTER_FORMATS[chain.format] === undefined) continue;
-    const view = `${chain.pageStarts}:${chain.segment.offset}:${chain.segment.size}:${chain.segment.address}`;
-    if (examinedViews.has(view)) continue;
-    examinedViews.add(view);
+    const view = `${chain.pageStarts}:${chain.segment.offset}:${chain.segment.size}:${chain.segment.address}:${chain.format}:${chain.pageSize}:${chain.pageCount}`;
+    const prior = examinedViews.get(view);
+    if (prior !== undefined) {
+      if (prior) decodedRanges.add(chainIndex);
+      continue;
+    }
+    let complete = true;
     for (let page = 0; page < chain.pageCount; page++) {
       const start = bytes.readUInt16LE(chain.pageStarts + page * 2);
       if (start === 0xffff) continue;
       const facts = pageFacts(chain, page, start);
       if (facts.failure !== undefined) {
+        complete = false;
         issues.push(
           issue(
             "pointer_fixups",
@@ -427,6 +436,8 @@ const chainedFixups = (
         break;
       }
     }
+    examinedViews.set(view, complete);
+    if (complete) decodedRanges.add(chainIndex);
   }
   const failures = issues.map(({ message }) => message);
   return {
@@ -435,13 +446,17 @@ const chainedFixups = (
     failures,
     issues,
     examined: Math.max(ranges.length, 1),
-    unreadRebaseBytes: 0,
+    get decoded() {
+      return ranges.length === 0 ? 1 : decodedRanges.size;
+    },
+    unreadRebaseBytes,
     decode(address, raw) {
-      const chain = ranges.find(
+      const chainIndex = ranges.findIndex(
         ({ segment }) =>
           address >= segment.address &&
           address < segment.address + segment.size,
       );
+      const chain = ranges[chainIndex];
       // Pointers outside fixup segments, such as in __TEXT, are stored plainly.
       if (chain === undefined) return { kind: "rebase", target: raw };
       const within = Number(address - chain.segment.address);
@@ -486,6 +501,7 @@ const chainedFixups = (
           );
           failures.push(reason);
         }
+        decodedRanges.delete(chainIndex);
         return { kind: "unsupported", reason };
       }
     },
@@ -684,10 +700,7 @@ export const parsePointerFixups = (
     0,
   );
   if (commands.chained !== null) {
-    const chained = chainedFixups(image, commands.chained);
-    return unreadRebaseBytes === 0
-      ? chained
-      : { ...chained, unreadRebaseBytes };
+    return chainedFixups(image, commands.chained, unreadRebaseBytes);
   }
   if (commands.binds.length === 0)
     return {
@@ -696,14 +709,17 @@ export const parsePointerFixups = (
       failures: [],
       issues: [],
       examined: 0,
+      decoded: 0,
       unreadRebaseBytes,
       decode: (_address, raw) => ({ kind: "rebase", target: raw }),
     };
   const binds: BindRun[] = [];
   const failures: string[] = [];
+  let decoded = 0;
   for (const stream of commands.binds)
     try {
       readBindStream(image, stream, binds);
+      decoded++;
     } catch (cause: unknown) {
       failures.push(
         `${stream.stream} bind opcodes: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -717,6 +733,7 @@ export const parsePointerFixups = (
       issue("pointer_fixups", "bind_stream_decode_failed", message),
     ),
     examined: commands.binds.length,
+    decoded,
     unreadRebaseBytes,
     decode(address, raw) {
       let match: BindRun | undefined;

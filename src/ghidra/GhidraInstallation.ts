@@ -641,14 +641,20 @@ const versionCheck = (
   properties: GhidraApplicationProperties | undefined,
 ): GhidraInstallationCheck => {
   const raw = properties?.providerVersion;
+  const parseError = properties?.parseError;
   return installationCheck({
     name: "version",
-    passed: ghidraReleaseAccepted(raw),
+    passed: parseError == null && ghidraReleaseAccepted(raw),
     code:
-      ghidraReleaseCompatibility(raw).status === "unsupported"
-        ? "unsupported_version"
-        : "version_unresolved",
-    detail: ghidraVersionDetail(raw),
+      parseError != null
+        ? "version_unresolved"
+        : ghidraReleaseCompatibility(raw).status === "unsupported"
+          ? "unsupported_version"
+          : "version_unresolved",
+    detail:
+      parseError == null
+        ? ghidraVersionDetail(raw)
+        : `application.properties could not be parsed: ${parseError}`,
     remediation: `Install a Ghidra ${ghidraReleaseLine()} release (verified with ${SUPPORTED_GHIDRA_VERSION}), or update REA for another Ghidra line.`,
   });
 };
@@ -701,7 +707,9 @@ const javaRemediation = (
 const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
   readText(path) {
     try {
-      return readFileSync(path, "utf8");
+      // Ghidra loads this file with Properties.load(InputStream), which maps
+      // bytes as ISO-8859-1 rather than decoding UTF-8.
+      return readFileSync(path).toString("latin1");
     } catch (cause: unknown) {
       // best-effort cleanup: optional install probing; unreadable means unknown.
       void cause;

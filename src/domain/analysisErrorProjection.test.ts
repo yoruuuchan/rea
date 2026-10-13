@@ -25,6 +25,91 @@ import { ProviderSelectionError } from "./providerSelectionError.js";
 import { analysisErrorProjectionSchema } from "../contracts/errorSchemas.js";
 import { nativeCallPartialObservationSchema } from "./native/nativeCallPartialObservation.js";
 
+describe("capability failure retry disposition", () => {
+  it.each([
+    { options: {}, retryable: false, category: "unsupported_provider" },
+    {
+      options: { retryable: false },
+      retryable: false,
+      category: "unsupported_provider",
+    },
+    { options: { retryable: true }, retryable: true, category: "unavailable" },
+  ] as const)(
+    "preserves the producer's $retryable disposition",
+    ({ options, retryable, category }) => {
+      const reason = "Native self-test failed with a sharing violation";
+      const projected = projectAnalysisError(
+        new AnalysisCapabilityUnavailableError(
+          "fixture-provider",
+          "inspect",
+          reason,
+          options,
+        ),
+      );
+      expect(projected).toMatchObject({
+        code: "capability_unavailable",
+        category,
+        retryable,
+        details: { reason },
+      });
+      if (retryable) {
+        expect(projected.message).toBe(
+          "Required runtime controls are unavailable for this attempt.",
+        );
+        expect(projected.remediation.action).toContain(
+          "retry the same analysis",
+        );
+      }
+      expect(analysisErrorProjectionSchema.safeParse(projected).success).toBe(
+        true,
+      );
+    },
+  );
+
+  it("preserves a caller-selected message for a retryable failure", () => {
+    expect(
+      projectAnalysisError(
+        new AnalysisCapabilityUnavailableError(
+          "fixture-provider",
+          "inspect",
+          "temporary failure",
+          {
+            retryable: true,
+            userMessage: "Selected runtime diagnostic",
+          },
+        ),
+      ).message,
+    ).toBe("Selected runtime diagnostic");
+  });
+
+  it("retains cleanup ownership before allowing a transient operation to retry", () => {
+    expect(
+      projectAnalysisError(
+        new AnalysisCapabilityUnavailableError(
+          "fixture-provider",
+          "inspect",
+          "temporary failure",
+          {
+            retryable: true,
+            cleanup: {
+              reason: "owned handle is still live",
+              resources: ["native-owner"],
+            },
+          },
+        ),
+      ),
+    ).toMatchObject({
+      code: "cleanup_incomplete",
+      retryable: false,
+      details: {
+        cleanup: "incomplete",
+        resources: ["native-owner"],
+        execution_failure: "capability_unavailable",
+      },
+    });
+  });
+});
+
 it("projects a published file receipt alongside retained cleanup failure", () => {
   const projected = projectAnalysisError(
     new EvidenceFileError("write", "io", {

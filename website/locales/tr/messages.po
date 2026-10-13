@@ -71,7 +71,7 @@ msgstr "Başlangıç N0zoM1z0 * 10 Ekim 2026"
 #: website/public/faq/index.html:573
 #: website/public/first-investigation/index.html:523
 #: website/public/get-started/index.html:882
-#: website/public/guides/browser/index.html:498
+#: website/public/guides/browser/index.html:507
 #: website/public/guides/index.html:282
 #: website/public/guides/javascript/index.html:503
 #: website/public/guides/native/index.html:509 website/public/index.html:1191
@@ -4754,7 +4754,7 @@ msgctxt "page:guides/browser/index.html"
 msgid "Copy read the loaded scripts"
 msgstr "Kopyala yüklenen komut dosyalarını oku"
 
-#: website/public/guides/browser/index.html:498
+#: website/public/guides/browser/index.html:507
 msgctxt "page:guides/browser/index.html"
 msgid "Back to top"
 msgstr "Başa dön"
@@ -11690,7 +11690,7 @@ msgstr "Rehberler"
 #: website/public/faq/index.html:565
 #: website/public/first-investigation/index.html:515
 #: website/public/get-started/index.html:874
-#: website/public/guides/browser/index.html:490
+#: website/public/guides/browser/index.html:499
 #: website/public/guides/index.html:274
 #: website/public/guides/javascript/index.html:495
 #: website/public/guides/native/index.html:501 website/public/index.html:1183
@@ -11710,7 +11710,7 @@ msgstr "Kaynak kod"
 #: website/public/faq/index.html:566
 #: website/public/first-investigation/index.html:516
 #: website/public/get-started/index.html:875
-#: website/public/guides/browser/index.html:491
+#: website/public/guides/browser/index.html:500
 #: website/public/guides/index.html:275
 #: website/public/guides/javascript/index.html:496
 #: website/public/guides/native/index.html:502 website/public/index.html:1184
@@ -11730,7 +11730,7 @@ msgstr "MIT lisansı"
 #: website/public/faq/index.html:567
 #: website/public/first-investigation/index.html:517
 #: website/public/get-started/index.html:876
-#: website/public/guides/browser/index.html:492
+#: website/public/guides/browser/index.html:501
 #: website/public/guides/index.html:276
 #: website/public/guides/javascript/index.html:497
 #: website/public/guides/native/index.html:503 website/public/index.html:1185
@@ -11750,7 +11750,7 @@ msgstr "Topluluğa katıl"
 #: website/public/faq/index.html:568
 #: website/public/first-investigation/index.html:518
 #: website/public/get-started/index.html:877
-#: website/public/guides/browser/index.html:493
+#: website/public/guides/browser/index.html:502
 #: website/public/guides/index.html:277
 #: website/public/guides/javascript/index.html:498
 #: website/public/guides/native/index.html:504 website/public/index.html:1186
@@ -12687,6 +12687,24 @@ msgstr "Açık temaya geç"
 msgctxt "runtime"
 msgid "Switch to dark mode"
 msgstr "Koyu temaya geç"
+
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/web-network-
+#. captures.md" >
+#. {ph1}: </a >
+#: website/public/guides/browser/index.html:480
+#, python-brace-format
+msgctxt "page:guides/browser/index.html"
+msgid ""
+"For HTTP request and response bodies, use {ph0}Fiddler Everywhere: SAZ "
+"captures, MCP and public skills{ph1}. Export SAZ or HAR 1.2 for offline REA "
+"capture Evidence, or connect Everywhere's MCP server to inspect captured "
+"traffic with your agent."
+msgstr ""
+"HTTP istek ve yanıt gövdelerini incelemek için {ph0}Fiddler Everywhere: SAZ "
+"kayıtları, MCP ve herkese açık beceriler{ph1} rehberini kullanın. REA ile "
+"çevrimdışı kayıt Evidence elde etmek için SAZ veya HAR 1.2 dışa aktarın veya"
+" kaydedilen trafiği ajanınızla incelemek için Everywhere MCP sunucusunu "
+"bağlayın."
 
 #~ msgctxt "page:index.html"
 #~ msgid "Setup guide"

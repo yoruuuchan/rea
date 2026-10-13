@@ -107,6 +107,30 @@ it("advertises exact valid schemas and records inline EVM interface evidence wit
   ).toBe(true);
 });
 
+it("rejects an EVM provider response with a non-file subject before recording Evidence", async () => {
+  const value = evmInterfaceFixture();
+  const execution = evmInterfaceExecution(value);
+  const malformed = {
+    ...execution,
+    subject: { ...execution.subject, format: "elf" },
+  } as unknown as typeof execution;
+  const harness = await createApplicationMcpHarness({
+    serverOptions: {
+      evmInterface: new EvmInterfaceService({
+        inspect: () => Promise.resolve(ok(malformed)),
+      }),
+    },
+  });
+  onTestFinished(harness.close);
+  const before = harness.session.exportEvidenceBundle().records.length;
+  const response = await harness.client.callTool({
+    name: "inspect_evm_interface",
+    arguments: { path: value.artifact.path, encoding: "hex" },
+  });
+  expect(parseMcpToolError(response).error.code).toBe("unreadable_output");
+  expect(harness.session.exportEvidenceBundle().records).toHaveLength(before);
+});
+
 it.each(["unavailable", "incompatible-output"])(
   "preserves a healthy WASM peer and explicit EVM failure: %s",
   async (scenario) => {

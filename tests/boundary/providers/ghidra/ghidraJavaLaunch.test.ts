@@ -286,7 +286,8 @@ describe.skipIf(process.platform === "win32")(
           {
             platform: process.platform,
             architecture: process.arch,
-            readText: () => "application.version=12.1.4\n",
+            readText: () =>
+              "application.version=12.1.4\napplication.java.min=21\n",
             executable: () => true,
             probeJava: () => ({
               version: "21.0.12",

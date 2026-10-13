@@ -30,6 +30,9 @@ it.each([
       silentLogger,
       {},
       {
+        inspectDecoders: async () => {
+          throw new Error("Unexpected discovery call");
+        },
         decode: async () => {
           called = true;
           throw new Error("Must not decode");
@@ -84,6 +87,9 @@ it.each([false, true])(
       silentLogger,
       {},
       {
+        inspectDecoders: async () => {
+          throw new Error("Unexpected discovery call");
+        },
         decode: async () => err(original),
         close: async () => {
           await Promise.resolve();

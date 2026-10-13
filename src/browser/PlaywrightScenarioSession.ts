@@ -133,7 +133,7 @@ export class PlaywrightScenarioSession implements BrowserScenarioSessionPort {
     const secrets = BrowserScenarioSecrets.resolve(scenario, environment);
     if (secrets === undefined)
       throw new BrowserObservationError(OPERATION, "secret_unavailable");
-    const startedAt = Date.now();
+    const startedAt = performance.now();
     const opening = openPlaywrightScenarioBrowser(scenario, environment, {
       signal: options.signal,
       ...(options.retainCleanup === undefined

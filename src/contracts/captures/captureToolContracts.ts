@@ -1,4 +1,8 @@
 import {
+  inspectPacketFieldsInputSchema,
+  packetFieldsCatalogSchema,
+} from "../../domain/captures/packetFields.js";
+import {
   inspectPacketCaptureInputSchema,
   packetCaptureSchema,
 } from "../../domain/captures/packetCapture.js";
@@ -6,6 +10,22 @@ import type { ToolContract } from "../toolContractTypes.js";
 import { toolContractMetadata } from "../toolEffects.js";
 import { evidenceResultOf } from "../toolOutputSchemaPrimitives.js";
 export const CAPTURE_TOOL_CONTRACTS = [
+  {
+    name: "inspect_packet_fields",
+    ...toolContractMetadata("inspect_packet_fields"),
+    kind: "artifact-provider",
+    description:
+      "Discover protocols or field names/types registered in the installed TShark 4.x. kind defaults to protocols; use fields and optional exact protocol abbreviation to select field definitions. query searches name/abbreviation/description by case-insensitive literal substring. Return 50 matches by default with offset/limit paging; null requests all remaining within resource limits. Preserve type/base/bitmask/description, duplicate registrations, source line numbers, coverage, tool identity and diagnostics. Linux, REA_TSHARK_COMMAND and prlimit required. No capture file, interface or binary target needed. Registrations describe tool capabilities, not observed traffic. Each call rereads the glossary; use selected fields with inspect_packet_capture.",
+    inputSchema: inspectPacketFieldsInputSchema,
+    outputSchema: evidenceResultOf(packetFieldsCatalogSchema),
+    examples: [
+      { title: "Find USB protocol registrations", input: { query: "usb" } },
+      {
+        title: "Find the installed USB vendor-ID field",
+        input: { kind: "fields", protocol: "usb", query: "idVendor" },
+      },
+    ],
+  },
   {
     name: "inspect_packet_capture",
     ...toolContractMetadata("inspect_packet_capture"),

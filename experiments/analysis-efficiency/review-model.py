@@ -69,7 +69,7 @@ def scope_with_verified_counts(value, expected_scope, returned_counts):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--domain', choices=['wasm', 'evm', 'android', 'managed', 'managed-nonempty', 'firmware', 'inventory', 'javascript', 'native', 'browser'], required=True)
+    parser.add_argument('--domain', choices=['wasm', 'evm', 'android', 'flutter-aot', 'sqlite', 'managed', 'managed-nonempty', 'firmware', 'inventory', 'javascript', 'native', 'browser'], required=True)
     parser.add_argument('--trial', type=Path, required=True)
     parser.add_argument('--reference', type=Path)
     parser.add_argument('--resource-log', type=Path, required=True)
@@ -133,6 +133,14 @@ def main():
         for key, expected in {'artifact_bytes': n['artifact']['bytes'], 'bytecode_sha256': n['bytecode']['sha256'], 'bytecode_bytes': n['bytecode']['bytes'], 'functions': n['functions'], 'evidence_kind': n['evidence_kind'], 'discovery_completeness': n['discovery_completeness'], 'runtime_execution': n['runtime_execution'], 'bytecode_kind': n['bytecode']['kind'], 'hardfork': n['bytecode']['hardfork'], 'deployment_authenticity': n['bytecode']['deployment_authenticity']}.items():
             check(key, answer.get(key), expected)
         check('evm_original_limitations', answer.get('limitations'), n['limitations'])
+    elif domain == 'sqlite':
+        for key in ['artifact', 'wal', 'engine', 'database_encoding', 'schema', 'rows', 'producer_limitations', 'limitations']:
+            # Missing is not SQL/JSON null; booleans are not numeric counters.
+            check(key, (key in answer, json.dumps(answer.get(key), sort_keys=True)),
+                  (True, json.dumps(reference[key], sort_keys=True)))
+    elif domain == 'flutter-aot':
+        for key in ['target', 'abi', 'libapp', 'string_pool', 'coverage', 'limitations']:
+            check(key, answer.get(key), reference[key])
     elif domain == 'android':
         for key in ['package_name', 'version_name', 'version_code', 'matches']:
             check(key, answer.get(key), reference[key])

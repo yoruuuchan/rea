@@ -261,6 +261,14 @@ it.runIf(supportedHost).each([
     if (result.ok) throw new Error("Expected unresolved process ownership");
     const projected = projectAnalysisError(result.error);
     expect(projected.code).toBe("cleanup_incomplete");
+    expect(projected).toMatchObject({
+      details: {
+        resources: expect.arrayContaining([
+          expect.stringMatching(/^pid:\d+$/u),
+          expect.stringMatching(/^process-group:\d+$/u),
+        ]),
+      },
+    });
     if (stage === "debugger")
       expect(projected).toMatchObject({
         details: {

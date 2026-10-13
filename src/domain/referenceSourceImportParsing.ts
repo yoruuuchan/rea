@@ -11,6 +11,7 @@ import {
   parserPluginsForPath,
 } from "./javascript/javascriptSourceParser.js";
 import { unshadowedReferenceSourceRequireCalls } from "./referenceSourceRequireBindings.js";
+import { isRelativeJavaScriptModuleSpecifier } from "./javascript/javascriptModuleSpecifier.js";
 import {
   isCallExpression,
   isExportAllDeclaration,
@@ -60,7 +61,8 @@ export interface ReferenceSourceImportParseResult {
   readonly limitations: readonly string[];
 }
 
-const codeSourceLanguages = new Set(["JavaScript", "TypeScript", "JSX", "TSX"]);
+export const PARSEABLE_REFERENCE_SOURCE_LANGUAGES: ReadonlySet<string> =
+  new Set(["JavaScript", "TypeScript", "JSX", "TSX"]);
 
 const safeModuleName = (node: Node | null | undefined): string | undefined => {
   if (isStringLiteral(node)) return node.value;
@@ -70,9 +72,11 @@ const safeModuleName = (node: Node | null | undefined): string | undefined => {
 const resolveSpecifier = (
   specifier: string,
 ): ReferenceSourceImportResolution => {
-  if (specifier.startsWith(".") || specifier.startsWith("/")) return "internal";
-  if (specifier.startsWith("node:") || specifier.startsWith("data:"))
-    return "external";
+  if (
+    isRelativeJavaScriptModuleSpecifier(specifier) ||
+    specifier.startsWith("/")
+  )
+    return "internal";
   return "external";
 };
 
@@ -314,7 +318,7 @@ export const parseReferenceSourceImports = (
   bytes: Uint8Array,
   language: string | null,
 ): ReferenceSourceImportParseResult => {
-  if (language !== null && !codeSourceLanguages.has(language))
+  if (language !== null && !PARSEABLE_REFERENCE_SOURCE_LANGUAGES.has(language))
     return { relationships: [], parse_failures: [], limitations: [] };
 
   let source: string;

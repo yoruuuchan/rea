@@ -9,6 +9,7 @@ import { wasmArtifactModule } from "../composition/wasm.js";
 import { registerWasmTools } from "./registerWasmTools.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
+import type { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
 import { evmInterfaceModule } from "../composition/evm.js";
@@ -54,6 +55,7 @@ import { silentLogger } from "../logger.js";
 import type { Logger } from "pino";
 import { registerApplicationTools } from "./registerApplicationTools.js";
 import { registerArtifactTools } from "./registerArtifactTools.js";
+import { registerNativeTools } from "./registerNativeTools.js";
 import { registerBrowserScenarioTool } from "./registerBrowserScenarioTool.js";
 import { registerBrowserTools } from "./registerBrowserTools.js";
 import { registerWebScriptTool } from "./registerWebScriptTool.js";
@@ -84,6 +86,7 @@ import type { FirmwareAnalysisPort } from "../application/firmware/FirmwareAnaly
 import { createFirmwareAnalysisProvider } from "../composition/firmware.js";
 import { registerAndroidTools } from "./registerAndroidTools.js";
 import { registerApktoolTools } from "./registerApktoolTools.js";
+import { registerPcapTools } from "./registerPcapTools.js";
 import { registerFlutterTools } from "./registerFlutterTools.js";
 import { registerJebTools } from "./registerJebTools.js";
 import { registerAdbTools } from "./registerAdbTools.js";
@@ -91,11 +94,14 @@ import { AndroidAnalysisService } from "../application/android/AndroidAnalysisSe
 import { JebAnalysisService } from "../application/jeb/JebAnalysisService.js";
 import type { AndroidAnalysisPort } from "../application/android/AndroidAnalysisPort.js";
 import type { ApktoolResourceAnalysisPort } from "../application/apktool/ApktoolResourceAnalysisPort.js";
+import type { PcapAnalysisPort } from "../application/pcap/PcapAnalysisPort.js";
+import { PcapAnalysisService } from "../application/pcap/PcapAnalysisService.js";
 import { ApktoolResourceAnalysisService } from "../application/apktool/ApktoolResourceAnalysisService.js";
 import type { FlutterBuildAnalysisPort } from "../application/flutter/FlutterBuildAnalysisPort.js";
 import { FlutterBuildAnalysisService } from "../application/flutter/FlutterBuildAnalysisService.js";
 import { createAndroidAnalysisProvider } from "../composition/android.js";
 import { createApktoolResourceAnalysisProvider } from "../composition/apktool.js";
+import { createPcapAnalysisProvider } from "../composition/pcap.js";
 import { createFlutterBuildAnalysisProvider } from "../composition/flutter.js";
 import type { JebAnalysisPort } from "../application/jeb/JebAnalysisPort.js";
 import { createJebAnalysisProvider } from "../composition/jeb.js";
@@ -103,8 +109,6 @@ import type { AdbDeviceAnalysisPort } from "../application/adb/AdbDeviceAnalysis
 import { AdbDeviceAnalysisService } from "../application/adb/AdbDeviceAnalysisService.js";
 import { createAdbDeviceAnalysisProvider } from "../composition/adb.js";
 import { registerManagedWorkflowTools } from "./registerManagedWorkflowTools.js";
-import { NATIVE_TOOL_CONTRACTS } from "../contracts/native/nativeToolContracts.js";
-import { registerEvidenceTools } from "./registerEvidenceTools.js";
 import { registerOfficialTools } from "./registerOfficialTools.js";
 import { registerGuidedPrompts } from "./registerPrompts.js";
 import { registerSessionTools } from "./registerSessionTools.js";
@@ -146,6 +150,7 @@ export interface CreateServerOptions {
   readonly webNetworkCapture?: WebNetworkCaptureService;
   readonly androidAnalysis?: AndroidAnalysisPort;
   readonly apktoolAnalysis?: ApktoolResourceAnalysisPort;
+  readonly pcapAnalysis?: PcapAnalysisPort;
   readonly flutterAnalysis?: FlutterBuildAnalysisPort;
   readonly jebAnalysis?: JebAnalysisPort;
   readonly adbDeviceAnalysis?: AdbDeviceAnalysisPort;
@@ -276,6 +281,10 @@ export const createServer = (
     options.webSourceLocation ?? createWebSourceLocationService(environment);
   const webModuleTrace =
     options.webModuleTrace ?? createWebModuleTraceService(environment);
+  const goBinary = options.goBinary ?? createGoBinaryService();
+  const peResources = createPeResourcesService();
+  const webNetworkCapture =
+    options.webNetworkCapture ?? createWebNetworkCaptureService(environment);
   const javascriptRecovery =
     options.javascriptRecovery ?? createJavaScriptRecoveryProvider(environment);
   const artifactResources = new ArtifactResourceScope();
@@ -303,6 +312,7 @@ export const createServer = (
   );
   const android =
     options.androidAnalysis ?? createAndroidAnalysisProvider(environment);
+  const pcap = options.pcapAnalysis ?? createPcapAnalysisProvider(environment);
   const flutter =
     options.flutterAnalysis ?? createFlutterBuildAnalysisProvider();
   const fridaInstrumentation =
@@ -333,12 +343,16 @@ export const createServer = (
       jeb.close(),
       adbDevice.close(),
       flutter.close(),
+      pcap.close(),
       evmInterface.close(),
       sqliteDatabase.close(),
       binaryLayout.close(),
       recordedCrash.close(),
       webSourceLocation.close(),
       webModuleTrace.close(),
+      goBinary.close(),
+      peResources.close(),
+      webNetworkCapture.close(),
       javascriptRecovery.close?.() ?? Promise.resolve(),
       artifactResources.close(),
       firmwareAnalysis.close(),
@@ -382,6 +396,9 @@ export const createServer = (
     recordEvidenceWithUnknown,
     withAdmittedAnalysis: analysisAdmission,
     artifactResources,
+    goBinary,
+    peResources,
+    webNetworkCapture,
   };
   registerBinaryAnalysisTools(toolContext);
   registerFridaTools(
@@ -438,12 +455,21 @@ export const createServer = (
     recordEvidence,
     analysisAdmission,
   );
+  registerPcapTools(
+    server,
+    new PcapAnalysisService(pcap),
+    toolLogger,
+    recordEvidence,
+    analysisAdmission,
+    evidenceById,
+  );
   registerFlutterTools(
     server,
     new FlutterBuildAnalysisService(flutter),
     toolLogger,
     recordEvidence,
     analysisAdmission,
+    evidenceById,
   );
   registerApktoolTools(
     server,
@@ -502,6 +528,9 @@ const registerConfiguredAnalysisTools = (
     evidenceById,
     recordEvidence,
     withAdmittedAnalysis,
+    goBinary,
+    peResources,
+    webNetworkCapture,
   }: ServerToolContext,
   android: AndroidAnalysisPort,
   wasmArtifact: Pick<WasmArtifactService, "inspect" | "close">,
@@ -515,6 +544,7 @@ const registerConfiguredAnalysisTools = (
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
+    evidenceById,
   );
   registerJebTools(
     server,
@@ -540,14 +570,14 @@ const registerConfiguredAnalysisTools = (
   );
   registerPeResourcesTool(
     server,
-    createPeResourcesService(),
+    peResources,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
   );
   registerGoTools(
     server,
-    options.goBinary ?? createGoBinaryService(),
+    goBinary,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -612,10 +642,11 @@ const registerConfiguredAnalysisTools = (
   );
   registerWebNetworkCaptureTool(
     server,
-    options.webNetworkCapture ?? createWebNetworkCaptureService(environment),
+    webNetworkCapture,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
+    evidenceById,
   );
   registerJavaScriptRecoveryTool(
     server,
@@ -656,6 +687,9 @@ const createSessionRecorders = (
 });
 
 interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
+  readonly goBinary: GoBinaryService;
+  readonly peResources: PeResourcesService;
+  readonly webNetworkCapture: WebNetworkCaptureService;
   readonly artifactResources: ArtifactResourceScope;
   readonly server: EvidenceMcpServer;
   readonly session: BinarySessionPort | undefined;
@@ -707,7 +741,7 @@ const registerBinaryAnalysisTools = ({
     recordEvidence,
     withAdmittedAnalysis,
   };
-  registerEvidenceTools(server, NATIVE_TOOL_CONTRACTS, evidenceOptions);
+  registerNativeTools(server, { ...evidenceOptions, evidenceById });
   registerArtifactTools(server, { ...evidenceOptions, evidenceById });
   registerManagedTools(server, { ...evidenceOptions, evidenceById });
   if (session !== undefined)

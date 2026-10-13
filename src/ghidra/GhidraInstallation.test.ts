@@ -12,6 +12,8 @@ import {
 import {
   SUPPORTED_GHIDRA_JAVA_MAJOR,
   SUPPORTED_GHIDRA_VERSION,
+  ghidraApplicationProperties,
+  ghidraJavaRequirement,
 } from "./GhidraInstallationPolicy.js";
 
 const INSTALL = "/opt/ghidra";
@@ -42,7 +44,7 @@ const host = (
 ): GhidraInstallationHost => ({
   readText: (path) =>
     path === PROPERTIES
-      ? `application.version=${SUPPORTED_GHIDRA_VERSION}\n`
+      ? `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=${String(SUPPORTED_GHIDRA_JAVA_MAJOR)}\n`
       : undefined,
   executable: (path) =>
     path === HEADLESS || path === MAC_DECOMPILER || path === LINUX_DECOMPILER,
@@ -190,7 +192,7 @@ describe("Ghidra installation inspection", () => {
       architecture: "x64",
       readText: (path) =>
         path === WINDOWS_PROPERTIES
-          ? `application.version=${SUPPORTED_GHIDRA_VERSION}\n`
+          ? `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=21\n`
           : undefined,
       executable: (path) =>
         path === WINDOWS_HEADLESS || path === WINDOWS_DECOMPILER,
@@ -275,7 +277,9 @@ describe("Ghidra installation rejection diagnostics", () => {
         platform: "linux" as const,
         architecture: "x64" as const,
       },
-      override: { readText: () => "application.version=11.4\n" },
+      override: {
+        readText: () => "application.version=11.4\napplication.java.min=21\n",
+      },
       failed: "version",
       code: "unsupported_version",
     },
@@ -350,6 +354,167 @@ describe("Ghidra installation rejection diagnostics", () => {
 });
 
 describe("Ghidra release line and JDK bounds", () => {
+  it("uses Java Properties last-key, delimiter, escape, and continuation rules", () => {
+    const properties = ghidraApplicationProperties(
+      [
+        "application.version=11.4",
+        "# comment ending with a slash " + "\\",
+        "application.\\u0076ersion : 12.\\",
+        "  1.\\u0034",
+        "! another comment " + "\\",
+        "application.java.\\u006din\t21",
+        "application.java.max=",
+      ].join("\n"),
+    );
+    expect(properties).toEqual({
+      providerVersion: "12.1.4",
+      javaMinimum: { status: "major", major: 21 },
+      javaMaximum: { status: "absent" },
+      parseError: null,
+    });
+    expect(
+      ghidraApplicationProperties("application.version=12.1.4").javaMinimum,
+    ).toEqual({
+      status: "absent",
+    });
+    expect(
+      ghidraApplicationProperties(
+        "application.version=12.1.4\napplication.java.min=\n",
+      ).javaMinimum,
+    ).toEqual({ status: "unresolved", raw: "" });
+    expect(
+      ghidraApplicationProperties("application.version=12.1.4\\")
+        .providerVersion,
+    ).toBe("12.1.4");
+    expect(
+      ghidraApplicationProperties("application.version=12.\\\n #.1")
+        .providerVersion,
+    ).toBe("12.#.1");
+    expect(
+      ghidraApplicationProperties(
+        "application.version=12.\\\n\napplication.version=12.1.4",
+      ).providerVersion,
+    ).toBe("12.1.4");
+  });
+
+  it("matches Ghidra integer Java bounds and zero maximum semantics", () => {
+    const properties = ghidraApplicationProperties(
+      "application.java.min=21.0\napplication.java.max=0\n",
+    );
+    expect(properties.javaMinimum).toEqual({
+      status: "unresolved",
+      raw: "21.0",
+    });
+    expect(properties.javaMaximum).toEqual({ status: "absent" });
+    expect(
+      ghidraApplicationProperties("application.java.max=+0").javaMaximum,
+    ).toEqual({
+      status: "absent",
+    });
+    expect(
+      ghidraApplicationProperties("application.java.max=+０").javaMaximum,
+    ).toEqual({ status: "absent" });
+    expect(
+      ghidraApplicationProperties("application.java.min=+21").javaMinimum,
+    ).toEqual({
+      status: "major",
+      major: 21,
+    });
+    expect(
+      ghidraApplicationProperties("application.java.min=٢١").javaMinimum,
+    ).toEqual({
+      status: "major",
+      major: 21,
+    });
+    expect(
+      ghidraApplicationProperties("application.java.min=２１").javaMinimum,
+    ).toEqual({
+      status: "major",
+      major: 21,
+    });
+    expect(
+      ghidraApplicationProperties("application.java.max=＋０").javaMaximum,
+    ).toEqual({
+      status: "unresolved",
+      raw: "＋０",
+    });
+    expect(
+      ghidraApplicationProperties("application.java.min=②").javaMinimum,
+    ).toEqual({
+      status: "unresolved",
+      raw: "②",
+    });
+    expect(
+      ghidraApplicationProperties("application.java.min=2147483648")
+        .javaMinimum,
+    ).toEqual({ status: "unresolved", raw: "2147483648" });
+  });
+
+  it("keeps an unavailable properties file unresolved for Java admission", () => {
+    expect(ghidraJavaRequirement(undefined).unresolved).toBe(
+      "application.properties is unavailable",
+    );
+  });
+
+  it("preserves property value trailing whitespace instead of normalizing it", () => {
+    const properties = ghidraApplicationProperties(
+      "application.version=12.1.4 \napplication.java.min=21 \n",
+    );
+    expect(properties.providerVersion).toBe("12.1.4 ");
+    expect(properties.javaMinimum).toEqual({
+      status: "unresolved",
+      raw: "21 ",
+    });
+    expect(properties.parseError).toBeNull();
+  });
+});
+
+describe("Ghidra malformed property admission", () => {
+  it("fails installation and doctor admission closed on malformed Unicode escapes", () => {
+    const result = inspectGhidraInstallation(
+      {
+        environment: {},
+        installDir: INSTALL,
+        platform: "linux",
+        architecture: "x64",
+      },
+      host({
+        readText: () =>
+          "application.version=12.1.4\nbroken=\\u12G4\napplication.java.min=17\n",
+      }),
+    );
+    expect(result.status).toBe("unavailable");
+    expect(result.providerVersion).toBeNull();
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "version",
+          status: "failed",
+          code: "version_unresolved",
+          detail: expect.stringContaining("Malformed Unicode escape"),
+        }),
+        expect.objectContaining({
+          name: "java",
+          status: "failed",
+          code: "version_unresolved",
+          remediation: expect.stringContaining(
+            "application.properties parse failed",
+          ),
+        }),
+      ]),
+    );
+    expect(projectGhidraDoctorInspection(result)).toMatchObject({
+      available: false,
+      registrationEnvironment: {},
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: "version", ok: false }),
+        expect.objectContaining({ name: "java", ok: false }),
+      ]),
+    });
+  });
+});
+
+describe("Ghidra installation version admission", () => {
   it.each([
     {
       name: "JDK above the installation maximum",
@@ -368,15 +533,22 @@ describe("Ghidra release line and JDK bounds", () => {
       code: "version_unresolved",
     },
     {
+      name: "missing Java minimum",
+      readText: () => "application.version=12.1.4\n",
+      probeJava: () => JAVA,
+      failed: "java",
+      code: "version_unresolved",
+    },
+    {
       name: "unparseable Ghidra version",
-      readText: () => "application.version=latest\n",
+      readText: () => "application.version=latest\napplication.java.min=21\n",
       probeJava: () => JAVA,
       failed: "version",
       code: "version_unresolved",
     },
     {
       name: "different Ghidra line",
-      readText: () => "application.version=12.2.0\n",
+      readText: () => "application.version=12.2.0\napplication.java.min=21\n",
       probeJava: () => JAVA,
       failed: "version",
       code: "unsupported_version",
@@ -422,7 +594,7 @@ describe("Ghidra release line and JDK bounds", () => {
     });
   });
 
-  it("honors an installation that declares a lower Java minimum", () => {
+  it("accepts a lower Java minimum declared by the installation", () => {
     expect(
       inspectGhidraInstallation(
         {

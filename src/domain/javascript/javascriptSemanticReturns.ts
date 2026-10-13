@@ -101,6 +101,7 @@ export const resolveSemanticModuleCallables = (
     bindings.map(({ bindingId, provenance }) => [bindingId, provenance]),
   );
   return state.moduleLinks.map((link) => {
+    if (link.kind === "type-import") return { ...link, callableId: null };
     // Named exports follow their lexical binding, including every assignment.
     // A declaration's ID or a callable's display name cannot prove that link.
     if (link.localName === null)
@@ -122,9 +123,7 @@ export const resolveSemanticModuleCallables = (
         : undefined;
     return {
       ...link,
-      ...(resolutionMode === "import" || resolutionMode === "require"
-        ? { resolutionMode }
-        : {}),
+      ...(resolutionMode !== undefined ? { resolutionMode } : {}),
       callableId: resolved.length === 1 ? (resolved[0] ?? null) : null,
     };
   });

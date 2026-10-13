@@ -11,11 +11,7 @@ import {
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import { UnknownRegistryError } from "../../domain/unknownRegistryError.js";
-import {
-  immutableEvidence,
-  parseEvidence,
-  type Evidence,
-} from "../../domain/evidence.js";
+import { immutableEvidence, type Evidence } from "../../domain/evidence.js";
 import {
   createResidualUnknown,
   updateResidualUnknown,
@@ -220,7 +216,7 @@ export class EvidenceLedger {
   ): Result<ResidualUnknown, EvidenceIntegrityError | UnknownRegistryError> {
     let parsedMutation: Evidence;
     try {
-      parsedMutation = parseEvidence(mutationEvidence);
+      parsedMutation = immutableEvidence(mutationEvidence);
     } catch (cause: unknown) {
       return err(
         new EvidenceIntegrityError("Unknown mutation evidence is invalid", {
@@ -255,8 +251,8 @@ export class EvidenceLedger {
     let evidence: Evidence;
     let mutation: Evidence;
     try {
-      evidence = parseEvidence(evidenceInput);
-      mutation = parseEvidence(mutationInput);
+      evidence = immutableEvidence(evidenceInput);
+      mutation = immutableEvidence(mutationInput);
     } catch (cause: unknown) {
       return err(
         new EvidenceIntegrityError("Atomic Evidence validation failed", {
@@ -394,7 +390,7 @@ export class EvidenceLedger {
   ): Result<ResidualUnknown, EvidenceIntegrityError | UnknownRegistryError> {
     let mutationEvidence: Evidence;
     try {
-      mutationEvidence = parseEvidence(mutationEvidenceInput);
+      mutationEvidence = immutableEvidence(mutationEvidenceInput);
     } catch (cause: unknown) {
       return err(
         new EvidenceIntegrityError("Unknown mutation evidence is invalid", {

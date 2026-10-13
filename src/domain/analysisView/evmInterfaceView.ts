@@ -76,6 +76,7 @@ export const projectEvmInterfaceView = (
   const report = parsed.data;
   if (
     parent.subject == null ||
+    parent.subject.format !== "file" ||
     parent.subject.local_path !== report.artifact.path ||
     parent.subject.digest.sha256 !== report.artifact.sha256
   )

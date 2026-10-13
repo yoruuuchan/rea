@@ -30,6 +30,25 @@ const packageNameSchema = z
     "Package name must be dot-separated Java identifiers",
   );
 
+/** Text states emitted by adb's ConnectionState formatter. */
+export const ADB_DEVICE_STATES = [
+  "no permissions",
+  "unauthorized",
+  "authorizing",
+  "offline",
+  "recovery",
+  "sideload",
+  "connecting",
+  "bootloader",
+  "device",
+  "unknown",
+  "host",
+  "rescue",
+  "detached",
+] as const;
+export const adbDeviceStateSchema = z.enum(ADB_DEVICE_STATES);
+export type AdbDeviceState = (typeof ADB_DEVICE_STATES)[number];
+
 const keyStringSchema = z.string().min(1).max(256);
 const keyPattern = /^[A-Za-z0-9._\x2d]+$/u;
 
@@ -412,7 +431,7 @@ const client = z.strictObject({
 
 const device = z.strictObject({
   serial: z.string().min(1),
-  state: z.string().min(1),
+  state: adbDeviceStateSchema,
   transport: z.enum(["usb", "tcp", "unknown"]),
   product: z.string().nullable(),
   model: z.string().nullable(),

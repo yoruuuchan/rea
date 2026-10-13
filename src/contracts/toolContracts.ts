@@ -12,6 +12,7 @@ import { MANAGED_TOOL_CONTRACTS } from "./managed/managedToolContracts.js";
 import { FIRMWARE_TOOL_CONTRACTS } from "./firmware/firmwareToolContracts.js";
 import { ANDROID_TOOL_CONTRACTS } from "./android/androidToolContracts.js";
 import { APKTOOL_TOOL_CONTRACTS } from "./apktool/apktoolToolContracts.js";
+import { PCAP_TOOL_CONTRACTS } from "./pcap/pcapToolContracts.js";
 import { FLUTTER_TOOL_CONTRACTS } from "./flutter/flutterToolContracts.js";
 import { JEB_TOOL_CONTRACTS } from "./jeb/jebToolContracts.js";
 import { ADB_TOOL_CONTRACTS } from "./adb/adbToolContracts.js";
@@ -46,6 +47,7 @@ export const TOOL_CONTRACTS = [
   ...MANAGED_TOOL_CONTRACTS,
   ...ANDROID_TOOL_CONTRACTS,
   ...APKTOOL_TOOL_CONTRACTS,
+  ...PCAP_TOOL_CONTRACTS,
   ...FLUTTER_TOOL_CONTRACTS,
   ...JEB_TOOL_CONTRACTS,
   ...ADB_TOOL_CONTRACTS,

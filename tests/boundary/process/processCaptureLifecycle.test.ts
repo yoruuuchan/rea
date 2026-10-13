@@ -4,7 +4,7 @@ import { access, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { itWithCaptureCapability } from "./processCaptureCapability.js";
 
@@ -122,6 +122,93 @@ const terminateFixtureProcess = async (pid: number): Promise<void> => {
   }
   await waitForProcessExit(pid);
 };
+
+itWithCaptureCapability(
+  "keeps the process deadline bounded when the wall clock moves backward",
+  async () => {
+    const wallStart = Date.now();
+    let wallReads = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => {
+      wallReads += 1;
+      return wallReads === 1 ? wallStart : wallStart - 60_000 + wallReads;
+    });
+    const controller = new AbortController();
+    const fallback = setTimeout(() => controller.abort(), 1_500);
+    try {
+      const result = await captureProcessScenario(
+        parseProcessScenario({
+          executable: process.execPath,
+          arguments: [processFixture, "hang"],
+          working_directory: dirname(processFixture),
+          timeout_ms: 100,
+          idle_timeout_ms: 5_000,
+        }),
+        controller.signal,
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw result.error;
+      expect(result.value.exit.reason).toBe("timeout");
+    } finally {
+      clearTimeout(fallback);
+      now.mockRestore();
+    }
+  },
+  10_000,
+);
+
+itWithCaptureCapability(
+  "preserves reversed wall-clock observations and monotonic frames across capture",
+  async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-02T00:00:00.000Z"));
+    try {
+      const result = await captureProcessScenario(
+        parseProcessScenario({
+          executable: process.execPath,
+          arguments: [processFixture, "partial"],
+          working_directory: dirname(processFixture),
+          settle_ms: 0,
+          timeout_ms: 5_000,
+          idle_timeout_ms: 5_000,
+        }),
+        undefined,
+        process.platform,
+        process.env,
+        undefined,
+        undefined,
+        {
+          async report(update) {
+            if (update.phase === "running")
+              vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+          },
+        },
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw result.error;
+      expect(result.value.frames.length).toBeGreaterThan(0);
+      expect(Date.parse(result.value.manifest.completed_at)).toBeLessThan(
+        Date.parse(result.value.manifest.started_at),
+      );
+      expect(result.value.limitations).toContain(
+        "Wall-clock completion time precedes start time; elapsed capture timing is recorded separately and remains monotonic.",
+      );
+      expect(
+        result.value.frames.map(({ at_ms }) => at_ms),
+        "capture-relative frame times stay ordered and nonnegative",
+      ).toEqual(
+        [...result.value.frames.map(({ at_ms }) => at_ms)].sort(
+          (left, right) => left - right,
+        ),
+      );
+      expect(result.value.frames.every(({ at_ms }) => at_ms >= 0)).toBe(true);
+      expect(result.value.exit.reason).toBe("exited");
+      expect(result.value.settlement.elapsed_ms).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+  10_000,
+);
 
 itWithCaptureCapability(
   "cleans detached run-token children omitted by sampling and preserves an unowned neighbor",

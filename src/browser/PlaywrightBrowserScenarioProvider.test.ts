@@ -303,6 +303,7 @@ describe("PlaywrightBrowserScenarioProvider", () => {
     });
     expect(result.value.limitations).toContain(session.eventGaps[0]);
   });
+
   it("returns an initial state and every step beyond the former action ceiling", async () => {
     const session = new FakeSession("launch");
     const provider = new PlaywrightBrowserScenarioProvider(() =>
@@ -373,6 +374,35 @@ describe("PlaywrightBrowserScenarioProvider", () => {
       missing_sections: ["events"],
     });
     expect(session.closeCalls).toBe(1);
+  });
+});
+
+describe("PlaywrightBrowserScenarioProvider timing", () => {
+  it("keeps capture elapsed values valid across a backward wall-clock jump", async () => {
+    let wallClock = 10_000;
+    vi.spyOn(Date, "now").mockImplementation(() => wallClock);
+    const session = new FakeSession("launch");
+    session.onPerform = () => {
+      wallClock = 1;
+    };
+    const provider = new PlaywrightBrowserScenarioProvider(() =>
+      Promise.resolve(session),
+    );
+
+    try {
+      const result = await provider.captureScenario(scenario());
+      if (!result.ok) throw result.error;
+      expect(wallClock).toBe(1);
+      expect(Number.isInteger(result.value.duration_ms)).toBe(true);
+      expect(result.value.duration_ms).toBeGreaterThanOrEqual(0);
+      expect(
+        result.value.steps.every(
+          ({ elapsed_ms }) => Number.isInteger(elapsed_ms) && elapsed_ms >= 0,
+        ),
+      ).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

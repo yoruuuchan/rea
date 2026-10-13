@@ -28,4 +28,17 @@ export const registerCaptureTools = (
     toolRegistrationOptions(contract),
     handler(contract),
   );
+  const discovery = toolContract("inspect_packet_fields");
+  const discover = createEvidenceToolHandler(
+    server,
+    (input, options) => service.inspectFields(input, options),
+    logger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  server.registerTool(
+    discovery.name,
+    toolRegistrationOptions(discovery),
+    discover(discovery),
+  );
 };

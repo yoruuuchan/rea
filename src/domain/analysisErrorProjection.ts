@@ -83,6 +83,8 @@ export const projectAnalysisError = (
     message: analysisErrorUserMessage(error),
     retryable:
       RETRYABLE_CODES.has(code) ||
+      (error instanceof AnalysisCapabilityUnavailableError &&
+        error.retryable) ||
       (code === "resource_constraint" &&
         error instanceof AnalysisResourceConstraintError &&
         error.resource === "capacity"),

@@ -28,4 +28,17 @@ export const registerSignalTools = (
     toolRegistrationOptions(contract),
     handler(contract),
   );
+  const discovery = toolContract("inspect_signal_decoders");
+  const discover = createEvidenceToolHandler(
+    server,
+    (input, options) => service.inspectDecoders(input, options),
+    logger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  server.registerTool(
+    discovery.name,
+    toolRegistrationOptions(discovery),
+    discover(discovery),
+  );
 };

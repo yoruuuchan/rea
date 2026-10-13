@@ -70,6 +70,7 @@ import {
   observeProcessStartIdentity,
   signalProcessWithStartIdentity,
 } from "../ProcessOwnershipObservation.js";
+import { monotonicProcessCaptureClock } from "./ProcessCaptureClock.js";
 
 interface StartedCaptureRuntime {
   readonly renderer: TerminalRenderer;
@@ -268,7 +269,7 @@ const startCaptureRuntime = async (
       options.signal,
     );
     const startedAt = new Date();
-    const started = Date.now();
+    const started = monotonicProcessCaptureClock();
     let lastOutput = started;
     renderer = createTerminalRenderer(
       scenario,
@@ -296,7 +297,7 @@ const startCaptureRuntime = async (
       ...options,
       terminal,
       started,
-      onOutput: () => (lastOutput = Date.now()),
+      onOutput: () => (lastOutput = monotonicProcessCaptureClock()),
       renderer,
     });
     scheduleScenarioInteractions({
@@ -541,7 +542,7 @@ const completeCapture = async (options: {
     },
     {
       name: "after_settlement",
-      at_ms: Math.max(0, Date.now() - runtime.started),
+      at_ms: Math.max(0, monotonicProcessCaptureClock() - runtime.started),
       files: after.files,
       effects: classifyFilesystemEffects(options.before, after),
       truncated: after.truncated,

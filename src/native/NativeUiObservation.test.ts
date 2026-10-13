@@ -35,6 +35,37 @@ const validPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv4sAAAAASUVORK5CYII=",
   "base64",
 );
+it.each([
+  { offset: 8, value: 12 },
+  { offset: 16, value: 0x8000_0000 },
+  { offset: 20, value: 0x8000_0000 },
+])(
+  "rejects invalid IHDR metadata with a matching digest",
+  async ({ offset, value }) => {
+    const bytes = Buffer.from(validPng);
+    bytes.writeUInt32BE(value, offset);
+    const screenshot = {
+      mime_type: "image/png",
+      base64: bytes.toString("base64"),
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      width: bytes.readUInt32BE(16),
+      height: bytes.readUInt32BE(20),
+    };
+    const result = await observeNativeUi(
+      target,
+      "observe_native_ui",
+      { ...scope, screenshot: true },
+      {
+        environment: {},
+        invoke: async () => ({
+          ok: true,
+          result: { ...snapshot, screenshot },
+        }),
+      },
+    );
+    expect(result.ok).toBe(false);
+  },
+);
 describe("native UI screenshot validation", () => {
   it("rejects malformed or mismatched screenshot bytes from the helper", async () => {
     const screenshot = {

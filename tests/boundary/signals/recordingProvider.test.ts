@@ -1,3 +1,4 @@
+import { signalDecodersSchema } from "../../../src/domain/signals/signalDecoders.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import { it, expect, onTestFinished } from "vitest";
 import { writeFile, readdir, chmod, symlink } from "node:fs/promises";
@@ -23,13 +24,17 @@ const fixture = async (mode = "ok", failCleanup = false) => {
   await writeFile(
     script,
     `import {readFileSync, writeFileSync, chmodSync, truncateSync} from 'node:fs';
-if (process.argv.includes('--version')) { console.log('sigrok-cli 0.7.2\\nlibsigrokdecode 0.5.3'); console.error('version warning'); }
+if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'sigrok-cli 0.7.1' : 'sigrok-cli 0.7.2\\nlibsigrokdecode 0.5.3'); console.error('version warning'); }
+else if (${JSON.stringify(mode)} === 'bad-version') console.log('unexpected version fallback');
 else if (${JSON.stringify(mode)} === 'nonzero') { console.error('invalid decoder'); process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'malformed-copy') { chmodSync('recording', 0o600); writeFileSync('recording', 'changed'); }
 else if (${JSON.stringify(mode)} === 'oversized-copy') { chmodSync('recording', 0o600); truncateSync('recording', 32 * 1024 * 1024 + 1); }
+else if (${JSON.stringify(mode)} === 'line-budget') process.stdout.write('ID: uart' + '\\n'.repeat(65536));
 else if (${JSON.stringify(mode)} === 'overflow') process.stdout.write('x'.repeat(5 * 1024 * 1024));
 else if (${JSON.stringify(mode)} === 'wait') { console.log('ready'); setInterval(() => {}, 1000); }
 else if (${JSON.stringify(mode)} === 'many') process.stdout.write(Array.from({length:90},(_,i)=>'line '+(i+1)+'\\r\\n').join(''));
+else if (process.argv.includes('--list-supported')) { console.log('Supported hardware drivers:\\n  ignored Device\\nSupported protocol decoders:\\n  uart                 Universal Asynchronous Receiver/Transmitter\\n  i2c                  Inter-Integrated Circuit\\n'); console.error('catalog warning'); }
+else if (process.argv.includes('--show')) console.log('ID: uart\\nOptions:\\n- baudrate: Baud rate (default 115200)\\n- parity: Parity');
 else { if(readFileSync('recording', 'utf8') !== 'recording bytes') throw Error('wrong copy'); console.log('10-20 uart-1: 42'); console.error('producer warning'); }
 `,
   );
@@ -285,6 +290,9 @@ it("retains a completed observation when cancellation arrives at the service bou
   const execution = await f.service.provider.decode(input);
   if (!execution.ok) throw execution.error;
   const service = new SignalRecordingService({
+    inspectDecoders: async () => {
+      throw new Error("Unexpected discovery call");
+    },
     decode: async () => {
       f.controller.abort();
       return execution;
@@ -417,5 +425,184 @@ it("preserves termination signal and effective file ceiling as a resource failur
     resource: "file-size",
     reportedLimits: { file_bytes: 1048576 },
     capturedOutput: { signal: "SIGXFSZ", stderr: "before file limit\n" },
+  });
+});
+
+it("discovers decoders without reading a recording and retains installation provenance", async () => {
+  const f = await fixture();
+  for (const [input, expected] of [
+    [
+      { query: "UART" },
+      {
+        decoders: [
+          { id: "uart", name: "Universal Asynchronous Receiver/Transmitter" },
+        ],
+        output_window: {
+          examined: 2,
+          matching: 1,
+          returned: 1,
+          has_more: false,
+        },
+      },
+    ],
+    [
+      { limit: 1 },
+      {
+        decoders: [
+          { id: "uart", name: "Universal Asynchronous Receiver/Transmitter" },
+        ],
+        output_window: { matching: 2, returned: 1, has_more: true },
+      },
+    ],
+    [
+      { offset: 1, limit: null },
+      {
+        decoders: [{ id: "i2c", name: "Inter-Integrated Circuit" }],
+        output_window: { returned: 1, has_more: false },
+      },
+    ],
+    [
+      { decoder: "uart", query: "baud" },
+      {
+        help_lines: [
+          { line_number: 3, text: "- baudrate: Baud rate (default 115200)" },
+        ],
+        output_window: { unit: "help-lines", examined: 4, matching: 1 },
+      },
+    ],
+    [
+      { query: "no-such-decoder" },
+      {
+        decoders: [],
+        output_window: { examined: 2, matching: 0, returned: 0 },
+      },
+    ],
+  ] as const) {
+    const result = await f.service.inspectDecoders(input);
+    if (!result.ok) throw result.error;
+    const report = signalDecodersSchema.parse(result.value.normalized_result);
+    expect(report).toMatchObject(expected);
+    expect(result.value.operation).toBe("inspect_signal_decoders");
+    expect(report.tool.version_diagnostics).toBe("version warning\n");
+    expect(report.tool.arguments).toContain("--dont-scan");
+    expect(
+      report.tool.arguments.some((arg) => arg.startsWith("--input-file")),
+    ).toBe(false);
+  }
+  expect(
+    (await readdir(f.directory)).filter((name) => name.startsWith("decoder-")),
+  ).toEqual([]);
+});
+
+it("attributes discovery admission failures to discovery while sharing the decoding slot", async () => {
+  const f = await fixture("gated");
+  const active = f.service.decode({ path: f.path, decoders: "uart" });
+  await f.acquired;
+  const busy = await f.service.inspectDecoders({});
+  f.release();
+  if (!(await active).ok) throw new Error("Decode failed");
+  expect(busy).toMatchObject({
+    ok: false,
+    error: { operation: "inspect_signal_decoders", resource: "capacity" },
+  });
+  await f.service.close();
+  expect(await f.service.inspectDecoders({})).toMatchObject({
+    ok: false,
+    error: {
+      operation: "inspect_signal_decoders",
+      _tag: "AnalysisCancelledError",
+    },
+  });
+});
+
+it.each([
+  "bad-version",
+  "nonzero",
+  "overflow",
+  "line-budget",
+  "wait",
+  "oversized-tool",
+])("preserves discovery failure diagnostics: %s", async (mode) => {
+  const f = await fixture(mode);
+  const result = await f.service.inspectDecoders(
+    {},
+    { signal: f.controller.signal },
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected failure");
+  expect(result.error).toMatchObject({
+    operation: "inspect_signal_decoders",
+  });
+  if (mode === "line-budget") {
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+    });
+    expect(result.error.capturedOutput?.stdout).toBe(
+      "ID: uart" + "\n".repeat(65536),
+    );
+  }
+  if (mode === "bad-version")
+    expect(result.error.capturedOutput).toMatchObject({
+      stdout: "sigrok-cli 0.7.1\n",
+      stderr: "version warning\n",
+    });
+});
+
+it("retains completed discovery when cleanup fails, then retries before accepting work", async () => {
+  const f = await fixture("ok", true);
+  const first = await f.service.inspectDecoders({ query: "uart" });
+  expect(first).toMatchObject({
+    ok: false,
+    error: {
+      operation: "inspect_signal_decoders",
+      partialObservation: { operation: "inspect_signal_decoders" },
+    },
+  });
+  await f.service.inspectDecoders({});
+  await f.service.decode({ path: f.path, decoders: "uart" });
+  expect(f.calls()).toBe(2);
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(f.service.close()).rejects.toMatchObject({
+      operation: "inspect_signal_decoders",
+      cleanupIncomplete: true,
+    });
+  f.allowCleanup();
+  await f.service.close();
+});
+
+it("rejects ambiguous decoder selectors before launch and retains malformed help output", async () => {
+  const f = await fixture();
+  for (const decoder of ["uart:baudrate=1", "uart,spi", "uart\0"]) {
+    expect(await f.service.inspectDecoders({ decoder })).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisInputError" },
+    });
+  }
+  expect(f.calls()).toBe(0);
+  expect(await f.service.inspectDecoders({ decoder: "spi" })).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisOutputError",
+      capturedOutput: { stdout: expect.stringContaining("ID: uart") },
+    },
+  });
+});
+
+it("retains completed discovery on cancellation during identity verification", async () => {
+  const f = await fixture("post-run-abort");
+  expect(
+    await f.service.inspectDecoders(
+      { query: "uart" },
+      { signal: f.controller.signal },
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisCancelledError",
+      partialObservation: {
+        operation: "inspect_signal_decoders",
+        normalized_result: { decoders: [{ id: "uart" }] },
+      },
+    },
   });
 });

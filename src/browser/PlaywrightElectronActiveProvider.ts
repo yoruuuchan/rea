@@ -86,7 +86,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
       if (options.signal?.aborted === true)
         throw new BrowserObservationError(OPERATION, "cancelled");
       await prepareProcessOwnershipInspection(options.signal);
-      const startupDeadline = Date.now() + STARTUP_TIMEOUT_MS;
+      const startupDeadline = performance.now() + STARTUP_TIMEOUT_MS;
       paths = {
         executable: input.executable_path,
         application: input.application_path,
@@ -101,7 +101,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         cwd: paths.root,
         env: safeElectronEnvironment(this.environment, runId),
         args: ["-r", hookPath, paths.application, ...input.args],
-        timeout: Math.max(1, startupDeadline - Date.now()),
+        timeout: Math.max(1, startupDeadline - performance.now()),
       });
       const leaderPid = application.process().pid;
       if (
@@ -128,7 +128,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
       const state = await runWithExecutionLimits(
         readApplicationState(application),
         undefined,
-        options.signal?.aborted ? Date.now() + 5_000 : undefined,
+        options.signal?.aborted ? performance.now() + 5_000 : undefined,
       );
       capture = projectElectronActiveCapture(paths, actions, state);
       outcome = options.signal?.aborted
@@ -187,7 +187,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         await runWithExecutionLimits(
           application.close(),
           undefined,
-          Date.now() + 5_000,
+          performance.now() + 5_000,
         );
       } catch (cause: unknown) {
         closeError = cause;

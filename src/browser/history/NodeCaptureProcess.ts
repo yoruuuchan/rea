@@ -3,7 +3,6 @@ import { z } from "zod";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
 import { CaptureFormatError } from "./CaptureFormatError.js";
-import { decodeHarCapture, decodeHarText } from "./HarCapture.js";
 
 const requestSchema = z.strictObject({
   snapshot_path: z.string(),
@@ -11,24 +10,37 @@ const requestSchema = z.strictObject({
   sensitive_values: z.array(z.string().min(1)),
 });
 
-/** Decode untrusted HAR in an owned, bounded heap rather than the long-lived MCP process. */
+/** Parse untrusted captures in an owned heap and return one complete bounded reply. */
 const main = async (): Promise<void> => {
+  const format = z.enum(["har", "saz", "qlog"]).parse(process.argv[3]);
   const request = requestSchema.parse(
     JSON.parse(await readFile(process.argv[2] ?? "", "utf8")),
   );
   let reply: unknown;
   try {
-    const snapshot = await readStableArtifact(
-      request.snapshot_path,
-      WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
-    );
-    reply = {
-      ok: true,
-      value: decodeHarCapture(
-        decodeHarText(snapshot.bytes),
+    let value;
+    if (format !== "saz") {
+      const { decodeCaptureText } = await import("./CaptureJson.js");
+      const decoder =
+        format === "har"
+          ? (await import("./HarCapture.js")).decodeHarCapture
+          : (await import("./QlogCapture.js")).decodeQlogCapture;
+      const snapshot = await readStableArtifact(
+        request.snapshot_path,
+        WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
+      );
+      value = decoder(
+        decodeCaptureText(snapshot.bytes, format === "har" ? "HAR" : "qlog"),
         request.sensitive_values,
-      ),
-    };
+      );
+    } else {
+      const { decodeSazCapture } = await import("./SazCapture.js");
+      value = await decodeSazCapture(
+        request.snapshot_path,
+        request.sensitive_values,
+      );
+    }
+    reply = { ok: true, value };
   } catch (cause: unknown) {
     reply =
       cause instanceof CaptureFormatError
@@ -41,7 +53,7 @@ const main = async (): Promise<void> => {
         : {
             ok: false,
             reason: "decoder",
-            message: `HAR decoder failed unexpectedly (${cause instanceof Error ? cause.name : "unknown exception"}).`,
+            message: `Capture decoder failed unexpectedly (${cause instanceof Error ? cause.name : "unknown exception"}).`,
             pointer: "",
           };
   }
@@ -50,7 +62,7 @@ const main = async (): Promise<void> => {
     text = JSON.stringify({
       ok: false,
       reason: "limit",
-      message: "HAR reply exceeds the complete-evidence output budget.",
+      message: "Capture reply exceeds the complete-evidence output budget.",
       pointer: "",
     });
   await writeFile(request.reply_path, text, { flag: "wx", mode: 0o600 });

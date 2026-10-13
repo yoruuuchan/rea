@@ -1,6 +1,7 @@
 import {
   AnalysisAccessDeniedError,
   AnalysisArtifactChangedError,
+  AnalysisCapabilityUnavailableError,
   AnalysisInputError,
   AnalysisUnsupportedTargetError,
   AnalysisResourceConstraintError,
@@ -33,6 +34,8 @@ import type { AnalysisErrorProjection } from "./analysisErrorProjection.js";
 export const analysisErrorRemediationAction = (
   error: AnalysisError,
 ): string => {
+  if (error instanceof AnalysisCapabilityUnavailableError && error.retryable)
+    return "Review details.reason, then retry the same analysis after the condition clears.";
   if (error instanceof EvidenceFileError && error.published !== undefined)
     return "Use the published file at details.published_path and resolve the reported staging cleanup failure.";
   if (error instanceof AnalysisSnapshotMismatchError)
@@ -112,6 +115,8 @@ export const analysisErrorRemediationAction = (
 export const analysisErrorCategory = (
   error: AnalysisError,
 ): AnalysisErrorProjection["category"] => {
+  if (error instanceof AnalysisCapabilityUnavailableError && error.retryable)
+    return "unavailable";
   if (
     error instanceof BinaryTargetError &&
     error.constraint === "load_selection_rejected"
@@ -220,6 +225,8 @@ export const analysisErrorUserMessage = (error: AnalysisError): string => {
   const hopperMessage = hopperErrorUserMessage(error);
   if (hopperMessage !== undefined) return hopperMessage;
   if (error.userMessage !== undefined) return error.userMessage;
+  if (error instanceof AnalysisCapabilityUnavailableError && error.retryable)
+    return "Required runtime controls are unavailable for this attempt.";
   const standardMessage = standardErrorMessage(error._tag);
   if (standardMessage !== undefined) return standardMessage;
   if (error instanceof ArtifactOperationError) return artifactMessage(error);

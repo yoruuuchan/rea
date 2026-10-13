@@ -149,6 +149,64 @@ const SEGMENTS: Segment[] = [
   { address: BASE + 0x4000n, size: 0x4000n, offset: 0x4000, executable: false },
 ];
 
+describe("independent chained segment coverage", () => {
+  it("counts successfully decoded chained segments alongside an unsupported segment", () => {
+    const starts = 28;
+    const startsSize = 4 + 2 * 4;
+    const firstInfo = starts + startsSize;
+    const secondInfo = firstInfo + 24;
+    const imports = secondInfo + 24;
+    const data = Buffer.alloc(0x3000);
+    data.writeUInt32LE(starts, 4);
+    data.writeUInt32LE(imports, 8);
+    data.writeUInt32LE(imports, 12);
+    data.writeUInt32LE(1, 20);
+    data.writeUInt32LE(2, starts);
+    data.writeUInt32LE(firstInfo - starts, starts + 4);
+    data.writeUInt32LE(secondInfo - starts, starts + 8);
+    for (const [info, format, segmentOffset] of [
+      [firstInfo, 6, 0],
+      [secondInfo, 99, 0x1000],
+    ] as const) {
+      data.writeUInt32LE(24, info);
+      data.writeUInt16LE(0x1000, info + 4);
+      data.writeUInt16LE(format, info + 6);
+      data.writeBigUInt64LE(BigInt(segmentOffset), info + 8);
+      data.writeUInt16LE(1, info + 20);
+      data.writeUInt16LE(8, info + 22);
+    }
+    const segments: Segment[] = [
+      { address: BASE, size: 0x1000n, offset: 0x1000, executable: false },
+      {
+        address: BASE + 0x1000n,
+        size: 0x1000n,
+        offset: 0x2000,
+        executable: false,
+      },
+    ];
+    const fixups = parsePointerFixups(
+      data,
+      {
+        chained: { offset: 0, size: imports },
+        binds: [],
+        rebases: [],
+        dylibs: [],
+      },
+      segments,
+      BASE,
+    );
+
+    expect(fixups).toMatchObject({ examined: 2, decoded: 1 });
+    expect(fixups.issues).toMatchObject([
+      { code: "unsupported_pointer_format" },
+    ]);
+    expect(fixups.decode(BASE + 8n, 0n)).toEqual({
+      kind: "rebase",
+      target: BASE,
+    });
+  });
+});
+
 describe("pointer fixup tables", () => {
   it("reports unsupported pointer formats even when no pointer is visited", () => {
     const data = chainedData(1);
@@ -196,20 +254,27 @@ describe("pointer fixup tables", () => {
       {
         chained: { offset: 0, size: 128 },
         binds: [],
-        rebases: [],
+        rebases: [{ offset: 8, size: 12 }],
         dylibs: [],
       },
       SEGMENTS,
       BASE,
     );
+    expect(fixups).toMatchObject({
+      examined: 1,
+      decoded: 1,
+      unreadRebaseBytes: 12,
+    });
     expect(fixups.decode(BASE + 0x4008n, field(1n, 63))).toMatchObject({
       kind: "bind",
       symbol: "_OBJC_CLASS_$_NSObject",
     });
     expect(fixups.issues).toEqual([]);
+    expect(fixups.decoded).toBe(1);
     expect(fixups.decode(BASE + 0x4008n, 1n | field(1n, 63))).toMatchObject({
       kind: "unsupported",
     });
+    expect(fixups.decoded).toBe(0);
     expect(fixups.issues).toMatchObject([
       { code: "chained_pointer_decode_failed" },
     ]);

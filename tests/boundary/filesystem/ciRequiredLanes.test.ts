@@ -64,6 +64,99 @@ it("makes the required gate wait for every CI lane, including future additions",
   );
 });
 
+it("leaves cancellation ownership with CI so child lanes cannot cancel another tier", async () => {
+  const { jobs } = await workflow();
+  const children = Object.values(jobs).flatMap((job) =>
+    typeof job.uses === "string" && job.uses.startsWith("./.github/workflows/")
+      ? [job.uses]
+      : [],
+  );
+  expect(children.length).toBeGreaterThan(0);
+  for (const path of children) {
+    const child = z
+      .object({ concurrency: z.unknown().optional() })
+      .parse(
+        parse(
+          await readFile(new URL(`../../../${path}`, import.meta.url), "utf8"),
+        ),
+      );
+    expect(
+      child.concurrency,
+      `${path} must use caller scheduling`,
+    ).toBeUndefined();
+  }
+});
+
+it("keeps fast feedback separate from complete qualification and release proof", async () => {
+  const ci = z
+    .object({
+      on: z.object({
+        push: z.unknown(),
+        pull_request: z.unknown(),
+        schedule: z.array(z.object({ cron: z.string() })),
+        workflow_call: z.object({
+          inputs: z.object({
+            source_sha: z.object({
+              required: z.literal(true),
+              type: z.literal("string"),
+            }),
+          }),
+        }),
+      }),
+      concurrency: z.object({
+        group: z.string(),
+        "cancel-in-progress": z.string(),
+      }),
+      jobs: z.record(
+        z.string(),
+        z.object({
+          if: z.string().optional(),
+          steps: z
+            .array(
+              z.object({
+                run: z.string().optional(),
+                if: z.string().optional(),
+                with: z.record(z.string(), z.unknown()).optional(),
+              }),
+            )
+            .optional(),
+        }),
+      ),
+    })
+    .parse(
+      parse(
+        await readFile(
+          new URL("../../../.github/workflows/ci.yml", import.meta.url),
+          "utf8",
+        ),
+      ),
+    );
+  expect(ci.on.schedule).toEqual([{ cron: "23 * * * *" }]);
+  expect(ci.concurrency.group).toContain("'qualification' || 'feedback'");
+  expect(ci.concurrency.group).toContain("inputs.source_sha ||");
+  for (const fullEvent of ["schedule", "workflow_dispatch"])
+    expect(ci.concurrency["cancel-in-progress"]).toContain(
+      `github.event_name != '${fullEvent}'`,
+    );
+  expect(ci.concurrency["cancel-in-progress"]).toContain(
+    "inputs.source_sha == ''",
+  );
+  expect(ci.jobs.required?.if).toBe("${{ always() }}");
+  const shards = ci.jobs["test-shard"]?.steps ?? [];
+  const fast = shards.find((step) => step.run?.includes("npm run test:run"));
+  const full = shards.find((step) => step.run?.includes("test:ci:shard:run"));
+  expect(fast?.if).toBe("needs.changes.outputs.tier == 'fast'");
+  expect(fast?.run).toContain("--reporter=blob");
+  expect(fast?.run).not.toContain("--coverage");
+  expect(full?.if).toBe("needs.changes.outputs.tier == 'full'");
+  const proof = ci.jobs["package-e2e"]?.steps?.find(
+    (step) => step.with?.name === "verified-release-package",
+  );
+  expect(proof?.if).toContain("needs.changes.outputs.tier == 'full'");
+  expect(proof?.if).toContain("matrix.platform == 'linux'");
+  expect(proof?.if).toContain("matrix.architecture == 'x64'");
+});
+
 it.each([
   ["true", "success", true],
   ["true", "failure", false],

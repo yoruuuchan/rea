@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { estimateTokenCount } from "tokenx";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, readdir } from "node:fs/promises";
@@ -68,6 +69,20 @@ for (const byte of Buffer.from("REA")) {
 lines.push(`#${tick + 1000}`, "1!");
 const source = lines.join("\n") + "\n";
 let cases = 0;
+const discoveryMeasurements = [];
+const inheritedAddressSpace = (await readFile("/proc/self/limits", "utf8"))
+  .split("\n")
+  .find((line) => line.startsWith("Max address space "))
+  ?.trim()
+  .match(/^Max address space\s+(\S+)\s+(\S+)\s+bytes$/u);
+assert.ok(inheritedAddressSpace);
+const expectedAddressSpace = Math.min(
+  1073741824,
+  ...inheritedAddressSpace
+    .slice(1)
+    .map((value) => (value === "unlimited" ? Infinity : Number(value))),
+);
+
 try {
   await writeFile(path, source);
   await client.connect(transport);
@@ -104,14 +119,16 @@ try {
       createHash("sha256").update(source).digest("hex"),
     );
     assert.equal(report.hardware_acquisition, "not-performed");
-    assert.equal(report.limits.address_space_bytes, 1073741824);
+    assert.equal(report.limits.address_space_bytes, expectedAddressSpace);
     assert.equal(report.tool.configured_path, process.env.REA_SIGROK_COMMAND);
     assert.equal(
       report.resource_limiter.configured_path,
       process.env.REA_SIGROK_PRLIMIT_COMMAND ?? "/usr/bin/prlimit",
     );
     assert.ok(
-      report.resource_limiter.arguments.includes("--as=1073741824:1073741824"),
+      report.resource_limiter.arguments.includes(
+        `--as=${expectedAddressSpace}:${expectedAddressSpace}`,
+      ),
     );
     assert.equal(report.diagnostics, "");
     const flags = Object.entries(input)
@@ -245,6 +262,88 @@ try {
   });
   assert.equal(invalid.isError, true);
   cases++;
+  const discoveryTool = (await client.listTools()).tools.find(
+    ({ name }) => name === "inspect_signal_decoders",
+  );
+  assert.ok(discoveryTool?.outputSchema);
+  assert.ok(ajv.validateSchema(discoveryTool.inputSchema));
+  assert.ok(ajv.validateSchema(discoveryTool.outputSchema));
+  const nativeHelp = (
+    await execute(
+      process.env.REA_SIGROK_COMMAND,
+      ["--dont-scan", "--protocol-decoders=uart", "--show"],
+      { env: environment, timeout: 30000, maxBuffer: 4 * 1024 * 1024 },
+    )
+  ).stdout.split(/\r?\n/);
+  if (nativeHelp.at(-1) === "") nativeHelp.pop();
+  for (const input of [
+    { query: "uart" },
+    { limit: 1 },
+    { offset: 1, limit: 2 },
+    { decoder: "uart", query: "BaUd" },
+    { decoder: "uart", offset: 50, limit: null },
+    { query: "rea_no_such_decoder" },
+  ]) {
+    const started = performance.now();
+    const response = await client.callTool({
+      name: discoveryTool.name,
+      arguments: input,
+    });
+    assert.notEqual(response.isError, true, JSON.stringify(response));
+    assert.ok(
+      ajv.validate(discoveryTool.outputSchema, response.structuredContent),
+      JSON.stringify(ajv.errors),
+    );
+    const evidence = parseEvidence(response.structuredContent);
+    const report = evidence.normalized_result;
+    discoveryMeasurements.push({
+      input,
+      elapsed_ms: +(performance.now() - started).toFixed(2),
+      response_bytes: Buffer.byteLength(JSON.stringify(response)),
+      estimated_tokens_one_tool_request_response: estimateTokenCount(
+        JSON.stringify(discoveryTool) +
+          JSON.stringify(input) +
+          JSON.stringify(response),
+      ),
+    });
+    if (input.decoder) {
+      const matched = nativeHelp
+        .map((text, i) => ({ line_number: i + 1, text }))
+        .filter(({ text }) =>
+          text.toLowerCase().includes((input.query ?? "").toLowerCase()),
+        );
+      assert.deepEqual(
+        report.help_lines,
+        matched.slice(
+          input.offset ?? 0,
+          input.limit === null
+            ? undefined
+            : (input.offset ?? 0) + (input.limit ?? 50),
+        ),
+      );
+    } else if (input.query === "uart")
+      assert.ok(report.decoders.some(({ id }) => id === "uart"));
+    const flags = Object.entries(input).flatMap(([key, value]) =>
+      value === null ? ["--all"] : [`--${key}`, String(value)],
+    );
+    const cli = JSON.parse(
+      (
+        await execute(
+          process.execPath,
+          [entrypoint, "inspect-signal-decoders", ...flags, "--format", "json"],
+          { env: environment, timeout: 60000, maxBuffer: 8 * 1024 * 1024 },
+        )
+      ).stdout,
+    );
+    assert.deepEqual(cli.normalized_result, report);
+    cases++;
+  }
+  const unavailable = await client.callTool({
+    name: discoveryTool.name,
+    arguments: { decoder: "rea_no_such_decoder" },
+  });
+  assert.equal(unavailable.isError, true);
+  cases++;
   await client.close();
   assert.deepEqual((await readdir(root.path)).sort(), [
     "paged.vcd",
@@ -260,6 +359,9 @@ console.log(
     {
       status: "passed",
       cases,
+      discovery_measurements: discoveryMeasurements,
+      measurement_scope:
+        "Warm MCP server, fresh sigrok processes; tokenx estimates include one advertised tool/request/response, not billed model usage. No model-driven selection benchmark, CPU or peak process-family memory measurement; no cache or speedup claim.",
       host: `${process.platform}/${process.arch}`,
       scope:
         "real sigrok UART VCD through compiled CLI/MCP; no physical acquisition",

@@ -154,6 +154,7 @@ export const redactExplicitFailure = (
         ...(error.userMessage === undefined
           ? {}
           : { userMessage: text(error.userMessage) }),
+        ...(error.retryable ? { retryable: true } : {}),
       },
     );
   if (error instanceof AnalysisResourceConstraintError)

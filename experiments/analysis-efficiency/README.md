@@ -7,6 +7,18 @@ JSON measurements belong outside the checkout. This document keeps the measured
 findings, verification scope and revision references; the scripts and `corpus.json`
 keep the reproduction inputs. Generated `results/` is ignored.
 
+Follow-up: [latest-main capability audit](latest-main-audit.md) records the
+Flutter, SQLite, TShark and sigrok priorities and the first shipped Dart AOT
+baseline, preserving existing controls before introducing another selector.
+
+Follow-up: [Dart AOT summary and retained string pools](flutter-aot-summary.md)
+records real LocalSend delivery pairs and old Evidence continuation, preserving
+ABI selection, snapshot identity, original lower bounds and partial coverage.
+
+Follow-up: [SQLite existing-control measurements](sqlite-existing-controls.md)
+tests QGIS's shipped GeoPackage through the existing column selection, preserving
+full selected-table schema and typed cells before considering another API.
+
 Follow-up: [native PE/DOS entry views and real model verification](native-entry-views.md)
 records the post-merge native continuation, including a small-function case where
 four selected replies cost more bytes than the complete dossier.
@@ -36,6 +48,11 @@ Follow-up: [model tool context and per-response usage](model-context.md) separat
 raw MCP replies from observed client execution/discovery and usage. Optional
 trial capture retains tool/usage items while excluding account and ambient state;
 existing ephemeral trials keep their default behavior.
+
+Follow-up: [Android package delivery and retained manifest](android-package-summary.md)
+records real NewPipe SDK pairs, unchanged old requests/Evidence, exact retained
+text, and actual Codex outcomes including client errors and a failed discovery.
+Reply bytes fall; model-token/time gains are not established.
 
 Follow-up: [resource counters at payload completion](resource-counters.md) adds
 optional owned counter observations while preserving unknown whole-scope final

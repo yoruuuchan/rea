@@ -1,4 +1,5 @@
 import {
+  chmod,
   cp,
   mkdir,
   readFile,
@@ -161,13 +162,158 @@ it("retains complete checks when implementation is renamed into documentation", 
   });
 });
 
-it("retains the complete main-push baseline even for documentation", async () => {
+it("keeps main pushes scoped when a successful ancestor baseline is available", async () => {
   const { directory, base } = await fixture();
   const head = await change(directory, ["README_ja.md"]);
   expect(await classify(directory, base, head, "push")).toMatchObject({
+    tier: "fast",
+    code: false,
+    package: false,
+    docs: true,
+    matrix: {
+      include: [
+        { os: "ubuntu-latest", platform: "linux", architecture: "x64" },
+      ],
+    },
+  });
+});
+
+it("includes changes from earlier cancelled pushes since the last successful baseline", async () => {
+  const { directory, base } = await fixture();
+  await change(directory, ["src/evm/client.ts"]);
+  const head = await change(directory, ["README.md"]);
+  expect(await classify(directory, base, head, "push")).toMatchObject({
+    tier: "fast",
+    code: true,
+    evm: true,
+    runtime: true,
+    package: false,
+  });
+});
+
+it.each(["", "not-a-commit"])(
+  "fails closed to all lanes for a missing or invalid push baseline (%s)",
+  async (base) => {
+    const { directory } = await fixture();
+    const head = await change(directory, ["README.md"]);
+    const plan = await classify(directory, base, head, "push");
+    expect(plan).toMatchObject({
+      tier: "fast",
+      code: true,
+      package: true,
+      evm: true,
+      browser: true,
+      reasons: expect.arrayContaining([expect.stringContaining("baseline")]),
+    });
+    const { SCOPES } = await loadScopes();
+    for (const flag of [
+      "code",
+      "runtime",
+      "package",
+      "fixtures",
+      "readiness",
+      "docs",
+      "workflows",
+      ...Object.keys(SCOPES),
+    ])
+      expect(plan[flag]).toBe(true);
+  },
+);
+
+it("selects only a trusted successful ancestor from recent CI push runs", async () => {
+  const { directory, base } = await fixture();
+  const head = await change(directory, ["src/evm/client.ts"]);
+  const bin = join(directory, "fake-bin");
+  await mkdir(bin);
+  const gh = join(bin, "gh");
+  await writeFile(gh, '#!/bin/sh\ncat "$GH_FIXTURE_RESPONSE"\n');
+  await chmod(gh, 0o755);
+  const response = join(directory, "runs.json");
+  await writeFile(
+    response,
+    JSON.stringify({
+      workflow_runs: [
+        {
+          event: "push",
+          conclusion: "success",
+          head_branch: "main",
+          head_repository: { full_name: "untrusted/fork" },
+          head_sha: base,
+        },
+        {
+          event: "push",
+          conclusion: "success",
+          head_branch: "main",
+          head_repository: { full_name: "owner/repo" },
+          head_sha: base,
+        },
+      ],
+    }),
+  );
+  const output = join(directory, "baseline-output");
+  const result = await execFileAsync(
+    process.execPath,
+    [new URL("../../../scripts/ci/baseline.mjs", import.meta.url).pathname],
+    {
+      cwd: directory,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        GH_FIXTURE_RESPONSE: response,
+        CI_REPOSITORY: "owner/repo",
+        CI_DEFAULT_BRANCH: "main",
+        HEAD_SHA: head,
+        GITHUB_OUTPUT: output,
+      },
+    },
+  );
+  expect(JSON.parse(result.stdout)).toEqual({ base, reason: "" });
+  expect(await readFile(output, "utf8")).toBe(`base=${base}\nreason=\n`);
+});
+
+it("returns an empty baseline when GitHub lookup fails", async () => {
+  const { directory, base } = await fixture();
+  const head = await change(directory, ["src/evm/client.ts"]);
+  const bin = join(directory, "fake-bin");
+  await mkdir(bin);
+  const gh = join(bin, "gh");
+  await writeFile(gh, "#!/bin/sh\nexit 1\n");
+  await chmod(gh, 0o755);
+  const result = await execFileAsync(
+    process.execPath,
+    [new URL("../../../scripts/ci/baseline.mjs", import.meta.url).pathname],
+    {
+      cwd: directory,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CI_REPOSITORY: "owner/repo",
+        CI_DEFAULT_BRANCH: "main",
+        HEAD_SHA: head,
+      },
+    },
+  );
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    base: "",
+    reason: expect.stringContaining("Could not read"),
+  });
+  expect(head).not.toBe(base);
+});
+
+it("fails closed when the successful push baseline is not an ancestor", async () => {
+  const { directory, base } = await fixture();
+  await git(directory, ["switch", "-c", "unrelated"]);
+  const unrelated = await change(directory, ["other.txt"]);
+  await git(directory, ["switch", "main"]);
+  const head = await change(directory, ["README.md"]);
+  expect(await classify(directory, unrelated, head, "push")).toMatchObject({
+    tier: "fast",
     code: true,
     package: true,
+    evm: true,
+    browser: true,
   });
+  expect(head).not.toBe(base);
 });
 
 it("fails classification rather than treating an invalid Git comparison as a scope", async () => {
@@ -207,7 +353,8 @@ it("retains native Inspector verification on every documented package host", asy
   );
   expect(packageInspector.if).toBeUndefined();
   expect(
-    (await classify((await fixture()).directory, "", "", "push")).matrix,
+    (await classify((await fixture()).directory, "", "", "workflow_dispatch"))
+      .matrix,
   ).toEqual({
     include: [
       { os: "ubuntu-latest", platform: "linux", architecture: "x64" },
@@ -595,6 +742,7 @@ it.each(["workflow_dispatch", "schedule"])(
   async (event) => {
     const { directory, base } = await fixture();
     expect(await classify(directory, base, base, event)).toMatchObject({
+      tier: "full",
       code: true,
       package: true,
       evm: true,
@@ -610,7 +758,13 @@ it("honors ci:full for successive PR revisions", async () => {
   for (const head of [first, second]) {
     expect(
       await classify(directory, base, head, "pull_request", true),
-    ).toMatchObject({ code: true, package: true, evm: true, browser: true });
+    ).toMatchObject({
+      tier: "full",
+      code: true,
+      package: true,
+      evm: true,
+      browser: true,
+    });
   }
 });
 
@@ -650,7 +804,7 @@ const INTEL_HOST = {
   architecture: "x64",
 };
 
-it("keeps macOS x64 package verification for ci:full and non-PR events", async () => {
+it("keeps macOS x64 package verification only for full qualification", async () => {
   const { directory, base } = await fixture();
   const head = await change(directory, ["src/windows/Example.ts"]);
   const matrix = z.object({ include: z.array(z.unknown()) });
@@ -661,7 +815,8 @@ it("keeps macOS x64 package verification for ci:full and non-PR events", async (
   expect(pullRequest).toHaveLength(3);
   expect(pullRequest).not.toContainEqual(INTEL_HOST);
   expect(await hosts("pull_request", true)).toContainEqual(INTEL_HOST);
-  for (const event of ["push", "schedule", "workflow_dispatch"])
+  expect(await hosts("push", false)).not.toContainEqual(INTEL_HOST);
+  for (const event of ["schedule", "workflow_dispatch"])
     expect(await hosts(event, false)).toContainEqual(INTEL_HOST);
 });
 

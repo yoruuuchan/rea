@@ -28,6 +28,7 @@ const { values } = parseArgs({
     "javascript-question": { type: "string", default: "inventory" },
     "managed-question": { type: "string", default: "inventory" },
     schemas: { type: "string", default: "default" },
+    "sqlite-selection": { type: "string", default: "all" },
   },
 });
 if (
@@ -43,6 +44,11 @@ if (
   ) ||
   !["inventory", "selected"].includes(values["javascript-question"]) ||
   !["default", "selected"].includes(values.schemas) ||
+  !["all", "columns"].includes(values["sqlite-selection"]) ||
+  (values.artifact !== "qgis-world-map.gpkg" &&
+    values["sqlite-selection"] !== "all") ||
+  (values.artifact === "qgis-world-map.gpkg" &&
+    values.delivery !== "complete") ||
   !["inventory", "identity"].includes(values["managed-question"]) ||
   (!["sharex.dll", "sharex.helpers.dll"].includes(values.artifact) &&
     values["managed-question"] !== "inventory") ||
@@ -518,6 +524,54 @@ const inspectEvmTarget = async () => {
 };
 
 const workflows = {
+  "qgis-world-map.gpkg": async () => {
+    const columns = ["fid", "NAME", "ISO_A3"];
+    const input = {
+      path: values.path,
+      table: "countries",
+      row_limit: 1,
+      ...(values["sqlite-selection"] === "columns" ? { columns } : {}),
+    };
+    const definition = catalogDefinitions.get("inspect_sqlite_database");
+    if (
+      definition === undefined ||
+      !new Ajv2020({ strict: false, validateFormats: false }).validate(
+        definition.inputSchema,
+        input,
+      )
+    )
+      throw new Error(
+        "Selected SQLite request is not advertised by this runtime",
+      );
+    const inspected = await call("inspect_sqlite_database", input);
+    const report = normalized(inspected);
+    if (report.rows === null || report.rows.table !== "countries")
+      throw new Error("Runtime returned no selected country sample");
+    const indexes = columns.map((column) => {
+      const index = report.rows.columns.indexOf(column);
+      if (index < 0)
+        throw new Error(`Missing requested SQLite column ${column}`);
+      return index;
+    });
+    return {
+      artifact_sha256: targetSha(inspected),
+      artifact: report.artifact,
+      wal: report.wal,
+      engine: report.engine,
+      database_encoding: report.database_encoding,
+      schema: report.schema,
+      rows: {
+        ...report.rows,
+        columns,
+        values: report.rows.values.map((row) =>
+          indexes.map((index) => row[index]),
+        ),
+      },
+      producer_limitations: report.limitations,
+      limitations: inspected.limitations,
+      evidence_ids: [inspected.evidence_id],
+    };
+  },
   "obsidian.asar": async () => {
     if (values["javascript-question"] === "selected") {
       const inspected = await call("analyze_javascript_application", {
@@ -666,7 +720,40 @@ const workflows = {
     }
   },
   "newpipe.apk": async () => {
-    const pkg = await call("inspect_android_package", { path: values.path });
+    const packageInput = {
+      path: values.path,
+      ...(values.delivery === "summary" ? { detail: "summary" } : {}),
+    };
+    const definition = catalogDefinitions.get("inspect_android_package");
+    if (
+      definition === undefined ||
+      !new Ajv2020({ strict: false, validateFormats: false }).validate(
+        definition.inputSchema,
+        packageInput,
+      )
+    )
+      throw new Error(
+        "Selected Android delivery is not advertised by this runtime",
+      );
+    const pkg = await call("inspect_android_package", packageInput);
+    const result = normalized(pkg);
+    const report = values.delivery === "summary" ? result.summary : result;
+    if (
+      values.delivery === "summary" &&
+      (result.kind !== "summary" ||
+        result.parent_operation !== "inspect_android_package")
+    )
+      throw new Error("Runtime returned no retained Android package summary");
+    const { manifest, ...declarations } = report;
+    const manifestObservation =
+      values.delivery === "summary"
+        ? manifest
+        : {
+            status: manifest.status,
+            reported_total_bytes: manifest.reported_total_bytes,
+            text_code_units: manifest.text.length,
+            text_included: false,
+          };
     const found = await call("search_android_classes", {
       path: values.path,
       query: "MainActivity",
@@ -677,9 +764,12 @@ const workflows = {
     });
     return {
       artifact_sha256: targetSha(pkg),
-      package_name: normalized(pkg).package_name,
-      version_name: normalized(pkg).version_name,
-      version_code: normalized(pkg).version_code,
+      package_name: report.package_name,
+      version_name: report.version_name,
+      version_code: report.version_code,
+      package_declarations: declarations,
+      manifest_observation: manifestObservation,
+      package_limitations: pkg.limitations,
       matches: normalized(found).matches,
       coverage: normalized(found).coverage,
       onCreate: normalized(cls).methods.filter(
@@ -690,6 +780,54 @@ const workflows = {
   },
   "sharex.dll": inspectManagedTarget,
   "sharex.helpers.dll": inspectManagedTarget,
+  "localsend-arm64.apk": async () => {
+    const input = {
+      path: values.path,
+      ...(values.delivery === "summary" ? { detail: "summary" } : {}),
+    };
+    const definition = catalogDefinitions.get("inspect_dart_aot");
+    if (
+      definition === undefined ||
+      !new Ajv2020({ strict: false, validateFormats: false }).validate(
+        definition.inputSchema,
+        input,
+      )
+    )
+      throw new Error(
+        "Selected Dart AOT delivery is not advertised by this runtime",
+      );
+    const inspected = await call("inspect_dart_aot", input);
+    const result = normalized(inspected);
+    if (
+      values.delivery === "summary" &&
+      (result.kind !== "summary" ||
+        result.parent_operation !== "inspect_dart_aot")
+    )
+      throw new Error("Runtime returned no retained Dart AOT summary");
+    const report = values.delivery === "summary" ? result.summary : result;
+    const { package_uris, dart_uris, class_like_tokens, ...pool } =
+      report.string_pool;
+    return {
+      artifact_sha256: targetSha(inspected),
+      target: report.target,
+      abi: report.abi,
+      libapp: report.libapp,
+      string_pool:
+        values.delivery === "summary"
+          ? pool
+          : {
+              ...pool,
+              returned_counts: {
+                package_uris: package_uris.length,
+                dart_uris: dart_uris.length,
+                class_like_tokens: class_like_tokens.length,
+              },
+            },
+      coverage: report.coverage,
+      limitations: inspected.limitations,
+      evidence_ids: [inspected.evidence_id],
+    };
+  },
   "openwrt.bin": async () => {
     const info = await call("inspect_firmware_regions", { path: values.path });
     return {
@@ -818,6 +956,10 @@ const report = {
   )
     ? values["managed-question"]
     : null,
+  sqlite_selection:
+    values.artifact === "qgis-world-map.gpkg"
+      ? values["sqlite-selection"]
+      : null,
   provider_settings_sha256: sha(JSON.stringify(selectedProviders)),
   provider_search_path_sha256: sha(
     selectedProviders.PATH ?? process.env.PATH ?? "",

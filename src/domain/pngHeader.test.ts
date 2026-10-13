@@ -33,3 +33,24 @@ it("rejects incomplete headers, invalid signatures and zero dimensions", () => {
     expect(readPngHeaderDimensions(zero)).toBeUndefined();
   }
 });
+
+it.each([0, 12, 14, 0xffff_ffff])("rejects IHDR data length %s", (length) => {
+  const bytes = Buffer.from(png);
+  bytes.writeUInt32BE(length, 8);
+  expect(readPngHeaderDimensions(bytes)).toBeUndefined();
+});
+
+it.each([16, 20])("rejects out-of-range PNG dimension at %s", (offset) => {
+  const bytes = Buffer.from(png);
+  bytes.writeUInt32BE(0x8000_0000, offset);
+  expect(readPngHeaderDimensions(bytes)).toBeUndefined();
+});
+
+it("accepts the largest dimension representable by the PNG specification", () => {
+  const bytes = Buffer.from(png);
+  bytes.writeUInt32BE(0x7fff_ffff, 16);
+  expect(readPngHeaderDimensions(bytes)).toEqual({
+    width: 0x7fff_ffff,
+    height: 1,
+  });
+});

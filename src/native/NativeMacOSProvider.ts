@@ -966,6 +966,7 @@ const translateCommandFailure = (
       signal: failure.capture?.signal ?? null,
       stdout_bytes: failure.capture?.stdoutBytes ?? 0,
       stderr_bytes: failure.capture?.stderrBytes ?? 0,
+      ...(failure.detail === null ? {} : { detail: failure.detail }),
     },
   });
 };

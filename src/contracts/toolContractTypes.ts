@@ -33,6 +33,7 @@ export const TOOL_KINDS = [
   "browser-provider",
   "electron-provider",
   "runtime-provider",
+  "pcap-provider",
   "application",
   "session",
 ] as const;

@@ -235,6 +235,34 @@
         },
         "immutable_scope": "Published Hardhat artifact does not record an immutable-reference map; absence is unknown, not proof of no immutables. Runtime template bytes remain exact."
       }
+    },
+    {
+      "id": "localsend-arm64.apk",
+      "file": "LocalSend-1.18.2-android-arm64v8.apk",
+      "bytes": 46558706,
+      "sha256": "82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3",
+      "provenance": {
+        "project": "LocalSend",
+        "version": "1.18.2",
+        "upstreamFile": "LocalSend-1.18.2-android-arm64v8.apk",
+        "url": "https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-arm64v8.apk",
+        "transport_sha256": "82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3",
+        "transport_bytes": 46558706,
+        "derivation": "Official arm64 release APK, compared with GitHub release asset digest; byte-only analysis without execution"
+      }
+    },
+    {
+      "id": "qgis-world-map.gpkg",
+      "file": "qgis-world-map.gpkg",
+      "bytes": 12914688,
+      "sha256": "01d293159d1b77bd9212b5252587853f61aa9e25b2387135f34afaba8d057190",
+      "provenance": {
+        "project": "QGIS bundled world map",
+        "source_commit": "e1223b8e9e71fc50ee995ed556f711c54ccc101b",
+        "git_blob_sha1": "c9ff80228dff0de93c9acdef16a97545ba360244",
+        "url": "https://raw.githubusercontent.com/qgis/QGIS/e1223b8e9e71fc50ee995ed556f711c54ccc101b/resources/data/world_map.gpkg",
+        "derivation": "unmodified official resource file; streaming Git blob and SHA-256 verification"
+      }
     }
   ]
 }

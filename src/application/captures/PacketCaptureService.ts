@@ -1,3 +1,9 @@
+import {
+  inspectPacketFieldsInputSchema,
+  packetFieldsCatalogSchema,
+  type InspectPacketFieldsInput,
+} from "../../domain/captures/packetFields.js";
+import type { JsonValue } from "../../domain/jsonValue.js";
 import { isAbsolute } from "node:path";
 import type {
   AnalysisExecution,
@@ -22,6 +28,10 @@ export interface PacketCapturePort {
   /** Release per-call resources before returning, or retain failed cleanup for close/retry. */
   inspect(
     input: InspectPacketCaptureInput,
+    options?: ExecutionOptions,
+  ): Promise<Result<AnalysisExecution, AnalysisError>>;
+  inspectFields(
+    input: InspectPacketFieldsInput,
     options?: ExecutionOptions,
   ): Promise<Result<AnalysisExecution, AnalysisError>>;
   close(): Promise<void>;
@@ -74,14 +84,58 @@ export class PacketCaptureService {
           "Capture analyzer returned malformed data or changed the selected artifact identity/options.",
         ),
       );
-    const evidence = createEvidence(execution.subject, execution.provider, {
-      operation,
-      parameters: input.data,
-      result: report.data,
-      confidence: "observed",
-      locations: execution.locations,
-      limitations: execution.limitations,
-    });
+    return this.#evidence(operation, input.data, execution, options);
+  }
+  async inspectFields(
+    raw: unknown,
+    options?: ExecutionOptions,
+  ): Promise<Result<Evidence, AnalysisError>> {
+    const operation = "inspect_packet_fields";
+    if (options?.signal?.aborted)
+      return err(new AnalysisCancelledError(operation));
+    const input = inspectPacketFieldsInputSchema.safeParse(raw);
+    if (!input.success)
+      return err(
+        analysisInputErrorFromIssues(operation, input.error.issues, raw, {
+          cause: input.error,
+        }),
+      );
+    const decoded = await this.provider.inspectFields(input.data, options);
+    if (!decoded.ok) return decoded;
+    const execution = decoded.value;
+    const report = packetFieldsCatalogSchema.safeParse(execution.result);
+    if (
+      !report.success ||
+      JSON.stringify(report.data.selection) !== JSON.stringify(input.data) ||
+      execution.subject?.path !== report.data.tool.path ||
+      execution.subject.sha256 !== report.data.tool.sha256
+    )
+      return err(
+        new AnalysisOutputError(
+          operation,
+          "Field discovery returned malformed data or changed the selected installation/options.",
+        ),
+      );
+    return this.#evidence(operation, input.data, execution, options);
+  }
+  #evidence(
+    operation: string,
+    parameters: Readonly<Record<string, JsonValue>>,
+    execution: AnalysisExecution,
+    options?: ExecutionOptions,
+  ): Result<Evidence, AnalysisError> {
+    const evidence = createEvidence(
+      execution.subject ?? undefined,
+      execution.provider,
+      {
+        operation,
+        parameters,
+        result: execution.result,
+        confidence: "observed",
+        locations: execution.locations,
+        limitations: execution.limitations,
+      },
+    );
     return options?.signal?.aborted
       ? err(
           new AnalysisCancelledError(operation, {

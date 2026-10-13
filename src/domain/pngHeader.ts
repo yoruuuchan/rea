@@ -8,10 +8,16 @@ export const readPngHeaderDimensions = (
   if (
     bytes.byteLength < 24 ||
     !bytes.subarray(0, 8).equals(PNG_SIGNATURE) ||
+    bytes.readUInt32BE(8) !== 13 ||
     !bytes.subarray(12, 16).equals(IHDR_TYPE)
   )
     return undefined;
   const width = bytes.readUInt32BE(16);
   const height = bytes.readUInt32BE(20);
-  return width === 0 || height === 0 ? undefined : { width, height };
+  return width === 0 ||
+    height === 0 ||
+    width > 0x7fff_ffff ||
+    height > 0x7fff_ffff
+    ? undefined
+    : { width, height };
 };

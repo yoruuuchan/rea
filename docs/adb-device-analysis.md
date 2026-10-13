@@ -136,8 +136,8 @@ existing analysis families directly, for example
 ## Resource and lifecycle limits
 
 - Caller values reach adb only as positional arguments in fixed vectors;
-  no tool accepts an arbitrary shell command line, and UI interaction
-  (`input`, `am`, `monkey`) is deliberately not exposed.
+  no tool accepts an arbitrary shell command line, `input`, or `monkey`.
+  The app/activity lifecycle tools use `am start -W` and `am force-stop`.
 - Per-invocation budgets: client/devices 10-20 s, shell reads 20-60 s with
   64 KiB-8 MiB capture caps (logcat 4 MiB, screen 32 MiB), transfers and
   bugreports 600 s. Exceeded budgets report `resource_constraint`; stopped
