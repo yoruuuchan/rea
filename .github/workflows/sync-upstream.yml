@@ -36,9 +36,11 @@ jobs:
 
           git merge --no-commit --no-ff upstream/main || true
 
-          # Keep this fork's workflow files unchanged. The built-in GITHUB_TOKEN
-          # cannot update .github/workflows files from an Actions run.
-          git restore --source=HEAD --staged --worktree .github/workflows
+          # Keep this fork's workflow directory exactly as it was before the merge.
+          # Removing it from the merge index first also resolves modify/delete
+          # conflicts when upstream changes workflows that this fork deleted.
+          git rm -r -f --ignore-unmatch .github/workflows
+          git checkout HEAD -- .github/workflows
           git add -A
 
           if git ls-files -u | grep -q .; then
