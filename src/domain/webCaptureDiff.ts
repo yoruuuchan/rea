@@ -70,9 +70,11 @@ const compareDimension = (
   after: ReadonlyMap<string, string>,
   complete: boolean,
   reason: string,
+  inventoryComplete = complete,
 ): Dimension => {
+  // Membership evidence can be complete even when selected content is unknown.
   const all = compareIdentities(before, after).filter(
-    ({ change }) => complete || change === "modified",
+    ({ change }) => inventoryComplete || change === "modified",
   );
   if (all.length > 0)
     return {
@@ -160,6 +162,7 @@ const storageDimension = (
     ),
     storageComparable(before, after, keysComplete, usageComplete),
     "Storage fingerprints, inventories, usage, or quota were unavailable or truncated in at least one observation.",
+    keysComplete,
   );
 };
 
@@ -683,16 +686,17 @@ const storageMap = (
       }),
     ],
   ]);
-  if (!includeKeys) return map;
   const add = (kind: string, keys: readonly string[]) => {
     for (const key of keys) {
       map.set(`storage:${kind}:${key}`, digestCanonicalValue(key));
     }
   };
-  add("local_storage", storage.local_storage_keys);
-  add("session_storage", storage.session_storage_keys);
-  add("indexed_db", storage.indexed_db_names);
-  add("cache", storage.cache_names);
+  if (includeKeys) {
+    add("local_storage", storage.local_storage_keys);
+    add("session_storage", storage.session_storage_keys);
+    add("indexed_db", storage.indexed_db_names);
+    add("cache", storage.cache_names);
+  }
   for (const fingerprint of storage.content_fingerprints) {
     const identity = `${fingerprint.scope}:${fingerprint.identity_sha256}`;
     if (!fingerprintIdentities.has(identity)) continue;

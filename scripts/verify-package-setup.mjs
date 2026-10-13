@@ -356,9 +356,8 @@ const verifySetupApply = async ({
   hopperSetupSupported,
 }) => {
   const status = "ready";
-  const hopperStatus = hopperSetupSupported
-    ? "needs_confirmation"
-    : "needs_human";
+  const hopperStatus =
+    hopperSetupSupported === true ? "needs_confirmation" : "needs_human";
   const firstExecution = await runWithStatus(
     cli,
     ["setup", "--yes", "--all-detected", "--json"],

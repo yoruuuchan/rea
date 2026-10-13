@@ -1,6 +1,6 @@
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { expect, it } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { nativeAotPeFixture } from "../../fixtures/nativeaotPe.js";
@@ -13,7 +13,6 @@ import {
   sessionEvidence,
 } from "./ghidraMcpHarness.js";
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { GhidraClient } from "../../../src/ghidra/GhidraClient.js";

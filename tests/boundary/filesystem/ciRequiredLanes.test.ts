@@ -365,7 +365,9 @@ it("keeps fast feedback separate from complete qualification and release proof",
   expect(ci.concurrency["cancel-in-progress"]).toBe(
     "${{ github.event_name == 'pull_request' && inputs.source_sha == '' && !contains(github.event.pull_request.labels.*.name, 'ci:full') }}",
   );
-  expect(ci.jobs.required?.if).toBe("${{ always() }}");
+  // Failed dependencies still reach the gate, but superseded PR runs must
+  // release their concurrency slot without waiting for another runner.
+  expect(ci.jobs.required?.if).toBe("${{ !cancelled() }}");
   const shards = ci.jobs["test-shard"]?.steps ?? [];
   const fast = shards.find((step) => step.run?.includes("npm run test:run"));
   const full = shards.find((step) => step.run?.includes("test:ci:shard:run"));
@@ -501,6 +503,47 @@ it("rejects incomplete or malformed classification even when available jobs succ
     ).rejects.toMatchObject({
       code: 1,
       stderr: expect.stringContaining("scope outputs: sqlite"),
+    });
+  }
+});
+
+it("fails fast only for ordinary PR matrices and rejects partial portable feedback", async () => {
+  const { jobs } = await workflow();
+  expect(jobs["test-shard"]?.strategy).toMatchObject({
+    "fail-fast":
+      "${{ github.event_name == 'pull_request' && needs.changes.outputs.tier == 'fast' }}",
+  });
+  expect(jobs["package-e2e"]?.strategy).toMatchObject({ "fail-fast": false });
+  const flags = await scopeFlags();
+  for (const result of ["failure", "cancelled", "skipped", "missing"]) {
+    // Even an incorrectly successful report merge cannot hide matrix failure.
+    const needs: Record<string, unknown> = {
+      changes: {
+        result: "success",
+        outputs: {
+          ...Object.fromEntries(flags.map((flag) => [flag, "false"])),
+          tier: "fast",
+          code: "true",
+        },
+      },
+      static: { result: "success" },
+      build: { result: "success" },
+      test: { result: "success" },
+      ...(result === "missing" ? {} : { "test-shard": { result } }),
+    };
+    await expect(
+      executeWorkflowFixture(
+        process.execPath,
+        [
+          fileURLToPath(
+            new URL("../../../scripts/ci/required.mjs", import.meta.url),
+          ),
+        ],
+        { env: { ...process.env, CI_JOBS: JSON.stringify(needs) } },
+      ),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("test-shard"),
     });
   }
 });

@@ -225,6 +225,8 @@ export const createSystemProcessOwnershipHost = (
     readonly darwinCompiler?: DarwinProcessReaderCompiler;
     /** Override the caller-owned module cache used compiling that helper. */
     readonly darwinModuleCachePath?: string;
+    /** Deadline for Darwin ownership-helper compilation. */
+    readonly compileTimeoutMs?: number;
   } = {},
 ): ProcessOwnershipHost => {
   const darwinModuleCachePath =
@@ -247,6 +249,9 @@ export const createSystemProcessOwnershipHost = (
           ...(darwinModuleCachePath === undefined
             ? {}
             : { moduleCachePath: darwinModuleCachePath }),
+          ...(options.compileTimeoutMs === undefined
+            ? { environment: hostEnvironment }
+            : { compileTimeoutMs: options.compileTimeoutMs }),
         })
       : undefined;
   const listProcesses = async (signal?: AbortSignal) => {

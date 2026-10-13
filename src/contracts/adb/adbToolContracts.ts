@@ -127,7 +127,7 @@ export const ADB_TOOL_CONTRACTS = [
     name: "push_adb_file",
     ...toolContractMetadata("push_adb_file"),
     description:
-      "Push one local file to an absolute device path. The only device-mutating ADB tool: existing device files are refused unless overwrite is explicitly requested, and the transfer is verified by comparing the local digest with the device's own sha256sum when the device provides one.",
+      "Push one local file to an absolute device path. A device-mutating tool: existing device files are refused unless overwrite is explicitly requested, and the transfer is verified by comparing the local digest with the device's own sha256sum when the device provides one.",
     kind: "adb-provider",
     inputSchema: adbInputSchemas.push_adb_file,
     outputSchema: evidenceResultOf(adbResultSchemas.push_adb_file),

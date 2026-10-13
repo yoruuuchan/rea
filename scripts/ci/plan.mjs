@@ -62,6 +62,10 @@ function classifyPackage(base, head) {
     ]),
   ].filter((key) => beforeScripts?.[key] !== afterScripts?.[key]);
   for (const script of changed) {
+    if (/^test:(coverage|mutation):reverse-tools$/.test(script)) {
+      selected.reverse_tools = true;
+      continue;
+    }
     if (script === "test:sqlite" || script === "test:sqlite:run") {
       selected.sqlite = true;
       continue;
@@ -162,6 +166,7 @@ if (tier === "reused") {
       .split("\0")
       .filter(Boolean);
     for (const file of files) {
+      if (matchesAny(file, SCOPES.reverse_tools)) selected.reverse_tools = true;
       if (
         /^(README(?:_[^/]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md|native\/windows\/README\.md|\.github\/pull_request_template\.md)$/.test(
           file,

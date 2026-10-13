@@ -104,13 +104,51 @@ export const compareArtifacts = (
   const right = parseArtifactInventoryEvidence(rightEvidence);
   const leftComplete = left.inventory.complete;
   const rightComplete = right.inventory.complete;
-  const leftCovered = hasCompleteInventoryCoverage(left.inventory);
-  const rightCovered = hasCompleteInventoryCoverage(right.inventory);
+  const sameScope =
+    left.inventory.coverage.scope === right.inventory.coverage.scope;
+  const rootCoverageComplete =
+    sameScope &&
+    left.inventory.complete &&
+    right.inventory.complete &&
+    left.inventory.coverage.status === "complete" &&
+    right.inventory.coverage.status === "complete";
+  const entryCoverageComplete =
+    rootCoverageComplete &&
+    left.inventory.coverage.scope === "container-entries";
+  const leftCovered =
+    sameScope &&
+    hasCompleteInventoryCoverage(left.inventory, left.inventory.coverage.scope);
+  const rightCovered =
+    sameScope &&
+    hasCompleteInventoryCoverage(
+      right.inventory,
+      right.inventory.coverage.scope,
+    );
+  const fullyCovered =
+    leftCovered &&
+    rightCovered &&
+    (entryCoverageComplete ||
+      (rootCoverageComplete &&
+        left.inventory.manifest.occurrence_count === 1 &&
+        right.inventory.manifest.occurrence_count === 1));
   const limitations = [
     ...left.inventory.limitations.map((item) => `Left: ${item}`),
     ...right.inventory.limitations.map((item) => `Right: ${item}`),
     ...(leftComplete ? [] : ["Left artifact inventory is incomplete."]),
     ...(rightComplete ? [] : ["Right artifact inventory is incomplete."]),
+    ...(sameScope ? [] : ["Artifact inventory scopes differ."]),
+    ...(sameScope &&
+    left.inventory.coverage.scope === "root" &&
+    (left.inventory.manifest.occurrence_count > 1 ||
+      right.inventory.manifest.occurrence_count > 1)
+      ? ["Container entry coverage is unavailable for child paths."]
+      : []),
+    ...(left.inventory.coverage.status === "complete"
+      ? []
+      : ["Left artifact inventory traversal coverage is unknown."]),
+    ...(right.inventory.coverage.status === "complete"
+      ? []
+      : ["Right artifact inventory traversal coverage is unknown."]),
   ];
   const changes = compareOccurrences(
     left.inventory,
@@ -119,7 +157,7 @@ export const compareArtifacts = (
       ...left.evidence.map(({ evidence_id: id }) => id),
       ...right.evidence.map(({ evidence_id: id }) => id),
     ],
-    leftCovered && rightCovered,
+    { root: rootCoverageComplete, entries: entryCoverageComplete },
   );
   applyRootHashChange(left.inventory, right.inventory, changes, [
     ...left.evidence.map(({ evidence_id: id }) => id),
@@ -129,7 +167,7 @@ export const compareArtifacts = (
     left.inventory,
     right.inventory,
     changes,
-    leftCovered && rightCovered,
+    fullyCovered,
   );
   return artifactComparisonResultSchema.parse({
     status:
@@ -139,7 +177,7 @@ export const compareArtifacts = (
               ({ classification }) => classification === "contradiction",
             )
           ? "contradiction"
-          : !leftCovered || !rightCovered
+          : !fullyCovered
             ? "unknown"
             : changes.some(({ classification }) => classification === "unknown")
               ? "unknown"
@@ -158,7 +196,7 @@ const compareOccurrences = (
   left: InventorySet,
   right: InventorySet,
   evidenceLinks: readonly string[],
-  complete: boolean,
+  coverage: { readonly root: boolean; readonly entries: boolean },
 ): ArtifactChange[] => {
   const leftByPath = new Map(
     left.occurrences.map((item) => [item.logical_path, item]),
@@ -187,7 +225,8 @@ const compareOccurrences = (
       rightNode: nodeFor(rightOccurrence, rightNodes),
       leftRelations: leftRelations.get(path) ?? [],
       rightRelations: rightRelations.get(path) ?? [],
-      complete,
+      rootCovered: coverage.root,
+      entriesCovered: coverage.entries,
       evidenceLinks,
     });
     if (change !== null) output.push(change);
@@ -203,7 +242,8 @@ interface ClassifyPathInput {
   readonly rightNode: ArtifactNode | undefined;
   readonly leftRelations: readonly RelationProjection[];
   readonly rightRelations: readonly RelationProjection[];
-  readonly complete: boolean;
+  readonly rootCovered: boolean;
+  readonly entriesCovered: boolean;
   readonly evidenceLinks: readonly string[];
 }
 
@@ -217,17 +257,18 @@ const buildArtifactChangeBase = (input: ClassifyPathInput) => ({
 });
 
 const classifyPresence = (input: ClassifyPathInput): ArtifactChange | null => {
+  const covered = input.path === "." ? input.rootCovered : input.entriesCovered;
   if (input.leftOccurrence === undefined)
     return {
       ...buildArtifactChangeBase(input),
-      classification: input.complete ? "added" : "unknown",
-      dimensions: [input.complete ? "content" : "availability"],
+      classification: covered ? "added" : "unknown",
+      dimensions: [covered ? "content" : "availability"],
     };
   if (input.rightOccurrence === undefined)
     return {
       ...buildArtifactChangeBase(input),
-      classification: input.complete ? "removed" : "unknown",
-      dimensions: [input.complete ? "content" : "availability"],
+      classification: covered ? "removed" : "unknown",
+      dimensions: [covered ? "content" : "availability"],
     };
   return null;
 };

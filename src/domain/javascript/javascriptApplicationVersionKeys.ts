@@ -77,15 +77,23 @@ export const matchJavaScriptApplicationVersions = (
 ): ApplicationVersionMatchingProjection => {
   const left = new Map(leftNodes.map((node) => [node.node_id, node]));
   const right = new Map(rightNodes.map((node) => [node.node_id, node]));
-  const leftCandidates = new Map<string, Set<string>>();
-  const rightCandidates = new Map<string, Set<string>>();
   const pairs: ApplicationVersionNodePair[] = [];
+  const ambiguousGroups: AmbiguousGroup[] = [];
   for (const tier of matchTiers())
-    applyTier({ left, right, pairs, leftCandidates, rightCandidates, tier });
+    applyTier({ left, right, pairs, ambiguousGroups, tier });
   const remainingLeft = sortedNodes(left.values());
   const remainingRight = sortedNodes(right.values());
-  const leftIds = new Set(remainingLeft.map(({ node_id: id }) => id));
-  const rightIds = new Set(remainingRight.map(({ node_id: id }) => id));
+  const leftCandidates = new Map<string, Set<string>>();
+  const rightCandidates = new Map<string, Set<string>>();
+  // Later tiers can pair members of an ambiguous group. Expand only survivors,
+  // without pairing groups that became unique after those later matches.
+  for (const group of ambiguousGroups) {
+    const leftGroup = group.left.filter((node) => left.has(node.node_id));
+    if (leftGroup.length === 0) continue;
+    const rightGroup = group.right.filter((node) => right.has(node.node_id));
+    if (rightGroup.length === 0) continue;
+    recordCandidates(leftGroup, rightGroup, leftCandidates, rightCandidates);
+  }
   return {
     pairs: pairs.sort((a, b) =>
       compareUnicodeCodePoints(
@@ -95,17 +103,21 @@ export const matchJavaScriptApplicationVersions = (
     ),
     unmatchedLeft: remainingLeft,
     unmatchedRight: remainingRight,
-    candidatesForLeft: filteredCandidates(leftCandidates, rightIds),
-    candidatesForRight: filteredCandidates(rightCandidates, leftIds),
+    candidatesForLeft: sortedCandidates(leftCandidates),
+    candidatesForRight: sortedCandidates(rightCandidates),
   };
 };
+
+interface AmbiguousGroup {
+  readonly left: readonly ApplicationNode[];
+  readonly right: readonly ApplicationNode[];
+}
 
 interface TierContext {
   readonly left: Map<string, ApplicationNode>;
   readonly right: Map<string, ApplicationNode>;
   readonly pairs: ApplicationVersionNodePair[];
-  readonly leftCandidates: Map<string, Set<string>>;
-  readonly rightCandidates: Map<string, Set<string>>;
+  readonly ambiguousGroups: AmbiguousGroup[];
   readonly tier: MatchTier;
 }
 
@@ -114,15 +126,12 @@ const applyTier = (context: TierContext): void => {
   const rightByKey = nodesByKey(context.right.values(), context.tier.key);
   for (const key of [...leftByKey.keys()].sort(compareUnicodeCodePoints)) {
     const leftGroup = leftByKey.get(key) ?? [];
-    const rightGroup = rightByKey.get(key) ?? [];
-    if (rightGroup.length === 0) continue;
-    recordCandidates(
-      leftGroup,
-      rightGroup,
-      context.leftCandidates,
-      context.rightCandidates,
-    );
-    if (leftGroup.length !== 1 || rightGroup.length !== 1) continue;
+    const rightGroup = rightByKey.get(key);
+    if (rightGroup === undefined) continue;
+    if (leftGroup.length !== 1 || rightGroup.length !== 1) {
+      context.ambiguousGroups.push({ left: leftGroup, right: rightGroup });
+      continue;
+    }
     const leftNode = leftGroup[0];
     const rightNode = rightGroup[0];
     if (leftNode === undefined || rightNode === undefined) continue;
@@ -144,7 +153,9 @@ const nodesByKey = (
   for (const node of nodes) {
     const key = keyFor(node);
     if (key === null) continue;
-    output.set(key, [...(output.get(key) ?? []), node]);
+    const group = output.get(key);
+    if (group === undefined) output.set(key, [node]);
+    else group.push(node);
   }
   return output;
 };
@@ -169,17 +180,14 @@ const recordCandidates = (
   }
 };
 
-const filteredCandidates = (
+const sortedCandidates = (
   candidates: ReadonlyMap<string, ReadonlySet<string>>,
-  retained: ReadonlySet<string>,
 ): ReadonlyMap<string, readonly string[]> =>
   new Map(
-    [...candidates.entries()].flatMap(([nodeId, values]) => {
-      const filtered = [...values]
-        .filter((value) => retained.has(value))
-        .sort(compareUnicodeCodePoints);
-      return filtered.length === 0 ? [] : [[nodeId, filtered] as const];
-    }),
+    [...candidates.entries()].map(([nodeId, values]) => [
+      nodeId,
+      [...values].sort(compareUnicodeCodePoints),
+    ]),
   );
 
 const nodeIdentityKey = (node: ApplicationNode): string =>

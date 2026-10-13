@@ -1,5 +1,8 @@
 import type { Readable } from "node:stream";
-import type { ArtifactCommand } from "../domain/artifactGraph.js";
+import type {
+  ArtifactCommand,
+  ArtifactInventoryCoverage,
+} from "../domain/artifactGraph.js";
 import type { ZipPackageFormat } from "../domain/zipPackageFormat.js";
 import type {
   AnalysisCleanupObservation,
@@ -90,10 +93,36 @@ export const sameArtifactEntry = (
   entry.sourceIdentity?.mtimeNs === produced.sourceIdentity?.mtimeNs &&
   entry.sourceIdentity?.ctimeNs === produced.sourceIdentity?.ctimeNs;
 
+/** One entry or subtree deliberately excluded from a traversal. */
+export interface ArtifactTraversalOmission {
+  readonly path: string;
+  readonly kind:
+    | "fifo"
+    | "socket"
+    | "block-device"
+    | "character-device"
+    | "unsupported"
+    | "directory-descendants";
+}
+
+/** Facts from an exhausted traversal, separate from entry content certainty. */
+export interface ArtifactReaderTraversal {
+  readonly status: ArtifactInventoryCoverage["status"];
+  readonly limitations: readonly string[];
+}
+
+/** Per-iterator observation sink; adapters report intentional omissions without shared state. */
+export interface ArtifactTraversalOptions {
+  readonly onOmission?: (omission: ArtifactTraversalOmission) => void;
+}
+
 /** Read-only adapter over one directory, archive, or virtual container. */
 export interface ArtifactReader {
   readonly format: "directory" | ZipPackageFormat | "asar" | "file";
-  entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry>;
+  entries(
+    signal?: AbortSignal,
+    options?: ArtifactTraversalOptions,
+  ): AsyncIterable<ArtifactEntry>;
   open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable>;
   provenance(): readonly ArtifactCommand[];
   close(): Promise<void>;

@@ -14,11 +14,17 @@ import {
   sameArtifactSourceIdentity,
   type ArtifactEntry,
   type ArtifactReader,
+  type ArtifactTraversalOmission,
+  type ArtifactTraversalOptions,
 } from "./ArtifactReader.js";
 import { hostExecutableMarking } from "./hostExecutableMarking.js";
 import { OwnedDirectoryHandle } from "../filesystem/OwnedDirectoryHandle.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
+
+interface DirectoryTraversalOptions extends ArtifactTraversalOptions {
+  readonly descendInto?: (path: string) => boolean;
+}
 
 /** Non-symlink-following directory reader. */
 export class DirectoryArtifactReader implements ArtifactReader {
@@ -35,9 +41,11 @@ export class DirectoryArtifactReader implements ArtifactReader {
   /** Enumerate entries, optionally restricting descent while retaining directories. */
   async *entries(
     signal?: AbortSignal,
-    descendInto?: (path: string) => boolean,
+    selection?: DirectoryTraversalOptions | ((path: string) => boolean),
   ): AsyncIterable<ArtifactEntry> {
     const root = await this.#resolveRoot();
+    const options =
+      typeof selection === "function" ? { descendInto: selection } : selection;
     const pending = [root];
     while (pending.length > 0) {
       abortIfNeeded(signal);
@@ -50,7 +58,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
         directory,
         pending,
         signal,
-        descendInto,
+        options,
       ))
         yield entry;
       await withDirectoryIoContext("inspect directory", directory, () =>
@@ -75,7 +83,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
     directory: string,
     pending: string[],
     signal?: AbortSignal,
-    descendInto?: (path: string) => boolean,
+    options?: DirectoryTraversalOptions,
   ): AsyncIterable<ArtifactEntry> {
     const root = await this.#resolveRoot();
     const handle = new OwnedDirectoryHandle(
@@ -103,10 +111,16 @@ export class DirectoryArtifactReader implements ArtifactReader {
         );
         const path = relative(root, absolute).split(sep).join("/");
         const entry = artifactEntry(path, absolute, metadata);
-        if (entry === undefined) continue;
+        if (entry === undefined) {
+          options?.onOmission?.({ path, kind: unsupportedEntryKind(metadata) });
+          continue;
+        }
         yield entry;
-        if (entry.kind === "directory" && (descendInto?.(path) ?? true))
-          childDirectories.push(absolute);
+        if (entry.kind === "directory") {
+          if (options?.descendInto?.(path) ?? true)
+            childDirectories.push(absolute);
+          else options?.onOmission?.({ path, kind: "directory-descendants" });
+        }
       }
     } catch (cause: unknown) {
       traversal = {
@@ -255,6 +269,19 @@ export class DirectoryArtifactReader implements ArtifactReader {
     return [];
   }
 }
+
+const unsupportedEntryKind = (
+  metadata: BigIntStats,
+): ArtifactTraversalOmission["kind"] =>
+  metadata.isFIFO()
+    ? "fifo"
+    : metadata.isSocket()
+      ? "socket"
+      : metadata.isBlockDevice()
+        ? "block-device"
+        : metadata.isCharacterDevice()
+          ? "character-device"
+          : "unsupported";
 
 const artifactEntry = (
   path: string,

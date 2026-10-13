@@ -11,7 +11,7 @@ import { AnalysisCancelledError } from "./analysisErrorCore.js";
 /** A bounded passive browser observation failed at its CDP boundary. */
 export class BrowserObservationError extends AnalysisError {
   readonly _tag = "BrowserObservationError";
-  override readonly cleanupIncomplete: boolean;
+  override cleanupIncomplete: boolean;
   override readonly cleanupResources: readonly string[];
   override readonly userCategory: "cancelled" | undefined;
   override readonly userMessage: string | undefined;

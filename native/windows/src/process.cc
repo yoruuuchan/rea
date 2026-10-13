@@ -464,6 +464,7 @@ napi_value inspect(napi_env env, std::unique_ptr<Runtime>& probe) {
   set(env, result, "architecture", string(env, std::string("x64")));
   set(env, result, "filesystem", filesystem);
   set(env, result, "privateDacl", boolean(env, true));
+  set(env, result, "privateBridgeDescriptorAccess", boolean(env, true));
   set(env, result, "atomicJobAssignment", boolean(env, true));
   set(env, result, "killOnOwnerClose", boolean(env, true));
   set(env, result, "protocolStdin", boolean(env, true));

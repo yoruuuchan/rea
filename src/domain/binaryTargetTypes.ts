@@ -24,6 +24,14 @@ export interface ElfFamilyMetadata {
   readonly flags: number;
 }
 
+/** Referenced CodeView debug symbols from a PE debug directory. */
+export interface PeCodeViewRecord {
+  readonly pdbPath: string;
+  readonly pdbFileName: string;
+  readonly guid: string | null;
+  readonly age: number;
+}
+
 /** Families whose parsed target variant carries `ElfFamilyMetadata`. */
 export const ELF_METADATA_ARCHITECTURES = [
   "mips",
@@ -170,6 +178,8 @@ export type BinaryTarget =
         | "non-executable";
       /** Whether the PE declares a non-empty CLI header data-directory entry. */
       readonly managed: boolean;
+      /** Referenced CodeView debug symbols from the PE debug directory, if present. */
+      readonly codeView?: PeCodeViewRecord;
     })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

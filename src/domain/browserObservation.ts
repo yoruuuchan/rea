@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { urlDeclaresQueryOrFragment } from "./urlComponents.js";
+import { parseUrlQueryParameterNames } from "./recordedTransportUrl.js";
 
 const parseExactOrigin = (value: string): string | undefined => {
   let url: URL;
@@ -254,7 +255,7 @@ export const sanitizeBrowserUrl = (value: string): SanitizedBrowserUrl => {
     };
   }
   const hadCredentials = parsed.username !== "" || parsed.password !== "";
-  const names = [...parsed.searchParams.keys()];
+  const names = [...parseUrlQueryParameterNames(parsed.search)];
   const sanitizedUrl = hadCredentials
     ? removeUrlUserInfo(value, parsed)
     : value;

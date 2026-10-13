@@ -86,13 +86,15 @@ export interface AnalysisInputIssue {
 /** Provider output failed provider-neutral application parsing. */
 export class AnalysisOutputError extends AnalysisError {
   readonly _tag = "AnalysisOutputError";
+  readonly cleanupOnly: boolean;
 
   constructor(
     readonly operation: string,
     readonly reason: string,
-    options?: AnalysisErrorOptions,
+    options?: AnalysisErrorOptions & { readonly cleanupOnly?: boolean },
   ) {
     super(`Invalid analysis output for ${operation}: ${reason}`, options);
+    this.cleanupOnly = options?.cleanupOnly ?? false;
   }
 }
 

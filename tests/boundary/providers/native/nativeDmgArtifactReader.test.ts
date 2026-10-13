@@ -17,6 +17,7 @@ import { execFileOutput } from "../../../../src/process/ExecFileOutput.js";
 import {
   ArtifactReaderFailure,
   type ArtifactEntry,
+  type ArtifactTraversalOmission,
 } from "../../../../src/artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
 import { DirectoryArtifactReader } from "../../../../src/artifacts/DirectoryArtifactReader.js";
@@ -473,10 +474,10 @@ describe("native DMG traversal shutdown", () => {
       .mockImplementation(async function* (
         this: DirectoryArtifactReader,
         signal?: AbortSignal,
-        descendInto?: (path: string) => boolean,
+        selection?: Parameters<DirectoryArtifactReader["entries"]>[1],
       ) {
         const iterator = originalEntries
-          .call(this, signal, descendInto)
+          .call(this, signal, selection)
           [Symbol.asyncIterator]();
         try {
           for (;;) {
@@ -606,9 +607,20 @@ describe("native DMG artifact reader", () => {
       undefined,
       host,
     );
+    if (mountPoint === undefined) throw new Error("expected mounted directory");
+    if (process.platform !== "win32")
+      await execFileOutput("mkfifo", [join(mountPoint, "special.pipe")]);
     const entries = [];
-    for await (const entry of reader.entries()) entries.push(entry.path);
+    const omissions: ArtifactTraversalOmission[] = [];
+    for await (const entry of reader.entries(undefined, {
+      onOmission: (omission) => omissions.push(omission),
+    }))
+      entries.push(entry.path);
     expect(entries).toContain("image.dmg/Fixture/hello.txt");
+    if (process.platform !== "win32")
+      expect(omissions).toEqual([
+        { path: "image.dmg/Fixture/special.pipe", kind: "fifo" },
+      ]);
     const provenance = reader.provenance();
     const first = provenance[0];
     if (first === undefined) throw new Error("expected attachment provenance");

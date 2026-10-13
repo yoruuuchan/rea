@@ -12,7 +12,10 @@ import {
   cleanupOwnedProcessGroup,
   type ProcessCleanupResult,
 } from "../../../src/process/ProcessOwnership.js";
-import { prepareProcessOwnershipInspection } from "../../../src/process/ProcessOwnershipObservation.js";
+import {
+  prepareProcessOwnershipInspection,
+  systemProcessOwnershipHost,
+} from "../../../src/process/ProcessOwnershipObservation.js";
 import { waitForProviderProcessReady } from "../../fixtures/providerProcess.js";
 
 const command = (script: string) => ({
@@ -151,6 +154,127 @@ it("fails an accepted nonzero command when an output stream errors and cleans it
   });
   expect(cleanup).toHaveBeenCalledOnce();
 });
+
+it("marks an output collection error when the process itself exits zero", async () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  class FakeProcess extends EventEmitter {
+    readonly stdout = stdout;
+    readonly stderr = stderr;
+    exitCode: number | null = null;
+    signalCode: NodeJS.Signals | null = null;
+    readonly pid = 41235;
+    kill(): boolean {
+      return true;
+    }
+  }
+  const child = new FakeProcess();
+  const request = command("unused fake launcher command");
+  const failure = runOwnedCommand(
+    request,
+    { timeoutMs: 2_000, diagnosticBytes: 1024, acceptNonZeroExit: true },
+    {
+      launcher: async () => {
+        setImmediate(() => {
+          stdout.write("partial output");
+          stdout.destroy(new Error("fixture read failure"));
+          stderr.end();
+          child.exitCode = 0;
+          child.emit("exit", 0, null);
+          child.emit("close", 0, null);
+        });
+        return {
+          process: child,
+          ownership: {
+            runId: request.runId,
+            leaderPid: child.pid,
+            processGroupId: child.pid,
+          },
+          cleanup: async () => ({ cleaned: true, signaled: false }),
+        };
+      },
+    },
+  );
+
+  await expect(failure).rejects.toMatchObject({
+    reason: "process",
+    collectionFailure: true,
+    message: "stdout stream failed: fixture read failure",
+    snapshot: { stdout: { text: "partial output" }, exitCode: 0 },
+  });
+});
+
+it.skipIf(process.platform === "win32")(
+  "sweeps detached run-token descendants and preserves a pre-existing unrelated process",
+  async () => {
+    const runId = `rea-owned-descendant-test-${randomUUID()}`;
+    const unrelated = await spawnOwnedProviderProcess({
+      command: process.execPath,
+      arguments: ["-e", "setInterval(() => undefined, 1000)"],
+      runId: `${runId}-unrelated`,
+      hostEnvironment: process.env,
+    });
+    let descendantPid: number | undefined;
+    try {
+      const result = await runOwnedCommand(
+        {
+          ...command(`
+            const { spawn } = require("node:child_process");
+            const child = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], {
+              detached: true,
+              stdio: "ignore",
+            });
+            child.unref();
+            process.stdout.write(String(child.pid));
+          `),
+          runId,
+          sweepTokenOwnedProcesses: true,
+        },
+        { timeoutMs: 5_000, diagnosticBytes: 1024 },
+      );
+      descendantPid = Number(result.stdout.text);
+      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      let remainsLive = true;
+      const deadline = Date.now() + 2_000;
+      while (remainsLive && Date.now() < deadline) {
+        remainsLive = (await systemProcessOwnershipHost.listProcesses()).some(
+          ({ pid }) => pid === descendantPid,
+        );
+        if (remainsLive) await delay(25);
+      }
+      expect(remainsLive).toBe(false);
+      expect(() => process.kill(unrelated.process.pid!, 0)).not.toThrow();
+    } finally {
+      if (descendantPid !== undefined) {
+        try {
+          process.kill(descendantPid, "SIGKILL");
+        } catch {
+          // The run-token sweep may already have removed it.
+        }
+      }
+      await cleanupOwnedProcessGroup(unrelated.ownership);
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "fails before provider spawn when a requested ownership baseline cannot be captured",
+  async () => {
+    const baseline = vi
+      .spyOn(systemProcessOwnershipHost, "captureBaseline")
+      .mockRejectedValue(new Error("baseline unavailable"));
+    try {
+      await expect(
+        runOwnedCommand(
+          { ...command("process.exit(0)"), sweepTokenOwnedProcesses: true },
+          { timeoutMs: 2_000, diagnosticBytes: 1024 },
+        ),
+      ).rejects.toThrow("baseline unavailable");
+    } finally {
+      baseline.mockRestore();
+    }
+  },
+);
 
 it("cancels a real acquired process and independently releases it", async () => {
   const controller = new AbortController();

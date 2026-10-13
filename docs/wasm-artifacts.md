@@ -61,9 +61,24 @@ The tool profile preserves upstream release/source identity, resolved executable
 paths, executable digests, exact banners and arguments. Executable digests are
 checked again after each command. Caller-supplied tools are trusted programs;
 version and digest recording are not publisher authentication or an OS sandbox.
-Each subprocess has a 30-second deadline and 32 MiB combined output budget;
-truncation fails. All commands use existing owned-process cancellation and
-cleanup. Workspace cleanup failures remain explicit errors with resource paths.
+Each subprocess has a 30-second deadline and 32 MiB combined output budget.
+Inspection output past the budget fails with `resource_constraint`; an oversized
+`--version` probe still reports `unreadable_output`. Both streams share the
+budget, so a stream that starts after the other has filled it retains nothing.
+The captured output keeps up to the first 4,096 bytes that each stream retained,
+each stream's retained byte count, and the exit code and signal. Retained text
+can end in U+FFFD where the budget cut a multi-byte character.
+
+These excerpts bound the returned diagnostic text.
+[PR #2117](https://github.com/morluto/rea/pull/2117) reports elapsed time, CPU
+time, and peak process-family memory, including WABT children, for warm Linux
+x64 WABT 1.0.42 CLI workflows; those costs did not change outside measurement
+noise. Agent token usage and truly cold workflows remain
+unmeasured. The underlying error cause still retains the full captured
+subprocess snapshot, so the excerpt does not establish lower retained memory
+or faster analysis.
+All commands use existing owned-process cancellation and cleanup. Workspace
+cleanup failures remain explicit errors with resource paths.
 
 WAT is a decoded representation, not original source or proof of runtime
 behavior. Custom annotations can preserve payloads, but WAT does not establish original

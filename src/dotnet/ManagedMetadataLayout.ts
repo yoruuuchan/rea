@@ -78,6 +78,8 @@ export interface ManagedMetadataLayout {
   readonly strings: MetadataStream;
   readonly guid: MetadataStream;
   readonly blob: MetadataStream;
+  /** Optional: assemblies without `ldstr` literals may omit #US. */
+  readonly userStrings: MetadataStream | null;
   readonly tables: ReadonlyMap<number, MetadataTableLayout>;
   readonly rowCounts: readonly number[];
   readonly stringIndexSize: 2 | 4;
@@ -431,6 +433,7 @@ export const readManagedMetadataLayout = (
     strings: requireStream(streams, "#Strings"),
     guid: requireStream(streams, "#GUID"),
     blob: requireStream(streams, "#Blob"),
+    userStrings: streams.get("#US") ?? null,
     tables,
     rowCounts,
     stringIndexSize: heaps.string,

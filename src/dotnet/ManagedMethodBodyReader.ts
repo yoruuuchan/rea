@@ -76,17 +76,25 @@ export const methodBody = (
     flags: 0,
   },
   budget?: ManagedDecodeBudget,
-): ManagedMethodBody => {
-  if (rva === 0) return emptyMethodBody(rva, "absent", null);
-  if (
+): {
+  readonly body: ManagedMethodBody;
+  /**
+   * Whether every CIL instruction was decoded, independent of exception-region
+   * validity. A body with no CIL, absent or native, has nothing left unscanned.
+   */
+  readonly scanned: boolean;
+} => {
+  // Without CIL there is nothing left unscanned.
+  if (rva === 0)
+    return { body: emptyMethodBody(rva, "absent", null), scanned: true };
+  const native =
     (implementation.implFlags & 7) !== 0 ||
-    (implementation.flags & 0x2000) !== 0
-  )
-    return emptyMethodBody(
-      rva,
-      "partial",
-      "CIL decoding is unavailable for native, runtime, unmanaged, or P/Invoke implementations",
-    );
+    (implementation.flags & 0x2000) !== 0;
+  if (native) {
+    const issue =
+      "CIL decoding is unavailable for native, runtime, unmanaged, or P/Invoke implementations";
+    return { body: emptyMethodBody(rva, "partial", issue), scanned: true };
+  }
   try {
     const offset = pe.rvaToOffset(rva, 1, "method.body");
     const methodExtent = pe.rvaAvailableBytes(rva, "method.body");
@@ -181,7 +189,10 @@ export const methodBody = (
           ? "Instruction decoding stopped before the end of the method body"
           : null),
     };
-    return budget === undefined ? body : admitManagedProjection(body, budget);
+    return {
+      body: budget === undefined ? body : admitManagedProjection(body, budget),
+      scanned: decoded.issue === null && decoded.truncated === 0,
+    };
   } catch (cause: unknown) {
     if (
       cause instanceof ManagedReaderFailure &&
@@ -193,11 +204,14 @@ export const methodBody = (
       !(cause instanceof RangeError)
     )
       throw cause;
-    return emptyMethodBody(
-      rva,
-      "malformed",
-      cause instanceof Error ? cause.message : "Method body parse failed",
-    );
+    return {
+      body: emptyMethodBody(
+        rva,
+        "malformed",
+        cause instanceof Error ? cause.message : "Method body parse failed",
+      ),
+      scanned: false,
+    };
   } finally {
     // IL and exception-section bookkeeping coexist until the body is built.
     budget?.releaseTransient();

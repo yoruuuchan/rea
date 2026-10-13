@@ -313,4 +313,38 @@ describe("overview document identity through MCP", () => {
         .isError,
     ).toBe(true);
   });
+
+  it("reports document selection unavailable when neither current-document nor list-documents is supported", async () => {
+    const client = await connect({
+      execute: (name) => {
+        if (name === "current_document" || name === "list_documents")
+          return Promise.resolve(
+            err(
+              new AnalysisCapabilityUnavailableError(
+                "fixture",
+                name,
+                "provider lacks document selection",
+              ),
+            ),
+          );
+        if (name === "list_segments") return Promise.resolve(ok([]));
+        if (name === "list_procedures" || name === "list_strings")
+          return Promise.resolve(ok([]));
+        throw new Error(`Unexpected analysis operation: ${name}`);
+      },
+    });
+    const result = await client.callTool({
+      name: "binary_overview",
+      arguments: {},
+    });
+    expect(result.isError).toBe(true);
+    expect(parseMcpToolError(result).error).toMatchObject({
+      code: "capability_unavailable",
+      details: {
+        provider_id: "fixture",
+        operation: "list_documents",
+        reason: expect.stringContaining("provider lacks document selection"),
+      },
+    });
+  });
 });

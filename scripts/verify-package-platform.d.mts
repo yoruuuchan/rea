@@ -8,4 +8,10 @@ export function assertLinuxPackageProviderFailure(execution: {
 export function verifyPackagePlatform(input: {
   readonly cli: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly platform?: string;
+  readonly runCommand?: (
+    command: string,
+    arguments_: readonly string[],
+    environment: Readonly<Record<string, string | undefined>>,
+  ) => Promise<string>;
 }): Promise<void>;

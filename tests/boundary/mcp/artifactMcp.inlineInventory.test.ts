@@ -254,8 +254,11 @@ const assertHistoricalInventory = async (
   const { archive, parent, inventoryEvidence, graph } = input;
   // Historical records may omit a later inventory field. Input parsing must
   // not insert defaults inside that authenticated child Evidence.
-  const { integrity_contradictions: _contradictions, ...legacyInventory } =
-    graph;
+  const {
+    integrity_contradictions: _contradictions,
+    coverage: _coverage,
+    ...legacyInventory
+  } = graph;
   const legacyTarget = {
     path: archive,
     sha256: graph.manifest.root_sha256,
@@ -275,6 +278,9 @@ const assertHistoricalInventory = async (
   expect(
     legacyInspection.substeps[0]?.evidence.normalized_result,
   ).not.toHaveProperty("integrity_contradictions");
+  expect(
+    legacyInspection.substeps[0]?.evidence.normalized_result,
+  ).not.toHaveProperty("coverage");
   const legacyParent = createEvidence(legacyTarget, parent.provider, {
     operation: "inspect_artifact",
     parameters: {},

@@ -1,9 +1,11 @@
 import {
+  declaredFileRange,
   GoBinaryFormatFailure,
   GoBinaryReader,
   mappedFileOffset,
   type GoBinaryContainer,
   type GoFileMapping,
+  type GoImageSection,
   type GoZeroFillMapping,
 } from "./GoBinaryContainer.js";
 
@@ -30,6 +32,7 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
     );
   const mappings: GoFileMapping[] = [];
   const zeroFills: GoZeroFillMapping[] = [];
+  const sections: GoImageSection[] = [];
   const named: GoFileMapping[] = [];
   let fallback: GoFileMapping | null = null;
   let offset = commandStart;
@@ -105,11 +108,25 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
         fallback = mapping;
       for (let sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++) {
         const section = offset + segmentHeader + sectionIndex * sectionWidth;
-        if (
-          fixedName(reader.range(section, 16, "Mach-O section name")) !==
-          "__go_buildinfo"
-        )
-          continue;
+        const sectionName = fixedName(
+          reader.range(section, 16, "Mach-O section name"),
+        );
+        sections.push(
+          machoImageSection({
+            reader,
+            bits,
+            wide,
+            header: section,
+            name: `${fixedName(reader.range(section + 16, 16, "Mach-O section segment"))},${sectionName}`,
+            protection,
+            unmapped: unmapped || mapping === undefined,
+            segmentAddress: address,
+            segmentMemorySize: memorySize,
+            segmentFileOffset: fileOffset,
+            segmentFileSize: fileSize,
+          }),
+        );
+        if (sectionName !== "__go_buildinfo") continue;
         if (unmapped)
           throw new GoBinaryFormatFailure(
             "malformed",
@@ -175,7 +192,71 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
     byte_order: little ? "little" : "big",
     mappings,
     zero_fills: zeroFills,
+    sections,
     search: named[0] ?? fallback,
+  };
+};
+
+const machoImageSection = ({
+  reader,
+  bits,
+  wide,
+  header,
+  name,
+  protection,
+  unmapped,
+  segmentAddress,
+  segmentMemorySize,
+  segmentFileOffset,
+  segmentFileSize,
+}: {
+  readonly reader: GoBinaryReader;
+  readonly bits: 32 | 64;
+  readonly wide: boolean;
+  readonly header: number;
+  readonly name: string;
+  readonly protection: number;
+  readonly unmapped: boolean;
+  readonly segmentAddress: bigint;
+  readonly segmentMemorySize: bigint;
+  readonly segmentFileOffset: bigint;
+  readonly segmentFileSize: bigint;
+}): GoImageSection => {
+  const flags = reader.u32(header + (wide ? 64 : 56));
+  const zeroFill = [1, 0xc, 0x12].includes(flags & 0xff);
+  const sectionAddress = reader.word(header + 32, bits);
+  const sectionSize = reader.word(header + (wide ? 40 : 36), bits);
+  const sectionOffset = BigInt(reader.u32(header + (wide ? 48 : 40)));
+  const addressDelta = sectionAddress - segmentAddress;
+  const fileDelta = sectionOffset - segmentFileOffset;
+  const inSegmentMemory =
+    addressDelta >= 0n &&
+    addressDelta <= segmentMemorySize &&
+    sectionSize <= segmentMemorySize - addressDelta;
+  const inSegmentFile =
+    fileDelta >= 0n &&
+    fileDelta <= segmentFileSize &&
+    sectionSize <= segmentFileSize - fileDelta;
+  const range = unmapped
+    ? { offset: 0, size: 0, file_backed: false }
+    : declaredFileRange(
+        reader.bytes.length,
+        BigInt(reader.u32(header + (wide ? 48 : 40))),
+        reader.word(header + (wide ? 40 : 36), bits),
+      );
+  const fileBacked =
+    range.file_backed && !zeroFill && inSegmentMemory && inSegmentFile;
+  const readOnly =
+    fileBacked &&
+    (protection & 1) !== 0 &&
+    (protection & 2) === 0 &&
+    (flags & 0x80000400) === 0;
+  return {
+    name,
+    ...range,
+    file_backed: fileBacked,
+    read_only: readOnly,
+    compressed: false,
   };
 };
 

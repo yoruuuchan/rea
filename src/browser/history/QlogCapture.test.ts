@@ -186,6 +186,21 @@ it("excludes structural auth material and explicit normalized values without gue
   expect(traces[0]?.incomplete_fact_records).toContain(2);
 });
 
+it("omits a hidden derived total for a stream with more contributions than call arguments allow", () => {
+  const events = Array.from({ length: 130 }, (_, index) =>
+    event(
+      Array.from({ length: 1_000 }, (_, offset) =>
+        frame(index * 1_000 + offset, 1),
+      ),
+    ),
+  );
+  const { traces } = facts(capture(events), ["130000"]);
+  expect(traces[0]?.streams).toEqual([]);
+  expect(traces[0]?.incomplete_fact_records).toEqual(
+    Array.from({ length: 130 }, (_, ordinal) => ordinal),
+  );
+});
+
 it("hides marked ancestor keys and safe derived sums while still validating hidden subtrees", () => {
   const text = capture([event([frame(0, 3), frame(3, 4)])]);
   expect(facts(text, ["7"]).traces[0]?.streams).toEqual([]);

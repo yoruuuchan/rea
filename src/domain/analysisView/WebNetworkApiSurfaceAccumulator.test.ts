@@ -26,6 +26,36 @@ const add = (
   if (!result.ok) throw result.error;
 };
 
+it("bounds query parser expansion before publishing or merging observed names", () => {
+  const accumulator = new WebNetworkApiSurfaceAccumulator(64 * 1024, true);
+  add(accumulator, record(0, "/products?kept=1"));
+  const before = accumulator.page(0, 1);
+  expect(
+    accumulator.add(record(1, `/products?${"x=1&".repeat(200)}`)),
+  ).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisResourceConstraintError" },
+  });
+  expect(accumulator.page(0, 1)).toEqual(before);
+  add(accumulator, record(2, "/products?after=2"));
+  expect(accumulator.page(0, 1).groups[0]?.query_parameter_names).toEqual([
+    { name: "after", record_ordinals: [2] },
+    { name: "kept", record_ordinals: [0] },
+  ]);
+});
+
+it("charges each retained name once and each name's ordinal once per request", () => {
+  const accumulator = new WebNetworkApiSurfaceAccumulator(1024 * 1024, true);
+  for (let ordinal = 0; ordinal < 1000; ordinal += 1)
+    add(accumulator, record(ordinal, "/products?category=one&category=two"));
+  expect(accumulator.page(0, 1).groups[0]?.query_parameter_names).toEqual([
+    {
+      name: "category",
+      record_ordinals: Array.from({ length: 1000 }, (_, index) => index),
+    },
+  ]);
+});
+
 it("admits the capture schema clone and grouping against the same budget", () => {
   const sample = record(0, `/${"a".repeat(1200)}`);
   const isolated = new WebNetworkApiSurfaceAccumulator(64 * 1024);

@@ -114,18 +114,34 @@ describe("Hermes YAML shape diagnostics", () => {
       "!!omap [{rea: {command: rea, args: [mcp]}}]",
       "!!timestamp 2001-12-15",
       "!!binary cmVh",
-    ].flatMap((value) => [
-      {
-        original: `${value}\n`,
-        problem: "The configuration root must be an object",
-      },
-      {
-        original: `mcp_servers: ${value}\n`,
-        problem: '"mcp_servers" must be an object',
-      },
-    ]),
+    ]
+      .flatMap((value) => [
+        {
+          original: `${value}\n`,
+          problem: "The configuration root must be an object",
+        },
+        {
+          original: `mcp_servers: ${value}\n`,
+          problem: '"mcp_servers" must be an object',
+        },
+      ])
+      .concat(
+        // An explicit null root is a value, not an empty file.
+        [
+          "null\n",
+          "~\n",
+          "# Hermes configuration\nnull\n",
+          "--- ~\n",
+          "--- !!null\n",
+          '!!null ""\n',
+          "--- &empty\n",
+        ].map((original) => ({
+          original,
+          problem: "The configuration root must be an object",
+        })),
+      ),
   )(
-    "blocks setup and uninstall before changes for tagged non-record YAML: $original",
+    "blocks setup and uninstall before changes for tagged or null non-record YAML: $original",
     async ({ original, problem }) => {
       const { home, client } = await hermesClient();
       const cursor = join(home, ".cursor", "mcp.json");
@@ -281,7 +297,36 @@ mcp_servers:
     });
   });
 
-  it.each(["", "\n"])(
+  // Comments and a bare document marker parse to a null document, like an
+  // empty file, and are kept ahead of the new registration.
+});
+
+describe("Hermes YAML empty configurations", () => {
+  it("rejects multiple YAML documents before treating an empty first root as absent", async () => {
+    const { client } = await hermesClient();
+    const original =
+      "---\n---\nmcp_servers:\n  rea:\n    command: rea\n    args: [mcp]\n";
+    await writeFile(client.configPath, original);
+    expect(await inspectClientConfiguration(client, {}, command)).toMatchObject(
+      { status: "invalid" },
+    );
+    expect(await configureClientConfiguration(client, {}, command)).toEqual({
+      status: "failed",
+      reason: "readback",
+    });
+    expect(await readFile(client.configPath, "utf8")).toBe(original);
+    await expect(
+      readFile(`${client.configPath}.rea.backup`, "utf8"),
+    ).rejects.toThrow();
+  });
+
+  it.each([
+    "",
+    "\n",
+    "# Hermes configuration\n",
+    "---\n",
+    "---\n# Hermes configuration\n",
+  ])(
     "configures an empty config.yaml %j as a new document",
     async (original) => {
       const { home, client } = await hermesClient();
@@ -289,7 +334,10 @@ mcp_servers:
       expect(
         (await configureClientConfiguration(client, {}, command)).status,
       ).toBe("configured");
-      expect(parseYaml(await readFile(client.configPath, "utf8"))).toEqual({
+      const text = await readFile(client.configPath, "utf8");
+      const kept = original.trimEnd();
+      expect(text.slice(0, kept.length)).toBe(kept);
+      expect(parseYaml(text)).toEqual({
         mcp_servers: {
           rea: { command: command[0], args: command.slice(1), enabled: true },
         },

@@ -215,6 +215,97 @@ it("advertises exact valid schemas and records inline WASM interface evidence wi
   expect(close).toHaveBeenCalled();
 });
 
+it("attributes rejected WASM paths to their selected fields before provider work", async () => {
+  const value = wasmArtifactFixture();
+  value.glue = [
+    {
+      artifact: { path: "/glue.js", sha256: "b".repeat(64), bytes: 0 },
+      parse_status: "complete",
+      references: [],
+    },
+  ];
+  value.candidates.push({
+    path: "/other.wasm",
+    sha256: "c".repeat(64),
+    bytes: 8,
+  });
+  const validInput = {
+    path: value.artifact.path,
+    glue_paths: ["/glue.js"],
+    candidate_paths: ["/other.wasm"],
+  };
+  const inspect = vi.fn(() =>
+    Promise.resolve(ok(wasmArtifactExecution(value))),
+  );
+  const harness = await createApplicationMcpHarness({
+    serverOptions: {
+      wasmArtifact: new WasmArtifactService({
+        close: () => Promise.resolve(),
+        inspect,
+      }),
+    },
+  });
+  onTestFinished(harness.close);
+  for (const [input, paths] of [
+    [{ path: "relative.wasm" }, [["path"]]],
+    [
+      { path: value.artifact.path, glue_paths: ["relative.js"] },
+      [["glue_paths", 0]],
+    ],
+    [
+      { path: value.artifact.path, candidate_paths: ["relative.wasm"] },
+      [["candidate_paths", 0]],
+    ],
+    [
+      {
+        path: value.artifact.path,
+        glue_paths: ["/glue.js", "relative.js"],
+        candidate_paths: ["/other.wasm", "relative.wasm"],
+      },
+      [
+        ["glue_paths", 1],
+        ["candidate_paths", 1],
+      ],
+    ],
+    [
+      {
+        path: "relative.wasm",
+        glue_paths: ["relative.js"],
+        candidate_paths: ["relative-candidate.wasm"],
+      },
+      [["path"], ["glue_paths", 0], ["candidate_paths", 0]],
+    ],
+  ] as const) {
+    const response = await harness.client.callTool({
+      name: "inspect_wasm_artifact",
+      arguments: input,
+    });
+    const failure = parseMcpToolError(response).error;
+    expect(failure.code).toBe("invalid_request");
+    const { issues } = z
+      .object({ issues: z.array(z.unknown()) })
+      .parse(failure.details);
+    expect(issues).toEqual(
+      paths.map((path) => ({
+        path,
+        reason: "invalid_format",
+        message: "Expected an absolute filesystem path on this host.",
+      })),
+    );
+  }
+  expect(inspect).not.toHaveBeenCalled();
+  const valid = await harness.client.callTool({
+    name: "inspect_wasm_artifact",
+    arguments: validInput,
+  });
+  expect(valid.isError).not.toBe(true);
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(
+    validInput,
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  await harness.client.ping();
+});
+
 it("rejects a WASM provider response with a non-file subject before recording Evidence", async () => {
   const value = wasmArtifactFixture();
   const execution = wasmArtifactExecution(value);

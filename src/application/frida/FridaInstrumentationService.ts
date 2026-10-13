@@ -12,6 +12,7 @@ import {
   AnalysisInputError,
 } from "../../domain/analysisErrorCore.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { FridaScriptLoadCancelledError } from "./FridaInstrumentationPort.js";
 import type {
   FridaDeviceSelector,
   FridaInstrumentationPort,
@@ -181,8 +182,17 @@ export class FridaInstrumentationService {
   async loadScript(
     sessionId: string,
     source: FridaScriptSource,
+    signal?: AbortSignal,
   ): Promise<Result<Evidence, AnalysisError>> {
-    const loaded = await this.#provider.loadScript(sessionId, source);
+    if (signal?.aborted)
+      return err(
+        new AnalysisCancelledError("load_frida_script", {
+          cause: signal.reason,
+        }),
+      );
+    const loaded = await this.#provider.loadScript(sessionId, source, signal);
+    if (!loaded.ok && loaded.error instanceof FridaScriptLoadCancelledError)
+      return err(cancelledScriptEvidence(sessionId, loaded.error));
     return loaded.ok
       ? ok(
           fridaEvidence("load_frida_script", scriptOutput(loaded.value), {
@@ -192,12 +202,12 @@ export class FridaInstrumentationService {
       : loaded;
   }
 
-  resumeSession(sessionId: string) {
-    return this.#provider.resumeSession(sessionId);
+  resumeSession(sessionId: string, signal?: AbortSignal) {
+    return this.#provider.resumeSession(sessionId, signal);
   }
 
-  unloadScript(sessionId: string, scriptId: string) {
-    return this.#provider.unloadScript(sessionId, scriptId);
+  unloadScript(sessionId: string, scriptId: string, signal?: AbortSignal) {
+    return this.#provider.unloadScript(sessionId, scriptId, signal);
   }
 
   status(sessionId: string): FridaSessionStatus | undefined {
@@ -243,14 +253,19 @@ export class FridaInstrumentationService {
     const loaded = await this.#provider.loadScript(
       started.value.sessionId,
       input.source,
+      signal,
     );
+    let scriptObservation: FridaScriptObservation | undefined;
+    if (loaded.ok) scriptObservation = loaded.value;
+    else if (loaded.error instanceof FridaScriptLoadCancelledError)
+      scriptObservation = loaded.error.script;
     if (signal?.aborted)
       return this.#cancelSession(
         "instrument_with_frida",
         started.value,
         input,
         signal.reason,
-        loaded.ok ? loaded.value : undefined,
+        scriptObservation,
       );
     if (!loaded.ok) {
       const closed = await this.#provider.closeSession(started.value.sessionId);
@@ -267,6 +282,7 @@ export class FridaInstrumentationService {
     if (started.value.mode === "spawn") {
       const resumed = await this.#provider.resumeSession(
         started.value.sessionId,
+        signal,
       );
       if (signal?.aborted)
         return this.#cancelSession(
@@ -462,3 +478,23 @@ const sessionStatusOutput = (status: FridaSessionStatus) => ({
   messages: status.messages,
   messages_truncated: status.messagesTruncated,
 });
+
+const cancelledScriptEvidence = (
+  sessionId: string,
+  error: FridaScriptLoadCancelledError,
+): AnalysisCancelledError =>
+  new AnalysisCancelledError(error.operation, {
+    cause: error.cause,
+    cleanup: error.cleanup,
+    partialObservation: fridaEvidence(
+      error.operation,
+      {
+        ...scriptOutput(error.script),
+        cleanup_error: error.cleanup?.reason ?? null,
+        script_cleanup: error.cleanupIncomplete
+          ? "incomplete_or_unknown"
+          : "released",
+      },
+      { session_id: sessionId },
+    ),
+  });

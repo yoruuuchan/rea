@@ -8,6 +8,7 @@ import {
   ArtifactReaderFailure,
   type ArtifactEntry,
   type ArtifactReader,
+  type ArtifactTraversalOptions,
 } from "./ArtifactReader.js";
 import { DirectoryArtifactReader } from "./DirectoryArtifactReader.js";
 import {
@@ -149,13 +150,24 @@ export class NativeDmgArtifactReader implements ArtifactReader {
     this.host = host ?? createSystemHost(environment);
   }
 
-  async *entries(signal?: AbortSignal): AsyncIterable<ArtifactEntry> {
+  async *entries(
+    signal?: AbortSignal,
+    options?: ArtifactTraversalOptions,
+  ): AsyncIterable<ArtifactEntry> {
     await this.#ensureAttached(signal);
     const directory = this.#directory;
     if (directory === undefined)
       throw new ArtifactReaderFailure("unavailable", "DMG is not attached");
     const prefix = basename(this.path);
-    const entries = directory.entries(signal)[Symbol.asyncIterator]();
+    const entries = directory
+      .entries(signal, {
+        onOmission: (omission) =>
+          options?.onOmission?.({
+            ...omission,
+            path: `${prefix}/${omission.path}`,
+          }),
+      })
+      [Symbol.asyncIterator]();
     try {
       for (;;) {
         if (this.#closed) return;

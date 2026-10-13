@@ -498,6 +498,106 @@ it("reports host denial before target mismatch but keeps composed workflow prere
   ).toBe("target_required");
 });
 
+describe("binary_overview capability requirements", () => {
+  it("admits a provider with current_document and other mandatory capabilities", () => {
+    const capabilities = [
+      "list_segments",
+      "current_document",
+      "list_procedures",
+      "list_strings",
+    ].map((operation) => ({ operation, available: true, reason: null }));
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({
+      available: true,
+      reason: "available",
+      remediation: null,
+    });
+  });
+
+  it("admits a provider with list_documents and other mandatory capabilities", () => {
+    const capabilities = [
+      "list_segments",
+      "list_documents",
+      "list_procedures",
+      "list_strings",
+    ].map((operation) => ({ operation, available: true, reason: null }));
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({
+      available: true,
+      reason: "available",
+      remediation: null,
+    });
+  });
+
+  it("reports document selection remediation when neither current_document nor list_documents is declared", () => {
+    const capabilities = [
+      "list_segments",
+      "list_procedures",
+      "list_strings",
+    ].map((operation) => ({ operation, available: true, reason: null }));
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({
+      available: false,
+      reason: "provider_missing",
+      remediation:
+        "Configure a provider for one of: current_document, list_documents.",
+    });
+  });
+
+  it("reports missing segment enumeration independently when segments are missing", () => {
+    const capabilities = [
+      "current_document",
+      "list_procedures",
+      "list_strings",
+    ].map((operation) => ({ operation, available: true, reason: null }));
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({
+      available: false,
+      reason: "provider_missing",
+      remediation: "Configure a provider for required operation list_segments.",
+    });
+  });
+
+  it("reports provider_unavailable when declared document selection capability is unavailable", () => {
+    const capabilities = [
+      { operation: "list_segments", available: true, reason: null },
+      {
+        operation: "current_document",
+        available: false,
+        reason: "Document view is closed",
+      },
+      { operation: "list_procedures", available: true, reason: null },
+      { operation: "list_strings", available: true, reason: null },
+    ];
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({
+      available: false,
+      reason: "provider_unavailable",
+      remediation: "Document view is closed",
+    });
+  });
+});
+
 describe("trace_feature requirements", () => {
   const capabilities = (operations: readonly string[]) =>
     operations.map((operation) => ({

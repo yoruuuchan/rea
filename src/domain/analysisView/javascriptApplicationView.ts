@@ -3,12 +3,12 @@ import {
   type AnalysisInputIssue,
 } from "../analysisErrorCore.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
-import { uniqueSorted } from "../canonicalOrdering.js";
 import { jsonObjectSchema, type JsonValue } from "../jsonValue.js";
 import type { JavaScriptApplicationAnalysisResult } from "../javascript/javascriptApplicationAnalysis.js";
 import type { ApplicationNode } from "../javascript/javascriptApplicationGraphSchemas.js";
 import { err, ok, type Result } from "../result.js";
 import {
+  boundedViewMessages,
   completeWithinViewCoverage as completeCoverage,
   pageViewCoverage as pageCoverage,
 } from "./analysisViewCoverage.js";
@@ -136,23 +136,20 @@ const applicationUnknownCount = (
     0,
   );
 
-const javascriptUnknowns = (
+const javascriptCoverageUnknowns = (
   analysis: JavaScriptApplicationAnalysisResult,
 ): readonly string[] => {
-  const unknowns = [
-    ...analysis.limitations,
-    ...analysis.graph.limitations,
-    ...analysis.semantic_graph.limitations,
-  ];
+  const unknowns: string[] = [];
   if (analysis.graph.coverage.status !== "complete")
     unknowns.push(`graph.coverage.status is ${analysis.graph.coverage.status}`);
   if (analysis.semantic_graph.coverage.status !== "complete")
     unknowns.push(
       `semantic_graph.coverage.status is ${analysis.semantic_graph.coverage.status}`,
     );
-  if (applicationUnknownCount(analysis) > 0)
+  const applicationUnknowns = applicationUnknownCount(analysis);
+  if (applicationUnknowns > 0)
     unknowns.push(
-      `${String(applicationUnknownCount(analysis))} application graph unknowns remain in the parent Evidence.`,
+      `${String(applicationUnknowns)} application graph unknowns remain in the parent Evidence.`,
     );
   if (analysis.semantic_graph.unknowns.length > 0)
     unknowns.push(
@@ -164,22 +161,33 @@ const javascriptUnknowns = (
 const parentFields = (
   parent: AnalysisViewParent,
   analysis: JavaScriptApplicationAnalysisResult,
-) => ({
-  parent_evidence_id: parent.evidenceId,
-  parent_operation: "analyze_javascript_application" as const,
-  parent_digest: parent.evidenceId.slice(3),
-  artifact: {
-    path: analysis.input_path,
-    sha256: analysis.root_artifact_sha256,
-  },
-  limitations: uniqueSorted([
-    ...parent.limitations,
+) => {
+  const limitations = [
     ...analysis.limitations,
     ...analysis.graph.limitations,
     ...analysis.semantic_graph.limitations,
-  ]),
-  unknowns: uniqueSorted([...javascriptUnknowns(analysis)]),
-});
+  ];
+  return {
+    parent_evidence_id: parent.evidenceId,
+    parent_operation: "analyze_javascript_application" as const,
+    parent_digest: parent.evidenceId.slice(3),
+    artifact: {
+      path: analysis.input_path,
+      sha256: analysis.root_artifact_sha256,
+    },
+    limitations: boundedViewMessages(
+      [...parent.limitations, ...limitations],
+      parent.evidenceId,
+      "limitations",
+    ),
+    unknowns: boundedViewMessages(
+      limitations,
+      parent.evidenceId,
+      "unknowns",
+      javascriptCoverageUnknowns(analysis),
+    ),
+  };
+};
 
 const selectModule = (
   modules: ReturnType<typeof moduleEntries>,

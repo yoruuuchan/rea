@@ -188,8 +188,11 @@ export const artifactGraphManifestSchema = z.object({
   edge_count: z.number().int().min(0),
 });
 
-/** Whether the inventory producer covered its modeled child-entry scope. */
-export const artifactInventoryCoverageSchema = z.enum(["complete", "partial"]);
+/** Producer-owned traversal coverage; content certainty remains on each occurrence. */
+export const artifactInventoryCoverageSchema = z.strictObject({
+  scope: z.enum(["root", "container-entries"]),
+  status: z.enum(["complete", "unknown"]),
+});
 export type ArtifactInventoryCoverage = z.infer<
   typeof artifactInventoryCoverageSchema
 >;
@@ -202,15 +205,19 @@ export const artifactInventoryResultSchema = z.object({
   edges: z.array(artifactEdgeSchema),
   provenance: z.array(artifactCommandSchema),
   integrity_contradictions: z.array(integrityContradictionSchema).default([]),
+  // Omitted by older retained Evidence; the inventory parser owns its compatibility policy.
+  coverage: artifactInventoryCoverageSchema.optional(),
   limitations: z.array(z.string()),
   /** Optional only for persisted inventory Evidence written before this field. */
-  coverage_status: artifactInventoryCoverageSchema.optional(),
+  coverage_status: z.enum(["complete", "partial"]).optional(),
 });
 
-/** Current inventory producers always classify the coverage they examined. */
+/** Current producers always declare coverage; historical Evidence inputs may omit it. */
 export const artifactInventoryOutputSchema =
-  artifactInventoryResultSchema.extend({
-    coverage_status: artifactInventoryCoverageSchema,
+  artifactInventoryResultSchema.safeExtend({
+    coverage: artifactInventoryCoverageSchema,
+    coverage_status:
+      artifactInventoryResultSchema.shape.coverage_status.unwrap(),
   });
 export type ArtifactInventoryOutput = z.infer<
   typeof artifactInventoryOutputSchema

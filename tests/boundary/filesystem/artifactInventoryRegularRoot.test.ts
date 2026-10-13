@@ -52,3 +52,22 @@ it("rejects a root path replaced between its initial stat and open", async () =>
     message: `Root artifact changed before inventory: ${path}`,
   });
 });
+
+it("keeps unavailable container traversal distinct from observed root bytes", async () => {
+  const root = await createTestTempDirectory("rea-artifact-root-scope-");
+  const path = join(root, "fixture.pkg");
+  // The recognized XAR prefix selects PKG inventory; no child decoder is installed.
+  await writeFile(path, Buffer.from("xar!fixture"));
+  const inventory = await inventoryArtifact(path);
+  expect(inventory.manifest).toMatchObject({
+    root_format: "pkg",
+    node_count: 1,
+    occurrence_count: 1,
+    edge_count: 0,
+  });
+  expect(inventory.occurrences[0]?.hash_status).toBe("verified");
+  expect(inventory.coverage).toEqual({
+    scope: "container-entries",
+    status: "unknown",
+  });
+});

@@ -112,6 +112,12 @@ function expectKnownAuthorityHints(tools: readonly ToolSchemas[]): void {
       idempotentHint: false,
       openWorldHint: false,
     },
+    start_gdb_session: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     export_web_scripts: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -142,6 +148,12 @@ function expectKnownAuthorityHints(tools: readonly ToolSchemas[]): void {
     import_evidence_bundle: {
       readOnlyHint: false,
       destructiveHint: false,
+    },
+    execute_rizin_command: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
     },
   } as const;
 

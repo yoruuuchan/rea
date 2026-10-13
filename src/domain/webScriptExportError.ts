@@ -4,7 +4,7 @@ import type { AnalysisErrorOptions } from "./analysisErrorBase.js";
 /** Publication failure retaining its input/output target and cleanup state. */
 export class WebScriptExportError extends ArtifactOperationError {
   override readonly userMessage: string;
-  override readonly cleanupIncomplete: boolean;
+  override cleanupIncomplete: boolean;
   override readonly cleanupResources: readonly string[];
 
   constructor(

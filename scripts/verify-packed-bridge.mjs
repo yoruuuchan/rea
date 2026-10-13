@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const packedHopperBridge = "package/bridge/hopper_bridge.py";
+const packedCutterBridge = "package/bridge/cutter/rea_bridge.py";
 const packedGhidraBridge = "package/bridge/ghidra/ReaGhidraBridge.java";
 const packedGhidraActivator =
   "package/bridge/ghidra/ReaGhidraBundleActivator.java";
@@ -12,6 +13,7 @@ const packedGhidraActivator =
 export async function verifyPackedBridge({ workspace, tarball, packedFiles }) {
   for (const path of [
     packedHopperBridge,
+    packedCutterBridge,
     packedGhidraBridge,
     packedGhidraActivator,
   ]) {

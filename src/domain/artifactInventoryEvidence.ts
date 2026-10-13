@@ -18,7 +18,10 @@ import {
 } from "./artifactIdentity.js";
 import { parseEvidence, type Evidence } from "./evidence.js";
 import { artifactInspectionResultSchema } from "./artifactInspection.js";
-import { ZIP_NON_ENTRY_TAIL_LIMITATION } from "./zipPackageFormat.js";
+import {
+  isZipPackageFormat,
+  isZipInventoryScopeLimitation,
+} from "./zipPackageFormat.js";
 
 /** Complete or partially assembled inventory used by comparison workflows. */
 export interface InventorySet {
@@ -30,13 +33,17 @@ export interface InventorySet {
   readonly limitations: readonly string[];
   /** True when merged node, occurrence, and edge counts match the manifest. */
   readonly complete: boolean;
-  readonly coverage_status: ArtifactInventoryCoverage;
+  readonly coverage: ArtifactInventoryCoverage;
 }
 
 /** Whether all graph members are present and the producer reports full coverage. */
 export const hasCompleteInventoryCoverage = (
   inventory: InventorySet,
-): boolean => inventory.complete && inventory.coverage_status === "complete";
+  requiredScope: ArtifactInventoryCoverage["scope"],
+): boolean =>
+  inventory.complete &&
+  inventory.coverage.scope === requiredScope &&
+  inventory.coverage.status === "complete";
 
 export interface ParsedInventorySet {
   readonly evidence: readonly Evidence[];
@@ -132,11 +139,14 @@ const assembleInventoryResults = (
   const first = pages[0];
   if (first === undefined)
     throw new TypeError("Artifact inventory requires Evidence pages");
-  const coverageStatuses = new Set(pages.map(resolveInventoryCoverageStatus));
-  if (coverageStatuses.size !== 1)
-    throw new TypeError("Artifact inventory pages disagree on coverage status");
-  const coverageStatus = [...coverageStatuses][0]!;
   const manifestJson = canonicalJson(first.manifest, "Artifact inventory");
+  const coverageJson = canonicalJson(
+    {
+      coverage: first.coverage ?? null,
+      coverage_status: first.coverage_status ?? null,
+    },
+    "Artifact inventory coverage",
+  );
   const nodes = new Map<string, ArtifactNode>();
   const occurrences = new Map<string, ArtifactOccurrence>();
   const paths = new Map<string, ArtifactOccurrence>();
@@ -144,6 +154,18 @@ const assembleInventoryResults = (
   for (const page of pages) {
     if (canonicalJson(page.manifest, "Artifact inventory") !== manifestJson)
       throw new TypeError("Artifact inventory pages do not share one manifest");
+    if (
+      canonicalJson(
+        {
+          coverage: page.coverage ?? null,
+          coverage_status: page.coverage_status ?? null,
+        },
+        "Artifact inventory coverage",
+      ) !== coverageJson
+    )
+      throw new TypeError(
+        "Artifact inventory pages do not share one coverage declaration",
+      );
     if (
       canonicalJson(page.integrity_contradictions, "Artifact inventory") !==
       canonicalJson(first.integrity_contradictions, "Artifact inventory")
@@ -165,12 +187,11 @@ const assembleInventoryResults = (
     for (const edge of page.edges)
       mergeExact(edges, edge.edge_id, edge, "edge");
   }
-  const inventory = orderedInventory(
-    first,
-    pages,
-    { nodes, occurrences, edges },
-    coverageStatus,
-  );
+  const inventory = orderedInventory(first, pages, {
+    nodes,
+    occurrences,
+    edges,
+  });
   if (inventory.complete) validateCompleteInventory(inventory);
   return inventory;
 };
@@ -186,7 +207,6 @@ const orderedInventory = (
       ArtifactInventoryResult["edges"][number]
     >;
   },
-  coverageStatus: ArtifactInventoryCoverage,
 ): InventorySet => {
   const nodes = [...values.nodes.values()].sort((left, right) =>
     compareUnicodeCodePoints(left.artifact_id, right.artifact_id),
@@ -197,40 +217,78 @@ const orderedInventory = (
   const edges = [...values.edges.values()].sort((left, right) =>
     compareUnicodeCodePoints(left.edge_id, right.edge_id),
   );
+  const limitations = [
+    ...new Set(pages.flatMap((inventory) => inventory.limitations)),
+  ].sort(compareUnicodeCodePoints);
   return {
     manifest: first.manifest,
     nodes,
     occurrences,
     edges,
     integrityContradictions: first.integrity_contradictions,
-    limitations: [
-      ...new Set(pages.flatMap((inventory) => inventory.limitations)),
-    ].sort(compareUnicodeCodePoints),
+    limitations,
+    coverage: resolveInventoryCoverage({ ...first, limitations }),
     complete:
       nodes.length === first.manifest.node_count &&
       occurrences.length === first.manifest.occurrence_count &&
       edges.length === first.manifest.edge_count,
-    coverage_status: coverageStatus,
   };
 };
 
-const resolveInventoryCoverageStatus = (
+// Normalize both retained coverage formats at this owning boundary.
+const resolveInventoryCoverage = (
   inventory: ArtifactInventoryResult,
 ): ArtifactInventoryCoverage => {
-  if (inventory.coverage_status !== undefined) return inventory.coverage_status;
-  // Older retained Evidence has no typed status. Keep only its known
-  // informational notices complete; unknown limitation text fails closed.
-  return inventory.limitations.every(isKnownNonCoverageNotice)
-    ? "complete"
-    : "partial";
+  const legacy = legacyInventoryCoverage(
+    inventory.manifest.root_format,
+    inventory.limitations,
+    inventory.integrity_contradictions.length,
+  );
+  if (inventory.coverage !== undefined) {
+    if (
+      inventory.coverage_status !== undefined &&
+      (inventory.coverage.status === "complete") !==
+        (inventory.coverage_status === "complete")
+    )
+      throw new TypeError(
+        "Artifact inventory has conflicting coverage declarations",
+      );
+    return inventory.coverage;
+  }
+  return inventory.coverage_status === undefined
+    ? legacy
+    : {
+        ...legacy,
+        status:
+          inventory.coverage_status === "complete" ? "complete" : "unknown",
+      };
 };
 
-const isKnownNonCoverageNotice = (limitation: string): boolean =>
-  limitation === "Artifact has no child container entries." ||
-  limitation === ZIP_NON_ENTRY_TAIL_LIMITATION ||
-  /^\d+ integrity contradiction\(s\) were recorded; mismatched content is observed-untrusted\.$/u.test(
-    limitation,
-  );
+// Retained pre-coverage records cannot classify arbitrary prose. Recognize only
+// the historical producer vocabulary here; unfamiliar diagnostics remain unknown.
+const legacyInventoryCoverage = (
+  format: ArtifactInventoryResult["manifest"]["root_format"],
+  limitations: readonly string[],
+  contradictionCount: number,
+): ArtifactInventoryCoverage => ({
+  scope:
+    isZipPackageFormat(format) ||
+    ["directory", "asar", "dmg", "pkg", "mach-o-universal"].includes(format)
+      ? "container-entries"
+      : "root",
+  status: limitations.some(
+    (limitation) =>
+      limitation !== "Artifact has no child container entries." &&
+      !isZipInventoryScopeLimitation(limitation) &&
+      !(
+        contradictionCount > 0 &&
+        limitation ===
+          `${String(contradictionCount)} integrity contradiction(s) were recorded; mismatched content is observed-untrusted.`
+      ),
+  )
+    ? "unknown"
+    : "complete",
+});
 
 const validateCompleteInventory = (inventory: InventorySet): void => {
   const nodeIds = new Set(inventory.nodes.map(({ artifact_id: id }) => id));

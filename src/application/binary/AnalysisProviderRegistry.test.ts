@@ -186,6 +186,28 @@ describe("analysis provider registry: binding failures and cancellation", () => 
       expect(explicit.error.reason).toBe("target_unsupported");
   });
 
+  it("rejects an unknown environment preference even when every candidate rejects the target", async () => {
+    const alpha = candidate("alpha");
+    const misconfigured = new AnalysisProviderRegistry(
+      [alpha.provider],
+      "missing",
+    );
+
+    for (const selected of [
+      await misconfigured.select(ARTIFACT_TARGET),
+      await misconfigured.select(ARTIFACT_TARGET, "missing"),
+    ]) {
+      if (selected.ok) throw new Error("expected unknown provider rejection");
+      expect(projectAnalysisError(selected.error)).toMatchObject({
+        details: {
+          selection_reason: "unknown_provider",
+          requested_provider_id: "missing",
+          candidate_ids: ["alpha"],
+        },
+      });
+    }
+  });
+
   it("does not bind a profile with unresolved version or adapter failure", async () => {
     const unresolved = candidate("unresolved", { profile: "missing" });
     const failed = candidate("failed", { profile: "error" });

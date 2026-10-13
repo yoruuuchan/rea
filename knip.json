@@ -9,6 +9,7 @@
     "src/application/RealHopperAssertions.ts",
     "scripts/verify/fridaBindingsCompatibility.ts",
     "scripts/verify/termux/browser.mjs",
+    "scripts/verify-real-cutter.mjs",
     "scripts/verify-real-ghidra-noreturn.mjs",
     "tests/processOwnershipRunner.ts"
   ],
@@ -17,7 +18,12 @@
     "entry": ["docs/.vitepress/config.ts"]
   },
   "ignoreBinaries": ["mkfifo"],
-  "ignoreDependencies": ["electron", "esbuild", "webpack"],
+  "ignoreDependencies": [
+    "@stryker-mutator/command-runner",
+    "electron",
+    "esbuild",
+    "webpack"
+  ],
   "ignoreExportsUsedInFile": true,
   "rules": {
     "files": "error",

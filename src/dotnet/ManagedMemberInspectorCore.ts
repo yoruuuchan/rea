@@ -35,6 +35,9 @@ export type ManagedMemberRef = ManagedMemberInspection["member_refs"][number];
 export type ManagedCallEdge = ManagedMemberInspection["call_edges"][number];
 export type ManagedFieldAccess =
   ManagedMemberInspection["field_accesses"][number];
+export type ManagedUserString = NonNullable<
+  ManagedMemberInspection["user_strings"]
+>["literals"][number];
 export type ManagedSignature = ManagedMethod["signature"];
 export type ManagedMethodBody = ManagedMethod["body"];
 export type ManagedInstructionAnchor = ManagedMethodBody["anchors"][number];

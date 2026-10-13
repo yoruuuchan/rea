@@ -37,7 +37,9 @@ export const assertCleanLinuxHopperRuntime = async (
     if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
     let executable;
     try {
-      executable = await stat(`${procRoot}/${entry.name}/exe`, { bigint: true });
+      executable = await stat(`${procRoot}/${entry.name}/exe`, {
+        bigint: true,
+      });
     } catch (error) {
       if (error?.code === "ENOENT" || error?.code === "ESRCH") continue;
       // Other users' executables may be unreadable. The setup lane launches

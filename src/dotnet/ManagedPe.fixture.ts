@@ -53,6 +53,8 @@ interface ManagedPeFixtureOptions {
   readonly targetFramework?: string | null;
   readonly typeName?: string;
   readonly typeNamespace?: string;
+  /** Raw #US stream bytes; omitted means the metadata has no #US stream. */
+  readonly userStringHeap?: Buffer;
   readonly virtualSectionSize?: number;
 }
 
@@ -416,6 +418,56 @@ const fixedStringAttributeBlob = (value: string): Buffer => {
   return Buffer.concat([Buffer.from([1, 0, bytes.length]), bytes, u16(0)]);
 };
 
+/**
+ * Lay out ECMA-335 #US items (compressed length, UTF-16LE, terminal flag byte)
+ * and return the `ldstr` token that names each value.
+ */
+// ECMA-335 II.24.2.4 terminal flag: 1 when a code unit has a high byte or a
+// low byte in 0x01-0x08, 0x0E-0x1F, 0x27, 0x2D, or 0x7F.
+const userStringFlag = (text: Buffer): number => {
+  for (let index = 0; index < text.length; index += 2) {
+    const unit = text.readUInt16LE(index);
+    if (
+      unit > 0xff ||
+      (unit >= 0x01 && unit <= 0x08) ||
+      (unit >= 0x0e && unit <= 0x1f) ||
+      unit === 0x27 ||
+      unit === 0x2d ||
+      unit === 0x7f
+    )
+      return 1;
+  }
+  return 0;
+};
+
+/** A #US heap whose items carry the ECMA-335 terminal flag, and their tokens. */
+export const fixtureUserStringHeap = (
+  values: readonly string[],
+): { readonly heap: Buffer; readonly tokens: readonly string[] } => {
+  const items: Buffer[] = [Buffer.from([0])];
+  const tokens: string[] = [];
+  let size = 1;
+  for (const value of values) {
+    const text = Buffer.from(value, "utf16le");
+    const length = text.length + 1;
+    if (length > 0x3fff)
+      throw new RangeError("Managed PE fixture user string is too long");
+    const prefix =
+      length < 0x80
+        ? Buffer.from([length])
+        : Buffer.from([0x80 | (length >> 8), length & 0xff]);
+    tokens.push(`0x70${size.toString(16).padStart(6, "0")}`);
+    const item = Buffer.concat([
+      prefix,
+      text,
+      Buffer.from([userStringFlag(text)]),
+    ]);
+    items.push(item);
+    size += item.length;
+  }
+  return { heap: Buffer.concat(items), tokens };
+};
+
 const metadataStreamHeader = (
   relativeOffset: number,
   size: number,
@@ -428,12 +480,28 @@ const metadataStreamHeader = (
 };
 
 const metadataRoot = (
-  tables: Buffer,
-  strings: Buffer,
-  guid: Buffer,
-  blob: Buffer,
+  {
+    tables,
+    strings,
+    guid,
+    blob,
+    userStrings,
+  }: {
+    readonly tables: Buffer;
+    readonly strings: Buffer;
+    readonly guid: Buffer;
+    readonly blob: Buffer;
+    readonly userStrings?: Buffer | undefined;
+  },
   tableStreamName: "#~" | "#-" = "#~",
 ): Buffer => {
+  const streams: readonly (readonly [string, Buffer])[] = [
+    [tableStreamName, tables],
+    ["#Strings", strings],
+    ...(userStrings === undefined ? [] : [["#US", userStrings] as const]),
+    ["#GUID", guid],
+    ["#Blob", blob],
+  ];
   const version = Buffer.from("v4.0.30319\0\0", "utf8");
   const header = Buffer.concat([
     u32(0x424a_5342),
@@ -443,34 +511,27 @@ const metadataRoot = (
     u32(version.length),
     version,
     u16(0),
-    u16(4),
+    u16(streams.length),
   ]);
-  const streamHeaderSize =
-    metadataStreamHeader(0, 0, tableStreamName).length +
-    metadataStreamHeader(0, 0, "#Strings").length +
-    metadataStreamHeader(0, 0, "#GUID").length +
-    metadataStreamHeader(0, 0, "#Blob").length;
+  const streamHeaderSize = streams.reduce(
+    (total, [name]) => total + metadataStreamHeader(0, 0, name).length,
+    0,
+  );
   let offset = align4(header.length + streamHeaderSize);
-  const tablesOffset = offset;
-  offset = align4(offset + tables.length);
-  const stringsOffset = offset;
-  offset = align4(offset + strings.length);
-  const guidOffset = offset;
-  offset = align4(offset + guid.length);
-  const blobOffset = offset;
-  const headers = Buffer.concat([
-    metadataStreamHeader(tablesOffset, tables.length, tableStreamName),
-    metadataStreamHeader(stringsOffset, strings.length, "#Strings"),
-    metadataStreamHeader(guidOffset, guid.length, "#GUID"),
-    metadataStreamHeader(blobOffset, blob.length, "#Blob"),
-  ]);
-  const root = Buffer.alloc(align4(blobOffset + blob.length));
+  const placed = streams.map(([name, data]) => {
+    const at = offset;
+    offset = align4(offset + data.length);
+    return { name, data, at };
+  });
+  const headers = Buffer.concat(
+    placed.map(({ name, data, at }) =>
+      metadataStreamHeader(at, data.length, name),
+    ),
+  );
+  const root = Buffer.alloc(offset);
   header.copy(root, 0);
   headers.copy(root, header.length);
-  tables.copy(root, tablesOffset);
-  strings.copy(root, stringsOffset);
-  guid.copy(root, guidOffset);
-  blob.copy(root, blobOffset);
+  for (const { data, at } of placed) data.copy(root, at);
   return root;
 };
 
@@ -951,17 +1012,18 @@ const buildManagedFixtureMetadata = (
     (stringSize === 4 ? 0x01 : 0) |
     (guidSize === 4 ? 0x02 : 0) |
     (blobSize === 4 ? 0x04 : 0);
-  const metadata = metadataRoot(
-    tablesStream(
+  const metadata = metadataRoot({
+    tables: tablesStream(
       rows,
       options.metadataValidMaskExtra ?? 0n,
       heapFlags,
       options.metadataExtraData,
     ),
-    strings.toBuffer(),
-    guidHeap(options.mvid),
-    blobs.toBuffer(),
-  );
+    strings: strings.toBuffer(),
+    guid: guidHeap(options.mvid),
+    blob: blobs.toBuffer(),
+    userStrings: options.userStringHeap,
+  });
   if (options.corruptMetadataSignature === true) metadata.writeUInt32LE(0, 0);
   return metadata;
 };
@@ -1189,10 +1251,12 @@ export const buildManagedMemberPointerFixture = (
     if (fieldPointers !== null) rows.set(3, fieldPointers.map(u16));
     if (methodPointers !== null) rows.set(5, methodPointers.map(u16));
     return metadataRoot(
-      tablesStream(rows, 0n, 0),
-      strings.toBuffer(),
-      guidHeap(),
-      blobs.toBuffer(),
+      {
+        tables: tablesStream(rows, 0n, 0),
+        strings: strings.toBuffer(),
+        guid: guidHeap(),
+        blob: blobs.toBuffer(),
+      },
       options.streamName ?? "#-",
     );
   });

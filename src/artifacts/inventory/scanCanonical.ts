@@ -10,6 +10,7 @@ import type { RootInventorySource } from "./classify.js";
 import {
   ArtifactReaderFailure,
   type ArtifactReader,
+  type ArtifactReaderTraversal,
 } from "../ArtifactReader.js";
 import type { ArtifactResourceOwner } from "../ArtifactResourceScope.js";
 import {
@@ -40,7 +41,7 @@ import {
   hashStableRootArtifact,
   hashStableRootArtifactHandle,
 } from "./hashStableRootArtifact.js";
-import { createReader, inventoryAssessment } from "./reader.js";
+import { createReader, inventoryCoverage } from "./reader.js";
 import {
   scanReader,
   type PendingIntegrityContradiction,
@@ -99,6 +100,7 @@ export const scanCanonicalArtifactInventoryInScope = async (
       occurrences,
       pendingContradictions,
       caseCollisionLimitation,
+      traversal,
     } = await scanReader(reader, ownedReaders, options.signal, integrity);
     outcome = {
       kind: "completed",
@@ -115,6 +117,7 @@ export const scanCanonicalArtifactInventoryInScope = async (
         occurrences,
         pendingContradictions,
         caseCollisionLimitation,
+        traversal,
       }),
     };
   } catch (cause: unknown) {
@@ -196,6 +199,7 @@ interface SnapshotBuildInput {
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
   readonly caseCollisionLimitation: string | undefined;
+  readonly traversal: ArtifactReaderTraversal;
 }
 
 const buildInventorySnapshot = async (
@@ -268,12 +272,7 @@ const buildInventorySnapshot = async (
     orderedOccurrences,
     orderedEdges,
   });
-  const assessment = inventoryAssessment(
-    rootFormat,
-    reader,
-    integrityContradictions,
-    input.caseCollisionLimitation,
-  );
+  const traversal = inventoryCoverage(rootFormat, reader, input.traversal);
   return {
     manifest,
     nodes: orderedNodes,
@@ -281,8 +280,14 @@ const buildInventorySnapshot = async (
     edges: orderedEdges,
     provenance: reader?.provenance() ?? [],
     integrity_contradictions: integrityContradictions,
-    coverage_status: assessment.coverage_status,
-    limitations: assessment.limitations,
+    coverage: traversal.coverage,
+    coverage_status:
+      traversal.coverage.status === "complete" ? "complete" : "partial",
+    limitations: buildLimitations(
+      traversal.limitations,
+      integrityContradictions,
+      input.caseCollisionLimitation,
+    ),
   };
 };
 
@@ -395,3 +400,17 @@ const buildManifest = ({
     occurrence_count: orderedOccurrences.length,
     edge_count: orderedEdges.length,
   });
+
+const buildLimitations = (
+  scopeLimitations: readonly string[],
+  integrityContradictions: readonly IntegrityContradiction[],
+  caseCollisionLimitation: string | undefined,
+): string[] => [
+  ...scopeLimitations,
+  ...(caseCollisionLimitation === undefined ? [] : [caseCollisionLimitation]),
+  ...(integrityContradictions.length === 0
+    ? []
+    : [
+        `${String(integrityContradictions.length)} integrity contradiction(s) were recorded; mismatched content is observed-untrusted.`,
+      ]),
+];

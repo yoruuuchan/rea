@@ -822,6 +822,39 @@ describe("Ghidra result projection", () => {
   });
 });
 
+describe("Ghidra PE CodeView debug symbol limitations", () => {
+  it("projects unapplied companion PDB limitation for PE target with CodeView record", async () => {
+    const ghidra = provider(installationHost(), () => ({
+      start: () => Promise.resolve(ok(sessionInfo())),
+      callTool: () => Promise.resolve(ok(null)),
+      close: () => Promise.resolve(ok(null)),
+    }));
+    const target = {
+      ...peTarget("x86_64"),
+      codeView: {
+        pdbPath: "C:\\projects\\app\\build\\test.pdb",
+        pdbFileName: "test.pdb",
+        guid: "01234567-89ab-cdef-0123-456789abcdef",
+        age: 1,
+      },
+    };
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("expected PE profile");
+    const client = ghidra.createClient(target, profile.value.profile);
+    const health = await client.execute("health", {});
+    expect(health).toMatchObject({
+      ok: true,
+      value: {
+        limitations: expect.arrayContaining([
+          'The target references debug symbols "test.pdb" (GUID 01234567-89ab-cdef-0123-456789abcdef, age 1) that were not applied; procedure names are analysis-generated.',
+        ]),
+      },
+    });
+    await client.close();
+  });
+});
+
 describe("Ghidra relationship coverage", () => {
   it("marks the full direct call-reference response complete while keeping static caveats", async () => {
     const ghidra = provider(installationHost(), () => ({

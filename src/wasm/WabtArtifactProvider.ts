@@ -268,9 +268,11 @@ export class WabtArtifactProvider implements WasmArtifactPort {
           undefined,
           this.#resources,
         );
-        const source = new TextDecoder("utf-8", { fatal: true }).decode(
-          bytes.bytes,
-        );
+        // Keep source characters intact so locations match the hashed artifact.
+        const source = new TextDecoder("utf-8", {
+          fatal: true,
+          ignoreBOM: true,
+        }).decode(bytes.bytes);
         glue.push({
           artifact: { path, sha256: bytes.sha256, bytes: bytes.bytes.length },
           ...associateWasmGlue(

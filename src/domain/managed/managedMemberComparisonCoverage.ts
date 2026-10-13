@@ -131,5 +131,8 @@ export const comparisonLimitations = (
     limitations.push(
       "ExportedType rows, including type forwarders, are observed but not compared; an unchanged comparison does not establish an unchanged exported or forwarded type set.",
     );
+  limitations.push(
+    "ldstr literals are not compared; normalized CIL keeps #US tokens rather than decoded text, so an unchanged method does not establish unchanged string literals.",
+  );
   return limitations;
 };

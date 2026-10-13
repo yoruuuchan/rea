@@ -33,10 +33,40 @@ unverified.
 ## Supply tools
 
 Use a **full JDK 17 or newer** (including its compiler module) and
-**jadx-headless-mcp 0.7.1**. REA runs its packaged Java metadata bridge in
-source-file mode against the unmodified engine JAR. REA does not install Java,
-an Android SDK, JADX, a device service or an emulator. Set the path in the shell
-or MCP server environment:
+[**jadx-headless-mcp 0.7.1**](https://github.com/1013503897/jadx-headless-mcp/releases/download/v0.7.1/jadx-headless-mcp-0.7.1-all.jar).
+Verify the downloaded JAR's SHA-256 against
+[REA's pinned release metadata](https://github.com/morluto/rea/blob/main/src/android/JadxRelease.ts)
+before using it. The following download and verification commands work for npm
+package consumers as well as repository checkouts; the repository-only
+`npm run fixtures:android` helper is not included in the npm package.
+
+On macOS or Linux, choose a destination and verify the pinned digest:
+
+```sh
+mkdir -p "$HOME/.local/share/rea/android" &&
+cd "$HOME/.local/share/rea/android" &&
+curl -fL -o jadx-headless-mcp-0.7.1-all.jar https://github.com/1013503897/jadx-headless-mcp/releases/download/v0.7.1/jadx-headless-mcp-0.7.1-all.jar &&
+if command -v sha256sum >/dev/null; then
+  echo '6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75  jadx-headless-mcp-0.7.1-all.jar' | sha256sum -c -
+else
+  echo '6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75  jadx-headless-mcp-0.7.1-all.jar' | shasum -a 256 -c -
+fi &&
+export REA_JADX_MCP_JAR="$PWD/jadx-headless-mcp-0.7.1-all.jar"
+```
+
+On Windows, run the equivalent in PowerShell:
+
+```powershell
+$jar = Join-Path $HOME '.local\share\rea\android\jadx-headless-mcp-0.7.1-all.jar'
+New-Item -ItemType Directory -Force (Split-Path $jar) | Out-Null
+Invoke-WebRequest -Uri 'https://github.com/1013503897/jadx-headless-mcp/releases/download/v0.7.1/jadx-headless-mcp-0.7.1-all.jar' -OutFile $jar
+if ((Get-FileHash -Algorithm SHA256 $jar).Hash.ToLowerInvariant() -ne '6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75') { throw 'JADX JAR SHA-256 does not match REA pinned metadata' }
+$env:REA_JADX_MCP_JAR = $jar
+```
+
+REA runs its packaged Java metadata bridge in source-file mode against the
+unmodified engine JAR. REA does not install Java, an Android SDK, JADX, a device
+service or an emulator. Set the path in the shell or MCP server environment:
 
 ```sh
 export REA_JADX_MCP_JAR=/absolute/path/jadx-headless-mcp-0.7.1-all.jar

@@ -92,7 +92,11 @@ export const compareManagedMemberPaths = async (
         throw new EvidenceIntegrityError(
           `Managed artifact digest changed after open: expected ${target.sha256}, observed ${snapshot.sha256} at ${target.path}`,
         );
-      const inspection = inspectManagedMembersBytes(snapshot.bytes, target);
+      // Member comparison never reads literals, so it does not spend the
+      // decode budget on them.
+      const inspection = inspectManagedMembersBytes(snapshot.bytes, target, {
+        userStrings: false,
+      });
       const evidence = createEvidence(target, MANAGED_STATIC_PROVIDER, {
         operation: "inspect_managed_members",
         parameters: {},

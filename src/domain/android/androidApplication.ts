@@ -68,7 +68,7 @@ export const androidApplicationProjectionResultSchema = z.strictObject({
     // Count completeness is separate from the declared coverage status.
     inventory_complete: z.boolean(),
   }),
-  limitations: z.array(z.string().min(1)),
+  limitations: z.array(z.string()),
 });
 
 export type AndroidApplicationProjectionInput = z.infer<
@@ -99,7 +99,8 @@ export const projectAndroidApplication = (
   );
   const components = classified;
   const limitations = [
-    ...(!hasCompleteInventoryCoverage(inventory)
+    ...inventory.limitations,
+    ...(!hasCompleteInventoryCoverage(inventory, "container-entries")
       ? ["Source inventory coverage is partial; absence is unknown."]
       : []),
     "Manifest, resource, signing, and bytecode semantics require a dedicated Android provider; this projection reports exact inventory paths and hashes only.",

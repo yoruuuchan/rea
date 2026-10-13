@@ -57,7 +57,6 @@ import {
   ELECTRON_MODULE,
 } from "./javascriptElectronMemberWrites.js";
 import { range } from "./javascriptStaticAnalysisHelpers.js";
-import { propertyName } from "./javascriptAstValues.js";
 import { semanticCoverage } from "./javascriptSemanticCoverage.js";
 import { semanticResourceLimitsIn } from "./javascriptSemanticResourceLimits.js";
 import {
@@ -1109,7 +1108,7 @@ const bindImports = (
       ? ["default"]
       : t.isImportNamespaceSpecifier(specifier)
         ? []
-        : [propertyName(specifier.imported) || "[dynamic]"];
+        : [semanticStaticPropertyKey(specifier.imported, false) ?? "[dynamic]"];
     addBinding({
       state,
       scope,

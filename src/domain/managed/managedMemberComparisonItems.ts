@@ -73,7 +73,11 @@ const methodDimensions = (
   if (bothAbsent) return { dimensions, bodyUnknown: false };
   if (!leftBodyComplete || !rightBodyComplete)
     return { dimensions, bodyUnknown: true };
-  if (left.body.normalized_il_sha256 !== right.body.normalized_il_sha256)
+  // The decoded fingerprint omits switch targets and is not exact CIL identity.
+  if (
+    left.body.il_sha256 !== right.body.il_sha256 ||
+    left.body.normalized_il_sha256 !== right.body.normalized_il_sha256
+  )
     dimensions.push("cil");
   if (
     canonicalize(left.body.opcode_counts) !==

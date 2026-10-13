@@ -2,6 +2,8 @@
 export interface RecordedTransportUrl {
   readonly origin: string | null;
   readonly path: string | null;
+  /** WHATWG query spelling, present only when explicitly selected for projection. */
+  readonly query?: string;
   readonly credentials:
     | { readonly start: number; readonly end: number }
     | "ambiguous"
@@ -15,6 +17,7 @@ export interface RecordedTransportUrl {
  */
 export const parseRecordedTransportUrl = (
   value: string,
+  options: { readonly includeQuery?: boolean } = {},
 ): RecordedTransportUrl => {
   const prefix = /^[\x00-\x20]*(?:([A-Za-z][A-Za-z0-9+.-]*):)?\/\//u.exec(
     value,
@@ -67,9 +70,22 @@ export const parseRecordedTransportUrl = (
     (special && value[authorityEnd] === "\\")
   )
     return { origin, path: null, credentials };
-  if (value[authorityEnd] !== "/") return { origin, path: "/", credentials };
+  const query =
+    options.includeQuery === true ? { query: absolute!.search } : {};
+  if (value[authorityEnd] !== "/")
+    return { origin, path: "/", credentials, ...query };
   let pathEnd = authorityEnd;
   while (pathEnd < value.length && !"?#".includes(value[pathEnd]!))
     pathEnd += 1;
-  return { origin, path: value.slice(authorityEnd, pathEnd), credentials };
+  return {
+    origin,
+    path: value.slice(authorityEnd, pathEnd),
+    credentials,
+    ...query,
+  };
 };
+
+/** WHATWG form-query name decoding; preserve order, repeats and empty names. */
+export const parseUrlQueryParameterNames = (
+  query: string,
+): IterableIterator<string> => new URLSearchParams(query).keys();

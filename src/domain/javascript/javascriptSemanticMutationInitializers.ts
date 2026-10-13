@@ -12,6 +12,37 @@ interface StatementPosition {
   readonly declaratorIndex: number;
 }
 
+/**
+ * Initializer positions depend only on a node and its parent map, which one
+ * analysis builds once and never changes. Different mutations and initializers
+ * re-derive the same positions along shared ancestry, so retain the first
+ * result for as long as its parent map is reachable.
+ */
+interface InitializerPositionCache {
+  readonly direct: WeakMap<t.Node, StatementPosition | null>;
+  readonly mutation: WeakMap<t.Node, StatementPosition | null>;
+  readonly reference: WeakMap<t.Node, StatementPosition | null>;
+}
+
+const initializerPositionCaches = new WeakMap<
+  WeakMap<t.Node, t.Node>,
+  InitializerPositionCache
+>();
+
+const initializerPositionCache = (
+  parents: WeakMap<t.Node, t.Node>,
+): InitializerPositionCache => {
+  const cached = initializerPositionCaches.get(parents);
+  if (cached !== undefined) return cached;
+  const created: InitializerPositionCache = {
+    direct: new WeakMap(),
+    mutation: new WeakMap(),
+    reference: new WeakMap(),
+  };
+  initializerPositionCaches.set(parents, created);
+  return created;
+};
+
 const statementPosition = (
   statement: t.Statement,
   parents: WeakMap<t.Node, t.Node>,
@@ -42,7 +73,7 @@ const positionPrecedes = (
       left.declaratorIndex >= 0 &&
       left.declaratorIndex < right.declaratorIndex));
 
-const directInitializerPosition = (
+const computeDirectInitializerPosition = (
   node: t.Node,
   parents: WeakMap<t.Node, t.Node>,
 ): StatementPosition | null => {
@@ -67,7 +98,19 @@ const directInitializerPosition = (
   return null;
 };
 
-const directMutationPosition = (
+const directInitializerPosition = (
+  node: t.Node,
+  parents: WeakMap<t.Node, t.Node>,
+): StatementPosition | null => {
+  const cache = initializerPositionCache(parents);
+  const cached = cache.direct.get(node);
+  if (cached !== undefined) return cached;
+  const computed = computeDirectInitializerPosition(node, parents);
+  cache.direct.set(node, computed);
+  return computed;
+};
+
+const computeDirectMutationPosition = (
   node: t.Node,
   parents: WeakMap<t.Node, t.Node>,
 ): StatementPosition | null => {
@@ -115,7 +158,19 @@ const directMutationPosition = (
   }
 };
 
-const referenceInitializerPosition = (
+const directMutationPosition = (
+  node: t.Node,
+  parents: WeakMap<t.Node, t.Node>,
+): StatementPosition | null => {
+  const cache = initializerPositionCache(parents);
+  const cached = cache.mutation.get(node);
+  if (cached !== undefined) return cached;
+  const computed = computeDirectMutationPosition(node, parents);
+  cache.mutation.set(node, computed);
+  return computed;
+};
+
+const computeReferenceInitializerPosition = (
   node: t.Node,
   parents: WeakMap<t.Node, t.Node>,
 ): StatementPosition | null => {
@@ -135,6 +190,18 @@ const referenceInitializerPosition = (
     }
     current = parent;
   }
+};
+
+const referenceInitializerPosition = (
+  node: t.Node,
+  parents: WeakMap<t.Node, t.Node>,
+): StatementPosition | null => {
+  const cache = initializerPositionCache(parents);
+  const cached = cache.reference.get(node);
+  if (cached !== undefined) return cached;
+  const computed = computeReferenceInitializerPosition(node, parents);
+  cache.reference.set(node, computed);
+  return computed;
 };
 
 /** Resolve origins at their use or capture, never at a later transitive effect. */

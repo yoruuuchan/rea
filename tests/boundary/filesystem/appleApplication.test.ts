@@ -75,7 +75,7 @@ async function createCompleteAppleProjection() {
 }
 
 describe("Apple application projection", () => {
-  it("keeps a case-colliding real IPA inventory partial", async () => {
+  it("retains complete traversal and case-collision limits for a real IPA", async () => {
     const root = await createTestTempDirectory("rea-apple-case-collision-");
     const path = join(root, "CaseCollision.ipa");
     const writer = new ZipWriter(new Uint8ArrayWriter());
@@ -93,7 +93,7 @@ describe("Apple application projection", () => {
       await runProviderAnalysis(path, "inventory_artifact", {}),
     );
     expect(inventory.normalized_result).toMatchObject({
-      coverage_status: "partial",
+      coverage_status: "complete",
     });
     const result = projectAppleApplicationEvidence({
       inventory_evidence: [inventory],
@@ -103,11 +103,11 @@ describe("Apple application projection", () => {
     );
 
     expect(projection.coverage).toEqual({
-      status: "partial",
+      status: "complete-within-inventory",
       inventory_complete: true,
     });
-    expect(projection.limitations).toContain(
-      "Source inventory coverage is partial; absence is unknown.",
+    expect(projection.limitations.join(" ")).toContain(
+      "case-insensitive destination",
     );
   });
 

@@ -1,9 +1,11 @@
 import { observeMzWindowsHeader, parseDosMzHeader } from "../domain/dosMz.js";
 import {
+  declaredFileRange,
   GoBinaryFormatFailure,
   GoBinaryReader,
   type GoBinaryContainer,
   type GoFileMapping,
+  type GoImageSection,
   type GoZeroFillMapping,
 } from "./GoBinaryContainer.js";
 
@@ -86,14 +88,30 @@ export const readGoPeImage = (bytes: Buffer): GoBinaryContainer => {
   );
   const mappings: GoFileMapping[] = [];
   const zeroFills: GoZeroFillMapping[] = [];
+  const sections: GoImageSection[] = [];
   let search: GoFileMapping | null = null;
   for (let index = 0; index < count; index++) {
     const entry = start + index * 40;
+    const sectionName = peSectionName(
+      reader.range(entry, 8, "PE section name"),
+    );
     const virtualSize = reader.u32(entry + 8);
     const virtualAddress = reader.u32(entry + 12);
     const size = reader.u32(entry + 16);
     const offset = reader.u32(entry + 20);
     const characteristics = reader.u32(entry + 36);
+    // SizeOfRawData includes file-alignment padding. VirtualSize is the content.
+    const contentSize = virtualSize === 0 ? size : Math.min(virtualSize, size);
+    if (sectionName.length > 0)
+      sections.push(
+        peImageSection({
+          reader,
+          name: sectionName,
+          size: contentSize,
+          offset,
+          characteristics,
+        }),
+      );
     const address = imageBase + BigInt(virtualAddress);
     if (address + BigInt(Math.max(size, virtualSize)) > 1n << BigInt(bits))
       throw new GoBinaryFormatFailure(
@@ -138,6 +156,39 @@ export const readGoPeImage = (bytes: Buffer): GoBinaryContainer => {
     byte_order: "little",
     mappings,
     zero_fills: zeroFills,
+    sections,
     search,
   };
+};
+
+const peSectionName = (bytes: Buffer): string => {
+  const nul = bytes.indexOf(0);
+  return bytes.toString("latin1", 0, nul < 0 ? bytes.length : nul);
+};
+
+const peImageSection = ({
+  reader,
+  name,
+  size,
+  offset,
+  characteristics,
+}: {
+  readonly reader: GoBinaryReader;
+  readonly name: string;
+  readonly size: number;
+  readonly offset: number;
+  readonly characteristics: number;
+}): GoImageSection => {
+  const range = declaredFileRange(
+    reader.bytes.length,
+    BigInt(offset),
+    BigInt(size),
+  );
+  const readOnly =
+    range.file_backed &&
+    (characteristics & 0x40000000) !== 0 &&
+    (characteristics & 0x80000000) === 0 &&
+    (characteristics & 0x20000000) === 0 &&
+    (characteristics & 0x40) !== 0;
+  return { name, ...range, read_only: readOnly, compressed: false };
 };

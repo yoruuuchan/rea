@@ -5,7 +5,10 @@ import {
 } from "../analysisErrorCore.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { compareUnicodeCodePoints as compare } from "../unicodeCodePointOrder.js";
-import { parseRecordedTransportUrl } from "../recordedTransportUrl.js";
+import {
+  parseRecordedTransportUrl,
+  parseUrlQueryParameterNames,
+} from "../recordedTransportUrl.js";
 import { err, ok, type Result } from "../result.js";
 import { MAX_JSON_DEPTH } from "../jsonValue.js";
 import {
@@ -41,6 +44,7 @@ interface GroupState {
   readonly ordinals: number[];
   readonly statuses: Set<number>;
   readonly contentTypes: Set<string>;
+  readonly queryNames?: Map<string, number[]>;
 }
 type Buckets = Map<string, Map<string, Map<string, Map<string, GroupState>>>>;
 
@@ -120,7 +124,10 @@ export class WebNetworkApiSurfaceAccumulator {
   #retainedBytes = 0;
   #temporaryBytes = 0;
 
-  constructor(readonly maximumBytes = WEB_NETWORK_CAPTURE_LIMITS.outputBytes) {}
+  constructor(
+    readonly maximumBytes = WEB_NETWORK_CAPTURE_LIMITS.outputBytes,
+    readonly includeQueryParameterNames = false,
+  ) {}
 
   #retain(bytes: number): boolean {
     if (this.#retainedBytes + this.#temporaryBytes + bytes > this.maximumBytes)
@@ -305,7 +312,9 @@ export class WebNetworkApiSurfaceAccumulator {
     if (!this.#temporary(RECORD_SCRATCH_BYTES + textBytes(url.length)))
       return this.#overBudget();
     try {
-      const parsed = parseRecordedTransportUrl(url);
+      const parsed = parseRecordedTransportUrl(url, {
+        includeQuery: this.includeQueryParameterNames,
+      });
       if (parsed.origin === null)
         return this.#exclude(record.ordinal, "url-unparseable");
       if (typeof method !== "string" || method.length === 0)
@@ -325,6 +334,8 @@ export class WebNetworkApiSurfaceAccumulator {
         return this.#overBudget();
       const route = this.#route(parsed.path);
       if (!route.ok) return route;
+      const queryNames = this.#queryNames(parsed.query);
+      if (!queryNames.ok) return queryNames;
       return this.#append(
         record.ordinal,
         method,
@@ -332,11 +343,32 @@ export class WebNetworkApiSurfaceAccumulator {
         route.value,
         typeof status === "number" && status !== 0 ? status : null,
         mediaTypeEssence(rawMime),
+        queryNames.value,
       );
     } finally {
       // Per-record strings and descriptors never become cumulative scratch.
       this.#temporaryBytes = 0;
     }
+  }
+
+  #queryNames(
+    query: string | undefined,
+  ): Result<ReadonlySet<string> | undefined, AnalysisError> {
+    if (query === undefined) return ok(undefined);
+    // Reserve form-parser tuples, decoded strings, the iterator and the name
+    // set before URLSearchParams materializes them. Delimiter count is an upper
+    // bound: empty query pairs are ignored by the WHATWG parser.
+    let pairs = query.length > 1 ? 1 : 0;
+    for (const character of query) if (character === "&") pairs += 1;
+    if (
+      !this.#temporary(
+        RECORD_SCRATCH_BYTES +
+          textBytes(query.length) +
+          pairs * ENTRY_BYTES * 4,
+      )
+    )
+      return this.#overBudget();
+    return ok(new Set(parseUrlQueryParameterNames(query)));
   }
 
   #append(
@@ -346,6 +378,7 @@ export class WebNetworkApiSurfaceAccumulator {
     route: Route,
     status: number | null,
     mime: string | null,
+    queryNames: ReadonlySet<string> | undefined,
   ): Result<void, AnalysisError> {
     let group = this.#buckets
       .get(method)
@@ -371,6 +404,14 @@ export class WebNetworkApiSurfaceAccumulator {
     if (status !== null && !group?.statuses.has(status)) bytes += ENTRY_BYTES;
     if (mime !== null && !group?.contentTypes.has(mime))
       bytes += ENTRY_BYTES + textBytes(mime.length);
+    if (queryNames !== undefined) {
+      if (group === undefined) bytes += CAPTURE_CONTAINER_BYTES;
+      for (const name of queryNames) {
+        bytes += ENTRY_BYTES; // This name's source ordinal, once per record.
+        if (!group?.queryNames?.has(name))
+          bytes += ENTRY_BYTES + textBytes(name.length);
+      }
+    }
     // Reserve the whole mutation while route scratch is still live. No sets,
     // map entries, arrays or new observed values are retained before admission.
     if (!this.#retain(bytes)) return this.#overBudget();
@@ -387,6 +428,7 @@ export class WebNetworkApiSurfaceAccumulator {
         ordinals: [],
         statuses: new Set(),
         contentTypes: new Set(),
+        ...(queryNames === undefined ? {} : { queryNames: new Map() }),
       };
       const byOrigin = this.#buckets.get(method) ?? new Map();
       this.#buckets.set(method, byOrigin);
@@ -404,6 +446,13 @@ export class WebNetworkApiSurfaceAccumulator {
     if (status === null || mime === null) this.#unavailableResponse = true;
     if (status !== null) group.statuses.add(status);
     if (mime !== null) group.contentTypes.add(mime);
+    if (queryNames !== undefined && group.queryNames !== undefined) {
+      for (const name of queryNames) {
+        const ordinals = group.queryNames.get(name);
+        if (ordinals === undefined) group.queryNames.set(name, [ordinal]);
+        else ordinals.push(ordinal);
+      }
+    }
     return ok(undefined);
   }
 
@@ -440,6 +489,16 @@ export class WebNetworkApiSurfaceAccumulator {
         record_ordinals: [...group.ordinals],
         statuses: [...group.statuses].sort((a, b) => a - b),
         content_types: [...group.contentTypes].sort(compare),
+        ...(group.queryNames === undefined
+          ? {}
+          : {
+              query_parameter_names: [...group.queryNames]
+                .sort(([a], [b]) => compare(a, b))
+                .map(([name, record_ordinals]) => ({
+                  name,
+                  record_ordinals: [...record_ordinals],
+                })),
+            }),
         flags: [
           ...(group.ordinals.length === 1 ? ["single-sample" as const] : []),
           ...(group.statuses.size > 1 ? ["mixed-statuses" as const] : []),

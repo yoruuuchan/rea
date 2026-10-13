@@ -9,9 +9,12 @@ import {
   ArtifactReaderFailure,
   type ArtifactEntry,
   type ArtifactReader,
+  type ArtifactReaderTraversal,
+  type ArtifactTraversalOmission,
 } from "../ArtifactReader.js";
 import { AsarArtifactReader } from "../AsarArtifactReader.js";
 import type { ArtifactNode } from "../../domain/artifactGraph.js";
+import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import {
   classifyArtifactContent,
   classifyArtifactBytes,
@@ -55,6 +58,7 @@ interface ScanContext {
   readonly registry: ArtifactPathRegistry;
   readonly expandedContainerIds: Set<string>;
   readonly ownedReaders: ArtifactReader[];
+  readonly omissions: ArtifactTraversalOmission[];
 }
 
 export const scanReader = async (
@@ -67,6 +71,7 @@ export const scanReader = async (
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
   readonly caseCollisionLimitation: string | undefined;
+  readonly traversal: ArtifactReaderTraversal;
 }> => {
   const { nodes, occurrences, pendingContradictions } = emptyScan();
   if (reader === undefined)
@@ -75,6 +80,7 @@ export const scanReader = async (
       occurrences,
       pendingContradictions,
       caseCollisionLimitation: undefined,
+      traversal: { status: "complete", limitations: [] },
     };
   const context: ScanContext = {
     reader,
@@ -87,6 +93,7 @@ export const scanReader = async (
     registry: new ArtifactPathRegistry(),
     expandedContainerIds: new Set<string>(),
     ownedReaders,
+    omissions: [],
   };
   await visitArtifactEntries(context, reader, "");
   // Archive directories may appear after their children. Resolve containment
@@ -101,8 +108,36 @@ export const scanReader = async (
     occurrences,
     pendingContradictions,
     caseCollisionLimitation: annotateEnglishUnicodeCaseCollisions(occurrences),
+    traversal: {
+      status: context.omissions.length === 0 ? "complete" : "unknown",
+      limitations: [
+        ...new Set(
+          context.omissions.map(
+            ({ path, kind }) =>
+              `Artifact traversal omitted ${kind} at ${JSON.stringify(path)}.`,
+          ),
+        ),
+      ].sort(compareUnicodeCodePoints),
+    },
   };
 };
+
+const inventoryEntries = (
+  context: ScanContext,
+  reader: ArtifactReader,
+  prefix: string,
+): AsyncIterator<ArtifactEntry> =>
+  reader
+    .entries(context.signal, {
+      onOmission: (omission) =>
+        context.omissions.push({
+          ...omission,
+          path: normalizeArtifactPath(
+            prefix.length === 0 ? omission.path : `${prefix}/${omission.path}`,
+          ),
+        }),
+    })
+    [Symbol.asyncIterator]();
 
 const visitArtifactEntries = async (
   context: ScanContext,
@@ -117,7 +152,7 @@ const visitArtifactEntries = async (
     {
       reader: currentReader,
       prefix,
-      iterator: currentReader.entries(context.signal)[Symbol.asyncIterator](),
+      iterator: inventoryEntries(context, currentReader, prefix),
     },
   ];
   let failure: { readonly cause: unknown } | undefined;
@@ -191,7 +226,7 @@ const visitArtifactEntries = async (
         stack.push({
           reader: nested,
           prefix: logicalPath,
-          iterator: nested.entries(context.signal)[Symbol.asyncIterator](),
+          iterator: inventoryEntries(context, nested, logicalPath),
         });
       }
     }

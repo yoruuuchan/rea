@@ -98,7 +98,9 @@ type AvailabilityContext = {
   readonly policy: AvailabilityPolicy;
 };
 
-const ENHANCED_REQUIREMENTS: Readonly<Record<string, readonly string[]>> = {
+const ENHANCED_REQUIREMENTS: Readonly<
+  Record<string, readonly (string | readonly string[])[]>
+> = {
   trace_native_values: ["analyze_function", "resolve_native_call_targets"],
   trace_native_ui_action: [
     "decode_interface_builder",
@@ -114,7 +116,7 @@ const ENHANCED_REQUIREMENTS: Readonly<Record<string, readonly string[]>> = {
   find_xrefs_to_name: ["list_names", "xrefs"],
   binary_overview: [
     "list_segments",
-    "list_documents",
+    ["current_document", "list_documents"],
     "list_procedures",
     "list_strings",
   ],
@@ -343,7 +345,7 @@ const workflowAvailabilityFor = ({
   kind,
   policy,
 }: AvailabilityContext): Availability | null => {
-  if (name === "inspect_go_binary")
+  if (name === "inspect_go_binary" || name === "inspect_rust_binary")
     return { reason: "available", remediation: null };
   if (name === "inspect_sqlite_database") {
     const capability = sqliteDatabaseCapability(process.versions.node);
@@ -642,27 +644,62 @@ const composedAvailability = (
 };
 
 const composedAvailabilityFor = (
-  requirements: readonly string[],
+  requirements: readonly (string | readonly string[])[],
   descriptors: ReadonlyMap<string, ProviderDescriptor>,
 ): Availability => {
-  const missing = requirements.find((operation) => !descriptors.has(operation));
-  if (missing !== undefined)
-    return {
-      reason: "provider_missing",
-      remediation: `Configure a provider for required operation ${missing}.`,
-    };
-  const unavailable = requirements
-    .map((operation) => descriptors.get(operation))
-    .find((descriptor) => descriptor?.available === false);
-  if (unavailable !== undefined)
-    return {
-      reason:
-        unavailable.availability_code === "unsupported_host"
-          ? "unsupported_host"
-          : "provider_unavailable",
-      remediation:
-        unavailable.reason ?? "Choose another target or configured provider.",
-    };
+  for (const requirement of requirements) {
+    if (typeof requirement === "string") {
+      if (!descriptors.has(requirement))
+        return {
+          reason: "provider_missing",
+          remediation: `Configure a provider for required operation ${requirement}.`,
+        };
+    } else {
+      const declared = requirement.some((operation) =>
+        descriptors.has(operation),
+      );
+      if (!declared)
+        return {
+          reason: "provider_missing",
+          remediation: `Configure a provider for one of: ${requirement.join(", ")}.`,
+        };
+    }
+  }
+
+  for (const requirement of requirements) {
+    if (typeof requirement === "string") {
+      const descriptor = descriptors.get(requirement);
+      if (descriptor?.available === false)
+        return {
+          reason:
+            descriptor.availability_code === "unsupported_host"
+              ? "unsupported_host"
+              : "provider_unavailable",
+          remediation:
+            descriptor.reason ??
+            "Choose another target or configured provider.",
+        };
+    } else {
+      const anyAvailable = requirement.some(
+        (operation) => descriptors.get(operation)?.available === true,
+      );
+      if (!anyAvailable) {
+        const unavailable = requirement
+          .map((operation) => descriptors.get(operation))
+          .find((descriptor) => descriptor?.available === false);
+        if (unavailable !== undefined)
+          return {
+            reason:
+              unavailable.availability_code === "unsupported_host"
+                ? "unsupported_host"
+                : "provider_unavailable",
+            remediation:
+              unavailable.reason ??
+              "Choose another target or configured provider.",
+          };
+      }
+    }
+  }
   return { reason: "available", remediation: null };
 };
 

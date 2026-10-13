@@ -82,6 +82,11 @@ export const TOOL_EXAMPLE_OVERRIDES: Readonly<
     left_bundle_path: "/tmp/left-evidence.json",
     right_bundle_path: "/tmp/right-evidence.json",
   },
+  inspect_with_objdump: {
+    path: "/tmp/program",
+    operation: "disassemble",
+  },
+  execute_rizin_command: { path: "/tmp/program", command: "iI" },
   list_frida_devices: {},
   list_frida_processes: { device_id: "local" },
   start_frida_session: { mode: "attach", device_id: "local", pid: 1234 },

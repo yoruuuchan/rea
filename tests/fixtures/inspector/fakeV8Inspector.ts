@@ -147,8 +147,8 @@ const registerInspectorSocket = (
       socket.close();
       return;
     }
-    socket.send(JSON.stringify({ id: command.id, result: {} }));
     respondToInspectorCommand(socket, command, options);
+    socket.send(JSON.stringify({ id: command.id, result: {} }));
   });
 };
 

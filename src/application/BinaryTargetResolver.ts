@@ -40,10 +40,14 @@ import {
 } from "../domain/zipPackageFormat.js";
 
 import {
+  parseCodeViewData,
   parseExecutableHeader,
   parsePeRecord,
+  peDebugDirectoryEntry,
+  peRvaToFileOffset,
   type ExecutableMetadata,
 } from "../domain/binaryTarget.js";
+import type { PeCodeViewRecord } from "../domain/binaryTargetTypes.js";
 
 /** Options for resolving a local binary target and its stable identity. */
 export interface BinaryTargetResolverOptions {
@@ -549,10 +553,98 @@ const readPeMetadata = async (
     return err(`unsupported ${windowsHeader.signature} executable in MZ image`);
   const optionalHeaderSize = fileHeader.readUInt16LE(20);
   if (optionalHeaderSize > 4096) return err("invalid PE optional header size");
+  const numberOfSections = fileHeader.readUInt16LE(6);
   const record = Buffer.alloc(24 + optionalHeaderSize);
   const recordRead = await handle.read(record, 0, record.length, offset);
   throwIfTargetResolutionCancelled(signal);
-  return recordRead.bytesRead === record.length
-    ? parsePeRecord(record)
-    : err("invalid or truncated PE header");
+  if (recordRead.bytesRead !== record.length)
+    return err("invalid or truncated PE header");
+  const codeView = await readPeCodeView(
+    handle,
+    offset,
+    numberOfSections,
+    record.subarray(24),
+    optionalHeaderSize,
+    signal,
+  );
+  return parsePeRecord(record, codeView);
+};
+
+const readPeCodeView = async (
+  handle: FileHandle,
+  peOffset: number,
+  numberOfSections: number,
+  optionalHeader: Buffer,
+  optionalHeaderSize: number,
+  signal?: AbortSignal,
+): Promise<PeCodeViewRecord | undefined> => {
+  throwIfTargetResolutionCancelled(signal);
+  const debugDir = peDebugDirectoryEntry(optionalHeader);
+  if (debugDir === undefined || numberOfSections > 96) return undefined;
+  const sectionTableOffset = peOffset + 24 + optionalHeaderSize;
+  const sectionTableSize = numberOfSections * 40;
+  const sectionTable = Buffer.alloc(sectionTableSize);
+  const sectionRead = await handle.read(
+    sectionTable,
+    0,
+    sectionTableSize,
+    sectionTableOffset,
+  );
+  throwIfTargetResolutionCancelled(signal);
+  if (sectionRead.bytesRead !== sectionTableSize) return undefined;
+  const debugFileOffset = peRvaToFileOffset(
+    debugDir.debugRva,
+    sectionTable,
+    numberOfSections,
+    debugDir.sizeOfHeaders,
+    Math.min(debugDir.debugSize, 4096),
+  );
+  if (debugFileOffset === undefined) return undefined;
+  const maxDebugSize = Math.min(debugDir.debugSize, 4096);
+  const debugDirectoryBuffer = Buffer.alloc(maxDebugSize);
+  const debugDirRead = await handle.read(
+    debugDirectoryBuffer,
+    0,
+    maxDebugSize,
+    debugFileOffset,
+  );
+  throwIfTargetResolutionCancelled(signal);
+  const numEntries = Math.floor(debugDirRead.bytesRead / 28);
+  for (let j = 0; j < numEntries; j++) {
+    const entryOffset = j * 28;
+    const type = debugDirectoryBuffer.readUInt32LE(entryOffset + 12);
+    if (type !== 2) continue; // IMAGE_DEBUG_TYPE_CODEVIEW
+    const sizeOfData = debugDirectoryBuffer.readUInt32LE(entryOffset + 16);
+    let pointerToRawData = debugDirectoryBuffer.readUInt32LE(entryOffset + 24);
+    if (pointerToRawData === 0) {
+      const addressOfRawData = debugDirectoryBuffer.readUInt32LE(
+        entryOffset + 20,
+      );
+      const mapped = peRvaToFileOffset(
+        addressOfRawData,
+        sectionTable,
+        numberOfSections,
+        debugDir.sizeOfHeaders,
+        Math.min(sizeOfData, 4096),
+      );
+      if (mapped === undefined) continue;
+      pointerToRawData = mapped;
+    }
+    if (sizeOfData < 16) continue;
+    const maxCodeViewRead = Math.min(sizeOfData, 4096);
+    const codeViewBuffer = Buffer.alloc(maxCodeViewRead);
+    const codeViewRead = await handle.read(
+      codeViewBuffer,
+      0,
+      maxCodeViewRead,
+      pointerToRawData,
+    );
+    throwIfTargetResolutionCancelled(signal);
+    const parsed = parseCodeViewData(
+      codeViewBuffer.subarray(0, codeViewRead.bytesRead),
+      sizeOfData,
+    );
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
 };

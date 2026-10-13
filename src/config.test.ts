@@ -249,6 +249,40 @@ describe("configuration failure diagnostics", () => {
     },
   );
 
+  it.each(["1", "90000", "2147483647"])(
+    "accepts Swift compile deadline %s without changing Hopper's deadline",
+    (value) => {
+      expect(
+        parseConfig({ REA_SWIFTC_COMPILE_TIMEOUT_MS: value }),
+      ).toMatchObject({
+        ok: true,
+        value: {
+          hopperStartupTimeoutMs: 120_000,
+        },
+      });
+    },
+  );
+
+  it.each(["", "0", "-1", "1.5", "1e3", "invalid", "2147483648"])(
+    "rejects malformed Swift compile deadline %j with its setting",
+    (value) => {
+      const result = parseConfig({ REA_SWIFTC_COMPILE_TIMEOUT_MS: value });
+      if (result.ok) throw new Error("Expected invalid Swift compile deadline");
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "configuration_invalid",
+        category: "invalid_input",
+        details: {
+          settings: [
+            {
+              setting: "REA_SWIFTC_COMPILE_TIMEOUT_MS",
+              constraint: expect.any(String),
+            },
+          ],
+        },
+      });
+    },
+  );
+
   it.each([
     ["GHIDRA_INSTALL_DIR", "./fixture"],
     ["JAVA_HOME", "./jdk"],

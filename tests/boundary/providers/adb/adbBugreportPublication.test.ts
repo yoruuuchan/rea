@@ -47,9 +47,12 @@ const fixture = async (duringCollection?: (root: string) => Promise<void>) => {
   let reportedPath = "";
   vi.mocked(execFileOutput).mockImplementation(async (_binary, args) => {
     expect(args).toEqual(["version"]);
+    const stdout = `Android Debug Bridge version 1.0.41\nVersion 34.0.5-stub\nInstalled as ${binary}\n`;
     return {
-      stdout: `Android Debug Bridge version 1.0.41\nVersion 34.0.5-stub\nInstalled as ${binary}\n`,
+      stdout,
       stderr: "",
+      stdoutBytes: Buffer.byteLength(stdout),
+      stderrBytes: 0,
     };
   });
   vi.mocked(execFileBytes).mockImplementation(async (_binary, args) => {

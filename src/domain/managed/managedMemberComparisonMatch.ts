@@ -49,10 +49,13 @@ interface Ambiguous<Item> {
 const keyMethod = (item: Method): Keyed<Method> => ({
   item,
   exactKey:
-    item.body.status === "present" && item.body.normalized_il_sha256 !== null
+    item.body.status === "present" &&
+    item.body.il_sha256 !== null &&
+    item.body.normalized_il_sha256 !== null
       ? sha256([
           "method-exact",
           item.signature.raw_sha256,
+          item.body.il_sha256,
           item.body.normalized_il_sha256,
         ])
       : null,

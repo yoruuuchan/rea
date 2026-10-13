@@ -72,7 +72,7 @@ export const harmonyApplicationProjectionResultSchema = z.strictObject({
     // Count completeness is separate from the declared coverage status.
     inventory_complete: z.boolean(),
   }),
-  limitations: z.array(z.string().min(1)),
+  limitations: z.array(z.string()),
 });
 
 export type HarmonyApplicationProjectionInput = z.infer<
@@ -112,7 +112,8 @@ export const projectHarmonyApplication = (
     classified.native_libraries,
   );
   const limitations = [
-    ...(!hasCompleteInventoryCoverage(inventory)
+    ...inventory.limitations,
+    ...(!hasCompleteInventoryCoverage(inventory, "container-entries")
       ? ["Source inventory coverage is partial; absence is unknown."]
       : []),
     ...(unavailable.length > 0

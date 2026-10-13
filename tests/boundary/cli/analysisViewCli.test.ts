@@ -21,6 +21,56 @@ import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { inspectEvidenceBundle } from "../../../src/application/investigation/InspectEvidenceBundle.js";
 
 cliTest(
+  "projects opted-in query names through compiled CLI without query values",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-query-names-cli-");
+    const path = join(root, "view.json");
+    const capture = analysisViewCaptureFixture();
+    capture.records = capture.records.slice(0, 2);
+    capture.total_records = 2;
+    capture.records.forEach((record, index) => {
+      record.reported = {
+        request: {
+          method: "GET",
+          url:
+            index === 0
+              ? "https://api.test/products?category=books&page=1&category=repeat"
+              : "https://api.test/products?category=games&sort=price#ignored",
+        },
+      };
+    });
+    await writeFile(
+      path,
+      JSON.stringify({
+        source: {
+          kind: "inline",
+          evidence: analysisViewCaptureEvidence(capture),
+        },
+        view: { kind: "api-surface", include_query_parameter_names: true },
+      }),
+    );
+    const result = await cli.run({
+      arguments: ["inspect-analysis-view", path, "--json"],
+    });
+    expect(result.exitCode).toBe(0);
+    const evidence = parseEvidence(result.json);
+    expect(evidence.normalized_result).toMatchObject({
+      groups: [
+        {
+          query_parameter_names: [
+            { name: "category", record_ordinals: [0, 1] },
+            { name: "page", record_ordinals: [0] },
+            { name: "sort", record_ordinals: [1] },
+          ],
+        },
+      ],
+    });
+    for (const value of ["books", "games", "repeat", "price", "ignored"])
+      expect(result.stdout).not.toContain(value);
+  },
+);
+
+cliTest(
   "projects portable artifact inventory after the original ZIP is removed",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-inventory-view-cli-");

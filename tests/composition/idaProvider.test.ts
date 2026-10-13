@@ -14,6 +14,7 @@ import {
 import { createEvidence } from "../../src/domain/evidence.js";
 import { createEvidenceBundle } from "../../src/domain/evidenceBundle.js";
 import { createAnalysisExecution } from "../../src/application/AnalysisProvider.js";
+import { EnhancedTools } from "../../src/application/EnhancedTools.js";
 import { IDA_PROVIDER_IDENTITY } from "../../src/ida/IdaProviderCapabilities.js";
 
 const roots: string[] = [];
@@ -181,5 +182,37 @@ describe("IDA provider composition", () => {
     expect(producer.connects).toBe(1);
     expect((await session.close()).ok).toBe(true);
     expect(producer.closes).toBe(1);
+  });
+});
+
+describe("IDA binary_overview execution", () => {
+  it("reports document selection unavailable when binary_overview executes against an IDA session", async () => {
+    const { root, target } = await createIdaTarget();
+    roots.push(root);
+    const path = join(root, "registration.json");
+    await writeFile(path, JSON.stringify({ command: "fixture" }));
+    const config = parseConfig({ REA_IDA_MCP_CONFIG: path });
+    if (!config.ok) throw config.error;
+    const producer = new RecordingIdaMcp(target);
+    const session = createTestBinarySession(
+      new IdaProvider(config.value, {}, () => producer),
+    );
+    expect((await session.open(target.path)).ok).toBe(true);
+    const tools = new EnhancedTools(session);
+    const overview = await tools.execute("binary_overview", {});
+    expect(overview).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisCapabilityUnavailableError",
+        providerId: "ida",
+        operation: "list_documents",
+        message: expect.stringContaining(
+          "operation is not declared by this provider",
+        ),
+      },
+    });
+    const procedures = await session.execute("list_procedures", {});
+    expect(procedures.ok).toBe(true);
+    expect((await session.close()).ok).toBe(true);
   });
 });

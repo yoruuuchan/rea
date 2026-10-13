@@ -176,7 +176,7 @@ export class AnalysisProviderRegistry {
       return err(new AnalysisCancelledError("open_binary"));
     if (
       request === undefined &&
-      selector !== "auto" &&
+      this.#byId.has(selector) &&
       baseline.length > 0 &&
       baseline.every(
         ({ targetSupport }) => targetSupport.status === "unsupported",

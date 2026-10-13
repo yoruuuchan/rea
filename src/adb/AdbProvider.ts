@@ -1707,9 +1707,7 @@ export class AdbProvider {
           },
           provider,
           {
-            limitations: [
-              "Push writes the caller's file to the device; this is the only device-mutating ADB tool",
-            ],
+            limitations: ["Push writes the caller's file to the device"],
           },
         ),
       );
@@ -1731,7 +1729,7 @@ export class AdbProvider {
         {
           limitations: [
             "The device did not answer sha256sum, so the transfer is not device-side verified",
-            "Push writes the caller's file to the device; this is the only device-mutating ADB tool",
+            "Push writes the caller's file to the device",
           ],
         },
       ),

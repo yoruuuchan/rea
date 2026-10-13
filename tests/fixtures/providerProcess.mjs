@@ -32,6 +32,13 @@ switch (mode) {
     process.exitCode = 23;
     break;
   }
+  case "invalid-utf8":
+    await write(process.stdout, Buffer.from([0x61, 0xff, 0x62]));
+    await write(process.stderr, Buffer.from([0x63, 0xfe, 0x64]));
+    break;
+  case "valid-multibyte":
+    await write(process.stdout, Buffer.from([0xe2, 0x82, 0xac]));
+    break;
   case "exit":
     process.exitCode = Number(value);
     break;

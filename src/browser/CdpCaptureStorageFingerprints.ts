@@ -193,7 +193,9 @@ const addIndexedDb = async (
       scope: "indexed_db_schema",
       identity: databaseName,
       value: stores.map(indexedDbStoreSchema),
-      complete: indexedDbSchemaComplete(stores),
+      complete:
+        stores.length === database.objectStores.length &&
+        indexedDbSchemaComplete(stores),
     });
     for (const store of stores) {
       const objectStoreName = cdpStringValue(store.name);
@@ -228,18 +230,36 @@ const indexedDbSchemaComplete = (
   stores.every(
     (store) =>
       cdpStringValue(store.name) !== undefined &&
-      stableValueComplete(store.keyPath) &&
+      indexedDbKeyPathComplete(store.keyPath) &&
       typeof store.autoIncrement === "boolean" &&
       Array.isArray(store.indexes) &&
       recordsValue(store.indexes).length === store.indexes.length &&
       recordsValue(store.indexes).every(
         (index) =>
           cdpStringValue(index.name) !== undefined &&
-          stableValueComplete(index.keyPath) &&
+          indexedDbKeyPathComplete(index.keyPath) &&
           typeof index.unique === "boolean" &&
           typeof index.multiEntry === "boolean",
       ),
   );
+
+const indexedDbKeyPathComplete = (value: unknown): boolean => {
+  const keyPath = recordValue(value);
+  if (keyPath === undefined) return false;
+  switch (keyPath.type) {
+    case "null":
+      return true;
+    case "string":
+      return typeof keyPath.string === "string";
+    case "array":
+      return (
+        Array.isArray(keyPath.array) &&
+        keyPath.array.every((key) => typeof key === "string")
+      );
+    default:
+      return false;
+  }
+};
 
 const addIndexedDbRecords = async (
   run: FingerprintRun,
@@ -474,14 +494,49 @@ const stableValueComplete = (value: unknown): boolean => {
 
 const remoteObjectComplete = (value: unknown): boolean => {
   const record = recordValue(value);
-  if (record === undefined) return true;
-  return (
-    record.objectId === undefined &&
-    record.preview === undefined &&
-    record.customPreview === undefined &&
-    (record.type !== "object" || record.value !== undefined) &&
-    stableValueComplete(record)
-  );
+  if (
+    record === undefined ||
+    record.objectId !== undefined ||
+    record.preview !== undefined ||
+    record.customPreview !== undefined ||
+    !stableValueComplete(record)
+  )
+    return false;
+  switch (record.type) {
+    case "undefined":
+      return (
+        record.value === undefined && record.unserializableValue === undefined
+      );
+    case "string":
+    case "boolean":
+      return (
+        typeof record.value === record.type &&
+        record.unserializableValue === undefined
+      );
+    case "number":
+      return record.unserializableValue === undefined
+        ? typeof record.value === "number" && Number.isFinite(record.value)
+        : record.value === undefined &&
+            typeof record.unserializableValue === "string" &&
+            ["-0", "NaN", "Infinity", "-Infinity"].includes(
+              record.unserializableValue,
+            );
+    case "bigint":
+      return (
+        record.value === undefined &&
+        typeof record.unserializableValue === "string" &&
+        /^-?\d+n$/u.test(record.unserializableValue)
+      );
+    case "object":
+      return (
+        record.unserializableValue === undefined &&
+        (record.subtype === "null"
+          ? record.value === null
+          : record.value !== null && typeof record.value === "object")
+      );
+    default:
+      return false;
+  }
 };
 
 const decodeBase64 = (value: string): Buffer | null => {

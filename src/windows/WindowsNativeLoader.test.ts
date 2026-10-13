@@ -8,7 +8,11 @@ import {
 } from "./WindowsNativeLoader.js";
 
 const fixture = (
-  capabilities: { protocolStdin?: boolean; jobMemoryLimit?: unknown } = {},
+  capabilities: {
+    protocolStdin?: boolean;
+    jobMemoryLimit?: unknown;
+    privateBridgeDescriptorAccess?: unknown;
+  } = {},
 ) => {
   const bytes = Buffer.alloc(128);
   bytes.write("MZ");
@@ -51,6 +55,7 @@ const fixture = (
           architecture: "x64",
           filesystem: identity,
           privateDacl: true,
+          privateBridgeDescriptorAccess: true,
           atomicJobAssignment: true,
           killOnOwnerClose: true,
           ...capabilities,
@@ -198,5 +203,13 @@ describe("packaged Windows native admission", () => {
     });
     expect(loaded.available).toBe(false);
     expect(loaded).not.toHaveProperty("retryable");
+  });
+
+  it("rejects Windows controls without handle-bound Cutter descriptor access", () => {
+    const value = fixture({ privateBridgeDescriptorAccess: undefined });
+    expect(loadWindowsNativeAuthority(value.host)).toMatchObject({
+      available: false,
+      reason: expect.stringContaining("privateBridgeDescriptorAccess"),
+    });
   });
 });

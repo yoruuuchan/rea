@@ -55,7 +55,7 @@ export interface GoBinaryImage {
 
 /** Inspect bounded executable bytes using native mappings, without loading or executing code. */
 export const readGoBinaryImage = (bytes: Buffer): GoBinaryImage => {
-  const container = readContainer(bytes);
+  const container = readGoBinaryContainer(bytes);
   const { format, architecture, bits, byte_order } = container;
   const search = container.search;
   const header = findHeader(bytes, search);
@@ -184,7 +184,8 @@ interface LocatedString {
   readonly location: GoStringLocation;
 }
 
-const readContainer = (bytes: Buffer): GoBinaryContainer => {
+/** Identify an ELF, PE, or thin Mach-O image and its named file sections. */
+export const readGoBinaryContainer = (bytes: Buffer): GoBinaryContainer => {
   if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])))
     return readGoElfImage(bytes);
   if (bytes.subarray(0, 2).equals(Buffer.from("MZ")))

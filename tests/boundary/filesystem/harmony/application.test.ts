@@ -20,7 +20,7 @@ import { artifactInventoryResultSchema } from "../../../../src/domain/artifactGr
 import { parseBinaryTarget } from "../../../../src/application/BinaryTargetResolver.js";
 import {
   ZIP_PACKAGE_FORMATS,
-  ZIP_NON_ENTRY_TAIL_LIMITATION,
+  ZIP_NON_ENTRY_LIMITATION,
 } from "../../../../src/domain/zipPackageFormat.js";
 
 const { runProviderAnalysis } = createDirectAnalysis({});
@@ -214,7 +214,7 @@ describe("HarmonyOS packaging boundaries", () => {
 });
 
 describe("HarmonyOS inventory coverage", () => {
-  it("keeps a case-colliding inventory partial in the application projection", async () => {
+  it("retains complete traversal and case-collision limits in the application projection", async () => {
     const path = await writeApplicationZip(
       "rea-harmony-case-collision-",
       "Fixture.hap",
@@ -225,7 +225,7 @@ describe("HarmonyOS inventory coverage", () => {
     );
     const inventory = await inventoryApplicationPackage(path);
     expect(inventory.normalized_result).toMatchObject({
-      coverage_status: "partial",
+      coverage_status: "complete",
     });
 
     const projection = requireDeterministicProjection(
@@ -234,11 +234,11 @@ describe("HarmonyOS inventory coverage", () => {
       harmonyApplicationProjectionResultSchema,
     );
     expect(projection.coverage).toEqual({
-      status: "partial",
+      status: "complete-within-inventory",
       inventory_complete: true,
     });
-    expect(projection.limitations).toContain(
-      "Source inventory coverage is partial; absence is unknown.",
+    expect(projection.limitations.join(" ")).toContain(
+      "case-insensitive destination",
     );
   });
 
@@ -264,7 +264,7 @@ describe("HarmonyOS inventory coverage", () => {
         artifact_kind: "container",
         artifact_format: format,
       });
-      expect(inventory.limitations).toContain(ZIP_NON_ENTRY_TAIL_LIMITATION);
+      expect(inventory.limitations).toContain(ZIP_NON_ENTRY_LIMITATION);
     },
   );
 

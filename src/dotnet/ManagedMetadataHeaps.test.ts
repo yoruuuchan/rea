@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { readMetadataBlob } from "./ManagedMetadataHeaps.js";
+import {
+  readMetadataBlob,
+  readMetadataUserString,
+} from "./ManagedMetadataHeaps.js";
 import type { ManagedMetadataLayout } from "./ManagedMetadataLayout.js";
 
 describe("managed metadata heaps", () => {
@@ -16,6 +19,7 @@ describe("managed metadata heaps", () => {
       strings: { name: "#Strings", offset: 0, size: 0 },
       guid: { name: "#GUID", offset: 0, size: 0 },
       blob: { name: "#Blob", offset: 0, size: bytes.length },
+      userStrings: null,
       tables: new Map(),
       rowCounts: [],
       stringIndexSize: 2,
@@ -30,4 +34,26 @@ describe("managed metadata heaps", () => {
       itemLength,
     );
   });
+
+  it.each([[[0x80]], [[0xc0, 0x00, 0x00]]])(
+    "reports a #US length prefix cut off by the end of the artifact as a string failure",
+    (prefix) => {
+      // #US ends at the end of the artifact, inside a multi-byte length prefix.
+      const bytes = Buffer.from([0x00, ...prefix]);
+      const layout = {
+        userStrings: { name: "#US", offset: 0, size: bytes.length },
+      } as unknown as ManagedMetadataLayout;
+
+      expect(() =>
+        readMetadataUserString(bytes, layout, "0x70000001"),
+      ).toThrowError(
+        expect.objectContaining({
+          issue: expect.objectContaining({
+            code: "invalid-string",
+            scope: "metadata.#US:0x70000001",
+          }),
+        }),
+      );
+    },
+  );
 });

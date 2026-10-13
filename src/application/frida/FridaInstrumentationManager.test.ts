@@ -1023,6 +1023,28 @@ it("serializes script loading against concurrent close and unloads the loaded sc
   expect(bindings.device.session.isDetached()).toBe(true);
 });
 
+it("drains startup when the provider loader initiates shutdown", async () => {
+  const bindings = new FakeDeviceManager();
+  let closing: Promise<void> | undefined;
+  const manager = new FridaInstrumentationManager({
+    deviceManagerLoader: async () => {
+      closing = manager.closeAll();
+      return bindings;
+    },
+  });
+  const started = await manager.startSession({
+    mode: "spawn",
+    deviceId: "local",
+    program: "/tmp/fixture",
+  });
+  if (!started.ok) throw started.error;
+  expect(closing).toBeDefined();
+  await closing;
+  expect(bindings.device.session.isDetached()).toBe(true);
+  expect(bindings.device.resumed).toEqual([512]);
+  expect(manager.status(started.value.sessionId)).toBeUndefined();
+});
+
 it("names the unknown session or script ID it rejects", async () => {
   const { manager, started } = await startLocalAttachedSession();
   if (!started.ok) throw started.error;

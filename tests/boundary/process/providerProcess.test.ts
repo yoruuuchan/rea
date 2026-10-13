@@ -188,6 +188,40 @@ describe("provider process runtime and wait primitives", () => {
 });
 
 describe("provider process output and cleanup primitives", () => {
+  it("marks retained provider output that cannot be represented as UTF-8", async () => {
+    const child = spawnProviderProcessFixture("invalid-utf8");
+    const supervisor = new ProviderProcessSupervisor({
+      process: child,
+      ownsProcessLifetime: true,
+    });
+
+    await expect(supervisor.waitForOutputClose(2_000)).resolves.toBe(true);
+    expect(supervisor.snapshot()).toMatchObject({
+      stdout: { text: "a�b", invalidUtf8: true },
+      stderr: { text: "c�d", invalidUtf8: true },
+    });
+    await expect(supervisor.stop()).resolves.toMatchObject({
+      status: "already-exited",
+    });
+  });
+
+  it("marks a retained byte prefix that cuts a valid multibyte UTF-8 character", async () => {
+    const child = spawnProviderProcessFixture("valid-multibyte");
+    const supervisor = new ProviderProcessSupervisor(
+      { process: child, ownsProcessLifetime: true },
+      { maxDiagnosticBytes: 2 },
+    );
+
+    await expect(supervisor.waitForOutputClose(2_000)).resolves.toBe(true);
+    expect(supervisor.snapshot()).toMatchObject({
+      stdout: { text: "�", bytes: 2, observedBytes: 3, invalidUtf8: true },
+      diagnosticTruncated: true,
+    });
+    await expect(supervisor.stop()).resolves.toMatchObject({
+      status: "already-exited",
+    });
+  });
+
   it("retains complete stdout and stderr beyond the former fixed ceiling", async () => {
     const outputBytes = 70_000;
     const child = spawnProviderProcessFixture("burst", outputBytes);

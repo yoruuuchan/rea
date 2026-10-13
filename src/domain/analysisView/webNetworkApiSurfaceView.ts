@@ -15,6 +15,12 @@ export const apiSurfaceViewSchema = z.strictObject({
   kind: z.literal("api-surface"),
   offset: z.number().int().nonnegative().default(0),
   limit: z.number().int().positive().default(50),
+  include_query_parameter_names: z
+    .boolean()
+    .optional()
+    .describe(
+      "Include distinct observed query parameter names and their original record ordinals; names do not establish required parameters or a complete API schema.",
+    ),
 });
 const ruleSchema = z.enum(["numeric", "uuid", "hex", "iso-date"]);
 const groupSchema = z.strictObject({
@@ -32,6 +38,14 @@ const groupSchema = z.strictObject({
   record_ordinals: z.array(z.number().int().nonnegative()),
   statuses: z.array(z.number()),
   content_types: z.array(z.string()),
+  query_parameter_names: z
+    .array(
+      z.strictObject({
+        name: z.string(),
+        record_ordinals: z.array(z.number().int().nonnegative()),
+      }),
+    )
+    .optional(),
   flags: z.array(
     z.enum(["single-sample", "mixed-statuses", "mixed-content-types"]),
   ),
@@ -66,7 +80,10 @@ export const apiSurfaceFields = {
 export const projectWebNetworkApiSurfaceView = (
   parent: AnalysisViewParent,
   view: AnalysisViewRequest,
-  accumulator = new WebNetworkApiSurfaceAccumulator(),
+  accumulator = new WebNetworkApiSurfaceAccumulator(
+    undefined,
+    view.kind === "api-surface" && view.include_query_parameter_names === true,
+  ),
 ): Result<UnsignedAnalysisView, AnalysisError> => {
   const unsupported = (reason: string) =>
     err(
@@ -111,6 +128,11 @@ export const projectWebNetworkApiSurfaceView = (
     ...parent.limitations,
     ...capture.limitations,
     "Grouping does not establish handler identity, URL-space schemas or causality.",
+    ...(view.include_query_parameter_names === true
+      ? [
+          "Observed query parameter names do not establish required parameters, value types or a complete API schema.",
+        ]
+      : []),
     ...(capture.records.length < capture.total_records
       ? [
           "Parent contains an ordinal subset; the surface covers only retained records.",

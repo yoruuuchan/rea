@@ -116,6 +116,63 @@ describe("managed member comparison", () => {
   });
 });
 
+describe("managed member comparison with equal decoded fingerprints", () => {
+  it.each([
+    { name: "Main", basis: "exact-signature" },
+    { name: "Renamed", basis: "structural-method-shape" },
+  ])("detects reordered switch targets in $name", ({ name, basis }) => {
+    const observe = (targets: readonly number[], methodName: string) => {
+      // ldarg.0; switch (case 0, case 1); ldc.i4.0; ret; ldc.i4.1; ret.
+      // Both cases target instruction starts, relative to the end of the table.
+      const il = Buffer.alloc(18);
+      il[0] = 0x02;
+      il[1] = 0x45;
+      il.writeUInt32LE(2, 2);
+      targets.forEach((target, index) =>
+        il.writeInt32LE(target, 6 + index * 4),
+      );
+      Buffer.from([0x16, 0x2a, 0x17, 0x2a]).copy(il, 14);
+      return inspect(
+        buildManagedPeFixture({
+          methodName,
+          methodSignature: Buffer.from([0x00, 0x01, 0x08, 0x08]),
+          ilBody: Buffer.concat([Buffer.from([(il.length << 2) | 2]), il]),
+        }),
+        `/tmp/${methodName}-${targets.join("-")}.dll`,
+      );
+    };
+    const left = observe([0, 2], "Main");
+    const right = observe([2, 0], name);
+    const leftBody = left.result.methods[0]?.body;
+    const rightBody = right.result.methods[0]?.body;
+    expect(leftBody?.status).toBe("present");
+    expect(rightBody?.status).toBe("present");
+    expect(leftBody?.normalized_il_sha256).toBe(
+      rightBody?.normalized_il_sha256,
+    );
+    expect(leftBody?.il_sha256).not.toBe(rightBody?.il_sha256);
+
+    const result = compareManagedMembers(left, right);
+    expect(result.matching.exact_il_signature).toBe(0);
+    expect(result.methods[0]).toMatchObject({
+      status: "changed",
+      match: { status: "matched", basis },
+      dimensions: ["cil"],
+    });
+    expect(
+      compareManagedMembers(right, observe([2, 0], name)).methods[0],
+    ).toMatchObject({
+      status: "unchanged",
+      match: {
+        status: "matched",
+        basis: "exact-il-signature",
+        confidence: "exact",
+      },
+      dimensions: [],
+    });
+  });
+});
+
 describe("managed member comparison floating-point constants", () => {
   it.each([
     {
@@ -310,6 +367,30 @@ describe("managed member comparison uncertainty", () => {
         }),
       }),
     ]);
+  });
+});
+
+describe("managed member comparison beside user strings", () => {
+  it("keeps member deltas and coverage when only #US literals are nonconforming", () => {
+    // The method loads "ok", stored with flag 1 where ECMA-335 expects 0.
+    const options = {
+      ilBody: Buffer.from([(7 << 2) | 2, 0x72, 1, 0, 0, 0x70, 0x26, 0x2a]),
+      userStringHeap: Buffer.from([0, 5, 0x6f, 0, 0x6b, 0, 1]),
+    };
+    const left = inspect(buildManagedPeFixture(options), "/tmp/left-us.dll");
+    const right = inspect(buildManagedPeFixture(options), "/tmp/right-us.dll");
+    const result = compareManagedMembers(
+      { evidenceId: left.evidenceId, result: { ...left.result, fields: [] } },
+      {
+        evidenceId: right.evidenceId,
+        result: { ...right.result, methods: [] },
+      },
+    );
+
+    expect(left.result.metadata.status).toBe("complete");
+    expect(left.result.coverage.state).toBe("complete");
+    expect(left.result.user_strings?.state).toBe("partial");
+    expect(result.summary).toMatchObject({ added: 1, removed: 1, unknown: 0 });
   });
 });
 

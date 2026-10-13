@@ -42,7 +42,7 @@ it("retains the delayed dependency in the complete real framed otool output", as
 
 it("rejects a repeated options field even when the duplicate has no value", async () => {
   const output = (await nativeFixture("otool-dylib-use.txt")).replace(
-    "      options delay-init ",
+    "      options delay-init",
     "      options delay-init\n      options",
   );
   expect(() => parseOtoolLoadCommands(output)).toThrow(/otool/u);

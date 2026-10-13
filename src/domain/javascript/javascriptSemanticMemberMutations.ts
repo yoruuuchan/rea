@@ -54,6 +54,57 @@ export function* collectSemanticMemberMutationsSteps(
   const selections = new Map<string, readonly string[]>();
   const coveringPaths = new Map<string, SemanticPropertyPathCoverage>();
   let arrayIterationUnknown = false;
+  // Definition collection finishes before this phase, so a scope's bindings no
+  // longer change and one node resolves to one binding. Repeated visits of the
+  // same node otherwise repeat the same scope walk.
+  const resolvedBindings = new WeakMap<
+    t.Node,
+    JavaScriptSemanticBindingState | null
+  >();
+  const resolveBinding = (
+    node: t.Node,
+    name: string,
+  ): JavaScriptSemanticBindingState | undefined => {
+    const cached = resolvedBindings.get(node);
+    if (cached !== undefined) return cached ?? undefined;
+    const resolved = resolveSemanticBindingState(state, node, name);
+    resolvedBindings.set(node, resolved ?? null);
+    return resolved;
+  };
+  // One capture tuple recurs across every alias it reaches. Re-encoding it
+  // would rebuild the same long key and force a fresh string hash per lookup.
+  const captureKeys = new WeakMap<
+    JavaScriptSemanticBindingState,
+    Map<string, string>
+  >();
+  const captureKeyOf = (
+    binding: JavaScriptSemanticBindingState,
+    originAt: t.Node | undefined,
+    ownerInitializer: t.Node | undefined,
+  ): string => {
+    let byPosition = captureKeys.get(binding);
+    if (byPosition === undefined) {
+      byPosition = new Map();
+      captureKeys.set(binding, byPosition);
+    }
+    const positionKey = `${originAt?.start ?? "u"}:${originAt?.end ?? "u"}:${
+      ownerInitializer?.start ?? "u"
+    }:${ownerInitializer?.end ?? "u"}`;
+    const cached = byPosition.get(positionKey);
+    if (cached !== undefined) return cached;
+    const created = JSON.stringify([
+      binding.bindingId,
+      originAt?.start,
+      originAt?.end,
+      ownerInitializer?.start,
+      ownerInitializer?.end,
+    ]);
+    byPosition.set(positionKey, created);
+    return created;
+  };
+  // A capture key already ends the array; a path stays one nested element.
+  const lifetimeKey = (captureKey: string, path: PropertyPath): string =>
+    `${captureKey.slice(0, -1)},${JSON.stringify(path)}]`;
   const pendingReferences: {
     readonly initializer: JavaScriptSemanticBindingState["referenceInitializers"][number];
     readonly path: PropertyPath;
@@ -121,11 +172,7 @@ export function* collectSemanticMemberMutationsSteps(
       if (current === undefined) break;
       const expression = unwrapJavaScriptExpression(current.node).node;
       if (t.isIdentifier(expression)) {
-        const binding = resolveSemanticBindingState(
-          state,
-          expression,
-          expression.name,
-        );
+        const binding = resolveBinding(expression, expression.name);
         if (binding === undefined) {
           if (
             (expression.name === "Array" &&
@@ -142,21 +189,18 @@ export function* collectSemanticMemberMutationsSteps(
         // An alias restored from a saved reference can revisit the same binding
         // at an earlier capture or a shorter getter-receiver path. Only a
         // repeated capture and path closes a cycle.
-        const capture = [
-          binding.bindingId,
-          current.originAt?.start,
-          current.originAt?.end,
-          current.ownerInitializer?.start,
-          current.ownerInitializer?.end,
-        ];
-        const lifetime = JSON.stringify([...capture, current.path]);
+        const captureKey = captureKeyOf(
+          binding,
+          current.originAt,
+          current.ownerInitializer,
+        );
+        const lifetime = lifetimeKey(captureKey, current.path);
         if (current.bindings.has(lifetime)) continue;
         // A self alias such as `node = node[key]` revisits its capture with the
         // same prefix added on every cycle, so exact paths never repeat. When
         // that prefix can never be pruned, escaping it once covers every longer
         // effect, including writes below shared children.
         // Only a capture already on this alias chain can repeat a prefix.
-        const captureKey = JSON.stringify(capture);
         const revisited = current.bindings.has(captureKey);
         let repeatedPrefix: PropertyPath | undefined;
         for (
@@ -165,8 +209,7 @@ export function* collectSemanticMemberMutationsSteps(
           start++
         ) {
           const suffix = current.path.slice(start);
-          if (!current.bindings.has(JSON.stringify([...capture, suffix])))
-            continue;
+          if (!current.bindings.has(lifetimeKey(captureKey, suffix))) continue;
           repeatedPrefix = current.path.slice(0, start);
           break;
         }
@@ -408,7 +451,7 @@ export function* collectSemanticMemberMutationsSteps(
       if (!t.isNode(node)) continue;
       const pathKey = JSON.stringify(value.path);
       if (t.isIdentifier(node) && value.iterableFallbackPath === undefined) {
-        const binding = resolveSemanticBindingState(state, node, node.name);
+        const binding = resolveBinding(node, node.name);
         const identity = JSON.stringify([
           binding === undefined ? null : binding.bindingId,
           binding === undefined ? node.name : null,

@@ -1,5 +1,7 @@
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
-import { parseEvidence } from "../../../src/domain/evidence.js";
+import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
+import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
+import { artifactInventoryResultSchema } from "../../../src/domain/artifactGraph.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -97,20 +99,6 @@ it.each([
   },
   20_000,
 );
-
-const artifactInventoryResultSchema = z.object({
-  occurrences: z.array(
-    z.object({ logical_path: z.string(), hash_status: z.string() }),
-  ),
-  integrity_contradictions: z.array(
-    z.object({
-      logical_path: z.string(),
-      declared_sha256: z.string(),
-      observed_sha256: z.string(),
-      trust: z.literal("observed-untrusted"),
-    }),
-  ),
-});
 
 it("extracts an active archive through MCP when requested", async () => {
   const root = await createTestTempDirectory("rea-artifact-extract-mcp-");
@@ -317,6 +305,30 @@ it("records an explicitly continued mismatch, preserves verified siblings, and n
           classification: "contradiction",
         }),
       ]),
+    });
+    const { coverage: _coverage, ...legacyInventory } = inventory;
+    const historical = createEvidence(
+      { path: archive, sha256: inventory.manifest.root_sha256, format: "asar" },
+      compact.provider,
+      {
+        operation: "inventory_artifact",
+        parameters: {},
+        result: jsonValueSchema.parse(legacyInventory),
+      },
+    );
+    const retainedComparison = await client.callTool({
+      name: "compare_artifacts",
+      arguments: { left: evidence, right: historical },
+    });
+    expect(
+      retainedComparison.isError,
+      JSON.stringify(retainedComparison),
+    ).not.toBe(true);
+    expect(
+      toolEvidence(retainedComparison.structuredContent).normalized_result,
+    ).toMatchObject({
+      status: "contradiction",
+      summary: { unchanged: 2, contradiction: 2, unknown: 0 },
     });
   } finally {
     await Promise.allSettled([client.close(), server.close(), session.close()]);

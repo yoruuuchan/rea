@@ -139,13 +139,39 @@ The result preserves the requested names in `selection.type_names` and reports
 unmatched names separately. If metadata names are unreadable, limitations retain
 that uncertainty. With no selection, `selection` is null and whole-assembly
 inspection keeps its existing resource policy. Selection restricts types,
-fields, methods, call edges and field accesses; member references remain an
-assembly-wide inventory, so output size is not guaranteed to be small.
+fields, methods, call edges, field accesses and user strings; member references
+remain an assembly-wide inventory, so output size is not guaranteed to be small.
 
 Coverage describes the selected members. Comparisons leave members outside the
 opposite observation's selection unknown, and application graphs report their
 selected scope as partial. Neither makes an absence claim about the whole
 assembly. Older member Evidence without `selection` remains readable.
+
+### User strings
+
+`ldstr` anchors keep their build-local `0x70` tokens. `user_strings.literals`
+lists each distinct token loaded by an inspected method body once, in token
+order, with its `#US` file offset and decoded value. Values keep their stored
+UTF-16 code units, including unpaired surrogates. Token `0x70000000` names the
+heap's empty entry at offset 0 and reads as `""`; any other item there is
+malformed. The terminal flag is checked against ECMA-335 II.24.2.4, and the
+length prefix against the width II.23.2 assigns. A difference is reported with
+its byte offset as a user-string issue while preserving the readable literal.
+Toolchain conventions can differ; this conformance observation does not
+establish runtime rejection. A missing `#US` stream is one stream-level issue;
+a malformed item is reported against its token. User strings carry their own
+coverage: any of these makes `user_strings.state` partial and lists the issue
+in `user_strings.issues`, while the member `coverage` and `metadata.status` are
+unaffected, and readable literals remain. The state is also partial when an
+inspected method's CIL was not fully decoded (a malformed exception section
+alone does not count) or a method that may belong to the inspected types was
+not inspected (its row could not be read, or its type's name could not be read
+under a `type_names` selection), because `ldstr` instructions there were not
+observed. Normalized CIL digests do not include decoded values.
+`compare_managed_members` does not decode or compare literals: an unchanged
+method does not establish unchanged strings, and the comparison says so in its
+limitations. Older member Evidence without `user_strings` reads as `null`: not
+examined.
 
 ### Edge target declaring types
 
@@ -183,9 +209,11 @@ native/runtime questions retain their own authority and coverage.
 Names and semantic labels do not establish durable member identity. Comparison
 preserves observed differences, structural inferences, and unknowns separately.
 
-Cross-version matching first prefers exact CIL/signature identity. When that
-does not match, it pairs an exact declared type, method name, and raw signature
-before trying structural body shape. The exact-signature key uses names only
+Cross-version matching first prefers exact raw CIL/signature identity, with
+equal decoded fingerprints. Equal decoded fingerprints alone cannot establish
+an exact match: they omit switch targets and collapse distinct NaN encodings.
+When that does not match, it pairs an exact declared type, method name, and raw
+signature before trying structural body shape. The exact-signature key uses names only
 as part of that full tuple; names alone never select a pair. Duplicate tuples
 remain ambiguous rather than being paired by token order. Fields follow the
 same exact tiers. The raw signature is exact whether or not REA decoded it, so
@@ -196,8 +224,11 @@ unpaired member, one-sided or ambiguous, with the same declared type and name
 whose signature was not decoded.
 
 For a matched method, an unavailable or partial body makes body-shape facets
-unknown while preserving observed signature differences. Structural identity
-compares normalized signatures, the limited decoded-CIL tuple fingerprint,
+unknown while preserving observed signature differences. For complete bodies,
+a difference in either the raw CIL digest or the decoded fingerprint is reported
+in the `cil` dimension, including reordered switch targets with equal decoded
+fingerprints. Structural identity compares normalized signatures, the limited
+decoded-CIL tuple fingerprint,
 constants, and bounded shape context. It reports all candidates at the winning
 score and remains ambiguous when the evidence does not distinguish them. The
 digest does not itself remap metadata tokens.
@@ -334,8 +365,8 @@ Opcode names retain short/long forms and prefix opcodes. This makes the value a
 reproducible decoded-tuple fingerprint, not a canonical semantic CIL identity:
 it does not resolve tokens across MVIDs, does not commit full control flow or
 exception semantics, and does not replace the raw CIL digest. Cross-build
-comparison uses the value only as one unique-only structural tier and reports
-ambiguity when that evidence is insufficient.
+comparison requires equal raw CIL digests as well for exact CIL/signature
+matches and reports ambiguity when structural evidence is insufficient.
 
 For example, a decoded `nop; ret` body serializes exactly as
 `[["nop","none",null],["ret","none",null]]` and has digest

@@ -43,3 +43,14 @@ export const uniqueManagedParseIssues = (
 ): readonly ManagedParseIssue[] => [
   ...new Map(issues.map((issue) => [JSON.stringify(issue), issue])).values(),
 ];
+
+/**
+ * Append issue lists one issue at a time. Spreading a list into `push` passes
+ * one argument per issue, which overflows the stack on large malformed inputs.
+ */
+export const appendManagedParseIssues = (
+  issues: ManagedParseIssue[],
+  ...found: readonly (readonly ManagedParseIssue[])[]
+): void => {
+  for (const list of found) for (const issue of list) issues.push(issue);
+};

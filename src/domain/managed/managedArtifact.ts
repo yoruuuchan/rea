@@ -219,6 +219,16 @@ const managedMemberReferenceSchema = z.object({
   signature: managedSignatureSchema,
 });
 
+const managedUserStringSchema = z.object({
+  token: tokenSchema,
+  offset: offsetSchema.describe("File offset of the #US item"),
+  value: z
+    .string()
+    .describe(
+      "Decoded UTF-16 code units, excluding the terminal flag byte; unpaired surrogates are kept",
+    ),
+});
+
 const managedModuleReferenceSchema = z.object({
   token: tokenSchema,
   row_offset: offsetSchema,
@@ -457,6 +467,17 @@ export const managedMemberInspectionSchema = z.object({
   member_refs: z.array(managedMemberReferenceSchema),
   call_edges: z.array(managedCallEdgeSchema),
   field_accesses: z.array(managedFieldAccessSchema),
+  // Distinct #US literals loaded by ldstr in the inspected method bodies, in
+  // token order, with their own coverage: #US issues never enter the member
+  // coverage. null means they were not examined, not that there were none.
+  user_strings: z
+    .object({
+      state: z.enum(["complete", "partial"]),
+      literals: z.array(managedUserStringSchema),
+      issues: z.array(managedParseIssueSchema),
+    })
+    .nullable()
+    .default(null),
   /** Caller-selected declaring types; null when every type was inspected. */
   selection: z
     .object({

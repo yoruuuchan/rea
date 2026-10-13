@@ -59,6 +59,7 @@ const authority = (
         directory: true,
       },
       privateDacl: true,
+      privateBridgeDescriptorAccess: true,
       atomicJobAssignment: true,
       killOnOwnerClose: true,
       protocolStdin: true,
@@ -105,6 +106,32 @@ const launch = (
   );
 
 describe("Windows Job Object memory limits", () => {
+  it("emits close only after descendants leave the Job Object", async () => {
+    const { native, calls } = authority({
+      polls: [
+        {
+          ...settledPoll,
+          stdoutEnded: false,
+          stderrEnded: false,
+          activeProcesses: 1,
+        },
+        settledPoll,
+      ],
+    });
+    const child = launch(native);
+    const events: string[] = [];
+    child.once("exit", () => events.push("exit"));
+    child.once("close", () => events.push("close"));
+
+    await once(child, "close");
+
+    expect(events).toEqual(["exit", "close"]);
+    expect(
+      calls.filter(({ operation }) => operation === "process_poll"),
+    ).toHaveLength(2);
+    expect(calls.at(-1)?.operation).toBe("process_close");
+  });
+
   it("refuses a requested limit before launch when the artifact lacks the control", () => {
     const { native, calls } = authority();
     expect(() => launch(native, LIMIT)).toThrow(

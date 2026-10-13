@@ -72,13 +72,14 @@ const windowsHeaderSignature = (
   bytes: Buffer | undefined,
 ): "PE" | "NE" | "LE" | "LX" | "other" | "unobserved" => {
   if (bytes === undefined || bytes.length < 2) return "unobserved";
-  const prefix = bytes.toString("latin1", 0, 2);
-  if (prefix === "NE" || prefix === "LE" || prefix === "LX") return prefix;
-  if (prefix !== "PE") return "other";
+  const first = bytes[0];
+  const second = bytes[1];
+  if (first === 0x4e && second === 0x45) return "NE";
+  if (first === 0x4c && second === 0x45) return "LE";
+  if (first === 0x4c && second === 0x58) return "LX";
+  if (first !== 0x50 || second !== 0x45) return "other";
   if (bytes.length < 4) return "unobserved";
-  return bytes.subarray(0, 4).equals(Buffer.from("PE\0\0", "binary"))
-    ? "PE"
-    : "other";
+  return bytes[2] === 0 && bytes[3] === 0 ? "PE" : "other";
 };
 
 /**

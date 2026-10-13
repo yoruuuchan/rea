@@ -33,6 +33,8 @@ codedb.snapshot
 htmlcov/
 .coverage
 coverage/
+.stryker-tmp/
+reports/mutation/
 .vitest/
 .vitest-reports/
 test-results.xml

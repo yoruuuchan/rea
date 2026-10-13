@@ -95,10 +95,10 @@ export const decodeQlogCapture = (
         ...stream.reported_final_sizes,
         ...stream.covered_ranges.flatMap((r) => [r.start, r.end]),
       ];
+      // A stream can have more contributions than call arguments allow.
       if (numericValues.some(excluded))
-        fact.incomplete_fact_records.push(
-          ...stream.contributions.map((c) => c.record_ordinal),
-        );
+        for (const contribution of stream.contributions)
+          fact.incomplete_fact_records.push(contribution.record_ordinal);
       else fact.streams.push(stream);
     }
     fact.incomplete_fact_records = [...new Set(fact.incomplete_fact_records)];

@@ -8,7 +8,14 @@ const fixturePath = fileURLToPath(
 
 /** Spawn one deterministic process-lifecycle fixture with piped diagnostics. */
 export const spawnProviderProcessFixture = (
-  mode: "burst" | "detached-child" | "exit" | "graceful" | "stubborn",
+  mode:
+    | "burst"
+    | "detached-child"
+    | "exit"
+    | "graceful"
+    | "invalid-utf8"
+    | "valid-multibyte"
+    | "stubborn",
   value?: number,
 ): ChildProcess =>
   spawn(

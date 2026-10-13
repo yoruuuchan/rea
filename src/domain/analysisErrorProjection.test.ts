@@ -796,3 +796,32 @@ describe("analysis error projection: evidence files", () => {
     },
   );
 });
+
+it("retains the primary failure and both cleanup reports after a secondary failure", () => {
+  const primary = new AnalysisCancelledError("execute_rizin_command", {
+    capturedOutput: {
+      stdout: "partial",
+      stderr: "diagnostic",
+      truncated: false,
+    },
+    cleanup: { reason: "writer remains", resources: ["writer"] },
+  });
+  const secondary = new AnalysisOutputError("open_binary", "cannot rebind", {
+    cleanup: { reason: "provider remains", resources: ["provider", "writer"] },
+  });
+  const enriched = primary.retainSecondaryFailure(secondary, {
+    rebind_error: projectAnalysisError(secondary),
+  });
+  expect(enriched).toBe(primary);
+  expect(enriched._tag).toBe("AnalysisCancelledError");
+  expect(projectAnalysisError(enriched)).toMatchObject({
+    code: "cleanup_incomplete",
+    details: {
+      execution_failure: "cancelled",
+      resources: ["writer"],
+      cleanup_reason: "writer remains",
+      captured_output: { stdout: "partial", stderr: "diagnostic" },
+      diagnostics: { rebind_error: { code: "cleanup_incomplete" } },
+    },
+  });
+});

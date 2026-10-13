@@ -2,6 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { TextReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 
 import { fragmentInventoryEvidence } from "../../fixtures/artifactEvidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -77,7 +78,11 @@ describe("leaf artifact comparison", () => {
     // Persisted inventory Evidence predates coverage_status. The known leaf
     // notice remains complete when normalized at the inventory boundary.
     const parsed = artifactInventoryResultSchema.parse(left.normalized_result);
-    const { coverage_status: _coverageStatus, ...legacyInventory } = parsed;
+    const {
+      coverage: _coverage,
+      coverage_status: _coverageStatus,
+      ...legacyInventory
+    } = parsed;
     const legacy = createEvidence(
       {
         path: left.subject!.local_path,
@@ -157,7 +162,7 @@ describe("artifact inventory coverage", () => {
     const graph = artifactInventoryResultSchema.parse(
       complete.normalized_result,
     );
-    const partial = createEvidence(
+    const contradictory = createEvidence(
       {
         path: complete.subject!.local_path,
         sha256: complete.subject!.digest.sha256,
@@ -168,6 +173,29 @@ describe("artifact inventory coverage", () => {
         operation: "inventory_artifact",
         parameters: {},
         result: jsonValueSchema.parse({ ...graph, coverage_status: "partial" }),
+        confidence: "derived",
+        authority: "shipped-artifact",
+      },
+    );
+    expect(() => parseArtifactInventoryEvidence(contradictory)).toThrow(
+      "Artifact inventory has conflicting coverage declarations",
+    );
+
+    const { coverage: _coverage, ...legacyStatusGraph } = graph;
+    const partial = createEvidence(
+      {
+        path: complete.subject!.local_path,
+        sha256: complete.subject!.digest.sha256,
+        format: complete.subject!.format,
+      },
+      PROVIDER,
+      {
+        operation: "inventory_artifact",
+        parameters: {},
+        result: jsonValueSchema.parse({
+          ...legacyStatusGraph,
+          coverage_status: "partial",
+        }),
         confidence: "observed",
         authority: "shipped-artifact",
       },
@@ -180,7 +208,8 @@ describe("artifact inventory coverage", () => {
       summary: { unchanged: 0, unknown: 1 },
     });
 
-    const { coverage_status: _coverageStatus, ...legacyGraph } = graph;
+    const { coverage_status: _coverageStatus, ...legacyGraph } =
+      legacyStatusGraph;
     const unknownLegacy = createEvidence(
       {
         path: complete.subject!.local_path,
@@ -219,6 +248,7 @@ describe("artifact inventory coverage", () => {
     const fragmentGraph = artifactInventoryResultSchema.parse(
       fragment.normalized_result,
     );
+    const { coverage: _coverage, ...legacyFragmentGraph } = fragmentGraph;
     const mixed = createEvidence(
       {
         path: fragment.subject!.local_path,
@@ -230,7 +260,7 @@ describe("artifact inventory coverage", () => {
         operation: "inventory_artifact",
         parameters: fragment.parameters,
         result: jsonValueSchema.parse({
-          ...fragmentGraph,
+          ...legacyFragmentGraph,
           coverage_status: "partial",
         }),
         confidence: "derived",
@@ -239,7 +269,7 @@ describe("artifact inventory coverage", () => {
     );
     expect(() =>
       parseArtifactInventoryEvidence([firstFragment, mixed]),
-    ).toThrow("Artifact inventory pages disagree on coverage status");
+    ).toThrow("Artifact inventory pages do not share one coverage declaration");
   });
 });
 
@@ -314,6 +344,61 @@ describe("artifact comparison", () => {
 });
 
 describe("artifact comparison completeness", () => {
+  it("does not infer child changes from root-only coverage", async () => {
+    const root = await createTestTempDirectory("rea-artifact-root-coverage-");
+    const leftPath = join(root, "left.app");
+    const rightPath = join(root, "right.app");
+    await Promise.all([mkdir(leftPath), mkdir(rightPath)]);
+    await Promise.all([
+      writeFile(join(leftPath, "left-only.txt"), "left"),
+      writeFile(join(rightPath, "right-only.txt"), "right"),
+    ]);
+    const [left, right] = await Promise.all([
+      observe(leftPath),
+      observe(rightPath),
+    ]);
+    const rootOnly = (evidence: Awaited<ReturnType<typeof observe>>) => {
+      const inventory = artifactInventoryResultSchema.parse(
+        evidence.normalized_result,
+      );
+      return createEvidence(
+        {
+          path: evidence.subject?.local_path ?? "",
+          sha256: inventory.manifest.root_sha256,
+          format: inventory.manifest.root_format,
+        },
+        PROVIDER,
+        {
+          operation: "inventory_artifact",
+          parameters: {},
+          result: jsonValueSchema.parse({
+            ...inventory,
+            coverage: { scope: "root", status: "complete" },
+          }),
+          confidence: "derived",
+          authority: "shipped-artifact",
+        },
+      );
+    };
+    const compared = compareArtifacts(rootOnly(left), rootOnly(right));
+    expect(compared.status).toBe("unknown");
+    expect(compared.summary).toMatchObject({ added: 0, removed: 0 });
+    expect(
+      compared.changes
+        .filter(({ logical_path }) => logical_path !== ".")
+        .map(({ logical_path, classification }) => ({
+          logical_path,
+          classification,
+        })),
+    ).toEqual([
+      { logical_path: "left-only.txt", classification: "unknown" },
+      { logical_path: "right-only.txt", classification: "unknown" },
+    ]);
+    expect(compared.limitations).toContain(
+      "Container entry coverage is unavailable for child paths.",
+    );
+  });
+
   it("compares every graph member for inventories larger than 500 entries", async () => {
     const root = await createTestTempDirectory("rea-artifact-pages-");
     const entryCount = 501;
@@ -358,7 +443,9 @@ describe("artifact comparison completeness", () => {
       changes: [],
     });
   }, 15_000);
+});
 
+describe("artifact comparison fragment integrity", () => {
   it("assembles real inventory fragments and retains every citation", async () => {
     const parent = await createTestTempDirectory("rea-artifact-fragments-");
     const leftPath = join(parent, "left.app");
@@ -415,6 +502,30 @@ describe("artifact comparison completeness", () => {
         evidence_links: citations,
       })),
     });
+    const fragment = leftFragments[0];
+    if (fragment === undefined) throw new Error("Expected inventory fragments");
+    const conflictingScope = createEvidence(
+      {
+        path: leftPath,
+        sha256: left.subject?.digest.sha256 ?? "",
+        format: "directory",
+      },
+      PROVIDER,
+      {
+        operation: "inventory_artifact",
+        parameters: {},
+        result: jsonValueSchema.parse({
+          ...artifactInventoryResultSchema.parse(fragment.normalized_result),
+          coverage: { scope: "root", status: "complete" },
+        }),
+      },
+    );
+    expect(() =>
+      compareArtifacts(
+        [conflictingScope, ...leftFragments.slice(1)],
+        rightFragments,
+      ),
+    ).toThrow(/coverage declaration/u);
   }, 15_000);
 
   it("rejects non-inventory and tampered Evidence", async () => {
@@ -443,5 +554,92 @@ describe("artifact comparison completeness", () => {
     expect(() => compareArtifacts(mismatchedSubject, evidence)).toThrow(
       /root digest/u,
     );
+  });
+});
+
+describe("ZIP non-entry coverage", () => {
+  it("retains pre-directory APK block changes and compares historical scope descriptions", async () => {
+    const root = await createTestTempDirectory("rea-apk-block-compare-");
+    const writer = new ZipWriter(new Uint8ArrayWriter());
+    await writer.add("classes.dex", new TextReader("unchanged entry"));
+    const zip = Buffer.from(await writer.close());
+    const eocd = zip.length - 22;
+    expect(zip.readUInt32LE(eocd)).toBe(0x06054b50);
+    const directory = zip.readUInt32LE(eocd + 16);
+    // APK Signing Block framing with one opaque padding pair, not a verified signature.
+    // https://source.android.com/docs/security/features/apksigning/v2#apk-signing-block
+    const block = Buffer.alloc(48);
+    block.writeBigUInt64LE(40n, 0);
+    block.writeBigUInt64LE(8n, 8);
+    block.writeUInt32LE(0x42726577, 16);
+    block.writeBigUInt64LE(40n, 24);
+    block.write("APK Sig Block 42", 32, "ascii");
+    const paths = [join(root, "before.apk"), join(root, "after.apk")];
+    for (const [index, path] of paths.entries()) {
+      block.writeUInt32LE(index, 20);
+      const apk = Buffer.concat([
+        zip.subarray(0, directory),
+        block,
+        zip.subarray(directory),
+      ]);
+      apk.writeUInt32LE(directory + block.length, eocd + block.length + 16);
+      await writeFile(path, apk);
+    }
+    const left = await observe(paths[0]!);
+    const right = await observe(paths[1]!);
+    const inventory = artifactInventoryResultSchema.parse(
+      left.normalized_result,
+    );
+    expect(inventory.limitations).toContain(
+      "ZIP inventory lists central-directory entries only. Non-entry bytes, including an APK Signing Block before the central directory or a ZIP comment after it, are not occurrences.",
+    );
+    expect(
+      inventory.occurrences.map(({ logical_path }) => logical_path).sort(),
+    ).toEqual([".", "classes.dex"]);
+    expect(compareArtifacts(left, right)).toMatchObject({
+      status: "changed",
+      summary: { changed: 1, unchanged: 1, unknown: 0 },
+      changes: [
+        expect.objectContaining({ logical_path: ".", dimensions: ["content"] }),
+      ],
+    });
+    const {
+      coverage: _coverage,
+      coverage_status: _coverageStatus,
+      ...legacyInventory
+    } = inventory;
+    const withLimitation = (limitation: string) =>
+      createEvidence(
+        {
+          path: paths[0]!,
+          sha256: inventory.manifest.root_sha256,
+          format: "apk",
+        },
+        PROVIDER,
+        {
+          operation: "inventory_artifact",
+          parameters: {},
+          result: jsonValueSchema.parse({
+            ...legacyInventory,
+            limitations: [limitation],
+          }),
+          confidence: "observed",
+          authority: "shipped-artifact",
+        },
+      );
+    const historical = withLimitation(
+      "ZIP inventory lists central-directory entries only. Bytes after the central directory, including an APK Signing Block or a ZIP comment, are not occurrences.",
+    );
+    expect(compareArtifacts(historical, left)).toMatchObject({
+      status: "unchanged",
+      summary: { unchanged: 2, unknown: 0 },
+      changes: [],
+    });
+    expect(
+      compareArtifacts(
+        withLimitation("ZIP entry bytes could not be read."),
+        left,
+      ).status,
+    ).toBe("unknown");
   });
 });

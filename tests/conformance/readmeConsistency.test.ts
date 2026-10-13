@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -51,7 +51,11 @@ describe("onboarding documentation product facts", () => {
       .filter((language) => language.code !== "en")
       .map((language) => language.readme);
     expect(translatedReadmes).toContain("docs/readme/README_it.md");
-    expect(translatedReadmes).toHaveLength(18);
+    expect(translatedReadmes).toContain("docs/readme/README_el.md");
+    const editions = (await readdir(resolve("docs/readme")))
+      .filter((name) => /^README_[A-Za-z0-9-]+\.md$/u.test(name))
+      .map((name) => `docs/readme/${name}`);
+    expect([...translatedReadmes].sort()).toEqual(editions.sort());
     const english = shellExamples(await readFile(resolve("README.md"), "utf8"));
     for (const path of translatedReadmes)
       expect(

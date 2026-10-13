@@ -94,7 +94,7 @@ export const appleApplicationProjectionResultSchema = z.strictObject({
     // Count completeness is separate from the declared coverage status.
     inventory_complete: z.boolean(),
   }),
-  limitations: z.array(z.string().min(1)),
+  limitations: z.array(z.string()),
 });
 
 export type AppleApplicationProjectionInput = z.infer<
@@ -169,18 +169,24 @@ export const projectAppleApplication = (
   );
   const uninventoriedImage =
     rootFormat === "dmg" && inventory.occurrences.length === 1;
-  const inventoryComplete = hasCompleteInventoryCoverage(inventory);
+  const inventoryComplete = hasCompleteInventoryCoverage(
+    inventory,
+    "container-entries",
+  );
   const complete = inventoryComplete && !uninventoriedImage;
-  const limitations = projectionLimitations({
-    complete: inventoryComplete,
-    uninventoriedImage,
-    roots,
-    bundles,
-    sidecars: entries.some(({ path }) => isSidecar(path)),
-    symlinks: entries.some(({ kind }) => kind === "symlink"),
-    unattributed,
-    bridgeCandidateCoverage: bridgeProjection.coverage,
-  });
+  const limitations = [
+    ...inventory.limitations,
+    ...projectionLimitations({
+      complete: inventoryComplete,
+      uninventoriedImage,
+      roots,
+      bundles,
+      sidecars: entries.some(({ path }) => isSidecar(path)),
+      symlinks: entries.some(({ kind }) => kind === "symlink"),
+      unattributed,
+      bridgeCandidateCoverage: bridgeProjection.coverage,
+    }),
+  ];
   const withoutId = {
     root_sha256: inventory.manifest.root_sha256,
     root_format: rootFormat,
