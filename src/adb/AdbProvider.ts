@@ -23,9 +23,11 @@ import {
   type AnalysisExecution,
 } from "../application/AnalysisProvider.js";
 import type {
+  AdbActivityStartPartialObservation,
   AdbAcquiredFilePartialObservation,
   AdbRequest,
 } from "../domain/adb/adbDeviceAnalysis.js";
+import { adbResultSchemas } from "../domain/adb/adbDeviceAnalysis.js";
 import {
   AnalysisArtifactChangedError,
   AnalysisCancelledError,
@@ -1985,28 +1987,55 @@ export class AdbProvider {
       signal,
     );
     if (!started.ok) return started;
-    const verdict = parseAmStartOutput(started.value.stdout);
-    if (verdict.status === "refused")
+    const verdict = parseAmStartOutput(
+      started.value.stdout,
+      started.value.stderr,
+    );
+    const result = {
+      ...resultFields,
+      started_activity: verdict.startedActivity,
+      reported_activity: verdict.activity,
+      reported_status: verdict.reportedStatus,
+    };
+    if (verdict.status === "refused") {
+      const partialObservation: AdbActivityStartPartialObservation =
+        operation === "start_adb_app"
+          ? {
+              provider_id: "adb",
+              operation,
+              result: adbResultSchemas.start_adb_app.parse(result),
+            }
+          : {
+              provider_id: "adb",
+              operation,
+              result: adbResultSchemas.start_adb_activity.parse(result),
+            };
       return err(
         new AnalysisUnsupportedTargetError(
           operation,
           serial,
           verdict.reason ?? "am start refused the intent",
+          {
+            capturedOutput: {
+              stdout: started.value.stdout,
+              stderr: started.value.stderr,
+              truncated: false,
+            },
+            partialObservation,
+          },
         ),
       );
+    }
     return ok(
-      createAnalysisExecution(
-        {
-          ...resultFields,
-          started_activity: verdict.startedActivity,
+      createAnalysisExecution(result, provider, {
+        rawResult: {
+          stdout: started.value.stdout,
+          stderr: started.value.stderr,
         },
-        provider,
-        {
-          limitations: [
-            "Starting an activity changes device state; am start -W waits for launch completion but no lifecycle observation is captured",
-          ],
-        },
-      ) as AnalysisExecution,
+        limitations: [
+          "Starting an activity changes device state; am start -W waits for launch completion but no lifecycle observation is captured",
+        ],
+      }) as AnalysisExecution,
     );
   }
 

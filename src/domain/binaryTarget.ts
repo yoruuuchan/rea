@@ -7,8 +7,13 @@ import type {
   UniversalMachOSlice,
 } from "./binaryTargetTypes.js";
 import { err, ok, type Result } from "./result.js";
-import { mzWindowsHeaderOffset, parseDosMzHeader } from "./dosMz.js";
+import { readElfFixedHeader } from "./elfFixedHeader.js";
+import { observeMzWindowsHeader, parseDosMzHeader } from "./dosMz.js";
 import { decodePeMachine } from "./peMachine.js";
+import {
+  classifyFatContainerIdentity,
+  readFatContainerHeader,
+} from "./apple/machoContainer.js";
 
 /** Format and architecture facts recovered from an executable header. */
 export type ExecutableMetadata =
@@ -55,6 +60,7 @@ export const parseExecutableHeader = (
   bytes: Buffer,
   hostArchitecture: NodeJS.Architecture,
   fileSize = bytes.length,
+  mzWindowsHeaderSignature?: Buffer,
 ): Result<ExecutableMetadata, string> => {
   if (
     bytes.length >= 4 &&
@@ -62,13 +68,14 @@ export const parseExecutableHeader = (
   )
     return parseElf(bytes, fileSize);
   if (bytes.length >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a)
-    return parseMz(bytes, fileSize);
+    return parseMz(bytes, fileSize, mzWindowsHeaderSignature);
   if (bytes.length < 8) return err("truncated or unsupported binary header");
   const magic = bytes.readUInt32BE(0);
   if ([0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe].includes(magic))
     return parseThinMachO(bytes, magic, fileSize);
-  if ([0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca].includes(magic))
-    return parseFatMachO(bytes, magic, hostArchitecture, fileSize);
+  const fatHeader = readFatContainerHeader(bytes, fileSize);
+  if (fatHeader.state !== "not-fat")
+    return parseFatMachO(bytes, hostArchitecture, fatHeader);
   return err("unsupported binary format");
 };
 
@@ -102,97 +109,97 @@ const parseThinMachO = (
 
 const parseFatMachO = (
   bytes: Buffer,
-  magic: number,
   host: NodeJS.Architecture,
-  fileSize: number,
+  header: Exclude<
+    ReturnType<typeof readFatContainerHeader>,
+    { state: "not-fat" }
+  >,
 ): Result<ExecutableMetadata, string> => {
-  const little = magic === 0xbebafeca || magic === 0xbfbafeca;
-  const is64 = magic === 0xcafebabf || magic === 0xbfbafeca;
-  if (bytes.length < 8) return err("truncated FAT header");
-  const read = (offset: number): number =>
-    little ? bytes.readUInt32LE(offset) : bytes.readUInt32BE(offset);
-  const count = read(4);
-  const entrySize = is64 ? 32 : 20;
-  if (count === 0 || count > 128 || bytes.length < 8 + count * entrySize)
+  if (header.state === "needs-data")
     return err("truncated or invalid FAT architecture table");
+  if (header.state === "malformed") return err(header.reason);
+  const identityError = fatIdentityError(bytes, header);
+  if (identityError !== null) return err(identityError);
   const architectures: HeaderArchitecture[] = [];
   const slices = new Map<
     HeaderArchitecture,
-    { readonly offset: bigint; readonly size: bigint }
+    { readonly offset: number; readonly size: number }
   >();
-  for (let index = 0; index < count; index += 1) {
-    const entry = 8 + index * entrySize;
-    const architecture = machArchitecture(read(entry));
+  for (const declaration of header.slices) {
+    const architecture = machArchitecture(declaration.cpuType);
     if (architecture === undefined || architectures.includes(architecture))
       continue;
     architectures.push(architecture);
-    const offset = is64
-      ? little
-        ? bytes.readBigUInt64LE(entry + 8)
-        : bytes.readBigUInt64BE(entry + 8)
-      : BigInt(read(entry + 8));
-    const size = is64
-      ? little
-        ? bytes.readBigUInt64LE(entry + 16)
-        : bytes.readBigUInt64BE(entry + 16)
-      : BigInt(read(entry + 12));
-    slices.set(architecture, { offset, size });
+    slices.set(architecture, {
+      offset: declaration.offset,
+      size: declaration.size,
+    });
   }
-  const preferred =
-    host === "arm64"
-      ? "arm64"
-      : host === "x64"
-        ? "x86_64"
-        : host === "ia32"
-          ? "x86"
-          : host === "arm"
-            ? "arm"
-            : undefined;
+  const preferred = fatHostArchitecture(host);
   const slice = preferred === undefined ? undefined : slices.get(preferred);
   if (preferred === undefined || slice === undefined)
     return err(`FAT binary has no host-compatible ${host} architecture`);
-  const tableEnd = BigInt(8 + count * entrySize);
-  if (slice.offset < tableEnd)
-    return err(`FAT slice for ${preferred} overlaps the architecture table`);
   const minimumHeaderSize =
-    preferred === "arm64" || preferred === "x86_64" ? 32n : 28n;
+    preferred === "arm64" || preferred === "x86_64" ? 32 : 28;
   if (slice.size < minimumHeaderSize)
     return err(`FAT slice for ${preferred} is shorter than its Mach-O header`);
-  const sliceEnd = slice.offset + slice.size;
-  if (sliceEnd > BigInt(fileSize))
-    return err(
-      `truncated FAT slice: the ${preferred} slice ends at byte ${sliceEnd}; the file has ${fileSize}`,
-    );
-  const sliceOffset = Number(slice.offset);
-  const sliceSize = Number(slice.size);
-  if (!Number.isSafeInteger(sliceOffset) || !Number.isSafeInteger(sliceSize))
-    return err(`FAT slice for ${preferred} exceeds addressable byte bounds`);
   return ok({
     format: "mach-o-universal",
     architecture: preferred,
     availableArchitectures: architectures,
-    universalSlice: { offset: sliceOffset, size: sliceSize },
+    universalSlice: { offset: slice.offset, size: slice.size },
   });
+};
+
+const fatHostArchitecture = (
+  host: NodeJS.Architecture,
+): HeaderArchitecture | undefined => {
+  switch (host) {
+    case "arm64":
+      return "arm64";
+    case "x64":
+      return "x86_64";
+    case "ia32":
+      return "x86";
+    case "arm":
+      return "arm";
+    default:
+      return undefined;
+  }
+};
+
+const fatIdentityError = (
+  bytes: Buffer,
+  header: Extract<
+    ReturnType<typeof readFatContainerHeader>,
+    { state: "parsed" }
+  >,
+): string | null => {
+  const identity = classifyFatContainerIdentity(header, (offset) => {
+    if (offset >= bytes.length) return undefined;
+    if (offset + 4 > bytes.length) return null;
+    return bytes.readUInt32BE(offset);
+  });
+  if (identity.state === "needs-slice-header")
+    return "FAT slice identity is outside the bounded prefix";
+  if (identity.state === "not-mach-o")
+    return "FAT table does not identify a Mach-O image";
+  if (identity.state === "malformed") return identity.reason;
+  return null;
 };
 
 const parseElf = (
   bytes: Buffer,
   fileSize: number,
 ): Result<ExecutableMetadata, string> => {
-  if (bytes.length < 6) return err("truncated ELF header");
-  if (bytes[4] !== 1 && bytes[4] !== 2) return err("unsupported ELF class");
-  const little = bytes[5] === 1;
-  if (!little && bytes[5] !== 2) return err("unsupported ELF endianness");
-  const headerSize = bytes[4] === 1 ? 52 : 64;
-  if (bytes.length < headerSize)
-    return err(
-      `truncated ELF header: an ELF${bytes[4] === 1 ? 32 : 64} header needs ${headerSize} bytes; the file has ${fileSize}`,
-    );
+  const fixedHeader = readElfFixedHeader(bytes, fileSize);
+  if (!fixedHeader.ok) return fixedHeader;
+  const { elfClass, byteOrder } = fixedHeader.value;
+  const little = byteOrder === "little";
   const machine = little ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18);
   const architecture = elfArchitecture(machine);
   if (architecture === undefined) return err("unsupported ELF architecture");
   if (architecture === "mips" || architecture === "riscv") {
-    const elfClass = bytes[4] === 1 ? 32 : 64;
     const flagsOffset = elfClass === 32 ? 36 : 48;
     const metadata: ElfFamilyMetadata = {
       elfClass,
@@ -226,17 +233,33 @@ const parseElf = (
 const parseMz = (
   bytes: Buffer,
   fileSize: number,
+  signatureAtOffset?: Buffer,
 ): Result<ExecutableMetadata, string> => {
-  const offset = mzWindowsHeaderOffset(bytes);
-  if (offset !== null) {
+  const windowsHeader = observeMzWindowsHeader(
+    bytes,
+    fileSize,
+    signatureAtOffset,
+  );
+  if (
+    windowsHeader.state === "header-needed" ||
+    windowsHeader.state === "signature-needed"
+  )
+    return err(
+      "Windows new-header pointer or signature is outside the bounded prefix",
+    );
+  if (windowsHeader.state === "declared") {
+    const { offset } = windowsHeader;
     if (offset < 64 || offset > bytes.length - 24)
       return err("invalid or truncated Windows executable header in MZ image");
-    const signature = bytes.toString("ascii", offset, offset + 2);
-    if (["NE", "LE", "LX"].includes(signature))
-      return err(`unsupported ${signature} executable in MZ image`);
+    if (["NE", "LE", "LX"].includes(windowsHeader.signature))
+      return err(
+        `unsupported ${windowsHeader.signature} executable in MZ image`,
+      );
+    if (windowsHeader.signature !== "PE")
+      return err("invalid or truncated Windows executable header in MZ image");
     return parsePeRecord(bytes.subarray(offset));
   }
-  const parsed = parseDosMzHeader(bytes, fileSize);
+  const parsed = parseDosMzHeader(bytes, fileSize, signatureAtOffset);
   return parsed.ok
     ? ok({
         format: "dos-mz",

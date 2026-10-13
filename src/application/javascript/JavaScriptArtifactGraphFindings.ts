@@ -376,10 +376,14 @@ const resolveReference = (
 ): ResolvedReference | null => {
   const specifier = reference.specifier;
   if (specifier === null) return null;
-  const chunk = resolveBundlerChunkReference(context, sourcePath, reference);
+  const isWorker =
+    reference.kind === "worker" || reference.kind === "service-worker";
+  const chunk = isWorker
+    ? null
+    : resolveBundlerChunkReference(context, sourcePath, reference);
   if (chunk !== null) return chunk;
   const module =
-    reference.module_runtime === undefined
+    isWorker || reference.module_runtime === undefined
       ? undefined
       : context.moduleNodes.get(
           moduleLookupKey(sourcePath, reference.module_runtime, specifier),
@@ -391,24 +395,23 @@ const resolveReference = (
       : { path: `${sourcePath}#module:${specifier}`, file, node: module };
   }
   // Worker scripts are URLs relative to the script, not module specifiers.
-  const path =
-    reference.kind === "worker" || reference.kind === "service-worker"
-      ? resolveArtifactPathByContext({
-          declaredPath: specifier,
-          sourcePath,
-          context: "url-reference",
-          files: context.filesByPath,
-        }).resolved_path
-      : resolveArtifactPath(
-          specifier,
-          sourcePath,
-          context.filesByPath,
-          reference.kind === "require" ||
-            reference.kind === "static-import" ||
-            reference.kind === "dynamic-import"
-            ? moduleKindForJavaScriptReference(sourcePath, reference.kind)
-            : undefined,
-        );
+  const path = isWorker
+    ? resolveArtifactPathByContext({
+        declaredPath: specifier,
+        sourcePath,
+        context: "url-reference",
+        files: context.filesByPath,
+      }).resolved_path
+    : resolveArtifactPath(
+        specifier,
+        sourcePath,
+        context.filesByPath,
+        reference.kind === "require" ||
+          reference.kind === "static-import" ||
+          reference.kind === "dynamic-import"
+          ? moduleKindForJavaScriptReference(sourcePath, reference.kind)
+          : undefined,
+      );
   if (path === null) return null;
   const file = context.filesByPath.get(path);
   const node = context.fileNodes.get(path);

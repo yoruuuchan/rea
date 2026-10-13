@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { urlDeclaresQueryOrFragment } from "./urlComponents.js";
+
 const parseExactOrigin = (value: string): string | undefined => {
   let url: URL;
   try {
@@ -15,8 +17,7 @@ const parseExactOrigin = (value: string): string | undefined => {
     url.username !== "" ||
     url.password !== "" ||
     url.pathname !== "/" ||
-    url.search !== "" ||
-    url.hash !== ""
+    urlDeclaresQueryOrFragment(url)
   )
     return undefined;
   return url.origin;
@@ -63,8 +64,7 @@ export const browserEndpointSchema = z
       url.username !== "" ||
       url.password !== "" ||
       url.pathname !== "/" ||
-      url.search !== "" ||
-      url.hash !== ""
+      urlDeclaresQueryOrFragment(url)
     ) {
       context.addIssue({
         code: "custom",

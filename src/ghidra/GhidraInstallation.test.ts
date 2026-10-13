@@ -5,6 +5,7 @@ import { projectGhidraDoctorInspection } from "./GhidraDoctor.js";
 import {
   ghidraJavaEnvironment,
   inspectGhidraInstallation,
+  type GhidraExecutableHeaderProbe,
   type GhidraInstallationHost,
   type GhidraJavaObservation,
 } from "./GhidraInstallation.js";
@@ -22,6 +23,11 @@ const WINDOWS_INSTALL = "C:\\tools\\ghidra_12.1.4_PUBLIC";
 const WINDOWS_PROPERTIES = `${WINDOWS_INSTALL}\\Ghidra\\application.properties`;
 const WINDOWS_HEADLESS = `${WINDOWS_INSTALL}\\support\\analyzeHeadless.bat`;
 const WINDOWS_DECOMPILER = `${WINDOWS_INSTALL}\\Ghidra\\Features\\Decompiler\\os\\win_x86_64\\decompile.exe`;
+
+const headerProbe = (bytes: Buffer): GhidraExecutableHeaderProbe => ({
+  bytes,
+  size: bytes.length,
+});
 
 const JAVA: GhidraJavaObservation = {
   version: "21.0.11",
@@ -543,7 +549,7 @@ describe("Ghidra FAT native decompiler admission", () => {
         platform: "darwin",
         architecture: "arm64",
       },
-      host({ executableHeader: () => ({ bytes, size: bytes.length }) }),
+      host({ executableHeader: () => headerProbe(bytes) }),
     );
     expect(result.status).toBe(status);
     expect(
@@ -561,7 +567,7 @@ describe("Ghidra FAT native decompiler admission", () => {
         platform: "darwin",
         architecture: "arm64",
       },
-      host({ executableHeader: () => ({ bytes, size: bytes.length }) }),
+      host({ executableHeader: () => headerProbe(bytes) }),
     );
     expect(result.status).toBe("available");
     expect(
@@ -581,9 +587,7 @@ describe("Ghidra native decompiler admission", () => {
         architecture: "x64" as const,
       },
       executableHeader: (path: string) =>
-        path === LINUX_DECOMPILER
-          ? { bytes: elf(1, 1, 8), size: 52 }
-          : undefined,
+        path === LINUX_DECOMPILER ? headerProbe(elf(1, 1, 8)) : undefined,
     },
     {
       name: "a Linux x86-64 decompiler at the macOS arm64 path",
@@ -594,9 +598,7 @@ describe("Ghidra native decompiler admission", () => {
         architecture: "arm64" as const,
       },
       executableHeader: (path: string) =>
-        path === MAC_DECOMPILER
-          ? { bytes: elf(2, 1, 62), size: 52 }
-          : undefined,
+        path === MAC_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
     },
     {
       name: "a macOS arm64 decompiler at the Linux x64 path",
@@ -608,7 +610,7 @@ describe("Ghidra native decompiler admission", () => {
       },
       executableHeader: (path: string) =>
         path === LINUX_DECOMPILER
-          ? { bytes: thinMach(0xcffaedfe, 0x0100000c), size: 32 }
+          ? headerProbe(thinMach(0xcffaedfe, 0x0100000c))
           : undefined,
     },
   ])("distinguishes $name", ({ options, executableHeader }) => {
@@ -632,9 +634,7 @@ describe("Ghidra native decompiler admission", () => {
       },
       host({
         executableHeader: (path: string) =>
-          path === LINUX_DECOMPILER
-            ? { bytes: elf(2, 1, 62), size: 52 }
-            : undefined,
+          path === LINUX_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
       }),
     );
     expect(result.status).toBe("available");
@@ -678,7 +678,7 @@ describe("Ghidra native decompiler admission", () => {
       },
       host({
         executableHeader: (path: string) =>
-          path === MAC_DECOMPILER ? { bytes, size: bytes.length } : undefined,
+          path === MAC_DECOMPILER ? headerProbe(bytes) : undefined,
       }),
     );
     expect(result.status).toBe("available");
@@ -701,9 +701,7 @@ describe("Ghidra native decompiler admission", () => {
       },
       host({
         executableHeader: (path: string) =>
-          path === MAC_DECOMPILER
-            ? { bytes: elf(2, 1, 62), size: 52 }
-            : undefined,
+          path === MAC_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
       }),
     );
     expect(result.status).toBe("unavailable");

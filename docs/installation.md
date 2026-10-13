@@ -605,11 +605,38 @@ rea doctor --json
 The copy step requires the destination to be absent and preserves an existing
 decompiler. This recipe is specific to macOS x64: the
 [Ghidra 12.1.4 Makefile](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_12.1.4_build/Ghidra/Features/Decompiler/src/decompile/cpp/Makefile)
-explicitly selects `-arch x86_64` on Darwin. For other architectures or a Gradle
+explicitly selects `-arch x86_64` on Darwin. For a Gradle
 build, follow the matching release's
 [native component instructions](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_12.1.4_build/GhidraDocs/GettingStarted.md#building-native-components).
 REA accepts the matching executable under either `os/<platform>/` or
 `build/os/<platform>/`; it does not build the component during setup or diagnosis.
+
+### macOS arm64 native decompiler
+
+On Apple Silicon the same source build works with explicit overrides; no
+Makefile edits and no Rosetta are needed. The Darwin block in the
+[Ghidra 12.1.4 Makefile](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_12.1.4_build/Ghidra/Features/Decompiler/src/decompile/cpp/Makefile)
+pins `-arch x86_64`, but `ARCH_TYPE` and `OSDIR` are ordinary make variables,
+and command-line assignments replace them for every compile and link rule:
+
+```bash
+cd "$GHIDRA_INSTALL_DIR/Ghidra/Features/Decompiler/src/decompile/cpp"
+make ghidra_opt ARCH_TYPE="-arch arm64" OSDIR=mac_arm_64
+decompiler_dir="$GHIDRA_INSTALL_DIR/Ghidra/Features/Decompiler/os/mac_arm_64"
+mkdir -p "$decompiler_dir"
+test ! -e "$decompiler_dir/decompile" && test ! -L "$decompiler_dir/decompile" &&
+  install -m 755 ghidra_opt "$decompiler_dir/decompile"
+rea doctor --json
+```
+
+Verified end to end on macOS 15.6 arm64 with Apple clang 17 and the stock
+bison 2.3, against Ghidra 12.1.4: the build produces a Mach-O arm64
+`ghidra_opt`, the doctor check `ghidra-native_decompiler` turns healthy with
+"reports mach-o arm64, which matches darwin/arm64", and `rea decompile` on an
+arm64 Mach-O returns decompiled C through the headless provider. The JDK is
+not needed for the make step, only for the Ghidra provider. If your toolchain
+rejects the inherited `-mmacosx-version-min=10.6` flag, retry the make with
+`ADDITIONAL_FLAGS="-w"`.
 
 ### Ghidra import language and analysis seeds
 

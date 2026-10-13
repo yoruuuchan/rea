@@ -215,7 +215,9 @@ rea import-reference-source /absolute/path/to/source
 ```
 
 The import records hashes and metadata for the supplied files, separately
-from observations of the current app. It honors the source tree's `.gitignore`
+from observations of the current app. For a directory inside a Git checkout,
+it records the HEAD of the nearest enclosing repository; whether the working
+tree matches that commit remains unknown. It honors the source tree's `.gitignore`
 and applies default exclusions for common generated and dependency paths such
 as `node_modules/`, `dist/`, and `*.log`. Pattern-based exclusions record the
 matched pattern and whether it came from project, default, caller, or sensitive

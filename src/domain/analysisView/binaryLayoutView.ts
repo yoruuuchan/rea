@@ -218,6 +218,12 @@ export const projectBinaryLayoutView = (
       ...shared,
     });
   }
+  if (view.kind !== "page")
+    return err(
+      layoutIncompatible(
+        "Layout views require summary, facet, item or page selections.",
+      ),
+    );
   if (view.collection === "modules")
     return err(
       layoutIncompatible(

@@ -64,6 +64,11 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
     launchesProcess: true,
     writesFilesystem: true,
   }),
+  decode_signal_recording: effects({
+    mutatesSession: true,
+    launchesProcess: true,
+    writesFilesystem: true,
+  }),
   inspect_wasm_artifact: effects({
     mutatesSession: true,
     writesFilesystem: true,
@@ -633,6 +638,31 @@ export const annotationsFromEffects = (
   openWorldHint: value.launchesProcess || value.accessesNetwork,
 });
 
+/**
+ * Tools whose results, successful or failed, carry only REA-authored session
+ * state or caller-supplied values, never text originating from an analysis
+ * target, a provider, a launcher or a device. Every other tool can return
+ * such text (strings, symbols, code, page text, scripts, captures, logs, file
+ * listings, provider diagnostics or captured process output), so a newly
+ * added tool is marked untrusted until it is audited into this set. A tool
+ * stays out when any error path can project external process output, as
+ * close_binary (provider cleanup diagnostics), binary_session (provider
+ * failure reasons and availability diagnostics) and the adb and apktool
+ * client probes (version output and stderr excerpts) can.
+ */
+export const TARGET_CONTENT_FREE_TOOLS: ReadonlySet<string> = new Set([
+  "export_evidence_bundle",
+  "record_unknown",
+]);
+
+/**
+ * Whether results of the named tool, successful or failed, can carry text that
+ * originates from the analysis target. Unknown names are treated as target
+ * content so an unaudited path never loses the untrusted marker.
+ */
+export const toolReturnsTargetContent = (name: string): boolean =>
+  !TARGET_CONTENT_FREE_TOOLS.has(name);
+
 /** Resolve the audited metadata for one public tool. */
 export const toolContractMetadata = (name: string) => {
   const audited = TOOL_EFFECTS[name];
@@ -645,5 +675,6 @@ export const toolContractMetadata = (name: string) => {
       .join(" "),
     effects: audited,
     annotations: annotationsFromEffects(audited),
+    returnsTargetContent: toolReturnsTargetContent(name),
   };
 };

@@ -135,6 +135,18 @@ assembly. Keep managed/native boundaries and unavailable reconstruction facts
 explicit. A bring-your-own reconstruction oracle is separate from the canonical
 parser and must not become an implicit setup dependency.
 
+For identity/classification questions, `inspect_managed_artifact` can explicitly
+select `detail: "summary"` on the first MCP call. It retains complete metadata
+and returns a linked overview with full classification/evidence, nullable
+module/MVID, frameworks, metadata coverage/issues/limitations and returned-row
+counts. Default complete requests remain unchanged. Read original rows with
+`inspect_analysis_view`, source `normalized_result.parent_evidence_id`, and
+`view: {kind: "managed", collection: "attributes", offset: 0, limit: 16}`.
+Collections are `references`, `resources` and `attributes`. Paging does not
+repeat parsing. Returned-row exhaustion
+does not prove complete metadata or absence under partial/unavailable coverage;
+preserve build-local tokens and their artifact/MVID scope.
+
 ### .NET NativeAOT
 
 NativeAOT binaries contain native machine code, so ordinary CIL decompilers

@@ -13,10 +13,14 @@ const header = (
   if (little) {
     bytes.writeUInt16LE(type, 16);
     bytes.writeUInt16LE(machine, 18);
+    bytes.writeUInt32LE(1, 20);
+    bytes.writeUInt16LE(bits === 32 ? 52 : 64, bits === 32 ? 40 : 52);
     bytes.writeUInt32LE(flags, bits === 32 ? 36 : 48);
   } else {
     bytes.writeUInt16BE(type, 16);
     bytes.writeUInt16BE(machine, 18);
+    bytes.writeUInt32BE(1, 20);
+    bytes.writeUInt16BE(bits === 32 ? 52 : 64, bits === 32 ? 40 : 52);
     bytes.writeUInt32BE(flags, bits === 32 ? 36 : 48);
   }
   return bytes;

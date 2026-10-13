@@ -40,6 +40,47 @@ inspection is needed; see [selected member inspection](#selected-member-inspecti
 Compare separate builds with [member comparison](#member-comparison), preserving
 their paths, digests, and selection scope.
 
+### Metadata overview and retained rows
+
+The existing CLI and omitted/complete MCP detail return complete metadata
+inventories. For identity and classification questions, select
+`inspect_managed_artifact` with
+`{"path":"/absolute/path/Assembly.dll","detail":"summary"}` on the first call.
+This keeps the complete source in the session and returns a distinct linked
+`inspect_analysis_view` overview with complete PE/CLI, classification and its
+evidence, metadata status, module/MVID, assembly, frameworks, returned-row counts,
+coverage/issues and limitations. No assembly is loaded or executed.
+
+Use `normalized_result.parent_evidence_id` to page original rows:
+
+```json
+{
+  "source": {
+    "kind": "retained-evidence",
+    "evidence_id": "<parent_evidence_id>"
+  },
+  "view": {
+    "kind": "managed",
+    "collection": "attributes",
+    "offset": 0,
+    "limit": 16
+  }
+}
+```
+
+Collections are `references`, `resources` and `attributes`; rows retain their
+original values, nulls, order, metadata tokens and offsets. Pages retain source
+metadata status and coverage. Exhaustion covers the returned parent collection,
+not all possible metadata, and empty rows under partial/unavailable metadata do
+not establish absence. Tokens are build-local and require the recorded artifact
+SHA-256 and known module MVID for cross-observation matching.
+
+Retained views do not repeat the parser or require the source file to remain
+available. Portable views use the authenticated original Evidence inline,
+including the existing `inspect-analysis-view` CLI. Session record lifetime and
+export/import semantics remain unchanged. A server without Evidence retention
+rejects selected summary before analysis; complete delivery remains available.
+
 ## Shipped scope
 
 The canonical parser admits PE/CLI bytes and their metadata/CIL without loading

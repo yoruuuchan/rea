@@ -21,6 +21,7 @@ import {
   parseFunctionDossier,
   parseListCount,
   parseRelatedAddresses,
+  parseSegmentImageBase,
   parseSegments,
 } from "../domain/hopperValues.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -527,6 +528,7 @@ export class EnhancedTools {
 
     const segments = parseSegments(segmentsResult.value);
     if (!segments.ok) return segments;
+    const imageBase = parseSegmentImageBase(segmentsResult.value);
     const procedureCount = parseListCount(proceduresResult.value, "procedures");
     if (!procedureCount.ok) return procedureCount;
     const stringCount = parseListCount(stringsResult.value, "strings");
@@ -543,6 +545,7 @@ export class EnhancedTools {
       segment_count: segments.value.length,
       procedure_count: procedureCount.value,
       string_count: stringCount.value,
+      ...(imageBase === undefined ? {} : { image_base: imageBase }),
     });
   }
 

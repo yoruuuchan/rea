@@ -52,6 +52,36 @@ describe("TypeScript import-equals links", () => {
 });
 
 describe("CommonJS dependency links", () => {
+  it("retains an import-equals binding and its module origin", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      import typed = require("dependency");
+      import type TypeOnly = require("type-only");
+      namespace Local { export class Marker {} }
+      import Alias = Local.Marker;
+      void typed;
+    `);
+    expect(topLevelBinding(ir, "typed")).toMatchObject({
+      kind: "import",
+      mutable: false,
+      provenance: {
+        origins: [{ specifier: "dependency", importedPath: [] }],
+      },
+    });
+    expect(
+      ir.moduleLinks.filter(({ specifier }) => specifier !== null),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "require",
+        specifier: "dependency",
+        importedName: null,
+        localName: "typed",
+      }),
+    ]);
+    expect(ir.references.filter(({ name }) => name === "typed")).toHaveLength(
+      1,
+    );
+  });
+
   it.each([
     'require("dependency");',
     'void require("dependency");',
@@ -148,7 +178,9 @@ describe("CommonJS dependency links", () => {
     ]);
     expect(
       ir.bindings.find(({ name }) => name === "bound")?.provenance.origins,
-    ).toEqual([{ specifier: "bound", importedPath: [] }]);
+    ).toEqual([
+      { specifier: "bound", importedPath: [], resolutionMode: "require" },
+    ]);
   });
 
   it.each([
@@ -179,6 +211,7 @@ it("preserves unshadowed require origins through aliases and assignments", () =>
     expect(origin(topLevelBinding(ir, name))).toEqual({
       specifier: "electron",
       importedPath: ["ipcMain"],
+      resolutionMode: "require",
     });
   expect(topLevelBinding(ir, "assigned").provenance).toMatchObject({
     status: "ambiguous",

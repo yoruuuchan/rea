@@ -619,23 +619,31 @@ describe("native DMG artifact reader", () => {
     expect(calls).toContainEqual(["detach", "/dev/disk-fixture"]);
   });
 
-  it("rejects non-zero verification results", async () => {
-    await expect(
-      createAttachedReader("/tmp/image.dmg", process.env, undefined, {
-        run: () =>
-          Promise.resolve({
-            stdout: "verify output",
-            stderr: "hdiutil: verify failed - image not recognized",
-            exitCode: 1,
-          }),
-      }),
-    ).rejects.toMatchObject({
-      reason: "format",
-      message: expect.stringMatching(
-        /"arguments":\["verify","\/tmp\/image\.dmg"\].*"exitCode":1.*"stderr":"hdiutil: verify failed - image not recognized"/u,
-      ),
-    });
-  });
+  // hdiutil localizes its diagnostics; en-GB and other English locales spell
+  // the refusal "recognised".
+  it.each(["recognized", "recognised"])(
+    "rejects non-zero verification results (image not %s)",
+    async (spelling) => {
+      await expect(
+        createAttachedReader("/tmp/image.dmg", process.env, undefined, {
+          run: () =>
+            Promise.resolve({
+              stdout: "verify output",
+              stderr: `hdiutil: verify failed - image not ${spelling}`,
+              exitCode: 1,
+            }),
+        }),
+      ).rejects.toMatchObject({
+        reason: "format",
+        message: expect.stringMatching(
+          new RegExp(
+            `"arguments":\\["verify","/tmp/image\\.dmg"\\].*"exitCode":1.*"stderr":"hdiutil: verify failed - image not ${spelling}"`,
+            "u",
+          ),
+        ),
+      });
+    },
+  );
 
   it("retains the root and reports unknown ownership when recovery discovery fails", async () => {
     const mount = createMountFixture();

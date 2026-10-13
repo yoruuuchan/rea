@@ -733,6 +733,14 @@ it("does not match unavailable layout names using a display placeholder", () => 
 });
 
 it("rejects unsupported parent operations and incompatible collections", () => {
+  expect(
+    projectAnalysisView(layoutParent(), {
+      kind: "managed",
+      collection: "attributes",
+      offset: 0,
+      limit: 1,
+    }),
+  ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
   const unsupported = projectAnalysisView(
     {
       evidenceId: `ev_${"d".repeat(64)}`,

@@ -9,6 +9,7 @@ export interface SessionAvailabilityDefaults {
   readonly optionalFeatures?: Pick<
     AvailabilityPolicy,
     | "packetCaptureEnabled"
+    | "signalRecordingEnabled"
     | "wasmArtifactEnabled"
     | "evmInterfaceEnabled"
     | "browserObservationEnabled"
@@ -35,6 +36,8 @@ export const sessionAvailabilityPolicy = (
     (() => ({
       packetCaptureEnabled:
         defaults.optionalFeatures?.packetCaptureEnabled ?? false,
+      signalRecordingEnabled:
+        defaults.optionalFeatures?.signalRecordingEnabled ?? false,
       wasmArtifactEnabled:
         defaults.optionalFeatures?.wasmArtifactEnabled ?? false,
       evmInterfaceEnabled:

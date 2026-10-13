@@ -1047,6 +1047,8 @@ itWithCaptureCapability(
         executable: process.execPath,
         arguments: [processFixture, "tree"],
         working_directory: dirname(processFixture),
+        // The post-capture ps lookup requires OS PIDs, not display identities.
+        normalization: { pids: false },
         timeout_ms: 20_000,
         idle_timeout_ms: 20_000,
       }),
@@ -1069,9 +1071,42 @@ itWithCaptureCapability(
     expect(JSON.stringify(capture.process_samples)).toContain(
       dirname(processFixture),
     );
-    const { stdout } = await execFileAsync("ps", ["-axo", "command="]);
-    expect(stdout).not.toContain(`${processFixture} tree-child`);
-    expect(stdout).not.toContain(`${processFixture} tree-grandchild`);
+    // Observe only this run's sampled descendants; never buffer the host table.
+    const fixturePids = [
+      ...new Set(
+        capture.process_samples
+          .filter(
+            ({ command }) =>
+              command.includes(`${processFixture} tree-child`) ||
+              command.includes(`${processFixture} tree-grandchild`),
+          )
+          .map(({ pid }) => pid),
+      ),
+    ];
+    let remainingCommands = "";
+    try {
+      remainingCommands = (
+        await execFileAsync(
+          "ps",
+          ["-p", fixturePids.join(","), "-o", "command="],
+          { maxBuffer: 64 * 1024 },
+        )
+      ).stdout;
+    } catch (cause: unknown) {
+      // ps exits 1 with no rows when all selected processes have exited.
+      if (
+        !(cause instanceof Error) ||
+        !("code" in cause) ||
+        cause.code !== 1 ||
+        !("stdout" in cause) ||
+        cause.stdout !== ""
+      )
+        throw cause;
+    }
+    expect(remainingCommands).not.toContain(`${processFixture} tree-child`);
+    expect(remainingCommands).not.toContain(
+      `${processFixture} tree-grandchild`,
+    );
   },
   20_000,
 );

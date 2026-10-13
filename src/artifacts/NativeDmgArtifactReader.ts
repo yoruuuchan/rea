@@ -625,7 +625,9 @@ const verifyFailureReason = (
     processOutput(cause, "stderr"),
   );
   switch (diagnostic) {
+    // hdiutil follows AppleLanguages, so en-GB and en-AU spell it "recognised".
     case "image not recognized":
+    case "image not recognised":
       return "format";
     case "invalid checksum":
     case "image data corrupted":

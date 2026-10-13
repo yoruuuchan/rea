@@ -43,6 +43,13 @@ import {
 } from "./evmInterfaceView.js";
 import { projectArtifactInventoryView } from "./artifactInventoryView.js";
 import {
+  projectManagedArtifactView,
+  managedViewRequestSchema,
+  managedViewItemSchema,
+  managedSummarySchema,
+  managedViewContextSchema,
+} from "./managedArtifactView.js";
+import {
   projectWasmArtifactView,
   wasmViewRequestSchema,
   wasmViewItemSchema,
@@ -161,6 +168,7 @@ export const analysisViewRequestSchema = z.discriminatedUnion("kind", [
   inventoryViewSchema,
   wasmViewRequestSchema,
   evmViewRequestSchema,
+  managedViewRequestSchema,
   apiSurfaceViewSchema,
 ]);
 
@@ -274,6 +282,7 @@ const viewResultBase = {
     "inventory_artifact",
     "inspect_wasm_artifact",
     "inspect_evm_interface",
+    "inspect_managed_artifact",
   ]),
   parent_digest: digestSchema,
   view_digest: digestSchema,
@@ -324,6 +333,13 @@ export const evmInterfaceSummaryViewResultSchema = z.strictObject({
   summary: evmSummarySchema,
 });
 
+/** Exact metadata overview for the managed artifact's selected delivery. */
+export const managedArtifactSummaryViewResultSchema = z.strictObject({
+  ...summaryViewResultBase,
+  parent_operation: z.literal("inspect_managed_artifact"),
+  summary: managedSummarySchema,
+});
+
 /** Projected facts for one selected view of retained analysis Evidence. */
 export const analysisViewResultSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -345,6 +361,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
       inventorySummarySchema,
       wasmSummarySchema,
       evmSummarySchema,
+      managedSummarySchema,
     ]),
   }),
   z.strictObject({
@@ -384,6 +401,14 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     item: evmViewItemSchema,
     ...viewResultBase,
     parent_operation: z.literal("inspect_evm_interface"),
+  }),
+  z.strictObject({
+    kind: z.literal("managed"),
+    view: managedViewRequestSchema,
+    item: managedViewItemSchema,
+    ...viewResultBase,
+    ...managedViewContextSchema.shape,
+    parent_operation: z.literal("inspect_managed_artifact"),
   }),
   z.strictObject({
     kind: z.literal("inventory"),
@@ -451,7 +476,11 @@ export type UnsignedAnalysisView =
       "view_digest"
     >
   | Omit<Extract<AnalysisViewResult, { readonly kind: "wasm" }>, "view_digest">
-  | Omit<Extract<AnalysisViewResult, { readonly kind: "evm" }>, "view_digest">;
+  | Omit<Extract<AnalysisViewResult, { readonly kind: "evm" }>, "view_digest">
+  | Omit<
+      Extract<AnalysisViewResult, { readonly kind: "managed" }>,
+      "view_digest"
+    >;
 
 /** Attach the content digest that must change when projected bytes change. */
 export const sealAnalysisView = (
@@ -496,7 +525,7 @@ const unsupportedParent = (
   new AnalysisUnsupportedTargetError(
     INSPECT_ANALYSIS_VIEW_OPERATION,
     parentArtifactPath(parent),
-    `Parent Evidence operation ${JSON.stringify(parent.operation)} does not support analysis views. Use completed binary layout, JavaScript application, native function, artifact inventory/inspection, WASM, or web network capture Evidence.`,
+    `Parent Evidence operation ${JSON.stringify(parent.operation)} does not support analysis views. Use completed binary layout, JavaScript application, native function, artifact inventory/inspection, WASM, EVM, managed artifact, or web network capture Evidence.`,
   );
 
 const parentArtifactPath = (parent: AnalysisViewParent): string => {
@@ -519,6 +548,15 @@ const parentArtifactPath = (parent: AnalysisViewParent): string => {
     return parent.normalizedResult.input_path;
   return parent.evidenceId;
 };
+
+/** Named source owners for views that need no extra decoder or accumulator. */
+const retainedViewProjectors = new Map<string, typeof projectWasmArtifactView>([
+  ["inspect_wasm_artifact", projectWasmArtifactView],
+  ["inspect_evm_interface", projectEvmInterfaceView],
+  ["inspect_managed_artifact", projectManagedArtifactView],
+  ["inspect_artifact", projectArtifactInventoryView],
+  ["inventory_artifact", projectArtifactInventoryView],
+]);
 
 /** Project one selected view from authenticated parent analysis Evidence. */
 export const projectAnalysisView = (
@@ -591,19 +629,9 @@ export const projectAnalysisView = (
     const projected = projectNativeFunctionView(parent, native.data, view);
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
-  if (parent.operation === "inspect_wasm_artifact") {
-    const projected = projectWasmArtifactView(parent, view);
-    return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
-  }
-  if (parent.operation === "inspect_evm_interface") {
-    const projected = projectEvmInterfaceView(parent, view);
-    return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
-  }
-  if (
-    parent.operation === "inspect_artifact" ||
-    parent.operation === "inventory_artifact"
-  ) {
-    const projected = projectArtifactInventoryView(parent, view);
+  const project = retainedViewProjectors.get(parent.operation);
+  if (project !== undefined) {
+    const projected = project(parent, view);
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
   return err(unsupportedParent(parent));

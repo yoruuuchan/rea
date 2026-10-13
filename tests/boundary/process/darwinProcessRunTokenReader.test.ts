@@ -903,7 +903,7 @@ it.skipIf(process.platform === "win32")(
 );
 
 it.skipIf(process.platform === "win32")(
-  "maps cancellation during native preparation before Electron path resolution",
+  "maps cancellation during native preparation before Electron launch",
   async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "rea-electron-token-abort-test-"),
@@ -926,7 +926,10 @@ it.skipIf(process.platform === "win32")(
         application_path: "/missing/application.js",
       });
       captureOutcome = new PlaywrightElectronActiveProvider({})
-        .capture(input, { signal: controller.signal })
+        .capture(
+          { ...input, application_root: process.cwd() },
+          { signal: controller.signal },
+        )
         .then(
           (value) => ({ state: "result" as const, value }),
           (cause: unknown) => ({ state: "rejected" as const, cause }),
@@ -1053,7 +1056,10 @@ it.skipIf(process.platform === "win32")(
         application_root: process.cwd(),
       });
       captureOutcome = new PlaywrightElectronActiveProvider({})
-        .capture(input, { signal: controller.signal })
+        .capture(
+          { ...input, application_root: process.cwd() },
+          { signal: controller.signal },
+        )
         .then(
           (value) => ({ state: "result" as const, value }),
           (cause: unknown) => ({ state: "rejected" as const, cause }),

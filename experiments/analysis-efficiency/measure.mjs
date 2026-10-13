@@ -26,6 +26,7 @@ const { values } = parseArgs({
     "verify-retained": { type: "boolean", default: false },
     "native-question": { type: "string", default: "entry" },
     "javascript-question": { type: "string", default: "inventory" },
+    "managed-question": { type: "string", default: "inventory" },
     schemas: { type: "string", default: "default" },
   },
 });
@@ -42,6 +43,12 @@ if (
   ) ||
   !["inventory", "selected"].includes(values["javascript-question"]) ||
   !["default", "selected"].includes(values.schemas) ||
+  !["inventory", "identity"].includes(values["managed-question"]) ||
+  (!["sharex.dll", "sharex.helpers.dll"].includes(values.artifact) &&
+    values["managed-question"] !== "inventory") ||
+  (["sharex.dll", "sharex.helpers.dll"].includes(values.artifact) &&
+    values.delivery === "summary" &&
+    values["managed-question"] !== "identity") ||
   (values["verify-retained"] &&
     !["weth.hex", "uniswap-v3.factory.hex", "uniswap-v3.pool.hex"].includes(
       values.artifact,
@@ -243,15 +250,55 @@ const targetSha = (value) => value.subject?.digest.sha256;
 const inventoryPaths = ["package.json", "main.js", "preload.js"];
 const unique = (values) => [...new Set(values)].sort();
 const inspectManagedTarget = async () => {
-  const info = await call("inspect_managed_artifact", { path: values.path });
+  const arguments_ = {
+    path: values.path,
+    ...(values.delivery === "summary" ? { detail: "summary" } : {}),
+  };
+  const definition = catalogDefinitions.get("inspect_managed_artifact");
+  if (definition === undefined)
+    throw new Error("Managed inspection is not advertised");
+  const accepted = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile(definition.inputSchema)(arguments_);
+  if (!accepted)
+    throw new Error(
+      "Selected managed delivery is not advertised by this runtime",
+    );
+  const info = await call("inspect_managed_artifact", arguments_);
   const boundaries = await call("inspect_managed_native_boundaries", {
     path: values.path,
   });
+  const received = normalized(info);
+  const report = received.kind === "summary" ? received.summary : received;
+  let artifact = report;
+  if (values["managed-question"] === "identity") {
+    const {
+      references,
+      resources,
+      attributes,
+      reported_counts,
+      identity_scope: _scope,
+      ...identity
+    } = report;
+    artifact = {
+      ...identity,
+      reported_counts: reported_counts ?? {
+        references: references.length,
+        resources: resources.length,
+        attributes: attributes.length,
+      },
+    };
+  }
   return {
     artifact_sha256: targetSha(info),
-    artifact: normalized(info),
+    artifact,
     boundaries: normalized(boundaries),
-    evidence_ids: [info.evidence_id, boundaries.evidence_id],
+    evidence_ids: [
+      info.evidence_id,
+      ...(received.kind === "summary" ? [received.parent_evidence_id] : []),
+      boundaries.evidence_id,
+    ],
   };
 };
 
@@ -766,6 +813,11 @@ const report = {
     : null,
   javascript_question:
     values.artifact === "obsidian.asar" ? values["javascript-question"] : null,
+  managed_question: ["sharex.dll", "sharex.helpers.dll"].includes(
+    values.artifact,
+  )
+    ? values["managed-question"]
+    : null,
   provider_settings_sha256: sha(JSON.stringify(selectedProviders)),
   provider_search_path_sha256: sha(
     selectedProviders.PATH ?? process.env.PATH ?? "",

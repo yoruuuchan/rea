@@ -26,6 +26,7 @@ import {
 } from "../../domain/residualUnknown.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
+import type { UnknownPage, UnknownQuery } from "./InvestigationRecordPort.js";
 
 type EvidenceLedgerFailure = EvidenceIntegrityError;
 type RecordResult = Result<"added" | "duplicate", EvidenceLedgerFailure>;
@@ -326,18 +327,39 @@ export class EvidenceLedger {
       readonly domain?: string;
     } = {},
   ): ResidualUnknown[] {
-    return [...this.#unknownHeads.values()]
+    return this.listUnknownsPage(filters).items;
+  }
+
+  /** Select a stable page of current heads before detaching record payloads. */
+  listUnknownsPage(query: UnknownQuery = {}): UnknownPage {
+    const offset = query.offset ?? 0;
+    const matching = [...this.#unknownHeads.values()]
       .filter(
         (unknown) =>
-          (filters.status === undefined || unknown.status === filters.status) &&
-          (filters.severity === undefined ||
-            unknown.severity === filters.severity) &&
-          (filters.domain === undefined || unknown.domain === filters.domain),
+          (query.status === undefined || unknown.status === query.status) &&
+          (query.severity === undefined ||
+            unknown.severity === query.severity) &&
+          (query.domain === undefined || unknown.domain === query.domain),
       )
       .sort((left, right) =>
         compareUnicodeCodePoints(left.unknown_id, right.unknown_id),
-      )
-      .map((unknown) => structuredClone(unknown));
+      );
+    const start = Math.min(offset, matching.length);
+    const end =
+      query.limit === undefined
+        ? undefined
+        : start + Math.min(query.limit, matching.length - start);
+    const page = matching.slice(start, end);
+    const nextOffset =
+      offset <= matching.length && start + page.length < matching.length
+        ? start + page.length
+        : null;
+    return {
+      items: page.map((unknown) => structuredClone(unknown)),
+      total: matching.length,
+      offset,
+      next_offset: nextOffset,
+    };
   }
 
   /** Return current resolution validity; imported invalid states are rejected. */

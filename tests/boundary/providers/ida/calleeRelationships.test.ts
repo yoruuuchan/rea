@@ -37,7 +37,8 @@ it("keeps unknown caller coverage and callee diagnostics in an ARM64 dossier", a
     if (!result.ok) throw result.error;
     expect(result.value.relationshipCoverage).toMatchObject({
       status: "unknown",
-      reason: "Upstream xrefs do not establish direct caller relationships.",
+      reason:
+        "Callers: Upstream xrefs do not establish direct caller relationships.",
       diagnostics: expect.arrayContaining([
         expect.stringContaining("targets IDA does not recognize as functions"),
       ]),

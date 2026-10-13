@@ -7,6 +7,7 @@ import type {
 
 /** One exact module origin followed through imports, requires, or aliases. */
 export interface JavaScriptModuleOrigin {
+  readonly resolutionMode?: "import" | "require";
   readonly specifier: string;
   readonly importedPath: readonly string[];
 }
@@ -392,8 +393,10 @@ export interface JavaScriptSemanticFrontier {
 
 /** Static import/export relationship retained for cross-file composition. */
 export interface JavaScriptSemanticModuleLink {
+  readonly resolutionMode?: "import" | "require";
   readonly kind:
     | "import"
+    | "type-import"
     | "require"
     | "export"
     | "re-export"

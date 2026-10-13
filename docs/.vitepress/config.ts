@@ -45,6 +45,7 @@ export default defineConfig({
           { text: "Firmware", link: "/firmware-analysis" },
           { text: "SQLite databases", link: "/sqlite-databases" },
           { text: "Packet captures", link: "/packet-captures" },
+          { text: "Signal recordings", link: "/signal-recordings" },
         ],
       },
       {

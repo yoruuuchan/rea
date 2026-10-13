@@ -130,7 +130,7 @@
     "test": "npm run test:with-build",
     "test:with-build": "npm run test:prepare && vitest run",
     "test:run": "vitest run",
-    "test:python": "python3 -m unittest bridge/native/test_rea_lldb_tracer.py -v",
+    "test:python": "python3 -m unittest bridge/native/test_rea_lldb_tracer.py -v && python3 -m unittest discover -s experiments/analysis-efficiency -p 'test_*.py' -v",
     "test:local": "node scripts/run-development-tests.mjs local",
     "test:fast": "vitest run --project domain --project services --project adapters --project composition --project conformance --project evaluation",
     "pretest:boundary": "npm run test:prepare",

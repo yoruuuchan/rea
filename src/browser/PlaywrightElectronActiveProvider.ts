@@ -1,5 +1,3 @@
-import { realpath } from "node:fs/promises";
-import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -9,11 +7,11 @@ import type {
   ExecutionOptions,
   ProviderIdentity,
 } from "../application/AnalysisProvider.js";
-import type { ElectronActiveObservationPort } from "../application/javascript/ElectronActiveObservationPort.js";
 import type {
-  ElectronActiveObservationInput,
-  ElectronActiveObservationResult,
-} from "../domain/javascript/electronActiveObservation.js";
+  CanonicalElectronActiveObservationInput,
+  ElectronActiveObservationPort,
+} from "../application/javascript/ElectronActiveObservationPort.js";
+import type { ElectronActiveObservationResult } from "../domain/javascript/electronActiveObservation.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
@@ -70,7 +68,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
   }
 
   async capture(
-    input: ElectronActiveObservationInput,
+    input: CanonicalElectronActiveObservationInput,
     options: ExecutionOptions = {},
   ): Promise<Result<ElectronActiveObservationResult, AnalysisError>> {
     let application: ElectronApplication | undefined;
@@ -89,7 +87,11 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         throw new BrowserObservationError(OPERATION, "cancelled");
       await prepareProcessOwnershipInspection(options.signal);
       const startupDeadline = Date.now() + STARTUP_TIMEOUT_MS;
-      paths = await canonicalPaths(input);
+      paths = {
+        executable: input.executable_path,
+        application: input.application_path,
+        root: input.application_root,
+      };
       const captureBaseline =
         await systemProcessOwnershipHost.captureBaseline?.(options.signal);
       if (options.signal?.aborted)
@@ -351,20 +353,6 @@ export const cleanupElectronProcesses = async (
           ],
         }),
   };
-};
-
-const canonicalPaths = async (
-  input: ElectronActiveObservationInput,
-): Promise<ElectronPaths> => {
-  const [executable, application] = await Promise.all([
-    realpath(input.executable_path),
-    realpath(input.application_path),
-  ]);
-  const root =
-    input.application_root === undefined
-      ? dirname(application)
-      : await realpath(input.application_root);
-  return { executable, application, root };
 };
 
 const safeElectronEnvironment = (

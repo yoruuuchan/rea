@@ -151,18 +151,14 @@ const registerListUnknownsTool = ({
     listContract.name,
     toolRegistrationOptions(listContract),
     (input) => {
-      const all = session.listUnknowns({
+      const page = session.listUnknownsPage({
         ...(input.status === undefined ? {} : { status: input.status }),
         ...(input.severity === undefined ? {} : { severity: input.severity }),
         ...(input.domain === undefined ? {} : { domain: input.domain }),
+        offset: input.offset,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
       });
-      return server.delivery.toCallToolResult(
-        ok({
-          items: all,
-          total: all.length,
-        }),
-        listContract,
-      );
+      return server.delivery.toCallToolResult(ok(page), listContract);
     },
   );
 };

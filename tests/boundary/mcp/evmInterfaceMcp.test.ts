@@ -28,8 +28,11 @@ import {
 
 it("advertises exact valid schemas and records inline EVM interface evidence without a binary target", async () => {
   const value = evmInterfaceFixture();
+  const inspect = vi.fn(() =>
+    Promise.resolve(ok(evmInterfaceExecution(value))),
+  );
   const service = new EvmInterfaceService({
-    inspect: () => Promise.resolve(ok(evmInterfaceExecution(value))),
+    inspect,
   });
   const session = createTestBinarySession(() => {
     throw new Error("deep provider must not start");
@@ -71,6 +74,7 @@ it("advertises exact valid schemas and records inline EVM interface evidence wit
   expect(() => registerEvmTools(server, service, silentLogger)).toThrow(
     /inspect_evm_interface.*already registered/,
   );
+  expect(inspect).not.toHaveBeenCalled();
   expect(
     (await client.listTools()).tools.filter(
       (tool) => tool.name === "inspect_evm_interface",

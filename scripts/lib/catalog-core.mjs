@@ -49,6 +49,8 @@ const SOURCE_PATHS = {
   nativeContracts: "dist/contracts/native/nativeToolContracts.js",
   captureContracts: "dist/contracts/captures/captureToolContracts.js",
   captureProvider: "dist/captures/TsharkCaptureProvider.js",
+  signalContracts: "dist/contracts/signals/signalToolContracts.js",
+  signalProvider: "dist/signals/SigrokRecordingProvider.js",
   wasmContracts: "dist/contracts/wasm/wasmToolContracts.js",
   wasmProvider: "dist/wasm/WabtRelease.js",
   evmContracts: "dist/contracts/evm/evmToolContracts.js",

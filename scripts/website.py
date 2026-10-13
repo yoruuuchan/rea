@@ -119,7 +119,7 @@ def shared_blocks(root, path, source):
     templates = root / "website/templates"
     return {
         name: indent(Template((templates / f"{name}.html.tmpl").read_text(encoding="utf-8")).substitute(values), "    ")
-        for name in ("sharing", "header", "footer")
+        for name in ("sharing", "theme", "header", "footer")
     }
 
 

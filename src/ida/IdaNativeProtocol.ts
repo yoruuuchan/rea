@@ -63,7 +63,21 @@ const nativeErrorSchema = z
   .nullish()
   .transform((value) => value ?? undefined);
 export const nativeCalleesSchema = z
-  .array(modernCalleesSchema.element.extend({ error: nativeErrorSchema }))
+  .array(
+    modernCalleesSchema.element
+      .extend({ error: nativeErrorSchema })
+      .transform((page) => {
+        if (
+          page.error === undefined &&
+          page.callees !== null &&
+          page.more === undefined
+        )
+          throw new AnalysisProtocolError(
+            "Native IDA callees omitted an explicit truncation marker.",
+          );
+        return page;
+      }),
+  )
   .length(1);
 export const nativeXrefsSchema = z
   .array(modernXrefsSchema.element.extend({ error: nativeErrorSchema }))

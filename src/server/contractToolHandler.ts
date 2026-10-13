@@ -70,6 +70,7 @@ export const createEvidenceToolHandler =
                 result.error,
                 partial.evidence_id,
                 recorded,
+                contract.returnsTargetContent,
               );
           }
           return server.delivery.toCallToolResult(result, contract);

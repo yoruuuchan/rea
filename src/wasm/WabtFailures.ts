@@ -11,6 +11,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
+import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRoot.js";
 import { WABT_LIMITS, WABT_PROVIDER_IDENTITY } from "./WabtRelease.js";
 /** Preserve lifecycle failures and diagnostic bytes instead of returning partial success. */
 export const wabtFailure = (
@@ -70,6 +71,13 @@ export const wabtFailure = (
       );
     return new AnalysisOutputError("inspect_wasm_artifact", reason, options);
   }
+  if (cause instanceof PrivateRuntimeRootUnavailableError)
+    return new AnalysisCapabilityUnavailableError(
+      WABT_PROVIDER_IDENTITY.id,
+      "inspect_wasm_artifact",
+      reason,
+      { cause },
+    );
   if (phase === "configuration")
     return new AnalysisCapabilityUnavailableError(
       WABT_PROVIDER_IDENTITY.id,

@@ -679,6 +679,8 @@ export const adbResultSchemas = {
     package_name: packageNameSchema,
     component: z.string().min(1),
     started_activity: z.string().nullable(),
+    reported_activity: z.string().nullable().optional(),
+    reported_status: z.string().nullable().optional(),
   }),
   start_adb_activity: z.strictObject({
     client,
@@ -694,6 +696,8 @@ export const adbResultSchemas = {
       }),
     ),
     started_activity: z.string().nullable(),
+    reported_activity: z.string().nullable().optional(),
+    reported_status: z.string().nullable().optional(),
   }),
   stop_adb_app: z.strictObject({
     client,
@@ -701,6 +705,19 @@ export const adbResultSchemas = {
     package_name: packageNameSchema,
   }),
 } as const;
+
+/** Launch-attempt facts retained when Activity Manager does not report success. */
+export type AdbActivityStartPartialObservation =
+  | {
+      readonly provider_id: "adb";
+      readonly operation: "start_adb_app";
+      readonly result: z.infer<typeof adbResultSchemas.start_adb_app>;
+    }
+  | {
+      readonly provider_id: "adb";
+      readonly operation: "start_adb_activity";
+      readonly result: z.infer<typeof adbResultSchemas.start_adb_activity>;
+    };
 
 /** Acquired package facts retained when cancellation leaves caller-owned output. */
 export type AdbPackagePullPartialObservation = {

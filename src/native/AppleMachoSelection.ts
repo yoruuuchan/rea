@@ -260,7 +260,8 @@ const collectSegment = (
     state.sections.push({
       name: bytes
         .subarray(position, position + 16)
-        .toString("ascii")
+        // ASCII decoding masks high bits and can fabricate known metadata names.
+        .toString("latin1")
         .replace(/\0.*$/u, ""),
       address: bytes.readBigUInt64LE(position + 32),
       size: Number(sectionSize),

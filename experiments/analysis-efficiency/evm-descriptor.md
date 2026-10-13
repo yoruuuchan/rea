@@ -179,3 +179,40 @@ interface question through an explicitly selected precise view, retain full
 bytecode/original Evidence under the existing lifetime, and preserve complete
 defaults. Discover support before sending new options to an older server. Include
 discovery, follow-up, failures and retries in the complete task cost.
+
+## Static contract admission verification
+
+The follow-up from main `c462a4ebd3a10e59253bcf38353a0914b176738b` tests the
+pilot's actual static boundary, without adding a dynamic module registry or
+changing production code. Complete-project TypeScript checking now verifies
+that the inferred descriptor type rejects a WASM operation contract, a WASM
+CLI command, a WASM service factory, an unrelated input schema and an unrelated
+output schema. These are negative assignability assertions: their guarantee
+comes from the compiler, not from executing an incompatible descriptor.
+The existing named contract and CLI identity are also checked at runtime;
+separate factory calls produce distinct service/provider owners. Invalid target
+input remains an application error without launching a worker.
+
+The actual public in-memory MCP SDK test additionally spies on the provider:
+duplicate EVM registration throws the named `already registered` error before
+any provider call. Converted input/output JSON Schemas validate before the
+first valid operation. Invalid client arguments are rejected before execution;
+incompatible provider reply data is validated **after** execution and is not
+presented as a pre-use contract guarantee. Existing healthy-peer, cancellation,
+retained summary/default and cleanup-retry scenarios remain covered.
+
+Full project typecheck passes with the installed compiler's supported single
+thread scheduling; it includes all source/test files. The two exact focused
+files pass 12 runtime cases. The resource scopes sample 2,057,961,472 bytes for
+typecheck and 2,426,290,176 bytes for required build plus focused tests, below the
+unchanged 3 GiB early-stop/4 GiB hard ceiling. Final transient-cgroup counters
+remain unknown. No new real-provider or performance improvement is claimed by
+these compile/SDK checks; the earlier pinned real EVMole/WABT/lifecycle evidence
+retains its original scope and source identity.
+
+This proves the one statically composed descriptor's named/schema/factory
+compatibility and duplicate-registration guard. It does not implement runtime
+admission of arbitrary JavaScript descriptors, third-party plugin ABI/version
+negotiation or a general plugin SDK. Those remain deferred by the original plan.
+Existing callers, full defaults, provider inputs, owned lifetimes and output
+identities are unchanged.

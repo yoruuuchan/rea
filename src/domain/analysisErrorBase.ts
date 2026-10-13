@@ -114,6 +114,7 @@ import type { Evidence } from "./evidence.js";
 import type { AndroidPartialObservation } from "./android/androidPartialObservation.js";
 import type { FirmwarePartialObservation } from "./firmware/firmwareAnalysis.js";
 import type {
+  AdbActivityStartPartialObservation,
   AdbAcquiredFilePartialObservation,
   AdbPackagePullPartialObservation,
 } from "./adb/adbDeviceAnalysis.js";
@@ -143,5 +144,6 @@ export type AnalysisPartialObservation =
   | AndroidPartialObservation
   | FirmwarePartialObservation
   | NativeUiObservationResult
+  | AdbActivityStartPartialObservation
   | AdbAcquiredFilePartialObservation
   | AdbPackagePullPartialObservation;

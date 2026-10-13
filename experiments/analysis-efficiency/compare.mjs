@@ -27,6 +27,7 @@ const sameSettings = [
   "retained_verification",
   "native_question",
   "javascript_question",
+  "managed_question",
   "provider_settings_sha256",
   "provider_search_path_sha256",
   "provider_environment_policy_sha256",

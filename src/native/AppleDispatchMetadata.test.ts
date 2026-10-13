@@ -89,6 +89,40 @@ const fixture = (relative = false) => {
   return bytes;
 };
 const provenance = { path: "/fixture/app", sha256: "a".repeat(64) };
+describe("chained Apple dispatch binary metadata", () => {
+  it("keeps absolute metadata pointers between declared chained fixups", () => {
+    const bytes = fixture();
+    bytes.writeUInt32LE(2, 16);
+    bytes.writeUInt32LE(168, 20);
+    bytes.writeUInt32LE(0x80000034, 184);
+    bytes.writeUInt32LE(16, 188);
+    bytes.writeUInt32LE(0xa00, 192);
+    bytes.writeUInt32LE(64, 196);
+    // Only the class-list pointer needs rebasing. All remaining metadata
+    // pointers carry their stored absolute values, outside the single chain.
+    bytes.writeBigUInt64LE(0x200n, 0x180);
+    bytes.writeUInt32LE(28, 0xa04);
+    bytes.writeUInt32LE(60, 0xa08);
+    bytes.writeUInt32LE(60, 0xa0c);
+    bytes.writeUInt32LE(1, 0xa14);
+    bytes.writeUInt32LE(1, 0xa1c);
+    bytes.writeUInt32LE(8, 0xa20);
+    bytes.writeUInt32LE(24, 0xa24);
+    bytes.writeUInt16LE(0x1000, 0xa28);
+    bytes.writeUInt16LE(6, 0xa2a);
+    bytes.writeUInt16LE(1, 0xa38);
+    bytes.writeUInt16LE(0x180, 0xa3a);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    expect(result.objc_classes[0]).toMatchObject({ name: "Fixture" });
+    expect(result.objc_dispatch_implementations[0]).toMatchObject({
+      selector: "performAction:",
+      implementation_address: "0x100000700",
+    });
+    expect(
+      result.coverage.find(({ facet }) => facet === "pointer_fixups"),
+    ).toMatchObject({ status: "complete" });
+  });
+});
 describe("Apple dispatch binary metadata", () => {
   it.each([false, true])(
     "decodes stripped absolute/relative method lists (relative=%s) with exact offsets",

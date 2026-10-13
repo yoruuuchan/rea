@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { WabtArtifactProvider } from "./WabtArtifactProvider.js";
-import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
+import {
+  PrivateRuntimeRoot,
+  PrivateRuntimeRootUnavailableError,
+} from "../process/PrivateRuntimeRoot.js";
 import { spawnOwnedProviderProcess } from "../process/ProviderProcess.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
 
@@ -33,6 +36,41 @@ it("returns actionable unavailable without creating a workspace when tools are a
     error: {
       _tag: "AnalysisCapabilityUnavailableError",
       userMessage: expect.stringContaining("REA_WABT_BIN_DIRECTORY"),
+    },
+  });
+});
+
+it("reports an unavailable private runtime root without a misleading WABT remediation", async () => {
+  const toolRoot = await createTestTempDirectory("rea-wabt-tool-root-");
+  for (const tool of ["wasm-validate", "wasm-objdump", "wasm2wat"])
+    await writeFile(
+      join(toolRoot, tool + (process.platform === "win32" ? ".exe" : "")),
+      "source-owned executable seam",
+      { mode: 0o700 },
+    );
+  const provider = new WabtArtifactProvider(
+    { REA_WABT_BIN_DIRECTORY: toolRoot },
+    undefined,
+    () => {
+      throw new PrivateRuntimeRootUnavailableError(
+        "REA Windows native controls are unavailable: probe failure",
+      );
+    },
+  );
+  expect(
+    await provider.inspect({
+      path: "/module.wasm",
+      glue_paths: [],
+      candidate_paths: [],
+    }),
+  ).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisCapabilityUnavailableError",
+      userMessage: undefined,
+      message: expect.stringContaining(
+        "REA Windows native controls are unavailable",
+      ),
     },
   });
 });

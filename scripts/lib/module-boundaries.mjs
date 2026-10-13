@@ -10,6 +10,7 @@ const MIGRATED_PROVIDER_ROOTS = new Set([
   "go",
   "wasm",
   "captures",
+  "signals",
   "android",
   "firmware",
   "ghidra",

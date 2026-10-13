@@ -23,6 +23,25 @@ connecting. Dossier relationship coverage remains unknown when direct callers
 are unavailable, while standalone callee coverage retains its own observed state.
 It preserves the attached GUI database.
 
+The later verification follow-up rejects native callee successes without an
+explicit truncation marker, checks positive procedure inventory/search and
+compares normalized function results. String and xref correctness require
+independent positive oracles; runs without those oracles label them unverified.
+Earlier reports established contract validity for these operations and did not
+by themselves establish string/xref semantic correctness.
+
+The follow-up passed eight production checks with a known CRT literal confirmed
+in the unchanged fixture bytes and a reference source address independently
+identified from `main` assembly matching the C source. A loopback response-only
+proxy in front of the real IDA Pro provider reproduced the earlier verifier
+passing empty function inventories and xrefs. The corrected verifier rejected
+those replies with positive oracles, empty string results and missing native
+callee truncation markers. The comparison used verifier source `d1aaeee40`
+with the same current adapter runtime; it is a verifier comparison, not an
+engine performance comparison. Only response payloads were modified; the original
+input digest stayed unchanged, the target was never executed, and the attached
+GUI database was preserved.
+
 The real application was a digest-verified, unchanged copy of Windows
 `whoami.exe`: 94,208 bytes, 243 recognized functions, and 314 upstream
 C-string observations. The selected 1,741-byte function had 20 resolved

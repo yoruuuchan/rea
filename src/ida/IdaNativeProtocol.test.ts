@@ -223,11 +223,22 @@ describe("native IDA provider observations", () => {
           procedure: "main",
         });
         if (!dossier.ok) throw dossier.error;
-        expect(dossier.value.relationshipCoverage).toEqual({
+        expect(dossier.value.relationshipCoverage).toMatchObject({
           status: "unknown",
-          reason:
-            "Upstream xrefs do not establish direct caller relationships.",
+          reason: more
+            ? expect.stringContaining(
+                "Callees: Upstream callees capped results at 500; additional callees remain unknown.",
+              )
+            : expect.stringContaining(
+                "Callers: Upstream xrefs do not establish direct caller relationships.",
+              ),
         });
+        if (more)
+          expect(dossier.value.relationshipCoverage).toMatchObject({
+            reason: expect.stringContaining(
+              "Callers: Upstream xrefs do not establish direct caller relationships.",
+            ),
+          });
         expect(dossier.value.result).toMatchObject({
           callers: [],
           callees: [{ address: "0x2000", name: "puts" }],
@@ -362,6 +373,42 @@ describe("native IDA query identity", () => {
       }
     },
   );
+});
+
+describe("native IDA callee truncation", () => {
+  it("rejects native successes without an explicit truncation marker and preserves upstream failures", async () => {
+    const { client, producer } = await fixture();
+    const previous = producer.overrideCall;
+    try {
+      producer.overrideCall = (name, args) =>
+        name === "callees"
+          ? [{ callees: [], error: null }]
+          : previous?.(name, args);
+      for (const operation of [
+        "procedure_callees",
+        "analyze_function",
+      ] as const) {
+        const result = await client.execute(operation, { procedure: "main" });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error).toBeInstanceOf(AnalysisProtocolError);
+          expect(result.error.message).toContain("truncation marker");
+        }
+      }
+      producer.overrideCall = (name, args) =>
+        name === "callees"
+          ? [{ callees: null, error: "callee database failure" }]
+          : previous?.(name, args);
+      const result = await client.execute("procedure_callees", {
+        procedure: "main",
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok)
+        expect(result.error.message).toContain("callee database failure");
+    } finally {
+      await client.close();
+    }
+  });
 });
 
 describe("native IDA callee lookup batches", () => {

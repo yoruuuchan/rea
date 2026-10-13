@@ -109,12 +109,18 @@ const resolveInternalSpecifier = (
     : { to: match, resolution: "internal" };
 };
 
+type ReadFile = Extract<ReferenceSourceEntry, { status: "read"; kind: "file" }>;
+
 const appendFile = (
-  entry: Extract<ReferenceSourceEntry, { status: "read"; kind: "file" }>,
+  entry: ReadFile,
   lookupPath: ReferenceSourcePathLookup,
   output: ParsedReferenceSourceEntries,
 ): void => {
   const language = detectReferenceSourceLanguage(entry.path);
+  const parsed =
+    language === null || !PARSEABLE_REFERENCE_SOURCE_LANGUAGES.has(language)
+      ? undefined
+      : parseReferenceSourceImports(entry.path, entry.bytes, language);
   output.entries.push({
     path: entry.path,
     kind: "file",
@@ -123,11 +129,9 @@ const appendFile = (
     language,
     classifications: classifyReferenceSourcePath(entry.path),
     content_state: "hashed",
-    limitations: [],
+    limitations: [...(parsed?.limitations ?? [])],
   });
-  if (language === null || !PARSEABLE_REFERENCE_SOURCE_LANGUAGES.has(language))
-    return;
-  const parsed = parseReferenceSourceImports(entry.path, entry.bytes, language);
+  if (parsed === undefined) return;
   for (const relationship of parsed.relationships) {
     if (relationship.resolution !== "internal") {
       output.relationships.push(relationship);

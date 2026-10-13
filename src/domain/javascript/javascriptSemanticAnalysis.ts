@@ -42,6 +42,7 @@ import {
 } from "./javascriptSemanticTraversal.js";
 import { semanticRequireOrigin } from "./javascriptSemanticRequireOrigin.js";
 import { collectSemanticMemberMutationsSteps } from "./javascriptSemanticMemberMutations.js";
+import { indexJavaScriptAmbientWritesSteps } from "./javascriptSemanticAmbientWrites.js";
 import {
   collectSemanticReturns,
   resolveSemanticModuleCallables,
@@ -99,6 +100,7 @@ interface AddBindingInput {
   readonly definitionNode: t.Node;
   readonly initializer: t.Node | null;
   readonly directOrigin?: JavaScriptModuleOrigin;
+  readonly runtimeImport?: boolean;
   readonly projection?: readonly (string | number | null)[];
 }
 
@@ -128,14 +130,18 @@ export function* indexJavaScriptBindingsSteps(
 ): Generator<void, JavaScriptSemanticAnalysisState> {
   const state = createState(program);
   yield* collectDefinitionsSteps(program, state);
+  yield* indexJavaScriptAmbientWritesSteps(program, state);
   return state;
 }
 
 /** Recover semantics from an already parsed JavaScript artifact. */
 export const analyzeParsedJavaScriptSemantics = (
   file: ParsedJavaScriptSource,
+  staticImportResolutionMode: "import" | "require" = "import",
 ): JavaScriptSemanticIr =>
-  completeSemanticSteps(analyzeParsedJavaScriptSemanticsSteps(file));
+  completeSemanticSteps(
+    analyzeParsedJavaScriptSemanticsSteps(file, staticImportResolutionMode),
+  );
 
 /**
  * Recover semantics from a parsed artifact with a yield between analysis
@@ -145,8 +151,9 @@ export const analyzeParsedJavaScriptSemantics = (
  */
 export function* analyzeParsedJavaScriptSemanticsSteps(
   file: ParsedJavaScriptSource,
+  staticImportResolutionMode: "import" | "require" = "import",
 ): Generator<void, JavaScriptSemanticIr> {
-  const state = createState(file.program);
+  const state = createState(file.program, staticImportResolutionMode);
   yield* collectDefinitionsSteps(file.program, state);
   yield* collectSemanticMemberMutationsSteps(file.program, state);
   yield* traverseJavaScriptAstSteps(file.program, {
@@ -159,7 +166,11 @@ export function* analyzeParsedJavaScriptSemanticsSteps(
   yield;
   const callables = collectSemanticReturns(state, parserPartial);
   yield;
-  const moduleLinks = resolveSemanticModuleCallables(state, callables);
+  const moduleLinks = resolveSemanticModuleCallables(
+    state,
+    callables,
+    bindings,
+  );
   const derived = yield* collectJavaScriptDerivedSemanticsSteps(
     file.program,
     state,
@@ -428,15 +439,18 @@ export function* indexJavaScriptElectronIdentitySteps(
   };
   yield* collectJavaScriptIdentityWritesSteps(
     program,
-    (root, kind) => {
-      if (kind === "opaque-call") return interop.opaqueMutationPath(root);
+    (node, kind) => {
+      if (kind === "opaque-call") return [interop.opaqueMutationPath(node)];
+      const { root, members } = electronMemberPath(node);
       const exported = kind === "binding" ? undefined : rootExport(root);
-      return exported === undefined
-        ? (interop.intrinsicPath(root) ??
+      const path =
+        exported === undefined
+          ? (interop.intrinsicPath(root) ??
             (kind === "member"
               ? interop.boundIntrinsic(root)?.path
               : undefined))
-        : ["electron", ...exported];
+          : ["electron", ...exported];
+      return path === undefined ? [] : [[...path, ...members]];
     },
     interop.intrinsicInvocation,
     interop.staticString,
@@ -517,7 +531,10 @@ const bindingOrigin = (
     : { ...origin, importedPath: [...origin.importedPath, ...projection] };
 };
 
-const createState = (program: t.Program): JavaScriptSemanticAnalysisState => {
+const createState = (
+  program: t.Program,
+  staticImportResolutionMode: "import" | "require" = "import",
+): JavaScriptSemanticAnalysisState => {
   const root: JavaScriptSemanticScopeState = {
     scopeId: semanticScopeId("program", program),
     parentScopeId: null,
@@ -527,6 +544,7 @@ const createState = (program: t.Program): JavaScriptSemanticAnalysisState => {
     bindings: new Map(),
   };
   return {
+    staticImportResolutionMode,
     parentsByNode: new WeakMap(),
     scopes: [root],
     scopesById: new Map([[root.scopeId, root]]),
@@ -538,6 +556,7 @@ const createState = (program: t.Program): JavaScriptSemanticAnalysisState => {
     linkedRequireCalls: new WeakSet(),
     moduleLinkBindings: new WeakMap(),
     conditionalInitializers: new WeakSet(),
+    ambientWrites: new SemanticPropertyPathCoverage(),
   };
 };
 
@@ -803,7 +822,7 @@ const bindImportEquals = (
     mutable: false,
     definitionNode: node.id,
     initializer: null,
-    directOrigin: { specifier, importedPath: [] },
+    directOrigin: { specifier, importedPath: [], resolutionMode: "require" },
   });
 };
 
@@ -992,6 +1011,12 @@ const bindImports = (
       definitionNode: specifier.local,
       initializer: null,
       directOrigin: { specifier: node.source.value, importedPath },
+      runtimeImport:
+        node.importKind !== "type" &&
+        node.importKind !== "typeof" &&
+        (!t.isImportSpecifier(specifier) ||
+          (specifier.importKind !== "type" &&
+            specifier.importKind !== "typeof")),
     });
   }
 };
@@ -1168,6 +1193,7 @@ const addBinding = (input: AddBindingInput): void => {
     definitionNode,
     initializer,
     directOrigin,
+    runtimeImport,
     projection = [],
   } = input;
   let binding = scope.bindings.get(name);
@@ -1181,7 +1207,14 @@ const addBinding = (input: AddBindingInput): void => {
   binding.definitions.push({ kind, location: range(definitionNode) });
   if (initializer !== null)
     binding.initializers.push({ node: initializer, projection });
-  if (directOrigin !== undefined) binding.directOrigins.push(directOrigin);
+  if (directOrigin !== undefined)
+    binding.directOrigins.push(
+      directOrigin.resolutionMode === undefined &&
+        state.staticImportResolutionMode === "require"
+        ? { ...directOrigin, resolutionMode: "require" }
+        : directOrigin,
+    );
+  binding.runtimeImport ||= runtimeImport === true;
 };
 
 const createBinding = (
@@ -1201,6 +1234,7 @@ const createBinding = (
   initializers: [],
   referenceInitializers: [],
   directOrigins: [],
+  runtimeImport: false,
 });
 
 const addAssignment = (

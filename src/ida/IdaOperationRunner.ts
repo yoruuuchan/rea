@@ -19,6 +19,7 @@ import {
 } from "../domain/hopperValues.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { RelationshipCoverage } from "../domain/relationshipCoverage.js";
+import { combineFunctionRelationshipCoverage } from "../domain/functionCallCoverage.js";
 import { readCallGraphCallees, unavailableCallGraph } from "./IdaCallGraph.js";
 import type { IdaMcpConnection } from "./IdaMcpConnection.js";
 import type { IdaOperation } from "./IdaProviderCapabilities.js";
@@ -70,33 +71,6 @@ interface IdaRelationships {
   readonly coverage: RelationshipCoverage;
 }
 
-const combinedRelationshipCoverage = (
-  callers: RelationshipCoverage,
-  callees: RelationshipCoverage,
-): RelationshipCoverage => {
-  const coverage = [callers, callees];
-  const diagnostics = [
-    ...new Set(
-      coverage.flatMap((item) =>
-        "diagnostics" in item ? item.diagnostics : [],
-      ),
-    ),
-  ];
-  const details = diagnostics.length > 0 ? { diagnostics } : {};
-  const unknown = coverage.filter((item) => item.status === "unknown");
-  if (unknown.length > 0)
-    return {
-      status: "unknown",
-      reason: [...new Set(unknown.map((item) => item.reason))].join(" "),
-      ...details,
-    };
-  const limitations = coverage.flatMap((item) =>
-    item.status === "partial" ? item.limitations : [],
-  );
-  return limitations.length > 0
-    ? { status: "partial", limitations, ...details }
-    : { status: "complete", ...details };
-};
 /** The only lookup answers upstream reports for a name or address that is not a function. */
 const MISSING_PROCEDURE_ANSWERS: ReadonlySet<string> = new Set([
   "Not found",
@@ -632,7 +606,7 @@ export class IdaOperationRunner {
     const pseudocode = await this.pseudocode(fn);
     const callers = await this.relationships(fn, "callers");
     const callees = await this.relationships(fn, "callees");
-    this.relationshipCoverage = combinedRelationshipCoverage(
+    this.relationshipCoverage = combineFunctionRelationshipCoverage(
       callers.coverage,
       callees.coverage,
     );
