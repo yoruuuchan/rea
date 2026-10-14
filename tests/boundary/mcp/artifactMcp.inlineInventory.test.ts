@@ -18,14 +18,8 @@ import {
   parseEvidence,
   type Evidence,
 } from "../../../src/domain/evidence.js";
-import {
-  artifactInspectionResultSchema,
-  createArtifactInspection,
-} from "../../../src/domain/artifactInspection.js";
-import {
-  artifactInventoryResultSchema,
-  type ArtifactInventoryResult,
-} from "../../../src/domain/artifactGraph.js";
+import { artifactInspectionResultSchema } from "../../../src/domain/artifactInspection.js";
+import { artifactInventoryResultSchema } from "../../../src/domain/artifactGraph.js";
 import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
 import {
   analysisViewResultSchema,
@@ -242,72 +236,6 @@ const createInventoryViewReader = async (client: Client, parent: Evidence) => {
   return readView;
 };
 
-const assertHistoricalInventory = async (
-  client: Client,
-  input: {
-    archive: string;
-    parent: Evidence;
-    inventoryEvidence: Evidence;
-    graph: ArtifactInventoryResult;
-  },
-) => {
-  const { archive, parent, inventoryEvidence, graph } = input;
-  // Historical records may omit a later inventory field. Input parsing must
-  // not insert defaults inside that authenticated child Evidence.
-  const {
-    integrity_contradictions: _contradictions,
-    coverage: _coverage,
-    ...legacyInventory
-  } = graph;
-  const legacyTarget = {
-    path: archive,
-    sha256: graph.manifest.root_sha256,
-    format: "zip" as const,
-  };
-  const legacySource = createEvidence(
-    legacyTarget,
-    inventoryEvidence.provider,
-    {
-      operation: "inventory_artifact",
-      parameters: {},
-      result: jsonValueSchema.parse(legacyInventory),
-    },
-  );
-  const legacyInspection = createArtifactInspection(legacySource);
-  expect(legacyInspection.substeps[0]?.evidence).toEqual(legacySource);
-  expect(
-    legacyInspection.substeps[0]?.evidence.normalized_result,
-  ).not.toHaveProperty("integrity_contradictions");
-  expect(
-    legacyInspection.substeps[0]?.evidence.normalized_result,
-  ).not.toHaveProperty("coverage");
-  const legacyParent = createEvidence(legacyTarget, parent.provider, {
-    operation: "inspect_artifact",
-    parameters: {},
-    result: legacyInspection,
-  });
-  const legacyReply = await client.callTool({
-    name: "inspect_analysis_view",
-    arguments: {
-      source: { kind: "inline", evidence: legacyParent },
-      view: { kind: "summary" },
-    },
-  });
-  expect(
-    legacyReply.isError,
-    JSON.stringify(legacyReply.structuredContent),
-  ).not.toBe(true);
-  expect(
-    parseEvidence(legacyReply.structuredContent).normalized_result,
-  ).toMatchObject({
-    parent_evidence_id: legacyParent.evidence_id,
-    summary: {
-      source_complete: true,
-      inventory_evidence_ids: [legacySource.evidence_id],
-    },
-  });
-};
-
 const assertPortableRoundtrip = async (
   client: Client,
   directory: string,
@@ -437,6 +365,10 @@ it("keeps complete ZIP output and reads retained inventory views after the sourc
     const graph = artifactInventoryResultSchema.parse(
       inventoryEvidence.normalized_result,
     );
+    expect(graph).toMatchObject({
+      integrity_contradictions: [],
+      coverage: { scope: "container-entries", status: "complete" },
+    });
     expect(graph.occurrences).toHaveLength(fileCount + 1);
     // Follow-ups must use retained source facts, not reopen this archive.
     await unlink(archive);
@@ -524,12 +456,6 @@ it("keeps complete ZIP output and reads retained inventory views after the sourc
       ]),
     });
 
-    await assertHistoricalInventory(client, {
-      archive,
-      parent,
-      inventoryEvidence,
-      graph,
-    });
     await assertPortableRoundtrip(client, directory, parent, summary.result);
   } finally {
     await client.close();

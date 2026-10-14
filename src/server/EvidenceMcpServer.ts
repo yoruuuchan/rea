@@ -126,9 +126,12 @@ export class EvidenceMcpServer extends McpServer {
         ? undefined
         : { budgetBytes: compactPresentation.budgetBytes };
     this.catalogIdentity =
-      this.compactPresentation === undefined
+      this.compactPresentation === undefined && !this.omitOutputSchemas
         ? CATALOG_IDENTITY
-        : createCatalogIdentity(this.compactPresentation);
+        : createCatalogIdentity(
+            this.compactPresentation,
+            this.omitOutputSchemas ? "off" : "full",
+          );
   }
 
   /**

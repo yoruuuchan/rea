@@ -6,7 +6,9 @@ import { FridaInstrumentationService } from "../application/frida/FridaInstrumen
 import type { FridaInstrumentationPort } from "../application/frida/FridaInstrumentationPort.js";
 import type { FridaRemoteConnection } from "../application/frida/FridaInstrumentationPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
+import type { ToolContract } from "../contracts/toolContractTypes.js";
 import { evidenceSchema } from "../domain/evidence.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { logToolExecution } from "./toolLogging.js";
@@ -121,8 +123,12 @@ export const registerFridaTools = (
               }),
       );
       if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, start);
+        return deliverPartialEvidenceError(
+          result,
+          start,
+          delivery,
+          recordEvidence,
+        );
       }
       return delivery.toCallToolResult(
         {
@@ -162,8 +168,12 @@ export const registerFridaTools = (
               }),
       );
       if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, load);
+        return deliverPartialEvidenceError(
+          result,
+          load,
+          delivery,
+          recordEvidence,
+        );
       }
       return delivery.toEvidenceToolResult(
         result.value,
@@ -295,8 +305,12 @@ export const registerFridaTools = (
         () => operation,
       );
       if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, instrument);
+        return deliverPartialEvidenceError(
+          result,
+          instrument,
+          delivery,
+          recordEvidence,
+        );
       }
       return delivery.toEvidenceToolResult(
         result.value.evidence,
@@ -307,13 +321,21 @@ export const registerFridaTools = (
   );
 };
 
-const recordPartialEvidence = (
-  error: { readonly partialObservation?: unknown },
+const deliverPartialEvidenceError = (
+  result: { readonly ok: false; readonly error: AnalysisError },
+  contract: ToolContract,
+  delivery: ToolResultDelivery,
   recordEvidence: EvidenceWriter["recordEvidence"] | undefined,
-): void => {
-  if (error.partialObservation === undefined) return;
-  const parsed = evidenceSchema.safeParse(error.partialObservation);
-  if (parsed.success) recordEvidence?.(parsed.data);
+): ReturnType<ToolResultDelivery["toCallToolResult"]> => {
+  const parsed = evidenceSchema.safeParse(result.error.partialObservation);
+  if (!parsed.success || recordEvidence === undefined)
+    return delivery.toCallToolResult(result, contract);
+  return delivery.toRecordedPartialErrorToolResult(
+    result.error,
+    parsed.data.evidence_id,
+    recordEvidence(parsed.data),
+    contract.returnsTargetContent,
+  );
 };
 
 const remoteConnection = (

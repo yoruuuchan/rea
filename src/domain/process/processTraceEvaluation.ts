@@ -123,29 +123,92 @@ const failure = (input: FailureInput): EvaluatedSide => ({
   },
 });
 
+type FiniteTraceEvaluation =
+  | { readonly status: "pass"; readonly variant: string }
+  | {
+      readonly status: "fail";
+      readonly eventIds: readonly string[];
+      readonly locationIndexes: readonly number[];
+    };
+
+/** Match variants once, retaining the best-prefix mismatch for attribution. */
 const evaluateFiniteTrace = (
   ids: readonly string[],
-  specification: ProcessTraceSpecification,
-): string | null => {
-  if (specification.language.kind !== "finite_traces") return null;
-  for (const variant of specification.language.variants) {
-    let offset = 0;
-    let accepted = true;
-    for (const token of variant.trace) {
-      if (typeof token === "string") {
-        if (ids[offset] !== token) accepted = false;
-        offset += 1;
-        continue;
-      }
-      const actual = ids.slice(offset, offset + token.unordered.length).sort();
-      const expected = [...token.unordered].sort();
-      if (canonicalTraceJson(actual) !== canonicalTraceJson(expected))
-        accepted = false;
-      offset += token.unordered.length;
+  language: Extract<
+    ProcessTraceSpecification["language"],
+    { kind: "finite_traces" }
+  >,
+): FiniteTraceEvaluation => {
+  let bestPrefix = -1;
+  const bestEventIds = new Set<string>();
+  const bestLocationIndexes = new Set<number>();
+
+  const recordMismatch = (
+    offset: number,
+    missing: readonly string[],
+    unexpected: readonly { readonly id: string; readonly index: number }[],
+  ): void => {
+    if (offset > bestPrefix) {
+      bestPrefix = offset;
+      bestEventIds.clear();
+      bestLocationIndexes.clear();
     }
-    if (accepted && offset === ids.length) return variant.id;
+    if (offset !== bestPrefix) return;
+    for (const eventId of missing) bestEventIds.add(eventId);
+    for (const { id, index } of unexpected) {
+      bestEventIds.add(id);
+      bestLocationIndexes.add(index);
+    }
+  };
+
+  for (const variant of language.variants) {
+    let offset = 0;
+    let mismatched = false;
+    for (const token of variant.trace) {
+      const expected = typeof token === "string" ? [token] : token.unordered;
+      const actual = ids.slice(offset, offset + expected.length);
+      const remaining = new Map<string, number>();
+      for (const eventId of expected)
+        remaining.set(eventId, (remaining.get(eventId) ?? 0) + 1);
+      const unexpected: Array<{ readonly id: string; readonly index: number }> =
+        [];
+      for (const [index, eventId] of actual.entries()) {
+        const count = remaining.get(eventId) ?? 0;
+        if (count === 0)
+          unexpected.push({ id: eventId, index: offset + index });
+        else if (count === 1) remaining.delete(eventId);
+        else remaining.set(eventId, count - 1);
+      }
+      const missing = [...remaining].flatMap(([eventId, count]) =>
+        Array.from({ length: count }, () => eventId),
+      );
+      if (
+        missing.length > 0 ||
+        unexpected.length > 0 ||
+        actual.length < expected.length
+      ) {
+        recordMismatch(offset, missing, unexpected);
+        mismatched = true;
+        break;
+      }
+      offset += expected.length;
+    }
+
+    if (mismatched) continue;
+    if (offset === ids.length) return { status: "pass", variant: variant.id };
+    const unexpected = ids[offset];
+    recordMismatch(
+      offset,
+      [],
+      unexpected === undefined ? [] : [{ id: unexpected, index: offset }],
+    );
   }
-  return null;
+
+  return {
+    status: "fail",
+    eventIds: [...bestEventIds],
+    locationIndexes: [...bestLocationIndexes],
+  };
 };
 
 type MatchedTrace = {
@@ -391,20 +454,23 @@ const evaluateMatchedTrace = (
   if (specification.language.kind === "partial_order")
     return evaluatePartialOrder(trace, specification.language);
   const ids = trace.rawTrace.map(({ event_id }) => event_id);
-  const variant = evaluateFiniteTrace(ids, specification);
-  return variant === null
+  const evaluation = evaluateFiniteTrace(ids, specification.language);
+  return evaluation.status === "fail"
     ? failure({
         kind: "trace",
         message: "Observed events do not match any finite trace variant.",
-        eventIds: ids,
-        locations: trace.rawTrace.map(({ location }) => location),
+        eventIds: evaluation.eventIds,
+        locations: evaluation.locationIndexes.flatMap((index) => {
+          const location = trace.rawTrace[index]?.location;
+          return location === undefined ? [] : [location];
+        }),
         rawTrace: trace.rawTrace,
       })
     : {
         result: {
           status: "pass",
-          matched_variant: variant,
-          satisfied_constraints: [`variant:${variant}`],
+          matched_variant: evaluation.variant,
+          satisfied_constraints: [`variant:${evaluation.variant}`],
           raw_trace: trace.rawTrace,
         },
         diagnostic: null,

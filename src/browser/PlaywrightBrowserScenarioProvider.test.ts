@@ -145,15 +145,16 @@ class FakeSession implements BrowserScenarioSessionPort {
     return 0;
   }
 
-  events(): {
-    readonly retained: number;
-    readonly dropped: number;
-    readonly items: readonly BrowserScenarioEvent[];
-  } {
+  events(): ReturnType<BrowserScenarioSessionPort["events"]> {
     return {
       retained: this.eventItems.length,
       dropped: 0,
       items: this.eventItems,
+      omissions: {
+        by_kind: [],
+        network_transactions: [],
+        network_transaction_range: null,
+      },
     };
   }
 
@@ -559,9 +560,16 @@ describe("PlaywrightBrowserScenarioProvider operation failures", () => {
               },
               steps: [{ step_id: "scenario_start" }],
               events: {
+                retained: 1,
+                dropped: 0,
                 items: [
                   expect.objectContaining({ text: "navigation started" }),
                 ],
+                omissions: {
+                  by_kind: [],
+                  network_transactions: [],
+                  network_transaction_range: null,
+                },
               },
             },
           },

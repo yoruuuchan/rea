@@ -263,7 +263,12 @@ describe("compact input schema budget and reduction", () => {
     expect(presentation).toBe("reduced");
     expect(schema.properties).toEqual({
       capture: { type: "object", description: "Complete capture." },
-      observations: { type: "array" },
+      observations: {
+        type: "array",
+        items: {
+          type: ["null", "boolean", "object", "array", "number", "string"],
+        },
+      },
       label: { type: ["string", "null"] },
     });
     const validate = new Ajv2020({ strict: false }).compile(schema);

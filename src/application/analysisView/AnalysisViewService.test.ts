@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "../../contracts/javascript/javascriptRuntimeReconciliationExample.js";
 import { createEvidence, parseEvidence } from "../../domain/evidence.js";
+import { inspectAnalysisViewInputSchema } from "../../domain/analysisView/analysisView.js";
 import { functionDossierSchema } from "../../domain/hopperValues.js";
 import { ghidraFunctionDossier } from "../../domain/ghidraValues.fixture.js";
 import {
@@ -432,45 +433,284 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
   expect(ledger.forAnalysis(parent.evidence_id)).toBe(borrowed);
 });
 
-it("rejects accessor-backed inline Evidence before all view projections", () => {
-  const views = [
-    { kind: "summary" },
-    { kind: "capture" },
-    { kind: "api-surface" },
-  ] as const;
-  for (const view of views) {
+it.each(["summary", "capture", "api-surface"] as const)(
+  "rejects inline accessors before parsing a %s view",
+  (kind) => {
     let accessed = false;
     const evidence = {
       get normalized_result() {
         accessed = true;
-        throw new Error("Evidence accessor must not be invoked");
+        throw new Error("Evidence must be admitted before parsing");
       },
     };
-    const result = inspectAnalysisView({
+    const input = {
       source: { kind: "inline", evidence },
-      view,
-    });
-    expect(result).toMatchObject({
+      view: { kind },
+    };
+    const parsed = inspectAnalysisViewInputSchema.parse(input);
+    if (parsed.source.kind !== "inline")
+      throw new Error("Expected inline input");
+    expect(parsed.source.evidence).toBe(evidence);
+    expect(inspectAnalysisView(input)).toMatchObject({
       ok: false,
-      error: { _tag: "AnalysisInputError" },
+      error: {
+        _tag: "AnalysisInputError",
+        issues: [{ path: ["source", "evidence", "normalized_result"] }],
+      },
     });
     expect(accessed).toBe(false);
-  }
-
-  const parent = analysisViewCaptureEvidence();
-  for (const view of views)
     expect(
       inspectAnalysisView({
-        source: { kind: "inline", evidence: parent },
-        view,
+        source: { kind: "inline", evidence: analysisViewCaptureEvidence() },
+        view: { kind },
       }).ok,
     ).toBe(true);
+  },
+);
+
+it.each(["summary", "capture", "api-surface"] as const)(
+  "rejects nested, hidden and inherited inline accessors for %s",
+  (kind) => {
+    const parent = analysisViewCaptureEvidence();
+    let accessed = false;
+    const getter = () => {
+      accessed = true;
+      throw new Error("Inline accessors must remain inert");
+    };
+    const nested = {
+      get value() {
+        return getter();
+      },
+    };
+    const hidden = Object.defineProperty({}, "value", { get: getter });
+    const array = Object.defineProperty([null], 0, { get: getter });
+    const inherited: unknown = Object.create({
+      get value() {
+        return getter();
+      },
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+    const cases: { data: unknown; path: (string | number)[] }[] = [
+      { data: nested, path: ["value"] },
+      { data: hidden, path: ["value"] },
+      { data: array, path: [0] },
+      { data: inherited, path: [] },
+      { data: cyclic, path: ["self"] },
+    ];
+    for (const { data, path } of cases) {
+      // A complete envelope reaches payload parsing and Evidence authentication.
+      const input = {
+        source: {
+          kind: "inline" as const,
+          evidence: { ...parent, raw_result: data },
+        },
+        view: { kind },
+      };
+      for (const result of [
+        inspectAnalysisView(input),
+        inspectAnalysisViewValidated(
+          inspectAnalysisViewInputSchema.parse(input),
+        ),
+      ])
+        expect(result).toMatchObject({
+          ok: false,
+          error: {
+            _tag: "AnalysisInputError",
+            issues: [{ path: ["source", "evidence", "raw_result", ...path] }],
+          },
+        });
+    }
+    expect(accessed).toBe(false);
+  },
+);
+
+it.each([
+  ["own map", "map", false],
+  ["own iterator", Symbol.iterator, false],
+  ["own constructor", "constructor", false],
+  ["inherited map", "map", true],
+  ["inherited iterator", Symbol.iterator, true],
+] as const)(
+  "rejects array %s accessors without invoking them",
+  (_name, key, inherited) => {
+    const parent = analysisViewCaptureEvidence();
+    let accessed = false;
+    const array: unknown[] = [];
+    const owner: object = inherited ? Object.create(Array.prototype) : array;
+    Object.defineProperty(owner, key, {
+      get() {
+        accessed = true;
+        throw new Error("Array behavior must remain inert");
+      },
+    });
+    if (inherited) Object.setPrototypeOf(array, owner);
+    for (const kind of ["summary", "capture", "api-surface"] as const) {
+      const result = inspectAnalysisView({
+        source: { kind: "inline", evidence: { ...parent, raw_result: array } },
+        view: { kind },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisInputError" },
+      });
+    }
+    expect(accessed).toBe(false);
+  },
+);
+
+it("rejects callable array overrides and subclass species before parsing", () => {
+  const parent = analysisViewCaptureEvidence();
+  let invoked = false;
+  const callback = () => {
+    invoked = true;
+    throw new Error("Array callbacks must remain inert");
+  };
+  class CustomArray extends Array<unknown> {
+    static override get [Symbol.species](): ArrayConstructor {
+      return callback();
+    }
+  }
+  for (const array of [
+    Object.defineProperty([], "map", { value: callback }),
+    Object.defineProperty([], Symbol.iterator, { value: callback }),
+    new CustomArray(),
+  ])
+    for (const kind of ["summary", "capture", "api-surface"] as const) {
+      const result = inspectAnalysisView({
+        source: { kind: "inline", evidence: { ...parent, raw_result: array } },
+        view: { kind },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisInputError" },
+      });
+    }
+  expect(invoked).toBe(false);
+});
+
+it.each(["summary", "capture", "api-surface"] as const)(
+  "preserves ordinary inline Evidence for %s",
+  (kind) => {
+    const parent = analysisViewCaptureEvidence();
+    const before = JSON.stringify(parent);
+    const result = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view: { kind },
+    });
+    if (!result.ok) throw result.error;
+    expect(parseEvidence(result.value)).toEqual(result.value);
+    expect(result.value.evidence_links).toEqual([parent.evidence_id]);
+    expect(result.value.normalized_result).toMatchObject({
+      kind,
+      parent_evidence_id: parent.evidence_id,
+    });
+    expect(JSON.stringify(parent)).toBe(before);
+    expect(Object.isFrozen(parent)).toBe(false);
+  },
+);
+
+it("rejects executable constructor values before schema plain-object checks", () => {
+  const parent = analysisViewCaptureEvidence();
+  let invoked = false;
+  const constructor = () => undefined;
+  Object.defineProperty(constructor, "prototype", {
+    get() {
+      invoked = true;
+      throw new Error("Constructor metadata must remain inert");
+    },
+  });
+  for (const kind of ["summary", "capture", "api-surface"] as const) {
+    expect(
+      inspectAnalysisView({
+        source: {
+          kind: "inline",
+          evidence: { ...parent, raw_result: { constructor } },
+        },
+        view: { kind },
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
+  }
+  expect(invoked).toBe(false);
+});
+
+it("rejects inline proxy values before reflection or parsing can run traps", () => {
+  const parent = analysisViewCaptureEvidence();
+  let invoked = false;
+  const trap = () => {
+    invoked = true;
+    throw new Error("Proxy behavior must remain inert");
+  };
+  const revoked = Proxy.revocable([], {});
+  revoked.revoke();
+  for (const value of [
+    new Proxy({}, { getPrototypeOf: trap, ownKeys: trap, get: trap }),
+    new Proxy(() => undefined, { get: trap }),
+    revoked.proxy,
+  ])
+    for (const kind of ["summary", "capture", "api-surface"] as const) {
+      const result = inspectAnalysisView({
+        source: { kind: "inline", evidence: { ...parent, raw_result: value } },
+        view: { kind },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisInputError" },
+      });
+    }
+  expect(invoked).toBe(false);
+});
+
+it("keeps ignored array metadata inert through parsing and projection", () => {
+  const capture = analysisViewCaptureFixture();
+  const parent = createEvidence(
+    {
+      path: capture.artifact.path,
+      sha256: capture.artifact.sha256!,
+      format: "file",
+    },
+    { id: "fixture", name: "fixture", version: "1" },
+    {
+      operation: "inspect_web_network_capture",
+      parameters: { sensitive_value_count: 0 },
+      result: capture,
+      rawResult: [],
+    },
+  );
+  if (!Array.isArray(parent.raw_result)) throw new Error("Expected raw array");
+  const array = parent.raw_result;
+  let invoked = false;
+  const getter = () => {
+    invoked = true;
+    throw new Error("Ignored array metadata must remain inert");
+  };
+  for (let index = 0; index < 10_000; index += 1)
+    Object.defineProperty(array, `metadata-${index}`, { get: getter });
+  Object.defineProperty(array, Symbol("metadata"), { get: getter });
+  for (const kind of ["summary", "capture", "api-surface"] as const) {
+    const result = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view: { kind },
+    });
+    if (!result.ok) throw result.error;
+    expect(result.value.evidence_links).toEqual([parent.evidence_id]);
+  }
+  expect(invoked).toBe(false);
+  expect(parseEvidence(parent).raw_result).toEqual([]);
 });
 
 it("keeps inline-envelope admission live alongside capture validation and grouping", () => {
   // Each clone alone fits; both graphs coexist while the view is projected.
   const capture = analysisViewObjectDenseCapture(40_000);
   const parent = analysisViewCaptureEvidence(capture);
+  for (const kind of ["summary", "capture"] as const) {
+    const projected = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view: { kind },
+    });
+    if (!projected.ok) throw projected.error;
+    expect(projected.value.evidence_links).toEqual([parent.evidence_id]);
+  }
   const retained = inspectAnalysisView(
     {
       source: { kind: "retained-evidence", evidence_id: parent.evidence_id },

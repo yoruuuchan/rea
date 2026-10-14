@@ -22,6 +22,7 @@ import type { ToolKind } from "../contracts/toolContractTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { isMachOFormat } from "../domain/binaryTargetTypes.js";
 import type { ProviderAvailability } from "./AnalysisProvider.js";
+import type { JebAnalysisAvailability } from "./jeb/JebAnalysisPort.js";
 import { TOOL_CONTRACTS } from "../contracts/toolContracts.js";
 import { FRIDA_TOOL_CONTRACTS } from "../contracts/fridaToolContracts.js";
 import {
@@ -56,7 +57,7 @@ export type AvailabilityPolicy = {
   readonly androidAnalysisAvailability?: ProviderAvailability;
   readonly adbAnalysisAvailability?: ProviderAvailability;
   readonly apktoolAnalysisAvailability?: ProviderAvailability;
-  readonly jebAnalysisAvailability?: ProviderAvailability;
+  readonly jebAnalysisAvailability?: JebAnalysisAvailability;
   readonly javascriptRecoveryEnabled?: boolean;
   readonly webModuleResolutionEnabled?: boolean;
   readonly browserObservationEnabled?: boolean;
@@ -485,15 +486,22 @@ const workflowAvailabilityFor = ({
       policy.apktoolAnalysisAvailability,
       "Set REA_APKTOOL_COMMAND to a caller-supplied Apktool executable or make Apktool 2.7.0 or newer available on PATH.",
     );
-  if (kind === "jeb-provider")
-    return policy.jebAnalysisAvailability?.status === "available"
-      ? { reason: "available", remediation: null }
-      : {
-          reason: "provider_missing",
-          remediation:
-            policy.jebAnalysisAvailability?.reason ??
-            "Start a JEB client serving MCP (GUI client, or headless via its programmatic launcher) and point REA_JEB_MCP_URL at it (default http://127.0.0.1:8425/mcp). REA does not install or launch JEB.",
-        };
+  if (kind === "jeb-provider") {
+    const availability = policy.jebAnalysisAvailability;
+    if (availability?.status === "available")
+      return availability.supportedOperations.some(
+        (operation) => operation === name,
+      )
+        ? { reason: "available", remediation: null }
+        : {
+            reason: "provider_unavailable",
+            remediation: `The running JEB endpoint does not advertise support for ${name}. Use a JEB client build that provides this operation.`,
+          };
+    return ownerProbeAvailability(
+      availability,
+      "Start a JEB client serving MCP (GUI client, or headless via its programmatic launcher) and point REA_JEB_MCP_URL at it (default http://127.0.0.1:8425/mcp). REA does not install or launch JEB.",
+    );
+  }
   const browser = browserProviderAvailability(name, kind, policy);
   if (browser !== null) return browser;
   if (name === "capture_process_scenario" && !policy.processCaptureEnabled)

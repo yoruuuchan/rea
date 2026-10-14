@@ -421,6 +421,33 @@ it("keeps duplicate function fingerprints ambiguous", () => {
   expect(query.summary.total_seed_matches).toBe(2);
 });
 
+it("selects analyzer-produced boundaries by their method field", () => {
+  const graph = graphFor("const port = Number(process.env.PORT);");
+  const boundary = graph.nodes.find(({ kind }) => kind === "boundary");
+  if (boundary === undefined) throw new Error("Expected a boundary node");
+
+  expect(boundary.properties).toMatchObject({
+    boundary_kind: "coerce",
+    field: "Number",
+    method: "Number",
+  });
+  expect(
+    queryJavaScriptSemanticGraph(graph, {
+      seed: { kind: "boundary-field", field: "Number" },
+      direction: "forward-influence",
+    }),
+  ).toMatchObject({
+    seed_node_ids: [boundary.node_id],
+    summary: { total_seed_matches: 1 },
+  });
+  expect(
+    queryJavaScriptSemanticGraph(graph, {
+      seed: { kind: "boundary-field", field: "missing-field" },
+      direction: "forward-influence",
+    }).summary.total_seed_matches,
+  ).toBe(0);
+});
+
 const semanticNodeFor = (roleKey: string) => {
   const file: JavaScriptArtifactFile = {
     path: "budget.js",

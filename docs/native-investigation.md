@@ -481,8 +481,9 @@ user's permissions and may change files, show UI or use the network.
 
 Debugging must be allowed for the user (Developer Tools access). A
 hardened-runtime target without `com.apple.security.get-task-allow` cannot be
-debugged; `inspect_signature` reports this as the debugger-attach facet, and
-the tool fails with a `debugger-attach-denied` reason.
+debugged; `inspect_signature` reports the signature's `hardened_runtime` value
+and its `entitlements`, including `com.apple.security.get-task-allow` when it
+is present. A denied trace reports the `debugger-attach-denied` reason.
 
 ## Provider and verification boundaries
 

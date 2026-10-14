@@ -73,7 +73,13 @@ import { comparePngScreenshots } from "./PngVisualDiff.js";
 
 import { CDP_BROWSER_PROVIDER_IDENTITY } from "./providerIdentities.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
-const CLEANUP_DOMAINS = ["Network", "Debugger", "Runtime", "Page"] as const;
+const CLEANUP_DOMAINS = [
+  "Network",
+  "Debugger",
+  "Runtime",
+  "Page",
+  "WebMCP",
+] as const;
 
 /** Passive browser observation through a selected user-owned CDP endpoint. */
 export class CdpBrowserProvider implements BrowserObservationPort {

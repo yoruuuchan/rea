@@ -44,6 +44,57 @@ it("validates device serials before contacting any device", async () => {
   });
 });
 
+it.each(["string:key", ":", "string"])(
+  "classifies malformed activity extra %j before contacting adb",
+  async (extra) => {
+    const result = await serve(
+      [
+        "start-adb-activity",
+        "emulator-5554",
+        "android.intent.action.VIEW",
+        "--extra",
+        extra,
+        "--format",
+        "json",
+      ],
+      { REA_ADB_PATH: "/path/that/does/not/exist" },
+    );
+
+    const error = JSON.parse(result.stdout);
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      category: "invalid_input",
+      retryable: true,
+      remediation: { action: expect.any(String) },
+    });
+    expect(error.remediation.action).not.toBe("");
+    expect(error.message).not.toBe("");
+  },
+);
+
+it.each([
+  ["bogus:key:value", "invalid_request"],
+  ["string:key:value", "capability_unavailable"],
+] as const)(
+  "preserves downstream validation for well-delimited activity extra %j",
+  async (extra, code) => {
+    const result = await serve(
+      [
+        "start-adb-activity",
+        "emulator-5554",
+        "android.intent.action.VIEW",
+        "--extra",
+        extra,
+        "--format",
+        "json",
+      ],
+      { REA_ADB_PATH: "/path/that/does/not/exist" },
+    );
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ code });
+  },
+);
+
 it.skipIf(process.platform === "win32")(
   "preserves requested reinstall mode without claiming prior package state",
   async () => {

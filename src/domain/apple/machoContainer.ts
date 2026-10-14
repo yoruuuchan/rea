@@ -1,3 +1,5 @@
+import { isJvmClassFile } from "./jvmClassFile.js";
+
 /** Physical facts for one entry in a Mach-O FAT architecture table. */
 export interface FatSliceDeclaration {
   readonly index: number;
@@ -68,6 +70,8 @@ export const readFatContainerHeader = (
       state: "malformed",
       reason: "FAT file size is invalid or contradicts retained bytes",
     };
+  if (bytes.byteLength === fileSize && isJvmClassFile(bytes))
+    return { state: "not-fat" };
   if (bytes.byteLength < 8) {
     return fileSize < 8
       ? { state: "malformed", reason: "FAT header is truncated" }

@@ -105,7 +105,6 @@ const assertCoverageControls = async ({
     derive({
       ...inventory,
       coverage: { scope: "root", status: "unknown" },
-      coverage_status: "partial",
       limitations: [],
     }),
   );
@@ -125,26 +124,14 @@ const assertCoverageControls = async ({
     limitations: expect.arrayContaining(["Artifact inventory scopes differ."]),
   });
 
-  const { coverage, coverage_status: _coverageStatus, ...legacy } = inventory;
-  expect(coverage).toBeDefined();
-  const retained = await compare(left, derive(legacy));
-  expect(retained.normalized_result).toMatchObject({
-    status: "unchanged",
-    summary: { unchanged: 1, unknown: 0 },
-  });
-  for (const limitation of [
-    "Child inventory is unavailable.",
-    "Missing child observations; 1 integrity contradiction(s) were recorded.",
-  ]) {
-    const unfamiliarLegacy = await compare(
-      left,
-      derive({ ...legacy, limitations: [limitation] }),
-    );
-    expect(unfamiliarLegacy.normalized_result).toMatchObject({
-      status: "unknown",
-      summary: { unchanged: 0, unknown: 1 },
-    });
-  }
+  const { coverage: _coverage, ...withoutCoverage } = inventory;
+  expect(() => artifactInventoryResultSchema.parse(withoutCoverage)).toThrow();
+  expect(() =>
+    artifactInventoryResultSchema.parse({
+      ...inventory,
+      coverage_status: "complete",
+    }),
+  ).toThrow();
 };
 
 cliTest(

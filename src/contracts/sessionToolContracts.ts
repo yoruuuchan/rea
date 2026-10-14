@@ -104,7 +104,7 @@ export const SESSION_TOOL_CONTRACTS = [
   ),
   session(
     "compare_artifacts",
-    "Compare complete artifact inventories by logical occurrence path, content identity, metadata, and graph relations. Pass the inventory Evidence nested in each inspect_artifact result as left and right. Every delta cites both inputs, and gaps yield truncated or unknown, never equivalence. Returns every change inline.",
+    "Compare complete artifact inventories by logical occurrence path, content identity, metadata, and graph relations. Pass the inventory Evidence nested in each inspect_artifact result as left and right, or pass its inspect_analysis_view summary while the complete parent Evidence remains retained in this session. Summary facts are not treated as a complete inventory; comparison resolves the exact retained parent. Every delta cites both complete inputs, and gaps yield truncated or unknown, never equivalence. Returns every change inline.",
     artifactComparisonInputSchema,
   ),
   session(

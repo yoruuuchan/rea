@@ -81,6 +81,14 @@ export const fetchWebSourceMaps = async (
   signal?: AbortSignal,
   host: SourceMapFetchHost = { fetch: globalThis.fetch },
 ): Promise<SourceMaps> => {
+  throwIfAborted(signal);
+  if (requests.length === 0)
+    return webSourceMapsSchema.parse({
+      status: "not_requested",
+      requested: 0,
+      processed: 0,
+      items: [],
+    });
   const items: SourceMapItem[] = [];
   const operationController = new AbortController();
   const timeout = setTimeout(
@@ -168,6 +176,10 @@ export const fetchWebSourceMaps = async (
     items,
     ...(limitation === undefined ? {} : { limitation }),
   });
+};
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted === true) throw signal.reason;
 };
 
 const sourceMapOutputLimitation = (unprocessed: number): string =>

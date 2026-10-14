@@ -79,6 +79,21 @@ it("preserves omitted relationship diagnostics and authenticates reported diagno
   ).toThrow("semantic identifier");
 });
 
+it("requires explicit coverage in serialized Evidence while producers encode omission as unknown", () => {
+  const evidence = createEvidence(TARGET, PROVIDER, {
+    operation: "procedure_callees",
+    parameters: { procedure: "0x1000" },
+    result: ["0x2000"],
+  });
+
+  expect(evidence.relationship_coverage).toBeNull();
+  expect(parseEvidence(JSON.parse(JSON.stringify(evidence)))).toEqual(evidence);
+  const oldEnvelope = { ...evidence } as Record<string, unknown>;
+  delete oldEnvelope.relationship_coverage;
+  expect(evidenceSchema.safeParse(oldEnvelope).success).toBe(false);
+  expect(() => parseEvidence(oldEnvelope)).toThrow();
+});
+
 it("projects known provider fields and preserves open JSON payloads", () => {
   const liveProvider = { ...PROVIDER, transient_status: "starting" };
   const evidence = createEvidence(TARGET, liveProvider, {

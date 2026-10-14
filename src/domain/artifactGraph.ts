@@ -196,31 +196,17 @@ export type ArtifactInventoryCoverage = z.infer<
   typeof artifactInventoryCoverageSchema
 >;
 
-/** Complete inventory observation containing the stable artifact graph. */
-export const artifactInventoryResultSchema = z.object({
+/** Current inventory observation containing the stable artifact graph. */
+export const artifactInventoryResultSchema = z.strictObject({
   manifest: artifactGraphManifestSchema,
   nodes: z.array(artifactNodeSchema),
   occurrences: z.array(artifactOccurrenceSchema),
   edges: z.array(artifactEdgeSchema),
   provenance: z.array(artifactCommandSchema),
-  integrity_contradictions: z.array(integrityContradictionSchema).default([]),
-  // Omitted by older retained Evidence; the inventory parser owns its compatibility policy.
-  coverage: artifactInventoryCoverageSchema.optional(),
+  integrity_contradictions: z.array(integrityContradictionSchema),
+  coverage: artifactInventoryCoverageSchema,
   limitations: z.array(z.string()),
-  /** Optional only for persisted inventory Evidence written before this field. */
-  coverage_status: z.enum(["complete", "partial"]).optional(),
 });
-
-/** Current producers always declare coverage; historical Evidence inputs may omit it. */
-export const artifactInventoryOutputSchema =
-  artifactInventoryResultSchema.safeExtend({
-    coverage: artifactInventoryCoverageSchema,
-    coverage_status:
-      artifactInventoryResultSchema.shape.coverage_status.unwrap(),
-  });
-export type ArtifactInventoryOutput = z.infer<
-  typeof artifactInventoryOutputSchema
->;
 
 /** One safely materialized artifact beneath caller-approved output root. */
 const extractedArtifactSchema = z.object({

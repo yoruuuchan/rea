@@ -138,6 +138,7 @@ export const SCOPES = {
     "src/domain/javascript/javascriptRuntimeStaticCandidates.ts",
     "tests/boundary/filesystem/webScriptManifestPaths.test.ts",
     "tests/boundary/process/ProcessEvidence.host.test.ts",
+    "tests/boundary/process/windowsOutputCapture.test.ts",
     "tests/acceptance/webModuleCli.test.ts",
     "tests/acceptance/webSourceLocationCli.test.ts",
     "tests/boundary/cli/referenceSourceImportStatus.test.ts",

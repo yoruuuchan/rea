@@ -164,7 +164,7 @@ export interface NativeCallTracer {
 
 /** Remediation for a target LLDB may not debug. */
 const ATTACH_REMEDIATION =
-  "Allow debugging for this user (Developer Tools access: `DevToolsSecurity -enable`, or membership in the _developer group). A hardened-runtime target is debuggable only with the com.apple.security.get-task-allow entitlement; see inspect_signature's debugger-attach facet.";
+  "Allow debugging for this user (Developer Tools access: `DevToolsSecurity -enable`, or membership in the _developer group). A hardened-runtime target is debuggable only with the com.apple.security.get-task-allow entitlement; inspect_signature reports hardened_runtime and entitlements.";
 
 /** Production tracer: `lldb --batch` running the REA LLDB bridge. */
 export class LldbCallTracer implements NativeCallTracer {

@@ -66,7 +66,7 @@ const fixture = (
   return { host, manifest, bytes, loads: () => loads };
 };
 
-describe("packaged Windows native admission", () => {
+describe("packaged Windows native compatibility", () => {
   it.each([true, false])(
     "preserves protocol stdin capability %s alongside existing job controls",
     (protocolStdin) => {
@@ -127,6 +127,30 @@ describe("packaged Windows native admission", () => {
     },
   );
 
+  it("names the absent packaged manifest and matching-version recovery", () => {
+    const value = fixture();
+    const missing = Object.assign(new Error("file absent"), {
+      code: "ENOENT",
+    });
+    expect(
+      loadWindowsNativeAuthority({
+        ...value.host,
+        readManifest: () => {
+          throw missing;
+        },
+      }),
+    ).toMatchObject({
+      available: false,
+      failureStage: "artifact",
+      reason: expect.stringMatching(
+        /Missing packaged Windows native file native\/windows\/build\/manifest\.json \(ENOENT\).*native\/windows\/build\/rea-windows-x64\.node.*native\/windows\/README\.md/u,
+      ),
+    });
+    expect(value.loads()).toBe(0);
+  });
+});
+
+describe("packaged Windows native artifact validation", () => {
   it("rejects tampering even when the original file was a valid PE image", () => {
     const value = fixture();
     value.bytes[127] = 1;

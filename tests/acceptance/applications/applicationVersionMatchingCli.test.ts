@@ -96,3 +96,85 @@ cliTest(
     }
   },
 );
+
+cliTest(
+  "matches an unchanged source module after a sibling file changes",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-source-module-version-");
+    const versions = await Promise.all(
+      ["left", "right"].map(async (name) => {
+        const application = join(root, name);
+        await mkdir(join(application, "src"), { recursive: true });
+        await writeFile(
+          join(application, "package.json"),
+          JSON.stringify({
+            name: "source-module-fixture",
+            version: "1.0.0",
+            main: "src/main.js",
+          }),
+        );
+        await writeFile(
+          join(application, "src/main.js"),
+          'require("./util.js");\n',
+        );
+        await writeFile(
+          join(application, "src/util.js"),
+          `module.exports = ${JSON.stringify(name)};\n`,
+        );
+        const response = await cli.run({
+          arguments: ["analyze-javascript-application", application, "--json"],
+          environment: { REA_LOG_LEVEL: "silent" },
+        });
+        expect(response.exitCode, response.stderr).toBe(0);
+        return parseEvidence(response.json);
+      }),
+    );
+    const [left, right] = versions;
+    if (left === undefined || right === undefined)
+      throw new Error("Missing source module Evidence");
+    const analyses = versions.map(({ normalized_result }) =>
+      javascriptApplicationAnalysisResultSchema.parse(normalized_result),
+    );
+    const sourceModules = analyses.map(({ graph }) => {
+      const node = graph.nodes.find(
+        ({ kind, observations }) =>
+          kind === "javascript-module" &&
+          observations.some(
+            ({ properties }) =>
+              properties.semantic_role === "source-module" &&
+              properties.path === "src/main.js",
+          ),
+      );
+      if (node === undefined) throw new Error("Missing main source module");
+      expect(
+        node.observations.some(
+          ({ properties }) => typeof properties.source_sha256 === "string",
+        ),
+      ).toBe(true);
+      return node;
+    });
+    const inputPath = join(root, "comparison.json");
+    await writeFile(inputPath, JSON.stringify({ left, right }));
+    const response = await cli.run({
+      arguments: ["compare-application-versions", inputPath, "--json"],
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+    expect(response.exitCode, response.stderr).toBe(0);
+    const result = applicationVersionComparisonResultSchema.parse(
+      parseEvidence(response.json).normalized_result,
+    );
+
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        left_node_id: sourceModules[0]?.node_id,
+        right_node_id: sourceModules[1]?.node_id,
+        status: "unchanged",
+        match: expect.objectContaining({
+          status: "matched",
+          basis: "exact-module-source-digest",
+          confidence: "exact",
+        }),
+      }),
+    );
+  },
+);

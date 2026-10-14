@@ -21,6 +21,7 @@ import { processScenarioSchema } from "../../../src/domain/process/processScenar
 import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
 import { ToolResultDelivery } from "../../../src/server/toolResult.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
+import { arrayItemSchemaError } from "../../fixtures/mcpClientSchemaConstraints.js";
 
 interface AdvertisedTool {
   readonly name: string;
@@ -223,6 +224,7 @@ describe("MCP compact schema constraints", () => {
       TOOL_CONTRACTS.map((contract) => [contract.name, contract]),
     );
     for (const tool of tools) {
+      expect(arrayItemSchemaError(tool.inputSchema, tool.name)).toBeUndefined();
       expect(
         ajv.validateSchema(tool.inputSchema),
         `${tool.name}: ${ajv.errorsText(ajv.errors)}`,
@@ -259,6 +261,11 @@ describe("MCP compact schema constraints", () => {
     expect(sqlite?.inputSchema.description).toContain(
       "When row_limit is provided, also provide table.",
     );
+    for (const tools of [fullTools, compactTools])
+      expect(
+        tools.find(({ name }) => name === "inspect_sqlite_database")
+          ?.inputSchema.description,
+      ).toContain("When schema_scope is selected_table, also provide table.");
   });
 
   it("retains parameter types and avoids client-side reference expansion", async () => {

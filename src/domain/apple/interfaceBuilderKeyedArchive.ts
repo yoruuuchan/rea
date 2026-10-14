@@ -523,7 +523,8 @@ const classifyConnection = (
 ): InterfaceBuilderConnection["kind"] => {
   const value = type.toLowerCase();
   if (value.includes("outlet")) return "outlet";
-  if (value.includes("action")) return "action";
+  if (value.includes("action") || value.includes("eventconnection"))
+    return "action";
   if (value.includes("segue")) return "segue";
   return "other";
 };

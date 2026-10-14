@@ -38,13 +38,10 @@ socket and device entries are not opened. Case-distinct archive members remain
 separate observations. Their case-insensitive materialization diagnostic does
 not reduce traversal coverage when both spellings were read.
 
-Current output also retains `coverage_status` (`complete` or `partial`) for existing clients, derived from the scoped traversal status. The owning parser normalizes retained `coverage_status` records to scoped coverage and rejects conflicting declarations.
-
-The coverage field is optional when reading older retained Evidence. The owning
-inventory parser recognizes historical REA scope notices for compatibility;
-unfamiliar legacy limitations remain conservative. Typed records do not derive
-coverage from limitation text. Pages from one inventory must carry the same
-coverage declaration.
+Current inventory Evidence requires scoped `coverage` with a `complete` or
+`unknown` status. Consumers use this producer-owned fact and reject records
+without it; limitations are explanatory and do not supply or infer coverage.
+Pages from one inventory must carry the same coverage declaration.
 
 Function dossiers can declare per-facet coverage in the optional
 `normalized_result.facet_availability` map. Each supplied facet is either
@@ -664,10 +661,14 @@ advertised. Every advertised example is a distinct valid canonical input.
 
 Root object unions are presented as
 one object without root `anyOf`, `oneOf`, or `allOf` for model API compatibility.
-The projection merges properties, retains shared required fields and
-group-specific field dependencies, and describes the accepted input groups.
-Canonical runtime validation enforces the exact union, including exclusions
-that the advertised projection does not express. Tests validate the schemas
+The projection merges properties, retains shared required fields, and
+describes the accepted input groups. Which fields belong together is guidance
+in that description rather than a `dependentRequired` or `dependencies`
+keyword, because Gemini function declarations reject both and one unknown
+keyword fails the client's whole tool catalog. Canonical runtime validation
+enforces the exact union, including partner fields and exclusions that the
+advertised projection does not express, so a client must not rely on the
+advertised schema to reject an incomplete group. Tests validate the schemas
 after SDK conversion and check advertised validation and actual calls.
 Individual model APIs can impose additional nesting limits; complete producer
 captures can exceed ten structural levels.
@@ -711,9 +712,9 @@ JSON Schema:
   in a reduced form: property names, reference-resolved types (including union
   alternatives), first-level guidance, and the root's required-field constraints,
   with nested validation detail elided. The
-  canonical schema still rejects malformed calls server-side, so callers
-  following the reduced advertisement receive the canonical typed error
-  instead of silent acceptance.
+  registered canonical schema still rejects malformed calls before invoking a
+  handler. That rejection can use the MCP SDK's input-validation diagnostic;
+  it does not guarantee the application's typed input error.
 - Schemas deeper than ten nodes use the same reduced projection, with
   root-property names, types, guidance, and required fields retained. The
   server continues to enforce the full canonical input contract.
@@ -731,6 +732,11 @@ catalog refreshes and equivalent tool outputs; changing the schema changes its
 identity. Explicit schema IDs and relative external reference bases are
 preserved. This keeps every tool and validation rule in discovery and does not
 change the SDK's catalog invalidation or availability checks.
+
+The server identity's tool-schema digest includes both the canonical output
+contracts and the selected output-schema profile. `full` and `off` therefore
+have distinct identities even though `off` keeps the same canonical output
+validation on the server.
 
 Some stdio hosts reject a complete `tools/list` frame before they load any
 tools. The opt-in `REA_MCP_OUTPUT_SCHEMA_PROFILE=off` setting omits `outputSchema`
@@ -768,9 +774,10 @@ identities remains unknown.
   `normalization` defaults to `{ "rules": [] }`.
 
 The advertised schema includes complete nested capture fields and rejects
-incomplete pairs and structurally malformed captures. Mixed comparison families
-can pass advertised validation; the SDK rejects them against the canonical
-input schema before invoking the handler. Domain validation additionally checks
+incomplete pairs and structurally malformed captures. Mixed comparison families,
+and `normalization` without both scenario captures, can pass advertised
+validation; the SDK rejects them against the canonical input schema before
+invoking the handler. Domain validation additionally checks
 relationships such as event sequence references and retained counts; JSON
 Schema does not express those cross-field invariants.
 

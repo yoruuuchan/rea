@@ -82,6 +82,18 @@ describe("jsonValueSchema depth bound", () => {
     },
   );
 
+  it("stops enclosing refinements before rejected JSON reaches consumers", () => {
+    let consumed = 0;
+    const envelope = z.object({ value: jsonValueSchema }).superRefine(() => {
+      consumed += 1;
+    });
+    const result = envelope.safeParse({ value: deepObject(10_000) });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.message).toContain("maximum nesting depth");
+    expect(consumed).toBe(0);
+  });
+
   it("rejects cyclic values instead of recursing forever", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;

@@ -1,5 +1,6 @@
 import { z } from "incur";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { AdbDeviceAnalysisService } from "../application/adb/AdbDeviceAnalysisService.js";
 import type { AdbDeviceAnalysisPort } from "../application/adb/AdbDeviceAnalysisPort.js";
 import { createAdbDeviceAnalysisProvider } from "../composition/adb.js";
@@ -351,12 +352,30 @@ export const registerAdbCommands = (
         ),
     }),
     run: ({ args, options }) => {
-      const extras = options.extra.map((entry) => {
+      const extras: {
+        readonly type: "string" | "boolean" | "int" | "long" | "float";
+        readonly key: string;
+        readonly value: string;
+      }[] = [];
+      for (const [index, entry] of options.extra.entries()) {
         const first = entry.indexOf(":");
         const second = entry.indexOf(":", first + 1);
         if (first === -1 || second === -1)
-          throw new Error(`--extra expects type:key:value, received: ${entry}`);
-        return {
+          return logCliCommand(
+            logger,
+            CLI_COMMANDS.startAdbActivity,
+            async () => {
+              throw new AnalysisInputError("start_adb_activity", undefined, [
+                {
+                  path: ["extras", index],
+                  reason: "invalid_format",
+                  message: "Expected --extra in type:key:value form.",
+                  expected: "type:key:value",
+                },
+              ]);
+            },
+          );
+        extras.push({
           type: entry.slice(0, first) as
             | "string"
             | "boolean"
@@ -365,8 +384,8 @@ export const registerAdbCommands = (
             | "float",
           key: entry.slice(first + 1, second),
           value: entry.slice(second + 1),
-        };
-      });
+        });
+      }
       return execute(CLI_COMMANDS.startAdbActivity, "start_adb_activity", {
         serial: args.serial,
         action: args.action,

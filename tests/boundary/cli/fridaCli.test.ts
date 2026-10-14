@@ -246,6 +246,11 @@ it.each([
     "script",
     "Provide exactly one of --script or --script-file.",
   ],
+  [
+    ["attach", "71", "--script", "send(1)", "--argument", "ignored"],
+    "argument",
+    "--argument is only valid in spawn mode; remove it when attaching to a process.",
+  ],
 ])(
   "names the rejected instrument-with-frida argument for %j",
   async (argv, path, message) => {

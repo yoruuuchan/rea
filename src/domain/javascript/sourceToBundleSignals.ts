@@ -45,6 +45,9 @@ export interface SourceToBundleCandidateIndex {
 }
 
 const RELEVANT_NODE_KINDS = new Set([
+  // Non-JavaScript source files such as JSON are projected as artifacts.
+  // Their content digests and paths still identify historical source files.
+  "artifact",
   "javascript-asset",
   "javascript-module",
   "source-module",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Page } from "playwright-core";
+import type { BrowserContext, Page, Request, Response } from "playwright-core";
 
 import { browserScenarioSchema } from "../domain/browserScenario.js";
 import { BrowserScenarioSecrets } from "./BrowserScenarioSecrets.js";
@@ -76,7 +76,124 @@ describe("declared secrets in scenario events", () => {
   });
 });
 
+const captureNetworkBudgetFixture = async (
+  maxTotalEventAllocationBytes?: number,
+) => {
+  const pageListeners = new Map<string, (value: unknown) => void>();
+  const contextListeners = new Map<string, (value: unknown) => void>();
+  const context = {
+    on: (name: string, listener: (value: unknown) => void) =>
+      contextListeners.set(name, listener),
+    off: vi.fn(),
+  } as unknown as BrowserContext;
+  const page = {
+    url: () => "http://127.0.0.1/fixture",
+    context: () => context,
+    on: (name: string, listener: (value: unknown) => void) =>
+      pageListeners.set(name, listener),
+    off: vi.fn(),
+  } as unknown as Page;
+  const scenario = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: "/fixture/chrome" },
+    start_url: { url: "http://127.0.0.1/fixture" },
+    actions: [{ step_id: "ready", action: "wait_for_timeout", duration_ms: 1 }],
+    capture: {
+      events: ["network"],
+      network: { response_body: true },
+      ...(maxTotalEventAllocationBytes === undefined
+        ? {}
+        : {
+            limits: {
+              max_total_event_allocation_bytes: maxTotalEventAllocationBytes,
+            },
+          }),
+    },
+  });
+  const secrets = BrowserScenarioSecrets.resolve(scenario, {});
+  if (secrets === undefined) throw new Error("Expected resolved secrets");
+  const redactBytes = vi.spyOn(secrets, "redactBytes");
+  const capture = new PlaywrightScenarioEvents({
+    page,
+    context,
+    ownsContext: true,
+    enabled: new Set(["network"]),
+    network: scenario.capture.network,
+    limits: scenario.capture.limits,
+    secrets,
+  });
+  for (let index = 0; index < 43; index += 1) {
+    const post = index >= 40;
+    const body = post
+      ? Buffer.from('{"ok":true}')
+      : Buffer.from("x".repeat(60_000));
+    const request = {
+      method: () => (post ? "POST" : "GET"),
+      url: () => `http://127.0.0.1/${post ? "final" : "data"}/${String(index)}`,
+      resourceType: () => "fetch",
+      postDataBuffer: () => (post ? Buffer.from("{}") : null),
+      redirectedFrom: () => null,
+      failure: () => null,
+      headers: () => ({ "content-type": "application/json" }),
+      headersArray: async () => [
+        { name: "content-type", value: "application/json" },
+      ],
+    } as unknown as Request;
+    const response = {
+      request: () => request,
+      url: () => request.url(),
+      status: () => 200,
+      headers: () => ({ "content-type": "application/json" }),
+      headersArray: async () => [
+        { name: "content-type", value: "application/json" },
+      ],
+      body: async () => body,
+    } as unknown as Response;
+    contextListeners.get("request")?.(request);
+    contextListeners.get("response")?.(response);
+    contextListeners.get("requestfinished")?.(request);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  await capture.finish();
+  return {
+    result: capture.result(),
+    redactedByteValues: redactBytes.mock.calls.length,
+  };
+};
+
 describe("PlaywrightScenarioEvents", () => {
+  it("identifies omitted network transaction content and honors a raised budget", async () => {
+    const baseline = await captureNetworkBudgetFixture();
+    const raised = await captureNetworkBudgetFixture(32 * 1024 * 1024);
+    expect(baseline.result.dropped).toBeGreaterThan(0);
+    expect(
+      baseline.result.omissions.by_kind.find(
+        ({ kind }) => kind === "network-content",
+      ),
+    ).toMatchObject({
+      count: expect.any(Number),
+      reasons: expect.arrayContaining(["max-total-event-allocation-bytes"]),
+    });
+    expect(
+      baseline.result.omissions.network_transactions.length,
+    ).toBeGreaterThan(0);
+    expect(baseline.redactedByteValues).toBe(
+      2 *
+        baseline.result.items.filter(
+          (event) => event.kind === "network-content",
+        ).length,
+    );
+    expect(raised.result).toMatchObject({
+      dropped: 0,
+      omissions: { network_transactions: [] },
+    });
+    expect(
+      raised.result.items.filter(
+        (event) =>
+          event.kind === "network-content" && event.phase === "response",
+      ),
+    ).toHaveLength(43);
+  });
+
   it("observes requested popup page errors independently of popup lifecycle events", () => {
     const listeners = new Map<string, (value: unknown) => void>();
     const popupListeners = new Map<string, (value: unknown) => void>();

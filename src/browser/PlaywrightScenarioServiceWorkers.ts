@@ -207,23 +207,29 @@ export class PlaywrightScenarioServiceWorkers {
   async assertBlocked(): Promise<void> {
     if (this.#session !== undefined) await this.settle();
     for (const frame of this.page.frames()) {
-      let violatesPolicy: unknown;
+      let failure: unknown;
       try {
-        violatesPolicy = await frame.evaluate(`(async () => {
-          if (!("serviceWorker" in navigator)) return false;
+        failure = await frame.evaluate(`(async () => {
+          if (!("serviceWorker" in navigator)) return null;
           const serviceWorker = navigator.serviceWorker;
           if (${this.#session !== undefined} &&
               (!Object.hasOwn(serviceWorker.register, Symbol.for(${this.marker})) ||
-               typeof globalThis[${this.restoreKey}] !== "function")) return true;
-          if (serviceWorker.controller !== null) return true;
-          return (await serviceWorker.getRegistrations()).length > 0;
+               typeof globalThis[${this.restoreKey}] !== "function")) return "policy_unprotected";
+          if (serviceWorker.controller !== null) return "service_worker_blocked";
+          return (await serviceWorker.getRegistrations()).length > 0
+            ? "service_worker_blocked"
+            : null;
         })()`);
       } catch (cause: unknown) {
         if (frame.isDetached()) continue;
         throw cause;
       }
-      if (violatesPolicy)
+      if (failure === "policy_unprotected")
         throw new BrowserObservationError(OPERATION, "target_not_allowed");
+      if (failure === "service_worker_blocked")
+        throw new BrowserObservationError(OPERATION, "service_worker_blocked");
+      if (failure !== null)
+        throw new BrowserObservationError(OPERATION, "protocol_error");
     }
   }
 

@@ -195,6 +195,121 @@ describe("exported function binding resolution through stdio MCP and CLI", () =>
   );
 });
 
+describe("CommonJS receiver lifetimes through stdio MCP and CLI", () => {
+  it.each([
+    "module.exports = {}; exports.parse = VALUE;",
+    "exports = {}; exports.parse = VALUE;",
+    "exports.parse = VALUE; module.exports = {};",
+    "module.exports.parse = VALUE; module.exports = {};",
+    "module.exports = {}; exports = module.exports; module.exports = {}; exports.parse = VALUE;",
+    'module.exports = {}; exports.parse = "enabled";',
+    'module.exports = {}; Reflect.set(module, "other", exports); exports.parse = VALUE;',
+    "module.exports = {}; let wrapper = module; wrapper = {}; Object.assign(wrapper, { exports }); exports.parse = VALUE;",
+  ])("excludes detached public export receivers: %s", async (source) => {
+    const fixture = await analyzeVersions(
+      (count) =>
+        source.replace(
+          "VALUE",
+          `() => ({ kind: "result", count: ${String(count)} })`,
+        ),
+      "parse",
+      "app.cjs",
+    );
+    for (const path of [fixture.leftPath, fixture.rightPath]) {
+      const value = requireFixture(path);
+      expect(Object.hasOwn(value, "parse")).toBe(false);
+      expect(value.parse).toBeUndefined();
+    }
+    for (const evidence of [fixture.input.left, fixture.input.right]) {
+      const { graph } = applicationEnvelope.parse(evidence).normalized_result;
+      expect(
+        graph.nodes
+          .flatMap(({ observations }) => observations)
+          .filter(
+            ({ properties }) =>
+              properties.exported_name === "parse" &&
+              ["export-binding", "export-return-shapes"].includes(
+                String(properties.semantic_role),
+              ),
+          ),
+      ).toEqual([]);
+    }
+    await expectCliAnalysisParity(fixture);
+    const comparison = await compareThroughMcp(fixture.input);
+    expect(comparison).toMatchObject({
+      left: { status: "missing" },
+      right: { status: "missing" },
+      summary: { added: 0, removed: 0, changed: 0 },
+    });
+    expect(await compareThroughCli(fixture)).toEqual(comparison);
+  });
+
+  it.each([
+    "exports.parse = VALUE;",
+    "module.exports = {}; module.exports.parse = VALUE;",
+    "module.exports = {}; exports = module.exports; exports.parse = VALUE;",
+    "exports.parse = VALUE; Object.assign(module.exports, { other: exports });",
+  ])("retains connected public export receivers: %s", async (source) => {
+    const fixture = await analyzeVersions(
+      (count) =>
+        source.replace(
+          "VALUE",
+          `() => ({ kind: "result", count: ${String(count)} })`,
+        ),
+      "parse",
+      "app.cjs",
+    );
+    for (const [path, count] of [
+      [fixture.leftPath, 1],
+      [fixture.rightPath, 2],
+    ] as const)
+      expect(requireFixture(path).parse()).toEqual({ kind: "result", count });
+    await expectCliAnalysisParity(fixture);
+    const comparison = await compareThroughMcp(fixture.input);
+    expectCountChange(comparison);
+    expect(await compareThroughCli(fixture)).toEqual(comparison);
+  });
+
+  it.each([
+    "if (false) module.exports = {}; exports.parse = VALUE;",
+    "exports.parse = VALUE; if (false) module.exports = {};",
+    "function replace() { module.exports = {}; } exports.parse = VALUE;",
+    "function replace() { exports = {}; } exports.parse = VALUE;",
+    'const holder = {}; ({ [(module.exports = exports, "x")]: holder.x } = (module.exports = {})); exports.parse = VALUE;',
+    'const { [(module.exports = exports, "x")]: value } = (module.exports = {}); exports.parse = VALUE;',
+    "const [value = (module.exports = exports)] = (module.exports = []); exports.parse = VALUE;",
+    "module.exports = {}; Object.assign(module, { exports }); exports.parse = VALUE;",
+    'module.exports = {}; Object.defineProperty(module, "exports", { value: exports }); exports.parse = VALUE;',
+    'module.exports = {}; Reflect.set(module, "exports", exports); exports.parse = VALUE;',
+    "module.exports = {}; const assign = Object.assign; assign.call(null, module, { exports }); exports.parse = VALUE;",
+    "module.exports = {}; const wrapper = module; Object.assign(wrapper, { exports }); exports.parse = VALUE;",
+  ])(
+    "keeps execution-dependent receiver identity uncertain: %s",
+    async (source) => {
+      const fixture = await analyzeVersions(
+        (count) =>
+          source.replace(
+            "VALUE",
+            `() => ({ kind: "result", count: ${String(count)} })`,
+          ),
+        "parse",
+        "app.cjs",
+      );
+      for (const [path, count] of [
+        [fixture.leftPath, 1],
+        [fixture.rightPath, 2],
+      ] as const)
+        expect(requireFixture(path).parse()).toEqual({ kind: "result", count });
+      for (const evidence of [fixture.input.left, fixture.input.right])
+        expectUnresolvedExportBinding(evidence, "parse");
+      await expectCliAnalysisParity(fixture);
+      const comparison = await compareThroughMcp(fixture.input);
+      expectUncertainComparison(comparison);
+      expect(await compareThroughCli(fixture)).toEqual(comparison);
+    },
+  );
+});
+
 describe("CommonJS assignment-chain receiver identity through stdio MCP", () => {
   it("does not export a named write whose captured module.exports receiver is replaced", async () => {
     const fixture = await analyzeVersions(

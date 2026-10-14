@@ -11,11 +11,29 @@ import type {
 } from "frida";
 import { expect, it, onTestFinished } from "vitest";
 
+import { FridaScriptLoadCancelledError } from "../../../src/application/frida/FridaInstrumentationPort.js";
+import type {
+  FridaInstrumentationPort,
+  FridaScriptObservation,
+} from "../../../src/application/frida/FridaInstrumentationPort.js";
+import type { EvidenceWriter } from "../../../src/application/investigation/InvestigationRecordPort.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
+import type { AnalysisPartialObservation } from "../../../src/domain/analysisErrorBase.js";
+import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
+import { EvidenceIntegrityError } from "../../../src/domain/evidenceErrors.js";
 import { evidenceBundleSchema } from "../../../src/domain/evidenceBundle.js";
+import type { Evidence } from "../../../src/domain/evidence.js";
+import { jsonObjectSchema } from "../../../src/domain/jsonValue.js";
+import { nativeCallPartialObservationSchema } from "../../../src/domain/native/nativeCallPartialObservation.js";
+import { err, ok } from "../../../src/domain/result.js";
 import { FridaInstrumentationManager } from "../../../src/frida/FridaInstrumentationManager.js";
+import { silentLogger } from "../../../src/logger.js";
 import { createServer } from "../../../src/server/createServer.js";
+import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
+import { registerFridaTools } from "../../../src/server/registerFridaTools.js";
+import { createToolResultDelivery } from "../../../src/server/toolResult.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 
 const gate = () => {
   let markEntered = () => {};
@@ -208,6 +226,193 @@ const connectedFixture = async () => {
     );
   return { ...native, manager, session, server, client, start, load };
 };
+
+type PartialRecording = "acknowledged" | "failed" | "unavailable";
+type PartialObservation = "evidence" | "non-evidence" | "unavailable";
+
+const unusedFridaPortMethod = (): never => {
+  throw new Error("Unused Frida test port method");
+};
+
+const nonEvidencePartialObservation = (): AnalysisPartialObservation =>
+  nativeCallPartialObservationSchema.parse({
+    kind: "native-call-observation",
+    target: {
+      path: "/fixture/target",
+      sha256: "b".repeat(64),
+      architecture: "arm64",
+      arguments: [],
+      environment: {},
+      working_directory: null,
+    },
+    process: {
+      pid: null,
+      stdout: null,
+      stderr: null,
+      other_stops: [],
+    },
+    debugger: { version: null },
+    events: [],
+    coverage: { status: "partial", reason: "cancelled" },
+    limitations: [],
+  });
+
+const callPartialFridaLoadError = async (
+  recording: PartialRecording,
+  partial: PartialObservation,
+) => {
+  const script: FridaScriptObservation = {
+    scriptId: "00000000-0000-4000-8000-000000000002",
+    sourceKind: "inline",
+    sourcePath: null,
+    sourceSha256: "a".repeat(64),
+    messages: [{ type: "send", payload: "partial" }],
+    messagesTruncated: false,
+  };
+  const failure =
+    partial === "evidence"
+      ? new FridaScriptLoadCancelledError(script)
+      : new AnalysisCancelledError("load_frida_script", {
+          ...(partial === "non-evidence"
+            ? { partialObservation: nonEvidencePartialObservation() }
+            : {}),
+        });
+  const provider: FridaInstrumentationPort = {
+    async listDevices() {
+      return unusedFridaPortMethod();
+    },
+    async listProcesses() {
+      return unusedFridaPortMethod();
+    },
+    async startSession() {
+      return unusedFridaPortMethod();
+    },
+    async loadScript() {
+      return err(failure);
+    },
+    async resumeSession() {
+      return unusedFridaPortMethod();
+    },
+    async unloadScript() {
+      return unusedFridaPortMethod();
+    },
+    status() {
+      return unusedFridaPortMethod();
+    },
+    async closeSession() {
+      return unusedFridaPortMethod();
+    },
+    async closeAll() {
+      return unusedFridaPortMethod();
+    },
+  };
+  const attempts: Evidence[] = [];
+  const recordEvidence: EvidenceWriter["recordEvidence"] | undefined =
+    recording === "unavailable"
+      ? undefined
+      : (evidence) => {
+          attempts.push(evidence);
+          return recording === "acknowledged"
+            ? ok("added" as const)
+            : err(new EvidenceIntegrityError("sentinel record failure"));
+        };
+  const delivery = createToolResultDelivery(1024 * 1024);
+  const server = new EvidenceMcpServer(
+    { name: "frida-partial-probe", version: "1" },
+    { capabilities: {} },
+    recordEvidence,
+    delivery,
+  );
+  registerFridaTools(server, provider, silentLogger, delivery, recordEvidence);
+  const client = new Client({
+    name: "frida-partial-probe-client",
+    version: "1",
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({
+      name: "load_frida_script",
+      arguments: {
+        session_id: "00000000-0000-4000-8000-000000000001",
+        source_kind: "inline",
+        source: "send('partial');",
+      },
+    });
+    return {
+      response,
+      error: parseMcpToolError(response).error,
+      attempts,
+    };
+  } finally {
+    await client.close();
+    await server.close();
+  }
+};
+
+it("projects acknowledged Frida partial Evidence as a retained reference", async () => {
+  const { response, error, attempts } = await callPartialFridaLoadError(
+    "acknowledged",
+    "evidence",
+  );
+  expect(response.isError).toBe(true);
+  expect(response.structuredContent).toBeUndefined();
+  expect(attempts).toHaveLength(1);
+  const details = jsonObjectSchema.parse(error.details);
+  expect(details.partial_observation).toEqual({
+    kind: "retained-evidence",
+    evidence_id: attempts[0]?.evidence_id,
+  });
+});
+
+it("preserves inline Frida partial Evidence when its writer rejects it", async () => {
+  const { response, error, attempts } = await callPartialFridaLoadError(
+    "failed",
+    "evidence",
+  );
+  expect(response.isError).toBe(true);
+  expect(response.structuredContent).toBeUndefined();
+  expect(attempts).toHaveLength(1);
+  expect(error.code).toBe("cancelled");
+  const details = jsonObjectSchema.parse(error.details);
+  expect(details.partial_observation).toEqual(attempts[0]);
+});
+
+it.each([
+  ["unavailable writer", "unavailable", "evidence"],
+  ["non-Evidence partial", "acknowledged", "non-evidence"],
+  ["missing partial", "acknowledged", "unavailable"],
+] as const)(
+  "preserves Frida error projection for %s",
+  async (_, recording, partial) => {
+    const { response, error, attempts } = await callPartialFridaLoadError(
+      recording,
+      partial,
+    );
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toBeUndefined();
+    const details = jsonObjectSchema.parse(error.details);
+    if (partial === "evidence") {
+      expect(details.partial_observation).toMatchObject({
+        operation: "load_frida_script",
+        normalized_result: {
+          script_id: "00000000-0000-4000-8000-000000000002",
+        },
+      });
+    } else if (partial === "non-evidence") {
+      expect(details.partial_observation).toEqual(
+        nonEvidencePartialObservation(),
+      );
+    } else {
+      expect(details).not.toHaveProperty("partial_observation");
+    }
+    expect(attempts).toHaveLength(
+      partial === "evidence" && recording !== "unavailable" ? 1 : 0,
+    );
+  },
+);
 
 const scriptLoadFixture = async (stage: "create" | "load" = "load") => {
   const fixture = await connectedFixture();

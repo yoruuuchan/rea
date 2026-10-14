@@ -9,6 +9,7 @@ import { requireOutputSchema } from "./toolOutputSchemaPrimitives.js";
 import { appleAssetCatalogInputSchema } from "../domain/apple/appleAssetCatalog.js";
 import { dylibResolutionInputSchema } from "../domain/apple/dylibResolution.js";
 import { keyedArchiveInputSchema } from "../domain/apple/keyedArchive.js";
+import { localPathStringSchema } from "../domain/localPath.js";
 import { analysisDetailSchema } from "./analysisDetail.js";
 /** Exact caller boundary for deterministic artifact inventory. */
 export const artifactInventoryInputSchema = z.strictObject({
@@ -34,7 +35,7 @@ export const artifactExtractionInputSchema = z.strictObject({
 /** Provider input containing the destination chosen by the local adapter. */
 export const artifactExtractionExecutionSchema =
   artifactExtractionInputSchema.extend({
-    output_root: z.string().min(1),
+    output_root: localPathStringSchema,
   });
 
 const exampleInputSchema = z.record(z.string(), jsonValueSchema);

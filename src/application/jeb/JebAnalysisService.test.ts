@@ -27,6 +27,12 @@ const fakePort = (
       code: null,
       reason: null,
       diagnostics: {},
+      supportedOperations: [
+        "inspect_jeb_client",
+        "list_jeb_units",
+        "open_jeb_project",
+        "decompile_jeb_item",
+      ],
     };
   },
   async close() {},

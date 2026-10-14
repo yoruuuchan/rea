@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCliJson as runCli } from "../../fixtures/cliJsonProcess.js";
+import { DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS } from "../../../src/domain/browserScenarioCaptureLimits.js";
 import {
   startFakeCdpBrowser,
   type FakeCdpBrowser,
@@ -665,13 +666,23 @@ const completeScenarioCapture = () => {
         header_values: false,
       },
       event_families: [],
+      limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
     },
     duration_ms: 1,
     steps: [
       step(0, "scenario_start", "scenario_start"),
       step(1, "open-settings", "click"),
     ],
-    events: { retained: 0, dropped: 0, items: [] },
+    events: {
+      retained: 0,
+      dropped: 0,
+      items: [],
+      omissions: {
+        by_kind: [],
+        network_transactions: [],
+        network_transaction_range: null,
+      },
+    },
     completeness,
     limitations: [],
   };
@@ -706,6 +717,11 @@ const scenarioCaptureWithConsole = (
           url: null,
         },
       ],
+      omissions: {
+        by_kind: [],
+        network_transactions: [],
+        network_transaction_range: null,
+      },
     },
   };
 };

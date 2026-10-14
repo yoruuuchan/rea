@@ -590,9 +590,11 @@ describe("AppKit keyed archive connectors", () => {
 });
 
 describe("keyed archive unresolved connectors", () => {
-  // A rooted UIKit archive whose only connector is UID 3, with UID 1 as the
-  // owner, UID 2 as the destination and UID 7 as the "view" label.
-  const rootedOutletArchive = (connection: Record<string, unknown>) => ({
+  const rootedOutletArchive = (
+    connection: Record<string, unknown>,
+    connectionClass = "UIRuntimeOutletConnection",
+    label = "view",
+  ) => ({
     $archiver: "NSKeyedArchiver",
     $version: 100000,
     $objects: [
@@ -606,14 +608,10 @@ describe("keyed archive unresolved connectors", () => {
       },
       { $classname: "UIView", $classes: ["UIView", "UIResponder", "NSObject"] },
       {
-        $classname: "UIRuntimeOutletConnection",
-        $classes: [
-          "UIRuntimeOutletConnection",
-          "UIRuntimeConnection",
-          "NSObject",
-        ],
+        $classname: connectionClass,
+        $classes: [connectionClass, "UIRuntimeConnection", "NSObject"],
       },
-      "view",
+      label,
       {
         $class: { CF$UID: 11 },
         "NS.objects": [{ CF$UID: 1 }, { CF$UID: 2 }, { CF$UID: 3 }],
@@ -664,6 +662,43 @@ describe("keyed archive unresolved connectors", () => {
       }),
     );
   });
+  it("projects keyed UIKit event connections as actions and retains the mask", () => {
+    const raw = rootedOutletArchive(
+      {
+        UISource: { CF$UID: 1 },
+        UIDestination: { CF$UID: 2 },
+        UILabel: { CF$UID: 7 },
+        UIEventMask: 64,
+      },
+      "UIRuntimeEventConnection",
+      "tapped:",
+    );
+    expect(parseInterfaceBuilderRecords(raw).connections[0]).toMatchObject({
+      kind: "action",
+      source_id: "1",
+      destination_id: "2",
+      label: "tapped:",
+      attributes: { UIEventMask: 64 },
+    });
+    const analysis = project(raw);
+    expect(analysis.graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "action", name: "tapped:" }),
+        expect.objectContaining({ kind: "objc_selector", name: "tapped:" }),
+      ]),
+    );
+    expect(analysis.graph.edges).toContainEqual(
+      expect.objectContaining({ relation: "target_action" }),
+    );
+    expect(analysis.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Main.nib",
+        status: "complete",
+        examined: 1,
+        omitted: 0,
+      }),
+    );
+  });
 
   it("reports a recognized connector with no resolvable owner as unresolved", () => {
     const raw = rootedOutletArchive({
@@ -686,6 +721,27 @@ describe("keyed archive unresolved connectors", () => {
       }),
     );
     expect(analysis.graph.truncated).toBe(true);
+
+    const eventWithoutSource = rootedOutletArchive(
+      {
+        UIDestination: { CF$UID: 2 },
+        UILabel: { CF$UID: 7 },
+        UIEventMask: 64,
+      },
+      "UIRuntimeEventConnection",
+      "tapped:",
+    );
+    expect(
+      parseInterfaceBuilderRecords(eventWithoutSource).unresolvedConnections,
+    ).toBe(1);
+    expect(project(eventWithoutSource).graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Main.nib",
+        status: "partial",
+        reason: "connection_unresolved",
+        omitted: 1,
+      }),
+    );
   });
 });
 

@@ -10,8 +10,40 @@ import {
   presentInputJsonSchema,
 } from "./inputSchemaPresentation.js";
 import { toolContract } from "./toolContracts.js";
-import { toolInputSchemaWithMetadata } from "./toolSchemaMetadata.js";
+import {
+  toolInputSchemaWithMetadata,
+  transformAdvertisedInputJsonSchema,
+} from "./toolSchemaMetadata.js";
 import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "./javascript/javascriptRuntimeReconciliationExample.js";
+
+it.each(["draft-2020-12", "draft-07"] as const)(
+  "honors projection options independently of cached wire transformations in %s",
+  (target) => {
+    const range = z.strictObject({ offset: z.number(), length: z.number() });
+    const canonical = toolInputSchemaWithMetadata({
+      ...toolContract("open_binary"),
+      inputSchema: z.strictObject({ before: range, after: range }),
+    });
+    const transform = (schema: Record<string, unknown>) => ({
+      ...schema,
+      title: "Transformed range inputs",
+    });
+    const options = { target, libraryOptions: { reused: "inline" as const } };
+    for (const inlineFirst of [false, true]) {
+      const wrapped = transformAdvertisedInputJsonSchema(canonical, transform);
+      const project = wrapped["~standard"].jsonSchema.input;
+      if (inlineFirst) project(options);
+      const shared = project({ target });
+      expect(JSON.stringify(shared)).toContain('"$ref":');
+      const inline = project(options);
+      expect(inline).toEqual(
+        transform(canonical["~standard"].jsonSchema.input(options)),
+      );
+      expect(JSON.stringify(inline)).not.toContain('"$ref":');
+      expect(project({ target })).toBe(shared);
+    }
+  },
+);
 
 it.each(["draft-2020-12", "draft-07"] as const)(
   "preserves the complete inline Evidence contract before deferred authentication in %s",

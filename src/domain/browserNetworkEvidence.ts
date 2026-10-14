@@ -26,9 +26,7 @@ export const browserNetworkContentSelectionSchema =
     });
 
 /** Self-verifying retained bytes, after any declared-secret redaction. */
-export const browserNetworkBodySchema = z.union([
-  z.strictObject({ state: z.literal("not_requested") }),
-  z.strictObject({ state: z.literal("not_exposed") }),
+const unavailableBrowserNetworkBodySchema = z.discriminatedUnion("reason", [
   z.strictObject({
     state: z.literal("unavailable"),
     reason: z.enum([
@@ -41,6 +39,26 @@ export const browserNetworkBodySchema = z.union([
     ]),
     message: z.string().min(1),
   }),
+  z.strictObject({
+    state: z.literal("unavailable"),
+    reason: z.literal("body-size-limit"),
+    message: z.string().min(1),
+    limit_bytes: z.number().int().positive().safe(),
+    observed_bytes: z.number().int().positive().safe(),
+  }),
+  z.strictObject({
+    state: z.literal("unavailable"),
+    reason: z.literal("body-allocation-limit"),
+    message: z.string().min(1),
+    limit_allocation_bytes: z.number().int().positive().safe(),
+    observed_allocation_bytes: z.number().int().positive().safe(),
+  }),
+]);
+
+export const browserNetworkBodySchema = z.union([
+  z.strictObject({ state: z.literal("not_requested") }),
+  z.strictObject({ state: z.literal("not_exposed") }),
+  unavailableBrowserNetworkBodySchema,
   z
     .strictObject({
       state: z.literal("captured"),

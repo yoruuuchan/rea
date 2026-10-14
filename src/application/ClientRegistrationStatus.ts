@@ -28,6 +28,7 @@ import {
 import type { SetupClient } from "./SupportedClients.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { dshDocument } from "./DshCordisPatch.js";
+import { clientRegistrationEnvironment } from "./ClientRegistrationEnvironment.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
 interface ClientRegistrationStatusBase {
@@ -215,6 +216,12 @@ export const readClientRegistrationInspections = async (
             }
           : client;
       const registration = parseRegistration(raw, effectiveClient);
+      const registrationEnvironment =
+        client.name === "kimi"
+          ? clientRegistrationEnvironment(parsed)
+          : undefined;
+      if (registrationEnvironment !== undefined && !registrationEnvironment.ok)
+        throw registrationEnvironment.error;
       const command: RegistrationCommand = [
         registration.command,
         ...registration.args,
@@ -225,12 +232,16 @@ export const readClientRegistrationInspections = async (
       const packageVersionDrift =
         packageVersion !== undefined &&
         packageVersion !== PRODUCT_IDENTITY.packageVersion;
-      const alignment = registrationAligned(
+      const alignment = registrationAligned({
         registration,
-        effectiveClient,
+        client: effectiveClient,
         currentCommandPath,
-        options.platform ?? process.platform,
-      );
+        platform: options.platform ?? process.platform,
+        kimiInputSchemaProfileSelected:
+          registrationEnvironment?.ok === true &&
+          registrationEnvironment.value.REA_MCP_INPUT_SCHEMA_PROFILE !==
+            undefined,
+      });
       record(
         configuredStatus(
           effectiveClient,
@@ -284,12 +295,19 @@ const registrationActivation = (
     ? "disabled"
     : "enabled";
 
-const registrationAligned = (
-  registration: z.output<typeof registrationSchema>,
-  client: SetupClient,
-  currentCommandPath: string | undefined,
-  platform: NodeJS.Platform,
-): "aligned" | "stale" | "unknown" => {
+const registrationAligned = ({
+  registration,
+  client,
+  currentCommandPath,
+  platform,
+  kimiInputSchemaProfileSelected,
+}: {
+  readonly registration: z.output<typeof registrationSchema>;
+  readonly client: SetupClient;
+  readonly currentCommandPath: string | undefined;
+  readonly platform: NodeJS.Platform;
+  readonly kimiInputSchemaProfileSelected: boolean;
+}): "aligned" | "stale" | "unknown" => {
   const command = [registration.command, ...registration.args];
   const identity = classifyClientRegistrationCommand(
     command,
@@ -310,6 +328,7 @@ const registrationAligned = (
       registration.toolTimeoutMs !== MCP_STARTUP_POLICY.kimiToolTimeoutMs)
   )
     return "stale";
+  if (client.name === "kimi" && !kimiInputSchemaProfileSelected) return "stale";
   if (
     (client.format === "kimi" ||
       client.format === "omp" ||

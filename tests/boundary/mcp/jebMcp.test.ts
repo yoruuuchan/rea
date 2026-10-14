@@ -2,15 +2,101 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it, onTestFinished } from "vitest";
 
-import type { JebAnalysisPort } from "../../../src/application/jeb/JebAnalysisPort.js";
+import type {
+  JebAnalysisPort,
+  JebAnalysisAvailability,
+} from "../../../src/application/jeb/JebAnalysisPort.js";
 import { createAnalysisExecution } from "../../../src/application/AnalysisProvider.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { ok } from "../../../src/domain/result.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { expandToolAvailability } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 
 const identity = { id: "jeb", name: "JEB", version: "5.48.0" } as const;
+
+it("discovers current JEB operation support and recovery through binary_session", async () => {
+  let availability: JebAnalysisAvailability = {
+    status: "unavailable",
+    code: "not_configured",
+    reason: "Start JEB at REA_JEB_MCP_URL",
+    diagnostics: {},
+  };
+  let probes = 0;
+  const provider: JebAnalysisPort = {
+    async inspectAvailability() {
+      probes += 1;
+      return availability;
+    },
+    async close() {},
+    async execute() {
+      throw new Error("Status must not execute analysis");
+    },
+  };
+  const session = createTestBinarySession(() => {
+    throw new Error("Status must not start a deep provider");
+  });
+  const server = createServer(
+    { kind: "session", session },
+    { environment: {}, jebAnalysis: provider },
+  );
+  const client = new Client({ name: "jeb-availability", version: "1" });
+  onTestFinished(async () => {
+    await client.close();
+    await server.close();
+    await session.close();
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const read = async () => {
+    const result = await client.callTool({
+      name: "binary_session",
+      arguments: {},
+    });
+    const status = toolContract("binary_session").outputSchema.parse(
+      result.structuredContent,
+    ).result;
+    return expandToolAvailability(status.tool_availability).filter(
+      (tool) => tool.surface === "jeb-provider",
+    );
+  };
+  const unavailable = await read();
+  expect(unavailable).toHaveLength(4);
+  expect(
+    unavailable.every(
+      (tool) => !tool.available && tool.remediation === availability.reason,
+    ),
+  ).toBe(true);
+  availability = {
+    status: "available",
+    code: null,
+    reason: null,
+    diagnostics: {},
+    supportedOperations: [
+      "inspect_jeb_client",
+      "list_jeb_units",
+      "decompile_jeb_item",
+    ],
+  };
+  const recovered = await read();
+  expect(
+    recovered
+      .filter((tool) => tool.available)
+      .map((tool) => tool.name)
+      .sort(),
+  ).toEqual(["decompile_jeb_item", "inspect_jeb_client", "list_jeb_units"]);
+  expect(
+    recovered.find((tool) => tool.name === "open_jeb_project"),
+  ).toMatchObject({
+    available: false,
+    reason: "provider_unavailable",
+    remediation: expect.stringContaining("does not advertise"),
+  });
+  expect(probes).toBe(2);
+});
 
 it("advertises exact valid JEB schemas and records inline evidence through MCP", async () => {
   const execution = createAnalysisExecution(
@@ -28,7 +114,17 @@ it("advertises exact valid JEB schemas and records inline evidence through MCP",
   );
   const provider: JebAnalysisPort = {
     async inspectAvailability() {
-      return { status: "available", code: null, reason: null, diagnostics: {} };
+      return {
+        status: "available",
+        code: null,
+        reason: null,
+        diagnostics: {},
+        supportedOperations: [
+          "inspect_jeb_client",
+          "list_jeb_units",
+          "decompile_jeb_item",
+        ],
+      };
     },
     async close() {},
     async execute() {
@@ -81,7 +177,17 @@ it("preserves JEB provider failure reasons through the MCP boundary", async () =
   const contract = toolContract("list_jeb_units");
   const provider: JebAnalysisPort = {
     async inspectAvailability() {
-      return { status: "available", code: null, reason: null, diagnostics: {} };
+      return {
+        status: "available",
+        code: null,
+        reason: null,
+        diagnostics: {},
+        supportedOperations: [
+          "inspect_jeb_client",
+          "list_jeb_units",
+          "decompile_jeb_item",
+        ],
+      };
     },
     async close() {},
     async execute() {

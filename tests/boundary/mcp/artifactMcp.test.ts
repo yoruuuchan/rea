@@ -306,30 +306,23 @@ it("records an explicitly continued mismatch, preserves verified siblings, and n
         }),
       ]),
     });
-    const { coverage: _coverage, ...legacyInventory } = inventory;
-    const historical = createEvidence(
+    const { coverage: _coverage, ...inventoryWithoutCoverage } = inventory;
+    const missingCoverage = createEvidence(
       { path: archive, sha256: inventory.manifest.root_sha256, format: "asar" },
       compact.provider,
       {
         operation: "inventory_artifact",
         parameters: {},
-        result: jsonValueSchema.parse(legacyInventory),
+        result: jsonValueSchema.parse(inventoryWithoutCoverage),
       },
     );
     const retainedComparison = await client.callTool({
       name: "compare_artifacts",
-      arguments: { left: evidence, right: historical },
+      arguments: { left: evidence, right: missingCoverage },
     });
-    expect(
-      retainedComparison.isError,
-      JSON.stringify(retainedComparison),
-    ).not.toBe(true);
-    expect(
-      toolEvidence(retainedComparison.structuredContent).normalized_result,
-    ).toMatchObject({
-      status: "contradiction",
-      summary: { unchanged: 2, contradiction: 2, unknown: 0 },
-    });
+    expect(retainedComparison.isError, JSON.stringify(retainedComparison)).toBe(
+      true,
+    );
   } finally {
     await Promise.allSettled([client.close(), server.close(), session.close()]);
   }
@@ -542,6 +535,67 @@ it("returns full artifact graphs inline and compares changed inventories", async
         ],
       },
     });
+  } finally {
+    await Promise.allSettled([client.close(), server.close(), session.close()]);
+  }
+});
+
+it("compares summary Evidence through retained complete inspection parents", async () => {
+  const directory = await createTestTempDirectory("rea-artifact-summary-mcp-");
+  const archive = join(directory, "one.zip");
+  const changedArchive = join(directory, "two.zip");
+  const writer = new ZipWriter(new Uint8ArrayWriter());
+  await writer.add("a.txt", new TextReader("same"));
+  await writeFile(archive, await writer.close());
+  const changedWriter = new ZipWriter(new Uint8ArrayWriter());
+  await changedWriter.add("a.txt", new TextReader("same"));
+  await changedWriter.add("b.txt", new TextReader("new"));
+  await writeFile(changedArchive, await changedWriter.close());
+
+  const session = createTestBinarySession(new ArtifactProvider(process.env));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({
+    name: "artifact-summary-mcp-test",
+    version: "1",
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const summaries = [];
+    for (const path of [archive, changedArchive]) {
+      const opened = await client.callTool({
+        name: "open_binary",
+        arguments: { path },
+      });
+      expect(opened.isError).not.toBe(true);
+      const inspected = await client.callTool({
+        name: "inspect_artifact",
+        arguments: { detail: "summary" },
+      });
+      expect(inspected.isError).not.toBe(true);
+      summaries.push(toolEvidence(inspected.structuredContent));
+    }
+    const [left, right] = summaries;
+    if (left === undefined || right === undefined)
+      throw new Error("missing artifact summary Evidence");
+    expect(left.operation).toBe("inspect_analysis_view");
+    expect(right.operation).toBe("inspect_analysis_view");
+    const compared = await client.callTool({
+      name: "compare_artifacts",
+      arguments: { left, right },
+    });
+    expect(compared.isError).not.toBe(true);
+    const result = toolEvidence(compared.structuredContent);
+    expect(result.normalized_result).toMatchObject({ status: "changed" });
+    const leftParentId = z
+      .object({ parent_evidence_id: z.string() })
+      .parse(left.normalized_result).parent_evidence_id;
+    const rightParentId = z
+      .object({ parent_evidence_id: z.string() })
+      .parse(right.normalized_result).parent_evidence_id;
+    expect(result.evidence_links).toEqual([leftParentId, rightParentId]);
   } finally {
     await Promise.allSettled([client.close(), server.close(), session.close()]);
   }

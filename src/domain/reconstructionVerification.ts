@@ -19,7 +19,7 @@ import {
   isProcessEvidenceProvider,
 } from "./process/processEvidenceProvider.js";
 import { functionDossierSchema } from "./hopperValues.js";
-import { functionCallCoverageLimitations } from "./functionCallCoverage.js";
+import { assessFunctionCallCoverage } from "./functionCallCoverage.js";
 import {
   deriveProcessComparisonStatus,
   PROCESS_COMPARISON_DIMENSIONS,
@@ -64,7 +64,8 @@ const providers = {
 
 interface FunctionSourceFacts {
   readonly evidence_id: string;
-  readonly callCoverageLimitations: readonly string[];
+  readonly callCoverageBlockers: readonly string[];
+  readonly callCoverageDiagnostics: readonly string[];
 }
 
 const acceptsPredicate = (
@@ -149,13 +150,14 @@ const evaluateClaim = (
   const functionSourceFacts = readValidatedSourceFacts(claim, sources);
   const observation = comparisonObservation(claim, comparison);
   const observed = observation.status;
-  const limitations = [
+  const callCoverage = sourceCallCoverage(
+    claim,
+    functionSourceFacts,
+    observation.hasIndependentFunctionChange === true,
+  );
+  const blockers = [
     ...authorityLimitations(claim, sources, sides),
-    ...sourceCallCoverageLimitations(
-      claim,
-      functionSourceFacts,
-      observation.hasIndependentFunctionChange === true,
-    ),
+    ...callCoverage.blockers,
   ];
   const relatedUnknowns = reconstructionClaimUnknowns(
     heads,
@@ -164,7 +166,7 @@ const evaluateClaim = (
     claim.dimension,
   );
   const relevantUnknowns = relatedUnknowns;
-  const status = classify(observed, limitations, relevantUnknowns);
+  const status = classify(observed, blockers, relevantUnknowns);
   const displayedUnknowns = relevantUnknowns;
   return reconstructionClaimResultSchema.parse({
     claim_id: claim.claim_id,
@@ -180,7 +182,8 @@ const evaluateClaim = (
     limitations: uniqueSorted([
       ...comparison.limitations,
       ...observation.limitations,
-      ...limitations,
+      ...blockers,
+      ...callCoverage.diagnostics,
       ...displayedUnknowns.map(
         ({ question }) => `Residual unknown: ${question}`,
       ),
@@ -214,12 +217,14 @@ const readValidatedSourceFacts = (
       parseProcessCapture(source.normalized_result);
     else if (claim.kind === "structural-function") {
       const dossier = functionDossierSchema.parse(source.normalized_result);
+      const callCoverage = assessFunctionCallCoverage(
+        source.relationship_coverage,
+        dossier,
+      );
       functionSources.push({
         evidence_id: source.evidence_id,
-        callCoverageLimitations: functionCallCoverageLimitations(
-          source.relationship_coverage,
-          dossier,
-        ),
+        callCoverageBlockers: callCoverage.blockers,
+        callCoverageDiagnostics: callCoverage.diagnostics,
       });
     } else artifactInventoryResultSchema.parse(source.normalized_result);
   }
@@ -366,20 +371,28 @@ const authorityLimitations = (
   return limitations;
 };
 
-const sourceCallCoverageLimitations = (
+const sourceCallCoverage = (
   claim: Claim,
   functionSources: readonly FunctionSourceFacts[],
   hasIndependentFunctionChange: boolean,
-): string[] => {
+): { blockers: string[]; diagnostics: string[] } => {
   if (
     claim.kind !== "structural-function" ||
     (claim.dimension !== "calls" &&
       !(claim.dimension === "overall" && !hasIndependentFunctionChange))
   )
-    return [];
-  return functionSources.flatMap(({ evidence_id, callCoverageLimitations }) =>
-    callCoverageLimitations.map((reason) => `Source ${evidence_id}: ${reason}`),
-  );
+    return { blockers: [], diagnostics: [] };
+  return {
+    blockers: functionSources.flatMap(({ evidence_id, callCoverageBlockers }) =>
+      callCoverageBlockers.map((reason) => `Source ${evidence_id}: ${reason}`),
+    ),
+    diagnostics: functionSources.flatMap(
+      ({ evidence_id, callCoverageDiagnostics }) =>
+        callCoverageDiagnostics.map(
+          (reason) => `Source ${evidence_id}: ${reason}`,
+        ),
+    ),
+  };
 };
 
 const classify = (

@@ -44,7 +44,7 @@ export const inspectSqliteDatabaseInputSchema = z
       .enum(["inventory", "selected_table", "database"])
       .optional()
       .describe(
-        "Default: compact inventory without a table, or detailed selected-table schema with a table. Database explicitly expands all stored declarations and supported columns.",
+        "Default: compact inventory without a table, or detailed selected-table schema with a table. selected_table requires table. Database explicitly expands all stored declarations and supported columns.",
       ),
     row_limit: z
       .number()
@@ -55,6 +55,7 @@ export const inspectSqliteDatabaseInputSchema = z
         "Selected-table sample size, default 20; subject to byte and worker resource limits",
       ),
   })
+  .describe("When schema_scope is selected_table, also provide table.")
   .superRefine((input, context) => {
     if (input.row_limit !== undefined && input.table === undefined)
       context.addIssue({

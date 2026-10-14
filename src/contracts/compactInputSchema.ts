@@ -289,7 +289,15 @@ const reduceToShallowProperties = (
           : {};
       return [
         name,
-        { ...(type === undefined ? {} : { type }), ...description },
+        {
+          ...(type === undefined ? {} : { type }),
+          // Reduced inputs intentionally omit nested validation, but clients
+          // still require an item schema to accept an array declaration.
+          ...(types?.includes("array")
+            ? { items: { type: jsonValueTypes } }
+            : {}),
+          ...description,
+        },
       ];
     }),
   );

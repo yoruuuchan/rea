@@ -158,15 +158,13 @@ export const networkContentCoverageReason = (
     : undefined;
 };
 
-/** Different or unrecorded event-family selection is missing comparability, not an observed website change. */
+/** Different event-family selection is missing comparability, not an observed website change. */
 export const eventFamilyCoverageReason = (
   before: BrowserScenarioCapture,
   after: BrowserScenarioCapture,
 ): string | undefined => {
   const left = before.scenario.event_families;
   const right = after.scenario.event_families;
-  if (left === undefined || right === undefined)
-    return "Event family selection is unknown in a legacy capture; capture both sides with matching event families before comparing event evidence.";
   const leftFamilies = new Set(left);
   const rightFamilies = new Set(right);
   return leftFamilies.size === rightFamilies.size &&

@@ -46,7 +46,7 @@ export const traceCoversObservedDimension = (
     case "exit":
       return sources.has("lifecycle");
     case "filesystem":
-      return false;
+      return sources.has("filesystem");
     case "process":
       return sources.has("process");
   }

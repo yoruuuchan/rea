@@ -273,7 +273,7 @@ describe("Windows native doctor failure diagnostics", () => {
       "artifact",
       "runtime_missing",
       "missing_dependency",
-      "bundled native addon",
+      "native/windows/README.md",
     ],
     [
       "self-test",

@@ -35,6 +35,11 @@ import type { AnalysisErrorProjection } from "./analysisErrorProjection.js";
 export const analysisErrorRemediationAction = (
   error: AnalysisError,
 ): string => {
+  if (
+    error instanceof BrowserObservationError &&
+    error.reason === "service_worker_blocked"
+  )
+    return "Set environment.service_workers to allow to permit this capture, or remove the service worker registration through the browser. REA never removes existing registrations.";
   if (error instanceof AnalysisCapabilityUnavailableError && error.retryable)
     return "Review details.reason, then retry the same analysis after the condition clears.";
   if (error instanceof EvidenceFileError && error.published !== undefined)
@@ -177,6 +182,7 @@ const browserErrorCategory = (
   if (
     reason === "target_not_found" ||
     reason === "target_not_allowed" ||
+    reason === "service_worker_blocked" ||
     reason === "target_changed" ||
     reason === "endpoint_unreachable" ||
     reason === "disconnected"
@@ -300,12 +306,14 @@ const hopperErrorUserMessage = (error: AnalysisError): string | undefined => {
 
 const RESTART_OWNED_PROVIDER =
   "Restart the owned provider by calling close_binary, then open the target again and retry.";
+const RESTART_UNREACHABLE_HOPPER = `${RESTART_OWNED_PROVIDER} If Hopper may have exited, call export_evidence_bundle before close_binary; closing clears retained records.`;
 
 const hopperProcessRemediation = (error: HopperProcessError): string => {
   if (error.failureCode !== undefined && error.userMessage !== undefined)
     return error.userMessage;
   if (error.stage === "launch")
     return "Review the captured launcher diagnostics and Hopper setup, then retry opening the target.";
+  if (error.providerState === "unreachable") return RESTART_UNREACHABLE_HOPPER;
   if (providerRetryAction(error.providerState) === "restart_provider")
     return RESTART_OWNED_PROVIDER;
   return "Read binary_session.provider_operation_health for this request before retrying or restarting the owned provider.";
@@ -335,7 +343,7 @@ const hopperProcessMessage = (error: HopperProcessError): string => {
     return `Hopper exited during ${where} (${exit}).${startup}${recovery}${request}`;
   }
   if (error.providerState === "unreachable")
-    return `Hopper became unreachable during ${where}; its process exit was not observed. ${RESTART_OWNED_PROVIDER}${startup}${request}`;
+    return `Hopper became unreachable during ${where}; its process exit was not observed. ${RESTART_UNREACHABLE_HOPPER}${startup}${request}`;
   return `Hopper failed during ${where} and REA could not determine whether the provider is busy, exited, or unreachable.${startup} Read binary_session.provider_operation_health for this request before retrying or restarting.${request}`;
 };
 

@@ -5,6 +5,7 @@ import { toolContract } from "../contracts/toolContracts.js";
 import { compareArtifacts } from "../domain/artifactComparison.js";
 import { createEvidence, parseEvidence } from "../domain/evidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
+import { resolveArtifactComparisonEvidence } from "../application/artifacts/ArtifactComparisonEvidence.js";
 import type { RecordUnknownInput } from "../domain/residualUnknown.js";
 import { recordDerivedEvidence } from "./recordDerivedEvidence.js";
 import { runDerivedOperation } from "./runDerivedOperation.js";
@@ -20,6 +21,9 @@ export const registerArtifactComparisonTool = (
   contract: ReturnType<typeof toolContract<"compare_artifacts">>,
 ): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
+  const evidenceById = (evidenceId: string) =>
+    session.evidenceForAnalysis?.(evidenceId) ??
+    session.evidenceById(evidenceId);
   server.registerTool(
     contract.name,
     toolRegistrationOptions(contract),
@@ -34,8 +38,20 @@ export const registerArtifactComparisonTool = (
             context,
             contract.name,
             () => {
-              const left = parseEvidence(input.left);
-              const right = parseEvidence(input.right);
+              const suppliedLeft = parseEvidence(input.left);
+              const suppliedRight = parseEvidence(input.right);
+              const resolvedLeft = resolveArtifactComparisonEvidence(
+                suppliedLeft,
+                evidenceById,
+              );
+              if (!resolvedLeft.ok) throw resolvedLeft.error;
+              const resolvedRight = resolveArtifactComparisonEvidence(
+                suppliedRight,
+                evidenceById,
+              );
+              if (!resolvedRight.ok) throw resolvedRight.error;
+              const left = resolvedLeft.value;
+              const right = resolvedRight.value;
               return { left, right, comparison: compareArtifacts(left, right) };
             },
           );

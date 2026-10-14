@@ -672,6 +672,10 @@ const runProcessScenario = async (
       counts: progressCounts(),
       terminal: true,
       disposition: signal?.aborted === true ? "cancelled" : "failed",
+      ...(cause instanceof ProcessCaptureError &&
+      cause.cleanupReport !== undefined
+        ? { cleanup: cause.cleanupReport }
+        : {}),
     });
     throw cause;
   }

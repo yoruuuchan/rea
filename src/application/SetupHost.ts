@@ -203,18 +203,29 @@ export const systemSetupHost = (
         return {
           status: "installed",
           launcherPath: result.launcherPath,
+          ...(result.openFailure === undefined
+            ? {}
+            : {
+                warning: `Hopper was installed, but macOS could not open it: ${result.openFailure}. Open ${result.launcherPath} manually to complete first-run setup.`,
+              }),
           ...(result.cleanupFailure === undefined
             ? {}
             : { cleanupFailure: result.cleanupFailure }),
         };
       const failure = setupInstallFailure(result.reason);
-      if (result.cleanupFailure === undefined) return failure;
-      return failure.status === "failed"
-        ? {
-            ...failure,
-            remediation: `${failure.remediation} ${result.cleanupFailure}`,
-          }
-        : failure;
+      const diagnostic = setupInstallerDiagnostic(result.diagnostic);
+      return {
+        ...failure,
+        remediation: [
+          failure.remediation,
+          ...(diagnostic === undefined
+            ? []
+            : [`Installer detail: ${diagnostic}`]),
+          ...(result.cleanupFailure === undefined
+            ? []
+            : [result.cleanupFailure]),
+        ].join(" "),
+      };
     },
     detectedClients: () => detectClients(homeDirectory, platform, environment),
     supportedClients: () =>
@@ -246,6 +257,21 @@ export const systemSetupHost = (
       ),
     doctor: (scope) => runDoctor(undefined, doctorHost, scope),
   };
+};
+
+const setupInstallerDiagnostic = (
+  value: string | undefined,
+): string | undefined => {
+  if (value === undefined) return undefined;
+  const normalized = value
+    .replace(/\u001b(?:\[[0-9;?]*[ -/]*[@-~]|\([0-9A-Za-z]|[@-Z\\^_])/gu, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (normalized === "") return undefined;
+  return normalized.length <= 400
+    ? normalized
+    : `${normalized.slice(0, 397).trimEnd()}...`;
 };
 
 const clientConfigurationOperations = (resources: ArtifactResourceScope) => ({

@@ -98,6 +98,18 @@ isolated filesystem boundary tests because it loads both source and compiled
 module graphs. Adapter, other boundary, acceptance, and process-global projects
 retain per-file isolation. See `vitest.config.ts` for current settings.
 
+Inject producer faults through scoped dependencies in shared workers: a module
+mock cannot replace a consumer that was imported earlier. Check these tests
+with the consumer preloaded as well as alone. For simulated protocol traces,
+use an acknowledged event barrier before asserting complete observations;
+a zero-duration capture does not guarantee queued events have arrived.
+
+Check advertised schemas after SDK conversion for every supported schema
+profile. Meta-schema validity does not establish client acceptance or useful
+rendered declarations. Keep canonical rejection checks separate from the
+intentionally reduced compact advertisement, and probe actual client renderers
+when changing schema representations.
+
 The reused CLI boundary workers cap V8 old space at 384 MiB, based on their
 profiled allocation and cleanup behavior. This encourages collection between
 files; spawned REA processes retain their own heap settings.

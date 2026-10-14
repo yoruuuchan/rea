@@ -16,6 +16,12 @@ URL after validating its syntax. That validation does not establish that the
 JEB service is reachable or that a project is open; use the existing
 `inspect-jeb-client` command for a read-only service query.
 
+MCP `binary_session` probes the live JEB service and its advertised tool catalog.
+Availability is reported per operation: a reachable headless client can support
+inspection and decompilation while refusing `open_jeb_project`. Catalog discovery
+uses one 60-second deadline across connection and pagination; a responsive server
+cannot keep discovery running indefinitely by returning more pages.
+
 Verified against JEB 5.48.0 (Linux x64, licensed build) serving `jeb-mcp-server` 1.3.0 over streamable HTTP.
 
 ## Operations

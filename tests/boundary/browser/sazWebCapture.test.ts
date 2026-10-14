@@ -15,6 +15,7 @@ import {
   webNetworkCaptureSchema,
 } from "../../../src/domain/webNetworkCapture.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import {
@@ -529,8 +530,10 @@ it.each([
       : "invalid_input",
   );
   // Expanded size is a caller-correctable input bound, not a decoder failure.
-  if (variant === "expanded-limit")
-    expect(JSON.parse(result.stdout).details.issues).toEqual([
+  if (variant === "expanded-limit") {
+    const error = JSON.parse(result.stdout);
+    expect(error.code).toBe("invalid_request");
+    expect(error.details.issues).toEqual([
       expect.objectContaining({
         path: ["capture_path", ""],
         reason: "out_of_range",
@@ -539,6 +542,27 @@ it.each([
         },
       }),
     ]);
+    const { call } = await connectLocalToolsMcp();
+    const response = await call("inspect_web_network_capture", {
+      capture_path: path,
+      format: "saz",
+      record_ordinals: [0],
+    });
+    expect(response.isError).toBe(true);
+    const mcpFailure = parseMcpToolError(response);
+    expect(mcpFailure).toMatchObject({
+      error: {
+        code: error.code,
+        category: error.category,
+        details: error.details,
+      },
+    });
+    expect(error).not.toHaveProperty("normalized_result");
+    expect(error.details).not.toHaveProperty("partial_observation");
+    expect(mcpFailure).not.toHaveProperty("normalized_result");
+    expect(mcpFailure.error.details).not.toHaveProperty("partial_observation");
+    expect(await readFile(path)).toEqual(bytes);
+  }
   expect(JSON.stringify(result)).not.toContain("malformed-private-input");
 });
 

@@ -142,6 +142,18 @@ Setup registers `rea` in `~/.kimi-code/mcp.json`, or
 creating a `.rea.backup` before updating an existing file. Kimi Code infers
 stdio from the `command` entry, so setup does not add a `type` field. The
 registration includes `startupTimeoutMs = 30000` and `toolTimeoutMs = 120000`.
+Setup selects the compact input-schema advertisement for new or refreshed Kimi
+registrations unless their stored configuration or setup environment explicitly
+selects `REA_MCP_INPUT_SCHEMA_PROFILE=full` or `compact`. This keeps REA's
+canonical tool validation unchanged while avoiding a Moonshot Kimi Code 2.2.0
+failure observed with the full catalog: its request was rejected because a
+single tool schema exceeded the provider's size limit. The limit is
+provider-specific and not an MCP protocol limit. `rea doctor --client kimi`
+reports an older registration with no explicit profile as stale. To restore the
+compact profile, run `rea setup --client kimi` or add
+`REA_MCP_INPUT_SCHEMA_PROFILE=compact` to the registration's `env`, then restart
+Kimi Code. An explicit `full` profile remains respected and can still exceed
+Moonshot's limit.
 Kimi Code also discovers personal skills in `~/.agents/skills` and project-local
 `.agents/skills`, so no separate skill root is required; setup still installs
 and verifies the matching skill files through the normal shared-skill flow.

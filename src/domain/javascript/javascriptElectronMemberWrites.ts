@@ -128,7 +128,9 @@ export function* collectJavaScriptIdentityWritesSteps(
               if (identities.length > 0) {
                 const key = keyedMutators.has(method ?? "")
                   ? [staticString(arguments_?.[1]) ?? null]
-                  : [];
+                  : // Mutating a target's contents does not replace the target.
+                    // Retain an unknown child key, rather than its own identity.
+                    [null];
                 for (const identity of identities)
                   retain(node, [...identity, ...key]);
               } else if (!freshObject(target)) {

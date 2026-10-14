@@ -45,10 +45,18 @@ export const registerCutterCommands = (
         .refine((value) => !/[\r\n]/u.test(value)),
     }),
     options: z.object({
+      jsonOutput: z
+        .boolean()
+        .optional()
+        .describe(
+          "Return command-specific JSON output when available (independent of CLI output formatting).",
+        ),
       json: z
         .boolean()
-        .default(false)
-        .describe("Return command-specific JSON output when available."),
+        .optional()
+        .describe(
+          "Deprecated compatibility input: use --json-output; pass --json=true or --json=false (bare --json formats CLI output).",
+        ),
     }),
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
@@ -58,7 +66,7 @@ export const registerCutterCommands = (
               session_id: args.sessionId,
               expected_generation: args.expectedGeneration,
               command: args.command,
-              json: options.json,
+              json: options.jsonOutput ?? options.json ?? false,
             },
             { signal },
           );

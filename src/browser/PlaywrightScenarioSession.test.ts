@@ -65,7 +65,16 @@ vi.mock("./PlaywrightScenarioEvents.js", () => ({
     }
 
     result() {
-      return { events: [] };
+      return {
+        retained: 0,
+        dropped: 0,
+        items: [],
+        omissions: {
+          by_kind: [],
+          network_transactions: [],
+          network_transaction_range: null,
+        },
+      };
     }
 
     limitations() {
@@ -105,7 +114,7 @@ const fixture = () => {
   const page = Object.assign(new EventEmitter(), {
     url: () => "about:blank",
     goto: vi.fn(async () => undefined),
-    evaluate: vi.fn(async (_script: unknown) => false),
+    evaluate: vi.fn(async (_script: unknown): Promise<unknown> => null),
     addInitScript: vi.fn(async (_script: unknown) => undefined),
     context: () => context,
     frames: () => [page],
@@ -190,7 +199,9 @@ it("stops attached navigation without storage and retries rejected policy cleanu
 
 it("rejects an init script accepted by CDP when the live realm is unprotected", async () => {
   const { page, cleanup } = fixture();
-  page.evaluate.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  page.evaluate
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce("policy_unprotected");
   const attached = browserScenarioSchema.parse({
     ...scenario,
     browser: {
@@ -484,7 +495,7 @@ it("waits for a pending registration installation before cancelled cleanup", asy
 
 it("rejects attached block when caller-owned registrations already exist", async () => {
   const { cleanup, page } = fixture();
-  page.evaluate.mockResolvedValueOnce(true);
+  page.evaluate.mockResolvedValueOnce("service_worker_blocked");
   const attached = browserScenarioSchema.parse({
     ...scenario,
     browser: {
@@ -499,7 +510,7 @@ it("rejects attached block when caller-owned registrations already exist", async
     PlaywrightScenarioSession.open(attached, {}, {}),
   ).rejects.toMatchObject({
     _tag: "BrowserObservationError",
-    reason: "target_not_allowed",
+    reason: "service_worker_blocked",
   });
   expect(page.addInitScript).not.toHaveBeenCalled();
   expect(cleanup.close).toHaveBeenCalledTimes(1);

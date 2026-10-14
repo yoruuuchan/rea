@@ -63,6 +63,12 @@ describe("curated Windows test lane", () => {
     );
     expect(missing.filter((path) => path !== undefined)).toEqual([]);
   }, 10_000);
+
+  it("keeps the native multi-megabyte output regression in the lane", async () => {
+    expect(await explicitPaths("windows")).toContain(
+      "tests/boundary/process/windowsOutputCapture.test.ts",
+    );
+  });
 });
 
 it("keeps every explicit focused CI test path executable after file moves", async () => {

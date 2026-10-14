@@ -1340,7 +1340,8 @@ public final class ReaGhidraBridge extends HeadlessScript {
             ReferenceIterator incomingIterator = currentProgram.getReferenceManager().getReferencesTo(address);
             while (incomingIterator.hasNext()) {
                 monitor.checkCancelled();
-                addReference(incoming, incomingIterator.next());
+                Reference reference = incomingIterator.next();
+                if (!reference.isEntryPointReference()) addReference(incoming, reference);
             }
             List<Reference> orderedIncoming = new ArrayList<>(incoming.values());
             orderedIncoming.sort(REFERENCE_ORDER);

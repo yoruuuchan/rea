@@ -99,12 +99,20 @@ const writeScenario = async (
 
 const runCaptureCli = async (
   scenarioPath: string,
-  options: { readonly stopOnRunning?: boolean } = {},
+  options: {
+    readonly stopOnRunning?: boolean;
+    readonly env?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<CliCapture> => {
   const child = spawn(
     process.execPath,
     ["scripts/rea.mjs", "capture-process", scenarioPath, "--json"],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(options.env === undefined
+        ? {}
+        : { env: { ...process.env, ...options.env } }),
+    },
   );
   let stdout = "";
   let stderr = "";
@@ -268,6 +276,44 @@ itWithCaptureCapability(
         owned_process_group: "cleaned",
         terminal_renderer: "cleaned",
         temporary_root: "cleaned",
+      },
+    });
+  },
+  30_000,
+);
+
+itWithCaptureCapability(
+  "reports unknown resource cleanup when temporary-root preparation fails",
+  async () => {
+    const scenario = await writeScenario(
+      "rea-process-progress-prepare-failed-",
+      {
+        executable: process.execPath,
+        arguments: childScript("process.stdout.write('ready\\n')"),
+        timeout_ms: 5_000,
+      },
+    );
+    const missingTempRoot = join(
+      await createTestTempDirectory("rea-process-progress-missing-tmpdir-"),
+      "missing",
+    );
+    const capture = await runCaptureCli(scenario, {
+      env: {
+        TMPDIR: missingTempRoot,
+        TMP: missingTempRoot,
+        TEMP: missingTempRoot,
+      },
+    });
+
+    expect(capture.exitCode).toBe(1);
+    expect(capture.lines.at(-1)?.update).toMatchObject({
+      phase: "cleanup",
+      terminal: true,
+      details: {
+        disposition: "failed",
+        owned_process_group: "unverified",
+        terminal_renderer: "unverified",
+        temporary_root: "unverified",
       },
     });
   },

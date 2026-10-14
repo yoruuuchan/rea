@@ -146,7 +146,10 @@ export const transformAdvertisedInputJsonSchema = <Schema>(
   const byTarget = new Map<string, Record<string, unknown>>();
   const transformedInput = (options: unknown): unknown => {
     const target = Reflect.get(options as object, "target");
-    if (typeof target === "string") {
+    const cacheable =
+      typeof target === "string" &&
+      Reflect.get(options as object, "libraryOptions") === undefined;
+    if (cacheable) {
       const cached = byTarget.get(target);
       if (cached !== undefined) return cached;
     }
@@ -154,7 +157,7 @@ export const transformAdvertisedInputJsonSchema = <Schema>(
     const transformed = isSchemaRecord(projected)
       ? transform(projected)
       : projected;
-    if (typeof target === "string" && isSchemaRecord(transformed))
+    if (cacheable && isSchemaRecord(transformed))
       byTarget.set(target, transformed);
     return transformed;
   };

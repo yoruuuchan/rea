@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BrowserScenarioSecrets } from "./BrowserScenarioSecrets.js";
 import { browserScenarioSchema } from "../domain/browserScenario.js";
+import { DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS } from "../domain/browserScenarioCaptureLimits.js";
 
 const secret = (secret_id: string) => ({ source: "secret", secret_id });
 const literal = (value: string) => ({
@@ -136,6 +137,7 @@ describe("browserScenarioSchema", () => {
       service_workers: "block",
     });
     expect(parsed.capture).toEqual({
+      limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
       network: {
         request_body: false,
         response_body: false,
@@ -145,7 +147,9 @@ describe("browserScenarioSchema", () => {
       at_end: ["dom", "storage"],
       events: ["console", "page-errors", "network", "websockets"],
     });
-    expect(parsed).not.toHaveProperty("limits");
+    expect(parsed.capture.limits).toEqual(
+      DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
+    );
   });
 
   it("allows callers to choose visible browsers and service workers", () => {

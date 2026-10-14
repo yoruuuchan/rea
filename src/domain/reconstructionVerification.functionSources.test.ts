@@ -323,11 +323,60 @@ describe("historical calls-only reconstruction changes", () => {
 });
 
 describe("function reconstruction call coverage", () => {
+  it("preserves complete call diagnostics while passing equal call claims", () => {
+    const diagnostic = "Indirect calls remain unresolved.";
+    const leftWithDiagnostic = source("a", {
+      relationshipCoverage: { status: "complete", diagnostics: [diagnostic] },
+    });
+    const rightWithDiagnostic = source("b", {
+      relationshipCoverage: { status: "complete", diagnostics: [diagnostic] },
+    });
+    const observed = compareFunctions(leftWithDiagnostic, rightWithDiagnostic);
+    expect(
+      observed.dimensions.find(({ dimension }) => dimension === "calls"),
+    ).toMatchObject({
+      status: "unchanged",
+      limitations: [`Left: ${diagnostic}`, `Right: ${diagnostic}`],
+    });
+    const evidence = comparison(
+      {
+        left_evidence_id: leftWithDiagnostic.evidence_id,
+        right_evidence_id: rightWithDiagnostic.evidence_id,
+      },
+      {},
+      [leftWithDiagnostic, rightWithDiagnostic],
+      {},
+      observed,
+    );
+    expect(
+      admittedVerification(
+        evidence,
+        [leftWithDiagnostic, rightWithDiagnostic],
+        "calls",
+      )(),
+    ).toMatchObject({
+      status: "pass",
+      claims: {
+        items: [
+          expect.objectContaining({
+            status: "pass",
+            observed_status: "unchanged",
+            limitations: expect.arrayContaining([
+              `Source ${leftWithDiagnostic.evidence_id}: ${diagnostic}`,
+              `Source ${rightWithDiagnostic.evidence_id}: ${diagnostic}`,
+            ]),
+          }),
+        ],
+      },
+    });
+  });
+
   it("rechecks old unchanged comparisons without affecting unrelated finite dimensions", () => {
     const incomplete = source("7", {
       relationshipCoverage: {
         status: "unknown",
         reason: "Call graph unavailable.",
+        diagnostics: ["Indirect calls remain unresolved."],
       },
     });
     const incompleteSides = {
@@ -352,6 +401,7 @@ describe("function reconstruction call coverage", () => {
               observed_status: "unchanged",
               limitations: expect.arrayContaining([
                 `Source ${incomplete.evidence_id}: Call graph unavailable.`,
+                `Source ${incomplete.evidence_id}: Indirect calls remain unresolved.`,
               ]),
             }),
           ],

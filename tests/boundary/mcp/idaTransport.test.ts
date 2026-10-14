@@ -1,45 +1,20 @@
 import { createServer } from "node:http";
 import { inspect } from "node:util";
 import { ProtocolError } from "@modelcontextprotocol/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { constants } from "node:buffer";
 import { IdaDiagnosticResourceError } from "../../../src/ida/IdaDiagnosticWriter.js";
+import { createIdaDiagnosticRedactor } from "../../../src/ida/IdaDiagnosticRedactor.js";
 import { z } from "zod";
 import { AnalysisProtocolError } from "../../../src/domain/analysisErrorCore.js";
 import type { JsonValue } from "../../../src/domain/jsonValue.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { ProviderAdapterError } from "../../../src/domain/providerAdapterError.js";
 import { createIdaMcpConnection } from "../../../src/ida/IdaMcpConnection.js";
-import type { IdaMcpConnection } from "../../../src/ida/IdaMcpConnection.js";
-
-// Inject an owned capacity failure at the producer while retaining the real
-// SDK. Small writer-limit tests separately exercise actual expansion checks.
-vi.mock("../../../src/ida/IdaDiagnosticRedactor.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("../../../src/ida/IdaDiagnosticRedactor.js")
-    >();
-  return {
-    ...actual,
-    createIdaDiagnosticRedactor: (
-      config: Parameters<typeof actual.createIdaDiagnosticRedactor>[0],
-    ) => {
-      const redactor = actual.createIdaDiagnosticRedactor(config);
-      return {
-        ...redactor,
-        text: redactor.text,
-        json: (message: string) => {
-          if (message === "fixture-resource-boundary")
-            throw new IdaDiagnosticResourceError(
-              message.length,
-              constants.MAX_STRING_LENGTH + 1,
-            );
-          return redactor.json(message);
-        },
-      };
-    },
-  };
-});
+import type {
+  IdaMcpConnection,
+  IdaMcpConnectionDependencies,
+} from "../../../src/ida/IdaMcpConnection.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -72,6 +47,7 @@ type IdaTransportFixtureOptions = {
   readonly toolContentType?: string;
   readonly toolResponseBody?: string | Buffer;
   readonly configurationHeaders?: Readonly<Record<string, string>>;
+  readonly connectionDependencies?: IdaMcpConnectionDependencies;
 };
 const fixture = async ({
   redirectUrl,
@@ -85,6 +61,7 @@ const fixture = async ({
   toolContentType = "application/json",
   toolResponseBody,
   configurationHeaders = { Authorization: "Bearer transport-fixture-secret" },
+  connectionDependencies,
 }: IdaTransportFixtureOptions = {}) => {
   const methods: string[] = [];
   const headers: (string | undefined)[] = [];
@@ -208,6 +185,7 @@ const fixture = async ({
       timeoutMs: 2000,
     },
     {},
+    connectionDependencies,
   );
   cleanups.push(() => connection.close());
   return {
@@ -1002,7 +980,21 @@ it.each([200, 500])(
   async (toolStatus) => {
     const { connection } = await fixture({
       toolStatus,
-      toolResponseBody: "fixture-resource-boundary",
+      toolResponseBody: "malformed fixture JSON",
+      connectionDependencies: {
+        createDiagnosticRedactor: (config) => {
+          const redactor = createIdaDiagnosticRedactor(config);
+          return {
+            ...redactor,
+            json(message: string) {
+              throw new IdaDiagnosticResourceError(
+                message.length,
+                constants.MAX_STRING_LENGTH + 1,
+              );
+            },
+          };
+        },
+      },
     });
     await connection.connect();
     const failure = await connection

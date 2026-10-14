@@ -9,6 +9,7 @@ import {
   AnalysisCancelledError,
 } from "../domain/analysisErrorCore.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { jebResultSchemas } from "../domain/jeb/jebAnalysis.js";
 
 const scriptedConnection = (
   responses: Readonly<Record<string, JsonValue | Error>>,
@@ -17,7 +18,10 @@ const scriptedConnection = (
   return {
     calls,
     async connect() {
-      return [];
+      return Object.keys(responses);
+    },
+    async listTools() {
+      return Object.keys(responses);
     },
     async call(name, args) {
       calls.push([name, args]);
@@ -37,7 +41,48 @@ const providerWith = (connection: JebMcpConnection) =>
     connectionFactory: () => connection,
   });
 
-describe("JebProvider boundary", () => {
+describe("JebProvider live availability", () => {
+  it("reports only the operations advertised by the live engine", async () => {
+    const connection = scriptedConnection({
+      get_client_information: {
+        success: true,
+        version: "5.48.0",
+        gui_client: false,
+      },
+      list_units: { success: true, units: [] },
+      decompile_code_item: { success: true, text: "" },
+    });
+    const provider = providerWith(connection);
+    expect(await provider.inspectAvailability()).toMatchObject({
+      status: "available",
+      supportedOperations: [
+        "inspect_jeb_client",
+        "list_jeb_units",
+        "decompile_jeb_item",
+      ],
+    });
+    expect(connection.calls).toEqual([["get_client_information", {}]]);
+  });
+
+  it("refreshes live operation support rather than reusing a readiness snapshot", async () => {
+    const connection = scriptedConnection({
+      get_client_information: { success: true, version: "5.48.0" },
+    });
+    let tools = ["get_client_information", "open_project"];
+    connection.listTools = async () => tools;
+    const provider = providerWith(connection);
+    expect(await provider.inspectAvailability()).toMatchObject({
+      supportedOperations: ["inspect_jeb_client", "open_jeb_project"],
+    });
+    tools = ["get_client_information"];
+    expect(await provider.inspectAvailability()).toMatchObject({
+      supportedOperations: ["inspect_jeb_client"],
+    });
+    expect(connection.calls).toHaveLength(2);
+  });
+});
+
+describe("JebProvider observations and failures", () => {
   it("normalizes client information and caches engine identity", async () => {
     const connection = scriptedConnection({
       get_client_information: {
@@ -52,12 +97,10 @@ describe("JebProvider boundary", () => {
       operation: "inspect_jeb_client",
       input: {},
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const normalized = result.value.result as {
-      readonly engine: { readonly version: string | null };
-      readonly startup_ts: number | null;
-    };
+    if (!result.ok) throw result.error;
+    const normalized = jebResultSchemas.inspect_jeb_client.parse(
+      result.value.result,
+    );
     expect(normalized.engine.version).toBe("5.48.0.202610071539");
     expect(normalized.startup_ts).toBe(1791623439);
     expect(result.value.provider.version).toBe("5.48.0.202610071539");
@@ -150,18 +193,18 @@ describe("JebProvider boundary", () => {
       operation: "list_jeb_units",
       input: { count: 3, index: 0 },
     });
+    if (!full.ok) throw full.error;
     expect(
-      full.ok &&
-        (full.value.result as { coverage: string }).coverage === "partial",
-    ).toBe(true);
+      jebResultSchemas.list_jeb_units.parse(full.value.result).coverage,
+    ).toBe("partial");
     const last = await provider.execute({
       operation: "list_jeb_units",
       input: { count: 4, index: 0 },
     });
+    if (!last.ok) throw last.error;
     expect(
-      last.ok &&
-        (last.value.result as { coverage: string }).coverage === "complete",
-    ).toBe(true);
+      jebResultSchemas.list_jeb_units.parse(last.value.result).coverage,
+    ).toBe("complete");
   });
 });
 
@@ -306,7 +349,10 @@ it("forwards in-flight cancellation to the MCP call", async () => {
   });
   const provider = providerWith({
     async connect() {
-      return [];
+      return ["get_client_information"];
+    },
+    async listTools() {
+      return ["get_client_information"];
     },
     async close() {},
     async call(_name, _args, signal) {

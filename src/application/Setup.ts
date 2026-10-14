@@ -306,6 +306,7 @@ const runSetupWorkflow = async (
   }
   let selectedClients: readonly SetupClient[] =
     planSelection.clientsToConfigure;
+  let hopperWarning: string | undefined;
   if (
     planSelection.installHopper &&
     (interactiveApproval || options.installHopper)
@@ -322,7 +323,12 @@ const runSetupWorkflow = async (
       clientStates,
     });
     if ("failure" in install) return install.failure;
-    ({ hopperPath, providerEnvironment, selectedClients } = install);
+    ({
+      hopperPath,
+      providerEnvironment,
+      selectedClients,
+      warning: hopperWarning,
+    } = install);
   }
   const clientFailure = await configureDetectedClients({
     host,
@@ -355,6 +361,7 @@ const runSetupWorkflow = async (
       doctor.healthy,
       hopperPath,
     ),
+    hopperWarning,
     manualRemediation,
   );
   return {
@@ -407,14 +414,17 @@ const installHopperAction = async (input: {
     };
   }
   input.appliedActions.push("installed_hopper");
+  const warning = [installed.warning, installed.cleanupFailure]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
   emitProgress(input.options, {
     actionId: "install_hopper",
     label,
-    state: installed.cleanupFailure === undefined ? "completed" : "warning",
+    state: warning === "" ? "completed" : "warning",
     detail:
-      installed.cleanupFailure === undefined
+      warning === ""
         ? installed.launcherPath
-        : `${installed.launcherPath}; ${installed.cleanupFailure}`,
+        : `${installed.launcherPath}; ${warning}`,
   });
   const providerEnvironment = {
     ...input.providerEnvironment,
@@ -423,6 +433,7 @@ const installHopperAction = async (input: {
   return {
     hopperPath: installed.launcherPath,
     providerEnvironment,
+    ...(warning === "" ? {} : { warning }),
     selectedClients: await filterClientsNeedingConfigure(
       input.host,
       input.selectedClients,

@@ -1,5 +1,11 @@
 # Analysis efficiency measurements
 
+For genuine Fiddler captures, see the [SAZ selection checkpoint](saz-selection-workflows.md).
+`measure.mjs --saz-selection baseline|focused|retained` compares default complete
+delivery (including retained-reference recovery), caller-selected ordinals, and
+summary/preview/complete/repeated pages. Each failed RPC remains in task costs.
+The body question uses stored bytes, not decoded HTTP application payloads.
+
 Tracks the experiments for [#2016](https://github.com/morluto/rea/issues/2016).
 The production CLI/MCP contracts and defaults remain the compatibility baseline.
 Downloaded artifacts, runtime copies, exported Evidence, transcripts and detailed

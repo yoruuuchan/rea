@@ -181,6 +181,7 @@ def main():
                  'inspect_android_class', 'inspect_android_method',
                  'inspect_firmware_regions', 'inspect_managed_artifact',
                  'inspect_sqlite_database', 'inspect_pcap_capture',
+                 'inspect_web_network_capture',
                  'inspect_packet_capture', 'inspect_packet_fields',
                  'decode_signal_recording', 'inspect_signal_decoders',
                  'inspect_managed_members', 'inspect_managed_native_boundaries',

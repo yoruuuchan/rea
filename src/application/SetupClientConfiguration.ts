@@ -683,10 +683,18 @@ const clientConfigurationDesired = (
     "fragment",
   );
   if (!environment.ok) throw environment.error;
+  const registrationEnvironment =
+    client.name === "kimi" &&
+    environment.value.REA_MCP_INPUT_SCHEMA_PROFILE === undefined
+      ? {
+          ...environment.value,
+          REA_MCP_INPUT_SCHEMA_PROFILE: "compact",
+        }
+      : environment.value;
   const registration = clientRegistrationEntry(
     format,
     launcher,
-    environment.value,
+    registrationEnvironment,
   );
   const previous = parsed?.servers[PRODUCT_IDENTITY.mcpServerKey];
   if (

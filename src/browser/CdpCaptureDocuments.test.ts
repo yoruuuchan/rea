@@ -130,10 +130,12 @@ describe("CDP DOM string and namespace validity", () => {
     { field: "nodeName", index: -1 },
     { field: "nodeName", index: 20 },
     { field: "nodeName", index: 2, malformedString: true },
+    { field: "nodeValue", index: -2 },
     { field: "nodeValue", index: 20 },
     { field: "nodeValue", index: 5, malformedString: true },
     { field: "attributeName", index: -1 },
     { field: "attributeName", index: 20 },
+    { field: "attributeValue", index: -2 },
     { field: "attributeValue", index: 20 },
   ] as const)(
     // -1 is DOMSnapshot's empty string for values, never for names.

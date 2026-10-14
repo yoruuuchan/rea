@@ -8,6 +8,7 @@ import { swiftStringLiteralSchema } from "../domain/hopperValues.js";
 import { applicationVersionComparisonResultSchema } from "../domain/javascript/javascriptApplicationVersionComparisonSchemas.js";
 import { pinvokeVerificationSchema } from "../domain/managed/managedNativeVerificationSchemas.js";
 import { relationshipCoverageSchema } from "../domain/relationshipCoverage.js";
+import { compactAdvertisedInputSchema } from "./compactInputSchema.js";
 
 const directions = [
   [],
@@ -162,3 +163,59 @@ describe.each(["draft-2020-12", "draft-07"] as const)(
     });
   },
 );
+
+describe("fixed tuple element guidance in advertised projections", () => {
+  it.each(["draft-2020-12", "draft-07"] as const)(
+    "keeps literal item guidance in full and compact %s projections",
+    (target) => {
+      const full = z.toJSONSchema(relationshipCoverageSchema, {
+        io: "output",
+        target,
+      });
+      for (const schema of [
+        full,
+        compactAdvertisedInputSchema(full, 64 * 1024).schema,
+      ]) {
+        const tupleSchemas: Record<string, unknown>[] = [];
+        const visit = (value: unknown): void => {
+          if (Array.isArray(value)) {
+            value.forEach(visit);
+          } else if (typeof value === "object" && value !== null) {
+            const candidate = value as Record<string, unknown>;
+            if (
+              Array.isArray(candidate.prefixItems) ||
+              (Array.isArray(candidate.items) && "additionalItems" in candidate)
+            )
+              tupleSchemas.push(candidate);
+            Object.values(candidate).forEach(visit);
+          }
+        };
+        visit(schema);
+
+        expect(tupleSchemas).toHaveLength(6);
+        for (const tuple of tupleSchemas) {
+          expect(tuple).toMatchObject({
+            type: "array",
+            minItems: expect.any(Number),
+            maxItems: expect.any(Number),
+          });
+          const positional = z
+            .array(z.object({ const: z.string() }))
+            .parse(tuple.prefixItems ?? tuple.items);
+          const rest = tuple.prefixItems ? tuple.items : tuple.additionalItems;
+          const ajv =
+            target === "draft-2020-12"
+              ? new Ajv2020({ strict: false })
+              : new Ajv({ strict: false });
+          const validateItem = ajv.compile(
+            z.record(z.string(), z.unknown()).parse(rest),
+          );
+          for (const value of ["callers", "callees", "incoming", null])
+            expect(validateItem(value), JSON.stringify(tuple)).toBe(
+              positional.some((position) => position.const === value),
+            );
+        }
+      }
+    },
+  );
+});

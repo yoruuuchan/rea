@@ -215,6 +215,21 @@ export const registerFridaCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.instrumentWithFrida, async () => {
+          if (args.mode === "attach" && options.argument !== undefined)
+            return projectAnalysisError(
+              new AnalysisInputError(
+                CLI_COMMANDS.instrumentWithFrida,
+                undefined,
+                [
+                  {
+                    path: ["argument"],
+                    reason: "invalid_value",
+                    message:
+                      "--argument is only valid in spawn mode; remove it when attaching to a process.",
+                  },
+                ],
+              ),
+            );
           if (
             (options.script === undefined) ===
             (options.scriptFile === undefined)

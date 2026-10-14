@@ -86,6 +86,7 @@ const captureFor = (scenario: BrowserScenario): BrowserScenarioCapture => {
       secret_references: scenario.secrets.map(({ secret_id: id }) => id),
       network_content: scenario.capture.network,
       event_families: scenario.capture.events,
+      limits: scenario.capture.limits,
     },
     duration_ms: 2,
     steps: [
@@ -94,7 +95,16 @@ const captureFor = (scenario: BrowserScenario): BrowserScenarioCapture => {
         step(index + 1, action.step_id, action.action),
       ),
     ],
-    events: { retained: 0, dropped: 0, items: [] },
+    events: {
+      retained: 0,
+      dropped: 0,
+      items: [],
+      omissions: {
+        by_kind: [],
+        network_transactions: [],
+        network_transaction_range: null,
+      },
+    },
     completeness: {
       status: "complete",
       equality_eligible: true,

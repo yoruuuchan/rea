@@ -311,6 +311,25 @@ describe("setup plan application", () => {
     expect(result.remediation).toBeUndefined();
   });
 
+  it("records an installed Hopper when opening the app needs manual recovery", async () => {
+    const host = new FakeSetupHost("darwin");
+    host.installHopper = () =>
+      Promise.resolve({
+        status: "installed",
+        launcherPath: "/Applications/Hopper.app/Contents/MacOS/hopper",
+        warning:
+          "Hopper was installed, but macOS could not open it. Open it manually.",
+      });
+
+    const result = await runSetup(options(true, true), host);
+
+    expect(result).toMatchObject({
+      status: "needs_human",
+      appliedActions: ["installed_hopper"],
+      remediation: expect.stringContaining("Open it manually"),
+    });
+  });
+
   it("reuses existing Hopper without selecting every detected client", async () => {
     const host = new FakeSetupHost();
     host.hopper = "/Applications/Hopper";

@@ -172,8 +172,8 @@ const flattenRootObjectUnion = (
       variants.set(name, known);
     }
   const required = sharedRequiredProperties(branches);
-  // A field unique to a group still needs that group's required partners.
-  // Counting properties alone would let optional fields pad an incomplete pair.
+  // A coarse property minimum rejects underspecified objects. Partner fields
+  // and exact group membership remain enforced by the canonical runtime parser.
   const fewestRequired = Math.min(
     ...branches.map((branch) => requiredProperties(branch).length),
   );

@@ -1,6 +1,28 @@
 import { expect, it } from "vitest";
 
 import { analyzeJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
+import { indexJavaScriptBindingsSteps } from "./javascriptSemanticAnalysis.js";
+import { completeSemanticSteps } from "./javascriptSemanticTraversal.js";
+import { parseJavaScriptSource } from "./javascriptSourceParser.js";
+
+it("keeps wrapper module aliases distinct from global-object module properties", () => {
+  const parsed = parseJavaScriptSource(
+    `
+    const wrapper = module;
+    Object.defineProperty(wrapper, "exports", { value: exports });
+    Object.defineProperty(globalThis.module, "exports", { value: exports });
+  `,
+    "app.cjs",
+  );
+  if (parsed === null) throw new Error("Expected parsed source");
+  const state = completeSemanticSteps(
+    indexJavaScriptBindingsSteps(parsed.program),
+  );
+  expect(state.ambientWriteEffects.map(({ path }) => path)).toEqual([
+    ["commonjs-module", "exports"],
+    ["global", "module", "exports"],
+  ]);
+});
 
 it.each([
   {

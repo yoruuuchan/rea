@@ -25,19 +25,24 @@ it("canonicalizes selected Windows variables without inheriting ambient values",
   expect(Object.isFrozen(snapshot)).toBe(true);
 });
 
-it("uses Node's first lexicographic Windows key even when it is undefined", () => {
-  expect(
-    snapshotEnvironment(
-      {
-        path: "lower",
-        Path: "mixed",
-        PATH: "upper",
-        ComSpec: "mixed-cmd",
-        COMSPEC: "upper-cmd",
-        Temp: "mixed-temp",
-        TEMP: undefined,
-      },
-      "win32",
-    ),
-  ).toEqual({ PATH: "upper", COMSPEC: "upper-cmd", TEMP: undefined });
+it("keeps the last caller value for Windows aliases, including undefined", () => {
+  const snapshot = snapshotEnvironment(
+    {
+      PATH: "upper",
+      path: "lower",
+      COMSPEC: "upper-cmd",
+      ComSpec: "mixed-cmd",
+      TEMP: "ambient-temp",
+      temp: undefined,
+    },
+    "win32",
+  );
+
+  expect(snapshot).toEqual({
+    COMSPEC: "mixed-cmd",
+    PATH: "lower",
+    TEMP: undefined,
+  });
+  expect(Object.keys(snapshot)).toEqual(["COMSPEC", "PATH", "TEMP"]);
+  expect(Object.isFrozen(snapshot)).toBe(true);
 });

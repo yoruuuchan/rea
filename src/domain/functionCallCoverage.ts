@@ -78,16 +78,23 @@ export const isCallerOnlyIncompleteCoverage = (
   );
 };
 
-/** Explain why two resolved call sets cannot establish call-set equality. */
-export const functionCallCoverageLimitations = (
+export interface FunctionCallCoverageAssessment {
+  /** Reasons the observed call sets cannot establish equality. */
+  readonly blockers: readonly string[];
+  /** Provider caveats that remain relevant even with complete coverage. */
+  readonly diagnostics: readonly string[];
+}
+
+/** Keep observed-set blockers separate from descriptive provider caveats. */
+export const assessFunctionCallCoverage = (
   coverage: RelationshipCoverage | null,
   dossier: Pick<FunctionDossier, "unresolved_calls">,
-): string[] => {
-  return uniqueSorted([
+): FunctionCallCoverageAssessment => ({
+  blockers: uniqueSorted([
     ...relationshipCoverageLimitations(coverage),
-    ...(coverage?.status === "complete" ? [] : (coverage?.diagnostics ?? [])),
     ...(dossier.unresolved_calls ?? []).map(
       ({ address, reason }) => `Unresolved call at ${address}: ${reason}`,
     ),
-  ]);
-};
+  ]),
+  diagnostics: uniqueSorted(coverage?.diagnostics ?? []),
+});

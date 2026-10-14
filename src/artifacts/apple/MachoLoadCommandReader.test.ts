@@ -460,12 +460,26 @@ describe("Mach-O load command reader inputs", () => {
       "i386",
     );
     // A Java class file shares the FAT magic; version fields are not a slice count.
-    const javaClasses = [javaClassFile(), javaClassFile(4000)];
-    expect(javaClasses.map(({ length }) => length)).toEqual([57, 4060]);
+    const javaClasses = [
+      javaClassFile(),
+      javaClassFile(4000),
+      javaClassFile(4000, true),
+    ];
     for (const javaClass of javaClasses) {
       expect(hasMachoMagic(javaClass)).toBe(true);
       expect(await read(javaClass)).toEqual({ status: "not-mach-o" });
     }
+    const malformedFat = Buffer.alloc(28);
+    malformedFat.writeUInt32BE(0xcafebabe, 0);
+    malformedFat.writeUInt32BE(1, 4);
+    malformedFat.writeUInt32BE(0x0100000c, 8);
+    malformedFat.writeUInt32BE(4096, 16);
+    malformedFat.writeUInt32BE(32, 20);
+    malformedFat.writeUInt32BE(12, 24);
+    expect(await read(malformedFat)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("slice range extends beyond the file"),
+    });
     expect(await read(new TextEncoder().encode("#!/bin/sh\n"))).toEqual({
       status: "not-mach-o",
     });
@@ -476,6 +490,35 @@ describe("Mach-O load command reader inputs", () => {
     expect(
       await read(Uint8Array.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00])),
     ).toEqual({ status: "malformed", reason: "Mach-O header is truncated" });
+  });
+
+  it("keeps oversized CAFEBABE identity unknown when class payload is sparse", async () => {
+    const classPrefix = Buffer.from(javaClassFile(4000, true));
+    const payloadBytes = MAX_LOAD_COMMAND_BYTES + 1;
+    const attributeHeader = Buffer.alloc(6);
+    attributeHeader.writeUInt16BE(5, 0);
+    attributeHeader.writeUInt32BE(payloadBytes, 2);
+    classPrefix.writeUInt16BE(1, classPrefix.length - 2);
+    const prefix = Buffer.concat([classPrefix, attributeHeader]);
+    const size = prefix.length + payloadBytes;
+    const sparseReadAt = async (offset: number, length: number) => {
+      const result = Buffer.alloc(Math.min(length, size - offset));
+      if (offset < prefix.length)
+        prefix.copy(
+          result,
+          0,
+          offset,
+          Math.min(prefix.length, offset + length),
+        );
+      return result;
+    };
+
+    expect(await readMachoImage(sparseReadAt, size)).toEqual({
+      status: "unsupported",
+      reason: expect.stringContaining(
+        "class identity scan exceeds the 16 MiB limit",
+      ),
+    });
   });
 });
 

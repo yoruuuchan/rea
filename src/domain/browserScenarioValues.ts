@@ -6,6 +6,10 @@ import { IDENTIFIER_PATTERN } from "./stringPatterns.js";
 import { localPathStringSchema } from "./localPath.js";
 import { browserNetworkContentSelectionSchema } from "./browserNetworkEvidence.js";
 import { browserScenarioEventFamilySchema } from "./browserScenarioCaptureValues.js";
+import {
+  browserScenarioCaptureLimitsSchema,
+  DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
+} from "./browserScenarioCaptureLimits.js";
 
 import {
   browserEndpointSchema,
@@ -292,6 +296,9 @@ export const browserScenarioCaptureSchema = z
     at_end: z.array(snapshotKindSchema).default(["url"]),
     events: z.array(browserScenarioEventFamilySchema).default([]),
     network: browserNetworkContentSelectionSchema,
+    limits: browserScenarioCaptureLimitsSchema.default(
+      DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
+    ),
   })
   .default({
     after_each_step: [],
@@ -302,6 +309,7 @@ export const browserScenarioCaptureSchema = z
       response_body: false,
       header_values: false,
     },
+    limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
   })
   .describe(
     "Optional retained artifacts and event families. Defaults to only a final sanitized URL; request screenshots, DOM, accessibility, history, storage, and event capture explicitly.",

@@ -10,6 +10,7 @@ import {
   compactPresentationForMcpInputSchemaProfile,
   parseMcpInputSchemaProfile,
 } from "./config/mcpInputSchemaProfile.js";
+import { parseMcpOutputSchemaProfile } from "./config/mcpOutputSchemaProfile.js";
 import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
 import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
 import { err, ok } from "./domain/result.js";
@@ -492,13 +493,17 @@ const targetFreeEnvironment = (
 const catalogIdentityForEnvironment = (
   environment: Readonly<Record<string, string | undefined>>,
 ): ReturnType<typeof createCatalogIdentity> => {
-  const parsed = parseMcpInputSchemaProfile(
+  const inputProfile = parseMcpInputSchemaProfile(
     environment.REA_MCP_INPUT_SCHEMA_PROFILE,
+  );
+  const outputProfile = parseMcpOutputSchemaProfile(
+    environment.REA_MCP_OUTPUT_SCHEMA_PROFILE,
   );
   return createCatalogIdentity(
     compactPresentationForMcpInputSchemaProfile(
-      parsed.ok ? parsed.value : undefined,
+      inputProfile.ok ? inputProfile.value : undefined,
     ),
+    outputProfile.ok ? (outputProfile.value ?? "full") : "full",
   );
 };
 

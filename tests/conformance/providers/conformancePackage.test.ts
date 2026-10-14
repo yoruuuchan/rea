@@ -5,6 +5,7 @@ import {
   parseConformancePackage,
   type ConformancePackageInput,
 } from "../../../src/domain/conformancePackage.js";
+import { createEvidence } from "../../../src/domain/evidence.js";
 
 const validPackageInput: ConformancePackageInput = {
   name: "test-fixture",
@@ -204,23 +205,19 @@ describe("conformance package construction", () => {
         scenario_id,
         bundle: null,
         required_dimensions: [],
-        envelopes: Array.from({ length: 101 }, (_, index) => ({
-          evidence_id: `ev_${String(index).padStart(64, "0")}`,
-          analysis_profile: null,
-          subject: null,
-          provider: { id: "fixture", name: "Fixture", version: null },
-          predicate_type: "observation",
-          operation: "inspect",
-          parameters: {},
-          raw_result: null,
-          normalized_result: null,
-          confidence: "observed" as const,
-          authority: "shipped-artifact" as const,
-          environment: null,
-          limitations: [],
-          locations: [],
-          evidence_links: [],
-        })),
+        envelopes: Array.from({ length: 101 }, (_, index) =>
+          createEvidence(
+            undefined,
+            { id: "fixture", name: "Fixture", version: null },
+            {
+              operation: "inspect",
+              parameters: { index },
+              result: { index },
+              confidence: "observed",
+              authority: "shipped-artifact",
+            },
+          ),
+        ),
       })),
       verifier_contracts: scenarioIds.map((scenario_id) => ({
         scenario_id,

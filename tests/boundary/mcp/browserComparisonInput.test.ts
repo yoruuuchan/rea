@@ -130,7 +130,7 @@ describe("browser comparison input boundary", () => {
       expect(advertised.inputSchema.description).toContain(
         "before + after; before_scenario + after_scenario + [normalization]",
       );
-      const mixedGroups = [
+      const runtimeOnlyInvalid = [
         { ...passive, ...scenario },
         { ...passive, normalization: { rules: [] } },
         {
@@ -153,7 +153,7 @@ describe("browser comparison input boundary", () => {
           advertisedValid: false,
           runtimeValid: false,
         })),
-        ...mixedGroups.map((input) => ({
+        ...runtimeOnlyInvalid.map((input) => ({
           input,
           advertisedValid: true,
           runtimeValid: false,

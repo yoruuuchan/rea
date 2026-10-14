@@ -279,6 +279,74 @@ const completenessSectionSchema = z.enum([
   "popups",
   "websockets",
 ]);
+
+export const browserScenarioEventKindSchema = z.enum([
+  "console",
+  "page-error",
+  "request",
+  "response",
+  "request-failed",
+  "request-finished",
+  "request-unfinished",
+  "network-content",
+  "websocket-opened",
+  "websocket-closed",
+  "websocket-frame-sent",
+  "websocket-frame-received",
+  "frame-attached",
+  "frame-detached",
+  "frame-navigated",
+  "worker-created",
+  "worker-closed",
+  "popup-opened",
+  "popup-closed",
+  "download-cancelled",
+]);
+export const browserScenarioEventBudgetReasonSchema = z.enum([
+  "max-events",
+  "max-event-allocation-bytes",
+  "max-total-event-allocation-bytes",
+  "max-network-transactions",
+  "max-network-metadata-allocation-bytes",
+  "max-listener-owners",
+]);
+export const browserScenarioEventOmissionsSchema = z.strictObject({
+  by_kind: z.array(
+    z.strictObject({
+      kind: browserScenarioEventKindSchema,
+      count: z.number().int().positive(),
+      reasons: z.array(browserScenarioEventBudgetReasonSchema).min(1),
+    }),
+  ),
+  network_transactions: z.array(
+    z.strictObject({
+      transaction_id: z.string().min(1),
+      omitted_kinds: z.array(browserScenarioEventKindSchema).min(1),
+      reasons: z.array(browserScenarioEventBudgetReasonSchema).min(1),
+    }),
+  ),
+  network_transaction_range: z
+    .strictObject({
+      first_transaction_id: z.string().min(1),
+      last_transaction_id: z.string().min(1),
+      count: z.number().int().positive(),
+      reason: z.literal("max-network-transactions"),
+    })
+    .nullable(),
+});
+export type BrowserScenarioEventOmissions = z.infer<
+  typeof browserScenarioEventOmissionsSchema
+>;
+export type BrowserScenarioEventBudgetReason = z.infer<
+  typeof browserScenarioEventBudgetReasonSchema
+>;
+export type BrowserScenarioEventAdmission =
+  | { readonly status: "retained"; readonly sequence: number }
+  | {
+      readonly status: "omitted";
+      readonly sequence: number;
+      readonly reason: BrowserScenarioEventBudgetReason;
+    };
 export type BrowserScenarioCompletenessSection = z.infer<
   typeof completenessSectionSchema
 >;

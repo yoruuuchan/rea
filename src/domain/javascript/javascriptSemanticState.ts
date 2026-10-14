@@ -103,7 +103,7 @@ export interface JavaScriptSemanticAnalysisState {
   readonly conditionallySkippedExpressions: WeakSet<t.Node>;
   /** Unbound identifier writes retain their source sites for capture ordering. */
   readonly ambientBindingWrites: Map<string, t.Node[]>;
-  /** Source-local writes, tagged by global object or import.meta identity. */
+  /** Source-local writes, tagged by global, import.meta or CJS module identity. */
   readonly ambientWrites: SemanticPropertyPathCoverage;
   /** Source sites distinguish replacement before an ambient identity capture from later writes. */
   readonly ambientWriteEffects: JavaScriptSemanticMemberEffect[];

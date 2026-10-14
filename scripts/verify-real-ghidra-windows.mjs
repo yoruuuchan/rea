@@ -27,6 +27,7 @@ import {
 } from "../dist/ghidra/GhidraSessionValues.js";
 import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
 import { completeVerifierRun, createVerifierRun } from "./lib/verifier-run.mjs";
+import { resolveGhidraVerifierTimeouts } from "./lib/ghidra-verifier-timeouts.mjs";
 import { verifyGhidraCompactReferences } from "./lib/real-ghidra-compact-references.mjs";
 import { verifyGhidraFileOffsets } from "./lib/real-ghidra-file-offsets.mjs";
 import { verifyWindowsGhidraByteSearch } from "./lib/ghidra-windows-byte-search.mjs";
@@ -47,6 +48,7 @@ if (
 )
   throw new Error("Windows Ghidra must not advertise database mutation");
 const installDir = process.env.GHIDRA_INSTALL_DIR;
+const { clientOptions } = resolveGhidraVerifierTimeouts(process.env);
 if (installDir === undefined || !isAbsolute(installDir))
   throw new Error(
     "Set GHIDRA_INSTALL_DIR to the absolute root of Ghidra 12.1.4.",
@@ -116,6 +118,7 @@ const client = new GhidraClient({
   transport: "authenticated-loopback-tcp",
   providerVersion: SUPPORTED_GHIDRA_VERSION,
   profileDigest: profile.value.profile.digest,
+  ...clientOptions,
 });
 
 let coordinates;

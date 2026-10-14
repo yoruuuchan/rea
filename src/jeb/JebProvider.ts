@@ -1,9 +1,11 @@
 import { z } from "zod";
-import type { JebAnalysisPort } from "../application/jeb/JebAnalysisPort.js";
+import type {
+  JebAnalysisPort,
+  JebAnalysisAvailability,
+} from "../application/jeb/JebAnalysisPort.js";
 import type {
   AnalysisExecution,
   ExecutionOptions,
-  ProviderAvailability,
   ProviderIdentity,
 } from "../application/AnalysisProvider.js";
 import { createAnalysisExecution } from "../application/AnalysisProvider.js";
@@ -23,6 +25,7 @@ import {
 } from "./JebMcpEndpoint.js";
 import {
   createStreamableHttpJebMcpConnection,
+  JEB_ENGINE_TOOLS,
   type JebMcpConnection,
   type JebMcpConnectionFactory,
 } from "./JebMcpConnection.js";
@@ -116,13 +119,17 @@ export class JebProvider implements JebAnalysisPort {
 
   async inspectAvailability(
     signal?: AbortSignal,
-  ): Promise<ProviderAvailability> {
+  ): Promise<JebAnalysisAvailability> {
     try {
+      const tools = new Set(await this.#connection.listTools(signal));
       await this.#refreshClientInformation(signal);
       return {
         status: "available",
         code: null,
         reason: null,
+        supportedOperations: (
+          Object.keys(JEB_ENGINE_TOOLS) as JebOperation[]
+        ).filter((operation) => tools.has(JEB_ENGINE_TOOLS[operation])),
         diagnostics: {
           endpoint: this.#endpoint.toString(),
           engine_version: this.#identity.version,

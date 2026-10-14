@@ -581,6 +581,7 @@ export const createServer = (
         adbDevice.inspectAvailability(signal),
       apktoolAnalysisAvailability: (signal) =>
         apktool.inspectAvailability(signal),
+      jebAnalysisAvailability: (signal) => jeb.inspectAvailability(signal),
       startedAt,
     });
   }

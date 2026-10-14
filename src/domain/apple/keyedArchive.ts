@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AnalysisInputError } from "../analysisErrorCore.js";
 import { jsonValueSchema, type JsonValue } from "../jsonValue.js";
+import { localPathStringSchema } from "../localPath.js";
 
 /**
  * The selected file is intact but is another kind of file, so another tool
@@ -20,7 +21,7 @@ export class KeyedArchiveKindError extends TypeError {
 
 /** Select one archive within the active bundle and optionally one named root. */
 export const keyedArchiveInputSchema = z.strictObject({
-  path: z.string().min(1).default("."),
+  path: localPathStringSchema.default("."),
   root: z.string().optional(),
   offset: z.number().int().min(0).default(0),
   limit: z.number().int().min(1).max(20_000).default(20_000),

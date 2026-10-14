@@ -7,8 +7,8 @@ import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import type { PromptCompletionKind } from "../contracts/promptContracts.js";
 import { currentMcpRequestSignal } from "./EvidenceMcpServer.js";
-import { artifactInventoryResultSchema } from "../domain/artifactGraph.js";
-import { artifactInspectionResultSchema } from "../domain/artifactInspection.js";
+import { parseArtifactInventoryEvidence } from "../domain/artifactInventoryEvidence.js";
+import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { parseProcessCapture } from "../domain/process/processCaptureParsing.js";
 
 const documentListSchema = z.array(z.string().min(1));
@@ -180,24 +180,32 @@ const evidenceValues = (
   if (kind === "evidence") return [evidence.evidence_id];
   if (kind === "capture")
     return isProcessCaptureEvidence(evidence) ? [evidence.evidence_id] : [];
-  const inventoryResult =
-    evidence.operation === "inventory_artifact"
-      ? evidence.normalized_result
-      : evidence.operation === "inspect_artifact"
-        ? (() => {
-            const inspection = artifactInspectionResultSchema.safeParse(
-              evidence.normalized_result,
-            );
-            return inspection.success
-              ? inspection.data.substeps[0]?.evidence.normalized_result
-              : undefined;
-          })()
-        : undefined;
-  if (inventoryResult === undefined) return [];
-  const inventory = artifactInventoryResultSchema.safeParse(inventoryResult);
-  if (!inventory.success) return [];
-  if (kind === "manifest") return [inventory.data.manifest.manifest_id];
-  return inventory.data.occurrences.map(({ occurrence_id: id }) => id);
+  if (
+    evidence.operation === "inventory_artifact" ||
+    evidence.operation === "inspect_artifact"
+  )
+    return artifactInventoryValues(kind, evidence);
+  return [];
+};
+
+const artifactInventoryValues = (
+  kind: "manifest" | "occurrence",
+  evidence: unknown,
+): readonly string[] => {
+  try {
+    const { inventory } = parseArtifactInventoryEvidence(evidence);
+    return kind === "manifest"
+      ? [inventory.manifest.manifest_id]
+      : inventory.occurrences.map(({ occurrence_id: id }) => id);
+  } catch (cause: unknown) {
+    if (
+      cause instanceof TypeError ||
+      cause instanceof z.ZodError ||
+      cause instanceof EvidenceIntegrityError
+    )
+      return [];
+    throw cause;
+  }
 };
 
 const isProcessCaptureEvidence = (evidence: LedgerEvidence): boolean => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { localPathStringSchema } from "../domain/localPath.js";
 import type { ToolContract } from "./toolContractTypes.js";
 import { evidenceResultOf } from "./toolOutputSchemaPrimitives.js";
 import { toolContractMetadata } from "./toolEffects.js";
@@ -122,7 +123,7 @@ export const FRIDA_TOOL_CONTRACTS = [
         mode: z.enum(["attach", "spawn"]),
         ...deviceSelector.shape,
         pid: z.number().int().positive().optional(),
-        program: z.string().min(1).optional(),
+        program: localPathStringSchema.optional(),
         argv: z.array(z.string()).optional(),
       })
       .refine(
@@ -156,7 +157,7 @@ export const FRIDA_TOOL_CONTRACTS = [
         session_id: sessionId,
         source_kind: z.enum(["inline", "file"]),
         source: z.string().optional(),
-        path: z.string().min(1).optional(),
+        path: localPathStringSchema.optional(),
       })
       .refine(
         (value) =>
@@ -271,11 +272,11 @@ export const FRIDA_TOOL_CONTRACTS = [
         mode: z.enum(["attach", "spawn"]),
         ...deviceSelector.shape,
         pid: z.number().int().positive().optional(),
-        program: z.string().min(1).optional(),
+        program: localPathStringSchema.optional(),
         argv: z.array(z.string()).optional(),
         source_kind: z.enum(["inline", "file"]),
         source: z.string().optional(),
-        path: z.string().min(1).optional(),
+        path: localPathStringSchema.optional(),
         duration_ms: z.number().int().min(0).max(60_000).default(1_000),
       })
       .refine(

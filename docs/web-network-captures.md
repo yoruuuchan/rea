@@ -117,7 +117,11 @@ gRPC message bytes. Missing members remain null, distinct from empty bodies.
 See Telerik's [SAZ format reference](https://www.telerik.com/fiddler/fiddler-everywhere/documentation/knowledge-base/fiddler-archives).
 
 The existing ZIP reader verifies read members; expanded archive contents are
-limited to 32 MiB in addition to the input/output budgets below. Encrypted
+limited to 32 MiB in addition to the input/output budgets below. Exceeding this
+expanded-byte budget returns `invalid_request` / `invalid_input` through both
+CLI and MCP, with an `out_of_range` issue at
+`capture_path` and `maximum_expanded_capture_bytes`. Selecting records does not
+bypass the complete-archive admission check or return partial Evidence. Encrypted
 archives and unrecognized raw session members are unsupported. SAZ requires an
 enforced decoder memory bound: Node's fixed heap, or the Windows Job Object
 commit limit. Bun on hosts without that Job Object limit returns capability

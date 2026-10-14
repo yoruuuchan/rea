@@ -274,6 +274,7 @@ describe("CommonJS dependency links", () => {
       const bound = (require("bound") as unknown);
       const { left, right } = require("destructured");
       module.exports = require("forwarded");
+      exports = module.exports;
       exports.member = require("member").value;
       exports.first = exports.second = require("chained");
     `);

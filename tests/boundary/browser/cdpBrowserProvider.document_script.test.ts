@@ -316,6 +316,13 @@ describe("CdpBrowserProvider: WebMCP discovery and completeness", () => {
       expect(serialized).not.toContain("private-tool-secret");
       const methods = browser.commands.map(({ method }) => method);
       expect(methods).toContain("WebMCP.enable");
+      expect(methods).toContain("WebMCP.disable");
+      expect(methods.indexOf("WebMCP.enable")).toBeLessThan(
+        methods.indexOf("WebMCP.disable"),
+      );
+      expect(methods.indexOf("WebMCP.disable")).toBeLessThan(
+        methods.indexOf("Target.detachFromTarget"),
+      );
       expect(methods).not.toContain("WebMCP.invokeTool");
       expect(methods).not.toContain("Runtime.evaluate");
     },

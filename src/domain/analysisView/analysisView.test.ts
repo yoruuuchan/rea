@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { functionDossierSchema } from "../hopperValues.js";
 import { ghidraFunctionDossier } from "../ghidraValues.fixture.js";
 import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "../../contracts/javascript/javascriptRuntimeReconciliationExample.js";
+import { ARTIFACT_COMPARISON_EXAMPLE } from "../../contracts/artifactComparisonExample.js";
 import {
   analysisViewBindJavaScriptGraphs,
   analysisViewJavaScriptAnalysis,
@@ -25,6 +26,7 @@ import {
   pageViewCoverage,
 } from "./analysisViewCoverage.js";
 import { sourceMapReference } from "../javascript/javascriptApplicationGraph.fixture.js";
+import { createArtifactInspection } from "../artifactInspection.js";
 import { javascriptModulePath } from "./javascriptApplicationView.js";
 import {
   inspectAnalysisViewInputSchema,
@@ -160,6 +162,28 @@ it("preserves native API limitations and unavailable residual unknowns", () => {
   expect(available.value.limitations).toEqual(
     expect.arrayContaining(original.native_api.limitations),
   );
+});
+
+it("rejects artifact summary views when inspection substep coverage count disagrees", () => {
+  const source = ARTIFACT_COMPARISON_EXAMPLE.left;
+  const inspection = createArtifactInspection(source);
+  const parent: AnalysisViewParent = {
+    evidenceId: `ev_${"a".repeat(64)}`,
+    operation: "inspect_artifact",
+    normalizedResult: {
+      ...inspection,
+      coverage: {
+        ...inspection.coverage,
+        substeps_completed: inspection.substeps.length + 1,
+      },
+    },
+    subject: source.subject,
+    limitations: [],
+  };
+  expect(projectAnalysisView(parent, { kind: "summary" })).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisInputError" },
+  });
 });
 
 it("pages every retained dossier collection and the native API record", () => {

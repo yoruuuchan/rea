@@ -4,32 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Cli } from "incur";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCli } from "../../../src/cli.js";
 import { serveCli } from "./cliServeHarness.js";
 
 const SESSION_ID = "27d3e3f1-f1e5-49ae-91ec-95af1f343a5a";
-const registeredCommands = Cli.toCommands as WeakMap<
-  object,
-  Map<string, unknown>
->;
-
-const cutterCommand = async (
-  environment: Record<string, string | undefined>,
-  args: {
-    readonly sessionId: string;
-    readonly expectedGeneration: number;
-    readonly command: string;
-  },
-): Promise<unknown> => {
-  const cli = createCli(environment);
-  const entry = registeredCommands.get(cli)?.get("cutter-command") ?? {};
-  const run = Reflect.get(entry, "run") as (...args: unknown[]) => unknown;
-  return Reflect.apply(run, undefined, [{ args, options: { json: false } }]);
-};
-
 const listen = async (
   server: ReturnType<typeof createServer>,
 ): Promise<number> => {
@@ -79,11 +58,26 @@ describe("Cutter CLI commands", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("invalid_request");
   });
+});
+
+describe("Cutter CLI command output flags", () => {
+  let directory: string | undefined;
+  let server: ReturnType<typeof createServer> | undefined;
+
+  afterEach(async () => {
+    if (server !== undefined)
+      await new Promise<void>((resolve) => server?.close(() => resolve()));
+    if (directory !== undefined)
+      await rm(directory, { recursive: true, force: true });
+    directory = undefined;
+    server = undefined;
+  });
 
   it("returns Evidence when the selected Cutter session completes a command", async () => {
     directory = await mkdtemp(join(tmpdir(), "rea-cutter-cli-test-"));
     const token = "synthetic-cutter-cli-token-for-test";
     let nextConnectionOrdinal = 0;
+    const commandJsonModes: boolean[] = [];
     server = createServer((connection) => {
       const ordinal = ++nextConnectionOrdinal;
       connection.setEncoding("utf8");
@@ -109,6 +103,8 @@ describe("Cutter CLI commands", () => {
         }
         const requestBytes = String(frame.request);
         const request = JSON.parse(requestBytes) as Record<string, unknown>;
+        if (request.kind === "command")
+          commandJsonModes.push(request.json === true);
         if (
           frame.proof !==
           createHmac("sha256", token)
@@ -172,12 +168,37 @@ describe("Cutter CLI commands", () => {
       { mode: 0o600 },
     );
 
-    const result = await cutterCommand(
+    const result = await serveCli(
+      ["cutter-command", SESSION_ID, "0", "pdi", "--json-output"],
       { REA_CUTTER_BRIDGE_DIR: directory },
-      { sessionId: SESSION_ID, expectedGeneration: 0, command: "pdi" },
     );
 
-    expect(JSON.stringify(result)).toContain("rea.cutter.command-observation");
-    expect(JSON.stringify(result)).toContain('"answer":42');
+    expect(result.exitCode).toBe(0);
+    expect(commandJsonModes).toEqual([true]);
+    expect(result.stdout).toContain("answer: 42");
+
+    const formatted = await serveCli(
+      ["cutter-command", SESSION_ID, "0", "pdi", "--json"],
+      { REA_CUTTER_BRIDGE_DIR: directory },
+    );
+    expect(formatted.exitCode).toBe(0);
+    expect(commandJsonModes).toEqual([true, false]);
+    expect(() => JSON.parse(formatted.stdout)).not.toThrow();
+
+    for (const [flags, expected] of [
+      [["--json=true"], true],
+      [["--json=false"], false],
+      [["--json=true", "--json-output=false"], false],
+      [["--json=false", "--json-output=true"], true],
+      [["--json-output=false", "--json=true"], false],
+      [["--json-output=true", "--json=false"], true],
+    ] as const) {
+      const compatible = await serveCli(
+        ["cutter-command", SESSION_ID, "0", "pdi", ...flags],
+        { REA_CUTTER_BRIDGE_DIR: directory },
+      );
+      expect(compatible.exitCode).toBe(0);
+      expect(commandJsonModes.at(-1)).toBe(expected);
+    }
   });
 });

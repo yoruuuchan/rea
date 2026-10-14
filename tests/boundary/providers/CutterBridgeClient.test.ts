@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -1124,16 +1125,12 @@ describe("CutterBridgeClient: scenario group 7", () => {
   });
 });
 
-describe("CutterBridgeClient: scenario group 8", () => {
+describe("CutterBridgeClient: conservative platform checks", () => {
   let directory: string | undefined;
-  let server: ReturnType<typeof createServer> | undefined;
 
   afterEach(async () => {
-    if (server !== undefined)
-      await new Promise<void>((resolve) => server?.close(() => resolve()));
     if (directory !== undefined)
       await rm(directory, { recursive: true, force: true });
-    server = undefined;
     directory = undefined;
   });
 
@@ -1196,6 +1193,111 @@ describe("CutterBridgeClient: scenario group 8", () => {
     ).resolves.toMatchObject({
       bridge_directory: join(homedir(), ".cache", "rea", "cutter-bridge"),
     });
+    await expect(
+      new CutterBridgeClient(
+        { REA_CUTTER_BRIDGE_DIR: "" },
+        { platform: "darwin" },
+      ).listSessions(),
+    ).resolves.toMatchObject({
+      bridge_directory: join(homedir(), ".cache", "rea", "cutter-bridge"),
+    });
+  });
+});
+
+describe("CutterBridgeClient: bridge paths and native descriptor reads", () => {
+  let directory: string | undefined;
+  let server: ReturnType<typeof createServer> | undefined;
+
+  afterEach(async () => {
+    if (server !== undefined)
+      await new Promise<void>((resolve) => server?.close(() => resolve()));
+    if (directory !== undefined)
+      await rm(directory, { recursive: true, force: true });
+    server = undefined;
+    directory = undefined;
+  });
+
+  it("uses the selected caller home for tilde and default bridge discovery", async () => {
+    directory = await mkdtemp(join(tmpdir(), "rea-cutter-selected-home-"));
+    const selectedHome = join(directory, "selected-home");
+    const tildeDirectory = join(selectedHome, "bridge");
+    const defaultDirectory = join(
+      selectedHome,
+      ".cache",
+      "rea",
+      "cutter-bridge",
+    );
+    await mkdir(tildeDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(defaultDirectory, { recursive: true, mode: 0o700 });
+    const sessionId = "27d3e3f1-f1e5-49ae-91ec-95af1f343a5a";
+    const token = "synthetic-cutter-bridge-token-for-tilde-test";
+    server = authenticatedServer(token, sessionId, (request, respond) => {
+      respond({
+        ok: true,
+        session_id: request.session_id,
+        current_file: "/fixture/sample",
+        document_generation: 3,
+        cutter_version: "Cutter fixture version",
+        identity_status: "partial",
+      });
+    });
+    const port = await listen(server);
+    await writeDescriptor(tildeDirectory, sessionId, port, token, {
+      currentFile: "/fixture/sample",
+      documentGeneration: 3,
+    });
+    await writeDescriptor(defaultDirectory, sessionId, port, token, {
+      currentFile: "/fixture/sample",
+      documentGeneration: 3,
+    });
+
+    const tildeResult = await createClient({
+      HOME: selectedHome,
+      REA_CUTTER_BRIDGE_DIR: "~/bridge",
+    }).listSessions();
+
+    expect(tildeResult).toMatchObject({
+      bridge_directory: tildeDirectory,
+      discovery_status: "sessions_found",
+      sessions: [
+        {
+          session_id: sessionId,
+          document_generation: 3,
+          current_file: "/fixture/sample",
+        },
+      ],
+    });
+
+    const defaultResult = await createClient({
+      HOME: selectedHome,
+    }).listSessions();
+    expect(defaultResult).toMatchObject({
+      bridge_directory: defaultDirectory,
+      discovery_status: "sessions_found",
+      sessions: [{ session_id: sessionId }],
+    });
+  });
+
+  it("prefers Windows USERPROFILE over HOME when expanding a bridge path", async () => {
+    const selectedHome = join(tmpdir(), "rea-cutter-userprofile-home");
+    const ambientHome = join(tmpdir(), "rea-cutter-ambient-home");
+    const result = await new CutterBridgeClient(
+      {
+        HOME: ambientHome,
+        USERPROFILE: selectedHome,
+        REA_CUTTER_BRIDGE_DIR: "~\\bridge",
+      },
+      {
+        platform: "win32",
+        windowsPrivateReader: {
+          verifyDirectory: () => true,
+          readDescriptor: () => Buffer.from("{}"),
+        },
+      },
+    ).listSessions();
+
+    expect(result.bridge_directory).toBe(join(selectedHome, "bridge"));
+    expect(result.discovery_status).toBe("no_live_bridge_found");
   });
 
   it("uses the packaged Windows authority for descriptor verification and reads", async () => {

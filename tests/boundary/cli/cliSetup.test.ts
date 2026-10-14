@@ -179,7 +179,10 @@ describe("TTY setup dry run", () => {
 describe("interactive setup journey", () => {
   it("shows detected and absent clients without preselecting detected clients", async () => {
     const result = await runJourney(
-      [step("Which agents should use REA?", "\u001b[B\r")],
+      [
+        step("Which agents should use REA?", "\u001b[B"),
+        step("Not detected · configuration is still available", "\r"),
+      ],
       false,
       [actions[0]],
     );
@@ -359,7 +362,14 @@ describe("interactive setup completion", () => {
         {
           cwd: process.cwd(),
           env: {
-            ...process.env,
+            ...Object.fromEntries(
+              Object.entries(process.env).filter(
+                ([key]) =>
+                  !["npm_command", "npm_config_user_agent"].includes(
+                    key.toLowerCase(),
+                  ),
+              ),
+            ),
             npm_command: npmCommand,
             npm_config_user_agent: userAgent,
             NO_COLOR: "1",
@@ -427,6 +437,7 @@ const runJourney = async (
         env: {
           ...process.env,
           HOME: isolatedHome,
+          USERPROFILE: isolatedHome,
           NO_COLOR: "1",
           TERM: "xterm-256color",
         },
@@ -464,9 +475,13 @@ const runJourney = async (
         finish(new Error(`Setup journey returned no decision:\n${output}`));
         return;
       }
-      const serialized = output
-        .slice(markerIndex + decisionMarker.length)
-        .split(/\r?\n/u, 1)[0];
+      const raw = output.slice(markerIndex + decisionMarker.length);
+      const jsonStart = raw.indexOf("{");
+      const jsonEnd = raw.lastIndexOf("}");
+      const serialized =
+        jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart
+          ? raw.slice(jsonStart, jsonEnd + 1)
+          : raw.split(/\r?\n/u, 1)[0];
       if (serialized === undefined) {
         finish(
           new Error(`Setup journey returned an empty decision:\n${output}`),

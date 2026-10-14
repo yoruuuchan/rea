@@ -319,11 +319,44 @@ redirected, which keeps large results smaller for agents and scripts; pipe
 through `jq .` for indented files. Output selection and formatting do not change
 operation status.
 
-| Status    | Meaning                                                                                                                                              |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`       | The operation completed. Its result may include partial evidence, warnings or unresolved questions.                                                  |
-| `1`       | The operation could not complete. Structured output identifies invalid input, permissions, cancellation, timeouts or another failure when available. |
-| `128 + N` | Signal `N` ended the process, where the shell or runtime preserves the conventional signal-derived status.                                           |
+For `cutter-command`, `--json-output` requests command-specific JSON from
+Cutter when available. This is separate from `--format json`, which selects the
+CLI result representation; the global `--json` flag selects that same CLI
+representation.
+
+Cutter still accepts deprecated `--json=true` and `--json=false` compatibility
+values. When both forms are present, `--json-output` takes precedence in either
+argument order. Bare `--json` retains its global meaning of selecting JSON CLI
+output formatting.
+
+| Status    | Meaning                                                                                                                                                                                                                                                                                                                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`       | The operation completed. Its result may include partial evidence, warnings or unresolved questions.                                                                                                                                                                                                                                                                                    |
+| `1`       | The operation could not complete. Structured output identifies invalid input, permissions, cancellation, timeouts or another failure when available.                                                                                                                                                                                                                                   |
+| `128 + N` | Signal-derived status. An unhandled signal may have ended the process, with the shell or runtime preserving the conventional status; a command may instead have handled the signal, waited for its operation and cleanup to settle, and assigned the same status (`130` for SIGINT, `143` for SIGTERM). In the handled case, it may also have printed a structured `cancelled` result. |
+
+A `cancelled` result does not by itself determine the exit status; it depends on
+the command's signal handling. Commands routed through the shared
+`withCommandCancellation` handler in the CLI set status `130` for SIGINT or
+`143` for SIGTERM after their operation settles. Current source registrations
+use that handler for process capture and comparison (`capture-process`,
+`compare-process-captures`), JavaScript application analysis (`analyze` when it
+selects the JavaScript lane, and `analyze-javascript-application`), selected
+browser, web and Electron commands (including `analyze-web-bundle`,
+`observe-web-execution`, `capture-browser-scenario` and
+`capture-electron-scenario`), and the platform and provider command families
+for Android/ADB, Apktool/JEB/Flutter, firmware, PCAP and signal analysis,
+WASM/EVM, Go/Rust and binary diagnostics, Frida instrumentation, the Cutter
+command, objdump, Rizin and GDB. In these paths, a returned structured
+`cancelled` result can be printed before the wrapper assigns the
+signal-derived status. This describes the current source routing; it is not a
+claim that every command or provider runtime has been independently exercised.
+
+`inspect-artifact` also returns a structured cancelled result, but its direct
+analysis cancellation path does not set a signal-derived exit status, so it
+exits `1`. Setup has its own contract: cancellation exits `0`. Treat the
+structured result and process status as separate signals when scripting
+cancellation.
 
 `setup --dry-run` returns `planned` and exits `0`; a cancelled setup also exits
 `0`. Setup returns `1` for `needs_confirmation` or `needs_human`.

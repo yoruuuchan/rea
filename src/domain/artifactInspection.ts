@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  artifactInventoryOutputSchema,
   artifactInventoryResultSchema,
   type ArtifactInventoryResult,
 } from "./artifactGraph.js";
@@ -75,7 +74,10 @@ export const artifactInspectionResultSchema = z.strictObject({
         operation: z.literal("inventory_artifact"),
         status: z.literal("completed"),
         evidence_id: evidenceIdSchema,
-        evidence: evidenceSchema,
+        evidence: evidenceSchema.safeExtend({
+          operation: z.literal("inventory_artifact"),
+          normalized_result: artifactInventoryResultSchema,
+        }),
       }),
     )
     .min(1),
@@ -86,7 +88,7 @@ export const artifactInspectionResultSchema = z.strictObject({
   next_probes: z.array(nextProbeSchema),
   coverage: z.strictObject({
     status: z.enum(["complete-within-substeps", "partial", "truncated"]),
-    substeps_completed: z.literal(1),
+    substeps_completed: z.number().int().min(1),
     observations_retained: z.number().int().min(0),
     observations_omitted: z.number().int().min(0),
     hypotheses_retained: z.number().int().min(0),
@@ -103,24 +105,6 @@ export const artifactInspectionResultSchema = z.strictObject({
 export type ArtifactInspectionResult = z.infer<
   typeof artifactInspectionResultSchema
 >;
-
-/**
- * The current producer guarantees a concrete inventory payload. Specialize
- * its output without narrowing the historical inspection/Evidence input
- * parser or applying inventory defaults inside an authenticated imported record.
- */
-export const artifactInspectionOutputSchema =
-  artifactInspectionResultSchema.safeExtend({
-    substeps: z
-      .array(
-        artifactInspectionResultSchema.shape.substeps.element.safeExtend({
-          evidence: evidenceSchema.safeExtend({
-            normalized_result: artifactInventoryOutputSchema,
-          }),
-        }),
-      )
-      .min(1),
-  });
 
 /** Project one successful inventory Evidence record into an inspection report. */
 export const createArtifactInspection = (

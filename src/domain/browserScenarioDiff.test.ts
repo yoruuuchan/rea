@@ -11,6 +11,13 @@ import {
   browserScenarioCaptureSchema,
   type BrowserScenarioCapture,
 } from "./browserScenarioCapture.js";
+import { DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS } from "./browserScenarioCaptureLimits.js";
+
+const noEventOmissions = {
+  by_kind: [],
+  network_transactions: [],
+  network_transaction_range: null,
+} as const;
 
 const networkCapture = (sourceSequence: number, receiptStep: number) => {
   const base = scenarioCapture({});
@@ -65,7 +72,12 @@ const networkCapture = (sourceSequence: number, receiptStep: number) => {
       },
       event_families: ["network"],
     },
-    events: { items: events, retained: 2, dropped: 0 },
+    events: {
+      items: events,
+      retained: 2,
+      dropped: 0,
+      omissions: noEventOmissions,
+    },
   });
 };
 
@@ -148,7 +160,7 @@ it("reports content-selection mismatch as unknown instead of a website change", 
     ).toBe(false);
 });
 
-it("reports event-family mismatch and legacy selection as unknown", () => {
+it("reports event-family selection mismatch as unknown", () => {
   const consoleOnly = scenarioCapture({});
   const withFamilies = (
     capture: BrowserScenarioCapture,
@@ -193,18 +205,6 @@ it("reports event-family mismatch and legacy selection as unknown", () => {
     ).overall_status,
   ).toBe("unchanged");
 
-  const legacy = withFamilies(consoleOnly, undefined);
-  expect(legacy.scenario.event_families).toBeUndefined();
-  for (const [before, after] of [
-    [legacy, consoleOnly],
-    [legacy, legacy],
-  ] as const)
-    expect(eventDiffs(compare(before, after))).toContainEqual(
-      expect.objectContaining({
-        status: "unknown",
-        reason: expect.stringContaining("Event family selection is unknown"),
-      }),
-    );
   expect(
     compareBrowserScenariosInputSchema.safeParse({
       before_scenario: {
@@ -217,7 +217,7 @@ it("reports event-family mismatch and legacy selection as unknown", () => {
 
   const quiet = browserScenarioCaptureSchema.parse({
     ...withFamilies(consoleOnly, []),
-    events: { retained: 0, dropped: 0, items: [] },
+    events: { retained: 0, dropped: 0, items: [], omissions: noEventOmissions },
   });
   const differentEvents = compare(quiet, widened);
   expect(differentEvents.overall_status).toBe("unknown");
@@ -283,7 +283,12 @@ const concurrentCapture = (
   ).map((event, index) => ({ ...event, sequence: index + 1 }));
   return browserScenarioCaptureSchema.parse({
     ...base,
-    events: { items: events, retained: events.length, dropped: 0 },
+    events: {
+      items: events,
+      retained: events.length,
+      dropped: 0,
+      omissions: noEventOmissions,
+    },
   });
 };
 
@@ -338,7 +343,12 @@ const redirectChainCapture = (swapLeaves = false, reverseReceipt = false) => {
     .map((event, index) => ({ ...event, sequence: index + 1 }));
   return browserScenarioCaptureSchema.parse({
     ...base,
-    events: { items: events, retained: events.length, dropped: 0 },
+    events: {
+      items: events,
+      retained: events.length,
+      dropped: 0,
+      omissions: noEventOmissions,
+    },
   });
 };
 
@@ -465,6 +475,7 @@ describe("browser scenario network comparison stability", () => {
         events: {
           retained: 2,
           dropped: 0,
+          omissions: noEventOmissions,
           items: [
             { ...consoleEvent, text },
             {
@@ -938,6 +949,7 @@ const scenarioCapture = (
         header_values: false,
       },
       event_families: ["console"],
+      limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
     },
     duration_ms: options.elapsedMs ?? 10,
     steps: [
@@ -983,6 +995,7 @@ const scenarioCapture = (
           url: null,
         },
       ],
+      omissions: noEventOmissions,
     },
     completeness,
     limitations: [],

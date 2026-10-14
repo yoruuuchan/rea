@@ -23,6 +23,7 @@ import {
   browserCaptureComparisonInputSchema,
   browserCaptureComparisonSchema,
 } from "../domain/browserCaptureComparison.js";
+import { DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS } from "../domain/browserScenarioCaptureLimits.js";
 import {
   captureWebScreenshotInputSchema,
   compareWebScreenshotsInputSchema,
@@ -85,6 +86,7 @@ const exampleScenarioCapture = () => ({
       header_values: false,
     },
     event_families: [],
+    limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
   },
   duration_ms: 10,
   steps: [
@@ -117,7 +119,16 @@ const exampleScenarioCapture = () => ({
       completeness: scenarioCompleteness,
     },
   ],
-  events: { retained: 0, dropped: 0, items: [] },
+  events: {
+    retained: 0,
+    dropped: 0,
+    items: [],
+    omissions: {
+      by_kind: [],
+      network_transactions: [],
+      network_transaction_range: null,
+    },
+  },
   completeness: scenarioCompleteness,
   limitations: [],
 });

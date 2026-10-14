@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { localPathStringSchema } from "../domain/localPath.js";
 import type { ToolContract } from "./toolContractTypes.js";
 import { evidenceResultOf } from "./toolOutputSchemaPrimitives.js";
 import { toolContractMetadata } from "./toolEffects.js";
@@ -24,8 +25,8 @@ export const RIZIN_DEBUG_TOOL_CONTRACTS = [
     description:
       "Start a persistent Rizin debugger session using `-N` to suppress user settings and scripts while retaining plugins, `-0` for NUL framing, and `-d` with an optional caller-selected IO debugger backend. Requires a caller-selected Linux TTY for inferior stdout and stderr; the target may write directly to that terminal while running and after detach. REA verifies both destinations and `dbg.exitkills=false` before detaching. Backend and target capabilities depend on the installed build. The session lives in this REA MCP process. Persistent sessions require Linux `/proc` descriptor readback. In a shared MCP server, starting this session retires any active binary-analysis session; after target effects have settled, call open_binary before further analysis. Close an active Ghidra session explicitly first.",
     inputSchema: z.strictObject({
-      path: z.string().min(1),
-      inferior_tty: z.string().min(1),
+      path: localPathStringSchema,
+      inferior_tty: localPathStringSchema,
       backend: z.string().min(1).optional(),
     }),
     outputSchema: z.strictObject({

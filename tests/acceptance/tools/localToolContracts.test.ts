@@ -156,6 +156,38 @@ const pathRequests: readonly [string, Record<string, unknown>][] = [
       import_map: { path: nul, base_url: "http://127.0.0.1/a" },
     },
   ],
+  ["start_frida_session", { mode: "spawn", device_id: "local", program: nul }],
+  [
+    "load_frida_script",
+    {
+      session_id: "00000000-0000-4000-8000-000000000001",
+      source_kind: "file",
+      path: nul,
+    },
+  ],
+  [
+    "instrument_with_frida",
+    {
+      mode: "spawn",
+      device_id: "local",
+      program: nul,
+      source_kind: "inline",
+      source: "send(1);",
+    },
+  ],
+  [
+    "instrument_with_frida",
+    {
+      mode: "spawn",
+      device_id: "local",
+      program: "/bin/true",
+      source_kind: "file",
+      path: nul,
+    },
+  ],
+  ["start_rizin_debug_session", { path: nul, inferior_tty: "/dev/pts/7" }],
+  ["start_rizin_debug_session", { path: "/tmp/program", inferior_tty: nul }],
+  ["start_gdb_session", { inferior_tty: nul }],
 ];
 
 it("rejects OS-invalid local inputs through the real advertised MCP contracts", async () => {

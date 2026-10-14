@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { sanitizeBrowserUrl } from "../../src/domain/browserObservation.js";
 import { browserScenarioCaptureSchema } from "../../src/domain/browserScenarioCapture.js";
+import { DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS } from "../../src/domain/browserScenarioCaptureLimits.js";
 import { browserScenarioEventSchema } from "../../src/domain/browserScenarioCaptureValues.js";
 import { createEvidence } from "../../src/domain/evidence.js";
 import { jsonValueSchema } from "../../src/domain/jsonValue.js";
@@ -107,10 +108,20 @@ export const scriptScenarioFixture = (
         header_values: false,
       },
       event_families: ["network"],
+      limits: DEFAULT_BROWSER_SCENARIO_CAPTURE_LIMITS,
     },
     duration_ms: 2,
     steps: [step(0), step(1)],
-    events: { items, retained: items.length, dropped: 0 },
+    events: {
+      items,
+      retained: items.length,
+      dropped: 0,
+      omissions: {
+        by_kind: [],
+        network_transactions: [],
+        network_transaction_range: null,
+      },
+    },
     completeness,
     limitations: [],
   });

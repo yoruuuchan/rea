@@ -13,8 +13,9 @@ const environmentValue = (
   platform: NodeJS.Platform,
 ): string | undefined => {
   if (platform !== "win32") return environment[name];
-  const key = Object.keys(environment).find(
-    (candidate) => candidate.toLowerCase() === name,
+  const target = name.toLowerCase();
+  const key = Object.keys(environment).findLast(
+    (candidate) => candidate.toLowerCase() === target,
   );
   return key === undefined ? undefined : environment[key];
 };

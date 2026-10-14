@@ -30,6 +30,58 @@ const HASH = {
 const EVIDENCE_ID = `ev_${"a".repeat(64)}`;
 
 describe("historical source to bundle comparison", () => {
+  it("matches an unchanged JSON source artifact by its exact content digest", () => {
+    const path = "src/data.json";
+    const artifact = createJavaScriptApplicationNode({
+      kind: "artifact",
+      identity: {
+        strategy: "content-digest",
+        stability: "global-exact",
+        sha256: HASH.unchanged,
+      },
+      observations: [
+        {
+          label: path,
+          properties: { path, file_kind: "json" },
+          evidence: artifactEvidence(HASH.unchanged, path),
+        },
+      ],
+    });
+    const result = compareSourceToBundle({
+      reference: historicalGraph("complete", [path]),
+      application: {
+        evidenceId: EVIDENCE_ID,
+        rootArtifactSha256: HASH.artifact,
+        graph: createJavaScriptApplicationGraph({
+          schema: "JavaScriptApplicationGraph",
+          root_node_ids: [artifact.node_id],
+          nodes: [artifact],
+          edges: [],
+          coverage: {
+            status: "complete",
+            truncated: false,
+            omitted_count: 0,
+            limits: [],
+          },
+          limitations: [],
+        }),
+      },
+    });
+
+    expect(item(result, path)).toMatchObject({
+      status: "unchanged",
+      confidence: "exact",
+      current_node_ids: [artifact.node_id],
+      candidates: [
+        expect.objectContaining({
+          signals: expect.arrayContaining([
+            expect.objectContaining({ kind: "exact-source-digest" }),
+          ]),
+        }),
+      ],
+    });
+  });
+
   it("classifies exact, changed, absent, split, and merged mappings stably", () => {
     const reference = historicalGraph("complete");
     const graph = applicationGraph("complete");
@@ -120,7 +172,9 @@ describe("historical source to bundle comparison", () => {
     });
     expect(result.coverage.status).toBe("partial");
   });
+});
 
+describe("source to bundle candidate evaluation", () => {
   it("evaluates all indexed candidates for each source file", () => {
     const result = compareSourceToBundle({
       reference: historicalGraph("complete", ["src/split.ts"]),

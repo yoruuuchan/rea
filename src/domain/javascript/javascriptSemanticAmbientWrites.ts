@@ -123,6 +123,12 @@ const createAmbientPathResolver = (
         continue;
       }
       if (t.isIdentifier(root)) {
+        // The wrapper module object is distinct from globalThis.module. Keep
+        // its identity through the same alias/projection owner used for writes.
+        if (isUnshadowedGlobal(root, state, "module")) {
+          retain(["commonjs-module", ...(suffix ?? [])]);
+          continue;
+        }
         if (globalObjectName(root, state) !== undefined) {
           retain(["global", ...(suffix ?? [])]);
           continue;

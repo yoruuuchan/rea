@@ -264,7 +264,7 @@ describe("case-distinct APK resource names", () => {
       await runProviderAnalysis(path, "inventory_artifact", {}),
     );
     expect(inventory.normalized_result).toMatchObject({
-      coverage_status: "complete",
+      coverage: { scope: "container-entries", status: "complete" },
     });
     const result = projectAndroidApplicationEvidence({
       inventory_evidence: [inventory],

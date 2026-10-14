@@ -4,15 +4,11 @@ import type { AnalysisError } from "../analysisErrorBase.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import { err, ok, type Result } from "../result.js";
 import {
-  parseArtifactInventoryEvidence,
+  parseArtifactInspectionInventoryResult,
   parseArtifactInventoryResult,
-  validateArtifactInventorySubject,
   type InventorySet,
 } from "../artifactInventoryEvidence.js";
-import {
-  artifactInspectionResultSchema,
-  type ArtifactInspectionResult,
-} from "../artifactInspection.js";
+import type { ArtifactInspectionResult } from "../artifactInspection.js";
 import type {
   AnalysisViewParent,
   AnalysisViewRequest,
@@ -52,36 +48,14 @@ const parseSource = (
         evidenceIds: [parent.evidenceId],
         inspection: null,
       });
-    const inspection = artifactInspectionResultSchema.parse(
+    const parsed = parseArtifactInspectionInventoryResult(
       parent.normalizedResult,
+      parent.subject ?? null,
     );
-    for (const step of inspection.substeps) {
-      if (
-        step.evidence_id !== step.evidence.evidence_id ||
-        step.evidence.operation !== step.operation
-      )
-        throw new TypeError(
-          "Inspection substep identity differs from its source Evidence",
-        );
-    }
-    const parsed = parseArtifactInventoryEvidence(
-      inspection.substeps.map(({ evidence }) => evidence),
-    );
-    const manifest = parsed.inventory.manifest;
-    validateArtifactInventorySubject(parent.subject ?? null, manifest);
-    if (
-      inspection.subject.manifest_id !== manifest.manifest_id ||
-      inspection.subject.root_artifact_id !== manifest.root_artifact_id ||
-      inspection.subject.root_sha256 !== manifest.root_sha256 ||
-      inspection.subject.root_format !== manifest.root_format
-    )
-      throw new TypeError(
-        "Inspection subject differs from its inventory manifest",
-      );
     return ok({
       inventory: parsed.inventory,
-      evidenceIds: parsed.evidence.map(({ evidence_id }) => evidence_id),
-      inspection,
+      evidenceIds: parsed.evidenceIds,
+      inspection: parsed.inspection,
     });
   } catch (cause: unknown) {
     if (!(cause instanceof TypeError) && !(cause instanceof z.ZodError))

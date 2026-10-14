@@ -263,6 +263,7 @@ const addBoundaryNode = (
           null),
     properties: {
       boundary_kind: operation.kind,
+      field: operation.method,
       method: operation.method,
     },
   });

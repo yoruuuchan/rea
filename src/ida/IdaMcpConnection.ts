@@ -45,6 +45,10 @@ export interface IdaMcpConnection {
   detach(): void;
 }
 
+export type IdaMcpConnectionDependencies = Readonly<{
+  createDiagnosticRedactor?: typeof createIdaDiagnosticRedactor;
+}>;
+
 const toolResultSchema = z.object({
   isError: z.boolean().optional(),
   structuredContent: z.record(z.string(), z.unknown()).optional(),
@@ -332,9 +336,12 @@ const retainedTransportCause = (cause: unknown, message: string): Error => {
 export const createIdaMcpConnection = (
   config: IdaConfiguration,
   environment: Readonly<NodeJS.ProcessEnv>,
+  dependencies: IdaMcpConnectionDependencies = {},
 ): IdaMcpConnection => {
   const client = new Client({ name: "rea-ida-provider", version: "1" });
-  const redactor = createIdaDiagnosticRedactor(config);
+  const redactor = (
+    dependencies.createDiagnosticRedactor ?? createIdaDiagnosticRedactor
+  )(config);
   let stderr = Buffer.alloc(0);
   let stderrBytes = 0;
   const transportFailure = (
