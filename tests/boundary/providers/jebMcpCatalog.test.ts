@@ -76,7 +76,7 @@ it("reads every JEB catalog page and refreshes the connected engine catalog", as
     throw new Error("Expected an ephemeral TCP listener");
   const connection = createStreamableHttpJebMcpConnection(
     new URL(`http://127.0.0.1:${address.port}/mcp`),
-    1_000,
+    { discoveryTimeoutMs: 1_000 },
   );
   try {
     expect(await connection.listTools()).toEqual([
@@ -109,7 +109,7 @@ it("reads every JEB catalog page and refreshes the connected engine catalog", as
     // Shared initial acquisition also owns a finite deadline and can recover.
     const acquiring = createStreamableHttpJebMcpConnection(
       new URL(`http://127.0.0.1:${address.port}/mcp`),
-      1_000,
+      { discoveryTimeoutMs: 1_000 },
     );
     try {
       infinitePages = true;

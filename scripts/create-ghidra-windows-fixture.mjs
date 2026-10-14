@@ -75,7 +75,57 @@ for (const architecture of ["x86_64", "x86"]) {
         : [0xe8, 0x0b, 0, 0, 0, 0xe8, 0x16, 0, 0, 0, 0x31, 0xc0, 0xc3],
       0x200,
     );
-    bytes.set([0xb8, 0x2a, 0, 0, 0, 0xc3], 0x210);
+    bytes.set(
+      x86 && !dll
+        ? [0xb8, 0x2a, 0, 0, 0, 0xe8, 0x66, 0, 0, 0, 0xc3]
+        : [0xb8, 0x2a, 0, 0, 0, 0xc3],
+      0x210,
+    );
+
+    if (x86 && !dll) {
+      // A statically analyzed Borland-style SEH registration whose handler
+      // entry is referenced but is not part of the registering function body.
+      bytes.set(
+        [
+          0x55, // PUSH EBP
+          0x89,
+          0xe5, // MOV EBP, ESP
+          0x68,
+          0xc0,
+          0x10,
+          0x40,
+          0x00, // PUSH 0x4010c0
+          0x64,
+          0xff,
+          0x35,
+          0,
+          0,
+          0,
+          0, // PUSH DWORD PTR FS:[0]
+          0x64,
+          0x89,
+          0x25,
+          0,
+          0,
+          0,
+          0, // MOV DWORD PTR FS:[0], ESP
+          0x64,
+          0x8f,
+          0x05,
+          0,
+          0,
+          0,
+          0, // POP DWORD PTR FS:[0]
+          0x83,
+          0xc4,
+          0x04, // ADD ESP, 4
+          0x5d, // POP EBP
+          0xc3, // RET
+        ],
+        0x280,
+      );
+      bytes.set([0xc3], 0x2c0);
+    }
 
     if (!dll) {
       const dataSection = sectionTable + 40;

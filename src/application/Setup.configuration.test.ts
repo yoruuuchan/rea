@@ -206,9 +206,10 @@ describe("configured Linux Hopper selection", () => {
     host.hopperLauncherConfigured = true;
     host.linuxDemoRuntimeMissing = true;
     const doctor = await host.doctor();
+    const initial = await host.initialSetupState();
     const discovery = await discoverSetupState({
       host,
-      providerEnvironment: { HOPPER_LAUNCHER_PATH: host.hopper },
+      providerConfigured: initial.providerConfigured,
       forceHopperInstall: false,
       proposeHopper: true,
       hopperLauncherConfigured: true,
@@ -227,9 +228,10 @@ describe("configured Linux Hopper selection", () => {
     };
     host.hopper = "/opt/hopper/bin/Hopper";
     host.unsupportedHopperVersion = true;
+    const initial = await host.initialSetupState();
     const discovery = await discoverSetupState({
       host,
-      providerEnvironment: { HOPPER_LAUNCHER_PATH: host.hopper },
+      providerConfigured: initial.providerConfigured,
       forceHopperInstall: false,
       proposeHopper: true,
       initialDoctor: await host.doctor(),

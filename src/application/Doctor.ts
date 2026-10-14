@@ -220,7 +220,11 @@ const inspectDoctor = async (
     providerInspections,
   } = await collectDoctorDiagnostics(target, host);
   const identity = await collectDoctorIdentity(host, scope);
-  const checks = [...diagnosticChecks, ...identity.checks];
+  const checks = [
+    ...diagnosticChecks,
+    ...identity.checks,
+    ...registrationAdvisoryChecks(identity.value.registrations),
+  ];
   const providers = {
     hopperAvailable:
       hopperPath !== undefined &&
@@ -251,6 +255,22 @@ const inspectDoctor = async (
     identity: identity.value,
   };
 };
+
+const registrationAdvisoryChecks = (
+  registrations: readonly ClientRegistrationStatus[],
+): readonly DoctorCheck[] =>
+  registrations.flatMap(({ client, advisory }) =>
+    advisory === undefined
+      ? []
+      : [
+          {
+            name: `registration_timeout:${client}`,
+            ok: true,
+            classification: "healthy" as const,
+            detail: advisory,
+          },
+        ],
+  );
 
 const closeDoctorHost = async (
   host: DoctorHost,

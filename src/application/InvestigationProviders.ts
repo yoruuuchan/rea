@@ -18,6 +18,7 @@ export const workflowAnalysisProfile = (
 ): AnalysisProfileCommitment =>
   createAnalysisProfile(REA_WORKFLOW_PROVIDER, {
     upstream_analysis_profile: upstream,
+    source_limitations: "provider-operation-caveats-v1",
     ...(operation === "binary_overview"
       ? { workflow_revision: 4 }
       : operation === "batch_decompile" ||

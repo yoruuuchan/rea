@@ -111,7 +111,7 @@ const runSetupWorkflow = async (
   let { hopperPath, providerEnvironment } = initialState;
   const discovery = await discoverSetupState({
     host,
-    providerEnvironment,
+    providerConfigured: initialState.providerConfigured,
     forceHopperInstall: options.installHopper,
     hopperLauncherConfigured: initialState.hopperLauncherConfigured === true,
     proposeHopper:

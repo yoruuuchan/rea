@@ -517,6 +517,14 @@ These deadlines have different owners:
 | Darwin swiftc helper | REA allows 120,000 ms by default for ownership-helper compilation; `REA_SWIFTC_COMPILE_TIMEOUT_MS` accepts decimal integers from 1–2,147,483,647 ms. Invalid values fail configuration validation.                                  |
 | Individual tool call | The client bounds its wait, including cold engine startup. The pinned client SDK 2.3.1 defaults to 60,000 ms and can cancel earlier than REA's startup deadline.                                                                    |
 
+For [Codex and Kimi registrations](client-configuration.md), setup supplies
+missing tool deadlines from the known provider allowance plus 120 seconds of
+operation headroom: 450 seconds with the default Ghidra allowance, or 2820
+seconds with `REA_GHIDRA_STARTUP_TIMEOUT_MS=2700000`. Positive caller-selected
+deadlines remain unchanged. Doctor reports an informational recommendation
+when a configured deadline is shorter than the known provider allowance. An
+explicit JEB upstream request budget also contributes to that allowance.
+
 For an already connected client using the pinned SDK, request options are the
 **second** argument of `callTool`:
 
@@ -546,10 +554,20 @@ Waiting notifications stop when startup settles or the caller cancels. They do
 not measure engine work completed.
 
 The pinned SDK can reset the request's inactivity timeout on progress with
-`resetTimeoutOnProgress: true`. Also set `maxTotalTimeout` to bound the complete
-request; the provider's startup deadline still applies. These options belong in
-the same second argument of `callTool`. Without that explicit client policy, the
-default 60-second request deadline still expires despite waiting notifications.
+`resetTimeoutOnProgress: true`. These options belong in the same second
+argument of `callTool`. Without that explicit client policy, the default
+60-second request deadline still expires despite waiting notifications.
+
+SDK 2.3.1 checks `maxTotalTimeout` when progress resets the timer; it does not
+schedule a separate absolute timer for that setting. A silent interval can
+therefore run beyond the declared total. For an absolute caller deadline,
+also pass `signal: AbortSignal.timeout(totalBudgetMs)`. If the caller already
+has a cancellation signal, preserve both with
+`AbortSignal.any([callerSignal, AbortSignal.timeout(totalBudgetMs)])`.
+`maxTotalTimeout` can still bound progress resets, and REA's provider startup
+deadline still applies. Choose the total budget for the expected workload;
+neither server configuration nor progress can override a remote caller's
+deadline.
 
 The 240-second setting is a measured example, not a universal timeout: a
 controlled Linux x64/WSL2 fixture took about 64 seconds for its first overview
@@ -690,7 +708,10 @@ reported by strict-depth MCP clients in [#2813](https://github.com/morluto/rea/i
 WorkBuddy/CodeBuddy gateways have also rejected full REA catalogs with an
 opaque `11133` error while accepting the compact profile
 ([#2999](https://github.com/morluto/rea/issues/2999)); compatibility depends on
-the selected gateway and model.
+the selected gateway and model. That report used ZCode through a gateway to a
+Kimi-K3 backend, not the WorkBuddy MCP client. Set the profile on REA's
+registration in the actual MCP host; the host's name alone does not identify
+the downstream model or its schema constraints.
 
 The compact profile renders the same tool set, output schemas, annotations,
 and canonical server-side validation. It changes only the advertised input

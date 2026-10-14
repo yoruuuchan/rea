@@ -124,8 +124,8 @@ describe("enhanced MCP graph caveats", () => {
       limitations: [
         "Artifact identity is unavailable for this observation.",
         "Derived by an REA composed workflow.",
-        caveat,
-        leafCaveat,
+        `Fixture analysis provider (fixture 1) procedure_callees: ${caveat}`,
+        `Fixture analysis provider (fixture 1) procedure_callees: ${leafCaveat}`,
       ],
       normalized_result: {
         graph: {
@@ -153,9 +153,6 @@ describe("enhanced MCP graph caveats", () => {
     const normalized = JSON.stringify(evidence.normalized_result);
     for (const item of [caveat, leafCaveat]) {
       expect(normalized.split(item)).toHaveLength(2);
-      expect(
-        evidence.limitations.filter((limit) => limit === item),
-      ).toHaveLength(1);
     }
 
     const trace = await client.callTool({
@@ -172,7 +169,11 @@ describe("enhanced MCP graph caveats", () => {
     });
     const traceEvidence = parseEvidence(trace.structuredContent);
     expect(
-      traceEvidence.limitations.filter((item) => item === caveat),
+      traceEvidence.limitations.filter(
+        (item) =>
+          item ===
+          `Fixture analysis provider (fixture 1) procedure_callees: ${caveat}`,
+      ),
     ).toHaveLength(1);
     expect(JSON.stringify(traceEvidence)).not.toContain(leafCaveat);
   });

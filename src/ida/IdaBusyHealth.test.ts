@@ -61,6 +61,34 @@ it("sleeps the fixed retry delay between busy reads and returns the settled answ
   expect(sleeps, "two fixed 100 ms pauses").toEqual([100, 100]);
 });
 
+it("returns an expired readiness timeout without starting a health read", async () => {
+  const timeoutMs = 10;
+  const { connection, reads } = scripted([ok]);
+  let clockReads = 0;
+  const clock = {
+    now: () => (clockReads++ === 0 ? 0 : 11),
+    delay: async () => {
+      throw new Error("An expired wait must not schedule a pause");
+    },
+  };
+
+  const failure = await readSettledHealth(connection, {
+    database: "db",
+    timeoutMs,
+    clock,
+  }).catch((cause: unknown) => cause);
+
+  expect(failure).toMatchObject({
+    _tag: "AnalysisTimeoutError",
+    operation: "server_health",
+    timeoutMs,
+  });
+  expect(
+    reads,
+    "an expired budget never becomes an SDK timeout of zero",
+  ).toHaveLength(0);
+});
+
 it("clamps the last pause to the remaining budget and stops without another read at expiry", async () => {
   const { connection, reads } = scripted([busy("config_json_get")]);
   const { clock, sleeps } = virtualClock();

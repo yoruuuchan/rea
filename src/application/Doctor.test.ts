@@ -363,6 +363,38 @@ describe("doctor scoped readiness", () => {
     );
     expect(staleSelected.healthy).toBe(false);
   });
+
+  it("keeps a caller-selected short timeout healthy and reports its advisory as informational", async () => {
+    const result = await runDoctor(
+      undefined,
+      host({
+        clientRegistrations: () =>
+          Promise.resolve([
+            {
+              client: "kimi",
+              config_path: "/home/user/.kimi-code/mcp.json",
+              command: ["/current/rea", "mcp"],
+              state: "aligned",
+              remediation: null,
+              advisory: "The configured toolTimeoutMs is shorter than startup.",
+            },
+          ]),
+      }),
+      { clients: ["kimi"] },
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(result.scope_checks).toContainEqual(
+      expect.objectContaining({ name: "registration:kimi", ok: true }),
+    );
+    expect(result.informational_checks).toContainEqual(
+      expect.objectContaining({
+        name: "registration_timeout:kimi",
+        ok: true,
+        detail: "The configured toolTimeoutMs is shorter than startup.",
+      }),
+    );
+  });
 });
 
 describe("Grok Bot readiness", () => {

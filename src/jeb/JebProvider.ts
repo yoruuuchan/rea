@@ -39,6 +39,8 @@ export const JEB_PROVIDER_IDENTITY: ProviderIdentity = {
 export interface JebProviderOptions {
   /** Caller environment carrying REA_JEB_MCP_URL. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** Per-tools/call budget selected by REA_JEB_MCP_TIMEOUT_MS. */
+  readonly requestTimeoutMs?: number;
   /** Injectable MCP boundary; defaults to the streamable HTTP client. */
   readonly connectionFactory?: JebMcpConnectionFactory;
 }
@@ -111,10 +113,14 @@ export class JebProvider implements JebAnalysisPort {
     const endpoint = parseJebMcpEndpoint(environment.REA_JEB_MCP_URL);
     if (!endpoint.ok) throw endpoint.error;
     this.#endpoint = endpoint.value;
-    this.#connection = (
-      options.connectionFactory ??
-      ((url: URL) => createStreamableHttpJebMcpConnection(url))
-    )(this.#endpoint);
+    const createConnection =
+      options.connectionFactory ?? createStreamableHttpJebMcpConnection;
+    this.#connection =
+      options.requestTimeoutMs === undefined
+        ? createConnection(this.#endpoint)
+        : createConnection(this.#endpoint, {
+            requestTimeoutMs: options.requestTimeoutMs,
+          });
   }
 
   async inspectAvailability(

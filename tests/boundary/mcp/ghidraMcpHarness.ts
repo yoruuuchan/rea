@@ -274,6 +274,7 @@ const functionObservationOperations: ReadonlySet<GhidraOperation> = new Set([
   "procedure_callers",
   "procedure_info",
   "procedure_pseudo_code",
+  "procedure_references",
   "read_function_instructions",
 ]);
 

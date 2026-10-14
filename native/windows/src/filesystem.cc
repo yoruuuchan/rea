@@ -67,7 +67,10 @@ std::unique_ptr<File> openFile(const std::wstring& requested, DWORD access, bool
   result->requestedPath = requested;
   const auto& path = result->path;
   require(directory || path.size() > 3, "Target is not a regular file", requested, ERROR_DIRECTORY);
-  result->handles.push_back(openComponent(path.substr(0, 3), 0, true));
+  // The volume root cannot be replaced or deleted. Match the later root
+  // reopen's write sharing here so a root writer cannot block admission.
+  result->handles.push_back(openComponent(path.substr(0, 3), 0, true,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE));
   wchar_t filesystem[64]{};
   DWORD flags = 0;
   require(GetVolumeInformationByHandleW(result->handles.front().get(), nullptr, 0, nullptr, nullptr,

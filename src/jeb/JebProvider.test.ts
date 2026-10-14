@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { createJebAnalysisProvider } from "../composition/jeb.js";
 import { JebProvider } from "./JebProvider.js";
-import type { JebMcpConnection } from "./JebMcpConnection.js";
+import type {
+  JebMcpConnection,
+  JebMcpConnectionTimeouts,
+} from "./JebMcpConnection.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
@@ -42,6 +46,36 @@ const providerWith = (connection: JebMcpConnection) =>
   });
 
 describe("JebProvider live availability", () => {
+  it("passes its validated environment timeout to the production connection", async () => {
+    let configured: JebMcpConnectionTimeouts | undefined;
+    const provider = createJebAnalysisProvider(
+      { REA_JEB_MCP_TIMEOUT_MS: "900000" },
+      (_endpoint, timeouts) => {
+        configured = timeouts;
+        return scriptedConnection({});
+      },
+    );
+    expect(configured).toEqual({ requestTimeoutMs: 900_000 });
+    await provider.close();
+  });
+
+  it("rejects an invalid JEB timeout before constructing its MCP connection", async () => {
+    let constructed = false;
+    const provider = createJebAnalysisProvider(
+      { REA_JEB_MCP_TIMEOUT_MS: "0" },
+      () => {
+        constructed = true;
+        return scriptedConnection({});
+      },
+    );
+    expect(constructed).toBe(false);
+    await expect(provider.inspectAvailability()).resolves.toMatchObject({
+      status: "unavailable",
+      diagnostics: { setting: "REA_JEB_MCP_TIMEOUT_MS" },
+    });
+    await provider.close();
+  });
+
   it("reports only the operations advertised by the live engine", async () => {
     const connection = scriptedConnection({
       get_client_information: {

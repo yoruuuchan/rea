@@ -30,6 +30,7 @@ const environmentSchema = z.object({
     .min(1)
     .refine(isAbsolute, "REA_IDA_MCP_CONFIG must be absolute")
     .optional(),
+  REA_JEB_MCP_TIMEOUT_MS: providerStartupTimeoutSchema.optional(),
   GHIDRA_INSTALL_DIR: z
     .string()
     .min(1)
@@ -76,6 +77,27 @@ const environmentSchema = z.object({
     .default("info"),
   REA_REFERENCE_SECRET_PATTERNS_JSON: z.string().default("[]"),
 });
+
+/** Parse the JEB-only timeout at its isolated provider-composition boundary. */
+export const parseJebMcpTimeoutMs = (
+  value: string | undefined,
+): Result<number | undefined, ConfigurationError> => {
+  if (value === undefined) return ok(undefined);
+  const parsed = providerStartupTimeoutSchema.safeParse(value);
+  if (parsed.success) return ok(parsed.data);
+  return err(
+    new ConfigurationError("Invalid REA environment configuration", {
+      cause: parsed.error,
+      settings: [
+        {
+          setting: "REA_JEB_MCP_TIMEOUT_MS",
+          constraint:
+            parsed.error.issues[0]?.message ?? "must be a valid timeout",
+        },
+      ],
+    }),
+  );
+};
 
 type Environment = Omit<
   z.infer<typeof environmentSchema>,

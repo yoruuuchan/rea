@@ -95,16 +95,18 @@ it("retains unique upstream limits in canonical order across concurrent observat
   let calls = 0;
   const options = { signal: new AbortController().signal };
   const analysis: AnalysisOperationPort = {
-    execute: async (_, parameters, forwarded) => {
+    execute: async (operation, parameters, forwarded) => {
       expect(parameters).toEqual({ marker: true });
       expect(forwarded).toBe(options);
       const call = calls++;
       if (call === 0) await gate;
       else release();
+      const limitation =
+        operation === "list_strings"
+          ? ["first", "shared"]
+          : ["second", "shared"];
       return ok(
-        createAnalysisExecution([], provider, {
-          limitations: call === 0 ? ["first", "shared"] : ["second", "shared"],
-        }),
+        createAnalysisExecution([], provider, { limitations: limitation }),
       );
     },
   };
@@ -117,7 +119,48 @@ it("retains unique upstream limits in canonical order across concurrent observat
   });
   expect(calls).toBe(2);
   expect(result).toEqual(
-    ok({ result: { count: 0 }, limitations: ["first", "second", "shared"] }),
+    ok({
+      result: { count: 0 },
+      limitations: [
+        "Fixture (fixture 1) list_procedures, list_strings: shared",
+        "Fixture (fixture 1) list_procedures: second",
+        "Fixture (fixture 1) list_strings: first",
+      ],
+    }),
+  );
+});
+
+it("deduplicates exact source caveats without merging providers or operations", async () => {
+  const firstProvider = { id: "first", name: "First", version: "1" };
+  const secondProvider = { id: "second", name: "Second", version: "1" };
+  const result = await executeComposedWorkflow(
+    {
+      execute: async (operation, parameters) =>
+        ok(
+          createAnalysisExecution(
+            null,
+            parameters.provider === "second" ? secondProvider : firstProvider,
+            { limitations: ["same source caveat"] },
+          ),
+        ),
+    },
+    async (observed) => {
+      await observed.execute("list_strings", { provider: "first" });
+      await observed.execute("list_strings", { provider: "first" });
+      await observed.execute("list_strings", { provider: "second" });
+      await observed.execute("list_procedures", { provider: "first" });
+      return ok({ count: 0 });
+    },
+  );
+
+  expect(result).toEqual(
+    ok({
+      result: { count: 0 },
+      limitations: [
+        "First (first 1) list_procedures, list_strings: same source caveat",
+        "Second (second 1) list_strings: same source caveat",
+      ],
+    }),
   );
 });
 

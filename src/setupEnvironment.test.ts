@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createDoctorHostFixture } from "./application/Doctor.fixture.js";
 import * as macHopperInstaller from "./application/MacHopper.js";
 import { runSetup } from "./application/Setup.js";
+import { discoverSetupState } from "./application/SetupPlan.js";
 import { options } from "./application/Setup.fixture.js";
 import { systemSetupHost } from "./application/SetupHost.js";
 import { systemUninstallHost } from "./application/Uninstall.js";
@@ -175,6 +176,60 @@ it("preserves a validated selected JEB endpoint in setup registrations without c
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it.each([
+  {
+    name: "registration-only settings",
+    environment: {
+      REA_ANALYSIS_PROVIDER: "auto",
+      REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700000",
+      REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+    },
+    providerConfigured: false,
+    installHopper: true,
+  },
+  {
+    name: "an explicit unready provider selection",
+    environment: { REA_ANALYSIS_PROVIDER: "ghidra" },
+    providerConfigured: true,
+    installHopper: false,
+  },
+])(
+  "derives Hopper proposal behavior from setup-host facts for $name",
+  async ({ environment, providerConfigured, installHopper }) => {
+    const doctorHost = createDoctorHostFixture({
+      platform: "darwin",
+      validTarget: () => Promise.resolve(false),
+      executable: () => Promise.resolve(false),
+    });
+    const setupHost = systemSetupHost(doctorHost, {
+      HOME: "/fixture/home",
+      USERPROFILE: "/fixture/home",
+      ...environment,
+    });
+    try {
+      const initial = await setupHost.initialSetupState();
+      expect(initial.providerConfigured).toBe(providerConfigured);
+      if ("REA_MCP_INPUT_SCHEMA_PROFILE" in environment) {
+        expect(initial.providerEnvironment).toMatchObject({
+          REA_ANALYSIS_PROVIDER: "auto",
+          REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700000",
+          REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+        });
+      }
+      const discovery = await discoverSetupState({
+        host: setupHost,
+        providerConfigured: initial.providerConfigured,
+        forceHopperInstall: false,
+        proposeHopper: true,
+        initialDoctor: initial.doctor,
+      });
+      expect(discovery.installHopper).toBe(installHopper);
+    } finally {
+      await setupHost.close?.();
+    }
+  },
+);
 
 it("passes only selected environment to updater subprocesses and drops npm invocation identity", async () => {
   vi.stubEnv("REA_UPDATE_MARKER", "ambient");

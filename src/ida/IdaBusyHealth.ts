@@ -29,6 +29,11 @@ const isBusyStatus = (raw: JsonValue): boolean =>
   !Array.isArray(raw) &&
   raw["status"] === "busy";
 
+interface LastBusyHealth {
+  readonly raw: JsonValue;
+  readonly operation: string;
+}
+
 /**
  * Reads `server_health` until the worker stops reporting a transient busy
  * state. The wait ends when the worker answers, the caller aborts, or the
@@ -53,22 +58,62 @@ export const readSettledHealth = async (
 ): Promise<JsonValue> => {
   const started = clock.now();
   const remaining = (): number => timeoutMs - (clock.now() - started);
+  let lastBusy: LastBusyHealth | undefined;
   for (;;) {
-    const raw = await connection.call("server_health", { database });
+    const budgetMs = remaining();
+    if (budgetMs <= 0)
+      throw lastBusy === undefined
+        ? new AnalysisTimeoutError("server_health", timeoutMs)
+        : busyTimeout(lastBusy, timeoutMs);
+    const requestTimeoutMs = Math.min(timeoutMs, Math.ceil(budgetMs));
+    let raw: JsonValue;
+    try {
+      raw = await connection.call(
+        "server_health",
+        { database },
+        { timeoutMs: requestTimeoutMs },
+      );
+    } catch (cause: unknown) {
+      if (
+        lastBusy !== undefined &&
+        cause instanceof AnalysisTimeoutError &&
+        cause.timeoutMs === requestTimeoutMs &&
+        requestTimeoutMs < timeoutMs
+      ) {
+        throw new AnalysisTimeoutError(lastBusy.operation, timeoutMs, {
+          cause: lastBusy.raw,
+          capturedOutput: cause.capturedOutput,
+          diagnostics: {
+            health_request_operation: cause.operation,
+            health_request_timeout_ms: cause.timeoutMs,
+          },
+        });
+      }
+      throw cause;
+    }
     const busy = busyHealthSchema.safeParse(raw);
     if (!busy.success) {
       if (isBusyStatus(raw)) throw busy.error;
       return raw;
     }
+    const observedBusy = {
+      raw,
+      operation: `server_health: headless worker still busy in ${busyToolName(busy.data.busy_tool)}`,
+    };
+    lastBusy = observedBusy;
     const expired = (): AnalysisTimeoutError =>
-      new AnalysisTimeoutError(
-        `server_health: headless worker still busy in ${busyToolName(busy.data.busy_tool)}`,
-        timeoutMs,
-        { cause: raw },
-      );
+      busyTimeout(observedBusy, timeoutMs);
     if (remaining() <= 0) throw expired();
     await clock.delay(Math.min(BUSY_HEALTH_RETRY_MS, remaining()), signal);
     signal?.throwIfAborted();
     if (remaining() <= 0) throw expired();
   }
 };
+
+const busyTimeout = (
+  lastBusy: LastBusyHealth,
+  timeoutMs: number,
+): AnalysisTimeoutError =>
+  new AnalysisTimeoutError(lastBusy.operation, timeoutMs, {
+    cause: lastBusy.raw,
+  });

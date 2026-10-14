@@ -23,7 +23,11 @@ import {
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { UnknownRegistryPort } from "./investigation/InvestigationRecordPort.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
-import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
+import {
+  renderSourceLimitations,
+  sourceLimitationKey,
+  type SourceLimitation,
+} from "./SourceLimitations.js";
 
 /** Retain the limits of exactly the observations used by one composed call. */
 export const executeComposedWorkflow = async (
@@ -37,21 +41,26 @@ export const executeComposedWorkflow = async (
     AnalysisError
   >
 > => {
-  const limitations = new Set<string>();
+  const limitations = new Map<string, SourceLimitation>();
   const result = await execute({
     execute: async (operation, parameters, options) => {
       const execution = await analysis.execute(operation, parameters, options);
       if (execution.ok)
-        execution.value.limitations.forEach((limitation) =>
-          limitations.add(limitation),
-        );
+        for (const limitation of execution.value.limitations) {
+          const fact = {
+            provider: execution.value.provider,
+            operation,
+            limitation,
+          } satisfies SourceLimitation;
+          limitations.set(sourceLimitationKey(fact), fact);
+        }
       return execution;
     },
   });
   if (!result.ok) return result;
   return ok({
     result: result.value,
-    limitations: [...limitations].sort(compareUnicodeCodePoints),
+    limitations: renderSourceLimitations([...limitations.values()]),
   });
 };
 

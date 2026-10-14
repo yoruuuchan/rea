@@ -21,7 +21,7 @@ export const compactPresentationForMcpInputSchemaProfile = (
     : undefined;
 
 const profileConstraint =
-  'REA_MCP_INPUT_SCHEMA_PROFILE must be "full" (default) or "compact". The compact profile advertises input schemas without nested annotation prose for providers that cap each tool schema\'s serialized size.';
+  'REA_MCP_INPUT_SCHEMA_PROFILE must be "full" (default) or "compact". The compact profile advertises bounded input schemas with fewer nested annotations for providers with schema compatibility constraints.';
 
 export type McpInputSchemaProfile = z.infer<typeof mcpInputSchemaProfileSchema>;
 

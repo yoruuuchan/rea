@@ -37,7 +37,7 @@ export interface SetupDiscovery {
 /** Discover supported clients and current registrations without mutation. */
 export const discoverSetupState = async (input: {
   readonly host: SetupHost;
-  readonly providerEnvironment: SetupProviderEnvironment;
+  readonly providerConfigured: boolean;
   readonly forceHopperInstall: boolean;
   readonly hopperLauncherConfigured?: boolean;
   readonly proposeHopper: boolean;
@@ -65,8 +65,7 @@ export const discoverSetupState = async (input: {
     input.forceHopperInstall ||
     (hopperInstallSupported &&
       input.proposeHopper &&
-      (Object.keys(input.providerEnvironment).length === 0 ||
-        linuxHopperRepairNeeded));
+      (!input.providerConfigured || linuxHopperRepairNeeded));
   const [clients, detectedClients] = await Promise.all([
     input.host.supportedClients(),
     input.host.detectedClients(),

@@ -112,6 +112,7 @@ describe("client configuration filesystem lifecycle", () => {
     expect(configured).toContain("[mcp_servers.rea]");
     expect(configured).toContain('command = "rea"');
     expect(configured).toContain("startup_timeout_sec = 30");
+    expect(configured).toContain("tool_timeout_sec = 450");
     expect(configured).toContain('GHIDRA_INSTALL_DIR = "/opt/ghidra"');
     expect(configured).toContain('JAVA_HOME = "/opt/jdk-21"');
     expect(
@@ -134,7 +135,7 @@ describe("client configuration filesystem lifecycle", () => {
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      `[mcp_servers.rea]\ncommand = "rea"\nargs = ["mcp"]\nstartup_timeout_sec = 30\n\n[mcp_servers.rea.env]\nJAVA_HOME = "/opt/jdk-21"\nHOPPER_LAUNCHER_PATH = "/Hopper Path"\nGHIDRA_INSTALL_DIR = "/opt/ghidra"\n`,
+      `[mcp_servers.rea]\ncommand = "rea"\nargs = ["mcp"]\nstartup_timeout_sec = 30\ntool_timeout_sec = 450\n\n[mcp_servers.rea.env]\nJAVA_HOME = "/opt/jdk-21"\nHOPPER_LAUNCHER_PATH = "/Hopper Path"\nGHIDRA_INSTALL_DIR = "/opt/ghidra"\n`,
     );
 
     const original = await readFile(configPath, "utf8");
@@ -154,7 +155,52 @@ describe("client configuration filesystem lifecycle", () => {
       readFile(`${configPath}.rea.backup`, "utf8"),
     ).rejects.toThrow();
   });
+});
 
+describe("Codex MCP tool deadlines", () => {
+  it("derives the Codex tool deadline from an explicit Ghidra startup allowance", async () => {
+    const home = await createTestTempDirectory("rea-codex-long-timeout-");
+    roots.push(home);
+    const configPath = join(home, ".codex/config.toml");
+    await mkdir(dirname(configPath), { recursive: true });
+    expect(
+      await configureClientConfiguration(
+        { name: "codex", configPath, format: "toml" },
+        { REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700001" },
+        ["rea", "mcp"],
+      ),
+    ).toMatchObject({ status: "configured" });
+    expect(await readFile(configPath, "utf8")).toContain(
+      "tool_timeout_sec = 2821",
+    );
+    expect(await readFile(configPath, "utf8")).toContain(
+      'REA_GHIDRA_STARTUP_TIMEOUT_MS = "2700001"',
+    );
+  });
+
+  it("preserves positive caller-selected Codex startup and tool deadlines", async () => {
+    const home = await createTestTempDirectory("rea-codex-custom-timeout-");
+    roots.push(home);
+    const configPath = join(home, ".codex/config.toml");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(
+      configPath,
+      '[mcp_servers.rea]\ncommand = "old-rea"\nargs = ["mcp"]\nstartup_timeout_sec = 5\ntool_timeout_sec = 10\n',
+    );
+    expect(
+      await configureClientConfiguration(
+        { name: "codex", configPath, format: "toml" },
+        {},
+        ["rea", "mcp"],
+      ),
+    ).toMatchObject({ status: "configured" });
+    const configured = await readFile(configPath, "utf8");
+    expect(configured).toContain("startup_timeout_sec = 5");
+    expect(configured).toContain("tool_timeout_sec = 10");
+  });
+});
+
+describe("client configuration filesystem lifecycle", () => {
   it("updates a symlink target without replacing the TOML config symlink", async () => {
     const home = await createTestTempDirectory("rea-toml-symlink-");
     roots.push(home);

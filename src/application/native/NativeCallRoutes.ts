@@ -9,6 +9,14 @@ import {
   referenceKindSchema,
 } from "../../domain/hopperValues.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import type { SourceLimitation } from "../SourceLimitations.js";
+
+const limitationsFrom = (
+  operation: SourceLimitation["operation"],
+  provider: ProviderIdentity,
+  limitations: readonly string[],
+): SourceLimitation[] =>
+  limitations.map((limitation) => ({ provider, operation, limitation }));
 
 const referencesSchema = z.object({
   reference_kinds_available: z.boolean(),
@@ -24,6 +32,33 @@ const referencesSchema = z.object({
     z.object({ address: z.string(), reason: z.string() }),
   ),
 });
+
+const typedCallRoutes = (
+  references: z.infer<typeof referencesSchema>["references"],
+) => {
+  const calls = references.filter(({ kind }) => kind.available && kind.call);
+  const countBySite = new Map<string, Set<string>>();
+  for (const call of calls) {
+    const targets = countBySite.get(call.source_address) ?? new Set<string>();
+    targets.add(call.target_address);
+    countBySite.set(call.source_address, targets);
+  }
+  return calls.map((call) => ({
+    address: call.target_procedure?.address ?? call.target_address,
+    site: call.source_address,
+    relation:
+      call.kind.available && (call.kind.computed || call.kind.indirect)
+        ? ("indirect_call" as const)
+        : ("direct_call" as const),
+    resolution:
+      (countBySite.get(call.source_address)?.size ?? 0) > 1
+        ? ("ambiguous" as const)
+        : call.kind.available && (call.kind.computed || call.kind.indirect)
+          ? ("resolved" as const)
+          : ("observed" as const),
+  }));
+};
+
 /** Prefer typed static call references, preserving computed targets and targetless sites. */
 export const readNativeCallRoutes = async (
   analysis: AnalysisOperationPort,
@@ -45,7 +80,13 @@ export const readNativeCallRoutes = async (
     reason: string;
     provider: ProviderIdentity;
   }> = [];
+  let limitations: SourceLimitation[] = [];
   if (execution.ok) {
+    limitations = limitationsFrom(
+      "procedure_references",
+      execution.value.provider,
+      execution.value.limitations,
+    );
     const parsed = referencesSchema.safeParse(execution.value.result);
     if (!parsed.success)
       return {
@@ -55,6 +96,7 @@ export const readNativeCallRoutes = async (
           "Invalid typed call references",
         ),
         unknowns,
+        limitations,
       };
     // Missing detailed reference flags do not invalidate observed targetless
     // calls. Keep their producing provider even if another provider supplies
@@ -68,48 +110,38 @@ export const readNativeCallRoutes = async (
       parsed.data.reference_kinds_available === true ||
       (references.length > 0 && references.every(({ kind }) => kind.available))
     ) {
-      const calls = references.filter(
-        ({ kind }) => kind.available && kind.call,
-      );
-      const countBySite = new Map<string, Set<string>>();
-      for (const call of calls) {
-        const targets =
-          countBySite.get(call.source_address) ?? new Set<string>();
-        targets.add(call.target_address);
-        countBySite.set(call.source_address, targets);
-      }
       return {
         ok: true as const,
         value: {
           provider: execution.value.provider,
-          routes: calls.map((call) => ({
-            address: call.target_procedure?.address ?? call.target_address,
-            site: call.source_address,
-            relation:
-              call.kind.available && (call.kind.computed || call.kind.indirect)
-                ? ("indirect_call" as const)
-                : ("direct_call" as const),
-            resolution:
-              (countBySite.get(call.source_address)?.size ?? 0) > 1
-                ? ("ambiguous" as const)
-                : call.kind.available &&
-                    (call.kind.computed || call.kind.indirect)
-                  ? ("resolved" as const)
-                  : ("observed" as const),
-          })),
+          routes: typedCallRoutes(references),
           unknowns,
+          limitations,
         },
       };
     }
   } else if (execution.error._tag !== "AnalysisCapabilityUnavailableError")
-    return { ok: false as const, error: execution.error, unknowns };
+    return {
+      ok: false as const,
+      error: execution.error,
+      unknowns,
+      limitations,
+    };
   const callees = await analysis.execute(
     "procedure_callees",
     { procedure },
     options,
   );
   if (!callees.ok)
-    return { ok: false as const, error: callees.error, unknowns };
+    return { ok: false as const, error: callees.error, unknowns, limitations };
+  limitations = [
+    ...limitations,
+    ...limitationsFrom(
+      "procedure_callees",
+      callees.value.provider,
+      callees.value.limitations,
+    ),
+  ];
   const parsed = parseRelatedAddresses(callees.value.result, "callees");
   return parsed.ok
     ? {
@@ -123,7 +155,8 @@ export const readNativeCallRoutes = async (
             resolution: "inferred" as const,
           })),
           unknowns,
+          limitations,
         },
       }
-    : { ok: false as const, error: parsed.error, unknowns };
+    : { ok: false as const, error: parsed.error, unknowns, limitations };
 };

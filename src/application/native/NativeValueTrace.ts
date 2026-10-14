@@ -13,6 +13,10 @@ import { err, ok } from "../../domain/result.js";
 import type { AnalysisOperationPort } from "../AnalysisProvider.js";
 import type { EnhancedResult } from "../EnhancedToolTypes.js";
 import { jsonParts } from "../../domain/jsonSerialization.js";
+import {
+  renderSourceLimitations,
+  type SourceLimitation,
+} from "../SourceLimitations.js";
 
 const NODE_PAYLOAD_BYTES = 8 * 1024 * 1024;
 
@@ -27,6 +31,7 @@ export const traceNativeValues = async (
   const edges: typeof nativeValueTraceSchema._output.edges = [];
   const procedures: typeof nativeValueTraceSchema._output.procedures = [];
   const unknowns: typeof nativeValueTraceSchema._output.unknowns = [];
+  const sourceLimitations: SourceLimitation[] = [];
   const callBindings: {
     caller: string;
     callee: string;
@@ -280,6 +285,13 @@ export const traceNativeValues = async (
             "Invalid static call resolution",
           ),
         );
+      sourceLimitations.push(
+        ...targets.data.limitations.map((limitation) => ({
+          provider: resolved.value.provider,
+          operation: "resolve_native_call_targets" as const,
+          limitation,
+        })),
+      );
       if (targets.data.targets.length === 0)
         unknowns.push({
           procedure: address,
@@ -424,6 +436,7 @@ export const traceNativeValues = async (
       "Static decompiler def-use graphs cover recovered block members; when membership is unavailable they exclude operations marked dead. Logical CALL argument positions bind to recovered HighParam ordinals and RETURN values bind to recovered CALL outputs; these are decompiler-derived dependencies, not original source or runtime observations. Missing parameters, variadic arguments and alias dependencies remain unknown.",
       "LOAD and STORE are memory operations; object fields, persistent state and RNG semantics are not inferred from names or pseudocode.",
       "Traversal caps depth, decompilations, call-site resolutions, nodes, edges and node payloads (8 MiB). Complete serialized output is bounded to 32 MiB. Pagination reruns analysis and returns edges whose source is on the node page; endpoints outside the page retain stable identities.",
+      ...renderSourceLimitations(sourceLimitations),
     ],
   });
   if (Buffer.byteLength(JSON.stringify(result)) > 32 * 1024 * 1024)

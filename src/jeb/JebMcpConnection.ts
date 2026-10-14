@@ -1,6 +1,8 @@
 import {
   Client,
   DEFAULT_REQUEST_TIMEOUT_MSEC,
+  SdkError,
+  SdkErrorCode,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { z } from "zod";
@@ -82,16 +84,27 @@ const isJebFailureEnvelope = (value: JsonValue): boolean =>
   !Array.isArray(value) &&
   value.success === false;
 
+export interface JebMcpConnectionTimeouts {
+  /** Absolute catalog connection and pagination deadline. */
+  readonly discoveryTimeoutMs?: number;
+  /** Absolute timeout for each upstream tools/call request. */
+  readonly requestTimeoutMs?: number;
+}
+
 export type JebMcpConnectionFactory = (
   endpoint: URL,
-  timeoutMs?: number,
+  timeouts?: JebMcpConnectionTimeouts,
 ) => JebMcpConnection;
 
 /** Serve JEB requests from a running engine client over streamable HTTP. */
 export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
   endpoint,
-  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MSEC,
+  timeouts,
 ) => {
+  const discoveryTimeoutMs =
+    timeouts?.discoveryTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
+  const requestTimeoutMs =
+    timeouts?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
   interface ConnectionState {
     readonly client: Client;
     readonly transport: StreamableHTTPClientTransport;
@@ -184,7 +197,7 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
     state = owner;
     const acquisition = (async () => {
       const deadline = new ProviderStartupDeadline(
-        timeoutMs,
+        discoveryTimeoutMs,
         owner.signal.signal,
       );
       try {
@@ -197,7 +210,9 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
       } catch (cause: unknown) {
         const failure =
           deadline.interruption === "timeout"
-            ? new AnalysisTimeoutError("jeb_mcp_catalog", timeoutMs, { cause })
+            ? new AnalysisTimeoutError("jeb_mcp_catalog", discoveryTimeoutMs, {
+                cause,
+              })
             : cause;
         owner.signal.abort(failure);
         try {
@@ -234,19 +249,30 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
       // could detach this waiter before that owner has disposed a failed client.
       const tools = await connect(signal);
       if (!existing) return tools;
-      const deadline = new ProviderStartupDeadline(timeoutMs, signal);
+      const owner = state;
+      if (owner === undefined)
+        throw new AnalysisProtocolError("JEB MCP client failed to connect");
+      const discoverySignal =
+        signal === undefined
+          ? owner.signal.signal
+          : AbortSignal.any([signal, owner.signal.signal]);
+      const deadline = new ProviderStartupDeadline(
+        discoveryTimeoutMs,
+        discoverySignal,
+      );
       try {
-        const owner = state;
-        if (owner === undefined)
-          throw new AnalysisProtocolError("JEB MCP client failed to connect");
         const refreshed = await readToolNames(owner.client, deadline.signal);
         owner.tools = refreshed;
         return refreshed;
       } catch (cause: unknown) {
         if (deadline.interruption === "timeout")
-          throw new AnalysisTimeoutError("jeb_mcp_catalog", timeoutMs, {
-            cause,
-          });
+          throw new AnalysisTimeoutError(
+            "jeb_mcp_catalog",
+            discoveryTimeoutMs,
+            { cause },
+          );
+        if (deadline.interruption === "cancelled")
+          throw new AnalysisCancelledError("jeb_mcp_catalog", { cause });
         throw cause;
       } finally {
         deadline.dispose();
@@ -257,11 +283,34 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
       const owner = state;
       if (owner === undefined || owner.tools === undefined)
         throw new AnalysisProtocolError("JEB MCP client failed to connect");
-      const result = await owner.client.callTool(
-        { name, arguments: args },
-        signal === undefined ? {} : { signal },
+      const requestSignal =
+        signal === undefined
+          ? owner.signal.signal
+          : AbortSignal.any([signal, owner.signal.signal]);
+      const deadline = new ProviderStartupDeadline(
+        requestTimeoutMs,
+        requestSignal,
       );
-      return decodeJebToolResult(result);
+      try {
+        const result = await owner.client.callTool(
+          { name, arguments: args },
+          { timeout: deadline.remainingMs(), signal: deadline.signal },
+        );
+        return decodeJebToolResult(result);
+      } catch (cause: unknown) {
+        if (deadline.interruption === "timeout")
+          throw new AnalysisTimeoutError(name, requestTimeoutMs, { cause });
+        if (requestSignal.aborted)
+          throw new AnalysisCancelledError(name, { cause });
+        if (
+          cause instanceof SdkError &&
+          cause.code === SdkErrorCode.RequestTimeout
+        )
+          throw new AnalysisTimeoutError(name, requestTimeoutMs, { cause });
+        throw cause;
+      } finally {
+        deadline.dispose();
+      }
     },
     async close() {
       closed = true;

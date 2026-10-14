@@ -470,14 +470,14 @@ const verifyWindowsSnapshotAdmission = async (
 };
 
 it.each([
-  { tool: "binary_overview", arguments: {}, priorRevision: 3 },
+  { tool: "binary_overview", arguments: {}, priorRevision: 4 },
   {
     tool: "inspect_native_api",
     arguments: { procedure: "0x1000" },
-    priorRevision: undefined,
+    priorRevision: 1,
   },
 ] as const)(
-  "refreshes pre-coverage $tool Evidence and replays the current revision",
+  "refreshes unattributed $tool Evidence and replays the current revision",
   async (scenario) => {
     const fixture = await createSnapshotReplayFixture("rea-prior-coverage-");
     const limitation = "Original PDB names may be missing.";
@@ -523,7 +523,9 @@ it.each([
         options,
       ),
     );
-    expect(refreshed.limitations).toContain(limitation);
+    expect(refreshed.limitations).toEqual(
+      expect.arrayContaining(first.limitations),
+    );
     expect(refreshed.analysis_profile?.digest).not.toBe(priorProfile.digest);
     expect(refreshed.normalized_result).toEqual(first.normalized_result);
     const starts = [...fixture.starts];

@@ -409,7 +409,11 @@ describe("active-target availability over MCP", () => {
     const session = createTestBinarySession(
       availabilityProvider(["inspect_macho", "inspect_artifact"]),
     );
-    const server = createServer({ kind: "session", session });
+    // Availability does not depend on compiling every advertised output schema.
+    const server = createServer(
+      { kind: "session", session },
+      { environment: { REA_MCP_OUTPUT_SCHEMA_PROFILE: "off" } },
+    );
     const client = new Client({ name: "availability-test", version: "1" });
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();

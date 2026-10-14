@@ -291,31 +291,32 @@ const nativeFlowDossier = (
   });
 };
 
-const callBindingAnalysis = (
-  callerAddress: string,
-  calleeAddress: string,
-  caller: ReturnType<typeof jsonValueSchema.parse>,
-  callee: ReturnType<typeof jsonValueSchema.parse>,
-): AnalysisOperationPort => ({
+const callBindingAnalysis = (input: {
+  readonly callerAddress: string;
+  readonly calleeAddress: string;
+  readonly caller: ReturnType<typeof jsonValueSchema.parse>;
+  readonly callee: ReturnType<typeof jsonValueSchema.parse>;
+  readonly targetLimitations?: readonly string[];
+}): AnalysisOperationPort => ({
   execute: async (operation, parameters) => {
     if (operation === "resolve_native_call_targets")
       return ok(
         createAnalysisExecution(
           {
             call_site: String(parameters.address),
-            procedure: calleeAddress,
+            procedure: input.calleeAddress,
             status: "direct",
             mechanism: "direct",
             targets: [
               {
-                address: calleeAddress,
-                procedure: calleeAddress,
+                address: input.calleeAddress,
+                procedure: input.calleeAddress,
                 status: "direct",
                 basis: "provider-reference",
                 references: [],
               },
             ],
-            limitations: [],
+            limitations: [...(input.targetLimitations ?? [])],
           },
           provider,
           { subject },
@@ -324,13 +325,15 @@ const callBindingAnalysis = (
     if (operation !== "analyze_function")
       throw new Error(`Unexpected native trace operation: ${operation}`);
     if (
-      parameters.procedure !== callerAddress &&
-      parameters.procedure !== calleeAddress
+      parameters.procedure !== input.callerAddress &&
+      parameters.procedure !== input.calleeAddress
     )
       throw new Error(`Unexpected procedure: ${String(parameters.procedure)}`);
     return ok(
       createAnalysisExecution(
-        parameters.procedure === callerAddress ? caller : callee,
+        parameters.procedure === input.callerAddress
+          ? input.caller
+          : input.callee,
         provider,
         { subject },
       ),
@@ -430,6 +433,40 @@ describe("native value failed-callee traversal", () => {
 });
 
 describe("native value call-binding fan-out", () => {
+  it("retains limitations embedded in resolved call-target results", async () => {
+    const callerAddress = "0x1000";
+    const calleeAddress = "0x2000";
+    const base = functionDossierSchema.parse(ghidraFunctionDossier());
+    const caller = nativeFlowDossier(base, {
+      address: callerAddress,
+      name: "caller",
+      operations: [node("call", callerAddress, "CALL")],
+      parameters: [],
+    });
+    const callee = nativeFlowDossier(base, {
+      address: calleeAddress,
+      name: "callee",
+      operations: [],
+      parameters: [],
+    });
+    const caveat = "Only statically resolved call sites are included.";
+    const result = await traceNativeValues(
+      callBindingAnalysis({
+        callerAddress,
+        calleeAddress,
+        caller,
+        callee,
+        targetLimitations: [caveat],
+      }),
+      { procedure: callerAddress, max_functions: 2 },
+    );
+
+    if (!result.ok) throw result.error;
+    expect(nativeValueTraceSchema.parse(result.value).limitations).toContain(
+      `Fixture (fixture 1) resolve_native_call_targets: ${caveat}`,
+    );
+  });
+
   it("preserves binding order and edge-budget behavior for repeated callees", async () => {
     const callCount = 128;
     const callerAddress = "0x1000";
@@ -455,12 +492,12 @@ describe("native value call-binding fan-out", () => {
       operations: [node("return", calleeAddress, "RETURN")],
       parameters: [{ ordinal: 0, name: "value", data_type: "/int" }],
     });
-    const fanoutAnalysis = callBindingAnalysis(
+    const fanoutAnalysis = callBindingAnalysis({
       callerAddress,
       calleeAddress,
       caller,
       callee,
-    );
+    });
     const expectedEdges = [
       ...Array.from({ length: callCount }, (_, index) => ({
         source: `${callerAddress}/call-${index}`,
@@ -803,7 +840,12 @@ describe("native value byte-bound call bindings", () => {
       ],
     });
     const result = await traceNativeValues(
-      callBindingAnalysis("0x1000", "0x2000", caller, callee),
+      callBindingAnalysis({
+        callerAddress: "0x1000",
+        calleeAddress: "0x2000",
+        caller,
+        callee,
+      }),
       { procedure: "0x1000" },
     );
     if (!result.ok) throw result.error;

@@ -20,6 +20,8 @@ export interface SetupInitialState {
   readonly hopperPath?: string;
   /** Whether the caller explicitly selected a Hopper launcher in its environment. */
   readonly hopperLauncherConfigured?: boolean;
+  /** Whether the caller or host has an analysis provider configuration. */
+  readonly providerConfigured: boolean;
   readonly providerEnvironment: SetupProviderEnvironment;
   readonly doctor: DoctorReport;
 }

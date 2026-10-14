@@ -4,7 +4,10 @@ import { EnhancedTools } from "../../../src/application/EnhancedTools.js";
 import { connectGhidraMcp, sessionEvidence } from "./ghidraMcpHarness.js";
 import { functionDossierSchema } from "../../../src/domain/hopperValues.js";
 import { functionComparisonResultSchema } from "../../../src/domain/functionComparisonSchemas.js";
-import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
+import {
+  ghidraFunctionDossier,
+  ghidraFunctionIdentity,
+} from "../../../src/domain/ghidraValues.fixture.js";
 import {
   jsonValueSchema,
   type JsonValue,
@@ -186,7 +189,7 @@ it("retains terminal-call qualifications across function views and snapshot repl
       expect(evidence.limitations, name).toContain(limitation);
       expect(evidence.analysis_profile?.parameters).toMatchObject({
         function_boundary_observations:
-          "ghidra-function-boundary-limitations-v3",
+          "ghidra-function-boundary-limitations-v4",
       });
       const replay = await harness.session.execute(name, evidence.parameters);
       if (!replay.ok) throw replay.error;
@@ -197,6 +200,61 @@ it("retains terminal-call qualifications across function views and snapshot repl
       );
     }
     expect(harness.calls).toEqual([...values.keys()]);
+  } finally {
+    await harness.close();
+  }
+});
+
+it("retains handler-region limitations on incoming and outgoing reference Evidence", async () => {
+  const limitation =
+    "Ghidra Listing shows a Borland/Delphi-style SEH frame registration at 0x40108f (push 0x4010c0 followed by fs-segment stack chaining); handler 0x4010c0 lies outside this procedure's body, so callees, strings, and cross-references may omit the handler region.";
+  const dossier = functionDossierSchema.parse(ghidraFunctionDossier());
+  const harness = await connectGhidraMcp(
+    "ghidra-seh-reference-evidence",
+    (operation, input) => {
+      if (operation !== "procedure_references")
+        throw new Error(`Unexpected operation: ${operation}`);
+      return Promise.resolve(
+        ok({
+          value: jsonValueSchema.parse({
+            procedure: ghidraFunctionIdentity(),
+            direction: input.direction ?? "outgoing",
+            references: [],
+            reference_kinds_available: true,
+            unresolved_calls: [],
+          }),
+          limitations: [limitation],
+        }),
+      );
+    },
+  );
+  try {
+    for (const direction of ["incoming", "outgoing"] as const) {
+      const reply = await harness.mcp.callTool({
+        name: "procedure_references",
+        arguments: { procedure: dossier.procedure.address, direction },
+      });
+      expect(reply.isError).not.toBe(true);
+      const evidence = sessionEvidence(
+        harness.session,
+        reply.structuredContent,
+      );
+      expect(evidence.normalized_result).toMatchObject({ direction });
+      expect(evidence.raw_result).toMatchObject({ limitations: [limitation] });
+      expect(evidence.limitations).toContain(limitation);
+      const replay = await harness.session.execute(
+        "procedure_references",
+        evidence.parameters,
+      );
+      if (!replay.ok) throw replay.error;
+      expect(replay.value.limitations).toContain(limitation);
+    }
+    expect(harness.calls).toEqual([
+      "procedure_references",
+      "procedure_references",
+      "procedure_references",
+      "procedure_references",
+    ]);
   } finally {
     await harness.close();
   }

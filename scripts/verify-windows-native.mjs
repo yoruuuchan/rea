@@ -22,6 +22,7 @@ import { dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { verifyWindowsProtocolInput } from "./lib/windows-protocol-input.mjs";
 import { verifyWindowsJobMemoryLimit } from "./lib/windows-job-memory-limit.mjs";
+import { verifyVolumeRootAppendLease } from "./lib/windows-volume-root-append-lease.mjs";
 
 if (process.platform !== "win32")
   throw new Error(
@@ -251,6 +252,17 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
   }
   const unrelatedFile = join(workspace, "unrelated-file");
   await writeFile(unrelatedFile, "preserve unrelated writes");
+  if (process.argv[3] !== undefined) {
+    await verifyVolumeRootAppendLease({
+      fixturePath: process.argv[3],
+      volumeRoot: parse(source).root,
+      verifyAdmission: () => {
+        const rootGuard = native.call("open", [source]);
+        native.call("close", [rootGuard.handle]);
+      },
+    });
+    report.controls.volumeRootAdmissionWithAppendHandle = true;
+  }
   const admitted = native.call("open", [source]);
   try {
     await assert.rejects(

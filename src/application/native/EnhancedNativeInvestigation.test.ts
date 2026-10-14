@@ -257,6 +257,56 @@ describe("native UI action trace", () => {
       }),
     );
   });
+  it("carries source-owned reference limitations into trace output without changing coverage", async () => {
+    const limitation = "SEH handler targets may be outside the function body.";
+    const run = async (limitations: readonly string[]) => {
+      const result = await new EnhancedTools(
+        testAnalysis({
+          procedure_address: () => execution("procedure_address", "0x1000"),
+          procedure_references: () =>
+            ok(
+              createAnalysisExecution(
+                {
+                  reference_kinds_available: false,
+                  references: [],
+                  unresolved_calls: [],
+                },
+                { id: "ghidra", name: "Ghidra", version: "fixture" },
+                { limitations },
+              ),
+            ),
+          procedure_callees: (parameters) =>
+            execution(
+              "procedure_callees",
+              parameters.procedure === "0x1000" ? ["0x2000"] : [],
+            ),
+        }),
+      ).execute("trace_native_ui_action", { action: "0x1000" });
+      if (!result.ok) throw result.error;
+      return nativeInvestigationTraceSchema.parse(result.value);
+    };
+
+    const withSourceLimitation = await run([limitation]);
+    const withoutSourceLimitation = await run([]);
+
+    expect(withSourceLimitation.limitations).toContain(
+      `Ghidra (ghidra fixture) procedure_references: ${limitation}`,
+    );
+    expect(
+      withSourceLimitation.limitations.filter((entry) =>
+        entry.endsWith(`procedure_references: ${limitation}`),
+      ),
+    ).toHaveLength(1);
+    expect(withSourceLimitation.coverage).toEqual(
+      withoutSourceLimitation.coverage,
+    );
+    expect(withSourceLimitation.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "static_native_calls",
+        status: "partial",
+      }),
+    );
+  });
   it("accepts an explicit native seed without an authored UI connection", async () => {
     const result = await new EnhancedTools(
       testAnalysis({

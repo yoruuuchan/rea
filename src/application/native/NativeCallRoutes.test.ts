@@ -34,6 +34,12 @@ describe("untyped native call route fallback", () => {
                 operation === "procedure_references"
                   ? referenceProvider
                   : fallbackProvider,
+                {
+                  limitations:
+                    operation === "procedure_references"
+                      ? ["Reference-kind metadata is incomplete."]
+                      : ["Callee enumeration is limited to named functions."],
+                },
               ),
             );
           },
@@ -54,6 +60,18 @@ describe("untyped native call route fallback", () => {
             resolution: "inferred",
           })),
           unknowns: [{ ...unknown, provider: referenceProvider }],
+          limitations: [
+            {
+              provider: referenceProvider,
+              operation: "procedure_references",
+              limitation: "Reference-kind metadata is incomplete.",
+            },
+            {
+              provider: fallbackProvider,
+              operation: "procedure_callees",
+              limitation: "Callee enumeration is limited to named functions.",
+            },
+          ],
         },
       });
     },
@@ -105,6 +123,7 @@ describe("typed native call routes", () => {
                 ],
               },
               provider,
+              { limitations: ["SEH handler targets may be outside the body."] },
             ),
           ),
       },
@@ -126,6 +145,13 @@ describe("typed native call routes", () => {
           },
         ],
         unknowns: [{ address: "0x1008" }],
+        limitations: [
+          {
+            provider,
+            operation: "procedure_references",
+            limitation: "SEH handler targets may be outside the body.",
+          },
+        ],
       },
     });
   });
@@ -146,12 +172,26 @@ describe("typed native call routes", () => {
     });
     expect(calls).toBe(1);
     const malformed = await readNativeCallRoutes(
-      { execute: async () => ok(createAnalysisExecution({}, provider)) },
+      {
+        execute: async () =>
+          ok(
+            createAnalysisExecution({}, provider, {
+              limitations: ["Malformed output still has source caveats."],
+            }),
+          ),
+      },
       "0x1000",
     );
     expect(malformed).toMatchObject({
       ok: false,
       error: { _tag: "AnalysisOutputError" },
+      limitations: [
+        {
+          provider,
+          operation: "procedure_references",
+          limitation: "Malformed output still has source caveats.",
+        },
+      ],
     });
   });
   it("rejects omitted unresolved-call observations instead of claiming none", async () => {

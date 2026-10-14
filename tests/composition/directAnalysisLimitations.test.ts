@@ -42,7 +42,10 @@ it("retains provider coverage caveats in a composed CLI result and closes the se
     {},
   );
   expect(output).toMatchObject({
-    limitations: ["Derived by an REA composed workflow.", limitation],
+    limitations: [
+      "Derived by an REA composed workflow.",
+      `Fixture (fixture 1) current_document, list_procedures, list_segments, list_strings: ${limitation}`,
+    ],
     normalized_result: {
       document: "fixture",
       segment_count: 0,

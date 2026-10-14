@@ -23,11 +23,18 @@ import { dshDocument, DshCordisDocument } from "./DshCordisPatch.js";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import { clientRegistrationEnvironment } from "./ClientRegistrationEnvironment.js";
+import {
+  clientRegistrationEnvironment,
+  clientRegistrationEnvironmentDetails,
+} from "./ClientRegistrationEnvironment.js";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { npxRegistrationCommand } from "./ClientRegistrationIdentity.js";
-import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
+import {
+  MCP_STARTUP_POLICY,
+  recommendedMcpToolTimeoutMs,
+  recommendedMcpToolTimeoutSeconds,
+} from "../mcpStartupPolicy.js";
 import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { packageReadTargetChanged } from "./MsixPackageStorage.js";
 import {
@@ -658,15 +665,15 @@ const clientConfigurationDesired = (
     client,
     document: parsed,
   });
-  const validated = clientRegistrationEnvironment(
-    effective,
-    providerEnvironment,
-  );
-  if (!validated.ok) throw validated.error;
   const format = parsed?.dialect ?? client.format ?? "json";
   const launcher =
     command.length === 0 ? [PRODUCT_IDENTITY.cliBinary, "mcp"] : command;
   if (format === "dsh") {
+    const validated = clientRegistrationEnvironment(
+      effective,
+      providerEnvironment,
+    );
+    if (!validated.ok) throw validated.error;
     const desired = (
       parsed === undefined
         ? new DshCordisDocument("")
@@ -675,8 +682,14 @@ const clientConfigurationDesired = (
     if (!desired.ok) throw desired.error;
     return desired.value;
   }
+  const validated = clientRegistrationEnvironmentDetails(
+    effective,
+    providerEnvironment,
+  );
+  if (!validated.ok) throw validated.error;
   // Preserve explicitly configured server settings, never the ambient process
-  // environment. Newly discovered provider paths win only for their own keys.
+  // environment. The effective layered view validates precedence and supplies
+  // timeout facts; the target file's fragment remains the value being written.
   const environment = clientRegistrationEnvironment(
     parsed,
     providerEnvironment,
@@ -708,14 +721,40 @@ const clientConfigurationDesired = (
     ...registration,
     ...(client.name === "codex" || client.name === "grok_build"
       ? {
-          startup_timeout_sec: MCP_STARTUP_POLICY.codexStartupTimeoutSeconds,
+          startup_timeout_sec:
+            client.name === "codex"
+              ? (positiveTimeout(previous, "startup_timeout_sec") ??
+                MCP_STARTUP_POLICY.codexStartupTimeoutSeconds)
+              : MCP_STARTUP_POLICY.codexStartupTimeoutSeconds,
+        }
+      : {}),
+    ...(client.name === "codex"
+      ? {
+          tool_timeout_sec:
+            positiveTimeout(previous, "tool_timeout_sec") ??
+            recommendedMcpToolTimeoutSeconds(validated.value.timeoutInputs),
         }
       : {}),
     ...(client.name === "kimi"
       ? {
-          startupTimeoutMs: MCP_STARTUP_POLICY.kimiStartupTimeoutMs,
-          toolTimeoutMs: MCP_STARTUP_POLICY.kimiToolTimeoutMs,
+          startupTimeoutMs:
+            positiveTimeout(previous, "startupTimeoutMs") ??
+            MCP_STARTUP_POLICY.kimiStartupTimeoutMs,
+          toolTimeoutMs:
+            positiveTimeout(previous, "toolTimeoutMs") ??
+            recommendedMcpToolTimeoutMs(validated.value.timeoutInputs),
         }
       : {}),
   };
+};
+
+const positiveTimeout = (
+  registration: unknown,
+  key: string,
+): number | undefined => {
+  if (typeof registration !== "object" || registration === null) return;
+  const value: unknown = Reflect.get(registration, key);
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 };
