@@ -119,6 +119,7 @@ it("summarizes selected members and pages every original collection after the fi
     unmatched_type_names: ["Missing.Type"],
   });
   expect(view.summary.coverage).toEqual(report.coverage);
+  expect(view.summary.signature_resolution).toBe("type-names-v1");
   expect(view.summary.identity_scope).toEqual(report.identity_scope);
   expect(view.summary).not.toHaveProperty("methods");
   for (const detail of [undefined, "complete"]) {
@@ -163,6 +164,7 @@ it("summarizes selected members and pages every original collection after the fi
       if (page.kind !== "managed-members")
         throw new Error("Unexpected page kind");
       expect(page.page.collection).toBe(collection);
+      expect(page.signature_resolution).toBe("type-names-v1");
       expect(page.selection).toEqual(report.selection);
       expect(page.coverage.total).toBe(rows.length);
       paged.push(...page.page.rows);
@@ -199,6 +201,7 @@ it("keeps collections that historical member Evidence never examined unknown", a
     exported_types: _exported,
     user_strings: _strings,
     selection: _selection,
+    signature_resolution: _resolution,
     ...recorded
   } = managedMemberInspectionSchema.parse(parent.normalized_result);
   const historical = createEvidence(undefined, parent.provider, {
@@ -217,6 +220,7 @@ it("keeps collections that historical member Evidence never examined unknown", a
     summary.value.normalized_result,
   );
   expect(view.summary.reported_counts.exported_types).toBeNull();
+  expect(view.summary.signature_resolution).toBeNull();
   expect(view.summary.reported_counts.user_strings).toBeNull();
   expect(view.summary.user_strings).toBeNull();
   expect(view.summary.selection).toBeNull();

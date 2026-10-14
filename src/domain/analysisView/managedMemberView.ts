@@ -64,6 +64,8 @@ const nullableCount = z.number().int().nonnegative().nullable();
 
 /** Keep identity, selection and coverage; member collections remain retained. */
 export const managedMemberSummarySchema = z.strictObject({
+  signature_resolution: member.signature_resolution,
+  nesting_read: member.nesting_read,
   artifact: member.artifact,
   module: member.module,
   metadata: member.metadata,
@@ -90,6 +92,8 @@ export const managedMemberSummarySchema = z.strictObject({
 });
 
 export const managedMembersViewContextSchema = z.strictObject({
+  signature_resolution: member.signature_resolution,
+  nesting_read: member.nesting_read,
   identity_scope: member.identity_scope,
   selection: member.selection.unwrap(),
   source_metadata_status: member.metadata.shape.status,
@@ -269,6 +273,8 @@ export const projectManagedMemberView = (
     view,
     page,
     ...shared,
+    signature_resolution: report.signature_resolution,
+    nesting_read: report.nesting_read,
     identity_scope: report.identity_scope,
     selection: report.selection,
     source_metadata_status: report.metadata.status,

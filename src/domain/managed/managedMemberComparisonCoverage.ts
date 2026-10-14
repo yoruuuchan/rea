@@ -3,6 +3,7 @@ import type {
   ManagedMemberComparisonSide,
 } from "./managedMemberComparison.js";
 import type { ManagedMemberInspection } from "./managedArtifact.js";
+import { hasSignatureResolution } from "./managedMemberSignatureIdentity.js";
 
 interface ComparisonCoverageInput {
   readonly left: ManagedMemberInspection;
@@ -108,8 +109,27 @@ export const comparisonLimitations = (
   const limitations: string[] = [
     "Metadata tokens are build-local coordinates; matched pairs are remaps, not persistent identities.",
     "Methods pair within one declared type and name by exact CIL/signature, then signature, then structural shape; only then may exact CIL/signature or structural shape alone remap across declared types or names, never taking a member whose own declared type and name remain unpaired on the other side or whose declaring type is unresolved. Names alone are never a matching basis.",
-    "Fields pair by declared type, name, and signature, then remap by exact decoded signature alone under the same rule; an undecoded signature is compared only by its raw bytes, and an unmatched member with one stays unknown.",
+    "Fields pair by declared type, name, and signature, then remap by exact decoded signature alone under the same rule; an undecoded signature is compared only for an exact signature match, and an unmatched member with one stays unknown.",
   ];
+  const namesTypes = (result: ManagedMemberInspection) =>
+    result.methods.some(
+      ({ signature }) =>
+        signature.resolved_sha256 !== null &&
+        signature.resolved_sha256 !== signature.raw_sha256,
+    ) ||
+    result.fields.some(
+      ({ signature }) =>
+        signature.resolved_sha256 !== null &&
+        signature.resolved_sha256 !== signature.raw_sha256,
+    );
+  if (
+    hasSignatureResolution(left) &&
+    hasSignatureResolution(right) &&
+    (namesTypes(left) || namesTypes(right))
+  )
+    limitations.push(
+      "Signature type operands compare by namespace, name, and enclosing names only; defining assemblies and CLR type identity are not established by this comparison.",
+    );
   if (left.coverage.state !== "complete" || right.coverage.state !== "complete")
     limitations.push("At least one managed member observation is partial.");
   if (!sameSelection(left, right))
@@ -119,6 +139,14 @@ export const comparisonLimitations = (
   else if (left.selection !== null)
     limitations.push(
       `Both observations cover only the selected declaring types (${left.selection.type_names.join(", ")}); member totals and statuses describe those types, not the whole assembly.`,
+    );
+  if (!hasSignatureResolution(left) || !hasSignatureResolution(right))
+    limitations.push(
+      "At least one managed member observation does not attest signature type-name resolution, so signatures compare by raw bytes, which name types by build-local metadata row.",
+    );
+  if (left.nesting_read === null || right.nesting_read === null)
+    limitations.push(
+      "At least one managed member observation predates enclosing-name identity. The legacy bare-name comparison does not establish the enclosing owner of a nested type.",
     );
   if (left.exported_types === null || right.exported_types === null)
     limitations.push(

@@ -19,7 +19,7 @@ const hash = (bytes: Buffer): string =>
   createHash("sha256").update(bytes).digest("hex");
 
 describe("managed member partial body comparison", () => {
-  it("keeps unavailable body facets unknown while retaining an observed signature change", () => {
+  it("keeps unavailable body facets unknown and a raw-only signature difference unchanged", () => {
     const left = inspect(buildManagedPeFixture(), "/tmp/left-body-partial.dll");
     const right = inspect(
       buildManagedPeFixture(),
@@ -85,9 +85,11 @@ describe("managed member partial body comparison", () => {
         result: rightSignatureChanged,
       },
     );
+    // Raw bytes that resolve to the same types, as when a rebuild moves a
+    // referenced type to another metadata row, are not a signature change.
     expect(signatureChanged.methods[0]).toMatchObject({
-      status: "changed",
-      dimensions: ["signature"],
+      status: "unchanged",
+      dimensions: [],
     });
 
     const bothAbsent = compareManagedMembers(

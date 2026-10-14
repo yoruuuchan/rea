@@ -5,6 +5,7 @@ import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { valid } from "semver";
 
 const MANIFEST_NAME = "manifest.json";
 const TARBALL_NAME = "package.tgz";
@@ -78,7 +79,7 @@ export async function retainVerifiedPackage({
 }
 
 /** Validate a retained package against the current checkout and workflow attempt. */
-async function validateVerifiedPackage({
+export async function validateVerifiedPackage({
   directory,
   sourceSha,
   runId,
@@ -155,6 +156,8 @@ function validateManifestShape(manifest) {
   ])
     if (typeof manifest[key] !== "string" || manifest[key].length === 0)
       throw new Error(`Verified package manifest has an invalid ${key}`);
+  if (valid(manifest.packageVersion) !== manifest.packageVersion)
+    throw new Error("Verified package manifest has an invalid package version");
   if (
     typeof manifest.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/u.test(manifest.sha256)
@@ -171,6 +174,16 @@ async function sha256File(path) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest("hex");
+}
+
+/** Require the registry to serve the exact archive selected for publication. */
+export async function verifyPublishedPackageIntegrity(tarball, integrity) {
+  const hash = createHash("sha512");
+  for await (const chunk of createReadStream(tarball)) hash.update(chunk);
+  if (integrity !== `sha512-${hash.digest("base64")}`)
+    throw new Error(
+      "Published npm integrity differs from the original qualified package",
+    );
 }
 
 async function validateFromCli(directory) {
@@ -202,10 +215,14 @@ async function validateFromCli(directory) {
     throw new Error(
       "GITHUB_OUTPUT is required to publish the validated tarball path",
     );
-  await writeFile(process.env.GITHUB_OUTPUT, `tarball=${tarball}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
+  await writeFile(
+    process.env.GITHUB_OUTPUT,
+    `tarball=${tarball}\nversion=${packageJson.version}\n`,
+    {
+      encoding: "utf8",
+      flag: "a",
+    },
+  );
   process.stdout.write(`${tarball}\n`);
 }
 

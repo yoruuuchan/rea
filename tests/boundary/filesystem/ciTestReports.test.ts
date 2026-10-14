@@ -140,13 +140,18 @@ function conditionValue(
   condition: string | undefined,
   needs: Record<string, unknown>,
   canceled: boolean,
+  timingReportExists = false,
 ) {
   if (!condition) throw new Error("Missing report collection condition");
   return runInNewContext(
     condition
       .replaceAll("needs.test-shard", 'needs["test-shard"]')
       .replaceAll("needs.test-source", 'needs["test-source"]'),
-    { needs, cancelled: () => canceled },
+    {
+      needs,
+      cancelled: () => canceled,
+      hashFiles: () => (timingReportExists ? "timing-report" : ""),
+    },
     { timeout: 1_000 },
   );
 }
@@ -205,6 +210,28 @@ it("collects either fast test group while keeping full reports tied to full shar
   expect(summary?.env?.SOURCE_REQUIRED).toBe(
     "${{ needs.changes.outputs.tier == 'fast' }}",
   );
+});
+
+it("requires portable report validation even when the timing report is missing", async () => {
+  const summary = (await workflow()).test.steps.find((step) =>
+    step.run?.includes("scripts/ci/test-report.mjs"),
+  );
+  for (const tier of ["fast", "full"]) {
+    for (const timingReportExists of [false, true]) {
+      for (const code of ["true", "false"]) {
+        for (const canceled of [false, true]) {
+          expect(
+            conditionValue(
+              summary?.if,
+              { changes: { outputs: { code, tier } } },
+              canceled,
+              timingReportExists,
+            ),
+          ).toBe(code === "true" && !canceled);
+        }
+      }
+    }
+  }
 });
 
 it("keeps diagnosis available after merge failure and publishes only complete successful history", async () => {
@@ -270,6 +297,16 @@ it("rejects successful shard reports with missing or duplicate portable files", 
       readFile(join(root, ".cache/ci-test-history/test-results.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   }
+  await run(["tests/first.test.ts", "tests/second.test.ts"]);
+  await rm(join(root, "test-timings.json"));
+  await expect(
+    executeTimingReport(root, { CI_VERIFY_TEST_INVENTORY: "true" }),
+  ).rejects.toMatchObject({
+    stderr: expect.stringContaining("ENOENT"),
+  });
+  await expect(
+    readFile(join(root, ".cache/ci-test-history/test-results.json")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("runs the existing onboarding and Python producer guards from their selected CI owners", async () => {

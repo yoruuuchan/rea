@@ -1,4 +1,4 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 
 import type { ConfigurationError } from "../domain/configurationErrors.js";
 import { ok, type Result } from "../domain/result.js";
@@ -16,7 +16,7 @@ import {
 const executableAvailable = (path: string): boolean => {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return statSync(path).isFile();
   } catch {
     return false;
   }

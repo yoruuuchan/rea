@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixedTupleSchema } from "./fixedTupleSchema.js";
 import { addressCoordinate } from "./native/addressCoordinate.js";
 
 import type { JsonValue } from "./jsonValue.js";
@@ -286,10 +287,10 @@ const swiftStringLiteralFields = {
   value: z
     .string()
     .describe("Decoded UTF-8 text, including the canonical empty string."),
-  registers: z.tuple([z.string(), z.string()]),
-  words: z
-    .tuple([z.string(), z.string()])
-    .describe("Observed constant register values, in register order."),
+  registers: fixedTupleSchema([z.string(), z.string()]),
+  words: fixedTupleSchema([z.string(), z.string()]).describe(
+    "Observed constant register values, in register order.",
+  ),
 };
 
 /** A Swift String literal decoded from the two words of its ABI value, not a data reference. */

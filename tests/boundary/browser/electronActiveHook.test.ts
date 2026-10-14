@@ -1,6 +1,8 @@
-import { rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, expect, it } from "vitest";
 
@@ -131,11 +133,10 @@ afterEach(async () => {
 it("retains active hook evidence within its event-retention budget", async () => {
   const root = await createTestTempDirectory("rea-electron-hook-");
   temporary.push(root);
-  await writeFile(join(root, "electron.js"), electronModuleSource);
+  await writeElectronFixture(root);
   const script = join(root, "exercise.cjs");
   await writeFile(script, activeCaptureSource);
-  const hook = join(process.cwd(), "scripts/electron-active-hook.cjs");
-  const execution = await runNode(hook, script, root, root);
+  const execution = await runNode(script, root);
   expect(execution.code, execution.stderr).toBe(0);
   const result = JSON.parse(
     execution.stdout.trim().split("\n").at(-1) ?? "null",
@@ -223,7 +224,7 @@ it("classifies a dropped browser preload as preload configuration at capture", a
     "rea-electron-hook-browser-preload-",
   );
   temporary.push(root);
-  await writeFile(join(root, "electron.js"), electronModuleSource);
+  await writeElectronFixture(root);
   const script = join(root, "browser-preload.cjs");
   await writeFile(
     script,
@@ -234,8 +235,7 @@ const snapshot = globalThis.__reaElectronActiveSnapshot();
 process.stdout.write(JSON.stringify(snapshot) + "\\n");
 `,
   );
-  const hook = join(process.cwd(), "scripts/electron-active-hook.cjs");
-  const execution = await runNode(hook, script, root, root);
+  const execution = await runNode(script, root);
   expect(execution.code, execution.stderr).toBe(0);
   const snapshot = JSON.parse(
     execution.stdout.trim().split("\n").at(-1) ?? "null",
@@ -259,35 +259,98 @@ process.stdout.write(JSON.stringify(snapshot) + "\\n");
   });
 });
 
+it("isolates hook and exercise from ancestor Electron packages", async () => {
+  const root = await createTestTempDirectory("rea-electron-hook-ancestor-");
+  temporary.push(root);
+  await writeElectronFixture(root, 'module.exports = "/ambient/Electron";');
+  const ambientHook = await stageHook(join(root, "producer", "scripts"));
+  expect(createRequire(ambientHook)("electron")).toBe("/ambient/Electron");
+
+  const fixture = join(root, "fixture");
+  await writeElectronFixture(fixture);
+  const script = join(fixture, "exercise.cjs");
+  await writeFile(
+    script,
+    `const { BrowserWindow } = require("electron");
+const window = new BrowserWindow({ webPreferences: {} });
+process.stdout.write(JSON.stringify({
+  hook_error: globalThis.__reaElectronActiveSnapshot().hook_error,
+  window_open_handler: typeof window.webContents.windowOpenHandler,
+}) + "\\n");
+`,
+  );
+  const result = await runNode(script, fixture, ambientHook);
+  expect(result.code, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual({
+    hook_error: false,
+    window_open_handler: "function",
+  });
+});
+
 it("preserves fatal process termination after recording uncaught exceptions", async () => {
   const root = await createTestTempDirectory("rea-electron-hook-fatal-");
   temporary.push(root);
+  await writeElectronFixture(
+    root,
+    'throw new Error("controlled Electron unavailable");',
+  );
   const script = join(root, "fatal.cjs");
-  await writeFile(script, 'throw new Error("fatal-hook-secret");\n');
-  const hook = join(process.cwd(), "scripts/electron-active-hook.cjs");
-  const result = await runNode(hook, script, root, root);
+  await writeFile(
+    script,
+    'process.stdout.write(String(globalThis.__reaElectronActiveSnapshot().hook_error) + "\\n");\nthrow new Error("fatal-hook-secret");\n',
+  );
+  const result = await runNode(script, root);
 
   expect(result.code).not.toBe(0);
+  expect(result.stdout.trim()).toBe("true");
   expect(result.stderr).toContain("fatal-hook-secret");
 });
 
-const runNode = (
-  hook: string,
+const writeElectronFixture = async (
+  root: string,
+  source = electronModuleSource,
+) => {
+  const directory = join(root, "node_modules", "electron");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "package.json"),
+    JSON.stringify({ name: "electron", main: "index.cjs" }),
+  );
+  await writeFile(join(directory, "index.cjs"), source);
+};
+
+const stageHook = async (
+  root: string,
+  source = fileURLToPath(
+    new URL("../../../scripts/electron-active-hook.cjs", import.meta.url),
+  ),
+) => {
+  await mkdir(root, { recursive: true });
+  const hook = join(root, "electron-active-hook.cjs");
+  await Promise.all([
+    copyFile(source, hook),
+    copyFile(
+      join(dirname(source), "electron-active-hook-boundaries.cjs"),
+      join(root, "electron-active-hook-boundaries.cjs"),
+    ),
+  ]);
+  return hook;
+};
+
+const runNode = async (
   script: string,
-  moduleRoot: string,
-  cwd: string,
+  root: string,
+  sourceHook?: string,
 ): Promise<{
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
-}> =>
-  new Promise((resolve, reject) => {
+}> => {
+  const hook = await stageHook(root, sourceHook);
+  return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["-r", hook, script], {
-      cwd,
-      env: {
-        ...process.env,
-        NODE_PATH: moduleRoot,
-      },
+      cwd: root,
+      env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout: Buffer[] = [];
@@ -303,3 +366,4 @@ const runNode = (
       }),
     );
   });
+};

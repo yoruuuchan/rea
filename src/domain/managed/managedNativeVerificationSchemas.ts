@@ -48,8 +48,8 @@ const pinvokeVerificationContextShape = {
 };
 
 const observedCandidatesSchema = z
-  .tuple([nativeSymbolSchema])
-  .rest(nativeSymbolSchema);
+  .tuple([nativeSymbolSchema], nativeSymbolSchema)
+  .check(z.minLength(1));
 
 export const pinvokeVerificationSchema = z.union([
   z.strictObject({

@@ -29,7 +29,7 @@ it("validates a tarball against the exact checkout and current workflow attempt"
     join(fixture.artifactDirectory, "package.tgz"),
   );
   expect(await readFile(fixture.output, "utf8")).toBe(
-    `tarball=${join(fixture.artifactDirectory, "package.tgz")}\n`,
+    `tarball=${join(fixture.artifactDirectory, "package.tgz")}\nversion=1.2.3\n`,
   );
 });
 
@@ -46,6 +46,7 @@ it.each([
   ["wrong verifier platform", { platform: "darwin" }],
   ["wrong verifier architecture", { architecture: "arm64" }],
   ["wrong package digest", { sha256: "c".repeat(64) }],
+  ["invalid package version", { packageVersion: "invalid\noutput=injection" }],
 ])("rejects %s", async (_label, override) => {
   const fixture = await createFixture({ override });
 

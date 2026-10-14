@@ -203,6 +203,116 @@ it("restores a real lint report across cold, warm, and fresh consumer checkouts"
   );
 });
 
+it.each(["workflow", "action manifest"])(
+  "invalidates Knip for GitHub %s entrypoints and module contents",
+  async (kind) => {
+    const root = await createTestTempDirectory("rea-knip-github-inputs-");
+    const cache = await createTestTempDirectory("rea-knip-github-cache-");
+    for (const directory of [
+      "src",
+      ".github/workflows",
+      ".github/actions/probe",
+    ])
+      await mkdir(join(root, directory), { recursive: true });
+    await symlink(
+      join(repository, "node_modules"),
+      join(root, "node_modules"),
+      "junction",
+    );
+    await writeTaskFixture(root, ["knip"], {
+      knip: "node node_modules/knip/bin/knip.js",
+    });
+    await writeFile(
+      join(root, ".gitignore"),
+      "node_modules/\n.cache/\n.turbo/\n",
+    );
+    await writeFile(
+      join(root, "knip.json"),
+      JSON.stringify({ entry: ["src/main.js"], project: ["src/**/*.js"] }),
+    );
+    await writeFile(join(root, "src/main.js"), 'console.log("ready");\n');
+    const modulePath = join(root, ".github/actions/fault.mjs");
+    const invalidModule = 'import "rea-ci-controlled-yaml-dependency";\n';
+    await writeFile(modulePath, invalidModule);
+    const workflow = (entry: string) =>
+      JSON.stringify({
+        name: "Probe",
+        on: "workflow_dispatch",
+        jobs: {
+          probe: {
+            "runs-on": "ubuntu-latest",
+            steps: [{ run: `node ${entry}` }],
+          },
+        },
+      });
+    const action = (entry: string) =>
+      JSON.stringify({
+        name: "Probe",
+        runs: { using: "node24", main: entry },
+      });
+    await writeFile(
+      join(root, ".github/workflows/ci.yml"),
+      workflow("src/main.js"),
+    );
+    if (kind === "action manifest")
+      await writeFile(
+        join(root, ".github/actions/probe/action.yml"),
+        action("../../../src/main.js"),
+      );
+    await workflowGit(root, ["init", "--initial-branch=main"]);
+    await workflowGit(root, ["add", "."]);
+    await workflowGit(root, ["commit", "-m", "test: seed Knip GitHub inputs"]);
+    const cold = runTurbo(root, "knip", cache);
+    expect(cold.status, cold.stdout + cold.stderr).toBe(0);
+    expect(cold.stdout).toMatch(/Cached:\s+0 cached/u);
+    await writeFile(join(root, ".github/README.md"), "# Unrelated notes\n");
+    await writeFile(
+      join(root, ".github/actions/notes.yml"),
+      "# Unrelated notes\n",
+    );
+    const warm = runTurbo(root, "knip", cache);
+    expect(warm.status, warm.stdout + warm.stderr).toBe(0);
+    expect(warm.stdout).toMatch(/Cached:\s+1 cached/u);
+    await writeFile(
+      join(
+        root,
+        kind === "workflow"
+          ? ".github/workflows/ci.yml"
+          : ".github/actions/probe/action.yml",
+      ),
+      kind === "workflow"
+        ? workflow(".github/actions/fault.mjs")
+        : action("../fault.mjs"),
+    );
+    const invalid = runTurbo(root, "knip", cache);
+    expect(invalid.error).toBeUndefined();
+    expect(invalid.status, invalid.stdout + invalid.stderr).not.toBe(0);
+    expect(invalid.stdout).toMatch(/Cached:\s+0 cached/u);
+    expect(invalid.stdout + invalid.stderr).toContain(
+      "rea-ci-controlled-yaml-dependency",
+    );
+
+    // A reachable module can change dependencies without another manifest edit.
+    await writeFile(modulePath, 'console.log("ready");\n');
+    const reachable = runTurbo(root, "knip", cache);
+    expect(reachable.status, reachable.stdout + reachable.stderr).toBe(0);
+    const reused = runTurbo(root, "knip", cache);
+    expect(reused.status, reused.stdout + reused.stderr).toBe(0);
+    expect(reused.stdout).toMatch(/Cached:\s+1 cached/u);
+    await writeFile(modulePath, invalidModule);
+    const changedModule = runTurbo(root, "knip", cache);
+    expect(changedModule.error).toBeUndefined();
+    expect(
+      changedModule.status,
+      changedModule.stdout + changedModule.stderr,
+    ).not.toBe(0);
+    expect(changedModule.stdout).toMatch(/Cached:\s+0 cached/u);
+    expect(changedModule.stdout + changedModule.stderr).toContain(
+      "rea-ci-controlled-yaml-dependency",
+    );
+  },
+);
+
 it.each([
   {
     label: "imported documentation helper",
@@ -260,12 +370,34 @@ it.each([
     diagnostic: "TS2322",
     invalidatesCompile: false,
   },
+  {
+    label: "GitHub action source",
+    path: ".github/actions/helper.ts",
+    content: "export const githubValue = 2;\n",
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+  {
+    label: "GitHub action declaration",
+    path: ".github/actions/api.d.mts",
+    content: "export type GithubValue = 2;\n",
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+  {
+    label: "GitHub action package scope",
+    path: ".github/actions/package.json",
+    content: '{"type":"commonjs"}\n',
+    diagnostic: "CommonJS",
+    invalidatesCompile: false,
+  },
 ])(
   "rejects a changed $label after warming real compiler tasks",
   async ({ path, content, diagnostic, invalidatesCompile }) => {
     const root = await createTestTempDirectory("rea-compiler-cache-inputs-");
     const cache = await createTestTempDirectory("rea-compiler-cache-store-");
     await mkdir(join(root, "docs/.vitepress"), { recursive: true });
+    await mkdir(join(root, ".github/actions"), { recursive: true });
     for (const directory of ["src", "tests", "scripts"])
       await mkdir(join(root, directory));
     await symlink(
@@ -325,6 +457,18 @@ it.each([
     await writeFile(
       join(root, "tests/use-script.ts"),
       'import type { ApiScope } from "../scripts/api.mjs";\nimport type { TestValue } from "./types.cjs";\nimport type { ScriptValue } from "../scripts/value.cjs";\nexport const scope: ApiScope = "root";\nexport const testValue: TestValue = "root";\nexport const scriptValue: ScriptValue = "root";\n',
+    );
+    await writeFile(
+      join(root, ".github/actions/helper.ts"),
+      "export const githubValue = 1;\n",
+    );
+    await writeFile(
+      join(root, ".github/actions/api.d.mts"),
+      "export type GithubValue = 1;\n",
+    );
+    await writeFile(
+      join(root, "tests/use-github.ts"),
+      'import { githubValue } from "../.github/actions/helper.js";\nimport type { GithubValue } from "../.github/actions/api.mjs";\nexport const actionValue: GithubValue = githubValue;\n',
     );
     await writeFile(
       join(root, "tests/types.d.cts"),

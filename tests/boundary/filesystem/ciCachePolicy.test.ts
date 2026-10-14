@@ -169,7 +169,6 @@ printf '%s\n' 'C:\Users\runner with spaces\AppData\Local\npm-cache'
           const step = steps[index];
           if (step?.uses !== "./.github/actions/npm-cache") continue;
           npmCacheSteps++;
-          expect(step.id).toBe("npm-cache");
           const setup = steps[index - 1];
           expect(
             typeof setup?.uses === "string" &&
@@ -198,6 +197,9 @@ it("shares static task snapshots only after validation using the npm cache owner
   const workflows = await readWorkflows();
   const ci = workflows.find(({ file }) => file === "ci.yml");
   const steps = ci?.workflow.jobs?.static?.steps ?? [];
+  expect(
+    steps.find((step) => step.uses === "./.github/actions/npm-cache")?.id,
+  ).toBe("npm-cache");
   const restore = steps.find((step) => step.id === "static-cache");
   const save = steps.find(
     (step) => step.name === "Save validated static task cache",
@@ -219,6 +221,24 @@ it("shares static task snapshots only after validation using the npm cache owner
   expect(steps.indexOf(save!)).toBeGreaterThan(
     steps.findIndex((step) => step.run === "npm run test:python"),
   );
+});
+
+it("passes the npm cache owner's selected path to package installation", async () => {
+  const workflows = await readWorkflows();
+  const ci = workflows.find(({ file }) => file === "ci.yml");
+  const steps = ci?.workflow.jobs?.["package-e2e"]?.steps ?? [];
+  const cacheIndex = steps.findIndex(
+    (step) => step.uses === "./.github/actions/npm-cache",
+  );
+  expect(steps[cacheIndex]?.id).toBe("npm-cache");
+  const consumerIndex = steps.findIndex(
+    (step) => step.run === "npm run verify:package",
+  );
+  expect(consumerIndex).toBeGreaterThan(cacheIndex);
+  expect(
+    z.record(z.string(), z.unknown()).parse(steps[consumerIndex]?.env)
+      .npm_config_cache,
+  ).toBe("${{ steps.npm-cache.outputs.path }}");
 });
 
 it("bounds the rolling static snapshot with Turbo age and size eviction", async () => {

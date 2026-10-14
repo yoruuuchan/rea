@@ -53,6 +53,15 @@ interface ManagedPeFixtureOptions {
   readonly targetFramework?: string | null;
   readonly typeName?: string;
   readonly typeNamespace?: string;
+  /** NestedClass rows as [nested, enclosing] TypeDef rows. */
+  readonly nestedTypes?: readonly (readonly [number, number])[];
+  /** TypeRef rows after the TargetFrameworkAttribute row, from row 2. */
+  readonly typeReferences?: readonly {
+    readonly namespace: string;
+    readonly name: string;
+    /** TypeRef row of the enclosing type, for a nested type. */
+    readonly enclosingRow?: number;
+  }[];
   /** Raw #US stream bytes; omitted means the metadata has no #US stream. */
   readonly userStringHeap?: Buffer;
   readonly virtualSectionSize?: number;
@@ -590,6 +599,11 @@ interface FixtureMetadataRowContext {
       readonly name: number;
       readonly namespace: number;
     }[];
+    readonly typeReferences: readonly {
+      readonly name: number;
+      readonly namespace: number;
+      readonly enclosingRow?: number;
+    }[];
     readonly tokenBlob: number;
     readonly fieldSignature: number;
     readonly methodSignature: number;
@@ -668,6 +682,52 @@ const exportedTypeTable = (
         ],
       ];
 
+const typeRefTable = (
+  options: ManagedPeFixtureOptions,
+  indexes: FixtureMetadataRowContext["indexes"],
+  heapSizes: FixtureMetadataRowContext["heapSizes"],
+  widths: FixtureIndexWidths,
+): readonly [number, readonly Buffer[]] => [
+  1,
+  [
+    typeRefRow(
+      indexes.attributeName,
+      indexes.attributeNamespace,
+      heapSizes.strings,
+      metadataIndex(options.typeRefScopeRaw ?? 0, widths.resolutionScope),
+    ),
+    ...indexes.typeReferences.map(({ name, namespace, enclosingRow }) =>
+      typeRefRow(
+        name,
+        namespace,
+        heapSizes.strings,
+        metadataIndex(
+          enclosingRow === undefined ? 0 : (enclosingRow << 2) | 3,
+          widths.resolutionScope,
+        ),
+      ),
+    ),
+  ],
+];
+
+const nestedClassTable = (
+  options: ManagedPeFixtureOptions,
+  widths: FixtureIndexWidths,
+): readonly (readonly [number, readonly Buffer[]])[] =>
+  (options.nestedTypes?.length ?? 0) === 0
+    ? []
+    : [
+        [
+          41,
+          (options.nestedTypes ?? []).map(([nested, enclosing]) =>
+            Buffer.concat([
+              metadataIndex(nested, widths.table(2)),
+              metadataIndex(enclosing, widths.table(2)),
+            ]),
+          ),
+        ],
+      ];
+
 const specTables = (
   options: ManagedPeFixtureOptions,
   indexes: FixtureMetadataRowContext["indexes"],
@@ -706,7 +766,7 @@ const fixtureIndexWidths = ({
 }: FixtureMetadataRowContext): FixtureIndexWidths => {
   const rowCounts = new Map<number, number>([
     [0, options.moduleRowCount ?? 1],
-    [1, 1],
+    [1, indexes.typeReferences.length + 1],
     [2, indexes.additionalTypeNames.length + 1],
     [4, 1],
     [6, options.methodRowCount ?? 1],
@@ -725,6 +785,7 @@ const fixtureIndexWidths = ({
     [35, referenceStringIndexes.length],
     [39, indexes.exportedTypes.length],
     [40, 1],
+    [41, options.nestedTypes?.length ?? 0],
     [43, options.methodSpecMethods?.length ?? 0],
   ]);
   const count = (table: number): number => rowCounts.get(table) ?? 0;
@@ -765,6 +826,9 @@ const fixtureMetadataRows = ({
     indexes,
     heapSizes,
   });
+  const nestedRows = new Set(
+    (options.nestedTypes ?? []).map(([nested]) => nested),
+  );
   const rows = new Map<number, readonly Buffer[]>([
     [
       0,
@@ -772,22 +836,13 @@ const fixtureMetadataRows = ({
         moduleRow(indexes.moduleName, heapSizes.strings, heapSizes.guids),
       ),
     ],
-    [
-      1,
-      [
-        typeRefRow(
-          indexes.attributeName,
-          indexes.attributeNamespace,
-          heapSizes.strings,
-          metadataIndex(options.typeRefScopeRaw ?? 0, widths.resolutionScope),
-        ),
-      ],
-    ],
+    typeRefTable(options, indexes, heapSizes, widths),
     [
       2,
-      [...indexes.additionalTypeNames, indexes.typeName].map((name) =>
+      [...indexes.additionalTypeNames, indexes.typeName].map((name, index) =>
         typeDefRow({
           name,
+          flags: nestedRows.has(index + 1) ? 0x0010_0002 : 0x0010_0001,
           namespace: indexes.typeNamespace,
           fieldList: 1,
           methodList: 1,
@@ -887,6 +942,7 @@ const fixtureMetadataRows = ({
     ],
     ...exportedTypeTable(options, indexes, heapSizes, widths),
     ...specTables(options, indexes, heapSizes, widths),
+    ...nestedClassTable(options, widths),
     [
       40,
       [
@@ -959,6 +1015,13 @@ const buildManagedFixtureMetadata = (
       namespace: strings.add(namespace),
     }),
   );
+  const typeReferences = (options.typeReferences ?? []).map(
+    ({ namespace, name, enclosingRow }) => ({
+      name: strings.add(name),
+      namespace: strings.add(namespace),
+      ...(enclosingRow === undefined ? {} : { enclosingRow }),
+    }),
+  );
   const referenceNames = options.references ?? ["System.Runtime"];
   const referenceStringIndexes = referenceNames.map((name) =>
     strings.add(name),
@@ -1000,6 +1063,7 @@ const buildManagedFixtureMetadata = (
       pinvokeImportName,
       resourceName,
       exportedTypes,
+      typeReferences,
       tokenBlob,
       fieldSignature,
       methodSignature,
@@ -1259,6 +1323,133 @@ export const buildManagedMemberPointerFixture = (
       },
       options.streamName ?? "#-",
     );
+  });
+  // The shared PE shell defaults to an executable; this fixture is a DLL.
+  image.writeUInt16LE(image.readUInt16LE(0x84 + 18) | 0x2000, 0x84 + 18);
+  image.writeUInt32LE(0, 0x0200 + 20);
+  return image;
+};
+
+/**
+ * Two top-level types A and B, each enclosing a nested type named Inner with
+ * one method M and one field F; the first Inner also encloses Leaf with a
+ * method M. Every method shares the fixture body. Swapping the enclosing
+ * types keeps every row but moves each Inner, with its Leaf, under the other
+ * top-level type. NestedClass rows pair a nested TypeDef row with its
+ * enclosing row and may be replaced to exercise malformed metadata.
+ */
+export const buildManagedNestedTypeFixture = ({
+  swapEnclosing = false,
+  nestedClassRows,
+  literalTopLevelName,
+  topLevelTypes = false,
+}: {
+  readonly swapEnclosing?: boolean;
+  readonly nestedClassRows?: readonly (readonly [number, number])[];
+  readonly literalTopLevelName?: string;
+  readonly topLevelTypes?: boolean;
+} = {}): Buffer => {
+  const image = buildManagedFixtureImage({}, (methodRva) => {
+    const strings = new StringHeap();
+    const blobs = new BlobHeap();
+    const moduleName = strings.add("Nested.dll");
+    const assemblyName = strings.add("Fixture.Nested");
+    const namespace = strings.add("Fixture");
+    const typeNames = [
+      "<Module>",
+      "A",
+      "B",
+      "Inner",
+      literalTopLevelName ?? (topLevelTypes ? "OtherInner" : "Inner"),
+      "Leaf",
+    ].map((name) => strings.add(name));
+    const methodName = strings.add("M");
+    const fieldName = strings.add("F");
+    const objectName = strings.add("Object");
+    const systemNamespace = strings.add("System");
+    const runtimeName = strings.add("System.Runtime");
+    const methodSignature = blobs.add(Buffer.from([0x20, 0, 0x08]));
+    const fieldSignature = blobs.add(Buffer.from([0x06, 0x08]));
+    // TypeDef rows 4 and 5 own one method and one field each; row 6 owns a method.
+    const memberList = [1, 1, 1, 1, 2, 3];
+    const rows = new Map<number, readonly Buffer[]>([
+      [0, [moduleRow(moduleName, 2, 2)]],
+      [
+        1,
+        [
+          Buffer.concat([
+            u16((1 << 2) | 2),
+            u16(objectName),
+            u16(systemNamespace),
+          ]),
+        ],
+      ],
+      [
+        2,
+        typeNames.map((name, index) =>
+          typeDefRow({
+            name,
+            namespace: index === 1 || index === 2 ? namespace : 0,
+            fieldList: Math.min(memberList[index] ?? 1, 3),
+            methodList: memberList[index] ?? 1,
+            stringSize: 2,
+            typeDefOrRefSize: 2,
+            fieldListSize: 2,
+            methodListSize: 2,
+            extendsRaw: index === 0 ? 0 : (1 << 2) | 1,
+            flags:
+              index <= 2 ||
+              topLevelTypes ||
+              (index === 4 && literalTopLevelName !== undefined)
+                ? 0x0010_0001
+                : 0x0010_0002,
+          }),
+        ),
+      ],
+      [4, [1, 2].map(() => fieldRow(fieldName, fieldSignature, 2, 2))],
+      [
+        6,
+        [1, 2, 3].map(() =>
+          methodDefRow({
+            name: methodName,
+            signature: methodSignature,
+            stringSize: 2,
+            blobSize: 2,
+            parameterSize: 2,
+            parameterList: 1,
+            rva: methodRva,
+            flags: 0x0086,
+          }),
+        ),
+      ],
+      [
+        41,
+        (
+          nestedClassRows ??
+          (topLevelTypes
+            ? []
+            : [
+                [4, swapEnclosing ? 3 : 2],
+                [5, swapEnclosing ? 2 : 3],
+                [6, 4],
+              ])
+        )
+          .filter(
+            ([nested]) => literalTopLevelName === undefined || nested !== 5,
+          )
+          .map(([nested, enclosing]) =>
+            Buffer.concat([u16(nested), u16(enclosing)]),
+          ),
+      ],
+      [32, [assemblyRow(assemblyName, 2, 2)]],
+      [35, [assemblyRefRow(runtimeName, 0, false, 2, 2)]],
+    ]);
+    return metadataRoot({
+      tables: tablesStream(rows, 0n, 0),
+      strings: strings.toBuffer(),
+      guid: guidHeap(),
+      blob: blobs.toBuffer(),
+    });
   });
   // The shared PE shell defaults to an executable; this fixture is a DLL.
   image.writeUInt16LE(image.readUInt16LE(0x84 + 18) | 0x2000, 0x84 + 18);

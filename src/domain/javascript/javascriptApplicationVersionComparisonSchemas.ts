@@ -70,7 +70,9 @@ export const compareApplicationVersionsInputSchema = z
   })
   .superRefine(validateApplicationVersionIdentities);
 
-const candidateNodesSchema = z.tuple([nodeIdSchema]).rest(nodeIdSchema);
+const candidateNodesSchema = z
+  .tuple([nodeIdSchema], nodeIdSchema)
+  .check(z.minLength(1));
 const exactMatchSchema = z.strictObject({
   status: z.literal("matched"),
   basis: z.enum([

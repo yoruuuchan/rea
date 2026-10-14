@@ -219,7 +219,7 @@ export const resolveGhidraAnalysisProfile = async (
         ].sort(),
         import_mode: "ephemeral-source-immutable",
         ...(target.format === "pe"
-          ? { pdb_observations: "program-info-v1" }
+          ? { pdb_observations: "program-info-v5" }
           : {}),
         annotation_policy: "atomic-function-entry-metadata-v1",
         load_image_observations: "source-mappings-entry-context-v2",

@@ -5,6 +5,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { advertisedInputExamples } from "../../../src/contracts/advertisedInputExamples.js";
+import {
+  schemaArrays,
+  schemaChildren,
+  schemaMaps,
+} from "../../../src/contracts/inputSchemaPresentation.js";
 import { TOOL_CONTRACTS } from "../../../src/contracts/toolContracts.js";
 import { emptyArraySchema } from "../../../src/domain/emptyArraySchema.js";
 import { processScenarioSchema } from "../../../src/domain/process/processScenario.js";
@@ -16,6 +21,37 @@ interface ToolSchemas {
   readonly inputSchema: Record<string, unknown>;
   readonly outputSchema?: Record<string, unknown> | undefined;
   readonly annotations?: Record<string, unknown> | undefined;
+}
+
+function arrayItemSchemaError(
+  schema: unknown,
+  path: string,
+): string | undefined {
+  if (!isRecord(schema)) return undefined;
+  // VS Code Copilot's toolSchemaNormalizer requires truthy `items`, even
+  // for Draft 2020-12 tuples with prefixItems (morluto/rea#3576).
+  if (schema.type === "array" && !schema.items)
+    return `${path}: tool parameters array type must have items`;
+  for (const [key, value] of Object.entries(schema)) {
+    const children =
+      schemaMaps.has(key) && isRecord(value)
+        ? Object.entries(value).map(
+            ([name, child]) => [`${key}.${name}`, child] as const,
+          )
+        : (schemaArrays.has(key) || schemaChildren.has(key)) &&
+            Array.isArray(value)
+          ? value.map(
+              (child: unknown, index) => [`${key}.${index}`, child] as const,
+            )
+          : schemaChildren.has(key)
+            ? [[key, value] as const]
+            : [];
+    for (const [suffix, child] of children) {
+      const error = arrayItemSchemaError(child, `${path}.${suffix}`);
+      if (error !== undefined) return error;
+    }
+  }
+  return undefined;
 }
 
 function schemaErrors(tools: readonly ToolSchemas[]): string[] {
@@ -35,7 +71,11 @@ function schemaErrors(tools: readonly ToolSchemas[]): string[] {
         if (!ajv.validateSchema(schema))
           return [`${tool.name}.${kind}: ${ajv.errorsText(ajv.errors)}`];
         ajv.compile(schema);
-        return [];
+        const clientError = arrayItemSchemaError(
+          schema,
+          `${tool.name}.${kind}`,
+        );
+        return clientError === undefined ? [] : [clientError];
       } catch (cause: unknown) {
         return [
           `${tool.name}.${kind}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -764,6 +804,26 @@ it("validates each tool independently when output schema IDs repeat", () => {
   expect(errors).toHaveLength(1);
   expect(errors[0]).toContain("broken.outputSchema");
   expect(errors[0]).toContain("missing");
+});
+
+it("checks client array constraints in schema positions while preserving literal metadata", () => {
+  const schema = {
+    type: "object",
+    properties: { examples: { type: "array", items: { type: "string" } } },
+    examples: [{ type: "array" }],
+    default: { type: "array" },
+    const: { type: "array" },
+    enum: [{ type: "array" }],
+  };
+  expect(arrayItemSchemaError(schema, "literal")).toBeUndefined();
+  expect(
+    arrayItemSchemaError(
+      { ...schema, properties: { examples: { type: "array" } } },
+      "broken",
+    ),
+  ).toBe(
+    "broken.properties.examples: tool parameters array type must have items",
+  );
 });
 
 it.each([false, true])(

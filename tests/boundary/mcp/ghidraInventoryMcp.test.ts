@@ -315,7 +315,7 @@ it("retains missing PDB coverage in empty PE name-search Evidence and snapshot r
     const evidence = sessionEvidence(harness.session, reply.structuredContent);
     expect(evidence.normalized_result).toEqual([]);
     expect(evidence.analysis_profile?.parameters.pdb_observations).toBe(
-      "program-info-v1",
+      "program-info-v5",
     );
     const limitation = evidence.limitations.find((value) =>
       value.includes(pdb.file),

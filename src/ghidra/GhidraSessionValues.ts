@@ -121,21 +121,26 @@ export const ghidraPdbLimitations = (
     limitations.push(
       `PDB attributes ${pdb.resource_limit.omitted_attributes.join(", ")} were omitted because the handshake's ${pdb.resource_limit.utf16_budget}-UTF-16-unit PDB attribute budget was exhausted. Omitted values remain unknown; they were not truncated or reported as absent.`,
     );
+  const hasReference = [
+    pdb.file,
+    pdb.guid,
+    pdb.age,
+    pdb.signature,
+    pdb.version,
+  ].some((value) => value !== null);
+  const reference = hasReference
+    ? `The Ghidra Program references PDB ${pdb.file ?? "(file unknown)"} (GUID ${pdb.guid ?? "unknown"}, age (hex) ${pdb.age ?? "unknown"}, signature ${pdb.signature ?? "unknown"}, version ${pdb.version ?? "unknown"}); `
+    : "";
   if (pdb.loaded === true)
     return [
       ...limitations,
-      "Ghidra reports a loaded PDB; this is not an independent PDB identity or complete symbol/type-coverage attestation. Original names and types may still be missing; an empty name search does not prove a procedure is absent. Use list_procedures and address-based analysis to inspect recovered functions.",
+      `${reference}Ghidra reports a loaded PDB; this is not an independent PDB identity or complete symbol/type-coverage attestation. Original names and types may still be missing; an empty name search does not prove a procedure is absent. Use list_procedures and address-based analysis to inspect recovered functions.`,
     ];
-  if (
-    [pdb.file, pdb.guid, pdb.age, pdb.signature, pdb.version].every(
-      (value) => value === null,
-    )
-  )
-    return limitations;
+  if (!hasReference) return limitations;
   const state = pdb.loaded === false ? "not loaded" : "load state unknown";
   return [
     ...limitations,
-    `The target references PDB ${pdb.file ?? "(file unknown)"} (GUID ${pdb.guid ?? "unknown"}, age (hex) ${pdb.age ?? "unknown"}, signature ${pdb.signature ?? "unknown"}, version ${pdb.version ?? "unknown"}); Ghidra reports ${state}. Original names and types may be missing; an empty name search does not prove a procedure is absent. Use list_procedures and address-based analysis to inspect recovered functions. REA does not admit a caller-selected PDB companion.`,
+    `${reference}Ghidra reports ${state}. Original names and types may be missing; an empty name search does not prove a procedure is absent. Use list_procedures and address-based analysis to inspect recovered functions. REA does not admit a caller-selected PDB companion.`,
   ];
 };
 

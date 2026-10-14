@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixedTupleSchema } from "../fixedTupleSchema.js";
 import { localPathStringSchema } from "../localPath.js";
 
 const argument = z
@@ -95,7 +96,7 @@ export type InspectPacketCaptureInput = z.infer<
 /** Values remain strings; repeated occurrences remain ordered arrays. */
 export const packetFieldsSchema = z
   .object({
-    "frame.number": z.tuple([z.string().regex(/^[1-9][0-9]*$/)]),
+    "frame.number": fixedTupleSchema([z.string().regex(/^[1-9][0-9]*$/)]),
   })
   .catchall(z.array(z.string()));
 export const packetCaptureSchema = z

@@ -174,12 +174,36 @@ describe its recorded investigation; update them only when repeating that work.
 - `public/showcase/ctf/index.html`: DownUnderCTF's masked-squares flag checker, extracted equations and real process captures.
 - `public/get-started/index.html`: agent setup, first CLI result and provider guides.
 - `public/faq/index.html`: concise answers about setup, updates, analysis and troubleshooting.
+- `public/contributors/index.html`: one searchable, alphabetical grid of GitHub contributors, with profile links and contribution guidance.
 - `public/guides/`: a guide hub and native, JavaScript/Electron and browser examples.
 - `public/examples/`: downloadable Electron source and an interactive Notes browser app.
 - `public/assets/`: shared styles, interactions, favicon and explanatory figures.
 
 Navigation and assets use relative paths, so the same files work at the local
 root and a GitHub Pages project path such as `/rea/`.
+
+### Update contributors
+
+`public/contributors/people.json` is a dated snapshot of the repository's public
+GitHub contributor list, including accounts GitHub identifies as bots. Every
+profile has the same presentation; there are no team tiers or contribution
+rankings. The page links the source list and shows the snapshot date. Avatars
+load from GitHub; usernames and profile links remain usable without images or
+JavaScript. Search is a small progressive enhancement.
+
+Refresh the snapshot with GitHub CLI available, then regenerate the marked
+`website:contributors` region from `templates/contributors.html.tmpl`:
+
+```sh
+python3 scripts/website.py contributors
+python3 scripts/website.py sync
+python3 scripts/website.py translations extract
+python3 scripts/website.py check
+```
+
+Refresh fetches every API page and validates the complete result before replacing
+the snapshot. Review and commit the JSON, rendered page and catalog updates
+together. Builds and offline checks use that snapshot, not the live API.
 
 ## Search and sharing metadata
 

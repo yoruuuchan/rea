@@ -20,7 +20,10 @@ import { jsonValueSchema } from "../../../../src/domain/jsonValue.js";
 import { compareManagedMembersInputSchema } from "../../../../src/domain/managed/managedMemberComparison.js";
 import { inspectManagedMembersBytes } from "../../../../src/dotnet/ManagedMemberInspector.js";
 import { managedPeFixtureTarget } from "../../../../src/dotnet/ManagedPe.fixture.js";
-import { buildManagedPeFixture } from "../../../../src/dotnet/ManagedPe.fixture.js";
+import {
+  buildManagedNestedTypeFixture,
+  buildManagedPeFixture,
+} from "../../../../src/dotnet/ManagedPe.fixture.js";
 import {
   MAX_MANAGED_SNAPSHOT_BYTES,
   readManagedSnapshot,
@@ -61,6 +64,356 @@ it.each([
     );
   },
 );
+
+type Inspection = ReturnType<typeof inspectManagedMembersBytes>;
+const nestedInspection = (
+  options: Parameters<typeof buildManagedNestedTypeFixture>[0] = {},
+  typeNames?: readonly string[],
+) => {
+  const bytes = buildManagedNestedTypeFixture(options);
+  const target = managedPeFixtureTarget(
+    bytes,
+    `/fixture/nested-${JSON.stringify(options)}.dll`,
+  );
+  return {
+    target,
+    inspection: inspectManagedMembersBytes(
+      bytes,
+      target,
+      typeNames === undefined ? {} : { typeNames },
+    ),
+  };
+};
+// Historical Evidence has neither nesting facts nor declared-name digests.
+const recordedBefore = ({ nesting_read, types, ...rest }: Inspection) => ({
+  ...rest,
+  types: types.map(({ enclosing_type_token, name_sha256, ...type }) => type),
+});
+const compare = (
+  left: ReturnType<typeof nestedInspection>,
+  right: ReturnType<typeof nestedInspection>,
+  edit: {
+    readonly left?: (inspection: Inspection) => unknown;
+    readonly right?: (inspection: Inspection) => unknown;
+  } = {},
+) => {
+  const observe = (
+    { target, inspection }: ReturnType<typeof nestedInspection>,
+    change: ((inspection: Inspection) => unknown) | undefined,
+  ) =>
+    createEvidence(
+      target,
+      { id: "nested-fixture", name: "Nested fixture", version: "1" },
+      {
+        operation: "inspect_managed_members",
+        parameters: {},
+        result: jsonValueSchema.parse(change?.(inspection) ?? inspection),
+        confidence: "observed",
+        authority: "shipped-artifact",
+      },
+    );
+  const result = compareManagedMembersEvidenceValidated(
+    compareManagedMembersInputSchema.parse({
+      left: observe(left, edit.left),
+      right: observe(right, edit.right),
+    }),
+  );
+  if (!result.ok) throw result.error;
+  return managedMemberComparisonResultSchema.parse(
+    result.value.normalized_result,
+  );
+};
+const withCilDigests =
+  (byToken: Readonly<Record<string, string>>) => (inspection: Inspection) => ({
+    ...inspection,
+    methods: inspection.methods.map((method) => {
+      const digest = byToken[method.token];
+      return digest === undefined || method.body.status !== "present"
+        ? method
+        : {
+            ...method,
+            body: {
+              ...method.body,
+              il_sha256: digest,
+              normalized_il_sha256: digest,
+            },
+          };
+    }),
+  });
+
+const pairs = (comparison: ReturnType<typeof compare>) => {
+  const of = (
+    items: readonly {
+      readonly left: { readonly token: string } | null;
+      readonly right: { readonly token: string } | null;
+      readonly status: string;
+      readonly match: { readonly basis: string; readonly confidence: string };
+    }[],
+  ) =>
+    items.map(({ left, right, status, match }) => [
+      left?.token ?? null,
+      right?.token ?? null,
+      status,
+      match.basis,
+      match.confidence,
+    ]);
+  return { methods: of(comparison.methods), fields: of(comparison.fields) };
+};
+const original = nestedInspection();
+const swapped = nestedInspection({ swapEnclosing: true });
+
+it("does not equate missing nested parents with genuinely top-level types", () => {
+  const missing = nestedInspection({ nestedClassRows: [] });
+  const topLevel = nestedInspection({ topLevelTypes: true });
+  const result = compare(missing, topLevel);
+  expect(result.summary.unchanged).toBe(0);
+  expect(
+    [...result.methods, ...result.fields].every(
+      ({ status }) => status === "unknown",
+    ),
+  ).toBe(true);
+});
+
+it.each(["left", "right"] as const)(
+  "preserves a current enclosing-cycle gap beside %s historical Evidence",
+  (historicalSide) => {
+    const cyclic = nestedInspection({
+      nestedClassRows: [
+        [4, 5],
+        [5, 4],
+        [6, 4],
+      ],
+    });
+    expect(cyclic.inspection.nesting_read).toBe(true);
+    const result =
+      historicalSide === "left"
+        ? compare(original, cyclic, { left: recordedBefore })
+        : compare(cyclic, original, { right: recordedBefore });
+    expect(result.summary.unchanged).toBe(0);
+    expect(
+      [...result.methods, ...result.fields].every(
+        ({ status }) => status === "unknown",
+      ),
+    ).toBe(true);
+  },
+);
+
+describe("managed member comparison of nested types", () => {
+  it("uses owned type identity while preserving omitted display labels", () => {
+    const result = compare(original, swapped, {
+      left: (inspection) => ({
+        ...inspection,
+        methods: inspection.methods.map((method) => ({
+          ...method,
+          declaring_type: null,
+        })),
+        fields: inspection.fields.map((field) => ({
+          ...field,
+          declaring_type: null,
+        })),
+      }),
+    });
+    expect(pairs(result)).toEqual(pairs(compare(original, swapped)));
+    expect(
+      [...result.methods, ...result.fields].every(
+        (item) => item.left?.declaring_type === null,
+      ),
+    ).toBe(true);
+  });
+  it("retains nested identity when selected inventories omit enclosing types", () => {
+    const left = nestedInspection({}, ["Inner"]);
+    const right = nestedInspection({ swapEnclosing: true }, ["Inner"]);
+    expect(left.inspection.types.map(({ full_name }) => full_name)).toEqual([
+      "Inner",
+      "Inner",
+    ]);
+    expect(pairs(compare(left, right))).toEqual({
+      methods: pairs(compare(original, swapped)).methods.slice(0, 2),
+      fields: pairs(compare(original, swapped)).fields,
+    });
+  });
+
+  it("withholds unchanged claims when current nesting rows are malformed", () => {
+    const malformed = nestedInspection({
+      swapEnclosing: true,
+      nestedClassRows: [
+        [4, 3],
+        [5, 2],
+        [6, 4],
+        [6, 5],
+      ],
+    });
+    const comparison = compare(original, malformed);
+    expect(comparison.methods.every(({ status }) => status === "unknown")).toBe(
+      true,
+    );
+    expect(comparison.fields.every(({ status }) => status === "unknown")).toBe(
+      true,
+    );
+  });
+
+  it("withholds unchanged claims for a current enclosing cycle", () => {
+    const cyclic = nestedInspection({
+      nestedClassRows: [
+        [4, 5],
+        [5, 4],
+        [6, 4],
+      ],
+    });
+    const comparison = compare(original, cyclic);
+    expect(comparison.methods.every(({ status }) => status === "unknown")).toBe(
+      true,
+    );
+    expect(comparison.fields.every(({ status }) => status === "unknown")).toBe(
+      true,
+    );
+  });
+
+  it("pairs members of same-named nested types by their enclosing types", () => {
+    // Moving each Inner under the other top-level type turns Fixture.A+Inner
+    // from TypeDef 4 on the left into TypeDef 5 on the right.
+    expect(pairs(compare(original, swapped))).toEqual({
+      methods: [
+        [
+          "0x06000001",
+          "0x06000002",
+          "unchanged",
+          "exact-il-signature",
+          "exact",
+        ],
+        [
+          "0x06000002",
+          "0x06000001",
+          "unchanged",
+          "exact-il-signature",
+          "exact",
+        ],
+        [
+          "0x06000003",
+          "0x06000003",
+          "unchanged",
+          "exact-il-signature",
+          "exact",
+        ],
+      ],
+      fields: [
+        ["0x04000001", "0x04000002", "unchanged", "field-signature", "exact"],
+        ["0x04000002", "0x04000001", "unchanged", "field-signature", "exact"],
+      ],
+    });
+  });
+
+  it("reports bodies swapped between same-named nested types as changed", () => {
+    // Give each Inner.M its own CIL, then swap the bodies between A and B.
+    // Fixture.A+Inner.M is MethodDef 1 on the left and MethodDef 2 on the right.
+    const comparison = compare(original, swapped, {
+      left: withCilDigests({
+        "0x06000001": "a".repeat(64),
+        "0x06000002": "b".repeat(64),
+      }),
+      right: withCilDigests({
+        "0x06000002": "b".repeat(64),
+        "0x06000001": "a".repeat(64),
+      }),
+    });
+
+    expect(pairs(comparison).methods.slice(0, 2)).toEqual([
+      ["0x06000001", "0x06000002", "changed", "exact-signature", "exact"],
+      ["0x06000002", "0x06000001", "changed", "exact-signature", "exact"],
+    ]);
+    expect(
+      comparison.methods.slice(0, 2).map(({ dimensions }) => dimensions),
+    ).toEqual([["cil"], ["cil"]]);
+    expect(comparison.summary).toMatchObject({ changed: 2 });
+  });
+
+  it("retains explicitly limited bare names for historical observations", () => {
+    const bare = pairs(
+      compare(original, swapped, {
+        left: recordedBefore,
+        right: recordedBefore,
+      }),
+    );
+
+    expect(bare).not.toEqual(pairs(compare(original, swapped)));
+    expect(pairs(compare(original, swapped, { left: recordedBefore }))).toEqual(
+      bare,
+    );
+    expect(
+      pairs(compare(original, swapped, { right: recordedBefore })),
+    ).toEqual(bare);
+    expect(
+      compare(original, swapped, { left: recordedBefore }).limitations,
+    ).toContainEqual(expect.stringContaining("legacy bare-name comparison"));
+  });
+
+  it("does not pair a nested type with a top-level type of the same name", () => {
+    const topLevel = nestedInspection({ topLevelTypes: true });
+
+    expect(
+      topLevel.inspection.types.find((type) => type.token === "0x02000004")
+        ?.name_sha256,
+    ).toMatch(/^[a-f0-9]{64}$/u);
+    expect(
+      pairs(compare(original, topLevel)).methods.filter(
+        ([left, right]) => left !== null && right !== null,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("managed nested type names", () => {
+  it("keeps a top-level name containing the separator apart from nesting", () => {
+    // Produce the literal plus sign in PE metadata, which C# identifiers disallow.
+    const literal = nestedInspection({
+      literalTopLevelName: "Fixture.A+Inner",
+    });
+    const spelled = compare(original, literal);
+    expect(
+      literal.inspection.types.find((type) => type.token === "0x02000005"),
+    ).toMatchObject({
+      full_name: "Fixture.A+Inner",
+      enclosing_type_token: null,
+    });
+
+    // Joined names would make both sides' Fixture.A+Inner one ambiguous group.
+    expect(pairs(spelled).methods).toEqual([
+      ["0x06000001", "0x06000001", "unchanged", "exact-il-signature", "exact"],
+      ["0x06000003", "0x06000003", "unchanged", "exact-il-signature", "exact"],
+      ["0x06000002", "0x06000002", "unchanged", "exact-il-signature", "exact"],
+    ]);
+  });
+
+  it("warns of an undecoded counterpart only for the same enclosing type", () => {
+    // Keep only Fixture.B+Inner.M on the right, with an undecoded signature.
+    const comparison = compare(original, original, {
+      right: (inspection) => ({
+        ...inspection,
+        methods: inspection.methods
+          .filter(({ token }) => token === "0x06000002")
+          .map((method) => ({
+            ...method,
+            signature: {
+              ...method.signature,
+              raw_sha256: "c".repeat(64),
+              resolved_sha256: null,
+              parse_status: "malformed",
+            },
+          })),
+      }),
+    });
+    const warned = comparison.methods.map(({ left, right, limitations }) => [
+      left?.token ?? null,
+      right?.token ?? null,
+      limitations.some((limitation) =>
+        limitation.startsWith("counterpart-signature-not-decoded"),
+      ),
+    ]);
+
+    expect(warned).toContainEqual(["0x06000001", null, false]);
+    expect(warned).toContainEqual(["0x06000002", null, true]);
+  });
+});
 
 describe("managed member comparison subject identity", () => {
   it("rejects authenticated member Evidence whose subject digest differs from its artifact", () => {

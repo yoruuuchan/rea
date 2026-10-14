@@ -35,6 +35,11 @@ import { silentLogger } from "../logger.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { ProviderStartupDeadline } from "../process/ProviderDeadline.js";
+import { createAnalysisProfile } from "../domain/analysisProfile.js";
+import { createAnalysisExecution } from "../application/AnalysisProvider.js";
+import { AnalysisSnapshotCache } from "../application/binary/AnalysisSnapshotCache.js";
+import { createEvidence } from "../domain/evidence.js";
+import { createEvidenceBundle } from "../domain/evidenceBundle.js";
 
 const INSTALL = "/opt/ghidra_12.1.4_PUBLIC";
 afterEach(() => vi.restoreAllMocks());
@@ -80,6 +85,69 @@ const createElfClient = async (ghidra: GhidraProvider) => {
     throw new Error("Expected a bound Ghidra profile");
   return ghidra.createClient(target, resolved.value.profile);
 };
+
+it.each([
+  "program-info-v1",
+  "program-info-v2",
+  "program-info-v3",
+  "program-info-v4",
+])(
+  "retains historical PE PDB Evidence for %s without replaying its old projection",
+  async (pdbObservations) => {
+    const target = peTarget("x86_64");
+    const resolved = await provider().resolveAnalysisProfile(target);
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("Expected admitted PE profile");
+    const current = resolved.value.profile;
+    const prior = createAnalysisProfile(current.provider, {
+      ...current.parameters,
+      pdb_observations: pdbObservations,
+    });
+    const operation = "search_procedures";
+    const parameters = { pattern: "wmain" };
+    const limitations = [
+      pdbObservations === "program-info-v4"
+        ? "Legacy projection discarded NB10 declaration when the reported GUID was omitted."
+        : "Legacy projection collapsed unknown PDB load state.",
+    ];
+    const cache = new AnalysisSnapshotCache();
+    cache.record({
+      target,
+      profile: prior,
+      operation,
+      parameters,
+      execution: createAnalysisExecution([], prior.provider, {
+        subject: target,
+        analysisProfile: prior,
+        limitations,
+      }),
+    });
+    const evidence = createEvidence(target, prior.provider, {
+      operation,
+      parameters,
+      result: [],
+      analysisProfile: prior,
+      limitations,
+    });
+    const exported = cache.export(
+      target,
+      prior,
+      createEvidenceBundle([evidence]),
+    );
+    if (!exported.ok) throw exported.error;
+    const imported = new AnalysisSnapshotCache();
+    expect(imported.import(exported.value, undefined, () => ok(0)).ok).toBe(
+      true,
+    );
+    expect(
+      imported.lookup(target, current, operation, parameters),
+    ).toBeUndefined();
+    expect(
+      imported.lookup(target, prior, operation, parameters)?.limitations,
+    ).toEqual(expect.arrayContaining(limitations));
+    expect(exported.value.evidence_bundle.records).toContainEqual(evidence);
+  },
+);
 
 describe("Ghidra provider", () => {
   it("commits DOS loader and real-mode language while retaining the CPU family", async () => {
@@ -957,43 +1025,31 @@ describe("Ghidra result projection", () => {
 
 describe("Ghidra PE CodeView debug symbol limitations", () => {
   it.each([
-    {
-      name: "omitted PDB facts",
-      loaded: undefined,
-      expectedLimitation:
-        "Ghidra did not report PDB attributes; debug-symbol coverage is unknown.",
-      forbiddenLimitation: "that were not applied",
-    },
-    {
-      name: "an explicit not-loaded report",
-      loaded: false,
-      expectedLimitation:
-        'The target references debug symbols "test.pdb" (GUID 01234567-89ab-cdef-0123-456789abcdef, age 1) that were not applied; procedure names are analysis-generated.',
-      forbiddenLimitation: "coverage is unknown",
-    },
-    {
-      name: "an explicit loaded report",
-      loaded: true,
-      expectedLimitation: "Ghidra reports a loaded PDB",
-      forbiddenLimitation: "that were not applied",
-    },
-  ])(
-    "preserves CodeView coverage state for $name in session Evidence",
-    async ({ loaded, expectedLimitation, forbiddenLimitation }) => {
-      const pdb = {
-        file: "C:\\projects\\app\\build\\test.pdb",
-        guid: "01234567-89ab-cdef-0123-456789abcdef",
-        age: "1",
-        signature: null,
-        version: "RSDS",
-        loaded: loaded ?? null,
-      };
+    ["absent report", undefined, "load state unknown"],
+    ["unknown load", null, "load state unknown"],
+    ["not loaded", false, "reports not loaded"],
+    ["loaded", true, "reports a loaded PDB"],
+  ] as const)(
+    "preserves %s in operation and health Evidence without duplicate caveats",
+    async (_, loaded, expected) => {
       const ghidra = provider(installationHost(), () => ({
         start: () =>
           Promise.resolve(
-            ok(
-              loaded === undefined ? sessionInfo() : { ...sessionInfo(), pdb },
-            ),
+            ok({
+              ...sessionInfo(),
+              ...(loaded === undefined
+                ? {}
+                : {
+                    pdb: {
+                      file: "test.pdb",
+                      guid: "01234567-89ab-cdef-0123-456789abcdef",
+                      age: "1",
+                      signature: null,
+                      version: "RSDS",
+                      loaded,
+                    },
+                  }),
+            }),
           ),
         callTool: () => Promise.resolve(ok([])),
         close: () => Promise.resolve(ok(null)),
@@ -1001,7 +1057,7 @@ describe("Ghidra PE CodeView debug symbol limitations", () => {
       const target = {
         ...peTarget("x86_64"),
         codeView: {
-          pdbPath: "C:\\projects\\app\\build\\test.pdb",
+          pdbPath: "test.pdb",
           pdbFileName: "test.pdb",
           guid: "01234567-89ab-cdef-0123-456789abcdef",
           age: 1,
@@ -1019,9 +1075,13 @@ describe("Ghidra PE CodeView debug symbol limitations", () => {
         const health = await client.execute("health", {});
         if (!health.ok) throw health.error;
         for (const observation of [search.value, health.value]) {
-          const limitations = observation.limitations.join("\n");
-          expect(limitations).toContain(expectedLimitation);
-          expect(limitations).not.toContain(forbiddenLimitation);
+          const caveats = observation.limitations.filter((limit) =>
+            limit.includes("PDB"),
+          );
+          expect(caveats).toHaveLength(1);
+          expect(caveats[0]).toContain(expected);
+          expect(caveats[0]).not.toContain("names are analysis-generated");
+          expect(caveats[0]).not.toContain("that were not applied");
         }
       } finally {
         await client.close();

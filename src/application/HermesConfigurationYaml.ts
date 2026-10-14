@@ -1,9 +1,13 @@
 import {
+  isMap,
+  isNode,
   isScalar,
+  isSeq,
   parseDocument,
   Document,
   Schema,
   type ParsedNode,
+  type Node,
   type ScalarTag,
   type Tags,
 } from "yaml";
@@ -322,6 +326,36 @@ export const parseHermesConfigurationYaml = (text: string): unknown => {
       });
 };
 
+/** Keep unchanged scalar nodes, including their quoting and explicit tags. */
+const retainHermesScalarSource = (previous: unknown, next: Node): Node => {
+  if (isScalar(previous) && isScalar(next) && previous.value === next.value)
+    return previous;
+  if (isMap(previous) && isMap(next)) {
+    const entries = new Map(
+      previous.items.flatMap((pair) =>
+        isScalar(pair.key) && typeof pair.key.value === "string"
+          ? [[pair.key.value, pair] as const]
+          : [],
+      ),
+    );
+    for (const pair of next.items) {
+      const key = isScalar(pair.key) ? pair.key.value : undefined;
+      const prior = typeof key === "string" ? entries.get(key) : undefined;
+      if (prior === undefined) continue;
+      pair.key = prior.key;
+      if (isNode(pair.value))
+        pair.value = retainHermesScalarSource(prior.value, pair.value);
+    }
+  } else if (isSeq(previous) && isSeq(next)) {
+    next.items = next.items.map((item, index) =>
+      isNode(item)
+        ? retainHermesScalarSource(previous.items[index], item)
+        : item,
+    );
+  }
+  return next;
+};
+
 /** Set or delete one value in a Hermes `config.yaml`, keeping the rest as written. */
 export const editHermesConfigurationYaml = (
   text: string,
@@ -348,8 +382,26 @@ export const editHermesConfigurationYaml = (
       if (!document.hasIn(parent))
         document.setIn(parent, document.createNode({}));
     }
-    document.setIn(path, value);
+    const previous = document.getIn(path, true);
+    // Let YAML's scalar update preserve numeric formats for a direct edit.
+    // Replacing containers needs explicit retention of unchanged child nodes.
+    document.setIn(
+      path,
+      isMap(previous) || isSeq(previous)
+        ? retainHermesScalarSource(previous, document.createNode(value))
+        : value,
+    );
   }
   // Editing REA must not reflow unrelated user prompts or other YAML scalars.
-  return document.toString({ lineWidth: 0 });
+  return document.toString({
+    lineWidth: 0,
+    // Hermes tries the YAML 1.1 C loader before its directive-aware pure
+    // fallback. Quote new strings to avoid introducing YAML 1.1 coercions.
+    ...(document.directives?.yaml.version === "1.2"
+      ? {
+          defaultStringType: "QUOTE_DOUBLE" as const,
+          defaultKeyType: "QUOTE_DOUBLE" as const,
+        }
+      : {}),
+  });
 };

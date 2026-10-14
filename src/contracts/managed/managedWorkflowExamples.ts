@@ -21,6 +21,7 @@ const emptyManagedMembers = (
   sha256: string,
   mvid: string,
 ): ManagedMemberInspection => ({
+  signature_resolution: null,
   artifact: {
     path: `/examples/${sha256.slice(0, 8)}.dll`,
     sha256,
@@ -47,6 +48,7 @@ const emptyManagedMembers = (
     requires_mvid: mvid,
   },
   types: [],
+  nesting_read: true,
   exported_types: [],
   fields: [],
   methods: [],
@@ -88,6 +90,7 @@ const runtimeMembers = (): ManagedMemberInspection => {
         signature: {
           raw_length: 3,
           raw_sha256: "3".repeat(64),
+          resolved_sha256: "3".repeat(64),
           kind: "method",
           parse_status: "decoded",
           calling_convention: "default",

@@ -259,14 +259,14 @@ Register with the variable unset:
 <!-- x-release-please-start-version -->
 
 ```bash
-claude mcp add --scope local rea -- npx -y rea-agents@6.4.0 mcp
+claude mcp add --scope local rea -- npx -y rea-agents@6.5.0 mcp
 ```
 
 On native Windows, use the same project directory and wrap the package-runner
 shim so the stdio client can launch it:
 
 ```powershell
-claude mcp add --scope local rea -- cmd.exe /d /c npx -y rea-agents@6.4.0 mcp
+claude mcp add --scope local rea -- cmd.exe /d /c npx -y rea-agents@6.5.0 mcp
 ```
 
 <!-- x-release-please-end -->
@@ -398,8 +398,9 @@ The npm release checked on **2026-10-11** was **6.4.0**, published from
 [`a56f7bb6`](https://github.com/morluto/rea/commit/a56f7bb668ab23fec8d33f7af353ac7ed2fe1895).
 The actual registry package accepted dry-run setup plans for the 17 client IDs
 in that release, including Qwen Code, Pi and Hermes. DeepSeek Harness (`dsh`)
-is on main and is not in npm 6.4.0; `rea setup --client dsh` against `@latest`
-reports an unsupported client until a release containing it is published.
+is included from 6.5.0 and was absent from the checked npm 6.4.0 package.
+The 6.4.0 registry check does not establish 6.5.0 publication or live DeepSeek
+API integration.
 OpenCode's plan selected
 `OPENCODE_CONFIG_DIR` even when that directory did not yet exist. These checks
 used an isolated home on macOS with Node 24; they verify planning and argument
@@ -584,6 +585,8 @@ system application, the canonical application installed by `rea setup` under
 diagnostic; to use a Homebrew-installed launcher for CLI/MCP startup, set
 `HOPPER_LAUNCHER_PATH` to the path reported by doctor. REA does not run Homebrew
 while loading runtime configuration.
+Automatic discovery accepts executable regular files, including file symlinks,
+and skips directories.
 On Linux, it prefers executable `/opt/hopper/bin/Hopper`, then executable
 `~/.local/share/rea/hopper/bin/Hopper`, followed by `/opt/hopper-v4/bin/hopper`
 and `/usr/bin/hopper`; if none exists, the former remains the diagnostic
@@ -1054,7 +1057,7 @@ For a client that requires manual configuration, use:
   "mcpServers": {
     "rea": {
       "command": "npx",
-      "args": ["-y", "rea-agents@6.4.0", "mcp"]
+      "args": ["-y", "rea-agents@6.5.0", "mcp"]
     }
   }
 }

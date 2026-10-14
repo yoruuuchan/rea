@@ -167,7 +167,14 @@ MCP uses `inspect_managed_members` with
 Repeat `--type` or supply multiple unique `type_names` for several types.
 Names match the reported `full_name` exactly. Top-level names are namespace
 qualified; nested types currently report bare names, which can select several
-types with that name.
+types with that name. Each type's `enclosing_type_token` records its enclosing
+TypeDef. `nesting_read` distinguishes complete source rows (true), incomplete
+current rows (false), and historical Evidence (null). A null enclosing token
+alone does not establish that a type is top-level.
+Each selected type also retains `name_sha256`, a framed digest of its namespace,
+name and enclosing names. It uses the same bounded, cached owner as signature
+type operands and remains available when selection omits the enclosing types.
+It adds one fixed-size digest per returned type rather than repeated name paths.
 
 The result preserves the requested names in `selection.type_names` and reports
 unmatched names separately. If metadata names are unreadable, limitations retain
@@ -243,9 +250,16 @@ native/runtime questions retain their own authority and coverage.
 Names and semantic labels do not establish durable member identity. Comparison
 preserves observed differences, structural inferences, and unknowns separately.
 
-Cross-version matching first pairs members of the same declared type and name:
-methods by exact CIL/signature identity, then by raw signature, then by
-structural body shape; fields by raw signature. Exact CIL/signature identity
+Cross-version matching first pairs members of the same declared type and name.
+A current declared type uses its observed `name_sha256`, so same-named nested
+types in different enclosing types stay distinct even in selected inventories.
+Malformed, missing, contradictory, cyclic or over-deep enclosing identity remains unknown;
+the comparison preserves display names without using them to repair that gap.
+Historical observations retain an explicitly limited bare-name mode when either
+side predates the identity facts. A known current identity gap still remains
+unknown beside a historical observation. Matching then pairs
+methods by exact CIL/signature identity, then by signature, then by
+structural body shape; fields by signature. Exact CIL/signature identity
 requires equal raw CIL digests and decoded fingerprints. Equal decoded
 fingerprints alone cannot establish an exact match: they omit switch targets
 and collapse distinct NaN encodings. Only then may a remap pair a
@@ -253,23 +267,56 @@ renamed or moved member across declared types or names: a method by exact
 CIL/signature identity or structural body shape, a field by exact decoded
 signature. A remap never takes a member whose own declared type and name remain
 unpaired on the other side, so a member is never taken from its own changed
-counterpart. A member whose declaring type is unresolved could belong to any
-type, so it pairs by name only when no other member shares its exact
-CIL/signature key, never by structural shape alone, and any remap group it
-joins stays ambiguous. The exact-signature key uses names only as part of that
+counterpart. A member whose declared identity is unresolved could belong to any type. It
+never makes a declared-identity pair, and any remap group it joins stays
+ambiguous. Unresolved same-named counterparts prevent definitive added/removed
+claims, while observed names and tokens remain available in the result.
+The exact-signature key uses names only as part of that
 full tuple; names alone never select a pair. Duplicate tuples remain ambiguous
-rather than being paired by token order. The raw signature is exact whether or
+rather than being paired by token order. Every round compares signatures by
+`resolved_sha256`: the raw signature with each TypeDef or TypeRef operand
+replaced by a digest of that type's namespace and name, hashed as separate
+values so `A` + `B.C` differs from `A.B` + `C`, after its enclosing types for a
+nested type (`Outer/Inner`). The defining assembly is not part of the name:
+a TypeDef and a TypeRef with the same namespace and name compare as the
+same nominal name, and a TypeRef's ResolutionScope assembly is ignored, so a type
+forwarded from one assembly to another still pairs. Two different types with
+the same full name in different assemblies therefore have equal name digests.
+Comparison reports this scope limitation inline; it does not establish CLR
+type identity or runtime binding equivalence.
+Nesting deeper than 64 levels is not named, and such a signature compares by
+its raw digest. Comparison keys keep resolved and raw digests apart, so a raw
+digest never pairs with an equal resolved one.
+Raw signature bytes name types by metadata row, and rows are build-local, so
+the same signature usually has different raw bytes in two builds. A signature
+that names no types resolves to its raw digest. When an operand cannot be
+resolved, such as a TypeSpec, or when REA could not parse the signature, the
+raw digest stands in. Missing or unreadable TypeDef and TypeRef operands are
+reported as coverage issues. Invalid NestedClass rows retain their failure
+reasons and withhold TypeDef signature identities; type names and nesting are
+parsed once by their shared owner. Each current inspection records
+`signature_resolution: "type-names-v1"`, even when none of its operands can be
+resolved. Historical Evidence defaults this attestation to `null`. When either
+observation predates resolution, both sides compare raw digests, which pair only where type rows agree,
+and the comparison reports that limitation. The signature is exact whether or
 not REA decoded it, so undecoded signatures pair by that tuple too, but they
 never enter structural rounds. An unmatched member is therefore reported as
 `unknown`, not added or removed, when its own signature was not decoded or when
 the other side has an unpaired member, one-sided or ambiguous, with the same
-declared type and name whose signature was not decoded.
+declared type and name whose signature was not decoded. When both observations
+attest type-name resolution, a decoded signature that still compares by its raw
+digest is treated the same way: an unmatched member with one, or beside an
+unpaired same-named member with one, is `unknown`, because its raw bytes name
+types by build-local row. A matched unresolved signature also remains unknown
+unless another observed dimension establishes a change; identical row bytes
+can reference different TypeSpec contents. Its resolution limitation is retained
+even when another dimension changes.
 
 For a matched method, an unavailable or partial body makes body-shape facets
 unknown while preserving observed signature differences. For complete bodies,
 a difference in either the raw CIL digest or the decoded fingerprint is reported
 in the `cil` dimension, including reordered switch targets with equal decoded
-fingerprints. Structural identity compares normalized signatures, the limited
+fingerprints. Structural identity compares resolved signatures, the limited
 decoded-CIL tuple fingerprint,
 constants, and bounded shape context. It reports all candidates at the winning
 score and remains ambiguous when the evidence does not distinguish them. The

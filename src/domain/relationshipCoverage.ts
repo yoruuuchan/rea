@@ -1,16 +1,16 @@
 import { z } from "zod";
 
+import { fixedTupleSchema } from "./fixedTupleSchema.js";
+
 const diagnostics = z.array(z.string().min(1)).min(1).exactOptional();
 const completeCoverage = z.strictObject({
   status: z.literal("complete"),
   diagnostics,
 });
 const limitedDirections = z.union([
-  z.tuple([z.literal("callers")]).check(z.minLength(1), z.maxLength(1)),
-  z.tuple([z.literal("callees")]).check(z.minLength(1), z.maxLength(1)),
-  z
-    .tuple([z.literal("callers"), z.literal("callees")])
-    .check(z.minLength(2), z.maxLength(2)),
+  fixedTupleSchema([z.literal("callers")]),
+  fixedTupleSchema([z.literal("callees")]),
+  fixedTupleSchema([z.literal("callers"), z.literal("callees")]),
 ]);
 const partialCoverage = z.strictObject({
   status: z.literal("partial"),

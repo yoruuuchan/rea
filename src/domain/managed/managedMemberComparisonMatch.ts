@@ -11,6 +11,10 @@ import type {
   ManagedMemberComparisonResult,
   ManagedMemberComparisonSide,
 } from "./managedMemberComparison.js";
+import {
+  comparableSides,
+  signatureIdentity,
+} from "./managedMemberSignatureIdentity.js";
 import type { JsonValue } from "../jsonValue.js";
 
 export const sha256 = (value: JsonValue): string => {
@@ -22,6 +26,7 @@ export const sha256 = (value: JsonValue): string => {
 
 type Method = ManagedMemberInspection["methods"][number];
 type Field = ManagedMemberInspection["fields"][number];
+
 type MatchBasis =
   ManagedMemberComparisonResult["methods"][number]["match"]["basis"];
 type ConcreteMatchBasis = Exclude<MatchBasis, "none">;
@@ -30,9 +35,12 @@ interface Keyed<Item> {
   readonly item: Item;
   /** Declared type and name; an unresolved type is null, the name remains. */
   readonly identity: string;
+  /** Declared identity could not be resolved; display facts remain. */
+  readonly identityUnavailable: boolean;
   readonly exactKey: string | null;
   readonly signatureKey: string | null;
-  readonly rawSignatureKey: string;
+  /** The name-free exact signature, resolved where both sides resolve it. */
+  readonly signatureId: string;
   readonly structuralKey: string | null;
 }
 
@@ -49,38 +57,42 @@ interface Ambiguous<Item> {
   readonly basis: ConcreteMatchBasis;
 }
 
-const keyMethod = (item: Method): Keyed<Method> => ({
+/** A declared type: a historical bare name or a tagged observed nominal digest. */
+type DeclaredName = string | string[] | null;
+type DeclaredNameOf = (item: Method | Field) => DeclaredName;
+const keyMethod = (item: Method, declared: DeclaredNameOf): Keyed<Method> => ({
   item,
-  identity: identityOf(item),
-  rawSignatureKey: item.signature.raw_sha256,
+  identity: identityOf({ declaring_type: declared(item), name: item.name }),
+  identityUnavailable: declared(item) === null,
+  signatureId: signatureIdentity(item.signature),
   exactKey:
     item.body.status === "present" &&
     item.body.il_sha256 !== null &&
     item.body.normalized_il_sha256 !== null
       ? sha256([
           "method-exact",
-          item.signature.raw_sha256,
+          signatureIdentity(item.signature),
           item.body.il_sha256,
           item.body.normalized_il_sha256,
         ])
       : null,
-  // The raw blob is the exact signature; decoding only feeds shape keys.
-  signatureKey: sha256([
-    "method-signature",
-    item.declaring_type,
-    item.name,
-    item.signature.raw_sha256,
-  ]),
+  // The blob, with type operands named, is the exact signature; decoding
+  // only gates the shape keys.
+  signatureKey:
+    declared(item) === null
+      ? null
+      : sha256([
+          "method-signature",
+          declared(item),
+          item.name,
+          signatureIdentity(item.signature),
+        ]),
   structuralKey:
     item.signature.parse_status === "decoded" && item.body.status === "present"
       ? sha256([
           "method-structural",
-          item.signature.kind,
-          item.signature.calling_convention,
-          item.signature.generic_parameter_count,
-          item.signature.parameter_count,
-          item.signature.return_type,
-          item.signature.parameter_types,
+          // Decoded type strings carry build-local rows; the identity names them.
+          signatureIdentity(item.signature),
           item.body.status,
           item.body.header_format,
           item.body.il_size,
@@ -103,22 +115,26 @@ const keyMethod = (item: Method): Keyed<Method> => ({
       : null,
 });
 
-const keyField = (item: Field): Keyed<Field> => ({
+const keyField = (item: Field, declared: DeclaredNameOf): Keyed<Field> => ({
   item,
-  identity: identityOf(item),
-  rawSignatureKey: item.signature.raw_sha256,
+  identity: identityOf({ declaring_type: declared(item), name: item.name }),
+  identityUnavailable: declared(item) === null,
+  signatureId: signatureIdentity(item.signature),
   exactKey:
     item.signature.parse_status === "decoded"
-      ? sha256(["field-exact", item.signature.raw_sha256])
+      ? sha256(["field-exact", signatureIdentity(item.signature)])
       : null,
   // Only an undecoded field reaches this round: a decoded field with the
-  // same raw signature already met its counterpart in the exact round.
-  signatureKey: sha256([
-    "field-signature",
-    item.declaring_type,
-    item.name,
-    item.signature.raw_sha256,
-  ]),
+  // same signature already met its counterpart in the exact round.
+  signatureKey:
+    declared(item) === null
+      ? null
+      : sha256([
+          "field-signature",
+          declared(item),
+          item.name,
+          signatureIdentity(item.signature),
+        ]),
   structuralKey: sha256([
     "field-structural",
     item.signature.kind,
@@ -142,13 +158,13 @@ const matchMethods = (
       {
         basis: "exact-signature",
         key: ({ signatureKey }) => signatureKey,
-        competitionKey: ({ rawSignatureKey }) => rawSignatureKey,
+        competitionKey: ({ signatureId }) => signatureId,
       },
       {
         basis: "structural-method-shape",
         // An unresolved owner has no declared shape match to prove.
         key: declaredAs((keyed) =>
-          keyed.item.declaring_type === null ? null : keyed.structuralKey,
+          keyed.identityUnavailable ? null : keyed.structuralKey,
         ),
         competitionKey: ({ structuralKey }) => structuralKey,
       },
@@ -181,7 +197,7 @@ const matchFields = (
       {
         basis: "exact-signature",
         key: ({ signatureKey }) => signatureKey,
-        competitionKey: ({ rawSignatureKey }) => rawSignatureKey,
+        competitionKey: ({ signatureId }) => signatureId,
       },
       {
         basis: "field-signature",
@@ -219,7 +235,7 @@ export const identityOf = ({
   declaring_type,
   name,
 }: {
-  readonly declaring_type: string | null;
+  readonly declaring_type: DeclaredName;
   readonly name: string;
 }): string => sha256([declaring_type, name]);
 
@@ -228,7 +244,9 @@ const declaredAs =
   <Item>(key: (item: Keyed<Item>) => string | null) =>
   (item: Keyed<Item>): string | null => {
     const value = key(item);
-    return value === null ? null : sha256([item.identity, value]);
+    return value === null || item.identityUnavailable
+      ? null
+      : sha256([item.identity, value]);
   };
 
 const matchByKeys = <Item extends Declared>({
@@ -251,7 +269,7 @@ const matchByKeys = <Item extends Declared>({
     const competitionKey = round.competitionKey ?? ((item) => item.exactKey);
     const unpairedLeft = unpairedOf(left, pairedLeft);
     const unpairedRight = unpairedOf(right, pairedRight);
-    const declarable = ownerlessDeclarable(
+    const declarable = declaredCandidates(
       unpairedLeft,
       unpairedRight,
       competitionKey,
@@ -285,7 +303,7 @@ const matchByKeys = <Item extends Declared>({
       const refused =
         round.remap === true &&
         [...leftItems, ...rightItems].some(
-          ({ item }) => item.declaring_type === null,
+          ({ identityUnavailable }) => identityUnavailable,
         );
       if (!refused && leftItems.length === 1 && rightItems.length === 1) {
         const [leftItem] = leftItems;
@@ -326,7 +344,7 @@ const matchByKeys = <Item extends Declared>({
     right.filter((item) => !usedRight.has(item)),
     ownerlessContested(
       [unpairedOf(left, pairedLeft), unpairedOf(right, pairedRight)],
-      (member) => member.rawSignatureKey,
+      (member) => member.signatureId,
     ),
   )) {
     for (const item of group.left) usedLeft.add(item);
@@ -348,7 +366,7 @@ const unresolvedSignatureAmbiguities = <Item extends Declared>(
   contested: ReadonlySet<string>,
 ): Ambiguous<Item>[] => {
   const key = (member: Keyed<Item>): string =>
-    competitionIdentityKey(member, member.rawSignatureKey) ?? "";
+    competitionIdentityKey(member, member.signatureId) ?? "";
   const leftGroups = groupBy(left, key);
   const rightGroups = groupBy(right, key);
   const groups: Ambiguous<Item>[] = [];
@@ -398,7 +416,7 @@ const ownerlessContested = <Item extends Declared>(
       const key = competitionIdentityKey(member, keyOf(member));
       if (key === null) continue;
       seen.set(key, (seen.get(key) ?? 0) + 1);
-      if (member.item.declaring_type === null) ownerless.add(key);
+      if (member.identityUnavailable) ownerless.add(key);
     }
     for (const key of ownerless)
       if ((seen.get(key) ?? 0) > 1) contested.add(key);
@@ -426,44 +444,23 @@ const remappable = <Item extends Declared>(
     return (
       (key !== null &&
         contested.has(competitionIdentityKey(member, key) ?? "")) ||
-      member.item.declaring_type === null ||
+      member.identityUnavailable ||
       !kept.has(member.identity)
     );
   });
 };
 
-/**
- * Whether a member may pair in a declared-identity round. A member with an
- * unresolved owner may, only when no other member on either side shares its
- * selected evidence key: its owner might be any of them, so a shared key
- * leaves it to the remap rounds, which keep such a group ambiguous. The
- * resolved members that share such a key stay out too, so they cannot pair and
- * consume the candidate the ownerless member might own.
- */
-const ownerlessDeclarable = <Item extends Declared>(
+/** A declared round needs a resolved owner and no unresolved contender. */
+const declaredCandidates = <Item extends Declared>(
   left: readonly Keyed<Item>[],
   right: readonly Keyed<Item>[],
   keyOf: (item: Keyed<Item>) => string | null,
 ): ((member: Keyed<Item>) => boolean) => {
-  const count = (side: readonly Keyed<Item>[]) => {
-    const seen = new Map<string, number>();
-    for (const member of side) {
-      const key = keyOf(member);
-      if (key !== null) seen.set(key, (seen.get(key) ?? 0) + 1);
-    }
-    return seen;
-  };
-  const leftSeen = count(left);
-  const rightSeen = count(right);
   const contested = ownerlessContested([left, right], keyOf);
   return (member) => {
-    const key = keyOf(member);
-    return key !== null &&
-      contested.has(competitionIdentityKey(member, key) ?? "")
-      ? false
-      : member.item.declaring_type !== null ||
-          key === null ||
-          ((leftSeen.get(key) ?? 0) <= 1 && (rightSeen.get(key) ?? 0) <= 1);
+    if (member.identityUnavailable) return false;
+    const key = competitionIdentityKey(member, keyOf(member));
+    return key === null || !contested.has(key);
   };
 };
 
@@ -506,47 +503,69 @@ const matchObserved = <Item extends Declared>(
     left: readonly Keyed<Item>[],
     right: readonly Keyed<Item>[],
   ) => ReturnType<typeof matchByKeys<Item>>,
-  key: (item: Item) => Keyed<Item>,
+  keyLeft: (item: Item) => Keyed<Item>,
+  keyRight: (item: Item) => Keyed<Item>,
 ): ReturnType<typeof matchByKeys<Item>> => {
   const matched = match(
-    left.filter(sides.inRight).map(key),
-    right.filter(sides.inLeft).map(key),
+    left.filter(sides.inRight).map(keyLeft),
+    right.filter(sides.inLeft).map(keyRight),
   );
   return {
     ...matched,
     leftOnly: [
       ...matched.leftOnly,
-      ...left.filter((item) => !sides.inRight(item)).map(key),
+      ...left.filter((item) => !sides.inRight(item)).map(keyLeft),
     ],
     rightOnly: [
       ...matched.rightOnly,
-      ...right.filter((item) => !sides.inLeft(item)).map(key),
+      ...right.filter((item) => !sides.inLeft(item)).map(keyRight),
     ],
   };
 };
 
 export const keyMembers = (
-  left: ManagedMemberComparisonSide,
-  right: ManagedMemberComparisonSide,
+  observedLeft: ManagedMemberComparisonSide,
+  observedRight: ManagedMemberComparisonSide,
 ): {
   readonly methodMatches: ReturnType<typeof matchMethods>;
   readonly fieldMatches: ReturnType<typeof matchFields>;
 } => {
+  const [left, right] = comparableSides(observedLeft, observedRight);
   const sides = { inLeft: observedBy(left), inRight: observedBy(right) };
+  const modern =
+    left.result.nesting_read !== null && right.result.nesting_read !== null;
+  const declared = (inspection: ManagedMemberInspection): DeclaredNameOf => {
+    const names = new Map(
+      inspection.types.map((type) => [type.token, type.name_sha256]),
+    );
+    return (item) => {
+      if (inspection.nesting_read === false) return null;
+      const digest = names.get(item.declaring_type_token ?? "");
+      // A historical counterpart cannot repair an observed current name gap.
+      if (inspection.nesting_read !== null && digest == null) return null;
+      // Historical observations retain their explicitly limited bare-name mode.
+      if (!modern) return item.declaring_type;
+      return digest == null ? null : ["nominal-name-sha256", digest];
+    };
+  };
+  const declaredLeft = declared(left.result);
+  const declaredRight = declared(right.result);
   return {
     methodMatches: matchObserved(
       left.result.methods,
       right.result.methods,
       sides,
       matchMethods,
-      keyMethod,
+      (item) => keyMethod(item, declaredLeft),
+      (item) => keyMethod(item, declaredRight),
     ),
     fieldMatches: matchObserved(
       left.result.fields,
       right.result.fields,
       sides,
       matchFields,
-      keyField,
+      (item) => keyField(item, declaredLeft),
+      (item) => keyField(item, declaredRight),
     ),
   };
 };

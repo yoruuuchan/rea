@@ -136,6 +136,7 @@ interface SnapshotProviderOptions {
   readonly profile?: ReturnType<typeof createAnalysisProfile>;
   readonly identity?: ProviderIdentity;
   readonly supportedOperations?: readonly CapabilityDescriptor["operation"][];
+  readonly limitations?: readonly string[];
 }
 
 const makeProvider = (
@@ -209,6 +210,7 @@ const makeProvider = (
             createAnalysisExecution(result, profile.provider, {
               analysisProfile: profile,
               rawResult: result,
+              limitations: options.limitations ?? [],
             }),
           );
         },
@@ -254,11 +256,11 @@ const withAlternateWorkflowProfile = (
   snapshot: AnalysisSnapshot,
   path: string,
   current: Evidence,
-): AnalysisSnapshot => {
-  const alternateProfile = createAnalysisProfile(REA_WORKFLOW_PROVIDER, {
+  alternateProfile = createAnalysisProfile(REA_WORKFLOW_PROVIDER, {
     workflow: "binary_overview",
     fixture: "alternate-profile",
-  });
+  }),
+): AnalysisSnapshot => {
   if (
     typeof current.normalized_result !== "object" ||
     current.normalized_result === null ||
@@ -466,6 +468,78 @@ const verifyWindowsSnapshotAdmission = async (
     fixture.calls.filter((call) => call === "search_strings"),
   ).toHaveLength(1);
 };
+
+it.each([
+  { tool: "binary_overview", arguments: {}, priorRevision: 3 },
+  {
+    tool: "inspect_native_api",
+    arguments: { procedure: "0x1000" },
+    priorRevision: undefined,
+  },
+] as const)(
+  "refreshes pre-coverage $tool Evidence and replays the current revision",
+  async (scenario) => {
+    const fixture = await createSnapshotReplayFixture("rea-prior-coverage-");
+    const limitation = "Original PDB names may be missing.";
+    const provider = fixture.createProvider({
+      supportedOperations: workflowProviderOperations,
+      limitations: [limitation],
+    });
+    const dependencies = fixture.dependencies(provider);
+    const options = { snapshotPath: fixture.snapshotPath };
+    const first = parseEvidence(
+      await runDirectAnalysis(
+        dependencies,
+        fixture.path,
+        scenario.tool,
+        scenario.arguments,
+        options,
+      ),
+    );
+    const saved = await readAnalysisSnapshot(fixture.snapshotPath);
+    if (!saved.ok) throw saved.error;
+    const priorProfile = createAnalysisProfile(REA_WORKFLOW_PROVIDER, {
+      upstream_analysis_profile: saved.value.binding.analysis_profile,
+      ...(scenario.priorRevision === undefined
+        ? {}
+        : { workflow_revision: scenario.priorRevision }),
+    });
+    const prior = withAlternateWorkflowProfile(
+      saved.value,
+      fixture.path,
+      { ...first, limitations: ["Derived by an REA composed workflow."] },
+      priorProfile,
+    );
+    const written = await withArtifactResourceScope((resources) =>
+      writeAnalysisSnapshot(prior, fixture.snapshotPath, true, resources),
+    );
+    if (!written.ok) throw written.error;
+    const refreshed = parseEvidence(
+      await runDirectAnalysis(
+        dependencies,
+        fixture.path,
+        scenario.tool,
+        scenario.arguments,
+        options,
+      ),
+    );
+    expect(refreshed.limitations).toContain(limitation);
+    expect(refreshed.analysis_profile?.digest).not.toBe(priorProfile.digest);
+    expect(refreshed.normalized_result).toEqual(first.normalized_result);
+    const starts = [...fixture.starts];
+    const calls = [...fixture.calls];
+    const replayed = await runDirectAnalysis(
+      dependencies,
+      fixture.path,
+      scenario.tool,
+      scenario.arguments,
+      options,
+    );
+    expect(replayed).toEqual(refreshed);
+    expect(fixture.starts).toEqual(starts);
+    expect(fixture.calls).toEqual(calls);
+  },
+);
 
 describe("direct analysis composed snapshot replay", () => {
   it.skipIf(process.platform !== "win32")(
