@@ -13,6 +13,9 @@ import {
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { holdFirstFileRead } from "../../support/holdFirstFileRead.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
+import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
+import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
+import type { PcapCommandLauncher } from "../../../src/pcap/PcapCommand.js";
 
 const it = test.skipIf(process.platform !== "linux");
 
@@ -97,11 +100,14 @@ exit 0
   return { tshark, capinfos };
 };
 
-const providerWith = async (options: { failCapinfos?: boolean } = {}) => {
+const providerWith = async (
+  options: { failCapinfos?: boolean; launcher?: PcapCommandLauncher } = {},
+) => {
   const root = await createTestTempDirectory("rea-pcap-");
   const { tshark, capinfos } = await writeStubTools(root, options);
   const provider = new PcapProvider({
     environment: { REA_TSHARK_COMMAND: tshark, REA_CAPINFOS_COMMAND: capinfos },
+    ...(options.launcher === undefined ? {} : { launcher: options.launcher }),
   });
   onTestFinished(() => provider.close());
   return {
@@ -170,6 +176,78 @@ it("inspects a capture with endpoints, DNS, TLS SNI, and HTTP", async () => {
   expect(result.http_request_uris).toEqual(["http://api.example.com/v1/data"]);
   expect(result.coverage).toBe("complete");
 });
+
+it.each(["capinfos", "tshark"] as const)(
+  "retains parsed output and cleanup ownership when %s cleanup is unresolved",
+  async (stage) => {
+    let mayClean = false;
+    let producerLaunches = 0;
+    const launcher: PcapCommandLauncher = async (spawn) => {
+      const selectedStage = spawn.arguments.includes("-M")
+        ? "capinfos"
+        : spawn.arguments.includes("-T")
+          ? "tshark"
+          : undefined;
+      const launched = await spawnOwnedProviderProcess(spawn);
+      if (selectedStage !== stage) return launched;
+      producerLaunches += 1;
+      const cleanupOwned =
+        launched.cleanup ??
+        (() => cleanupOwnedProcessGroup(launched.ownership));
+      return {
+        ...launched,
+        cleanup: async () => {
+          const cleaned = await cleanupOwned();
+          if (!mayClean) throw new Error("injected retained cleanup failure");
+          return cleaned;
+        },
+      };
+    };
+    const { provider, root } = await providerWith({ launcher });
+    const path = await captureFixture(root);
+    const result = await provider.execute({
+      operation: "inspect_pcap_capture",
+      input: { path },
+    });
+    if (result.ok) throw new Error("Expected cleanup to remain unresolved");
+    expect(result.error).toMatchObject({ cleanupIncomplete: true });
+    expect(result.error.diagnostics).toMatchObject({
+      reason: "injected retained cleanup failure",
+      previous_error: null,
+      captured_output: {
+        stdout: stage === "capinfos" ? CAPINFOS_OUTPUT : TSHARK_JSON,
+        truncated: false,
+      },
+    });
+    expect(result.error.partialObservation).toMatchObject({
+      normalized_result:
+        stage === "capinfos"
+          ? {
+              stage: "capinfos-complete-tshark-not-run",
+              packet_count: 3,
+            }
+          : {
+              coverage: "complete",
+              packet_count: 3,
+              endpoints: expect.any(Array),
+            },
+    });
+    expect(producerLaunches).toBe(1);
+    expect(await readFile(path)).toEqual(Buffer.from("pcap-fixture-bytes"));
+    expect(
+      result.error.cleanupResources.some((resource) =>
+        resource.endsWith("/capture.pcap"),
+      ),
+    ).toBe(true);
+    expect(
+      result.error.cleanupResources.some((resource) =>
+        resource.startsWith("process-group:"),
+      ),
+    ).toBe(true);
+    mayClean = true;
+    await provider.close();
+  },
+);
 
 it("reports a non-capture file as unsupported", async () => {
   const { provider, root } = await providerWith({ failCapinfos: true });

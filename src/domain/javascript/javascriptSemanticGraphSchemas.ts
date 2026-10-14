@@ -184,7 +184,6 @@ const relativePathSchema = z
   .refine(
     (path) =>
       !path.startsWith("/") &&
-      !path.includes("\\") &&
       path.split("/").every((part) => !["", ".", ".."].includes(part)),
     "Expected a normalized relative POSIX path without traversal",
   );

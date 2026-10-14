@@ -33,6 +33,9 @@ const webMcpToolSchema = z.object({
   annotations: z.object({
     read_only: z.boolean().nullable(),
     untrusted_content: z.boolean().nullable(),
+    // Absent when this annotation was not recorded or its protocol value was invalid; null
+    // distinguishes a declaration that omitted it from a declared false.
+    consequential: z.boolean().nullable().optional(),
     autosubmit: z.boolean().nullable(),
   }),
   registration_source: z

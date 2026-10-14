@@ -125,6 +125,11 @@ export const traceNativeUiAction = async (
     );
     if (!native.ok && native.error._tag === "AnalysisCancelledError")
       return err(native.error);
+    if (
+      !native.ok &&
+      native.error._tag !== "AnalysisCapabilityUnavailableError"
+    )
+      return err(native.error);
     if (native.ok) {
       const address = z.string().safeParse(native.value.result);
       if (!address.success || native.value.subject?.sha256 !== targetSha256)

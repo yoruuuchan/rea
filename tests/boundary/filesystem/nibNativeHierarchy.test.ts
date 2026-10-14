@@ -220,7 +220,7 @@ describe.skipIf(process.platform !== "darwin")(
             REA_ANALYSIS_PROVIDER: "auto",
           },
         });
-        expect(output.exitCode).toBe(0);
+        expect(output.exitCode, JSON.stringify(output)).toBe(0);
         const result = interfaceBuilderAnalysisSchema.parse(
           parseEvidence(output.json).normalized_result,
         );

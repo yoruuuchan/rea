@@ -3,6 +3,10 @@ import type { Readable } from "node:stream";
 
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import { streamChunkToBuffer } from "./StreamBytes.js";
+import {
+  createXmlPlistSignatureProbe,
+  MAX_XML_PLIST_PROBE_BYTES,
+} from "../domain/apple/appleArchiveFormat.js";
 
 /** Full stream digest and byte count with bounded classification evidence. */
 export type HashResult = {
@@ -31,19 +35,32 @@ export const hashReadable = async (
   const hash = createHash("sha256");
   const prefixes: Buffer[] = [];
   let prefixBytes = 0;
+  const xmlProbe = createXmlPlistSignatureProbe();
   let bytes = 0;
   for await (const raw of stream) {
     abortIfNeeded(signal);
     const chunk = streamChunkToBuffer(raw);
     bytes += chunk.length;
     hash.update(chunk);
-    if (prefixBytes < ARTIFACT_CLASSIFICATION_PREFIX_BYTES) {
+    let chunkOffset = 0;
+    while (
+      chunkOffset < chunk.length &&
+      (prefixBytes < ARTIFACT_CLASSIFICATION_PREFIX_BYTES ||
+        (xmlProbe.state === "pending" &&
+          prefixBytes < MAX_XML_PLIST_PROBE_BYTES))
+    ) {
+      const limit =
+        prefixBytes < ARTIFACT_CLASSIFICATION_PREFIX_BYTES
+          ? ARTIFACT_CLASSIFICATION_PREFIX_BYTES
+          : MAX_XML_PLIST_PROBE_BYTES;
       const selected = chunk.subarray(
-        0,
-        ARTIFACT_CLASSIFICATION_PREFIX_BYTES - prefixBytes,
+        chunkOffset,
+        Math.min(chunkOffset + limit - prefixBytes, chunk.length),
       );
       prefixes.push(selected);
       prefixBytes += selected.length;
+      chunkOffset += selected.length;
+      xmlProbe.write(selected);
     }
   }
   return { sha256: hash.digest("hex"), bytes, prefix: Buffer.concat(prefixes) };

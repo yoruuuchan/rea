@@ -162,6 +162,7 @@ export class IdaSessionClient implements AnalysisClient {
   #databaseCloseCompleted = false;
   #openAttempted = false;
   #openCompleted = false;
+  #ready = false;
   #blockingSessions: readonly UpstreamSession[] | undefined;
   #openRejected = false;
   #callGraphAdvertised = false;
@@ -197,11 +198,10 @@ export class IdaSessionClient implements AnalysisClient {
     parameters: Readonly<Record<string, JsonValue>>,
     options?: ExecutionOptions,
   ) {
-    if (!this.#openCompleted || this.#closed || this.#closing)
+    if (!this.#ready || this.#closed || this.#closing)
       return Promise.resolve(undefined);
     const call = this.#tail.then(() => {
-      if (!this.#openCompleted || this.#closed || this.#closing)
-        return undefined;
+      if (!this.#ready || this.#closed || this.#closing) return undefined;
       if (wasCancelled(options))
         return err(new AnalysisCancelledError(operation));
       return this.#execute(operation, parameters, options, true);
@@ -601,6 +601,7 @@ export class IdaSessionClient implements AnalysisClient {
         );
       this.#database = opened.session.session_id;
     }
+    this.#ready = true;
   }
 
   async #nativeMetadata(): Promise<JsonValue> {

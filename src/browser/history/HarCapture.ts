@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isSafeNumber, LosslessNumber } from "lossless-json";
+import { LosslessNumber } from "lossless-json";
 import { parseCaptureJson } from "./CaptureJson.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import {
@@ -121,13 +121,14 @@ const projectHar = (
     )
       return redactor.credential(pointer);
     if (item instanceof LosslessNumber) {
-      if (redact && redactor.text(item.value, pointer) === null) return null;
+      const number = redactor.number(item, pointer, redact);
+      if (number === null) return null;
       numeric_literals.push({
         pointer,
         producer_type: "json-number",
-        literal: item.value,
+        literal: number.literal,
       });
-      return isSafeNumber(item.value) ? Number(item.value) : null;
+      return number.reported;
     }
     if (typeof item === "string") {
       if (

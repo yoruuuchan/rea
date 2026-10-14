@@ -32,6 +32,11 @@ it.each([
       REA_MCP_MAX_RESPONSE_BYTES: "33554432",
       REA_BROWSER_EXECUTABLE: join(root, "custom-browser"),
       GHIDRA_INSTALL_DIR: join(root, "old-ghidra"),
+      HOPPER_LOADER_ARGS_JSON: '["", "--loader", "Mach-O"]',
+      REA_REFERENCE_SECRET_PATTERNS_JSON: '["*.private", "local/**"]',
+      REA_GHIDRA_LANGUAGE_ID: "x86:LE:32:default",
+      REA_GHIDRA_COMPILER_SPEC_ID: "borlandcpp",
+      CALLER_SETTING: "preserve exactly",
     };
     const original = serializeClientConfiguration(
       {
@@ -53,9 +58,10 @@ it.each([
     ).toMatchObject({ status: "configured" });
     const configured = await readFile(configPath, "utf8");
     const parsed = parseClientConfiguration(configured, format);
-    expect(effectiveClientServer(parsed, "rea")).toMatchObject({
-      [environmentKey]: { ...custom, ...providers },
-    });
+    expect(effectiveClientServer(parsed, "rea")).toHaveProperty(
+      environmentKey,
+      { ...custom, ...providers },
+    );
     expect(effectiveClientServer(parsed, "other")).toEqual(
       effectiveClientServer(
         parseClientConfiguration(original, format),
@@ -141,6 +147,36 @@ it.each([
     "invalid response budget",
     { REA_MCP_MAX_RESPONSE_BYTES: "1" },
     "REA_MCP_MAX_RESPONSE_BYTES",
+  ],
+  [
+    "malformed loader JSON",
+    { HOPPER_LOADER_ARGS_JSON: "{" },
+    "HOPPER_LOADER_ARGS_JSON",
+  ],
+  [
+    "non-array loader JSON",
+    { HOPPER_LOADER_ARGS_JSON: "{}" },
+    "HOPPER_LOADER_ARGS_JSON",
+  ],
+  [
+    "NUL loader argument",
+    { HOPPER_LOADER_ARGS_JSON: JSON.stringify(["a\0b"]) },
+    "HOPPER_LOADER_ARGS_JSON",
+  ],
+  [
+    "malformed exclusion JSON",
+    { REA_REFERENCE_SECRET_PATTERNS_JSON: "{" },
+    "REA_REFERENCE_SECRET_PATTERNS_JSON",
+  ],
+  [
+    "empty exclusion pattern",
+    { REA_REFERENCE_SECRET_PATTERNS_JSON: '[""]' },
+    "REA_REFERENCE_SECRET_PATTERNS_JSON",
+  ],
+  [
+    "unpaired compiler specification",
+    { REA_GHIDRA_COMPILER_SPEC_ID: "borlandcpp" },
+    "REA_GHIDRA_COMPILER_SPEC_ID",
   ],
 ] as const)(
   "refuses %s before changing the configuration",

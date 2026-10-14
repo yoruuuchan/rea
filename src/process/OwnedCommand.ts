@@ -1,6 +1,7 @@
 import type {
   OwnedProviderProcessSpawnOptions,
   ProviderProcessSnapshot,
+  ProviderProcessStopResult,
   SpawnedOwnedProviderProcess,
 } from "./ProviderProcess.js";
 import {
@@ -63,7 +64,10 @@ export const runOwnedCommand = async (
   options: {
     readonly signal?: AbortSignal | undefined;
     /** Synchronously accept unresolved cleanup ownership; execution still returns its original outcome. Must not throw. */
-    readonly retainCleanup?: (owner: ProviderProcessSupervisor) => void;
+    readonly retainCleanup?: (
+      owner: ProviderProcessSupervisor,
+      result: Extract<ProviderProcessStopResult, { status: "incomplete" }>,
+    ) => void;
     readonly launcher?: (
       input: OwnedProviderProcessSpawnOptions,
     ) => Promise<SpawnedOwnedProviderProcess>;
@@ -102,7 +106,10 @@ const collectOwnedCommand = async (
   ) => Promise<SpawnedOwnedProviderProcess>,
   deadline: ProviderStartupDeadline,
   callerSignal?: AbortSignal,
-  retainCleanup?: (owner: ProviderProcessSupervisor) => void,
+  retainCleanup?: (
+    owner: ProviderProcessSupervisor,
+    result: Extract<ProviderProcessStopResult, { status: "incomplete" }>,
+  ) => void,
 ): Promise<ProviderProcessSnapshot> => {
   const signal = deadline.signal;
   let launched: SpawnedOwnedProviderProcess;
@@ -216,7 +223,7 @@ const collectOwnedCommand = async (
   const stopped = await supervisor.stop();
   const snapshot = supervisor.snapshot();
   if (stopped.status === "incomplete" && retainCleanup !== undefined)
-    retainCleanup(supervisor);
+    retainCleanup(supervisor, stopped);
   else if (stopped.status === "incomplete")
     throw new OwnedCommandFailure(
       failure?.reason ?? "process",

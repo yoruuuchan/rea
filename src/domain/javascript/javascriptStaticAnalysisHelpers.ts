@@ -223,7 +223,7 @@ const staticCallPath = (
       ? stringValue(node.arguments[0])
       : undefined;
   if (name === "fileURLToPath" || name.endsWith(".fileURLToPath")) {
-    return staticFileUrlPath(argumentNode(node.arguments[0]));
+    return staticFileUrlPath(node);
   }
   if (name.endsWith(".resolve"))
     return name === "win32.resolve" || name.endsWith(".win32.resolve")
@@ -246,12 +246,34 @@ const staticCallPath = (
 };
 
 const staticFileUrlPath = (
-  argument: t.Node | undefined,
+  node: t.CallExpression | t.NewExpression,
 ): string | undefined => {
+  if (node.arguments.length !== 1) return undefined;
+  const argument = argumentNode(node.arguments[0]);
   if (argument === undefined) return undefined;
-  return isSourceFileUrl(argument)
-    ? sourceRelativeFileUrlPath(argument)
-    : staticPath(argument);
+  if (isSourceFileUrl(argument)) return sourceRelativeFileUrlPath(argument);
+  const value = staticPath(argument);
+  const rawPath = value?.split(/[?#]/u, 1)[0] ?? "";
+  if (
+    value === undefined ||
+    !/^file:/iu.test(value) ||
+    value !== value.trim() ||
+    value.includes("\\") ||
+    [...value].some((character) => character.charCodeAt(0) < 32) ||
+    /%(?:2f|5c)/iu.test(rawPath)
+  )
+    return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "file:") return undefined;
+    // Canonical analysis paths use POSIX spelling so results do not depend on
+    // the analyzer host. Drive and UNC paths need an explicit target platform.
+    const path = fileURLToPath(url, { windows: false });
+    return /^\/[a-z]:/iu.test(path) ? undefined : path;
+  } catch (cause: unknown) {
+    void cause;
+    return undefined;
+  }
 };
 
 /** Project a known source-relative URL through the actual file URL decoder. */
@@ -339,10 +361,13 @@ const isFilesystemPathExpression = (node: t.Node): boolean => {
     if (name === "URL" || name.endsWith(".URL"))
       return isFileIdentity(argumentNode(node.arguments[1]));
     if (name === "fileURLToPath" || name.endsWith(".fileURLToPath"))
-      return node.arguments.some((argument) => {
-        const value = argumentNode(argument);
-        return value !== undefined && isFilesystemPathExpression(value);
-      });
+      return (
+        staticFileUrlPath(node) !== undefined ||
+        node.arguments.some((argument) => {
+          const value = argumentNode(argument);
+          return value !== undefined && isFilesystemPathExpression(value);
+        })
+      );
     return node.arguments.some((argument) => {
       const value = argumentNode(argument);
       return value !== undefined && isFilesystemPathExpression(value);
@@ -410,12 +435,26 @@ const XHR_METHODS = new Set([
   "TRACE",
 ]);
 
-/** An absolute HTTP(S)/WebSocket URL, or an absolute or relative path. */
-const isRequestUrlLiteral = (value: string): boolean =>
+/** Legacy URL/path shapes that bypass the overloaded lookup exclusions. */
+const isRequestUrlOrPathLiteral = (value: string): boolean =>
   /^(?:https?|wss?):\/\//iu.test(value) ||
   value.startsWith("/") ||
   value.startsWith("./") ||
   value.startsWith("../");
+
+/** Explicit request references, classified after receiver-specific exclusions. */
+const isRequestUrlReference = (value: string): boolean => {
+  if (
+    isRequestUrlOrPathLiteral(value) ||
+    value.startsWith("?") ||
+    value.startsWith("#")
+  )
+    return true;
+  // WHATWG accepts HTTP/WS scheme forms without authority slashes. Parse
+  // without a base so bare keys stay ambiguous, and keep the source spelling.
+  if (!/^(?:https?|wss?):/iu.test(value)) return false;
+  return URL.parse(value) !== null;
+};
 
 /**
  * Browsing-context and document `open` take a URL or type first and a target
@@ -538,10 +577,20 @@ const isKeyedCollectionReceiver = (callee: t.Node): boolean => {
     receiver.property,
     receiver.computed,
   );
-  return property === "headers" || property === "searchParams";
+  return (
+    property === "headers" ||
+    property === "headersList" ||
+    property === "searchParams"
+  );
 };
 
-/** Select the literal URL argument for recognized network callees. */
+/** A literal endpoint shape or an ambiguous argument of an HTTP-method-named call. */
+export interface JavaScriptEndpointArgument {
+  readonly kind: "endpoint" | "candidate";
+  readonly value: string;
+}
+
+/** Classify one literal without treating a generic method name as network identity. */
 export const endpointArgument = (
   name: string,
   args: readonly (
@@ -552,7 +601,11 @@ export const endpointArgument = (
   )[],
   callee: t.Node,
   receiverFact?: JavaScriptOpenReceiverFact,
-): string | undefined => {
+): JavaScriptEndpointArgument | undefined => {
+  const literal = (
+    value: string | undefined,
+  ): JavaScriptEndpointArgument | undefined =>
+    value === undefined ? undefined : { kind: "endpoint", value };
   if (receiverFact === "window") return undefined;
   if (
     name === "fetch" ||
@@ -561,9 +614,18 @@ export const endpointArgument = (
     name === "EventSource" ||
     name.endsWith(".EventSource")
   )
-    return stringValue(args[0]);
-  if (name.endsWith(".open"))
-    return xhrOpenUrl(name, args[0], args[1], receiverFact);
+    return literal(stringValue(args[0]));
+  if (name.endsWith(".open")) {
+    const value = xhrOpenUrl(name, args[0], args[1], receiverFact);
+    if (value === undefined) return undefined;
+    return {
+      kind:
+        stringValue(args[0]) !== undefined || isRequestUrlReference(value)
+          ? "endpoint"
+          : "candidate",
+      value,
+    };
+  }
   const method = ["get", "post", "put", "patch", "delete", "request"].find(
     (candidate) => name === candidate || name.endsWith(`.${candidate}`),
   );
@@ -572,18 +634,26 @@ export const endpointArgument = (
     // Only get and delete also belong to the keyed-collection APIs, whose
     // keys are header, field, and parameter names rather than URLs or paths.
     // Configuration `get` reads setting keys.
-    return value !== undefined &&
+    if (value === undefined) return undefined;
+    if (
       (method === "get" || method === "delete") &&
-      !isRequestUrlLiteral(value) &&
+      !isRequestUrlOrPathLiteral(value) &&
       (isKeyedCollectionReceiver(callee) ||
-        (method === "get" && receiverFact === "configuration"))
-      ? undefined
-      : value;
+        (method === "get" &&
+          (receiverFact === "configuration" ||
+            receiverFact === "extension-state")))
+    )
+      return undefined;
+    return {
+      kind: isRequestUrlReference(value) ? "endpoint" : "candidate",
+      value,
+    };
   }
-  // navigator.sendBeacon(url, data) queues a POST to its first argument.
+  // Beacon URLs are endpoint observations, retaining the upstream API support.
   if (name === "sendBeacon" || name.endsWith(".sendBeacon"))
-    return stringValue(args[0]);
-  if (name.endsWith("loadURL")) return stringValue(args[0]);
+    return literal(stringValue(args[0]));
+  if (name === "loadURL" || name.endsWith(".loadURL"))
+    return literal(stringValue(args[0]));
   return undefined;
 };
 

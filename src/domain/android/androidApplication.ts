@@ -18,6 +18,8 @@ import {
   projectionCoverage,
   projectionDigest,
   projectionEvidenceIdSchema,
+  unavailableComponentSchema,
+  unavailableComponents,
 } from "../mobileApplicationGraphProjection.js";
 
 const evidenceIdSchema = projectionEvidenceIdSchema;
@@ -42,6 +44,7 @@ export const androidApplicationProjectionResultSchema = z.strictObject({
     javascript: z.array(componentSchema),
     signing: z.array(componentSchema),
   }),
+  unavailable_components: z.array(unavailableComponentSchema),
   runtime_families: z.array(
     z.enum([
       "dalvik-art",
@@ -92,6 +95,7 @@ export const projectAndroidApplication = (
       `Android application projection requires APK inventory Evidence; the inventory root format is ${inventory.manifest.root_format}. APK is chosen for a ZIP archive whose name ends in .apk.`,
     );
   const all = projectedComponents(inventory);
+  const unavailable = unavailableComponents(inventory);
   const classified = classify(all);
   const bridgeProjection = bridgeCandidates(
     [...classified.dex, ...classified.jvm_classes],
@@ -118,6 +122,11 @@ export const projectAndroidApplication = (
           `Bridge candidate pairs exceeded the projection safety budget; ${bridgeProjection.coverage.omitted_candidates} hypotheses are omitted. Component arrays still include every component from the supplied inventory pages.`,
         ]
       : []),
+    ...(unavailable.length > 0
+      ? [
+          "Some inventoried occurrences have no authenticated content identity. Their paths and limitations are retained in unavailable_components; component absence is unknown.",
+        ]
+      : []),
   ];
   const withoutId = {
     root_sha256: inventory.manifest.root_sha256,
@@ -126,12 +135,14 @@ export const projectAndroidApplication = (
       .map(({ evidence_id: id }) => id)
       .sort(compareProjectionStrings),
     components,
+    unavailable_components: unavailable,
     runtime_families: runtimeFamilies(all),
     bridge_candidates: bridgeProjection.candidates,
     bridge_candidate_coverage: bridgeProjection.coverage,
     coverage: projectionCoverage(
       inventory,
-      bridgeProjection.coverage.status === "complete",
+      bridgeProjection.coverage.status === "complete" &&
+        unavailable.length === 0,
     ),
     limitations,
   };

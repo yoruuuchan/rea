@@ -21,3 +21,51 @@ describe("macOS Hopper setup failure projection", () => {
     });
   });
 });
+
+describe("Linux package-manager setup failure projection", () => {
+  it("quotes the failing command and a sanitized bounded diagnostic", () => {
+    const result = setupInstallFailure("authorization_or_package_manager", {
+      command: 'pkexec pacman -U "/tmp/hopper package.pkg.tar.xz"',
+      exitCode: 1,
+      stdout: "",
+      stderr: "\u001b[31merror:\u001b[0m package conflict\nrefused",
+      outputTruncated: false,
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "authorization_or_package_manager_failed",
+    });
+    if (result.status !== "failed") throw new Error("expected failure");
+    expect(result.remediation).toContain(
+      'pkexec pacman -U "/tmp/hopper package.pkg.tar.xz"; exit 1',
+    );
+    expect(result.remediation).toContain("error: package conflict refused");
+    expect(result.remediation).not.toContain("\u001b");
+    expect(result.remediation).not.toContain("\n");
+  });
+
+  it("preserves the established remediation if no package output exists", () => {
+    expect(setupInstallFailure("authorization_or_package_manager")).toEqual({
+      status: "failed",
+      code: "authorization_or_package_manager_failed",
+      remediation:
+        "Allow the system package-manager operation or install the planned Hopper package and Linux runtime dependencies, then rerun rea setup.",
+    });
+  });
+
+  it("keeps truncated package output within its excerpt budget", () => {
+    const result = setupInstallFailure("authorization_or_package_manager", {
+      command: "pacman -U hopper.pkg.tar.xz",
+      exitCode: 1,
+      stdout: "",
+      stderr: `${"warning ".repeat(100)}final package conflict`,
+      outputTruncated: true,
+    });
+    if (result.status !== "failed") throw new Error("expected failure");
+    const excerpt = result.remediation
+      .split("its output: ")[1]
+      ?.split(" Resolve")[0];
+    expect(excerpt).toContain("output truncated");
+    expect(excerpt?.length).toBeLessThanOrEqual(400);
+  });
+});

@@ -27,6 +27,8 @@ export const pushDispatchCoverage = (input: {
   readonly examined: number;
   readonly categoriesExamined: number;
   readonly truncated: boolean;
+  readonly objcListScanTruncated: boolean;
+  readonly objcClassListScanTruncated: boolean;
   readonly fixups: PointerFixups;
   readonly vtables: FacetDecodeFacts;
   readonly swift: FacetDecodeFacts;
@@ -38,6 +40,8 @@ export const pushDispatchCoverage = (input: {
     examined,
     categoriesExamined,
     truncated,
+    objcListScanTruncated,
+    objcClassListScanTruncated,
     fixups,
     vtables,
     swift,
@@ -78,7 +82,7 @@ export const pushDispatchCoverage = (input: {
   const classReasons = [
     ...failures,
     ...classRecords,
-    ...(truncated ? ["max_records_reached"] : []),
+    ...(truncated || objcListScanTruncated ? ["max_records_reached"] : []),
   ];
   const categoryMethods = result.objc_dispatch_implementations.filter(
     ({ category }) => category !== undefined,
@@ -99,20 +103,18 @@ export const pushDispatchCoverage = (input: {
       ({ decode }) => decode?.status === "decoded",
     ).length,
   });
+  const relativePointerReasons = [
+    ...(truncated || objcClassListScanTruncated ? ["max_records_reached"] : []),
+    ...(result.relative_pointers.some(
+      (item) => item.decode.status !== "decoded",
+    )
+      ? ["relative_pointer_targets_unresolved"]
+      : []),
+  ];
   result.coverage.push({
     facet: "binary_relative_pointers",
-    status:
-      truncated ||
-      result.relative_pointers.some((item) => item.decode.status !== "decoded")
-        ? "partial"
-        : "complete",
-    reason: truncated
-      ? "max_records_reached"
-      : result.relative_pointers.some(
-            (item) => item.decode.status !== "decoded",
-          )
-        ? "relative_pointer_targets_unresolved"
-        : null,
+    status: relativePointerReasons.length > 0 ? "partial" : "complete",
+    reason: relativePointerReasons.join("; ") || null,
     examined: result.relative_pointers.length,
     decoded: result.relative_pointers.filter(
       (item) => item.decode.status === "decoded",
@@ -126,6 +128,7 @@ export const pushDispatchCoverage = (input: {
     facet: "objc_properties_categories",
     status:
       truncated ||
+      objcClassListScanTruncated ||
       categoryFailures.length > 0 ||
       result.objc_categories.some(
         ({ decode }) => decode.status !== "decoded",
@@ -137,7 +140,9 @@ export const pushDispatchCoverage = (input: {
       [
         ...categoryFailures,
         ...categoryMethodReasons,
-        ...(truncated ? ["max_records_reached"] : []),
+        ...(truncated || objcClassListScanTruncated
+          ? ["max_records_reached"]
+          : []),
       ].join("; ") || null,
     examined: categoriesExamined,
     decoded: result.objc_categories.filter(

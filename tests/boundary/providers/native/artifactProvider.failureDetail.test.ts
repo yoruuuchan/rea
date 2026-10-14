@@ -41,10 +41,32 @@ it("keeps logical names that differ only in case and records the limitation", as
   }
 });
 
+it("keeps literal backslash ZIP names distinct from slash paths", async () => {
+  const root = await createTestTempDirectory("rea-artifact-detail-");
+  const path = join(root, "fixture.zip");
+  await writeOrderedZip(path, ["a\\b.js", "a/b.js"]);
+  const target = await parseBinaryTarget(path);
+  if (!target.ok) throw new Error("expected a ZIP target");
+  const result = await new ArtifactProvider(process.env)
+    .createClient(target.value)
+    .execute("inventory_artifact", {});
+  if (!result.ok) throw result.error;
+  const inventory = artifactInventoryResultSchema.parse(result.value.result);
+  const literal = inventory.occurrences.find(
+    ({ logical_path }) => logical_path === "a\\b.js",
+  );
+  const slash = inventory.occurrences.find(
+    ({ logical_path }) => logical_path === "a/b.js",
+  );
+  expect(literal).toBeDefined();
+  expect(slash).toBeDefined();
+  expect(literal?.occurrence_id).not.toBe(slash?.occurrence_id);
+});
+
 it("reports an unsafe path as a hostile artifact path", async () => {
   const root = await createTestTempDirectory("rea-artifact-detail-");
   const path = join(root, "fixture.zip");
-  await writeOrderedZip(path, ["a\\b.js"]);
+  await writeOrderedZip(path, ["../outside.js"]);
   const target = await parseBinaryTarget(path);
   if (!target.ok) throw new Error("expected a ZIP target");
   const result = await new ArtifactProvider(process.env)
@@ -53,11 +75,11 @@ it("reports an unsafe path as a hostile artifact path", async () => {
   if (result.ok) throw new Error("expected the path constraint to fail");
   expect(projectAnalysisError(result.error)).toMatchObject({
     code: "artifact_operation_failed",
-    message: 'Artifact path is absolute or unsafe: "a\\\\b.js"',
+    message: 'Artifact path is not normalized: "../outside.js"',
     details: {
       operation: "inventory_artifact",
       reason: "path",
-      detail: 'Artifact path is absolute or unsafe: "a\\\\b.js"',
+      detail: 'Artifact path is not normalized: "../outside.js"',
     },
   });
 });

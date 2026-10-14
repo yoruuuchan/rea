@@ -201,6 +201,16 @@ async function stageCli() {
     ),
   );
 
+  assert.ok(
+    files.extraction_gaps.some(
+      (gap) =>
+        gap.kind === "unknown-chunk-handler" &&
+        gap.range !== null &&
+        gap.range.offset === 0 &&
+        gap.range.length === 64,
+    ),
+    "The unknown chunk must carry its explicit recovery row",
+  );
   return { regions, files };
 }
 
@@ -247,6 +257,20 @@ async function stageMcp(cli) {
   );
   assert.equal(depthParsed.coverage, "partial");
   assert.ok(depthParsed.depth_limited_paths.length > 0);
+  assert.ok(
+    depthParsed.extraction_gaps.some(
+      (gap) =>
+        gap.kind === "depth-limited" &&
+        gap.dependencies.length === 0 &&
+        depthParsed.extraction_continuations.some(
+          ({ id, instruction }) =>
+            id === gap.continuation_id &&
+            instruction.includes("max_depth") &&
+            instruction.includes("fresh output_directory"),
+        ),
+    ),
+    "Depth-limited paths must carry the explicit depth continuation",
+  );
 
   console.log(
     "PASS real Binwalk/Unblob: CLI, MCP, independent offsets/digests, range extraction, unknown chunks and depth limits",
@@ -292,8 +316,17 @@ async function stageExt4() {
   );
   assert.equal(degradedParsed.coverage, "partial");
   assert.ok(JSON.stringify(degradedParsed.diagnostics).includes("debugfs"));
+  assert.ok(
+    degradedParsed.extraction_gaps.some(
+      (gap) =>
+        gap.kind === "missing-extractor-dependency" &&
+        gap.dependencies.includes("debugfs") &&
+        gap.handler === "extfs",
+    ),
+    "The missing extractor must be named in its explicit recovery row",
+  );
   console.log(
-    "PASS real missing-extractor diagnostics retained despite Unblob exit 1",
+    "PASS real missing-extractor diagnostics and recovery row retained despite Unblob exit 1",
   );
 }
 

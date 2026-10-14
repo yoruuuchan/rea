@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > Fontes oficiais do REA: [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > Use os links de instalação e de versões dessas fontes oficiais. Um nome de repositório parecido ou um README copiado não comprova que um download seja oficial.
+
+<div align="center">
 
 <br />
 
@@ -137,13 +141,13 @@ O REA requer Node.js 22.x (>=22.19), 24.x (>=24.11) ou 26+, além do npm. As fer
 
 | Alvo                        | O que o REA retorna                                                                                                     | Requisitos e guia                                                                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Binários nativos            | Pseudocódigo, assembly, strings, símbolos, chamadas e referências                                                       | Hopper, Ghidra ou IDA; [análise nativa](https://rea.tools/pt-BR/guides/native/)                                                   |
+| Binários nativos            | Pseudocódigo, assembly, strings, símbolos, chamadas e referências                                                       | Hopper, Ghidra ou IDA; [análise nativa](../native-investigation.md)                                                               |
 | Estrutura ELF sem execução  | Seções, segmentos, símbolos/relocações originais e possíveis mecanismos de mitigação identificados por análise estática | pwntools fornecido pelo chamador no Linux x64; [diagnóstico de binários](../binary-diagnostics.md)                                |
 | Bytecode EVM                | Seletores de despacho, offsets de bytes, argumentos inferidos e mutabilidade                                            | Entrada local com bytes brutos ou representação hexadecimal no Linux x64; [guia de EVM sem execução](../evm-bytecode.md)          |
 | Rust binaries               | Embedded cargo-auditable dependency list                                                                                | [Rust binaries](../rust-binaries.md)                                                                                              |
 | Falhas do Linux registradas | Registros note brutos, registradores/sinais de cada thread registrada e candidatos opcionais a mapeamentos              | pwntools fornecido pelo chamador no Linux x64; GDB/pwndbg opcionais; [falhas registradas](../recorded-crashes.md)                 |
-| JavaScript / Electron       | Módulos, importações, source maps, rotas, IPC e relações com complementos nativos                                       | Node.js e npm; [análise de aplicativos](https://rea.tools/pt-BR/guides/javascript/)                                               |
-| Sites                       | Estrutura da página, scripts, observações de rede e capturas de tela solicitadas                                        | Um navegador da família Chrome; [análise do navegador](https://rea.tools/pt-BR/guides/browser/)                                   |
+| JavaScript / Electron       | Módulos, importações, source maps, rotas, IPC e relações com complementos nativos                                       | Node.js e npm; [análise de aplicativos](../javascript-application-workflows.md)                                                   |
+| Sites                       | Estrutura da página, scripts, observações de rede e capturas de tela solicitadas                                        | Um navegador da família Chrome; [análise do navegador](../browser-observation.md)                                                 |
 | Capturas de rede salvas     | Requisições, respostas, payloads acessíveis e localizações de origem                                                    | HAR; mitmdump no Linux para capturas no formato nativo do mitmproxy; [guia de capturas](../web-network-captures.md)               |
 | Capturas de pacotes         | Endpoints, DNS, TLS SNI, distribuição de protocolos e requisições HTTP                                                  | tshark e capinfos fornecidos pelo chamador; [guia pcap](../pcap-analysis.md)                                                      |
 | Assemblies .NET             | Metadados, instruções CIL, dependências nativas declaradas e comparações de builds                                      | Inspeção estática; [guia de código gerenciado](../managed-code-analysis.md)                                                       |
@@ -268,7 +272,7 @@ Relate vulnerabilidades conforme [SECURITY.md](../../SECURITY.md).
 
 ## Histórico de estrelas
 
-🎉 **170.000 estrelas no GitHub — muito obrigado!**
+🎉 **200.000 estrelas no GitHub — muito obrigado!**
 
 Obrigado a todos que usam o REA, relatam bugs, sugerem funcionalidades, testam builds e contribuem com correções.
 

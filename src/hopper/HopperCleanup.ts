@@ -10,8 +10,12 @@ import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { Logger } from "pino";
 import type { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
-import type { ProcessCleanupResult } from "../process/ProcessOwnership.js";
+import type {
+  ProcessCleanupResult,
+  ProcessIdentityObservation,
+} from "../process/ProcessOwnership.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
+import { observeProcessStartIdentityExit } from "../process/ProcessOwnershipObservation.js";
 import type { BridgeLaunch } from "./BridgeLauncher.js";
 import {
   createOwnedHopperShutdownDiagnostic,
@@ -42,6 +46,12 @@ export interface HopperOwnedResources {
   processSupervisor: ProviderProcessSupervisor | undefined;
   runtimeRoot: PrivateRuntimeRoot | undefined;
   shutdownConfirmed: boolean;
+  externalApplication:
+    | {
+        readonly pid: number;
+        readonly identity: ProcessIdentityObservation;
+      }
+    | undefined;
 }
 
 export interface HopperCleanupInput {
@@ -68,6 +78,11 @@ export const cleanupHopperSession = async (
     cleanupResult: undefined,
     processStopped: input.resources.processSupervisor === undefined,
   };
+  await confirmExternalApplicationExit(
+    input.resources,
+    input.socket,
+    input.releaseTransport,
+  );
   await report(
     input.progress,
     0,
@@ -117,6 +132,28 @@ export const cleanupHopperSession = async (
     }
   }
   return cleanupOutcome(input, state);
+};
+
+export const confirmExternalApplicationExit = async (
+  resources: HopperOwnedResources,
+  socket: Socket | undefined,
+  releaseTransport: (socket: Socket | undefined) => void,
+  observeExit: typeof observeProcessStartIdentityExit = observeProcessStartIdentityExit,
+): Promise<void> => {
+  const application = resources.externalApplication;
+  if (
+    resources.shutdownConfirmed ||
+    resources.launch?.providerLifetime !== "external-application" ||
+    application?.identity.state !== "readable"
+  )
+    return;
+  if (
+    (await observeExit(application.pid, application.identity.identity)) ===
+    "exited"
+  ) {
+    resources.shutdownConfirmed = true;
+    releaseTransport(socket);
+  }
 };
 
 const requestShutdown = async (

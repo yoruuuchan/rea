@@ -263,6 +263,34 @@
         "url": "https://raw.githubusercontent.com/qgis/QGIS/e1223b8e9e71fc50ee995ed556f711c54ccc101b/resources/data/world_map.gpkg",
         "derivation": "unmodified official resource file; streaming Git blob and SHA-256 verification"
       }
+    },
+    {
+      "id": "wireshark-http.cap",
+      "file": "http.cap",
+      "bytes": 25803,
+      "sha256": "25a72bdf10339f2c29916920c8b9501d294923108de8f29b19aba7cc001ab60d",
+      "provenance": {
+        "project": "Wireshark public sample captures",
+        "source_page": "https://wiki.wireshark.org/SampleCaptures",
+        "url": "https://wiki.wireshark.org/uploads/27707187aeb30df68e70c8fb9d614981/http.cap",
+        "resolved_url": "https://gitlab.com/wireshark/wireshark/-/wikis/uploads/27707187aeb30df68e70c8fb9d614981/http.cap",
+        "upstream_expected_digest": null,
+        "derivation": "Unmodified capture published by official Wireshark wiki. Local digest pins downloaded bytes; no independently published upstream digest is claimed."
+      }
+    },
+    {
+      "id": "wireshark-http_redirects.pcapng",
+      "file": "http_redirects.pcapng",
+      "bytes": 47804,
+      "sha256": "ff432a6b71d06cd20720f7763e584014edd0a43c3b55981c682d1b7640207abc",
+      "provenance": {
+        "project": "Wireshark public sample captures",
+        "source_page": "https://wiki.wireshark.org/SampleCaptures",
+        "url": "https://wiki.wireshark.org/uploads/__moin_import__/attachments/SampleCaptures/http_redirects.pcapng",
+        "resolved_url": "https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/http_redirects.pcapng",
+        "upstream_expected_digest": null,
+        "derivation": "Unmodified capture published by official Wireshark wiki. Local digest pins downloaded bytes; no independently published upstream digest is claimed."
+      }
     }
   ]
 }

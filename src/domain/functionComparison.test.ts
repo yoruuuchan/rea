@@ -625,6 +625,40 @@ describe("function comparison CFG address normalization", () => {
 });
 
 describe("function comparison unresolved text", () => {
+  it("qualifies exact text changes caused by relocated provider labels", () => {
+    const left = observe(
+      "2",
+      functionDossierSchema.parse({
+        ...dossier("return FUN_00001010(DAT_00001020) % 3;", "0x1000"),
+        assembly: ["0x1000 call FUN_00001010", "0x1004 ret"],
+      }),
+    );
+    const right = observe(
+      "3",
+      functionDossierSchema.parse({
+        ...dossier("return FUN_00002010(DAT_00002020) % 3;", "0x2000"),
+        assembly: ["0x2000 call FUN_00002010", "0x2004 ret"],
+      }),
+    );
+    const comparison = compareFunctions(left, right);
+    for (const name of ["pseudocode", "assembly"]) {
+      const dimension = comparison.dimensions.find(
+        ({ dimension }) => dimension === name,
+      );
+      expect(dimension).toMatchObject({
+        status: "changed",
+        limitations: expect.arrayContaining([
+          expect.stringContaining(
+            "layout-only differences do not establish a behavior change",
+          ),
+        ]),
+      });
+    }
+    expect(
+      comparison.dimensions.find(({ dimension }) => dimension === "cfg"),
+    ).toMatchObject({ status: "unchanged" });
+  });
+
   it("counts Unicode text consistently for unresolved provider comparisons", () => {
     const left = observe("b", dossier("return '😀';", "0x1000"), "provider-a");
     const right = observe("c", dossier("return '😀';", "0x2000"), "provider-b");
@@ -886,6 +920,31 @@ describe("function comparison Swift string literals", () => {
 });
 
 describe("function comparison partial Swift literal coverage", () => {
+  it("keeps literal comparisons unknown at unresolved jump candidates", () => {
+    const unresolved = functionDossierSchema.parse({
+      ...withLiterals("0x2000", []),
+      swift_string_literal_omissions: [
+        {
+          source_address: "0x2004",
+          representation: "small",
+          address: null,
+          byte_length: 4,
+          reason: "unresolved_jump",
+          registers: ["x0", "x1"],
+          words: ["0x732f4220", "0xe400000000000000"],
+        },
+      ],
+    });
+    expect(
+      stringsDimension(
+        "8",
+        withLiterals("0x1000", ["SleepDisabled"]),
+        "9",
+        unresolved,
+      ),
+    ).toMatchObject({ status: "unknown" });
+  });
+
   it("does not equate a partial literal record with a complete one", () => {
     const partial = functionDossierSchema.parse({
       ...withLiterals("0x2000", ["SleepDisabled"]),
@@ -930,7 +989,9 @@ describe("function comparison partial Swift literal coverage", () => {
       stringsDimension("d", withLiterals("0x1000", []), "e", partial),
     ).toMatchObject({ status: "changed" });
   });
+});
 
+describe("function comparison partial Swift literal omission interpretation", () => {
   it("does not interpret an unexamined path as a missing literal at a retained site", () => {
     const partial = functionDossierSchema.parse({
       ...withLiterals("0x2000", ["A"]),

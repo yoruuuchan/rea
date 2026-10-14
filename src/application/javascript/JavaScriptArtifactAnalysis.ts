@@ -17,11 +17,7 @@ import {
   flattenSourceMapLeaves,
   sourceMapJsonText,
 } from "../../domain/sourceMapEnvelope.js";
-import type {
-  JavaScriptSourceRange,
-  JavaScriptSourcePoint,
-  JavaScriptStaticAnalysis,
-} from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
+import type { JavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
 import { failedJavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import type {
   JavaScriptArtifactFile,
@@ -32,6 +28,7 @@ import type {
   JavaScriptArtifactAnalysis,
   JavaScriptModuleArtifactAnalysis,
   JavaScriptModuleSemanticIr,
+  JavaScriptHtmlInlineScriptsObservation,
   JavaScriptHtmlScriptObservation,
   JavaScriptJsonModuleObservation,
   JavaScriptPackageObservation,
@@ -58,6 +55,7 @@ interface MutableArtifactAnalysis<
   readonly packages: JavaScriptPackageObservation[];
   readonly jsonModules: JavaScriptJsonModuleObservation[];
   readonly htmlScripts: JavaScriptHtmlScriptObservation[];
+  readonly htmlInlineScripts: JavaScriptHtmlInlineScriptsObservation[];
   readonly sourceMaps: JavaScriptSourceMapObservation[];
   visitedNodes: number;
   findings: number;
@@ -329,14 +327,22 @@ const finalizeArtifactAnalysis = <
     packages: state.packages,
     json_modules: state.jsonModules,
     html_scripts: state.htmlScripts,
+    html_inline_scripts: state.htmlInlineScripts,
     source_maps: state.sourceMaps,
     visited_ast_nodes: state.visitedNodes,
-    findings: state.findings + state.htmlScripts.length,
+    findings:
+      state.findings +
+      state.htmlScripts.length +
+      state.htmlInlineScripts.reduce(
+        (count, { script_count }) => count + script_count,
+        0,
+      ),
     modules: state.modules,
     parse_failures: state.parseFailures,
     limitations: [
       "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
       "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+      ...state.htmlInlineScripts.map(htmlInlineScriptLimitation),
       ...state.files.flatMap(
         ({ analysis_failure, application_projection_failure }) =>
           [analysis_failure, application_projection_failure].flatMap(
@@ -356,8 +362,13 @@ function* analyzeArtifactFileSteps<
   const { state } = context;
   if (classifyOutsideAnalysisScope(file, state)) return;
   addStructuredObservations(file, state);
-  if (file.kind === "html" && file.text.included)
-    state.htmlScripts.push(...parseHtmlScripts(file.path, file.text.value));
+  if (file.kind === "html" && file.text.included) {
+    const html = parseHtmlScripts(file.path, file.text.value);
+    // Append without spreading: argument count is bounded by the engine.
+    for (const script of html.scripts) state.htmlScripts.push(script);
+    if (html.inlineScripts !== null)
+      state.htmlInlineScripts.push(html.inlineScripts);
+  }
   if (file.kind === "source-map") addSourceMap(file, context);
   if (file.kind !== "javascript" || !file.text.included) {
     state.files.push({ file, javascript: null, semantic: null });
@@ -443,6 +454,7 @@ const emptyArtifactAnalysis = <
   packages: [],
   jsonModules: [],
   htmlScripts: [],
+  htmlInlineScripts: [],
   sourceMaps: [],
   visitedNodes: 0,
   findings: 0,
@@ -515,14 +527,31 @@ const unavailablePackage = (
 const parseHtmlScripts = (
   path: string,
   text: string,
-): JavaScriptHtmlScriptObservation[] => {
-  const { scripts, baseHref } = htmlArtifactReferences(text);
-  return scripts.map(({ scriptPath, startOffset, endOffset }) => ({
-    html_path: path,
-    script_path: scriptPath,
-    base_href: baseHref,
-    location: rangeForOffsets(text, startOffset, endOffset),
-  }));
+): {
+  readonly scripts: JavaScriptHtmlScriptObservation[];
+  readonly inlineScripts: JavaScriptHtmlInlineScriptsObservation | null;
+} => {
+  const { scripts, inlineScripts, inlineScriptCount, baseHref } =
+    htmlArtifactReferences(text);
+  return {
+    scripts: scripts.map(({ scriptPath, location }) => ({
+      html_path: path,
+      script_path: scriptPath,
+      base_href: baseHref,
+      location,
+    })),
+    inlineScripts:
+      inlineScriptCount === 0
+        ? null
+        : {
+            path,
+            script_count: inlineScriptCount,
+            scripts: inlineScripts.map(({ scriptType, location }) => ({
+              script_type: scriptType,
+              location,
+            })),
+          },
+  };
 };
 
 const parseSourceMap = (
@@ -599,6 +628,23 @@ const collectSourceMapOriginals = (
   };
 };
 
+/** Name the HTML file and lines whose inline JavaScript was not analyzed. */
+export const htmlInlineScriptLimitation = ({
+  path,
+  script_count: count,
+  scripts,
+}: JavaScriptHtmlInlineScriptsObservation): string => {
+  const lines = scripts
+    .slice(0, HTML_INLINE_SCRIPT_LIMITATION_LINES)
+    .map(({ location }) => String(location.start.line));
+  const unnamed = count - lines.length;
+  const one = count === 1;
+  return `${path} has ${String(count)} inline JavaScript ${one ? "body" : "bodies"} starting at line${one ? "" : "s"} ${lines.join(", ")}${unnamed > 0 ? ` and ${String(unnamed)} more` : ""} that ${one ? "was" : "were"} not analyzed; endpoints, storage, imports and other facts in ${one ? "it" : "them"} are absent from the evidence.`;
+};
+
+// Keep the agent-facing limitation short; the unknown scope keeps the ranges.
+const HTML_INLINE_SCRIPT_LIMITATION_LINES = 10;
+
 const unavailableSourceMap = (
   file: JavaScriptArtifactFile,
 ): JavaScriptSourceMapObservation => {
@@ -637,23 +683,6 @@ const findingCount = (analysis: JavaScriptStaticAnalysis): number =>
   analysis.electron.sender_validations.length +
   analysis.electron.utility_processes.length +
   analysis.electron.native_addon_bindings.length;
-
-const rangeForOffsets = (
-  text: string,
-  start: number,
-  end: number,
-): JavaScriptSourceRange => ({
-  start: pointForOffset(text, start),
-  end: pointForOffset(text, end),
-});
-
-const pointForOffset = (
-  text: string,
-  offset: number,
-): JavaScriptSourcePoint => {
-  const lines = text.slice(0, offset).split(/\r\n|\r|\n/u);
-  return { line: lines.length, column: lines.at(-1)?.length ?? 0 };
-};
 
 const optionalString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;

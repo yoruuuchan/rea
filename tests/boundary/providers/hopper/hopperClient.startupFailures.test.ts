@@ -41,6 +41,7 @@ class CancelThenFixtureLauncher implements BridgeLauncher {
   readonly firstLaunch = new Promise<ChildProcess>((resolve) => {
     this.#firstLaunchReady = resolve;
   });
+  retriedProcess: ChildProcess | undefined;
 
   async launch(session: BridgeSession) {
     this.#launches += 1;
@@ -49,6 +50,7 @@ class CancelThenFixtureLauncher implements BridgeLauncher {
       : new FixtureLauncher().launch(session));
     if (this.#launches === 1 && launched.ok)
       this.#firstLaunchReady?.(launched.value.process);
+    else if (launched.ok) this.retriedProcess = launched.value.process;
     return launched;
   }
 }
@@ -256,9 +258,17 @@ describe("HopperClient startup failures", () => {
     expect(
       firstProcess.exitCode !== null || firstProcess.signalCode !== null,
     ).toBe(true);
-    await expect(client.start()).resolves.toEqual({
+    const restarted = await client.start();
+    const retriedProcess = launcher.retriedProcess;
+    expect(retriedProcess).toBeDefined();
+    expect(retriedProcess).not.toBe(firstProcess);
+    expect(restarted).toEqual({
       ok: true,
-      value: { name: "REA Hopper bridge", version: "1.0.0" },
+      value: {
+        name: "REA Hopper bridge",
+        version: "1.0.0",
+        processId: retriedProcess?.pid,
+      },
     });
     await expect(
       client.callTool("echo", { value: "retried" }),
@@ -282,11 +292,16 @@ describe("HopperClient startup failures", () => {
       error: { _tag: "HopperCancelledError" },
     });
     expect(launcher.processes).toHaveLength(0);
-    await expect(client.start()).resolves.toEqual({
-      ok: true,
-      value: { name: "REA Hopper bridge", version: "1.0.0" },
-    });
+    const started = await client.start();
     expect(launcher.processes).toHaveLength(1);
+    expect(started).toEqual({
+      ok: true,
+      value: {
+        name: "REA Hopper bridge",
+        version: "1.0.0",
+        processId: launcher.processes[0]?.pid,
+      },
+    });
     await expect(
       client.callTool("echo", { value: "retried" }),
     ).resolves.toEqual({

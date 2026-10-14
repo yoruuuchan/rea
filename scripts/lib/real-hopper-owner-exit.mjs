@@ -10,6 +10,7 @@ import { verifyNoTokenOwnedProcesses } from "../../dist/process/ProcessOwnership
 import {
   observeProcessStartIdentity,
   signalProcessWithStartIdentity,
+  systemProcessOwnershipHost,
 } from "../../dist/process/ProcessOwnershipObservation.js";
 import { startUnrelatedHopperSentinel } from "./unrelated-hopper-sentinel.mjs";
 import {
@@ -31,6 +32,11 @@ export async function verifyLinuxHopperOwnerExit({
   const outcomes = [];
   try {
     for (const mode of ["graceful", "SIGKILL"]) {
+      const baseline = await systemProcessOwnershipHost.captureBaseline?.();
+      assert.ok(
+        baseline,
+        "Could not capture pre-launch process ownership baseline",
+      );
       const transport = new StdioClientTransport({
         command: serverCommand,
         args: serverArgs,
@@ -47,6 +53,18 @@ export async function verifyLinuxHopperOwnerExit({
         assert.ok(ownerPid !== null);
         const owner = await observeProcessStartIdentity(ownerPid);
         assert.equal(owner?.state, "readable");
+        const ownerProcess = (
+          await systemProcessOwnershipHost.listProcesses()
+        ).find(({ pid }) => pid === ownerPid);
+        assert.ok(
+          ownerProcess,
+          "Could not observe the launched MCP process group",
+        );
+        assert.equal(typeof ownerProcess.processGroupId, "number");
+        const relation = {
+          leaderPid: ownerPid,
+          processGroupId: ownerProcess.processGroupId,
+        };
         requireMcpLifecycleResult(
           await client.callTool(
             {
@@ -75,7 +93,17 @@ export async function verifyLinuxHopperOwnerExit({
         const runId = status.analysis_run?.run_id;
         assert.equal(typeof runId, "string");
         assert.equal(status.analysis_provider_binding?.provider.id, "hopper");
-        assert.equal((await verifyNoTokenOwnedProcesses(runId)).cleaned, false);
+        assert.equal(
+          (
+            await verifyNoTokenOwnedProcesses(
+              runId,
+              systemProcessOwnershipHost,
+              baseline,
+              relation,
+            )
+          ).cleaned,
+          false,
+        );
         if (mode === "graceful") await client.close();
         else {
           assert.equal(
@@ -90,7 +118,12 @@ export async function verifyLinuxHopperOwnerExit({
         const deadline = Date.now() + 10_000;
         let cleanup;
         do {
-          cleanup = await verifyNoTokenOwnedProcesses(runId);
+          cleanup = await verifyNoTokenOwnedProcesses(
+            runId,
+            systemProcessOwnershipHost,
+            baseline,
+            relation,
+          );
           if (cleanup.cleaned) break;
           await delay(100);
         } while (Date.now() < deadline);

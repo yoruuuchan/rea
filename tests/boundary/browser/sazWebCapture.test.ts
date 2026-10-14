@@ -10,7 +10,10 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it as runtimeTest } from "vitest";
 import { z } from "zod";
 import { parseEvidence } from "../../../src/domain/evidence.js";
-import { webNetworkCaptureSchema } from "../../../src/domain/webNetworkCapture.js";
+import {
+  WEB_NETWORK_CAPTURE_LIMITS,
+  webNetworkCaptureSchema,
+} from "../../../src/domain/webNetworkCapture.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -478,12 +481,19 @@ it.each([
   expect(JSON.parse(result.stdout).category).toBe(
     ["encrypted", "unknown-member", "dtd"].includes(variant)
       ? "unsupported_provider"
-      : variant === "expanded-limit"
-        ? "execution_failure"
-        : "invalid_input",
+      : "invalid_input",
   );
+  // Expanded size is a caller-correctable input bound, not a decoder failure.
   if (variant === "expanded-limit")
-    expect(JSON.parse(result.stdout).code).toBe("unreadable_output");
+    expect(JSON.parse(result.stdout).details.issues).toEqual([
+      expect.objectContaining({
+        path: ["capture_path", ""],
+        reason: "out_of_range",
+        expected: {
+          maximum_expanded_capture_bytes: WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
+        },
+      }),
+    ]);
   expect(JSON.stringify(result)).not.toContain("malformed-private-input");
 });
 

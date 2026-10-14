@@ -180,6 +180,7 @@ export class WabtArtifactProvider implements WasmArtifactPort {
         args: readonly string[],
         acceptNonZeroExit = false,
       ) => {
+        capturedOutput = undefined;
         await verifySnapshot();
         const snapshot = await runOwnedCommand(
           {

@@ -160,12 +160,26 @@ export const inspectManagedMembersBytes = (
   target: BinaryTarget,
   {
     typeNames,
+    methodOffset = 0,
+    methodLimit = Number.MAX_SAFE_INTEGER,
     userStrings: readUserStrings = true,
   }: {
     readonly typeNames?: readonly string[];
+    /** Zero-based offset into MethodDef rows. */
+    readonly methodOffset?: number;
+    readonly methodLimit?: number;
     readonly userStrings?: boolean;
   } = {},
 ): ManagedMemberInspection => {
+  if (
+    !Number.isSafeInteger(methodOffset) ||
+    methodOffset < 0 ||
+    !Number.isSafeInteger(methodLimit) ||
+    methodLimit < 0
+  )
+    throw new RangeError(
+      "methodOffset and methodLimit must be non-negative safe integers",
+    );
   const pe = readManagedPeLayout(bytes);
   if (pe.cli === null)
     return unavailable(target, bytes, pe.cliIssue, typeNames);
@@ -196,6 +210,8 @@ export const inspectManagedMembersBytes = (
       pe,
       ranges,
       selected,
+      methodOffset,
+      methodLimit,
     });
     appendManagedParseIssues(issues, fields.issues, methods.issues);
     // #US literals sit beside the member inventory and carry their own

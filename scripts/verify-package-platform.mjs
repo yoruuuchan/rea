@@ -10,7 +10,7 @@ export async function verifyPackagePlatform({
   if (platform === "linux") {
     const unsupportedExecution = await runWithStatus(
       cli,
-      ["analyze", process.execPath, "--json"],
+      ["analyze", process.execPath, "--provider", "hopper", "--json"],
       environment,
     );
     assertLinuxPackageProviderFailure(unsupportedExecution);
@@ -18,7 +18,7 @@ export async function verifyPackagePlatform({
     const overview = json(
       await runCommand(
         cli,
-        ["analyze", process.execPath, "--json"],
+        ["analyze", process.execPath, "--provider", "hopper", "--json"],
         environment,
       ),
     );
@@ -29,7 +29,7 @@ export async function verifyPackagePlatform({
     const inspected = json(
       await runCommand(
         cli,
-        ["inspect", process.execPath, "--json"],
+        ["inspect", process.execPath, "--provider", "hopper", "--json"],
         environment,
       ),
     );
@@ -38,7 +38,14 @@ export async function verifyPackagePlatform({
     const functionResult = json(
       await runCommand(
         cli,
-        ["function", process.execPath, "0x1000", "--json"],
+        [
+          "function",
+          process.execPath,
+          "0x1000",
+          "--provider",
+          "hopper",
+          "--json",
+        ],
         environment,
       ),
     );
@@ -53,7 +60,7 @@ export async function verifyPackagePlatform({
     const xrefs = json(
       await runCommand(
         cli,
-        ["xrefs", process.execPath, "0x1000", "--json"],
+        ["xrefs", process.execPath, "0x1000", "--provider", "hopper", "--json"],
         environment,
       ),
     );
@@ -65,7 +72,14 @@ export async function verifyPackagePlatform({
     const trace = json(
       await runCommand(
         cli,
-        ["trace", process.execPath, "fixture", "--json"],
+        [
+          "trace",
+          process.execPath,
+          "fixture",
+          "--provider",
+          "hopper",
+          "--json",
+        ],
         environment,
       ),
     );

@@ -8,6 +8,7 @@ import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
 import type { ToolContract } from "./contracts/toolContractTypes.js";
 import { CLI_COMMAND_NAMES } from "./cliCommandNames.js";
 import { compareUnicodeCodePoints } from "./domain/unicodeCodePointOrder.js";
+import { advertisedInputJsonSchema } from "./contracts/toolSchemaMetadata.js";
 
 const sortByName = (
   contracts: readonly ToolContract[],
@@ -33,12 +34,7 @@ const createToolCatalog = (contracts: readonly ToolContract[]) =>
     effects: { ...contract.effects },
     returns_target_content: contract.returnsTargetContent,
     annotations: contract.annotations,
-    input_schema: {
-      type: "object",
-      ...z.toJSONSchema(contract.inputSchema, {
-        unrepresentable: "any",
-      }),
-    },
+    input_schema: advertisedInputJsonSchema(contract),
     output_schema: {
       type: "object",
       ...z.toJSONSchema(contract.outputSchema, {

@@ -1,19 +1,12 @@
 import { digestCanonicalValue } from "./canonicalDigest.js";
 
-import type {
-  BrowserScenarioArtifactKind,
-  BrowserScenarioDiff,
-  BrowserScenarioNormalization,
-  BrowserScenarioNormalizationRule,
+import {
+  BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES,
+  type BrowserScenarioArtifactKind,
+  type BrowserScenarioDiff,
+  type BrowserScenarioNormalization,
+  type BrowserScenarioNormalizationRule,
 } from "./browserScenarioDiffValues.js";
-
-const BUILT_IN_RULES = [
-  "ignore_step_elapsed_ms",
-  "ignore_event_sequence",
-  "ignore_event_step_index",
-  "compare_screenshot_content_digest",
-  "compare_normalized_text_content",
-] as const;
 
 /** Canonically order and commit a parsed browser scenario normalization policy. */
 export const commitBrowserScenarioNormalization = (
@@ -27,22 +20,29 @@ export const commitBrowserScenarioNormalization = (
     .sort((left, right) =>
       left.rule_id < right.rule_id ? -1 : left.rule_id > right.rule_id ? 1 : 0,
     );
-  const commitment = { built_in_rules: [...BUILT_IN_RULES], rules };
+  const commitment = {
+    built_in_rules: [...BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES],
+    rules,
+  };
   return {
     ...commitment,
     sha256: digestCanonicalValue(commitment, "Browser scenario"),
   };
 };
 
-/** Digest one artifact after applying committed exact-literal rules. */
+/** Digest one artifact after applying committed exact-literal rules, then any artifact ordering. */
 export const digestNormalizedScenarioValue = (
   value: unknown,
   artifact: BrowserScenarioArtifactKind,
   rules: readonly BrowserScenarioNormalizationRule[],
+  order: (normalized: unknown) => unknown = (normalized) => normalized,
 ): string =>
-  digestCanonicalValue(normalize(value, artifact, rules), "Browser scenario");
+  digestCanonicalValue(
+    order(normalizeScenarioValue(value, artifact, rules)),
+    "Browser scenario",
+  );
 
-const normalize = (
+export const normalizeScenarioValue = (
   value: unknown,
   artifact: BrowserScenarioArtifactKind,
   rules: readonly BrowserScenarioNormalizationRule[],
@@ -57,12 +57,12 @@ const normalize = (
         value,
       );
   if (Array.isArray(value))
-    return value.map((item) => normalize(item, artifact, rules));
+    return value.map((item) => normalizeScenarioValue(item, artifact, rules));
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
-      normalize(item, artifact, rules),
+      normalizeScenarioValue(item, artifact, rules),
     ]),
   );
 };

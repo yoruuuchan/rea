@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parseExpression } from "@babel/parser";
 import { describe, expect, it } from "vitest";
@@ -206,6 +207,32 @@ describe("inert JavaScript path resolution", () => {
     ).toBeUndefined(),
   );
 });
+
+it.each([
+  "file:///app/preload%20file.js",
+  "file:///app/%E2%9C%93.js",
+  "file:///app/preload.js?query=1#fragment",
+])("decodes literal file URL %s as a filesystem expression", (url) => {
+  assertPathProjection(
+    `fileURLToPath(${JSON.stringify(url)})`,
+    fileURLToPath(url, { windows: false }),
+    "filesystem-expression",
+  );
+});
+
+it.each([
+  'fileURLToPath("file:///app/%2Fpreload.js")',
+  'fileURLToPath("file:///app/%5Cpreload.js")',
+  'fileURLToPath("file:///app/%")',
+  'fileURLToPath("file:///C:/app/preload.js")',
+  'fileURLToPath("file://remote/share/preload.js")',
+  'fileURLToPath("file:///app/preload.js", options)',
+  "fileURLToPath(selectedUrl)",
+])("leaves platform-dependent or invalid %s unknown", (expression) =>
+  expect(
+    staticPath(parseExpression(expression, { sourceType: "module" })),
+  ).toBeUndefined(),
+);
 
 const analyzePathConsumers = (expression: string) => {
   const property = `preload: ${expression}`;

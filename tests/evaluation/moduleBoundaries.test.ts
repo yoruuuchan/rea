@@ -275,6 +275,47 @@ describe("module import syntax and source discovery", () => {
     expect(result.stderr).toContain("src/domain/probe.ts:1: pure-layer");
     expect(result.stderr).not.toContain("old.ts");
   });
+
+  it("discovers forbidden nested sources without a Git worktree", async () => {
+    const temporary = await createTestTempDirectory("rea-module-no-git-");
+    await mkdir(join(temporary, "src", "domain", "nested"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(temporary, "src/domain/nested/probe.ts"),
+      'import { createServer } from "../../server/createServer.js";\n',
+    );
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: temporary,
+      encoding: "utf8",
+    });
+    if (result.error !== undefined) throw result.error;
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("src/domain/nested/probe.ts");
+    expect(result.stderr).toContain("src/server/createServer.js");
+  });
+
+  it("discovers sources in an ignored archive nested under an ancestor Git worktree", async () => {
+    const outer = await createTestTempDirectory("rea-module-ancestor-git-");
+    const archive = join(outer, "archive");
+    await writeFile(join(outer, ".gitignore"), "archive/\n");
+    await execute("git", ["init", "--quiet"], { cwd: outer });
+    await execute("git", ["add", "--", ".gitignore"], { cwd: outer });
+    await mkdir(join(archive, "src", "domain"), { recursive: true });
+    await writeFile(
+      join(archive, "src/domain/probe.ts"),
+      'import { createServer } from "../server/createServer.js";\n',
+    );
+
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: archive,
+      encoding: "utf8",
+    });
+    if (result.error !== undefined) throw result.error;
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("src/domain/probe.ts:1: pure-layer");
+    expect(result.stderr).toContain("src/server/createServer.js");
+  });
 });
 
 describe("test lane import boundaries", () => {

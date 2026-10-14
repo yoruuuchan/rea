@@ -156,7 +156,10 @@ for (const little of [true, false]) {
       else bytes.writeUInt32BE(sectionOffset, 32);
       const resolved = await resolveFixture(bytes);
       assert.equal(resolved.mips.abiFlags?.fpAbi, 5);
-      assert.equal(ghidraMipsUnsupportedReason(resolved), null);
+      assert.match(
+        ghidraMipsUnsupportedReason(resolved) ?? "",
+        /ABI declaration inspection is incomplete/u,
+      );
       assert.match(
         resolved.mips.limitations?.join(" ") ?? "",
         /section header table/u,
@@ -172,7 +175,7 @@ it("keeps declarations in uncaptured section headers unknown when program ABI da
   assert.equal(resolved.mips.abiFlags, null);
   assert.match(
     ghidraMipsUnsupportedReason(resolved) ?? "",
-    /inspected ABI.*unavailable headers remain unknown/u,
+    /ABI declaration inspection is incomplete.*unavailable headers remain unknown/u,
   );
 });
 for (const failure of ["conflicting", "outside", "duplicate"]) {
@@ -369,6 +372,26 @@ it("projects a malformed out-of-probe ABI record as a target error", async () =>
   assert.match(result.error.message, /ABI record lies outside the file/u);
   assert.deepEqual(await readFile(path), bytes);
 });
+
+for (const little of [true, false]) {
+  it(`refuses GNU ABI attributes by section type without reading attacker-controlled names or sizes (${little ? "LE" : "BE"})`, async () => {
+    const bytes = fixture(little);
+    const write16 = little
+      ? (value: number, offset: number) => bytes.writeUInt16LE(value, offset)
+      : (value: number, offset: number) => bytes.writeUInt16BE(value, offset);
+    const write32 = little
+      ? (value: number, offset: number) => bytes.writeUInt32LE(value, offset)
+      : (value: number, offset: number) => bytes.writeUInt32BE(value, offset);
+    write32(0xffffffff, 168); // Unknown name; the section type is authoritative.
+    write32(0x6ffffff5, 172); // SHT_GNU_ATTRIBUTES.
+    write32(0xfffffff0, 184); // Must not be read as a payload offset.
+    write32(0xffffffff, 188); // Must not control allocation.
+    write16(0, 50); // No section-name string table is required for detection.
+    const result = await inspect(bytes, little);
+    assert.ok(!result.ok);
+    assert.match(result.error, /GNU ABI attributes that REA does not inspect/u);
+  });
+}
 
 it("preserves cancellation instead of turning it into malformed target data", async () => {
   const directory = await createTestTempDirectory("rea-mips-resolution-");

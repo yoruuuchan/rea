@@ -2,8 +2,8 @@ import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import { evmInterfaceSchema } from "../evm/evmInterface.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
 import { err, ok, type Result } from "../result.js";
+import { parseAnalysisViewResult } from "./analysisViewParent.js";
 import {
   analysisViewInputError,
   type AnalysisViewParent,
@@ -60,20 +60,9 @@ export const projectEvmInterfaceView = (
         },
       ]),
     );
-  const parsed = evmInterfaceSchema.safeParse(parent.normalizedResult);
-  if (!parsed.success)
-    return err(
-      analysisInputErrorFromIssues(
-        "inspect_analysis_view",
-        parsed.error.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: parent.normalizedResult } },
-        { cause: parsed.error },
-      ),
-    );
-  const report = parsed.data;
+  const parsed = parseAnalysisViewResult(evmInterfaceSchema, parent);
+  if (!parsed.ok) return parsed;
+  const report = parsed.value;
   if (
     parent.subject == null ||
     parent.subject.format !== "file" ||

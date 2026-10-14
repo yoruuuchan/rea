@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { androidResultSchemas } from "../android/androidAnalysis.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
 import { err, ok, type Result } from "../result.js";
+import { parseAnalysisViewResult } from "./analysisViewParent.js";
 import {
   analysisViewInputError,
   type AnalysisViewParent,
@@ -53,19 +53,8 @@ export const projectAndroidPackageView = (
         },
       ]),
     );
-  const parsed = packageSchema.safeParse(parent.normalizedResult);
-  if (!parsed.success)
-    return err(
-      analysisInputErrorFromIssues(
-        "inspect_analysis_view",
-        parsed.error.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: parent.normalizedResult } },
-        { cause: parsed.error },
-      ),
-    );
+  const parsed = parseAnalysisViewResult(packageSchema, parent);
+  if (!parsed.ok) return parsed;
   // Engine artifact_sha256 identifies the JAR, never the APK. A missing
   // authenticated APK subject cannot be repaired using the engine identity.
   if (parent.subject == null)
@@ -79,7 +68,7 @@ export const projectAndroidPackageView = (
         },
       ]),
     );
-  const report = parsed.data;
+  const report = parsed.value;
   const shared = {
     parent_evidence_id: parent.evidenceId,
     parent_operation: "inspect_android_package" as const,

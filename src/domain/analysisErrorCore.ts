@@ -83,17 +83,29 @@ export interface AnalysisInputIssue {
   readonly maximum?: number;
 }
 
+/** Refusal-specific context a producer projects with an output failure. */
+export interface AnalysisOutputErrorOptions extends AnalysisErrorOptions {
+  /** Caller-facing explanation for a deterministic, diagnosable refusal. */
+  readonly userMessage?: string;
+  readonly remediationAction?: string;
+  readonly cleanupOnly?: boolean;
+}
+
 /** Provider output failed provider-neutral application parsing. */
 export class AnalysisOutputError extends AnalysisError {
   readonly _tag = "AnalysisOutputError";
+  override readonly userMessage: string | undefined;
+  readonly remediationAction: string | undefined;
   readonly cleanupOnly: boolean;
 
   constructor(
     readonly operation: string,
     readonly reason: string,
-    options?: AnalysisErrorOptions & { readonly cleanupOnly?: boolean },
+    options?: AnalysisOutputErrorOptions,
   ) {
     super(`Invalid analysis output for ${operation}: ${reason}`, options);
+    this.userMessage = options?.userMessage;
+    this.remediationAction = options?.remediationAction;
     this.cleanupOnly = options?.cleanupOnly ?? false;
   }
 }

@@ -123,20 +123,29 @@ const alignmentFailureSchema = z.strictObject({
   step_id: z.string().min(1).nullable(),
   reason: z.string().min(1),
 });
-const builtInNormalizationSchema = z.enum([
+export const BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES = [
   "ignore_step_elapsed_ms",
   "ignore_event_sequence",
   "ignore_event_step_index",
   "compare_screenshot_content_digest",
   "compare_normalized_text_content",
-]);
+  "ignore_capture_local_network_transaction_ids",
+  "attribute_network_transactions_to_request_step",
+  "compare_network_transactions_as_unordered_collection",
+  "preserve_redirect_transaction_ancestry",
+] as const;
+const builtInNormalizationSchema = z.enum(
+  BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES,
+);
 
 /** Step alignment, recorded normalization, and inline artifact differences. */
 export const browserScenarioDiffSchema = z.strictObject({
   comparison_kind: z.literal("browser_scenario"),
   overall_status: z.enum(["changed", "unchanged", "unknown"]),
   normalization: z.strictObject({
-    built_in_rules: z.array(builtInNormalizationSchema).length(5),
+    built_in_rules: z
+      .array(builtInNormalizationSchema)
+      .length(BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES.length),
     rules: z.array(normalizationRuleSchema),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   }),

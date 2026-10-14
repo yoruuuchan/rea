@@ -60,6 +60,7 @@ const factories = (
   const dependencies: DirectAnalysisDependencies = {
     readConfiguration: () => parseConfig({}),
     createBinarySession: () => session,
+    createArtifactBinarySession: () => session,
     createManagedBinarySession: () => session,
   };
   return { dependencies, session };

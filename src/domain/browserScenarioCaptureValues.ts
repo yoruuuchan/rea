@@ -144,6 +144,8 @@ const networkEventShape = {
   ...eventBase,
   transaction_id: z.string().min(1),
   redirected_from_transaction_id: z.string().min(1).nullable(),
+  /** Distinguishes a captured root from an unobserved predecessor for null links. */
+  redirected_from_transaction_state: z.enum(["root", "unknown"]).optional(),
   method: z.string().min(1),
   url: sanitizedBrowserUrlSchema,
   resource_type: z.string().min(1),
@@ -157,96 +159,110 @@ const webSocketFrameShape = {
   truncated: z.boolean(),
 };
 
-export const browserScenarioEventSchema = z.union([
-  z.strictObject({
-    ...eventBase,
-    kind: z.literal("console"),
-    level: z.string().min(1),
-    text: z.string(),
-    url: eventUrl,
-  }),
-  z.strictObject({
-    ...eventBase,
-    kind: z.literal("page-error"),
-    message: z.string(),
-    stack: z.string().nullable(),
-  }),
-  z.strictObject({
-    ...networkEventShape,
-    kind: z.literal("request"),
-    status: z.null(),
-    failure: z.null(),
-  }),
-  z.strictObject({
-    ...networkEventShape,
-    kind: z.literal("response"),
-    status: z.number().int().min(100).max(599),
-    failure: z.null(),
-  }),
-  z.strictObject({
-    ...networkEventShape,
-    kind: z.literal("request-failed"),
-    status: z.null(),
-    failure: z.string().min(1),
-  }),
-  z.strictObject({
-    ...networkEventShape,
-    kind: z.literal("request-finished"),
-    status: z.null(),
-    failure: z.null(),
-  }),
-  z.strictObject({
-    ...networkEventShape,
-    kind: z.literal("request-unfinished"),
-    status: z.null(),
-    failure: z.null(),
-    reason: z.enum(["capture-ended", "cancelled"]),
-  }),
-  z.strictObject({
-    ...eventBase,
-    kind: z.literal("network-content"),
-    transaction_id: z.string().min(1),
-    source_event_sequence: z.number().int().min(1),
-    phase: z.enum(["request", "response"]),
-    headers: browserNetworkHeadersSchema,
-    body: browserNetworkBodySchema,
-  }),
-  z.strictObject({
-    ...eventBase,
-    kind: z.enum(["websocket-opened", "websocket-closed"]),
-    url: sanitizedBrowserUrlSchema,
-  }),
-  z.strictObject({
-    ...webSocketFrameShape,
-    payload_type: z.literal("text"),
-    payload_text: z.string(),
-  }),
-  z.strictObject({
-    ...webSocketFrameShape,
-    payload_type: z.literal("binary"),
-    payload_text: z.null(),
-  }),
-  z.strictObject({
-    ...eventBase,
-    kind: z.enum([
-      "frame-attached",
-      "frame-detached",
-      "frame-navigated",
-      "worker-created",
-      "worker-closed",
-      "popup-opened",
-      "popup-closed",
-    ]),
-    url: eventUrl,
-    name: z.string().nullable(),
-  }),
-  z.strictObject({
-    ...eventBase,
-    kind: z.literal("download-cancelled"),
-    suggested_filename: z.string(),
-    url: sanitizedBrowserUrlSchema,
-  }),
-]);
+export const browserScenarioEventSchema = z
+  .union([
+    z.strictObject({
+      ...eventBase,
+      kind: z.literal("console"),
+      level: z.string().min(1),
+      text: z.string(),
+      url: eventUrl,
+    }),
+    z.strictObject({
+      ...eventBase,
+      kind: z.literal("page-error"),
+      message: z.string(),
+      stack: z.string().nullable(),
+    }),
+    z.strictObject({
+      ...networkEventShape,
+      kind: z.literal("request"),
+      status: z.null(),
+      failure: z.null(),
+    }),
+    z.strictObject({
+      ...networkEventShape,
+      kind: z.literal("response"),
+      status: z.number().int().min(100).max(599),
+      failure: z.null(),
+    }),
+    z.strictObject({
+      ...networkEventShape,
+      kind: z.literal("request-failed"),
+      status: z.null(),
+      failure: z.string().min(1),
+    }),
+    z.strictObject({
+      ...networkEventShape,
+      kind: z.literal("request-finished"),
+      status: z.null(),
+      failure: z.null(),
+    }),
+    z.strictObject({
+      ...networkEventShape,
+      kind: z.literal("request-unfinished"),
+      status: z.null(),
+      failure: z.null(),
+      reason: z.enum(["capture-ended", "cancelled"]),
+    }),
+    z.strictObject({
+      ...eventBase,
+      kind: z.literal("network-content"),
+      transaction_id: z.string().min(1),
+      source_event_sequence: z.number().int().min(1),
+      phase: z.enum(["request", "response"]),
+      headers: browserNetworkHeadersSchema,
+      body: browserNetworkBodySchema,
+    }),
+    z.strictObject({
+      ...eventBase,
+      kind: z.enum(["websocket-opened", "websocket-closed"]),
+      url: sanitizedBrowserUrlSchema,
+    }),
+    z.strictObject({
+      ...webSocketFrameShape,
+      payload_type: z.literal("text"),
+      payload_text: z.string(),
+    }),
+    z.strictObject({
+      ...webSocketFrameShape,
+      payload_type: z.literal("binary"),
+      payload_text: z.null(),
+    }),
+    z.strictObject({
+      ...eventBase,
+      kind: z.enum([
+        "frame-attached",
+        "frame-detached",
+        "frame-navigated",
+        "worker-created",
+        "worker-closed",
+        "popup-opened",
+        "popup-closed",
+      ]),
+      url: eventUrl,
+      name: z.string().nullable(),
+    }),
+    z.strictObject({
+      ...eventBase,
+      kind: z.literal("download-cancelled"),
+      suggested_filename: z.string(),
+      url: sanitizedBrowserUrlSchema,
+    }),
+  ])
+  .superRefine((event, context) => {
+    if (
+      "redirected_from_transaction_id" in event &&
+      event.redirected_from_transaction_id !== null &&
+      event.redirected_from_transaction_state !== undefined
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Redirect state is valid only when the predecessor transaction ID is null",
+        path: ["redirected_from_transaction_state"],
+      });
+  });
 export type BrowserScenarioEvent = z.infer<typeof browserScenarioEventSchema>;
 
 const completenessSectionSchema = z.enum([

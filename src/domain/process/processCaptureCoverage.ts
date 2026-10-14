@@ -16,7 +16,19 @@ export const filesystemCoverageSchema = z.strictObject({
   depth_limit: z.number().int().nonnegative(),
   enumeration_truncated: z.boolean(),
   enumeration_reasons: z.array(
-    z.enum(["files_limit", "depth_limit", "identity_changed"]),
+    z.enum([
+      "files_limit",
+      "depth_limit",
+      "identity_changed",
+      "directory_unavailable",
+    ]),
+  ),
+  enumeration_omissions: z.array(
+    z.strictObject({
+      path: z.string(),
+      reason: z.literal("directory_unavailable"),
+      system_code: z.string().nullable(),
+    }),
   ),
   hash_budget_bytes: z.number().int().nonnegative(),
   hashed_bytes: z.number().int().nonnegative(),
@@ -66,7 +78,9 @@ export type ProcessSamplingCoverage =
 const omitted = (retention: TerminalRetention): boolean =>
   retention.observed_frames > retention.retained_frames;
 const filesystemTruncated = (coverage: FilesystemCoverage): boolean =>
-  coverage.enumeration_truncated || coverage.hash_omissions.length > 0;
+  coverage.enumeration_truncated ||
+  coverage.enumeration_omissions.length > 0 ||
+  coverage.hash_omissions.length > 0;
 
 /** Derive the aggregate truncation flag from independent producer observations. */
 export const hasCaptureTruncation = (

@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > REA の公式配布元： [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > インストールとリリースのリンクは、これらの公式配布元からたどってください。似たリポジトリ名やコピーされた README だけでは、公式の配布物とは確認できません。
+
+<div align="center">
 
 <br />
 
@@ -137,13 +141,13 @@ REA には Node.js 22.x（>=22.19）、24.x（>=24.11）、または 26+ と npm
 
 | 対象                             | REA が返すもの                                                                              | 要件とガイド                                                                                                                                   |
 | -------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| ネイティブバイナリ               | 疑似コード、アセンブリ、文字列、シンボル、呼び出し、参照                                    | Hopper、Ghidra、または IDA；[ネイティブ分析](https://rea.tools/ja/guides/native/)                                                              |
+| ネイティブバイナリ               | 疑似コード、アセンブリ、文字列、シンボル、呼び出し、参照                                    | Hopper、Ghidra、または IDA；[ネイティブ分析](../native-investigation.md)                                                                       |
 | オフライン ELF レイアウト        | セクション、セグメント、元のシンボル／再配置情報、静的解析によるセキュリティ対策の候補      | Linux x64 で利用者が用意する pwntools；[バイナリ診断](../binary-diagnostics.md)                                                                |
 | EVM バイトコード                 | ディスパッチセレクター、バイトオフセット、推定された引数と状態変更の可否                    | Linux x64 上のローカルの生バイト／16 進数の入力ファイル；[オフライン EVM ガイド](../evm-bytecode.md)                                           |
 | Rust binaries                    | Embedded cargo-auditable dependency list                                                    | [Rust binaries](../rust-binaries.md)                                                                                                           |
 | 記録済みの Linux クラッシュ      | 生の note レコード、記録された全スレッドのレジスター／シグナル、任意のマッピング候補        | Linux x64 で利用者が用意する pwntools；GDB/pwndbg は任意；[記録済みクラッシュ](../recorded-crashes.md)                                         |
-| JavaScript / Electron            | モジュール、インポート、ソースマップ、ルート、IPC、ネイティブアドオンの関係                 | Node.js と npm；[アプリケーション分析](https://rea.tools/ja/guides/javascript/)                                                                |
-| ウェブサイト                     | ページ構造、スクリプト、ネットワークの観測結果、依頼されたスクリーンショット                | Chrome 系ブラウザー；[ブラウザー分析](https://rea.tools/ja/guides/browser/)                                                                    |
+| JavaScript / Electron            | モジュール、インポート、ソースマップ、ルート、IPC、ネイティブアドオンの関係                 | Node.js と npm；[アプリケーション分析](../javascript-application-workflows.md)                                                                 |
+| ウェブサイト                     | ページ構造、スクリプト、ネットワークの観測結果、依頼されたスクリーンショット                | Chrome 系ブラウザー；[ブラウザー分析](../browser-observation.md)                                                                               |
 | 保存済みのネットワークキャプチャ | リクエスト、レスポンス、取得可能なペイロード、ソース内の位置                                | HAR；mitmproxy ネイティブ形式のキャプチャには Linux 上の mitmdump；[キャプチャガイド](../web-network-captures.md)                              |
 | パケットキャプチャ               | エンドポイント、DNS、TLS SNI、プロトコル分布、HTTPリクエスト                                | 呼び出し側が用意した tshark と capinfos；[pcapガイド](../pcap-analysis.md)                                                                     |
 | .NET アセンブリ                  | メタデータ、CIL 命令、宣言されたネイティブ依存関係、ビルドの比較                            | 静的な検査；[マネージドコードのガイド](../managed-code-analysis.md)                                                                            |
@@ -270,7 +274,7 @@ npx rea-agents@latest setup
 
 ## スター履歴
 
-🎉 **GitHub スター 170,000 件、ありがとうございます！**
+🎉 **GitHub スター 200,000 件、ありがとうございます！**
 
 REA の利用、バグ報告、機能の要望、ビルドのテスト、修正への貢献に感謝します。
 

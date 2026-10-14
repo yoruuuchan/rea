@@ -39,10 +39,7 @@ interface NativeMachoInspectionContext {
   ) => NativeCommandInvocation;
 }
 
-const DISCOVERY_COMMANDS = [
-  ["file", ["-b"]],
-  ["lipo", ["-detailed_info"]],
-] as const;
+const DISCOVERY_COMMANDS = [["lipo", ["-detailed_info"]]] as const;
 
 const REQUIRED_SLICE_COMMANDS = [
   ["otool", ["-h", "-l"]],
@@ -247,8 +244,8 @@ const normalizeMacho = (
   return inspectMachoSchema.parse({
     format: "mach-o",
     selected_architecture: selectedArchitecture,
-    endian: parseEndian(byTool("file").stdout),
-    word_size: parseWordSize(byTool("file").stdout),
+    endian: load.endian,
+    word_size: load.wordSize,
     file_type: load.fileType,
     flags: load.flags,
     uuid: uuid.value,
@@ -307,16 +304,6 @@ const parseNmExports = (output: string) =>
       reexport: null,
       source: "nm",
     }));
-
-const parseEndian = (output: string): "little" | "big" | null =>
-  /little-endian/iu.test(output)
-    ? "little"
-    : /big-endian/iu.test(output)
-      ? "big"
-      : null;
-
-const parseWordSize = (output: string): 32 | 64 | null =>
-  /64-bit/iu.test(output) ? 64 : /32-bit/iu.test(output) ? 32 : null;
 
 const covered = <Value>(
   items: readonly Value[],

@@ -53,7 +53,6 @@ const inspect = async (lipo: string, architecture: "x86" | "arm64") => {
     run: (tool, args) => {
       commands.push({ tool, args });
       if (tool === "lipo") return Promise.resolve(ok(capture(tool, lipo)));
-      if (tool === "file") return Promise.resolve(ok(capture(tool, "Mach-O")));
       return Promise.resolve(err(new AnalysisCancelledError("inspect_native")));
     },
     invocation: () => {
@@ -72,7 +71,7 @@ describe("Mach-O tool architecture selection", () => {
       _tag: "AnalysisOutputError",
       reason: "lipo did not list i386; refusing to read another slice",
     });
-    expect(commands.map(({ tool }) => tool)).toEqual(["file", "lipo"]);
+    expect(commands.map(({ tool }) => tool)).toEqual(["lipo"]);
   });
 
   it("passes the arm64e slice lipo listed for an arm64 target", async () => {
@@ -264,7 +263,7 @@ describe("Mach-O slice command scheduling", () => {
     let maxInFlight = 0;
     let launched = 0;
     const run = async (tool: string, args: readonly string[]) => {
-      if (tool === "file" || tool === "lipo") return fixtures.run(tool, args);
+      if (tool === "lipo") return fixtures.run(tool, args);
       const order = launched++;
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
@@ -300,7 +299,7 @@ describe("Mach-O slice command scheduling", () => {
     if (!result.ok) throw result.error;
     expect(runner.maxInFlight()).toBe(SLICE_TOOLS.length + 1);
     expect(result.value.result).toMatchObject({
-      provenance: ["file", "lipo", ...SLICE_TOOLS, "vtool"].map((tool) => ({
+      provenance: ["lipo", ...SLICE_TOOLS, "vtool"].map((tool) => ({
         tool,
       })),
     });

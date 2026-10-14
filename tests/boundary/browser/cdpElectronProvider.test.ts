@@ -258,7 +258,62 @@ describe("CdpElectronProvider packaged pages", () => {
   });
 });
 
-describe("CdpElectronProvider capture", () => {
+describe("CdpElectronProvider frame capture", () => {
+  it.each([7, undefined])(
+    "reports a malformed child frame ID as unavailable protocol evidence: %s",
+    async (childId) => {
+      const root = await electronFixture();
+      const main = pathToFileURL(join(root, "index.html")).href;
+      const child = pathToFileURL(join(root, "child.html")).href;
+      const browser = await startFakeCdpBrowser({
+        electronFileUrl: main,
+        commandResult: (command) =>
+          command.method === "Page.getFrameTree"
+            ? {
+                frameTree: {
+                  frame: { id: "frame-main", url: main },
+                  childFrames: [
+                    {
+                      frame: {
+                        ...(childId === undefined ? {} : { id: childId }),
+                        url: child,
+                      },
+                    },
+                  ],
+                },
+              }
+            : undefined,
+      });
+      browsers.push(browser);
+      const result = await new CdpElectronProvider().inspectPage(
+        inspectElectronPageInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+          target_id: "electron-page",
+          observation_ms: 0,
+        }),
+      );
+
+      if (!result.ok) throw result.error;
+      expect(result.value.frames.map((frame) => frame.frame_id)).toEqual([
+        "frame-main",
+      ]);
+      expect(result.value.completeness).toMatchObject({
+        unavailable_sections: ["frames"],
+      });
+      expect(result.value.completeness.excluded).toContainEqual({
+        section: "frames",
+        reason: "invalid_protocol_value",
+        count: 1,
+      });
+      expect(result.value.completeness.policy_filtered_sections).not.toContain(
+        "frames",
+      );
+      expect(result.value.completeness.conditions).toContain("attach_limited");
+    },
+  );
+});
+
+describe("CdpElectronProvider malformed source replies", () => {
   it.each([{}, { scriptSource: null }, { scriptSource: 123 }])(
     "rejects malformed Electron source replies instead of inventing source: %j",
     async (reply) => {
@@ -291,7 +346,9 @@ describe("CdpElectronProvider capture", () => {
       );
     },
   );
+});
 
+describe("CdpElectronProvider script source capture", () => {
   it("retains an explicitly empty Electron producer script", async () => {
     const root = await electronFixture();
     const browser = await startFakeCdpBrowser({

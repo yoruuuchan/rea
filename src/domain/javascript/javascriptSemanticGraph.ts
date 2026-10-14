@@ -306,9 +306,11 @@ function* checkCoverageSteps(
     relationsByFamily.set(family, (relationsByFamily.get(family) ?? 0) + 1);
   }
   const unknownsById = new Map<string, GraphRecord["unknowns"][number]>();
+  const unknownFamilies = new Set<string>();
   for (const [index, unknown] of graph.unknowns.entries()) {
     if (index % 256 === 0) yield;
     unknownsById.set(unknown.unknown_id, unknown);
+    unknownFamilies.add(unknown.family);
   }
   for (const [index, family] of graph.coverage.families.entries()) {
     if (family.retained_relations !== relationsByFamily.get(family.family))
@@ -329,7 +331,9 @@ function* checkCoverageSteps(
       });
     if (
       family.status === "complete" &&
-      (family.omitted_relations !== 0 || family.unknown_ids.length > 0)
+      (family.omitted_relations !== 0 ||
+        family.unknown_ids.length > 0 ||
+        unknownFamilies.has(family.family))
     )
       context.addIssue({
         code: "custom",

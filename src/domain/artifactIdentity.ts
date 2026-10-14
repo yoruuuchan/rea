@@ -19,9 +19,7 @@ export const logicalPathNfc = (value: string): string => value.normalize("NFC");
  */
 export const normalizeJoinedLogicalPath = (value: string): string => {
   if (value.includes("\0")) return value;
-  return logicalPathNfc(
-    posix.normalize(value.replaceAll("\\", "/")).replace(/^\.\//u, ""),
-  );
+  return logicalPathNfc(posix.normalize(value).replace(/^\.\//u, ""));
 };
 
 /** Whether a joined logical path leaves the archive root. */

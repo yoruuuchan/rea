@@ -306,7 +306,9 @@ describe("JavaScript export return-shape uncertain presence", () => {
       ).toBe("partial");
     }
   });
+});
 
+describe("JavaScript export return-shape array presence", () => {
   it("excludes array holes while preserving observed unknown elements", async () => {
     const holes = 'export default () => ({ kind: "result", items: [,] });';
     const empty = await analyzeSources({
@@ -331,6 +333,84 @@ describe("JavaScript export return-shape uncertain presence", () => {
       }),
     );
   });
+});
+
+describe("JavaScript export unpaired return locations", () => {
+  it.each([
+    {
+      description: "two right return variants",
+      left: "export default function f() {}",
+      right: `export default function f(flag) {
+        if (flag) return { count: call() };
+        return { total: call() };
+      }`,
+      side: "right" as const,
+      lines: [2, 3],
+    },
+    {
+      description: "one right return variant",
+      left: "export default function f() {}",
+      right: `export default function f() {
+        return { count: call() };
+      }`,
+      side: "right" as const,
+      lines: [2],
+    },
+    {
+      description: "two left return variants",
+      left: `export default function f(flag) {
+        if (flag) return { count: call() };
+        return { total: call() };
+      }`,
+      right: "export default function f() {}",
+      side: "left" as const,
+      lines: [2, 3],
+    },
+    {
+      description: "one left return variant",
+      left: `export default function f() {
+        return { count: call() };
+      }`,
+      right: "export default function f() {}",
+      side: "left" as const,
+      lines: [2],
+    },
+  ])(
+    "retains each location for $description when the opposite export has no return",
+    async ({ left, right, side, lines }) => {
+      const graphs = await analyzeSources({ left, right });
+      const result = compare(...graphs);
+      expect(result.coverage).toMatchObject({
+        status: "partial",
+        unpaired_left_variants: side === "left" ? lines.length : 0,
+        unpaired_right_variants: side === "right" ? lines.length : 0,
+      });
+      expect(result.changes).toHaveLength(lines.length);
+      expect(
+        result.changes.every(
+          ({ status, left_source_range, right_source_range }) =>
+            status === "unknown" &&
+            (side === "left"
+              ? left_source_range !== null && right_source_range === null
+              : left_source_range === null && right_source_range !== null),
+        ),
+      ).toBe(true);
+      const locations = result.changes
+        .map((change) =>
+          side === "left"
+            ? change.left_source_range?.start.line
+            : change.right_source_range?.start.line,
+        )
+        .sort((first, second) => (first ?? 0) - (second ?? 0));
+      expect(locations).toEqual(lines);
+      expect(result.summary).toMatchObject({
+        added: 0,
+        removed: 0,
+        changed: 0,
+        unknown: lines.length,
+      });
+    },
+  );
 
   it("retains unpaired inventory locations when the opposite export has no return", async () => {
     const graphs = await analyzeSources({

@@ -144,6 +144,51 @@ it("keeps every translated README and authored guide on the documentation lane",
   });
 });
 
+it.each(["cjs", "cts", "js", "jsx", "mjs", "mts", "ts", "tsx"])(
+  "selects static checks for authored documentation code (%s) without provider lanes",
+  async (extension) => {
+    const { directory, base } = await fixture();
+    const head = await change(directory, [
+      `docs/.vitepress/helpers/navigation.${extension}`,
+    ]);
+    const plan = await classify(directory, base, head);
+    const { CI_FLAGS } = await loadScopes();
+    expect(plan).toMatchObject({ tier: "fast", code: true, docs: true });
+    for (const flag of CI_FLAGS)
+      if (flag !== "code" && flag !== "docs") expect(plan[flag]).toBe(false);
+  },
+);
+
+it("retains code checks when documentation code is removed or renamed to Markdown", async () => {
+  const { directory } = await fixture();
+  const base = await change(directory, ["docs/.vitepress/config.ts"]);
+  await git(directory, [
+    "mv",
+    "docs/.vitepress/config.ts",
+    "docs/configuration.md",
+  ]);
+  const head = await commit(directory);
+  expect(await classify(directory, base, head)).toMatchObject({
+    code: true,
+    docs: true,
+    runtime: false,
+    package: false,
+  });
+});
+
+it("selects code checks for documentation filenames containing line separators", async () => {
+  const { directory, base } = await fixture();
+  const head = await change(directory, [
+    "docs/.vitepress/navigation\u2028menu.ts",
+  ]);
+  expect(await classify(directory, base, head)).toMatchObject({
+    code: true,
+    docs: true,
+    runtime: false,
+    package: false,
+  });
+});
+
 it.each([
   "job-timings.mjs",
   "job-timings-batch.mjs",
@@ -617,6 +662,10 @@ it.each([
   ],
   ["website/src/index.ts", { code: false, website: true, package: false }],
   [
+    "website/public/examples/notes-electron/preload.js",
+    { code: true, website: true, package: false },
+  ],
+  [
     "website/locales/zh-CN/messages.po",
     { code: false, website: true, package: false },
   ],
@@ -933,7 +982,7 @@ it.each([
     "tsconfig.build.json",
     { code: true, package: true, browser: true, evm: true },
   ],
-  ["docs/.vitepress/config.ts", { code: false, docs: true, package: false }],
+  ["docs/.vitepress/config.ts", { code: true, docs: true, package: false }],
   ["CHANGELOG.md", { code: false, docs: true, package: false }],
   ["SECURITY.md", { code: false, docs: true, package: false }],
   [".github/pull_request_template.md", { code: false, docs: true }],

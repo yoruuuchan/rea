@@ -55,6 +55,26 @@ export const classifySwiftSymbol = (
   return { category };
 };
 
+/**
+ * Prefixes accepted by Swift's demangler as manglings. This is deliberately
+ * narrower than visible Swift runtime class names (`_Tt…`): those names are
+ * useful metadata symbols but are not themselves demangler manglings.
+ */
+const SWIFT_MANGLING_PREFIXES = [
+  "_T0",
+  "$S",
+  "_$S",
+  "$s",
+  "_$s",
+  "@__swiftmacro_",
+  "$e",
+  "_$e",
+] as const;
+
+/** Recognize names the Swift demangler accepts as mangled symbols. */
+export const isSwiftMangledSymbolName = (name: string): boolean =>
+  SWIFT_MANGLING_PREFIXES.some((prefix) => name.startsWith(prefix));
+
 const identifierEnd = (
   mangling: string,
   offset: number,

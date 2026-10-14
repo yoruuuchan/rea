@@ -91,7 +91,9 @@ describe("enhanced MCP tools", () => {
       },
     });
   });
+});
 
+describe("enhanced MCP graph caveats", () => {
   it("keeps generic provider caveats visible without truncating complete relationships", async () => {
     const caveat = "Decompiler output may omit indirect calls.";
     const client = await connect({
@@ -113,21 +115,33 @@ describe("enhanced MCP tools", () => {
       arguments: { address: "0x1", direction: "forward" },
     });
     expect(graph.structuredContent).toMatchObject({
+      limitations: [
+        "Artifact identity is unavailable for this observation.",
+        "Derived by an REA composed workflow.",
+        caveat,
+      ],
       normalized_result: {
         graph: {
           "0": [
-            { status: "ok", relationship_coverage: { status: "complete" } },
+            {
+              address: "0x1",
+              calls: ["0x2"],
+              status: "ok",
+              relationship_coverage: { status: "complete" },
+            },
           ],
           "1": [
-            { status: "ok", relationship_coverage: { status: "complete" } },
+            {
+              address: "0x2",
+              calls: [],
+              status: "ok",
+              relationship_coverage: { status: "complete" },
+            },
           ],
         },
         limitations: [caveat],
       },
     });
-    expect(JSON.stringify(graph.structuredContent)?.split(caveat)).toHaveLength(
-      2,
-    );
 
     const trace = await client.callTool({
       name: "trace_call_path",

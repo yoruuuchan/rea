@@ -68,7 +68,11 @@ try {
     }
     if (!process.exitCode && !shutdownSignal) {
       const tested = await run(process.execPath, [
-        resolve("node_modules/vitest/vitest.mjs"),
+        resolve(
+          request.paths.length > 0
+            ? "scripts/run-exact-tests.mjs"
+            : "node_modules/vitest/vitest.mjs",
+        ),
         ...plan.vitestArguments,
       ]);
       process.exitCode = tested.code;

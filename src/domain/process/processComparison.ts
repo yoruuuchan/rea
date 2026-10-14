@@ -1,7 +1,10 @@
 import canonicalize from "canonicalize";
 import { z } from "zod";
 import { processSourceTruncated } from "./processCaptureCoverage.js";
-import type { ProcessObservationSource } from "./processObservation.js";
+import type {
+  ProcessObservationLocation,
+  ProcessObservationSource,
+} from "./processObservation.js";
 
 import type { ProcessCapture } from "./processCaptureParsing.js";
 import { comparableTerminalFrame } from "./processObservation.js";
@@ -299,6 +302,18 @@ const differingContractFields = (
     )
     .sort();
 
+const LOCATION_SOURCES = {
+  frames: "terminal_raw",
+  rendered_frames: "terminal_rendered",
+  interaction_events: "interaction",
+  lifecycle: "lifecycle",
+  process_samples: "process",
+  filesystem_checkpoints: "filesystem",
+} as const satisfies Record<
+  ProcessObservationLocation["collection"],
+  ProcessObservationSource
+>;
+
 const applyTraceVerdict = (
   dimensions: ComparisonDimensions,
   specification: ProcessTraceSpecification,
@@ -314,6 +329,20 @@ const applyTraceVerdict = (
         : "changed";
   const sources = new Set(specification.events.map(({ source }) => source));
   const covered = dimensionsForTraceSources(sources);
+  // A different verdict names the failing events and observations; attribute
+  // it only to their dimensions so equal observations keep their exact status.
+  const diagnosticSources = new Set<ProcessObservationSource>([
+    ...specification.events
+      .filter(({ id }) => trace.diagnostic?.event_ids.includes(id) === true)
+      .map(({ source }) => source),
+    ...(trace.diagnostic?.locations ?? []).map(
+      ({ collection }) => LOCATION_SOURCES[collection],
+    ),
+  ]);
+  const attributed =
+    diagnosticSources.size > 0
+      ? dimensionsForTraceSources(diagnosticSources)
+      : covered;
   const statusFor = (
     dimension: (typeof PROCESS_COMPARISON_DIMENSIONS)[number],
   ): ComparisonStatus => {
@@ -321,7 +350,10 @@ const applyTraceVerdict = (
     if (!covered.has(dimension)) return exact;
     if (trace.verdict === "nonconforming") return exact;
     if (trace.verdict === "different")
-      return traceShowsDifference ? "changed" : exact;
+      return traceShowsDifference &&
+        (exact !== "unchanged" || attributed.has(dimension))
+        ? "changed"
+        : exact;
     if (
       trace.verdict === "unknown" &&
       ["changed", "added", "removed"].includes(exact)

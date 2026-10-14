@@ -58,6 +58,7 @@ interface CallCollectionContext {
     readonly JavaScriptSemanticBindingState[]
   >;
   readonly ancestors: t.Node[];
+  readonly callableStack: JavaScriptSemanticCallable[];
 }
 
 /** Recover direct-call and lexical-capture candidates from inert syntax. */
@@ -77,6 +78,7 @@ export const collectJavaScriptSemanticCalls = (
   const callableById = new Map(
     callables.map((callable) => [callable.callableId, callable]),
   );
+  const callableStack: JavaScriptSemanticCallable[] = [];
   const context: CallCollectionContext = {
     state,
     callableById,
@@ -84,8 +86,8 @@ export const collectJavaScriptSemanticCalls = (
     bindingResolutionCache: new Map(),
     parameterBindingCache: new Map(),
     ancestors: [],
+    callableStack,
   };
-  const callableStack: JavaScriptSemanticCallable[] = [];
   traverseJavaScriptAst(program, {
     enter: (node, parent) => {
       const callableId = semanticCallableIdForNode(node);
@@ -316,17 +318,47 @@ const collectCapture = (
   )
     return;
   if (semanticReferenceRole(node, parent) === null) return;
+  const captureOwner = computedMethodKeyOwner(node, owner, context);
+  if (captureOwner === undefined || captureOwner.bodyScopeId === null) return;
   const binding = resolveSemanticBindingState(state, node, node.name);
   if (
     binding === undefined ||
-    bindingIsWithinCallable(binding, owner.bodyScopeId, state)
+    bindingIsWithinCallable(binding, captureOwner.bodyScopeId, state)
   )
     return;
   output.closureCaptures.push({
-    callableId: owner.callableId,
+    callableId: captureOwner.callableId,
     bindingId: binding.bindingId,
     referenceLocation: range(node),
   });
+};
+
+const computedMethodKeyOwner = (
+  node: t.Node,
+  owner: JavaScriptSemanticCallable,
+  context: CallCollectionContext,
+): JavaScriptSemanticCallable | undefined => {
+  const ownerNode = context.ancestors.findLast(
+    (candidate) => semanticCallableIdForNode(candidate) === owner.callableId,
+  );
+  if (
+    ownerNode === undefined ||
+    (!t.isObjectMethod(ownerNode) && !t.isClassMethod(ownerNode)) ||
+    !ownerNode.computed
+  )
+    return owner;
+  let child = node;
+  let parent = context.state.parentsByNode.get(child);
+  while (parent !== undefined && parent !== ownerNode) {
+    child = parent;
+    parent = context.state.parentsByNode.get(parent);
+  }
+  if (parent !== ownerNode || ownerNode.key !== child) return owner;
+  return enclosingFunction(
+    context.callableStack.filter(
+      ({ callableId }) => callableId !== owner.callableId,
+    ),
+  );
 };
 
 const collectDynamicProperty = (

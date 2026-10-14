@@ -21,6 +21,12 @@ const urlCases = [
 ] as const;
 
 const unknownExpressions = [
+  'fileURLToPath("file:///app/%2Fpreload.cjs")',
+  'fileURLToPath("file:///app/%5Cpreload.cjs")',
+  'fileURLToPath("file:///app/%")',
+  'fileURLToPath("file:///C:/app/preload.cjs")',
+  'fileURLToPath("file://remote/share/preload.cjs")',
+  'fileURLToPath("file:///app/preload.cjs", { windows: selectedPlatform })',
   'fileURLToPath(new URL("./invalid%.cjs", import.meta.url))',
   'fileURLToPath(new URL("./preload%2fname.cjs", import.meta.url))',
   'fileURLToPath(new URL("./preload%5cname.cjs", import.meta.url))',
@@ -34,7 +40,7 @@ const unknownExpressions = [
   'convertFileURLToPath(new URL("./preload.cjs", import.meta.url))',
 ];
 
-describe("source-relative file URL paths", () => {
+describe("JavaScript file URL paths", () => {
   it.each(urlCases)(
     "resolves %s to the file read by Node",
     async (reference, target, sourcePath) => {
@@ -78,6 +84,36 @@ describe("source-relative file URL paths", () => {
         });
     },
   );
+
+  it("resolves a decoded literal file URL at the filesystem boundary", async () => {
+    const root = await createTestTempDirectory("rea-literal-file-url-");
+    await mkdir(join(root, "app"), { recursive: true });
+    await writeFile(
+      join(root, "app", "preload name.cjs"),
+      'module.exports = "literal file URL preload";\n',
+    );
+    await writeFile(
+      join(root, "main.mjs"),
+      `import { fileURLToPath } from "node:url";\nimport { BrowserWindow } from "electron";\nnew BrowserWindow({ webPreferences: { preload: fileURLToPath("file:///app/preload%20name.cjs") } });\n`,
+    );
+
+    const result = await analyzeJavaScriptApplication({
+      input_path: root,
+      format: "directory",
+    });
+    if (!result.ok) throw result.error;
+    const { graph } = javascriptApplicationAnalysisResultSchema.parse(
+      result.value.normalized_result,
+    );
+    const preload = graph.nodes.find(({ kind }) => kind === "electron-preload");
+    expect(preload?.observations).not.toHaveLength(0);
+    for (const observation of preload?.observations ?? [])
+      expect(observation.properties).toMatchObject({
+        resolved_path: "app/preload name.cjs",
+        resolution_status: "resolved",
+        resolution_context: "filesystem-expression",
+      });
+  });
 
   it.each(unknownExpressions)("leaves unsupported %s unknown", (expression) => {
     expect(

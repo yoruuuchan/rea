@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright-core";
 
 import { browserScenarioSchema } from "../domain/browserScenario.js";
@@ -166,43 +166,127 @@ describe("PlaywrightScenarioEvents", () => {
       stack: "s".repeat(300_000),
     });
   });
+});
 
-  it("retains every observed event without a collection count ceiling", () => {
-    const listeners = new Map<string, ((value: Error) => void)[]>();
-    const page = {
-      url: () => "https://app.example.test/",
-      on: (name: string, listener: (value: Error) => void) => {
-        const registered = listeners.get(name) ?? [];
-        registered.push(listener);
-        listeners.set(name, registered);
-      },
-    } as unknown as Page;
-    const scenario = browserScenarioSchema.parse({
-      browser: {
-        mode: "launch",
-        executable_path: "/opt/chromium",
-      },
-      start_url: { url: "https://app.example.test/" },
-      actions: [
-        { step_id: "wait", action: "wait_for_timeout", duration_ms: 1 },
-      ],
-      capture: { events: ["page-errors"] },
-    });
-    const secrets = BrowserScenarioSecrets.resolve(scenario, {});
-    if (secrets === undefined) throw new Error("Expected resolved secrets");
-    const events = new PlaywrightScenarioEvents({
-      page,
-      enabled: new Set(["page-errors"]),
-      secrets,
-    });
-    for (let index = 0; index < 2_001; index += 1)
-      listeners
-        .get("pageerror")
-        ?.forEach((listener) => listener(new Error(`failure-${index}`)));
-    expect(events.result()).toMatchObject({ retained: 2_001, dropped: 0 });
-    expect(events.result().items.at(-1)).toMatchObject({
-      kind: "page-error",
-      message: "failure-2000",
-    });
+it("retains ordinary event volumes and reports event-count exhaustion", () => {
+  const listeners = new Map<string, ((value: Error) => void)[]>();
+  const page = {
+    url: () => "https://app.example.test/",
+    on: (name: string, listener: (value: Error) => void) => {
+      const registered = listeners.get(name) ?? [];
+      registered.push(listener);
+      listeners.set(name, registered);
+    },
+  } as unknown as Page;
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "launch",
+      executable_path: "/opt/chromium",
+    },
+    start_url: { url: "https://app.example.test/" },
+    actions: [{ step_id: "wait", action: "wait_for_timeout", duration_ms: 1 }],
+    capture: { events: ["page-errors"] },
   });
+  const secrets = BrowserScenarioSecrets.resolve(scenario, {});
+  if (secrets === undefined) throw new Error("Expected resolved secrets");
+  const events = new PlaywrightScenarioEvents({
+    page,
+    enabled: new Set(["page-errors"]),
+    secrets,
+  });
+  for (let index = 0; index < 2_001; index += 1)
+    listeners.get("pageerror")?.forEach((listener) => {
+      const error = new Error(`failure-${index}`);
+      error.stack = "";
+      listener(error);
+    });
+  expect(events.result()).toMatchObject({ retained: 2_001, dropped: 0 });
+  expect(events.result().items.at(-1)).toMatchObject({
+    kind: "page-error",
+    message: "failure-2000",
+  });
+  // Omit whole oversized events, preserving ordinary messages rather than
+  // inventing truncated observations. This also tests admission before redact.
+  const redact = vi.spyOn(secrets, "redact");
+  listeners.get("pageerror")?.forEach((listener) => {
+    const error = new Error("x".repeat(1_000_000));
+    error.stack = "";
+    listener(error);
+  });
+  expect(redact).not.toHaveBeenCalled();
+  for (let index = 0; index < 10_000; index += 1)
+    listeners.get("pageerror")?.forEach((listener) => {
+      const error = new Error(`short-${index}`);
+      error.stack = "";
+      listener(error);
+    });
+  expect(events.result()).toMatchObject({ retained: 10_000, dropped: 2_002 });
+  expect(events.limitations().join(" ")).toContain("resource budget");
+  const aggregate = new PlaywrightScenarioEvents({
+    page,
+    enabled: new Set(["page-errors"]),
+    secrets,
+  });
+  const aggregateListener = listeners.get("pageerror")?.at(-1);
+  const aggregateRedact = vi.spyOn(secrets, "redact");
+  let refused = false;
+  for (let index = 0; index < 64 && !refused; index += 1) {
+    aggregateRedact.mockClear();
+    const droppedBefore = aggregate.result().dropped;
+    const error = new Error("x".repeat(400_000));
+    error.stack = "";
+    aggregateListener?.(error);
+    refused = aggregate.result().dropped > droppedBefore;
+    if (refused) expect(aggregateRedact.mock.calls.length).toBe(0);
+  }
+  expect(refused).toBe(true);
+
+  const small = new Error("small event remains eligible");
+  small.stack = "";
+  aggregateRedact.mockClear();
+  aggregateListener?.(small);
+  expect(aggregateRedact.mock.calls.length).toBeGreaterThan(0);
+  expect(aggregate.result().retained).toBeGreaterThan(0);
+  expect(aggregate.result().items.at(-1)).toMatchObject({
+    kind: "page-error",
+    message: "small event remains eligible",
+  });
+});
+
+it("caps live descendant listeners and reuses capacity after closure", () => {
+  const listeners = new Map<string, (value: unknown) => void>();
+  const page = {
+    on: (name: string, listener: (value: unknown) => void) =>
+      listeners.set(name, listener),
+    off: vi.fn(),
+  } as unknown as Page;
+  const scenario = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: "/fixture/chrome" },
+    start_url: { url: "https://example.test" },
+    actions: [{ step_id: "wait", action: "wait_for_timeout", duration_ms: 1 }],
+  });
+  const secrets = BrowserScenarioSecrets.resolve(scenario, {});
+  if (secrets === undefined) throw new Error("Expected resolved secrets");
+  const events = new PlaywrightScenarioEvents({
+    page,
+    enabled: new Set(["websockets"]),
+    secrets,
+  });
+  const sockets = Array.from({ length: 2049 }, () => ({
+    url: () => "wss://example.test/",
+    on: vi.fn<(name: string, listener: () => void) => void>(),
+    off: vi.fn(),
+  }));
+  for (const socket of sockets.slice(0, 2048))
+    listeners.get("websocket")?.(socket);
+  expect(sockets[2046]?.on).toHaveBeenCalledTimes(3);
+  expect(sockets[2047]?.on).not.toHaveBeenCalled();
+  expect(events.result().dropped).toBe(1);
+  const close = sockets[0]?.on.mock.calls.find(
+    ([name]) => name === "close",
+  )?.[1];
+  close?.();
+  expect(sockets[0]?.off).toHaveBeenCalledTimes(3);
+  listeners.get("websocket")?.(sockets[2048]);
+  expect(sockets[2048]?.on).toHaveBeenCalledTimes(3);
 });

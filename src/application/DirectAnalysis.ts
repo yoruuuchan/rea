@@ -10,7 +10,10 @@ import type { Logger } from "pino";
 import { createEvidence } from "../domain/evidence.js";
 import type { Evidence } from "../domain/evidence.js";
 import type { NativeToolName } from "../contracts/native/nativeToolContracts.js";
-import type { ArtifactAnalysisOperation } from "../contracts/artifactToolContracts.js";
+import {
+  ARTIFACT_ANALYSIS_OPERATIONS,
+  type ArtifactAnalysisOperation,
+} from "../contracts/artifactToolContracts.js";
 import {
   isManagedToolName,
   type ManagedToolName,
@@ -42,6 +45,7 @@ import {
   workflowAnalysisProfile,
 } from "./InvestigationProviders.js";
 import {
+  executeComposedWorkflow,
   createWorkflowEvidence,
   workflowSnapshotRecord,
   recordWorkflowUnknowns,
@@ -77,6 +81,10 @@ type DirectAnalysisTool =
   | "trace_feature"
   | "trace_native_ui_action"
   | "trace_native_values";
+
+const ARTIFACT_ANALYSIS_OPERATION_SET: ReadonlySet<string> = new Set(
+  ARTIFACT_ANALYSIS_OPERATIONS,
+);
 
 /**
  * Open one binary, execute one tool, and always release provider resources.
@@ -128,16 +136,26 @@ export const runProviderAnalysis = async (
     logger?: Logger,
     signal?: AbortSignal,
   ]
-): Promise<JsonValue> =>
-  isManagedToolName(tool)
-    ? runManagedProviderAnalysis(dependencies, path, tool, arguments_, signal)
-    : withProcessCancellation(signal, (operationSignal) =>
-        runAnalysis(dependencies, path, tool, arguments_, {
-          logger,
-          snapshotPath: undefined,
-          signal: operationSignal,
-        }),
-      );
+): Promise<JsonValue> => {
+  if (isManagedToolName(tool))
+    return runManagedProviderAnalysis(
+      dependencies,
+      path,
+      tool,
+      arguments_,
+      signal,
+    );
+  return withProcessCancellation(signal, (operationSignal) =>
+    runAnalysis(dependencies, path, tool, arguments_, {
+      logger,
+      snapshotPath: undefined,
+      signal: operationSignal,
+      ...(ARTIFACT_ANALYSIS_OPERATION_SET.has(tool)
+        ? { createSession: dependencies.createArtifactBinarySession }
+        : {}),
+    }),
+  );
+};
 
 /** Execute managed metadata inspection in an isolated managed-only session. */
 export const runManagedProviderExecution = async (
@@ -204,6 +222,7 @@ const runAnalysis = async (
     readonly logger: Logger;
     readonly snapshotPath: string | undefined;
     readonly signal: AbortSignal;
+    readonly createSession?: () => BinarySession | Promise<BinarySession>;
     readonly providerId?: AnalysisProviderSelector;
     readonly formatHint?: ExecutableFormatHint;
     readonly architecture?: BinaryArchitecture;
@@ -211,9 +230,14 @@ const runAnalysis = async (
   },
 ): Promise<JsonValue> => {
   const { logger, signal, snapshotPath } = options;
-  const config = dependencies.readConfiguration();
-  if (!config.ok) return cliError(config.error);
-  const session = await dependencies.createBinarySession(config.value, logger);
+  let session: BinarySession;
+  if (options.createSession !== undefined) {
+    session = await options.createSession();
+  } else {
+    const config = dependencies.readConfiguration();
+    if (!config.ok) return cliError(config.error);
+    session = await dependencies.createBinarySession(config.value, logger);
+  }
   return withSessionCleanup(
     session,
     async () => {
@@ -401,18 +425,17 @@ const executeAnalysisTool = async (input: {
     tool === "trace_native_ui_action"
   ) {
     const { EnhancedTools } = await import("./EnhancedTools.js");
-    const result = await new EnhancedTools(session).execute(
-      tool,
-      input.arguments,
-      signal,
+    const result = await executeComposedWorkflow(session, (observed) =>
+      new EnhancedTools(observed).execute(tool, input.arguments, signal),
     );
     if (!result.ok) return { output: cliError(result.error) };
     const evidence = createWorkflowEvidence({
       target: input.openedTarget,
       operation: tool,
       parameters: input.arguments,
-      result: result.value,
+      result: result.value.result,
       upstreamProfile: evidenceProfile,
+      upstreamLimitations: result.value.limitations,
     });
     return { output: evidence, evidence };
   }

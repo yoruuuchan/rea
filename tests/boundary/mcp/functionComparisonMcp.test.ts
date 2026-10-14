@@ -15,128 +15,157 @@ import { FUNCTION_COMPARISON_EXAMPLE } from "../../../src/contracts/functionComp
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
+import { reconstructionVerificationResultSchema } from "../../../src/domain/reconstructionVerificationSchemas.js";
 
-describe("function comparison reconstruction MCP integration", () => {
-  it.each([
-    { comparisonStatus: "unchanged", verificationStatus: "pass" },
-    { comparisonStatus: "changed", verificationStatus: "fail" },
-  ] as const)(
-    "verifies public $comparisonStatus function comparison as $verificationStatus",
-    async ({ comparisonStatus, verificationStatus }) => {
-      let providerLaunches = 0;
-      const session = createTestBinarySession(() => {
-        providerLaunches += 1;
-        throw new Error("Function verification must not launch a provider");
-      });
-      const left = FUNCTION_COMPARISON_EXAMPLE.left;
-      const right =
-        comparisonStatus === "changed"
-          ? FUNCTION_COMPARISON_EXAMPLE.right
-          : createEvidence(
-              {
-                path: "/tmp/function-unchanged",
-                sha256: "2".repeat(64),
-                format: "mach-o",
-              },
-              left.provider,
-              {
-                operation: left.operation,
-                parameters: left.parameters,
-                result: left.normalized_result,
-                confidence: left.confidence,
-                authority: left.authority,
-                ...(left.relationship_coverage === null
-                  ? {}
-                  : { relationshipCoverage: left.relationship_coverage }),
-              },
-            );
-      const server = createServer({ kind: "session", session });
-      const client = new Client({
-        name: "function-verification-test",
-        version: "1",
-      });
-      const [clientTransport, serverTransport] =
-        InMemoryTransport.createLinkedPair();
-      try {
-        await server.connect(serverTransport);
-        await client.connect(clientTransport);
-        const compared = await client.callTool({
-          name: "compare_functions",
-          arguments: { left, right },
-        });
-        expect(compared.isError).not.toBe(true);
-        const comparison = parseEvidence(compared.structuredContent);
-        expect(comparison.normalized_result).toMatchObject({
-          status: comparisonStatus,
-        });
-        expect(comparison.parameters).toEqual({
-          left_evidence_id: left.evidence_id,
-          right_evidence_id: right.evidence_id,
-        });
-        expect(comparison.evidence_links).toEqual(
-          expect.arrayContaining([left.evidence_id, right.evidence_id]),
-        );
-
-        const verified = await client.callTool({
-          name: "verify_reconstruction",
-          arguments: {
-            specification: {
-              name: "Function pseudocode comparison",
-              claims: [
-                {
-                  kind: "structural-function",
-                  claim_id: "pseudocode",
-                  title: "Pseudocode agrees",
-                  comparison_evidence_id: comparison.evidence_id,
-                  dimension: "pseudocode",
-                },
-              ],
+it.each([
+  { comparisonStatus: "unchanged", verificationStatus: "pass" },
+  { comparisonStatus: "changed", verificationStatus: "fail" },
+] as const)(
+  "verifies public $comparisonStatus function comparison as $verificationStatus",
+  async ({ comparisonStatus, verificationStatus }) => {
+    let providerLaunches = 0;
+    const session = createTestBinarySession(() => {
+      providerLaunches += 1;
+      throw new Error("Function verification must not launch a provider");
+    });
+    const left = FUNCTION_COMPARISON_EXAMPLE.left;
+    const right =
+      comparisonStatus === "changed"
+        ? FUNCTION_COMPARISON_EXAMPLE.right
+        : createEvidence(
+            {
+              path: "/tmp/function-unchanged",
+              sha256: "2".repeat(64),
+              format: "mach-o",
             },
-          },
-        });
-        expect(
-          verified.isError,
-          JSON.stringify(verified.structuredContent),
-        ).not.toBe(true);
-        const verification = parseEvidence(verified.structuredContent);
-        expect(verification.normalized_result).toMatchObject({
-          status: verificationStatus,
-          summary: {
-            total: 1,
-            passed: verificationStatus === "pass" ? 1 : 0,
-            failed: verificationStatus === "fail" ? 1 : 0,
-            unknown: 0,
-          },
-          claims: {
-            items: [
-              expect.objectContaining({
-                status: verificationStatus,
-                observed_status: comparisonStatus,
+            left.provider,
+            {
+              operation: left.operation,
+              parameters: left.parameters,
+              result: left.normalized_result,
+              confidence: left.confidence,
+              authority: left.authority,
+              ...(left.relationship_coverage === null
+                ? {}
+                : { relationshipCoverage: left.relationship_coverage }),
+            },
+          );
+    const server = createServer({ kind: "session", session });
+    const client = new Client({ name: "function-claims", version: "1" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const compared = await client.callTool({
+        name: "compare_functions",
+        arguments: { left, right },
+      });
+      expect(compared.isError).not.toBe(true);
+      const comparison = parseEvidence(compared.structuredContent);
+      expect(comparison.limitations).not.toContainEqual(
+        expect.stringContaining(
+          "without address or generated-name normalization",
+        ),
+      );
+      expect(comparison.normalized_result).toMatchObject({
+        status: comparisonStatus,
+        dimensions: expect.arrayContaining(
+          ["pseudocode", "assembly"].map((dimension) =>
+            expect.objectContaining({
+              dimension,
+              limitations: expect.arrayContaining([
+                expect.stringContaining(
+                  "without address or generated-name normalization",
+                ),
+              ]),
+            }),
+          ),
+        ),
+      });
+      expect(comparison.parameters).toEqual({
+        left_evidence_id: left.evidence_id,
+        right_evidence_id: right.evidence_id,
+      });
+      expect(comparison.evidence_links).toEqual(
+        expect.arrayContaining([left.evidence_id, right.evidence_id]),
+      );
+
+      const verified = await client.callTool({
+        name: "verify_reconstruction",
+        arguments: {
+          specification: {
+            name: "Function pseudocode comparison",
+            claims: ["pseudocode", "assembly", "cfg", "overall"].map(
+              (dimension) => ({
+                kind: "structural-function",
+                claim_id: dimension,
+                title: `${dimension} agrees`,
                 comparison_evidence_id: comparison.evidence_id,
-                left_evidence_ids: [left.evidence_id],
-                right_evidence_ids: [right.evidence_id],
+                dimension,
               }),
-            ],
-          },
-        });
-        expect(
-          session
-            .exportEvidenceBundle()
-            .records.find(
-              ({ evidence_id: id }) => id === comparison.evidence_id,
             ),
-        ).toEqual(comparison);
-      } finally {
-        await Promise.allSettled([
-          client.close(),
-          server.close(),
-          session.close(),
-        ]);
-        expect(providerLaunches).toBe(0);
+          },
+        },
+      });
+      expect(
+        verified.isError,
+        JSON.stringify(verified.structuredContent),
+      ).not.toBe(true);
+      const verification = parseEvidence(verified.structuredContent);
+      expect(verification.normalized_result).toMatchObject({
+        status: verificationStatus,
+        summary: {
+          total: 4,
+          passed: verificationStatus === "pass" ? 4 : 2,
+          failed: verificationStatus === "fail" ? 2 : 0,
+          unknown: 0,
+        },
+        claims: {
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              dimension: "pseudocode",
+              status: verificationStatus,
+              observed_status: comparisonStatus,
+              comparison_evidence_id: comparison.evidence_id,
+              left_evidence_ids: [left.evidence_id],
+              right_evidence_ids: [right.evidence_id],
+              limitations: expect.arrayContaining([
+                expect.stringContaining(
+                  "without address or generated-name normalization",
+                ),
+              ]),
+            }),
+          ]),
+        },
+      });
+      const claims = reconstructionVerificationResultSchema.parse(
+        verification.normalized_result,
+      ).claims.items;
+      for (const claim of claims) {
+        const caveats = claim.limitations.join(" ");
+        if (claim.dimension === "cfg")
+          expect(caveats).not.toMatch(/generated-name normalization/u);
+        else expect(caveats).toMatch(/generated-name normalization/u);
+        if (claim.dimension === "assembly" || claim.dimension === "overall")
+          expect(caveats).toMatch(/Assembly is opaque/u);
+        else expect(caveats).not.toMatch(/Assembly is opaque/u);
       }
-    },
-  );
-});
+      expect(
+        session
+          .exportEvidenceBundle()
+          .records.find(({ evidence_id: id }) => id === comparison.evidence_id),
+      ).toEqual(comparison);
+    } finally {
+      await Promise.allSettled([
+        client.close(),
+        server.close(),
+        session.close(),
+      ]);
+      expect(providerLaunches).toBe(0);
+    }
+  },
+);
 
 describe("function comparison MCP integration", () => {
   it("records linked comparison Evidence and its residual unknown", async () => {

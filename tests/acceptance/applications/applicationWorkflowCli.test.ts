@@ -485,6 +485,7 @@ it("preserves complete line-comment source-map URLs through CLI and MCP", async 
           declared_url: declaredUrl,
           declared_url_sha256: digest,
           resolved_path: "app.js.map",
+          resolution_status: "resolved",
           available: true,
         },
         evidence: expect.objectContaining({
@@ -507,6 +508,7 @@ it("preserves complete line-comment source-map URLs through CLI and MCP", async 
         properties: {
           declared_url_sha256: digest,
           resolved_path: "app.js.map",
+          resolution_status: "resolved",
         },
       }),
     );
@@ -565,6 +567,7 @@ it("resolves source-map URL paths once without changing their declarations", asy
           declared_url: declaredUrl,
           declared_url_sha256: digest,
           resolved_path: path,
+          resolution_status: "resolved",
           available: true,
         },
         evidence: expect.objectContaining({
@@ -587,7 +590,11 @@ it("resolves source-map URL paths once without changing their declarations", asy
       expect.objectContaining({
         relation: "maps_to",
         target_node_id: map?.node_id,
-        properties: { declared_url_sha256: digest, resolved_path: path },
+        properties: {
+          declared_url_sha256: digest,
+          resolved_path: path,
+          resolution_status: "resolved",
+        },
       }),
     );
   }
@@ -873,8 +880,9 @@ describe("rest parameter semantic trace CLI", () => {
           kind === "expression" && label === `argument ${String(index)}`,
       );
       if (argument === undefined) throw new Error("Missing argument node");
-      const traced = await runCli([
-        "trace-javascript-semantics",
+      const requestPath = join(root, `trace-request-${index}.json`);
+      await writeFile(
+        requestPath,
         JSON.stringify({
           application,
           query: {
@@ -884,6 +892,10 @@ describe("rest parameter semantic trace CLI", () => {
             expected: { role: "sink", classes: ["parameter"] },
           },
         }),
+      );
+      const traced = await runCli([
+        "trace-javascript-semantics",
+        requestPath,
         "--json",
       ]);
       expect(traced).toMatchObject({
@@ -1571,8 +1583,11 @@ it("retains bundled isolated-world contextBridge APIs through dedicated and gene
           world: "isolated",
           world_id: { status: "literal", value: 1001, expression: null },
           api_key: "isolatedApi",
+          api_status: "object-literal",
           members: ["ping"],
-          resolution_basis: "wrapper-substitution",
+          unknown_members: 0,
+          // The proven Webpack bootstrap resolves `load(2)` directly.
+          resolution_basis: "direct-syntax",
         }),
         evidence: expect.objectContaining({
           location: expect.objectContaining({

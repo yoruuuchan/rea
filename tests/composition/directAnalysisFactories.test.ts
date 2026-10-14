@@ -34,6 +34,7 @@ const recordingFactories = (failure?: Error) => {
   const dependencies: DirectAnalysisDependencies = {
     readConfiguration: () => parseConfig({}),
     createBinarySession: createSession,
+    createArtifactBinarySession: createSession,
     createManagedBinarySession: createSession,
   };
   return { dependencies, sessions, clientsClosed: () => clientsClosed };

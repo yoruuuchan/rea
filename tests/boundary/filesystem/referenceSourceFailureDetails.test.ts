@@ -117,6 +117,7 @@ describe("reference import native entry failure details", () => {
       ).toBeUndefined();
       expect(imported.value.exclusions).toContainEqual({
         path: "secret-events.pipe",
+        entry_kind: "other",
         reason: "configured-secret",
         pattern: "*secret*",
       });
@@ -209,6 +210,7 @@ describe("reference import paths beyond the platform limit", () => {
         ).toBe(false);
         expect(secret.value.exclusions).toContainEqual({
           path: failed?.path,
+          entry_kind: "unknown",
           reason: "configured-secret",
           pattern: secretPattern,
         });

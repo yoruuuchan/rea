@@ -14,8 +14,31 @@ import {
   BrowserStartupError,
   waitForBrowserDevtoolsPort,
 } from "../../../src/browser/BrowserProcessStartup.js";
+import { assertOrdinaryWindowsVerifierCaller } from "../../../scripts/lib/windows-ordinary-user-verifier.mjs";
 
 describe("browser process startup", () => {
+  it("requires a positively observed ordinary Windows verifier caller", () => {
+    expect(() =>
+      assertOrdinaryWindowsVerifierCaller({
+        administrator: false,
+        elevated: false,
+        integrityLevel: 8192,
+      }),
+    ).not.toThrow();
+
+    for (const token of [
+      { administrator: true, elevated: false },
+      { administrator: false, elevated: true },
+      { administrator: false },
+      { administrator: false, elevated: null },
+      null,
+    ]) {
+      expect(() => assertOrdinaryWindowsVerifierCaller(token)).toThrow(
+        /ordinary, non-elevated user token/u,
+      );
+    }
+  });
+
   it("returns a delayed valid DevToolsActivePort", async ({ processes }) => {
     const root = await temporaryRoot();
     const portPath = join(root, "DevToolsActivePort");

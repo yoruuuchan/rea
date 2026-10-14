@@ -1,6 +1,10 @@
+import { posix } from "node:path";
+
 export interface ReferenceSourcePathLookup {
   readonly resolve: (path: string) => string | undefined;
   readonly resolveCandidates: (paths: readonly string[]) => string | undefined;
+  /** Resolve a path to the closest recorded parent identity. */
+  readonly resolveAncestor: (path: string) => string | undefined;
 }
 
 /**
@@ -18,11 +22,24 @@ export const createReferenceSourcePathLookup = (
   }
   const equivalent = (path: string): string | undefined =>
     canonical.get(path.normalize("NFC")) ?? undefined;
+  const resolve = (path: string): string | undefined =>
+    exact.has(path) ? path : equivalent(path);
   return {
-    resolve: (path) => (exact.has(path) ? path : equivalent(path)),
+    resolve,
     resolveCandidates: (candidates) =>
       candidates.find((path) => exact.has(path)) ??
       candidates.map(equivalent).find((path) => path !== undefined),
+    resolveAncestor: (path) => {
+      for (
+        let candidate = path;
+        candidate !== "." && candidate !== "/";
+        candidate = posix.dirname(candidate)
+      ) {
+        const found = resolve(candidate);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    },
   };
 };
 

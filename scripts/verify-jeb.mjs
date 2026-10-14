@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { JebAnalysisService } from "../dist/application/jeb/JebAnalysisService.js";
 import { createJebAnalysisProvider } from "../dist/composition/jeb.js";
+import { closeVerifierResources } from "./lib/verifier-cleanup.mjs";
 
 const run = promisify(execFile);
 
@@ -25,8 +26,11 @@ if (options.help) {
 
 const provider = createJebAnalysisProvider(process.env);
 const service = new JebAnalysisService(provider);
-const fixtureDirectory = await mkdtemp(join(tmpdir(), "rea-jeb-"));
+let fixtureDirectory;
+let primaryFailure;
+let report;
 try {
+  fixtureDirectory = await mkdtemp(join(tmpdir(), "rea-jeb-"));
   const client = await service.execute("inspect_jeb_client", {});
   if (!client.ok) throw new Error(client.error.message);
   const engine = client.value.normalized_result.engine;
@@ -70,7 +74,7 @@ try {
       "Decompiled pseudo-code did not contain the fixture marker",
     );
 
-  const report = {
+  report = {
     ok: true,
     provider: "jeb",
     host_platform: process.platform,
@@ -82,17 +86,33 @@ try {
     unit_count: units.value.normalized_result.units.length,
     decompiled_marker_observed: true,
   };
-  process.stdout.write(`${JSON.stringify(report)}\n`);
 } catch (cause) {
+  primaryFailure = cause;
+}
+
+const cleanupTasks = [
+  () => provider.close(),
+  ...(fixtureDirectory === undefined
+    ? []
+    : [() => rm(fixtureDirectory, { recursive: true, force: true })]),
+];
+let cleanupFailure;
+try {
+  await closeVerifierResources(cleanupTasks, primaryFailure);
+} catch (cause) {
+  cleanupFailure = cause;
+}
+if (primaryFailure !== undefined || cleanupFailure !== undefined) {
+  const causes =
+    cleanupFailure instanceof AggregateError
+      ? cleanupFailure.errors
+      : [cleanupFailure ?? primaryFailure];
   process.stderr.write(
-    `JEB real-provider verification failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+    `JEB real-provider verification failed: ${causes.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join("; ")}\n`,
   );
   process.exitCode = 1;
-} finally {
-  await provider.close().catch(() => undefined);
-  await rm(fixtureDirectory, { recursive: true, force: true }).catch(
-    () => undefined,
-  );
+} else {
+  process.stdout.write(`${JSON.stringify(report)}\n`);
 }
 
 async function resolveTarget(selected, directory) {

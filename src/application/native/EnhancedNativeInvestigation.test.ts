@@ -12,6 +12,7 @@ import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
+  AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
 import { EnhancedTools } from "../EnhancedTools.js";
 import {
@@ -612,6 +613,25 @@ describe("native UI query outcomes", () => {
           reason: "object_limit_reached",
         }),
       ]),
+    });
+  });
+
+  it("returns native seed resolution failures instead of reporting not found", async () => {
+    const result = await new EnhancedTools(
+      testAnalysis({
+        procedure_address: () =>
+          err(
+            new AnalysisOutputError(
+              "procedure_address",
+              "invalid address response",
+            ),
+          ),
+      }),
+    ).execute("trace_native_ui_action", { action: "missing-selector" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisOutputError", operation: "procedure_address" },
     });
   });
 

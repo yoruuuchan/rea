@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { parse } from "plist";
 
 import { omitPrototypeKeys, parseXmlPropertyList } from "./propertyListKeys.js";
 
@@ -232,5 +233,57 @@ it("locates sparse omitted keys across newline-dense source", () => {
   expect(parseXmlPropertyList(text)).toEqual({
     value: { nested: { kept: true } },
     omittedPrototypeKeys: 2,
+  });
+});
+
+describe("OpenStep plist nesting preflight", () => {
+  const arrays = (depth: number, leaf = "x") =>
+    "(".repeat(depth) + leaf + ")".repeat(depth);
+
+  it.each([129, 3000])(
+    "rejects %s nested OpenStep values with the shared depth limit",
+    (depth) => {
+      expect(() => parseXmlPropertyList(arrays(depth))).toThrow(
+        "Plist exceeds 128 nesting levels",
+      );
+    },
+  );
+
+  it.each(["{}", "()"])(
+    "preserves the first %s root despite deeply nested trailing text",
+    (root) => {
+      expect(parseXmlPropertyList(root + arrays(3000))).toEqual({
+        value: root === "{}" ? {} : [],
+        omittedPrototypeKeys: 0,
+      });
+    },
+  );
+
+  it("accepts the deepest supported OpenStep value and empty container", () => {
+    expect(() => parseXmlPropertyList(arrays(128))).not.toThrow();
+    expect(() => parseXmlPropertyList(arrays(129, ""))).not.toThrow();
+  });
+
+  it.each([
+    "(x, y,)",
+    "{ key = x next = (y,); }",
+    "{ (compound, key) = x; { nested = key; } = y; }",
+    "{ key = (); next = {}; }",
+  ])("preserves pinned separator and compound-key semantics for %s", (text) => {
+    expect(parseXmlPropertyList(text)).toEqual({
+      value: parse(text),
+      omittedPrototypeKeys: 0,
+    });
+  });
+
+  it("ignores brackets in quoted strings, escaped quotes, comments, and data", () => {
+    expect(
+      parseXmlPropertyList(
+        '{ quote = "\\\"( )"; /* ((( */ data = <2829>; // (((\n values = (x); }',
+      ),
+    ).toEqual({
+      value: { quote: '"( )', data: new Uint8Array([40, 41]), values: ["x"] },
+      omittedPrototypeKeys: 0,
+    });
   });
 });

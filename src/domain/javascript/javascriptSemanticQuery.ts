@@ -250,10 +250,23 @@ const relevantUnknownFrontiers = (
   return graph.unknowns.filter(
     (unknown) =>
       (unknown.node_id === null || nodeIds.has(unknown.node_id)) &&
-      (allowed === null ||
-        unknown.relation_kinds.some((relation) => allowed.has(relation))),
+      unknown.relation_kinds.some(
+        (relation) =>
+          directionAllowsRelation(input.direction, relation) &&
+          (allowed === null || allowed.has(relation)),
+      ),
   );
 };
+
+const directionAllowsRelation = (
+  direction: JavaScriptSemanticQueryInput["direction"],
+  relation: JavaScriptSemanticGraphRelation["relation"],
+): boolean =>
+  direction === "callers"
+    ? relation === "calls"
+    : direction === "ownership"
+      ? ownershipRelation(relation)
+      : true;
 
 const relevantCandidateRelationCount = (
   graph: JavaScriptSemanticGraph,

@@ -115,28 +115,23 @@ const estimateXmlPlistExpansion = (
   xmlText?: string,
 ): number => {
   const xml = xmlText ?? decodeXmlPlistText(bytes);
-  if (/<!DOCTYPE\b[^>]*\[/iu.test(xml))
-    throw new InterfaceBuilderDecodeBudgetExceeded(
-      "aggregate_decode_budget_exhausted",
-      "XML plist internal entity expansion exceeds the aggregate Interface Builder decode budget",
-    );
-  const elementPattern =
-    /<!--[^]*?-->|<!\[CDATA\[[^]*?\]\]>|<!DOCTYPE[^>]*>|<\?[^]*?\?>|<\/?[A-Za-z][^>]*>/giu;
   const decodedSourceBytes = xml.length * 2;
   let elementCount = 0;
   let xmlDepth = 0;
-  for (const match of xml.matchAll(elementPattern)) {
-    const token = match[0] ?? "";
-    if (
-      token.startsWith("<!--") ||
-      token.startsWith("<![CDATA[") ||
-      token.startsWith("<!DOCTYPE") ||
-      token.startsWith("<?")
-    )
+  for (const token of xmlPreflightTokens(xml)) {
+    if (token.doctype) {
+      // Only a declaration outside opaque text can introduce an internal
+      // subset. Brackets in quoted external identifiers are literal text.
+      if (token.internalSubset)
+        throw new InterfaceBuilderDecodeBudgetExceeded(
+          "aggregate_decode_budget_exhausted",
+          "XML plist internal entity expansion exceeds the aggregate Interface Builder decode budget",
+        );
       continue;
+    }
     elementCount += 1;
-    if (token.startsWith("</")) xmlDepth -= 1;
-    else if (!token.endsWith("/>")) {
+    if (token.closing) xmlDepth -= 1;
+    else if (!token.selfClosing) {
       xmlDepth += 1;
       if (xmlDepth > 128)
         throw new InterfaceBuilderDecodeBudgetExceeded(
@@ -149,6 +144,50 @@ const estimateXmlPlistExpansion = (
   }
   return decodedSourceBytes * 2 + elementCount * 128;
 };
+
+/** Consume each XML span once; malformed tokens cannot restart suffix scans. */
+function* xmlPreflightTokens(xml: string) {
+  let cursor = 0;
+  while (cursor < xml.length) {
+    const start = xml.indexOf("<", cursor);
+    if (start < 0) return;
+    const opaqueEnd = xml.startsWith("<!--", start)
+      ? "-->"
+      : xml.startsWith("<![CDATA[", start)
+        ? "]]>"
+        : xml.startsWith("<?", start)
+          ? "?>"
+          : undefined;
+    if (opaqueEnd !== undefined) {
+      const end = xml.indexOf(opaqueEnd, start + 2);
+      if (end < 0) return;
+      cursor = end + opaqueEnd.length;
+      continue;
+    }
+    const doctype = /^<!DOCTYPE\b/iu.test(xml.slice(start, start + 10));
+    const element = /^<\/?[A-Za-z]/u.test(xml.slice(start, start + 4));
+    let quote: string | undefined;
+    let internalSubset = false;
+    let end = start + 1;
+    for (; end < xml.length; end += 1) {
+      const character = xml[end];
+      if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") quote = character;
+      else if (character === ">") break;
+      else if (doctype && character === "[") internalSubset = true;
+    }
+    if (end === xml.length) return;
+    cursor = end + 1;
+    if (doctype || element)
+      yield {
+        doctype,
+        internalSubset,
+        closing: xml[start + 1] === "/",
+        selfClosing: xml[end - 1] === "/",
+      };
+  }
+}
 
 /** Resource a binary plist preflight found over its budget, or a malformed reference cycle. */
 export type BinaryPlistExpansionFailure = "cycle" | "depth" | "expansion";

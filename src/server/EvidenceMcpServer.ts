@@ -60,6 +60,47 @@ const hasAdvertisedInputJsonSchema = (value: unknown): boolean => {
   );
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Remove only client-facing output schemas; SDK registrations stay canonical. */
+const omitOutputSchemasFromToolsList = (
+  message: JSONRPCMessage,
+  requestId: RequestId,
+): JSONRPCMessage => {
+  if (
+    !isJSONRPCResultResponse(message) ||
+    message.id !== requestId ||
+    !isRecord(message.result) ||
+    !Array.isArray(message.result.tools)
+  )
+    return message;
+  return {
+    ...message,
+    result: {
+      ...message.result,
+      tools: message.result.tools.map((tool: unknown) => {
+        if (!isRecord(tool)) return tool;
+        const { outputSchema: _outputSchema, ...advertisedTool } = tool;
+        return advertisedTool;
+      }),
+    },
+  } as JSONRPCMessage;
+};
+
+/** Release every transport-owned reference for a cancelled/completed request. */
+export const forgetPendingMcpRequest = (
+  pendingTools: Map<RequestId, string>,
+  pendingToolLists: Set<RequestId>,
+  pendingCompletions: Map<RequestId, AbortController>,
+  id: RequestId,
+): void => {
+  pendingTools.delete(id);
+  pendingToolLists.delete(id);
+  pendingCompletions.get(id)?.abort();
+  pendingCompletions.delete(id);
+};
+
 /** Bind oversized MCP error recovery to this server's Evidence ledger. */
 export class EvidenceMcpServer extends McpServer {
   constructor(
@@ -72,15 +113,15 @@ export class EvidenceMcpServer extends McpServer {
     private readonly compactPresentation:
       | CompactInputSchemaPresentation
       | undefined = undefined,
+    private readonly omitOutputSchemas = false,
   ) {
     super(info, options);
   }
 
   /**
-   * Compact the advertised input schema of every registered tool when the
-   * compact profile is active. The registered canonical schema, its parser,
-   * and output schemas are untouched; only the advertised JSON Schema
-   * projection is rendered within the provider's per-schema size budget.
+   * Compact advertised input schemas and optionally omit output-schema
+   * advertisements. Canonical parsers and contracts remain registered; the
+   * output-schema-off path validates successful structured results locally.
    * The signatures mirror the SDK's registrations so call sites keep their
    * inferred handler argument types.
    */
@@ -114,11 +155,11 @@ export class EvidenceMcpServer extends McpServer {
               compactAdvertisedInputSchema(projected, budget).schema,
           )
         : undefined;
+    const registeredConfig =
+      inputSchema === undefined ? config : { ...config, inputSchema };
     return super.registerTool(
       name,
-      (inputSchema === undefined
-        ? config
-        : { ...config, inputSchema }) as never,
+      registeredConfig as never,
       callback as never,
     );
   }
@@ -126,7 +167,12 @@ export class EvidenceMcpServer extends McpServer {
   /** Preserve the SDK transport lifecycle while retaining oversized errors. */
   override connect(transport: Transport): Promise<void> {
     return super.connect(
-      new ErrorEvidenceTransport(transport, this.recordEvidence, this.delivery),
+      new ErrorEvidenceTransport(
+        transport,
+        this.recordEvidence,
+        this.delivery,
+        this.omitOutputSchemas,
+      ),
     );
   }
 }
@@ -137,6 +183,7 @@ class ErrorEvidenceTransport implements Transport {
   onmessage: Transport["onmessage"];
   readonly hasPerRequestStream?: boolean;
   private readonly pendingTools = new Map<RequestId, string>();
+  private readonly pendingToolLists = new Set<RequestId>();
   private readonly pendingCompletions = new Map<RequestId, AbortController>();
 
   constructor(
@@ -145,6 +192,7 @@ class ErrorEvidenceTransport implements Transport {
       | EvidenceWriter["recordEvidence"]
       | undefined,
     private readonly delivery: ToolResultDelivery,
+    private readonly omitOutputSchemas: boolean,
   ) {
     if (transport.hasPerRequestStream !== undefined)
       this.hasPerRequestStream = transport.hasPerRequestStream;
@@ -155,6 +203,8 @@ class ErrorEvidenceTransport implements Transport {
         typeof message.params?.["name"] === "string"
       )
         this.pendingTools.set(message.id, message.params["name"]);
+      if (isJSONRPCRequest(message) && message.method === "tools/list")
+        this.pendingToolLists.add(message.id);
       if (isJSONRPCRequest(message) && message.method === "completion/complete")
         this.pendingCompletions.set(message.id, new AbortController());
       // The SDK suppresses replies after cancellation, so send() cannot release
@@ -164,11 +214,13 @@ class ErrorEvidenceTransport implements Transport {
         message.method === "notifications/cancelled"
       ) {
         const id = message.params?.["requestId"];
-        if (typeof id === "string" || typeof id === "number") {
-          this.pendingTools.delete(id);
-          this.pendingCompletions.get(id)?.abort();
-          this.pendingCompletions.delete(id);
-        }
+        if (typeof id === "string" || typeof id === "number")
+          forgetPendingMcpRequest(
+            this.pendingTools,
+            this.pendingToolLists,
+            this.pendingCompletions,
+            id,
+          );
       }
       const completion =
         isJSONRPCRequest(message) && message.method === "completion/complete"
@@ -183,6 +235,7 @@ class ErrorEvidenceTransport implements Transport {
     transport.onerror = (error) => this.onerror?.(error);
     transport.onclose = () => {
       this.pendingTools.clear();
+      this.pendingToolLists.clear();
       for (const completion of this.pendingCompletions.values())
         completion.abort();
       this.pendingCompletions.clear();
@@ -206,6 +259,7 @@ class ErrorEvidenceTransport implements Transport {
       await this.transport.close();
     } finally {
       this.pendingTools.clear();
+      this.pendingToolLists.clear();
       for (const completion of this.pendingCompletions.values())
         completion.abort();
       this.pendingCompletions.clear();
@@ -230,17 +284,24 @@ class ErrorEvidenceTransport implements Transport {
         ? message.id
         : undefined;
     const tool = id === undefined ? undefined : this.pendingTools.get(id);
+    const omitToolSchemas =
+      this.omitOutputSchemas &&
+      id !== undefined &&
+      this.pendingToolLists.has(id);
     try {
       const recovered = this.recoverError(message, tool);
+      const advertised = omitToolSchemas
+        ? omitOutputSchemasFromToolsList(recovered, id)
+        : recovered;
       if (
-        isJSONRPCResultResponse(recovered) &&
-        isCallToolResult(recovered.result) &&
-        recovered.result.isError === true
+        isJSONRPCResultResponse(advertised) &&
+        isCallToolResult(advertised.result) &&
+        advertised.result.isError === true
       ) {
         // Keep the complete typed JSON in content. Error projections are not
         // success outputSchema data; oversized recovery must consume their
         // private structured carrier before it is removed from the wire.
-        const { structuredContent: _diagnostic, ...result } = recovered.result;
+        const { structuredContent: _diagnostic, ...result } = advertised.result;
         // Errors the SDK builds itself (input validation, a thrown handler)
         // bypass ToolResultDelivery; mark them for target-content tools too.
         const marked =
@@ -252,12 +313,16 @@ class ErrorEvidenceTransport implements Transport {
                 _meta: { ...result._meta, ...TARGET_CONTENT_RESULT_META },
               }
             : result;
-        await this.transport.send({ ...recovered, result: marked }, options);
-      } else await this.transport.send(recovered, options);
+        await this.transport.send({ ...advertised, result: marked }, options);
+      } else await this.transport.send(advertised, options);
     } finally {
       if (!isJSONRPCRequest(message) && id !== undefined) {
-        this.pendingTools.delete(id);
-        this.pendingCompletions.delete(id);
+        forgetPendingMcpRequest(
+          this.pendingTools,
+          this.pendingToolLists,
+          this.pendingCompletions,
+          id,
+        );
       }
     }
   }

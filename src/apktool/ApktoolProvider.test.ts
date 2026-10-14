@@ -100,10 +100,12 @@ const decodeStub = (
     readonly manifestFile?: string;
     readonly stringsFile?: string;
     readonly stringsXml?: string;
+    readonly extraValuesDirectories?: readonly string[];
   } = {},
 ): ((root: string) => string) => {
   const withStrings = options.withStrings ?? true;
   const withGerman = options.withGerman ?? true;
+  const extraValuesDirectories = options.extraValuesDirectories ?? [];
   const stringsXml = options.stringsXml ?? REAL_STRINGS;
   const ymlWrite =
     options.ymlFile === undefined
@@ -117,6 +119,12 @@ const decodeStub = (
     options.stringsFile === undefined
       ? `printf '%s\\n' '${stringsXml.replace(/'/gu, "'\\''")}' > "$5/res/values/strings.xml"`
       : `cp '${options.stringsFile}' "$5/res/values/strings.xml"`;
+  const qualifierStrings = extraValuesDirectories
+    .map(
+      (name) =>
+        `printf '%s\\n' '<resources><string name="wrong">Wrong</string></resources>' > "$5/res/values-${name}/strings.xml"`,
+    )
+    .join("\\n  ");
   return () => `if [ "$1" = "--version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "d" ]; then
   ${
@@ -124,9 +132,10 @@ if [ "$1" = "d" ]; then
       ? `printf 'Exception in thread "main" brut.androlib.AndrolibException: Could not decode the APK\\n' >&2; exit 1;`
       : `${ymlWrite}
   ${manifestWrite}
-  mkdir -p "$5/res/values"${withGerman ? ' "$5/res/values-de"' : ""}
+  mkdir -p "$5/res/values"${withGerman ? ' "$5/res/values-de"' : ""}${extraValuesDirectories.map((name) => ` "$5/res/values-${name}"`).join("")}
   ${withStrings ? stringsWrite : ""}
   ${withGerman ? `printf '%s\\n' '${DE_STRINGS.replace(/'/gu, "'\\''")}' > "$5/res/values-de/strings.xml"` : ""}
+  ${qualifierStrings}
   printf 'I: Using Apktool on stub\\n'
   exit 0`
   }
@@ -253,6 +262,30 @@ it("preserves empty resource strings and reports markup omissions as partial", a
   ]);
   expect(result.coverage).toBe("partial");
 });
+
+it("ignores Android resource qualifiers when discovering locales", async () => {
+  const { command, root } = await writeApktoolStub(
+    decodeStub({ extraValuesDirectories: ["car", "night", "v21"] }),
+  );
+  const apk = await apkFixture(root);
+  const result = await evidenceResult(providerOver(command), {
+    operation: "decode_android_resources",
+    input: { path: apk.path, include_strings: true },
+  });
+  expect(result.locales).toEqual(["de"]);
+});
+
+it.each(["car", "night", "v21"])(
+  "rejects %s as a requested locale",
+  (locale) => {
+    expect(
+      apktoolRequestSchema.safeParse({
+        operation: "decode_android_resources",
+        input: { path: "/tmp/probe.apk", locale },
+      }).success,
+    ).toBe(false);
+  },
+);
 
 it("projects one locale's strings on request", async () => {
   const { command, root } = await writeApktoolStub(decodeStub());

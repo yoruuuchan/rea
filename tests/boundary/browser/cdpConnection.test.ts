@@ -28,6 +28,7 @@ const INVALID_REPLIES = [
     }),
   ],
   ["invalid result", (id: number) => ({ id, result: [] })],
+  ["missing session id", (id: number) => ({ id, result: {} })],
   ["invalid session id", (id: number) => ({ id, result: {}, sessionId: 7 })],
   [
     "foreign session id",

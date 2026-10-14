@@ -10,10 +10,8 @@ import { CdpConnection } from "../../dist/browser/CdpConnection.js";
 import { parseEvidence } from "../../dist/domain/evidence.js";
 import { traceSourceMap } from "../../dist/javascript/sourceMaps/TraceSourceMap.js";
 import { startBrowserSourceMapSite } from "../fixtures/browser-source-map-site.mjs";
-import {
-  startRuntimeFixtureBrowser,
-  closeRuntimeFixtureResources,
-} from "./browser-runtime-fixture-lifecycle.mjs";
+import { startRuntimeFixtureBrowser } from "./browser-runtime-fixture-lifecycle.mjs";
+import { closeVerifierResources } from "./verifier-cleanup.mjs";
 
 const cases = [
   { name: "same-line nested column control", prefixes: ["\n\n       ", "   "] },
@@ -184,7 +182,7 @@ async function verifyCase(executable, entrypoint, scenario) {
     primaryError = failure;
     throw failure;
   } finally {
-    await closeRuntimeFixtureResources(
+    await closeVerifierResources(
       [() => connection?.close(), () => fixture?.close(), () => site.close()],
       primaryError,
     );

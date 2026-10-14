@@ -48,7 +48,7 @@ describe("parameter references copied into function body bindings", () => {
         name: "arg",
         kind: "variable",
         mutable: true,
-        mutatedPaths: [],
+        memberWrites: [],
         escapedPaths: [],
         definitions: [],
         initializers: [entry, assigned],

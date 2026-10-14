@@ -98,6 +98,21 @@ const entry = (
 };
 
 describe("capability failure reasons", () => {
+  it("keeps an unavailable Android runtime distinct from a missing provider", () => {
+    const inventory = buildCapabilityInventory(status(), {
+      ...enabledPolicy,
+      androidAnalysisAvailability: {
+        status: "unavailable",
+        code: "runtime_unavailable",
+        reason: "The JADX native self-test failed.",
+        diagnostics: {},
+      },
+    });
+    expect(
+      inventory.find(({ name }) => name === "inspect_android_package"),
+    ).toMatchObject({ available: false, reason: "provider_unavailable" });
+  });
+
   it("admits physical universal Mach-O targets for native Mach-O operations", () => {
     expect(
       entry(
@@ -501,7 +516,6 @@ it("reports host denial before target mismatch but keeps composed workflow prere
 describe("binary_overview capability requirements", () => {
   it("admits a provider with current_document and other mandatory capabilities", () => {
     const capabilities = [
-      "list_segments",
       "current_document",
       "list_procedures",
       "list_strings",
@@ -520,7 +534,6 @@ describe("binary_overview capability requirements", () => {
 
   it("admits a provider with list_documents and other mandatory capabilities", () => {
     const capabilities = [
-      "list_segments",
       "list_documents",
       "list_procedures",
       "list_strings",
@@ -556,7 +569,7 @@ describe("binary_overview capability requirements", () => {
     });
   });
 
-  it("reports missing segment enumeration independently when segments are missing", () => {
+  it("admits a provider without optional segment enumeration", () => {
     const capabilities = [
       "current_document",
       "list_procedures",
@@ -568,10 +581,29 @@ describe("binary_overview capability requirements", () => {
         status({ open: true, kind: "executable", capabilities }),
       ),
     ).toMatchObject({
-      available: false,
-      reason: "provider_missing",
-      remediation: "Configure a provider for required operation list_segments.",
+      available: true,
+      reason: "available",
+      remediation: null,
     });
+  });
+
+  it("keeps binary overview available when a declared segment facet is unavailable", () => {
+    const capabilities = [
+      {
+        operation: "list_segments",
+        available: false,
+        reason: "This upstream profile does not expose segment enumeration.",
+      },
+      { operation: "list_documents", available: true, reason: null },
+      { operation: "list_procedures", available: true, reason: null },
+      { operation: "list_strings", available: true, reason: null },
+    ];
+    expect(
+      entry(
+        "binary_overview",
+        status({ open: true, kind: "executable", capabilities }),
+      ),
+    ).toMatchObject({ available: true, reason: "available" });
   });
 
   it("reports provider_unavailable when declared document selection capability is unavailable", () => {

@@ -45,6 +45,16 @@ export interface JavaScriptHtmlScriptObservation {
   readonly location: JavaScriptSourceRange;
 }
 
+/** Bounded source locations for inline JavaScript bodies skipped by analysis. */
+export interface JavaScriptHtmlInlineScriptsObservation {
+  readonly path: string;
+  readonly script_count: number;
+  readonly scripts: readonly {
+    readonly script_type: "classic" | "module";
+    readonly location: JavaScriptSourceRange;
+  }[];
+}
+
 /** One original source declared by a local source map. */
 export interface JavaScriptSourceMapOriginal {
   /** Index within the leaf map's sources and sourcesContent arrays. */
@@ -128,6 +138,7 @@ export interface JavaScriptArtifactAnalysis<
   readonly packages: readonly JavaScriptPackageObservation[];
   readonly json_modules: readonly JavaScriptJsonModuleObservation[];
   readonly html_scripts: readonly JavaScriptHtmlScriptObservation[];
+  readonly html_inline_scripts: readonly JavaScriptHtmlInlineScriptsObservation[];
   readonly source_maps: readonly JavaScriptSourceMapObservation[];
   readonly visited_ast_nodes: number;
   readonly findings: number;

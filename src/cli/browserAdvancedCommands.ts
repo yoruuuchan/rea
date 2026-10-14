@@ -27,6 +27,7 @@ import type { JsonValue } from "../domain/jsonValue.js";
 import { parseCliJsonInput } from "../cliJsonInput.js";
 import type { Logger } from "pino";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
+import { withCommandCancellation } from "./commandCancellation.js";
 
 /** Register WebMCP, capture-diff, and screenshot CLI equivalents. */
 export const registerAdvancedBrowserCommands = (
@@ -61,23 +62,29 @@ const registerWebMcp = (
         .describe("Observation duration in milliseconds"),
     }),
     run: ({ args, options }) =>
-      logCliCommand(logger, "discover-webmcp-tools", async () => {
-        const context = browserContext();
-        const input = {
-          cdp_endpoint: args.endpoint,
-          allowed_origins: options.allowedOrigins,
-          target_id: args.targetId,
-          observation_ms: options.observationMs,
-        };
-        const parsed = discoverWebMcpToolsInputSchema.safeParse(input);
-        if (!parsed.success)
-          return inputError(
-            "discover_webmcp_tools",
-            projectInputIssues(parsed.error.issues, input),
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, "discover-webmcp-tools", async () => {
+          const context = browserContext();
+          const input = {
+            cdp_endpoint: args.endpoint,
+            allowed_origins: options.allowedOrigins,
+            target_id: args.targetId,
+            observation_ms: options.observationMs,
+          };
+          const parsed = discoverWebMcpToolsInputSchema.safeParse(input);
+          if (!parsed.success)
+            return inputError(
+              "discover_webmcp_tools",
+              projectInputIssues(parsed.error.issues, input),
+            );
+          const result = await discoverWebMcpTools(
+            context.provider,
+            parsed.data,
+            { signal },
           );
-        const result = await discoverWebMcpTools(context.provider, parsed.data);
-        return result.ok ? result.value : browserCliError(result.error);
-      }),
+          return result.ok ? result.value : browserCliError(result.error);
+        }),
+      ),
   });
 };
 
@@ -161,25 +168,28 @@ const registerScreenshot = (
       ...browserScopeOptions,
     }),
     run: ({ args, options }) =>
-      logCliCommand(logger, "capture-web-screenshot", async () => {
-        const context = browserContext();
-        const input = {
-          cdp_endpoint: args.endpoint,
-          allowed_origins: options.allowedOrigins,
-          target_id: args.targetId,
-        };
-        const parsed = captureWebScreenshotInputSchema.safeParse(input);
-        if (!parsed.success)
-          return inputError(
-            "capture_web_screenshot",
-            projectInputIssues(parsed.error.issues, input),
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, "capture-web-screenshot", async () => {
+          const context = browserContext();
+          const input = {
+            cdp_endpoint: args.endpoint,
+            allowed_origins: options.allowedOrigins,
+            target_id: args.targetId,
+          };
+          const parsed = captureWebScreenshotInputSchema.safeParse(input);
+          if (!parsed.success)
+            return inputError(
+              "capture_web_screenshot",
+              projectInputIssues(parsed.error.issues, input),
+            );
+          const result = await captureWebScreenshot(
+            context.provider,
+            parsed.data,
+            { signal },
           );
-        const result = await captureWebScreenshot(
-          context.provider,
-          parsed.data,
-        );
-        return result.ok ? result.value : browserCliError(result.error);
-      }),
+          return result.ok ? result.value : browserCliError(result.error);
+        }),
+      ),
   });
 };
 

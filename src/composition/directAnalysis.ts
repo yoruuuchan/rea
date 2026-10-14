@@ -28,6 +28,10 @@ export const createDirectAnalysis = (
       const { createManagedBinarySession } = await import("./binary.js");
       return createManagedBinarySession();
     },
+    createArtifactBinarySession: async () => {
+      const { createArtifactBinarySession } = await import("./binary.js");
+      return createArtifactBinarySession(environment);
+    },
   };
   const runDirectAnalysis: BoundOperation<
     DirectAnalysisRuntime["runDirectAnalysis"]

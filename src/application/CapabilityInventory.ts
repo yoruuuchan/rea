@@ -115,7 +115,6 @@ const ENHANCED_REQUIREMENTS: Readonly<
   analyze_swift_types: ["list_procedures"],
   find_xrefs_to_name: ["list_names", "xrefs"],
   binary_overview: [
-    "list_segments",
     ["current_document", "list_documents"],
     "list_procedures",
     "list_strings",
@@ -345,7 +344,11 @@ const workflowAvailabilityFor = ({
   kind,
   policy,
 }: AvailabilityContext): Availability | null => {
-  if (name === "inspect_go_binary" || name === "inspect_rust_binary")
+  if (
+    name === "inspect_go_binary" ||
+    name === "inspect_rust_binary" ||
+    name === "inspect_electron_fuses"
+  )
     return { reason: "available", remediation: null };
   if (name === "inspect_sqlite_database") {
     const capability = sqliteDatabaseCapability(process.versions.node);
@@ -462,7 +465,10 @@ const workflowAvailabilityFor = ({
           reason:
             policy.androidAnalysisAvailability?.code === "unsupported_host"
               ? "unsupported_host"
-              : "provider_missing",
+              : policy.androidAnalysisAvailability?.code ===
+                  "runtime_unavailable"
+                ? "provider_unavailable"
+                : "provider_missing",
           remediation:
             policy.androidAnalysisAvailability?.reason ??
             "Set REA_JADX_MCP_JAR to a caller-supplied jadx-headless-mcp 0.7.1 JAR and provide a full JDK on Linux, macOS, or Windows x64 with its matching bundled native controls.",

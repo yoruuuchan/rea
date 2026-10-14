@@ -214,18 +214,32 @@ std::unique_ptr<Process> spawnProcess(const std::wstring& command, const std::ws
 }
 
 static napi_value readOutput(napi_env env, Handle& read, bool& ended) {
-  std::array<unsigned char, 65536> bytes;
-  DWORD available = 0, count = 0;
+  constexpr size_t kMaximumReadPerPoll = 1024 * 1024;
+  std::array<unsigned char, 65536> chunk;
+  std::vector<unsigned char> bytes;
   if (!read.valid()) ended = true;
-  else if (!PeekNamedPipe(read.get(), nullptr, 0, nullptr, &available, nullptr)) {
-    require(GetLastError() == ERROR_BROKEN_PIPE, "Observe owned process output failed");
-    read.reset(); ended = true;
-  } else if (available > 0) {
-    require(ReadFile(read.get(), bytes.data(), std::min<DWORD>(available, bytes.size()), &count, nullptr),
-            "Read owned process output failed");
+  else {
+    while (bytes.size() < kMaximumReadPerPoll) {
+      DWORD available = 0;
+      if (!PeekNamedPipe(read.get(), nullptr, 0, nullptr, &available, nullptr)) {
+        require(GetLastError() == ERROR_BROKEN_PIPE,
+                "Observe owned process output failed");
+        read.reset();
+        ended = true;
+        break;
+      }
+      if (available == 0) break;
+      const auto requested = static_cast<DWORD>(std::min<size_t>(
+          {available, chunk.size(), kMaximumReadPerPoll - bytes.size()}));
+      DWORD count = 0;
+      require(ReadFile(read.get(), chunk.data(), requested, &count, nullptr) &&
+                  count > 0,
+              "Read owned process output failed");
+      bytes.insert(bytes.end(), chunk.begin(), chunk.begin() + count);
+    }
   }
   napi_value result;
-  check(napi_create_buffer_copy(env, count, bytes.data(), nullptr, &result));
+  check(napi_create_buffer_copy(env, bytes.size(), bytes.data(), nullptr, &result));
   return result;
 }
 

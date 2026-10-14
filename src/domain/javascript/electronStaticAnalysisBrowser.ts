@@ -25,7 +25,7 @@ import {
   staticPath,
   staticPathResolutionContext,
 } from "./javascriptStaticAnalysisHelpers.js";
-import { semanticStaticPropertyName } from "./javascriptAstValues.js";
+import { semanticStaticPropertyKey } from "./javascriptAstValues.js";
 import type { JavaScriptFindingContext } from "./javascriptStaticAnalysisState.js";
 
 /** Inspect BrowserWindow, contextBridge, and utility-process syntax. */
@@ -126,8 +126,8 @@ const collectWebPreferences = (
       });
       continue;
     }
-    const name = semanticStaticPropertyName(property.key, property.computed);
-    if (name === "" || property.computed) {
+    const name = semanticStaticPropertyKey(property.key, property.computed);
+    if (name === null) {
       unknown += 1;
       preferences.push({
         name: `[dynamic@${String(property.start ?? -1)}]`,

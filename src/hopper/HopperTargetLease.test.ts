@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -30,6 +31,84 @@ afterEach(async () => {
       .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
+
+describe.skipIf(process.platform === "win32")(
+  "Hopper lease directory admission",
+  () => {
+    it("secures an existing owned directory without replacing it", async () => {
+      const directory = await temporaryDirectory();
+      await chmod(directory, 0o755);
+      const before = await lstat(directory);
+      const acquired = await acquireLinuxHopperApplicationLease({
+        directory,
+        runId: "permission-hardening",
+      });
+      if (!acquired.acquired)
+        throw new Error("Expected the owned directory lease");
+      try {
+        const after = await lstat(directory);
+        expect(after.dev).toBe(before.dev);
+        expect(after.ino).toBe(before.ino);
+        expect(after.mode & 0o777).toBe(0o700);
+      } finally {
+        await acquired.lease.release();
+      }
+    });
+
+    it("rejects a directory symlink without changing its target", async () => {
+      const directory = await temporaryDirectory();
+      const realDirectory = join(directory, "actual");
+      const alias = join(directory, "selected");
+      await mkdir(realDirectory);
+      await chmod(realDirectory, 0o755);
+      await symlink(realDirectory, alias);
+      await expect(
+        acquireLinuxHopperApplicationLease({
+          directory: alias,
+          runId: "alias",
+        }),
+      ).rejects.toMatchObject({ _tag: "HopperStartError" });
+      expect(await readdir(realDirectory)).toEqual([]);
+      expect((await lstat(realDirectory)).mode & 0o777).toBe(0o755);
+      expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+    });
+
+    it.skipIf(process.getuid?.() === 0)(
+      "explains unreadable directory recovery without changing unverified permissions",
+      async () => {
+        const directory = await temporaryDirectory();
+        await chmod(directory, 0o333);
+        try {
+          await expect(
+            acquireLinuxHopperApplicationLease({
+              directory,
+              runId: "unreadable",
+            }),
+          ).rejects.toMatchObject({
+            _tag: "HopperStartError",
+            cause: expect.objectContaining({ code: "EACCES" }),
+            userMessage: expect.stringContaining(
+              "restore owner-only read, write, and search permissions (0700)",
+            ),
+          });
+          expect((await lstat(directory)).mode & 0o777).toBe(0o333);
+          // This fixture owns the directory. Apply the documented recovery,
+          // then exercise the same production acquisition again.
+          await chmod(directory, 0o700);
+          const recovered = await acquireLinuxHopperApplicationLease({
+            directory,
+            runId: "recovered-access",
+          });
+          if (!recovered.acquired) throw new Error("Expected recovered access");
+          await recovered.lease.release();
+          expect(await readdir(directory)).toEqual([]);
+        } finally {
+          await chmod(directory, 0o700);
+        }
+      },
+    );
+  },
+);
 
 describe("Hopper target leases", () => {
   it("reports the owning REA session for a duplicate target and profile", async () => {

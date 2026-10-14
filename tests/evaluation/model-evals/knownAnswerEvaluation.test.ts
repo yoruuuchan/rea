@@ -140,6 +140,8 @@ const managedTranscript = () => {
     javascriptSha256: "",
     javascriptShapeLeft: "",
     javascriptShapeRight: "",
+    notesElectron: "",
+    notesElectronSha256: "",
     managed: target.path,
     managedSha256: target.sha256,
   });

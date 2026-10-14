@@ -51,6 +51,7 @@ const replySchema = z.discriminatedUnion("ok", [
       "format",
       "unsupported",
       "input-limit",
+      "expanded-limit",
       "resource-limit",
       "decoder",
       "limit",
@@ -212,6 +213,18 @@ export class HistoricalCaptureDecoder {
               message: reply.message,
               expected: {
                 maximum_capture_nesting: WEB_NETWORK_CAPTURE_LIMITS.depth,
+              },
+            },
+          ]);
+        if (reply.reason === "expanded-limit")
+          throw new AnalysisInputError(OPERATION, undefined, [
+            {
+              path: ["capture_path", reply.pointer],
+              reason: "out_of_range",
+              message: reply.message,
+              expected: {
+                maximum_expanded_capture_bytes:
+                  WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
               },
             },
           ]);

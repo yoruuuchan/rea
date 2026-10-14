@@ -301,7 +301,10 @@ const addIndexedDbRecords = async (
     for (const entry of entries) {
       const key = stableValue(entry.key);
       const primaryKey = stableValue(entry.primaryKey);
-      const value = stableValue(entry.value);
+      // A missing remote object is an omission, not the JavaScript value
+      // "undefined". Keep the unavailable digest null and coverage partial.
+      const value =
+        entry.value === undefined ? undefined : stableValue(entry.value);
       addFingerprint(run.state, {
         scope: "indexed_db_record",
         identity: {

@@ -184,11 +184,13 @@ export async function startBrowserVerifierSite() {
     async close() {
       for (const client of webSockets.clients) client.terminate();
       await new Promise((resolve) => webSockets.close(resolve));
-      await new Promise((resolve, reject) =>
+      const serverClosed = new Promise((resolve, reject) =>
         server.close((error) =>
           error === undefined ? resolve() : reject(error),
         ),
       );
+      server.closeAllConnections();
+      await serverClosed;
     },
   };
 }

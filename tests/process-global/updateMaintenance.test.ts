@@ -146,6 +146,22 @@ describe("maintenance activation and layered configuration", () => {
     expect(await readFile(configPath, "utf8")).toBe(original);
   });
 
+  it("selects a ZCode registration loaded from the same-scope fallback", async () => {
+    await writeClient("zcode", JSON.stringify({ mcp: { servers: {} } }));
+    const fallbackPath = join(home, ".agents", "mcp.json");
+    await mkdir(join(home, ".agents"), { recursive: true });
+    await writeFile(
+      fallbackPath,
+      JSON.stringify({
+        mcpServers: { rea: { command: entryPoint, args: ["mcp"] } },
+      }),
+    );
+
+    await expect(
+      existingMaintenanceScope(home, entryPoint, process.env),
+    ).resolves.toMatchObject({ clients: ["zcode"] });
+  });
+
   it("selects an enabled registration inherited through layered OpenCode files", async () => {
     const directory = join(home, ".config", "opencode");
     await mkdir(directory, { recursive: true });
@@ -319,6 +335,8 @@ describe("updated executable maintenance planning", () => {
   it("runs real setup as a noninteractive dry run and creates no new integrations or backups", async () => {
     const configPath = await writeClient("codex", staleCodex);
     const untouched = await writeClient("claude_code", '{"mcpServers":{}}');
+    const skillContent = `---\nname: ${PRODUCT_IDENTITY.skillName}\nmetadata:\n  version: "1"\n---\n# REA\n`;
+    const skillPath = await writeSkill(skillContent);
     vi.stubEnv("npm_command", "exec");
     const result = await planIntegrationMaintenance(
       home,
@@ -328,18 +346,35 @@ describe("updated executable maintenance planning", () => {
     );
     expect(result).toMatchObject({
       status: "planned",
-      scope: { clients: ["codex"], skill: false },
-      plannedActions: [
-        { id: "configure_client:codex", kind: "configure_client" },
-      ],
+      scope: {
+        clients: ["codex"],
+        skill: true,
+        skillDestinations: [{ client: "shared", path: dirname(skillPath) }],
+      },
     });
+    if (result.status !== "planned") throw new Error(JSON.stringify(result));
+    expect(result.plannedActions).toEqual([
+      expect.objectContaining({
+        id: "configure_client:codex",
+        kind: "configure_client",
+      }),
+      expect.objectContaining({
+        id: "install_skill",
+        kind: "install_skill",
+        target: dirname(skillPath),
+      }),
+    ]);
     expect(await readFile(configPath, "utf8")).toBe(staleCodex);
     expect(await readFile(untouched, "utf8")).toBe('{"mcpServers":{}}');
+    expect(await readFile(skillPath, "utf8")).toBe(skillContent);
     await expect(access(`${configPath}.rea.backup`)).rejects.toMatchObject({
       code: "ENOENT",
     });
+    await expect(access(`${skillPath}.rea.backup`)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(
-      access(join(home, ".agents", "skills", PRODUCT_IDENTITY.skillName)),
+      access(join(home, ".claude", "skills", PRODUCT_IDENTITY.skillName)),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

@@ -21,6 +21,7 @@ import {
   runtimeFunctionParameters,
   semanticStaticPropertyKey,
   semanticWriteTargets,
+  unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import type {
   JavaScriptSemanticAnalysisState,
@@ -42,6 +43,7 @@ import {
   traverseJavaScriptAstSteps,
 } from "./javascriptSemanticTraversal.js";
 import { semanticRequireOrigin } from "./javascriptSemanticRequireOrigin.js";
+import { semanticBundledRequireOrigin } from "./javascriptBundledRequireOrigin.js";
 import { collectSemanticMemberMutationsSteps } from "./javascriptSemanticMemberMutations.js";
 import { indexJavaScriptAmbientWritesSteps } from "./javascriptSemanticAmbientWrites.js";
 import { hasUncertainTypeOnlyModuleSideEffect } from "./javascriptModuleDeclaration.js";
@@ -157,6 +159,7 @@ export function* analyzeParsedJavaScriptSemanticsSteps(
 ): Generator<void, JavaScriptSemanticIr> {
   const state = createState(file.program, staticImportResolutionMode);
   yield* collectDefinitionsSteps(file.program, state);
+  yield* indexJavaScriptAmbientWritesSteps(file.program, state);
   yield* collectSemanticMemberMutationsSteps(file.program, state);
   yield* traverseJavaScriptAstSteps(file.program, {
     enter: (node) => collectSemanticModuleLink(node, state),
@@ -258,7 +261,8 @@ export type JavaScriptOpenReceiverFact =
   | "local"
   | "local-indexed-db"
   | "local-cache-storage"
-  | "configuration";
+  | "configuration"
+  | "extension-state";
 
 /**
  * Resolve only the lexical receiver identity needed to distinguish browser
@@ -278,6 +282,7 @@ export function* classifyParsedJavaScriptOpenReceiversSteps(
   const state = createState(file.program);
   yield* collectDefinitionsSteps(file.program, state);
   const facts = new Map<number, JavaScriptOpenReceiverFact>();
+  const extensionStateReads: number[] = [];
   yield* traverseJavaScriptAstSteps(file.program, {
     enter: (node) => {
       if (
@@ -293,6 +298,8 @@ export function* classifyParsedJavaScriptOpenReceiversSteps(
       if (method === "get") {
         if (isConfigurationReceiver(state, node.callee.object))
           facts.set(node.start ?? -1, "configuration");
+        else if (isExtensionStateMember(node.callee.object))
+          extensionStateReads.push(node.start ?? -1);
         return;
       }
       if (method !== "open" || !t.isIdentifier(node.callee.object)) return;
@@ -358,8 +365,30 @@ export function* classifyParsedJavaScriptOpenReceiversSteps(
       if (aliasFact !== undefined) facts.set(node.start ?? -1, aliasFact);
     },
   });
+  if (extensionStateReads.length > 0 && importsVsCodeModule(state))
+    for (const start of extensionStateReads)
+      facts.set(start, "extension-state");
   return facts;
 }
+
+/** VS Code passes extension state through ExtensionContext, not an import. */
+const isExtensionStateMember = (receiver: t.Node): boolean =>
+  (t.isMemberExpression(receiver) || t.isOptionalMemberExpression(receiver)) &&
+  (() => {
+    const key = semanticStaticPropertyKey(receiver.property, receiver.computed);
+    return key === "globalState" || key === "workspaceState";
+  })();
+
+/** Require module evidence before treating a familiar member as VS Code state. */
+const importsVsCodeModule = (state: JavaScriptSemanticAnalysisState): boolean =>
+  [...state.bindingsById.values()].some(
+    (binding) =>
+      binding.directOrigins.some(({ specifier }) => specifier === "vscode") ||
+      semanticRequireOrigin(
+        semanticStableInitializer(binding, state)?.node,
+        state,
+      )?.origin.specifier === "vscode",
+  );
 
 /**
  * Whether a call spells VS Code's `workspace.getConfiguration(section)`, whose
@@ -522,7 +551,7 @@ export function* indexJavaScriptElectronIdentitySteps(
     const wrapped = interop.callOrigin(root);
     const origin =
       wrapped === undefined
-        ? semanticRequireOrigin(root, state)?.origin
+        ? electronRequireOrigin(root, state)?.origin
         : collectedWrites && interop.invalidatedCall(root)
           ? undefined
           : wrapped.origin;
@@ -606,6 +635,13 @@ const electronExport = (
     : null;
 };
 
+const electronRequireOrigin = (
+  node: t.Node,
+  state: JavaScriptSemanticAnalysisState,
+) =>
+  semanticRequireOrigin(node, state) ??
+  semanticBundledRequireOrigin(node, state);
+
 const bindingOrigin = (
   binding: JavaScriptSemanticBindingState,
   state: JavaScriptSemanticAnalysisState,
@@ -616,7 +652,7 @@ const bindingOrigin = (
       : undefined;
   const initializer = semanticStableInitializer(binding, state);
   if (initializer === undefined) return undefined;
-  const origin = semanticRequireOrigin(initializer.node, state)?.origin;
+  const origin = electronRequireOrigin(initializer.node, state)?.origin;
   const projection = initializer.projection;
   return origin === undefined ||
     !projection.every((key): key is string => typeof key === "string")
@@ -637,6 +673,7 @@ const createState = (
     bindings: new Map(),
   };
   return {
+    program,
     staticImportResolutionMode,
     parentsByNode: new WeakMap(),
     scopes: [root],
@@ -649,7 +686,10 @@ const createState = (
     linkedRequireCalls: new WeakSet(),
     moduleLinkBindings: new WeakMap(),
     conditionalInitializers: new WeakSet(),
+    requiredModuleEffects: new Map(),
+    ambientBindingWrites: new Map(),
     ambientWrites: new SemanticPropertyPathCoverage(),
+    ambientWriteEffects: [],
   };
 };
 
@@ -820,13 +860,18 @@ const hasConditionalInitializer = (ancestors: readonly t.Node[]): boolean => {
     const node = ancestors[index];
     if (t.isFunction(node) || t.isProgram(node) || t.isStaticBlock(node))
       return false;
-    if (
-      t.isIfStatement(node) ||
-      t.isLoop(node) ||
-      t.isSwitchCase(node) ||
-      t.isTryStatement(node)
-    )
+    if (t.isIfStatement(node) || t.isSwitchCase(node) || t.isTryStatement(node))
       return true;
+    if (t.isLoop(node)) {
+      const bodyOrTest = ancestors[index + 1];
+      if (
+        (t.isForStatement(node) && bodyOrTest === node.init) ||
+        (t.isDoWhileStatement(node) &&
+          (bodyOrTest === node.body || bodyOrTest === node.test))
+      )
+        continue;
+      return true;
+    }
   }
   return false;
 };
@@ -940,12 +985,13 @@ const bindAssignment = (
   state: JavaScriptSemanticAnalysisState,
 ): void => {
   if (t.isAssignmentExpression(node)) {
-    if (t.isIdentifier(node.left))
+    const left = unwrapJavaScriptExpression(node.left).node;
+    if (t.isIdentifier(left))
       addAssignment(
-        node.left,
+        left,
         node.operator === "=" ||
           ((node.operator === "||=" || node.operator === "??=") &&
-            !hasIncomingValue(node.left, scope, state))
+            !hasIncomingValue(left, scope, state))
           ? node.right
           : node,
         scope,
@@ -955,9 +1001,10 @@ const bindAssignment = (
       for (const identifier of semanticWriteTargets(node.left))
         if (t.isIdentifier(identifier))
           addAssignment(identifier, node, scope, state);
-  } else if (t.isUpdateExpression(node) && t.isIdentifier(node.argument))
-    addAssignment(node.argument, node, scope, state);
-  else if (t.isForOfStatement(node) || t.isForInStatement(node))
+  } else if (t.isUpdateExpression(node)) {
+    const argument = unwrapJavaScriptExpression(node.argument).node;
+    if (t.isIdentifier(argument)) addAssignment(argument, node, scope, state);
+  } else if (t.isForOfStatement(node) || t.isForInStatement(node))
     for (const pattern of t.isVariableDeclaration(node.left)
       ? node.left.declarations.map(({ id }) => id)
       : [node.left]) {
@@ -1339,7 +1386,7 @@ const createBinding = (
   name,
   kind,
   mutable,
-  mutatedPaths: [],
+  memberWrites: [],
   escapedPaths: [],
   definitions: [],
   initializers: [],
@@ -1359,7 +1406,14 @@ const addAssignment = (
     identifier.name,
     state,
   );
-  if (binding === undefined) return;
+  if (binding === undefined) {
+    // Unbound identifiers can denote host wrapper bindings (such as require),
+    // which are separate from properties written through the global object.
+    const writes = state.ambientBindingWrites.get(identifier.name) ?? [];
+    writes.push(identifier);
+    state.ambientBindingWrites.set(identifier.name, writes);
+    return;
+  }
   binding.mutable = true;
   binding.definitions.push({ kind: "assignment", location: range(identifier) });
   binding.initializers.push({ node: initializer, projection: [] });

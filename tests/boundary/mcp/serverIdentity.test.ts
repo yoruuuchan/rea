@@ -139,6 +139,20 @@ describe("server and catalog identity", () => {
     );
   });
 
+  it("changes catalog identity when advertised input examples change", () => {
+    const contract = TOOL_CONTRACTS.find((item) => item.examples.length > 0);
+    if (contract === undefined) throw new Error("expected an input example");
+    const original = createCatalogDigests();
+    const withoutExamples = createCatalogDigests(
+      TOOL_CONTRACTS.map((item) =>
+        item === contract ? { ...item, examples: [] } : item,
+      ),
+    );
+    expect(withoutExamples.tools_sha256).not.toBe(original.tools_sha256);
+    expect(withoutExamples.combined_sha256).not.toBe(original.combined_sha256);
+    expect(withoutExamples.prompts_sha256).toBe(original.prompts_sha256);
+  });
+
   it("reports unknown without a live comparison and distinguishes aligned from stale", () => {
     const unknown = createServerIdentity({
       startedAt: "2026-07-13T00:00:00.000Z",

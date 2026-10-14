@@ -157,7 +157,7 @@ export const readGoPeImage = (bytes: Buffer): GoBinaryContainer => {
     mappings,
     zero_fills: zeroFills,
     sections,
-    search,
+    search: search === null ? [] : [search],
   };
 };
 

@@ -4,7 +4,10 @@ import {
   analyzeJadxRequest,
   type JadxToolPort,
 } from "../../../src/android/JadxAnalysis.js";
-import { androidInputSchemas } from "../../../src/domain/android/androidAnalysis.js";
+import {
+  androidInputSchemas,
+  androidResultSchemas,
+} from "../../../src/domain/android/androidAnalysis.js";
 
 const summary = {
   full_name: "fixture.Target",
@@ -40,6 +43,43 @@ const engine = {
   worker_count: 1,
   heap_limit_mib: null,
 };
+
+it("requires explicit direct invoke coverage state in result evidence", () => {
+  const result = {
+    engine,
+    class_name: "fixture.Target",
+    method_name: null,
+    overload_index: null,
+    reported_signature: null,
+    dex_descriptor: null,
+    total: 1,
+    references: [
+      {
+        kind: "method",
+        name: "caller",
+        reported_full_name: "fixture.Other.caller",
+        containing_class: "fixture.Other",
+        top_class: "fixture.Other",
+        source_line: null,
+        dex_offset: null,
+        direct_invokes: null,
+      },
+    ],
+    coverage: "complete",
+    reference_unit: "using_node",
+  };
+  expect(
+    androidResultSchemas.trace_android_references.safeParse(result).success,
+  ).toBe(false);
+  expect(
+    androidResultSchemas.trace_android_references.safeParse({
+      ...result,
+      references: [
+        { ...result.references[0], direct_invokes_exhaustive: null },
+      ],
+    }).success,
+  ).toBe(true);
+});
 
 it("publishes exact DEX prototypes instead of discarding bridge metadata", async () => {
   const tools: JadxToolPort = {
@@ -246,7 +286,9 @@ it.each([
   async (fields, expected) => {
     const result = await traceWithReference(fields as Record<string, unknown>);
     expect(result).toMatchObject({
-      references: [{ direct_invokes: expected }],
+      references: [
+        { direct_invokes: expected, direct_invokes_exhaustive: null },
+      ],
     });
   },
 );

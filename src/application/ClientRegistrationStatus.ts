@@ -1,8 +1,5 @@
 import { readClientPolicyBlock } from "./GeminiClientSettings.js";
-import {
-  effectiveClientConfiguration,
-  readClientConfigurationFiles,
-} from "./ClientConfigurationFiles.js";
+import { readEffectiveClientRegistrationConfiguration } from "./ClientConfigurationFiles.js";
 import {
   clientServerForcedEnabled,
   clientServerListedDisabled,
@@ -13,10 +10,12 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { z } from "zod";
+import { valid } from "semver";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
 import {
+  clientRegistrationPackageReference,
   isOwnedClientRegistrationCommand,
   packageRunnerRegistrationCommand,
 } from "./ClientRegistrationIdentity.js";
@@ -33,6 +32,8 @@ import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.j
 interface ClientRegistrationStatusBase {
   readonly client: string;
   readonly config_path: string;
+  /** Exact package reference requested by npx/bunx, when registration uses one. */
+  readonly package_reference?: string;
 }
 
 type RegistrationCommand = readonly [string, ...string[]];
@@ -140,24 +141,26 @@ export const readClientRegistrationInspections = async (
         });
       continue;
     }
+    let selectedConfigPath = client.configPath;
     try {
-      const files = await readClientConfigurationFiles(
+      const configuration = await readEffectiveClientRegistrationConfiguration(
         client,
         options.resources,
       );
-      if (!files.ok) {
+      if (!configuration.ok) {
         record({
           client: client.name,
-          config_path: client.configPath,
+          config_path: configuration.error.path,
           command: [],
           state: "invalid",
-          remediation: files.error.detail,
+          remediation: configuration.error.detail,
         });
         continue;
       }
-      const parsed = effectiveClientConfiguration(files.value);
+      const { document: parsed, configPath } = configuration.value;
+      selectedConfigPath = configPath;
       if (parsed === undefined) {
-        record(unavailableStatus(client, "missing"));
+        record(unavailableStatus(client, "missing", configPath));
         continue;
       }
       const policy = await readClientPolicyBlock(
@@ -169,7 +172,7 @@ export const readClientRegistrationInspections = async (
       if (!policy.ok) {
         record({
           client: client.name,
-          config_path: client.configPath,
+          config_path: configPath,
           command: [],
           state: "invalid",
           remediation: policy.error.detail,
@@ -186,30 +189,45 @@ export const readClientRegistrationInspections = async (
         if (editabilityError !== undefined) {
           record({
             client: client.name,
-            config_path: client.configPath,
+            config_path: configPath,
             command: [],
             state: "invalid",
             remediation: editabilityError.message,
           });
           continue;
         }
-        record(unavailableStatus(client, "missing"));
+        record(unavailableStatus(client, "missing", configPath));
         continue;
       }
-      const registration = parseRegistration(raw, client);
+      const effectiveClient: SetupClient =
+        parsed.dialect === "zcode_fallback"
+          ? {
+              ...client,
+              configPath,
+              configPaths: [configPath],
+              format: "zcode_fallback",
+            }
+          : client;
+      const registration = parseRegistration(raw, effectiveClient);
       const command: RegistrationCommand = [
         registration.command,
         ...registration.args,
       ];
+      const packageReference = clientRegistrationPackageReference(command);
       const activation = registrationActivation(registration, client, parsed);
+      const packageVersion = exactRegisteredPackageVersion(packageReference);
+      const packageVersionDrift =
+        packageVersion !== undefined &&
+        packageVersion !== PRODUCT_IDENTITY.packageVersion;
       record(
         configuredStatus(
-          client,
+          effectiveClient,
           command,
           activation === "enabled" &&
+            !packageVersionDrift &&
             registrationAligned(
               registration,
-              client,
+              effectiveClient,
               currentCommandPath,
               options.platform ?? process.platform,
             ) &&
@@ -217,13 +235,21 @@ export const readClientRegistrationInspections = async (
             policyBlock === undefined
             ? "aligned"
             : "stale",
-          policyBlock,
+          policyBlock ??
+            (packageVersionDrift
+              ? packageVersionRemediation(packageReference ?? "", client)
+              : undefined),
+          packageReference,
         ),
         activation,
       );
     } catch (cause: unknown) {
       record(
-        unavailableStatus(client, isMissing(cause) ? "missing" : "invalid"),
+        unavailableStatus(
+          client,
+          isMissing(cause) ? "missing" : "invalid",
+          selectedConfigPath,
+        ),
       );
     }
   }
@@ -240,7 +266,8 @@ const registrationActivation = (
   (client.format !== "grok" && registration.disabled === true) ||
   (registration.enabled === false &&
     !clientServerForcedEnabled(parsed, PRODUCT_IDENTITY.mcpServerKey)) ||
-  (client.format === "zcode" && registration.enable === false) ||
+  ((parsed.dialect === "zcode" || parsed.dialect === "zcode_fallback") &&
+    registration.enable === false) ||
   clientServerListedDisabled(parsed, PRODUCT_IDENTITY.mcpServerKey)
     ? "disabled"
     : "enabled";
@@ -378,12 +405,16 @@ const configuredStatus = (
   command: RegistrationCommand,
   state: "aligned" | "stale",
   policyRemediation?: string,
+  packageReference?: string,
 ): ClientRegistrationStatus =>
   state === "aligned"
     ? {
         client: client.name,
         config_path: client.configPath,
         command,
+        ...(packageReference === undefined
+          ? {}
+          : { package_reference: packageReference }),
         state,
         remediation: null,
       }
@@ -391,16 +422,36 @@ const configuredStatus = (
         client: client.name,
         config_path: client.configPath,
         command,
+        ...(packageReference === undefined
+          ? {}
+          : { package_reference: packageReference }),
         state,
         remediation: policyRemediation ?? remediation(client),
       };
 
+const exactRegisteredPackageVersion = (
+  packageReference: string | undefined,
+): string | undefined => {
+  if (packageReference === undefined) return undefined;
+  const prefix = `${PRODUCT_IDENTITY.packageName}@`;
+  if (!packageReference.startsWith(prefix)) return undefined;
+  const version = packageReference.slice(prefix.length);
+  return valid(version) === version ? version : undefined;
+};
+
+const packageVersionRemediation = (
+  packageReference: string,
+  client: SetupClient,
+): string =>
+  `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
+
 const unavailableStatus = (
   client: SetupClient,
   state: "missing" | "invalid",
+  configPath: string = client.configPath,
 ): ClientRegistrationStatus => ({
   client: client.name,
-  config_path: client.configPath,
+  config_path: configPath,
   command: [],
   state,
   remediation: remediation(client),

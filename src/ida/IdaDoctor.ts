@@ -52,13 +52,16 @@ const inspectPrivateWorkspace = (): DoctorProviderCheck => {
   return {
     name: "private_workspace",
     ok: privacy.available,
-    code: privacy.available ? null : "unsupported_host",
+    code: privacy.available ? null : privacy.code,
     detail: privacy.available
       ? `Private workspace authority is available (${privacy.proof}).`
       : privacy.reason,
-    remediation: privacy.available
-      ? null
-      : "Use the matching Windows x64 REA package and a writable local NTFS temporary directory.",
-    classification: "unsupported_host",
+    remediation: privacy.available ? null : privacy.remediation,
+    classification:
+      !privacy.available && privacy.code === "runtime_missing"
+        ? "missing_dependency"
+        : !privacy.available && privacy.code === "runtime_unavailable"
+          ? "runtime_failure"
+          : "unsupported_host",
   };
 };

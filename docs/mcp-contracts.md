@@ -193,7 +193,8 @@ after target content was read.
 ## Retained application Evidence inputs
 
 `analyze_javascript_application`, `inspect_binary_layout`, `inspect_artifact`,
-`inspect_wasm_artifact`, and `inspect_macho` accept `detail`:
+`inspect_wasm_artifact`, `inspect_macho`, and `decode_interface_builder`
+accept `detail`:
 `complete` (default) returns the complete analysis Evidence; `summary` records
 that complete Evidence in the session and returns the derived
 `inspect_analysis_view` summary Evidence instead. Its
@@ -275,6 +276,17 @@ that unreturned symbols are absent. Large frameworks return megabytes of
 symbols (Electron Framework: 2.5 MB of imports and exports, 3.3 KB as a
 summary), so select `detail: "summary"` on the first call. Delivery detail
 never reaches the native tools or changes the source Evidence ID.
+
+Completed `decode_interface_builder` Evidence supports a summary and
+`view: {kind: "interface-builder", collection: "nodes", offset: 0, limit: 64}`.
+Collections are `documents`, `nodes`, `edges`, and `coverage`; for nodes and
+edges an optional `document` keeps rows whose evidence names that exact decoded
+`relative_path`, and an undecoded path is refused. The summary keeps every
+decoded document, the provider, node-kind, edge-relation and coverage-status
+counts, and whether the decoded graph is incomplete. Each page repeats
+`source_truncated`. A complete app graph often exceeds the default MCP response
+budget (XLD.app: 6.7 MB), so select `detail: "summary"` on the first call.
+Delivery detail never reaches the decoder or changes the source Evidence ID.
 
 `trace_application_feature`, `trace_javascript_semantics`,
 `compare_application_versions`, `compare_source_to_bundle`, and
@@ -671,7 +683,13 @@ advertised input schema within a 13,312-byte budget, measured to sit below
 Moonshot's observed cap (community measurements: a 13.7 KB schema is accepted
 while a ~15 KB one is rejected). The setting is read at startup; restart the
 server to apply changes, as with `REA_MCP_MAX_RESPONSE_BYTES`. The default
-value `full` keeps the complete advertisement unchanged.
+value `full` keeps the complete advertisement unchanged. Compact presentation
+also reduces schemas whose expanded JSON tree exceeds ten levels, the limit
+reported by strict-depth MCP clients in [#2813](https://github.com/morluto/rea/issues/2813).
+WorkBuddy/CodeBuddy gateways have also rejected full REA catalogs with an
+opaque `11133` error while accepting the compact profile
+([#2999](https://github.com/morluto/rea/issues/2999)); compatibility depends on
+the selected gateway and model.
 
 The compact profile renders the same tool set, output schemas, annotations,
 and canonical server-side validation. It changes only the advertised input
@@ -696,6 +714,9 @@ JSON Schema:
   canonical schema still rejects malformed calls server-side, so callers
   following the reduced advertisement receive the canonical typed error
   instead of silent acceptance.
+- Schemas deeper than ten nodes use the same reduced projection, with
+  root-property names, types, guidance, and required fields retained. The
+  server continues to enforce the full canonical input contract.
 
 Boundary tests pin every advertised compact schema to the budget, keep them
 valid JSON Schema that still accepts every canonical example. Client verification
@@ -710,6 +731,30 @@ catalog refreshes and equivalent tool outputs; changing the schema changes its
 identity. Explicit schema IDs and relative external reference bases are
 preserved. This keeps every tool and validation rule in discovery and does not
 change the SDK's catalog invalidation or availability checks.
+
+Some stdio hosts reject a complete `tools/list` frame before they load any
+tools. The opt-in `REA_MCP_OUTPUT_SCHEMA_PROFILE=off` setting omits `outputSchema`
+from the advertised catalog for hosts with a small frame limit (the measured
+pi-web-ui failure and catalog breakdown are in [#2512](https://github.com/morluto/rea/issues/2512)).
+The default `full` profile is unchanged. With `off`, REA validates successful
+structured results against the same named canonical tool contract before
+delivery; it still returns complete `structuredContent` and text results.
+Only client-side schema discovery and validation are omitted, so hosts using
+this profile should rely on REA's validation and retain their usual response
+size limits.
+
+### Function comparison limitations
+
+`compare_functions` compares the `pseudocode` and `assembly` dimensions as
+exact provider text. A `changed` status establishes a textual difference, not a
+behavior change. Addresses and generated names are not normalized, so relocated
+labels can change these dimensions while `cfg` remains unchanged. Both text
+dimensions carry this limitation inline. Numeric constants remain part of the
+exact comparison. Reconstruction verification and static/runtime correlation
+retain limitations from the selected dimension; an overall function claim
+includes all dimension limitations. Equal CFGs establish only equal observed
+block sizes and successor relationships. Text from different provider
+identities remains unknown.
 
 ### Comparison input shapes
 

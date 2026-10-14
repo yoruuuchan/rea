@@ -1,3 +1,4 @@
+import { isSafeNumber, type LosslessNumber } from "lossless-json";
 import type { WebNetworkCaptureRecord } from "../../domain/webNetworkCapture.js";
 import { parseRecordedTransportUrl } from "../../domain/recordedTransportUrl.js";
 
@@ -48,6 +49,22 @@ export class CaptureRedaction {
   credential(pointer: string): null {
     this.redactions.push({ pointer, reason: "transport-credential" });
     return null;
+  }
+
+  /** Check both retained spellings before projecting a producer JSON number. */
+  number(
+    value: LosslessNumber,
+    pointer: string,
+    redact = true,
+  ): { reported: number | null; literal: string } | null {
+    const reported = isSafeNumber(value.value) ? Number(value.value) : null;
+    if (
+      redact &&
+      (this.text(value.value, pointer) === null ||
+        (reported !== null && this.text(String(reported), pointer) === null))
+    )
+      return null;
+    return { reported, literal: value.value };
   }
 
   /** Known HAR credential surfaces; unknown extensions are ordinary caller-selected evidence. */

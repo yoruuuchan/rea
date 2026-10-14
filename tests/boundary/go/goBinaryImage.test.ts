@@ -5,12 +5,112 @@ import {
   fatImage,
   machoImage,
 } from "../../../src/artifacts/apple/MachoImage.fixture.js";
-import { readGoBinaryImage } from "../../../src/go/GoBinaryImage.js";
+import {
+  readGoBinaryImage,
+  GoBinaryResourceFailure,
+} from "../../../src/go/GoBinaryImage.js";
 import { readGoMachoImage } from "../../../src/go/GoMachoImage.js";
 import {
   createGoBinaryFixture,
+  createGoSplitElfFixture,
+  createGoOverlappingElfFixture,
   GO_MODULE_TEXT,
 } from "../../fixtures/go/image.js";
+
+it("bounds cumulative header searches across overlapping ELF file spans", () => {
+  const bytes = createGoOverlappingElfFixture();
+  expect(() => readGoBinaryImage(bytes)).toThrow(GoBinaryResourceFailure);
+  expect(() => readGoBinaryImage(bytes)).toThrow(/256 MiB.*search/);
+});
+
+it("does not charge duplicate ELF search spans repeatedly", () => {
+  expect(
+    readGoBinaryImage(createGoOverlappingElfFixture(true)).build_info,
+  ).toBeNull();
+});
+
+it("accepts a search exactly at the cumulative byte limit", () => {
+  const bytes = createGoOverlappingElfFixture();
+  bytes.writeUInt16LE(256, 56);
+  expect(readGoBinaryImage(bytes).build_info).toBeNull();
+});
+
+it("keeps different virtual alignments distinct when file spans match", () => {
+  const fixture = createGoBinaryFixture({ sectionless: true });
+  fixture.bytes.copy(fixture.bytes, 184, 128, 184);
+  fixture.bytes.writeUInt16LE(2, 56);
+  fixture.bytes.writeBigUInt64LE(0x200001n, 128 + 16);
+  expect(readGoBinaryImage(fixture.bytes).build_info?.header_offset).toBe(
+    fixture.headerOffset,
+  );
+});
+
+it.each([
+  [32, "little", "inline"],
+  [32, "little", "pointer"],
+  [32, "big", "inline"],
+  [32, "big", "pointer"],
+  [64, "little", "inline"],
+  [64, "little", "pointer"],
+  [64, "big", "inline"],
+  [64, "big", "pointer"],
+] as const)(
+  "retains later-load ELF metadata without sections (%d %s %s)",
+  (bits, byteOrder, encoding) => {
+    const original = createGoSplitElfFixture({ bits, byteOrder, encoding });
+    const sectionless = createGoSplitElfFixture({
+      bits,
+      byteOrder,
+      encoding,
+      sectionless: true,
+    });
+    const expected = readGoBinaryImage(original.bytes).build_info;
+    expect(expected).not.toBeNull();
+    expect(readGoBinaryImage(sectionless.bytes).build_info).toEqual(expected);
+  },
+);
+
+it("continues past an empty file-backed ELF data load", () => {
+  const fixture = createGoSplitElfFixture({ sectionless: true });
+  const expected = readGoBinaryImage(fixture.bytes).build_info;
+  fixture.bytes.writeBigUInt64LE(0n, 128 + 32);
+  expect(readGoBinaryImage(fixture.bytes).build_info).toEqual(expected);
+});
+
+it.each([4, 5, 7])(
+  "does not search a later non-data ELF load with flags %d",
+  (flags) => {
+    const fixture = createGoSplitElfFixture({ sectionless: true });
+    fixture.bytes.writeUInt32LE(flags, 184 + 4);
+    expect(readGoBinaryImage(fixture.bytes).build_info).toBeNull();
+  },
+);
+
+it("prefers the named ELF section to an earlier writable-load marker", () => {
+  const fixture = createGoSplitElfFixture();
+  const expected = readGoBinaryImage(fixture.bytes).build_info;
+  fixture.bytes.copy(
+    fixture.bytes,
+    512,
+    fixture.headerOffset,
+    fixture.headerOffset + 32,
+  );
+  expect(readGoBinaryImage(fixture.bytes).build_info).toEqual(expected);
+});
+
+it("does not skip malformed earlier metadata to report a later valid record", () => {
+  const fixture = createGoSplitElfFixture({ sectionless: true });
+  fixture.bytes.copy(
+    fixture.bytes,
+    512,
+    fixture.headerOffset,
+    fixture.headerOffset + 32,
+  );
+  fixture.bytes[512 + 15] = 0xff;
+  expect(() => readGoBinaryImage(fixture.bytes)).toThrow(
+    /unsupported format bit/,
+  );
+});
 
 it.each([
   ["elf", 32, "little"],

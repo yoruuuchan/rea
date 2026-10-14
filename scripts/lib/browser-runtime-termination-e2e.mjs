@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { CdpConnection } from "../../dist/browser/CdpConnection.js";
 import { mcpTextValue } from "./mcp-verifier-results.mjs";
-import { closeRuntimeFixtureResources } from "./browser-runtime-fixture-lifecycle.mjs";
+import { closeVerifierResources } from "./verifier-cleanup.mjs";
 
 /** Close a separately owned fixture page after actual MCP arming and inspect native cleanup diagnostics. */
 export async function verifyRuntimeTargetTermination(client, input, origin) {
@@ -76,7 +76,7 @@ export async function verifyRuntimeTargetTermination(client, input, origin) {
     primaryError = cause;
     throw cause;
   } finally {
-    await closeRuntimeFixtureResources(
+    await closeVerifierResources(
       [
         () =>
           targetId === undefined || closed

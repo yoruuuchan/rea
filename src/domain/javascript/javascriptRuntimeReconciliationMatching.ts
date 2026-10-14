@@ -51,6 +51,13 @@ interface CandidateIndex {
     string,
     readonly StaticRuntimeCandidate[]
   >;
+  readonly byNativeDeclarationPath: ReadonlyMap<
+    string,
+    readonly {
+      readonly candidate: StaticRuntimeCandidate;
+      readonly sourcePath: string | null;
+    }[]
+  >;
   readonly byLayerCategoryPath: ReadonlyMap<
     string,
     readonly StaticRuntimeCandidate[]
@@ -170,9 +177,25 @@ const candidatesWithLocation = (
   const located = new Map<string, LocatedCandidate>();
   for (const layer of layers)
     for (const mapping of mappedRuntimePaths(layer, entity))
-      for (const candidate of index.byLayerCategoryPath.get(
-        layerCategoryPathKey(layer.layerId, entity.staticKind, mapping.path),
-      ) ?? []) {
+      for (const candidate of [
+        ...(index.byLayerCategoryPath.get(
+          layerCategoryPathKey(layer.layerId, entity.staticKind, mapping.path),
+        ) ?? []),
+        ...(mapping.fileStyle === null || mapping.nativeRelativePath === null
+          ? []
+          : (
+              index.byNativeDeclarationPath.get(
+                `${mapping.fileStyle}\0${layerCategoryPathKey(layer.layerId, entity.staticKind, mapping.nativeRelativePath)}`,
+              ) ?? []
+            )
+              .filter(
+                ({ sourcePath }) =>
+                  mapping.artifactPrefix === "" ||
+                  (sourcePath !== null &&
+                    sourcePath.startsWith(`${mapping.artifactPrefix}/`)),
+              )
+              .map(({ candidate }) => candidate)),
+      ]) {
         const key = candidateKey(candidate);
         if (!located.has(key)) located.set(key, { candidate, mapping });
       }
@@ -189,6 +212,10 @@ const indexCandidates = (
 ): CandidateIndex => {
   const byCategoryDigest = new Map<string, StaticRuntimeCandidate[]>();
   const byLayerCategoryPath = new Map<string, StaticRuntimeCandidate[]>();
+  const byNativeDeclarationPath = new Map<
+    string,
+    { candidate: StaticRuntimeCandidate; sourcePath: string | null }[]
+  >();
   for (const candidate of candidates) {
     for (const { sha256 } of candidate.digests)
       appendIndex(
@@ -202,14 +229,23 @@ const indexCandidates = (
         layerCategoryPathKey(candidate.layer.layerId, candidate.category, path),
         candidate,
       );
+    for (const style of ["posix", "windows"] as const)
+      for (const { path, sourcePath } of candidate.nativeDeclarationPaths[
+        style
+      ])
+        appendIndex(
+          byNativeDeclarationPath,
+          `${style}\0${layerCategoryPathKey(candidate.layer.layerId, candidate.category, path)}`,
+          { candidate, sourcePath },
+        );
   }
-  return { byCategoryDigest, byLayerCategoryPath };
+  return { byCategoryDigest, byLayerCategoryPath, byNativeDeclarationPath };
 };
 
-const appendIndex = (
-  index: Map<string, StaticRuntimeCandidate[]>,
+const appendIndex = <Value>(
+  index: Map<string, Value[]>,
   key: string,
-  candidate: StaticRuntimeCandidate,
+  candidate: Value,
 ): void => {
   const values = index.get(key);
   if (values === undefined) index.set(key, [candidate]);

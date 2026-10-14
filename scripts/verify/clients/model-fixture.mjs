@@ -15,7 +15,8 @@ export const createOpenAiModelFixture = async ({
   let failure;
   const server = createServer(async (request, response) => {
     try {
-      if (request.method === "GET" && request.url?.endsWith("/models")) {
+      const path = new URL(request.url ?? "/", "http://localhost").pathname;
+      if (request.method === "GET" && path.endsWith("/models")) {
         response.setHeader("Content-Type", "application/json");
         response.end(
           JSON.stringify({
@@ -47,7 +48,7 @@ export const createOpenAiModelFixture = async ({
         join(directory, `${prefix}-incoming-${++incoming}.json`),
         JSON.stringify({ method: request.method, path: request.url, body }),
       );
-      if (request.url !== "/v1/chat/completions") {
+      if (path !== "/v1/chat/completions") {
         // Hermes probes custom endpoints for Ollama/llama.cpp metadata.
         // Unsupported HTTP endpoints return 404, as on an OpenAI-only server.
         probes.push({

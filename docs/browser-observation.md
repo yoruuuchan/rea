@@ -18,7 +18,7 @@ Inspect native SAZ or HAR 1.2 offline with REA, or connect Everywhere's separate
 - `inspect_web_page` / `rea inspect-web-page` captures DOM structure, accessibility nodes, scripts, resources, safe response/DOM metadata, attach-window network and console metadata, WebSocket frame sizes, workers, quota, and optionally selected storage key names, redacted storage-content fingerprints, or script sources.
 - `analyze_web_bundle` / `rea analyze-web-bundle` parses selected script artifacts without execution and derives chunk edges, route and endpoint candidates, vendor fingerprints, static WebMCP declarations, and optionally source-map/original-source evidence.
 - `observe_web_session` / `rea observe-web-session` arms an observation window of the requested duration for an external user action and records ordered reload, SPA navigation, redirect, failure, lifecycle, and target-termination metadata.
-- `discover_webmcp_tools` / `rea discover-webmcp-tools` uses the experimental CDP WebMCP domain to return every in-scope registration and its complete observed `input_schema` declaration and canonical `input_schema_sha256` digest inline. Declarations are untrusted JSON data, including declared types, required fields, enums, examples and reference URLs. REA does not resolve schema references. These fields replace `input_schema_shape`. Registrations with the same name and URL in distinct observed frames retain separate identities. `tool_key` includes the observed frame ID; it is not a stable identity across navigation or browser sessions. Same-frame registration updates replace that owner only, and removal leaves other owners intact. REA never exposes `WebMCP.invokeTool`; malformed protocol payloads fail explicitly instead of returning incomplete tool metadata.
+- `discover_webmcp_tools` / `rea discover-webmcp-tools` uses the experimental CDP WebMCP domain to return every in-scope registration and its complete observed `input_schema` declaration and canonical `input_schema_sha256` digest inline. Declarations are untrusted JSON data, including declared types, required fields, enums, examples and reference URLs. REA does not resolve schema references. These fields replace `input_schema_shape`. Registrations with the same name and URL in distinct observed frames retain separate identities. `tool_key` includes the observed frame ID; it is not a stable identity across navigation or browser sessions. Same-frame registration updates replace that owner only, and removal leaves other owners intact. Declared `readOnly`, `untrustedContent`, `consequential`, and `autosubmit` annotation hints are reported per registration: `true`/`false` are declared values, `null` means the declaration did not provide the hint in that capture, and a missing `consequential` key means the hint was not recorded, either in a historical capture or because the observed annotation was invalid. Consult discovery completeness and exclusions to distinguish these cases. Malformed annotation values retain the registration with incomplete coverage and an `invalid_protocol_value` exclusion. Other malformed protocol payloads can fail discovery explicitly. REA never exposes `WebMCP.invokeTool`.
 - `compare_web_captures` / `rea compare-web-captures` compares passive captures or exact-step-aligned browser scenarios. Scenario results commit reproducible literal normalization and expose alignment failures plus artifact-level action, screenshot, DOM, accessibility, URL, history, storage, and event differences. Missing or truncated evidence is never treated as equivalence.
 - `capture_web_screenshot` / `rea capture-web-screenshot` returns a content-addressed visible-viewport PNG.
 - `compare_web_screenshots` / `rea compare-web-screenshots` performs bounded local PNG pixel comparison without OCR or external services.
@@ -189,6 +189,36 @@ rea observe-web-session http://127.0.0.1:9222 TARGET_ID \
 rea discover-webmcp-tools http://127.0.0.1:9222 TARGET_ID \
   --json
 ```
+
+### WebMCP discovery prerequisites
+
+`discover_webmcp_tools` reports only what the attached browser's experimental
+`WebMCP` CDP domain exposes. When a browser rejects the unknown domain, the
+result reports `status: "unavailable"`. Whether a page can register tools at
+all depends on several conditions that are not interchangeable:
+
+- A site's own origin-trial token can enable the API for that origin
+  **provided the trial is still active, the browser version and platform
+  support it, and user settings permit it** — token presence alone is not a
+  guarantee. The trial is announced for Chrome 149 and later.
+- The `WebMCPTesting` feature — `--enable-features=WebMCPTesting` at launch, or
+  `chrome://flags/#enable-webmcp-testing` in a normal profile — enables the
+  API page-side for that browser instance, independent of per-site tokens.
+  In one pilot run, a site whose registration code was present but whose
+  served token was scoped for third-party use registered 0 tools under a
+  default launch and 4 under the flag; that the token did not enroll the
+  first-party document is consistent with this but is an inference, not a
+  measured Chrome behavior.
+
+In Chrome 154 specifically (one tested version), `WebMCP.enable` answered
+under a default launch — the debug domain was not flag-gated in that run.
+Other versions may differ, so an unattributed zero-tool result should be
+read as registration state only after domain availability is confirmed.
+
+Discovery is attach-only: the command needs a reachable loopback CDP endpoint
+and a target ID from `list_browser_targets`, and it never navigates, reloads,
+or evaluates the page. Observe the page in the state you want to measure;
+registered tools reflect the document as loaded.
 
 Accessibility names/descriptions, console primitive text, JSON body shapes, WebSocket shapes, script content, and storage key names are selected independently:
 

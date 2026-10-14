@@ -580,6 +580,11 @@ const normalizeDestinationPath = (
   platform: NodeJS.Platform,
 ): string => {
   const path = normalizeArtifactPath(relativePath);
+  if (platform === "win32" && path.includes("\\"))
+    throw new ArtifactReaderFailure(
+      "path",
+      `Windows destination cannot materialize artifact path: ${JSON.stringify(path)}; backslashes denote path separators.`,
+    );
   if (platform === "win32" && path.includes(":"))
     throw new ArtifactReaderFailure(
       "path",

@@ -52,7 +52,7 @@ export const decodeSazCapture = async (
       }
       if (declaredBytes > WEB_NETWORK_CAPTURE_LIMITS.inputBytes)
         throw new CaptureFormatError(
-          "limit",
+          "expanded-limit",
           "SAZ expanded members exceed the 32 MiB complete-evidence budget.",
         );
       inventory.push({
@@ -161,7 +161,7 @@ export const decodeSazCapture = async (
     if (cause instanceof CaptureFormatError) throw cause;
     if (cause instanceof ArtifactReaderFailure && cause.reason === "limit")
       throw new CaptureFormatError(
-        "limit",
+        "expanded-limit",
         "SAZ archive exceeds the ZIP reader's resource budget.",
       );
     throw new CaptureFormatError(

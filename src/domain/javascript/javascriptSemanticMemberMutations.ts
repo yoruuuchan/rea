@@ -1,6 +1,15 @@
 import * as t from "@babel/types";
 
 import {
+  semanticGlobalProcessOrigin,
+  semanticGlobalProcessPathOrigin,
+  semanticOriginalGlobalProcessAt,
+  semanticMutableBuiltinOrigin,
+  semanticRequireExportsIdentity,
+  semanticRequireOrigin,
+} from "./javascriptSemanticRequireOrigin.js";
+
+import {
   resolveSemanticBindingState,
   type JavaScriptSemanticBindingState,
   type JavaScriptSemanticAnalysisState,
@@ -35,6 +44,7 @@ import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import { traverseJavaScriptAstSteps } from "./javascriptSemanticTraversal.js";
 import {
   semanticStaticPropertyKey,
+  semanticWriteSiteTarget,
   semanticWriteTargets,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
@@ -50,7 +60,51 @@ export function* collectSemanticMemberMutationsSteps(
   const parents = state.parentsByNode;
   const observablePaths = observableMutationPaths(state);
   const returnedReferences = createSemanticReturnedReferences(state);
-  const recordedEffects = new Set<string>();
+  const recordedRequiredEffects = new Set<string>();
+  let recordedEffectCount = 0;
+  const recordRequiredEffect = (
+    specifier: string,
+    path: PropertyPath,
+    effect: ValueEffect,
+    node: t.Node | undefined,
+  ): void => {
+    const identity = semanticRequireExportsIdentity(specifier, path);
+    // Node stores process.env values and process.argv entries as strings, so
+    // passing one to a call exposes no object that the callee could mutate.
+    // Replacing an entry records its own write or receiver escape.
+    if (
+      effect === "escape" &&
+      identity.specifier === "process" &&
+      identity.path.length === 2 &&
+      (identity.path[0] === "env" || identity.path[0] === "argv")
+    )
+      return;
+    const key = JSON.stringify([
+      "required",
+      identity.specifier,
+      effect,
+      identity.path,
+      node?.start,
+      node?.end,
+    ]);
+    if (recordedRequiredEffects.has(key)) return;
+    recordedRequiredEffects.add(key);
+    recordedEffectCount += 1;
+    const effects = state.requiredModuleEffects.get(identity.specifier) ?? [];
+    effects.push({ path: identity.path, node, kind: effect });
+    state.requiredModuleEffects.set(identity.specifier, effects);
+  };
+  // Ambient indexing owns aliases of global objects. Consume its canonical
+  // writes instead of reparsing qualified or aliased process assignments.
+  for (const { path, node } of state.ambientWriteEffects)
+    if (
+      path[0] === "global" &&
+      path[1] === "process" &&
+      path.length > 2 &&
+      node !== undefined &&
+      semanticOriginalGlobalProcessAt(node, state)
+    )
+      recordRequiredEffect("node:process", path.slice(2), "write", node);
   const selections = new Map<string, readonly string[]>();
   const coveringPaths = new Map<string, SemanticPropertyPathCoverage>();
   let arrayIterationUnknown = false;
@@ -171,9 +225,37 @@ export function* collectSemanticMemberMutationsSteps(
       const current = pending[cursor];
       if (current === undefined) break;
       const expression = unwrapJavaScriptExpression(current.node).node;
+      const required = semanticRequireOrigin(expression, state);
+      if (required !== undefined) {
+        recordRequiredEffect(
+          required.origin.specifier,
+          [...required.origin.importedPath, ...current.path],
+          effect,
+          mutation,
+        );
+        continue;
+      }
+      const globalProcess = semanticGlobalProcessPathOrigin(expression, state);
+      if (globalProcess !== undefined) {
+        recordRequiredEffect(
+          globalProcess.specifier,
+          [...globalProcess.importedPath, ...current.path],
+          effect,
+          mutation,
+        );
+        continue;
+      }
       if (t.isIdentifier(expression)) {
         const binding = resolveBinding(expression, expression.name);
         if (binding === undefined) {
+          const processOrigin = semanticGlobalProcessOrigin(expression, state);
+          if (processOrigin !== undefined)
+            recordRequiredEffect(
+              processOrigin.specifier,
+              current.path,
+              effect,
+              mutation,
+            );
           if (
             (expression.name === "Array" &&
               (current.path[0] === "prototype" || current.path[0] === null)) ||
@@ -270,52 +352,6 @@ export function* collectSemanticMemberMutationsSteps(
             index === selectorIndex ? { ...selector, excludedKeys } : key,
           );
         }
-        // Keep an antichain of exact paths. Widening distinct member keys would
-        // also invalidate unrelated siblings that never reach this effect.
-        const pathState = JSON.stringify([
-          binding.bindingId,
-          effect,
-          // Short writes stop at owned literal slots, whereas longer writes
-          // reach shared children. Only equal-depth writes cover one another.
-          effect === "write" ? path.length : null,
-          mutation?.start,
-          mutation?.end,
-          current.originAt?.start,
-          current.originAt?.end,
-          current.ownerInitializer?.start,
-          current.ownerInitializer?.end,
-        ]);
-        let covering = coveringPaths.get(pathState);
-        if (covering === undefined) {
-          covering = new SemanticPropertyPathCoverage();
-          coveringPaths.set(pathState, covering);
-        }
-        if (!covering.retain(path)) continue;
-        const identity = JSON.stringify([
-          binding.bindingId,
-          effect,
-          path,
-          mutation?.start,
-          mutation?.end,
-          current.originAt?.start,
-          current.originAt?.end,
-          current.ownerInitializer?.start,
-          current.ownerInitializer?.end,
-        ]);
-        if (recordedEffects.has(identity)) continue;
-        // A recorded write invalidates the binding to a non-primitive value, so
-        // only its first write can target a primitive. Re-evaluating it would
-        // replay every earlier write and make repeated writes superlinear.
-        const value =
-          effect === "write" && binding.mutatedPaths.length === 0
-            ? evaluateSemanticBinding(binding, state)
-            : undefined;
-        const primitiveWrite =
-          value?.status === "literal" || value?.status === "union";
-        recordedEffects.add(identity);
-        const nested = new Set([...current.bindings, lifetime, captureKey]);
-        // Returning a literal's receiver reaches that allocation, not the
-        // binding's older values read while evaluating its initializer.
         const origins =
           current.ownerInitializer !== undefined
             ? {
@@ -323,6 +359,7 @@ export function* collectSemanticMemberMutationsSteps(
                   ({ node }) => node === current.ownerInitializer,
                 ),
                 referenceInitializers: [],
+                directOrigins: [],
               }
             : current.originAt === undefined
               ? binding
@@ -331,10 +368,57 @@ export function* collectSemanticMemberMutationsSteps(
                   current.originAt,
                   parents,
                 );
+        // Keep an antichain of exact paths. Widening distinct member keys would
+        // also invalidate unrelated siblings that never reach this effect.
+        // This map is local to the file scan. Escaping the binding id keeps a
+        // field separator injective while avoiding a fresh JSON array encode.
+        const pathState = `${JSON.stringify(binding.bindingId)}\u0001${
+          effect
+        }\u0001${
+          // Short writes stop at owned literal slots, whereas longer writes
+          // reach shared children. Only equal-depth writes cover one another.
+          effect === "write" ? path.length : -1
+        }\u0001${mutation?.start ?? -1}\u0001${mutation?.end ?? -1}\u0001${
+          current.originAt?.start ?? -1
+        }\u0001${current.originAt?.end ?? -1}\u0001${
+          current.ownerInitializer?.start ?? -1
+        }\u0001${current.ownerInitializer?.end ?? -1}`;
+        let covering = coveringPaths.get(pathState);
+        if (covering === undefined) {
+          covering = new SemanticPropertyPathCoverage();
+          coveringPaths.set(pathState, covering);
+        }
+        if (!covering.retain(path)) continue;
+        // A recorded write invalidates the binding to a non-primitive value, so
+        // only its first write can target a primitive. Re-evaluating it would
+        // replay every earlier write and make repeated writes superlinear.
+        const value =
+          effect === "write" && binding.memberWrites.length === 0
+            ? evaluateSemanticBinding(binding, state)
+            : undefined;
+        const primitiveWrite =
+          value?.status === "literal" || value?.status === "union";
+        // The coverage index already owns binding-effect deduplication.
+        recordedEffectCount += 1;
+        const nested = new Set(current.bindings);
+        nested.add(lifetime);
+        nested.add(captureKey);
+        // Returning a literal's receiver reaches that allocation, not the
+        // binding's older values read while evaluating its initializer.
         if (!primitiveWrite) {
+          for (const origin of origins.directOrigins) {
+            const shared = semanticMutableBuiltinOrigin(origin, path);
+            if (shared !== undefined)
+              recordRequiredEffect(
+                shared.specifier,
+                shared.path,
+                effect,
+                mutation,
+              );
+          }
           if (effect === "escape")
             binding.escapedPaths.push({ path, node: mutation });
-          else binding.mutatedPaths.push(path);
+          else binding.memberWrites.push({ path, node: mutation });
           clearSemanticValueCaches(state);
           for (const initializer of origins.initializers)
             pending.push({
@@ -514,12 +598,8 @@ export function* collectSemanticMemberMutationsSteps(
           originAt: source.mutation,
           iterationOnly: source.kind === "iteration",
         });
-      if (t.isAssignmentExpression(node)) markTarget(node.left, node);
-      else if (t.isUpdateExpression(node)) markTarget(node.argument, node);
-      else if (t.isUnaryExpression(node, { operator: "delete" }))
-        markTarget(node.argument, node);
-      else if (t.isForOfStatement(node) || t.isForInStatement(node))
-        markTarget(node.left, node);
+      const writeTarget = semanticWriteSiteTarget(node);
+      if (writeTarget !== null) markTarget(writeTarget, node);
       else if (
         t.isCallExpression(node) ||
         t.isOptionalCallExpression(node) ||
@@ -552,7 +632,7 @@ export function* collectSemanticMemberMutationsSteps(
   // A later effect can make a previously defined destructuring source uncertain.
   // Reconsider defaults and iterable origins until their effects are stable.
   while (pendingReferences.length > 0 || iterableReferences.length > 0) {
-    const effectsBefore = recordedEffects.size;
+    const effectsBefore = recordedEffectCount;
     const iterablesBefore = iterableReferences.length;
     const iterationBefore: boolean = arrayIterationUnknown;
     for (const [index, reference] of pendingReferences.splice(0).entries()) {
@@ -631,7 +711,7 @@ export function* collectSemanticMemberMutationsSteps(
       );
     }
     if (
-      recordedEffects.size === effectsBefore &&
+      recordedEffectCount === effectsBefore &&
       iterableReferences.length === iterablesBefore &&
       arrayIterationUnknown === iterationBefore
     )
@@ -881,6 +961,15 @@ const observableMutationPaths = (
   for (const binding of state.bindingsById.values()) {
     const observer = bindingNodes.get(binding.bindingId);
     if (observer === undefined) continue;
+    // Imported values are external objects with observable member slots even
+    // when their syntax has no local object-allocation node (for example a
+    // CommonJS namespace from `require("node:fs")`). Keep those writes at their
+    // exact member paths instead of widening the first path to a wildcard.
+    const hasParsedRequireOrigin = binding.initializers.some(
+      ({ node }) => semanticRequireOrigin(node, state) !== undefined,
+    );
+    if (binding.directOrigins.length > 0 || hasParsedRequireOrigin)
+      (observer.origins ??= new Set()).add("opaque");
     for (const initializer of binding.initializers) {
       link(
         project(expressionNode(initializer.node), initializer.projection),

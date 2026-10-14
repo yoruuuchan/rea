@@ -40,6 +40,24 @@ it("retains the delayed dependency in the complete real framed otool output", as
   expect(parseOtoolLoadCommands(output).commands).toHaveLength(23);
 });
 
+it.each([
+  ["0xfeedfacf 16777228", 64, "little"],
+  ["0xfeedfacf 16777223", 64, "little"],
+  ["0xfeedface        7", 32, "little"],
+  ["0xfeedface       18", 32, "big"],
+  ["0xfeedface        6", 32, null],
+  ["0xfeedfade 16777228", null, "little"],
+] as const)(
+  "derives word size and byte order from the selected slice header %s",
+  async (header, wordSize, endian) => {
+    const output = (await nativeFixture("otool-dylib-use.txt")).replace(
+      "0xfeedfacf 16777228",
+      header,
+    );
+    expect(parseOtoolLoadCommands(output)).toMatchObject({ wordSize, endian });
+  },
+);
+
 it("rejects a repeated options field even when the duplicate has no value", async () => {
   const output = (await nativeFixture("otool-dylib-use.txt")).replace(
     "      options delay-init",

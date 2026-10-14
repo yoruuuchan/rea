@@ -26,6 +26,7 @@ export const graphForJavaScript = (
     packages: [],
     json_modules: [],
     html_scripts: [],
+    html_inline_scripts: [],
     source_maps: [],
     visited_ast_nodes: 0,
     findings: 0,

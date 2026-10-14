@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 
 import {
+  createProcessTextNormalizer,
   normalizeProcessSamples,
   normalizeProcessText,
 } from "./ProcessNormalization.js";
@@ -92,6 +93,42 @@ it("replaces caller-declared patterns literally, without expanding replacement p
       rootPid,
     ),
   ).toBe("listening on $&$&; $$; $1=alpha; tail $1");
+});
+
+it("reuses matchers while observing the terminal PID after launch", () => {
+  let pid = -1;
+  const normalize = createProcessTextNormalizer(
+    scenario({ ports: false, patterns: [] }),
+    "/temporary",
+    () => pid,
+  );
+  expect(normalize("root 41010 /workspace/item")).toBe(
+    "root 41010 <working-directory>/item",
+  );
+  pid = 41_010;
+  expect(normalize("root 41010 /workspace/item")).toBe(
+    "root <pid> <working-directory>/item",
+  );
+  pid = 42_020;
+  expect(normalize("root 41010 peer 42020")).toBe("root 41010 peer <pid>");
+});
+
+it("keeps equal-path priority and replacement aliases local to each capture", () => {
+  const declared = parseProcessScenario({
+    executable: "/selected/tool",
+    working_directory: "/selected",
+    filesystem_observation_paths: ["/selected", "<working-directory>"],
+    normalization: { paths: true, pids: false, ports: false, patterns: [] },
+  });
+  const normalize = createProcessTextNormalizer(declared, "/selected", -1);
+  const other = createProcessTextNormalizer(declared, "/other", -1);
+  const text = "/selected/item <working-directory>/source";
+  expect(normalize(text)).toBe(
+    "<temporary-root>/item <filesystem-root-1>/source",
+  );
+  expect(other(text)).toBe(
+    "<working-directory>/item <filesystem-root-1>/source",
+  );
 });
 
 it("preserves empty-pattern boundaries, including empty text", () => {

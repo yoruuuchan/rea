@@ -32,6 +32,7 @@ import type {
   JavaScriptBundlerModule,
   JavaScriptBundlerRegistration,
 } from "./javascriptStaticAnalysisTypes.js";
+import { JAVASCRIPT_AST_FINGERPRINT_ALGORITHM } from "./javascriptStaticAnalysisTypes.js";
 
 /** Inspect a bundler registration call and recover its module table. */
 export const inspectBundlerRegistration = (
@@ -269,7 +270,7 @@ const recoverBundlerModule = (
       factory_require_name: requireName,
       source_sha256: sha256Text(sourceSlice(source, factory)),
       structural_fingerprint_sha256: fingerprint,
-      structural_fingerprint_algorithm: "babel-ast-v1",
+      structural_fingerprint_algorithm: JAVASCRIPT_AST_FINGERPRINT_ALGORITHM,
       exports: exportsValue.values,
       location: range(factory),
     },

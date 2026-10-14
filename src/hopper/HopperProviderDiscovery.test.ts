@@ -46,7 +46,7 @@ describe("Hopper provider discovery", () => {
   });
 
   it("separates target kind, format, and architecture support", () => {
-    const hopper = provider(process.execPath);
+    const hopper = provider(process.execPath, "linux");
     expect(hopper.inspectTargetSupport(databaseTarget())).toMatchObject({
       status: "supported",
     });
@@ -59,12 +59,31 @@ describe("Hopper provider discovery", () => {
       diagnostics: { target_kind: "archive", target_format: "asar" },
     });
   });
+
+  it("fails closed for saved Hopper databases on macOS without a bridge launch route", () => {
+    expect(
+      provider(process.execPath, "darwin").inspectTargetSupport(
+        databaseTarget(),
+      ),
+    ).toMatchObject({
+      status: "unsupported",
+      code: "target_kind_unsupported",
+      reason: expect.stringContaining("cannot start REA's analysis bridge"),
+      diagnostics: {
+        target_kind: "database",
+        target_format: "analysis-database",
+      },
+    });
+  });
 });
 
-const provider = (launcherPath: string): HopperProvider => {
+const provider = (
+  launcherPath: string,
+  platform: NodeJS.Platform = process.platform,
+): HopperProvider => {
   const config = parseConfig({ HOPPER_LAUNCHER_PATH: launcherPath });
   if (!config.ok) throw config.error;
-  return new HopperProvider(config.value, silentLogger, {});
+  return new HopperProvider(config.value, silentLogger, {}, platform);
 };
 
 const databaseTarget = (): BinaryTarget => ({

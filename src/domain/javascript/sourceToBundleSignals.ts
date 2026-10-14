@@ -188,7 +188,7 @@ const projectCurrentNode = (node: ApplicationNode): CurrentProjection => {
       digests.add(node.identity.source_sha256);
   }
   if (node.identity.strategy === "canonical-path")
-    addPath(paths, "canonical-path", node.identity.path);
+    addPath(paths, "canonical-path", node.identity.path, "artifact");
   for (const observation of node.observations) {
     if (node.identity.strategy === "source-map-original") {
       const resolution = observation.source_map_reference?.resolution;
@@ -202,8 +202,26 @@ const projectCurrentNode = (node: ApplicationNode): CurrentProjection => {
       const sourceDigest = observation.properties.source_sha256;
       if (typeof sourceDigest === "string" && isDigest(sourceDigest))
         digests.add(sourceDigest);
-      for (const key of PATH_PROPERTIES)
-        addJsonPath(paths, observation.properties[key]);
+      for (const key of PATH_PROPERTIES) {
+        // A resolved declaration already has an owning artifact-path fact.
+        if (
+          key === "declared_path" &&
+          typeof observation.properties.resolved_path === "string"
+        )
+          continue;
+        addJsonPath(
+          paths,
+          observation.properties[key],
+          key === "resolved_path" ||
+            ((key === "path" || key === "module_path") &&
+              !(
+                typeof observation.properties[key] === "string" &&
+                SCHEME_URL.test(observation.properties[key])
+              ))
+            ? "artifact"
+            : "reference",
+        );
+      }
     }
   }
   return {
@@ -323,29 +341,40 @@ const matchingUnicodePaths = (
     .map(({ value }) => value);
 };
 
-const addJsonPath = (paths: CurrentPath[], value: unknown): void => {
-  if (typeof value === "string") addPath(paths, "observation-path", value);
+const addJsonPath = (
+  paths: CurrentPath[],
+  value: unknown,
+  format: "artifact" | "reference",
+): void => {
+  if (typeof value === "string")
+    addPath(paths, "observation-path", value, format);
 };
 
 const addPath = (
   paths: CurrentPath[],
   kind: CurrentPathKind,
   raw: string,
+  format: "artifact" | "reference",
 ): void => {
-  const value = normalizeCurrentPath(raw);
+  const value = normalizeCurrentPath(raw, format);
   if (value !== null) paths.push({ kind, value, allowSuffix: true });
 };
 
 const SCHEME_URL = /^[a-z][a-z0-9+.-]*:\/\//iu;
 const SCHEME_URL_PREFIX = /^[a-z][a-z0-9+.-]*:\/\/+/iu;
 
-const normalizeCurrentPath = (raw: string): string | null => {
-  const withoutQuery = SCHEME_URL.test(raw)
-    ? (raw.split(/[?#]/u, 1)[0] ?? "")
-    : raw;
-  const portable = withoutQuery
-    .replace(SCHEME_URL_PREFIX, "")
-    .replaceAll("\\", "/");
+const normalizeCurrentPath = (
+  raw: string,
+  format: "artifact" | "reference",
+): string | null => {
+  const withoutQuery =
+    format === "reference" && SCHEME_URL.test(raw)
+      ? (raw.split(/[?#]/u, 1)[0] ?? "")
+      : raw;
+  const portable =
+    format === "artifact"
+      ? withoutQuery
+      : withoutQuery.replace(SCHEME_URL_PREFIX, "").replaceAll("\\", "/");
   const parts: string[] = [];
   for (const part of portable.split("/")) {
     if (part === "" || part === ".") continue;

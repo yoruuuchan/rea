@@ -52,6 +52,7 @@ export class FakeSetupHost implements SetupHost {
   scopedDoctorHealthy: boolean | undefined;
   linuxDemoRuntimeMissing = false;
   unsupportedHopperVersion = false;
+  hopperLauncherConfigured = false;
 
   constructor(platform: NodeJS.Platform = "darwin") {
     this.platform = platform;
@@ -64,6 +65,9 @@ export class FakeSetupHost implements SetupHost {
     Promise.resolve(this.distribution);
   initialSetupState = async (scope?: DoctorScope) => ({
     ...(this.hopper === undefined ? {} : { hopperPath: this.hopper }),
+    ...(this.hopperLauncherConfigured
+      ? { hopperLauncherConfigured: true }
+      : {}),
     providerEnvironment: {
       ...(this.hopper === undefined
         ? {}

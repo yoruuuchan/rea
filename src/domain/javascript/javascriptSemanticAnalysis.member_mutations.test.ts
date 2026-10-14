@@ -164,6 +164,32 @@ describe("JavaScript semantic values after explicit property mutations", () => {
   });
 });
 
+it("invalidates a shared value reached through an object-literal prototype getter", () => {
+  const value = resultValue(`
+    const shared = { x: 1 };
+    const proto = { get v() { return shared; } };
+    const box = { __proto__: proto };
+    box.v.x = 2;
+    return shared.x;
+  `);
+  expect(
+    value?.status === "unknown" ||
+      (value?.status === "literal" && value.value === 2),
+  ).toBe(true);
+});
+
+it("does not follow an object-literal prototype getter past an own property", () => {
+  expect(
+    resultValue(`
+      const shared = { x: 1 };
+      const proto = { get v() { return shared; } };
+      const box = { __proto__: proto, v: { x: 3 } };
+      box.v.x = 2;
+      return shared.x;
+    `),
+  ).toEqual({ status: "literal", value: 1 });
+});
+
 describe("JavaScript semantic mutations through getter results (#1494)", () => {
   it.each([
     [

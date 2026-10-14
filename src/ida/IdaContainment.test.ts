@@ -148,7 +148,7 @@ const found = (query: string, fn: typeof function_) => ({
 });
 
 describe("IDA containment capabilities", () => {
-  it("declares both operations for the headless profile only", () => {
+  it("declares document identity in both profiles and address resolution only in headless", () => {
     const declared = (mode: "attached" | "headless", native = false) =>
       idaCapabilities(mode, false, native)
         .map(({ operation }) => operation)
@@ -172,35 +172,30 @@ describe("IDA containment capabilities", () => {
       "resolve_containing_procedure",
       "list_documents",
     ]);
-    expect(declared("attached")).toEqual([]);
-    expect(declared("attached", true)).toEqual([]);
+    expect(declared("attached")).toEqual(["list_documents"]);
+    expect(declared("attached", true)).toEqual(["list_documents"]);
     expect(
       idaCapabilities("attached", false).map(({ operation }) => operation),
-      "attached profiles do not even declare them",
-    ).not.toContain("list_documents");
+      "attached profiles declare the bound document but not address resolution",
+    ).toContain("list_documents");
   });
 
-  it.each(["resolve_containing_procedure", "list_documents"] as const)(
-    "refuses %s on the legacy attached profile without calling upstream",
-    async (operation) => {
-      const { client, producer } = await session({}, "attached");
-      try {
-        const result = await client.execute(
-          operation,
-          operation === "list_documents" ? {} : { address: "0x1000" },
-        );
-
-        expect(result.ok).toBe(false);
-        if (!result.ok)
-          expect(result.error._tag).toBe("AnalysisCapabilityUnavailableError");
-        expect(producer.calls.some(({ name }) => name === "lookup_funcs")).toBe(
-          false,
-        );
-      } finally {
-        expect((await client.close()).ok).toBe(true);
-      }
-    },
-  );
+  it("refuses address resolution on the legacy attached profile", async () => {
+    const { client, producer } = await session({}, "attached");
+    try {
+      const result = await client.execute("resolve_containing_procedure", {
+        address: "0x1000",
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok)
+        expect(result.error._tag).toBe("AnalysisCapabilityUnavailableError");
+      expect(producer.calls.some(({ name }) => name === "lookup_funcs")).toBe(
+        false,
+      );
+    } finally {
+      expect((await client.close()).ok).toBe(true);
+    }
+  });
 });
 
 describe("headless IDA containing procedure", () => {

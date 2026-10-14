@@ -218,7 +218,23 @@ describe("Codex completed tool call parsing", () => {
     },
   );
 
-  it("preserves legacy completed calls with no server field", () => {
+  it.each([
+    {
+      label: "missing server identity",
+      identity: {},
+      routed: false,
+    },
+    {
+      label: "another server",
+      identity: { server: "other" },
+      routed: false,
+    },
+    {
+      label: "verified REA alias",
+      identity: { server_name: "rea" },
+      routed: true,
+    },
+  ])("routes only $label calls", ({ identity, routed }) => {
     const metrics = evaluateCodexEvents(
       [
         {
@@ -228,16 +244,20 @@ describe("Codex completed tool call parsing", () => {
             status: "completed",
             tool: "inspect_managed_artifact",
             arguments: {},
+            ...identity,
           },
         },
       ],
       "inspect_managed_artifact",
+      { requiredToolSubsequence: ["inspect_managed_artifact"] },
     );
 
     expect(metrics).toMatchObject({
-      naturalUse: true,
-      correctFirstTool: true,
-      reaCalls: [{ server: null }],
+      naturalUse: routed,
+      correctFirstTool: routed,
+      firstTool: routed ? "inspect_managed_artifact" : null,
+      requiredToolSubsequenceMet: routed,
+      reaCalls: routed ? [{ server: "rea" }] : [],
     });
   });
 });

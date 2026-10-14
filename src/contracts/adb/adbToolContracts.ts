@@ -127,7 +127,7 @@ export const ADB_TOOL_CONTRACTS = [
     name: "push_adb_file",
     ...toolContractMetadata("push_adb_file"),
     description:
-      "Push one local file to an absolute device path. A device-mutating tool: existing device files are refused unless overwrite is explicitly requested, and the transfer is verified by comparing the local digest with the device's own sha256sum when the device provides one.",
+      "Push one local file to an absolute device path. A device-mutating tool: checks for an existing device file before transfer and refuses it unless overwrite is explicitly requested; this check is not an atomic create and another process can create the path before adb writes. When the device provides sha256sum, the transfer is verified by comparing it with the local digest.",
     kind: "adb-provider",
     inputSchema: adbInputSchemas.push_adb_file,
     outputSchema: evidenceResultOf(adbResultSchemas.push_adb_file),
@@ -224,7 +224,7 @@ export const ADB_TOOL_CONTRACTS = [
     name: "inspect_adb_window",
     ...toolContractMetadata("inspect_adb_window"),
     description:
-      "Report the window manager's current focus declarations (`dumpsys window windows`: mCurrentFocus and mFocusedApp) — what is on screen at read time without any interaction. Read-only.",
+      "Report the window manager's current focus declarations (mCurrentFocus and mFocusedApp from `dumpsys window windows`, or from `dumpsys window displays` when the windows section declares neither, as on Android 16) — what is on screen at read time without any interaction. Read-only.",
     kind: "adb-provider",
     inputSchema: adbInputSchemas.inspect_adb_window,
     outputSchema: evidenceResultOf(adbResultSchemas.inspect_adb_window),

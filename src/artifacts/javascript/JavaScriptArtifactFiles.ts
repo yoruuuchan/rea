@@ -19,11 +19,14 @@ import { hashReadable } from "../ArtifactHash.js";
 import type { ArtifactOccurrence } from "../../domain/artifactGraph.js";
 import type { ArtifactInventorySnapshot } from "../../domain/artifactInventorySnapshot.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
+import { isJavaScriptSourcePath } from "../../domain/javascript/javascriptArtifactFiles.js";
 
 import type {
   JavaScriptArtifactFileKind,
   JavaScriptArtifactFile,
   JavaScriptArtifactContainer,
+  JavaScriptUnanalyzedArtifactFile,
+  JavaScriptUnanalyzedArtifactLookup,
   JavaScriptArtifactFileSet,
 } from "../../domain/javascript/javascriptArtifactFiles.js";
 
@@ -140,6 +143,10 @@ export const readJavaScriptArtifactFiles = async (
   assertExpectedFilesWereVisited(expected, files);
   return {
     files,
+    unanalyzed_files: createUnanalyzedArtifactLookup(
+      snapshot,
+      context.containers,
+    ),
     containers: context.containers.sort((left, right) =>
       compareUnicodeCodePoints(left.path, right.path),
     ),
@@ -438,6 +445,118 @@ const expectedInventory = (
   return { files, containers, unavailableFiles };
 };
 
+/** Canonical snapshot arrays are already ordered by code-point identity. */
+const lowerBound = <T>(
+  rows: readonly T[],
+  key: string,
+  identity: (row: T) => string,
+): number => {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    const row = rows[middle];
+    if (row !== undefined && compareUnicodeCodePoints(identity(row), key) < 0)
+      low = middle + 1;
+    else high = middle;
+  }
+  return low;
+};
+
+const createUnanalyzedArtifactLookup = (
+  snapshot: ArtifactInventorySnapshot,
+  containers: readonly JavaScriptArtifactContainer[],
+): JavaScriptUnanalyzedArtifactLookup => {
+  const requested = new Map<
+    string,
+    JavaScriptUnanalyzedArtifactFile | undefined
+  >();
+  const directories = new Map<string, Map<string | undefined, boolean>>();
+  const containerIds = new Map(
+    containers.map((container) => [container.path, container.sha256]),
+  );
+  const containerFor = (path: string): string => {
+    let prefix = path;
+    for (;;) {
+      const slash = prefix.lastIndexOf("/");
+      if (slash < 0) return snapshot.manifest.root_sha256;
+      prefix = prefix.slice(0, slash);
+      const sha256 = containerIds.get(prefix);
+      if (sha256 !== undefined) return sha256;
+    }
+  };
+  const isOpaque = (occurrence: ArtifactOccurrence): boolean =>
+    occurrence.entry_kind === "file" &&
+    relevantKind(occurrence.logical_path) === undefined;
+  return {
+    get(path) {
+      if (requested.has(path)) return requested.get(path);
+      const occurrence =
+        snapshot.occurrences[
+          lowerBound(snapshot.occurrences, path, (entry) => entry.logical_path)
+        ];
+      const id =
+        occurrence?.logical_path === path && isOpaque(occurrence)
+          ? occurrence.artifact_id
+          : undefined;
+      const candidate =
+        id == null
+          ? undefined
+          : snapshot.nodes[
+              lowerBound(snapshot.nodes, id, (entry) => entry.artifact_id)
+            ];
+      const node = candidate?.artifact_id === id ? candidate : undefined;
+      const file =
+        occurrence?.logical_path !== path || !isOpaque(occurrence)
+          ? undefined
+          : {
+              path,
+              container_sha256: containerFor(path),
+              sha256: node?.sha256 ?? null,
+              bytes: node?.size ?? occurrence.declared_size,
+              inventory_artifact_id: occurrence.artifact_id,
+              limitations: occurrence.limitations,
+            };
+      requested.set(path, file);
+      return file;
+    },
+    hasDirectory(path, containerSha256) {
+      let results = directories.get(path);
+      const previous = results?.get(containerSha256);
+      if (previous !== undefined) return previous;
+      const prefix = `${path}/`;
+      let present = false;
+      for (
+        let index = lowerBound(
+          snapshot.occurrences,
+          prefix,
+          (entry) => entry.logical_path,
+        );
+        index < snapshot.occurrences.length;
+        index += 1
+      ) {
+        const entry = snapshot.occurrences[index];
+        if (entry === undefined || !entry.logical_path.startsWith(prefix))
+          break;
+        if (
+          isOpaque(entry) &&
+          (containerSha256 === undefined ||
+            containerFor(entry.logical_path) === containerSha256)
+        ) {
+          present = true;
+          break;
+        }
+      }
+      if (results === undefined) {
+        results = new Map();
+        directories.set(path, results);
+      }
+      results.set(containerSha256, present);
+      return present;
+    },
+  };
+};
+
 const readAll = async (
   stream: Readable,
   signal?: AbortSignal,
@@ -471,7 +590,7 @@ const relevantKind = (path: string): JavaScriptArtifactFileKind | undefined => {
   if (lower === "package.json" || lower.endsWith("/package.json"))
     return "package-json";
   if (lower.endsWith(".json")) return "json";
-  if (/\.(?:cjs|cts|mjs|mts|js|jsx|ts|tsx)$/u.test(lower)) return "javascript";
+  if (isJavaScriptSourcePath(path)) return "javascript";
   if (/\.html?$/u.test(lower)) return "html";
   if (lower.endsWith(".map")) return "source-map";
   if (lower.endsWith(".node")) return "native-addon";

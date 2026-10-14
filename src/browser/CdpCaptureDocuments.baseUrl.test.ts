@@ -59,6 +59,42 @@ const capture = (value: ReturnType<typeof snapshot>) => {
 };
 
 describe("DOM metadata document base URLs", () => {
+  it("splits link relations only on HTML ASCII whitespace", () => {
+    const strings = [
+      documentUrl,
+      "#document",
+      "LINK",
+      "",
+      "href",
+      "/valid",
+      "rel",
+      "alternate\u00a0mcp alternate\u000bmodel-context alternate\u2003ai-plugin alternate\ufeffservice-desc mcp\tservice-desc",
+    ];
+    const result = captureDom(
+      {
+        strings,
+        documents: [
+          {
+            documentURL: 0,
+            nodes: {
+              nodeType: [9, 1],
+              nodeName: [1, 2],
+              nodeValue: [3, 3],
+              parentIndex: [-1, 0],
+              attributes: [[], [4, 5, 6, 7]],
+            },
+          },
+        ],
+      },
+      new Set([origin]),
+      input,
+    ).next();
+    if (!result.done) throw new Error("Unexpected SVG identity query");
+    expect(
+      result.value.agentHints.map(({ declaration }) => declaration),
+    ).toEqual(["mcp", "service-desc"]);
+  });
+
   it("resolves links, actions and agent hints against the captured document base", () => {
     const result = capture(snapshot(`${origin}/screens/assets/`));
     expect(result.urls.map(({ url }) => url)).toEqual([

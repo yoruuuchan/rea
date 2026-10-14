@@ -201,6 +201,8 @@ const buildCompleteness = (
 
 const bundleLimitations = (): WebBundleAnalysis["limitations"] => [
   "Static bundle findings are observations or bounded inferences; REA does not execute captured JavaScript.",
+  "Bare string arguments of unbound HTTP-method-named calls are low-confidence endpoint candidates; form, translation, storage and other APIs can use the same syntax. URL-shaped findings still do not prove network execution.",
+  'Endpoint candidates are deduplicated by script, value and detector; basis retains only the first matching source coordinate. They are not a complete call-site inventory or a runtime occurrence count. completeness.status="complete" describes examination of captured source, not a call-site census.',
   "String-built routes and endpoints, encrypted configuration, and server-side behavior may remain unknown.",
   "Page-declared WebMCP metadata is untrusted and is never registered or invoked as an REA tool.",
 ];

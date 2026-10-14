@@ -6,10 +6,50 @@ import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { createDirectAnalysis } from "../../../../src/composition/directAnalysis.js";
+import { createArtifactBinarySession } from "../../../../src/composition/binary.js";
+import { thinMach } from "../../../../src/domain/binaryTarget.fixture.js";
+import { interfaceBuilderAnalysisSchema } from "../../../../src/domain/apple/interfaceBuilderGraph.js";
 import { artifactInspectionResultSchema } from "../../../../src/domain/artifactInspection.js";
 import { parseEvidence } from "../../../../src/domain/evidence.js";
 
 const { runProviderAnalysis } = createDirectAnalysis({});
+
+it("runs static .app decoding without registering native analysis engines", async () => {
+  const root = await createTestTempDirectory("rea-artifact-only-direct-");
+  const app = join(root, "Fixture.app");
+  const contents = join(app, "Contents");
+  await mkdir(join(contents, "MacOS"), { recursive: true });
+  await mkdir(join(contents, "Resources"), { recursive: true });
+  await writeFile(
+    join(contents, "Info.plist"),
+    "<plist><dict><key>CFBundleExecutable</key><string>Fixture</string></dict></plist>",
+  );
+  await writeFile(
+    join(contents, "MacOS", "Fixture"),
+    thinMach(0xfeedfacf, 0x0100000c),
+  );
+
+  const staticSession = await createArtifactBinarySession({
+    REA_ANALYSIS_PROVIDER: "auto",
+  });
+  expect(staticSession.status()).toMatchObject({
+    analysis_provider_candidates: [],
+  });
+  await staticSession.close();
+
+  const evidence = parseEvidence(
+    await createDirectAnalysis({
+      REA_ANALYSIS_PROVIDER: "auto",
+    }).runProviderAnalysis(app, "decode_interface_builder", {}),
+  );
+  expect(evidence.operation).toBe("decode_interface_builder");
+  expect(evidence.provider.id).toBe("rea-artifact-graph");
+  const result = interfaceBuilderAnalysisSchema.parse(
+    evidence.normalized_result,
+  );
+  expect(result.documents).toEqual([]);
+  expect(result.graph.target_sha256).toBe(evidence.subject?.digest.sha256);
+});
 
 it("inspects an artifact through the direct CLI workflow without an REA grant", async () => {
   const root = await createTestTempDirectory("rea-artifact-direct-");

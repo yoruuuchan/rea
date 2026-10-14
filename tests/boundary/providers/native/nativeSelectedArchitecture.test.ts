@@ -27,7 +27,7 @@ const sliceSelectingRunner = (
     calls.push({ tool, arguments_ });
     const expected = tool === "dyld_info" ? dyldArchitecture : selected;
     if (
-      !["file", "lipo"].includes(tool) &&
+      tool !== "lipo" &&
       !arguments_.some(
         (argument, index) =>
           argument === expected ||
@@ -313,3 +313,38 @@ it.each([
     });
   },
 );
+
+it("reports the selected 32-bit slice's word size and byte order beside a 64-bit slice", async () => {
+  const i386Header = (await nativeFixture("otool-load.txt")).replace(
+    "0xfeedfacf 16777228",
+    "0xfeedface        7",
+  );
+  const fixtures = new NativeFixtureRunner({
+    lipo: [
+      "architecture x86_64\n    cputype 16777223\n    cpusubtype 3\n    offset 0\n    size 8192\n    align 2^14 (16384)",
+      "architecture i386\n    cputype 7\n    cpusubtype 3\n    offset 16384\n    size 8192\n    align 2^14 (16384)",
+    ].join("\n"),
+    "otool:-h": i386Header,
+    dwarfdump:
+      "UUID: 01234567-89AB-CDEF-0123-456789ABCDEF (i386) /owned/universal\n",
+  });
+  const base = nativeMachoTarget("/owned/universal");
+  const result = await new NativeMacOSProvider(
+    {},
+    sliceSelectingRunner(fixtures, "i386", "i386"),
+    "darwin",
+  )
+    .createClient({
+      ...base,
+      architecture: "x86",
+      availableArchitectures: ["x86_64", "x86"],
+    })
+    .execute("inspect_macho", {});
+
+  if (!result.ok) throw result.error;
+  expect(result.value.result).toMatchObject({
+    selected_architecture: { name: "i386", container_file_offset: 16384 },
+    word_size: 32,
+    endian: "little",
+  });
+});

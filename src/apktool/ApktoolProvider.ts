@@ -25,7 +25,10 @@ import {
   createAnalysisExecution,
   type AnalysisExecution,
 } from "../application/AnalysisProvider.js";
-import type { ApktoolRequest } from "../domain/apktool/apktoolResourceAnalysis.js";
+import {
+  androidLocaleQualifierSchema,
+  type ApktoolRequest,
+} from "../domain/apktool/apktoolResourceAnalysis.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
@@ -291,6 +294,7 @@ const countDecodedFiles = async (
           const match = /^values-(.+)$/u.exec(entry.name);
           if (
             match !== null &&
+            androidLocaleQualifierSchema.safeParse(match[1]).success &&
             (await access(join(path, "strings.xml")).then(
               () => true,
               () => false,

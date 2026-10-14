@@ -84,6 +84,11 @@ export class LocalWebScriptArtifacts implements WebScriptArtifactPort {
           "path",
           `Selected source path changes during normalization: ${selected.content.relative_path}`,
         );
+      if (process.platform === "win32" && portable.includes("\\"))
+        throw new ArtifactReaderFailure(
+          "path",
+          `Windows source path cannot contain backslashes as literal name characters: ${JSON.stringify(portable)}`,
+        );
       const root = resolve(dirname(input.manifest_path));
       const sourcePath = join(root, "files", portable);
       targetPath = sourcePath;

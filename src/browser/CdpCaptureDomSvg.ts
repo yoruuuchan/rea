@@ -1,13 +1,18 @@
 import { numberValue, recordValue } from "./CdpCaptureValues.js";
+import {
+  cdpSnapshotAttributesResolve,
+  cdpSnapshotString,
+  cdpSnapshotValueString,
+} from "./CdpSnapshotStrings.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
 
 interface DomSnapshotNodes {
-  readonly nodeTypes: readonly number[];
-  readonly nodeNames: readonly number[];
-  readonly parents: readonly number[];
-  readonly strings: readonly string[];
+  readonly nodeTypes: readonly (number | undefined)[];
+  readonly nodeNames: readonly (number | undefined)[];
+  readonly parents: readonly (number | undefined)[];
+  readonly strings: readonly (string | undefined)[];
   readonly attributes: readonly unknown[];
 }
 
@@ -17,7 +22,7 @@ interface XmlSvgLink {
 }
 
 interface DocumentSvgAncestry {
-  readonly xml: boolean;
+  readonly xml: boolean | undefined;
   readonly xmlLinks: Map<number, XmlSvgLink>;
 }
 
@@ -48,50 +53,49 @@ export const capturedSvgNodeKind = (
 
 interface DomSvgLink {
   readonly svgElement: boolean;
-  readonly xmlDocument: boolean;
+  readonly xmlDocument: boolean | undefined;
   readonly xlinkHref: string | undefined;
 }
 
-const UNRESOLVED: XmlSvgLink = {
-  svgElement: false,
-  xlinkHref: undefined,
-};
-
-const stringAt = (strings: readonly string[], index: unknown): string => {
-  const integer = numberValue(index);
-  return integer === undefined ? "" : (strings[Math.trunc(integer)] ?? "");
-};
-
-const numberArray = (value: unknown): readonly number[] =>
+const numberArray = (value: unknown): readonly (number | undefined)[] =>
   Array.isArray(value)
-    ? value.flatMap((item) => {
+    ? value.map((item) => {
         const number = numberValue(item);
-        return number === undefined ? [] : [number];
+        return number !== undefined && Number.isSafeInteger(number)
+          ? number
+          : undefined;
       })
     : [];
 
 // DOMSnapshot has no namespace URI. HTML documents use uppercase `HTML` and
 // the parser's local names. XML documents preserve prefixed names and xmlns
 // declarations, including those on standalone SVG roots.
-const xmlDocument = (nodes: DomSnapshotNodes): boolean => {
-  const documentIndex = nodes.nodeTypes.findIndex(
-    (nodeType) => Math.trunc(nodeType) === 9,
-  );
+const xmlDocument = (nodes: DomSnapshotNodes): boolean | undefined => {
+  const documentIndex = nodes.nodeTypes.findIndex((nodeType) => nodeType === 9);
   if (documentIndex < 0) return false;
+  if (
+    !validSvgSourceNode(nodes, documentIndex) ||
+    nodes.parents[documentIndex] !== -1
+  )
+    return undefined;
   for (let index = 0; index < nodes.nodeTypes.length; index += 1) {
-    if (Math.trunc(nodes.nodeTypes[index] ?? 0) !== 1) continue;
-    if (Math.trunc(nodes.parents[index] ?? -1) !== documentIndex) continue;
-    const name = stringAt(nodes.strings, nodes.nodeNames[index]);
+    if (nodes.nodeTypes[index] !== 1) continue;
+    if (nodes.parents[index] !== documentIndex) continue;
+    const name = cdpSnapshotString(nodes.strings, nodes.nodeNames[index]);
+    if (name === undefined || !validSvgSourceNode(nodes, index))
+      return undefined;
     if (name === "HTML") return false;
     if (name === "html" || name.includes(":")) return true;
     // Explicit namespaces also identify standalone SVG and other XML roots.
     // Namespace-free synthetic snapshots retain the legacy HTML behavior.
     const attributes = numberArray(nodes.attributes[index]);
-    return attributes.some(
-      (value, offset) =>
-        offset % 2 === 0 &&
-        xmlnsPrefix(stringAt(nodes.strings, value)) !== undefined,
-    );
+    for (let offset = 0; offset + 1 < attributes.length; offset += 2) {
+      const value = attributes[offset];
+      const attributeName = cdpSnapshotString(nodes.strings, value);
+      if (attributeName === undefined) return undefined;
+      if (xmlnsPrefix(attributeName) !== undefined) return true;
+    }
+    return false;
   }
   return false;
 };
@@ -102,7 +106,7 @@ export const createDocumentSvgAncestry = (
   const xml = xmlDocument(nodes);
   return {
     xml,
-    xmlLinks: xml ? resolveXmlElements(nodes) : new Map(),
+    xmlLinks: xml === true ? resolveXmlElements(nodes) : new Map(),
   };
 };
 
@@ -110,14 +114,28 @@ export const domSvgLink = (
   ancestry: DocumentSvgAncestry,
   index: number,
 ): DomSvgLink => {
-  if (!ancestry.xml) {
+  if (ancestry.xml === false) {
     return {
       svgElement: false,
       xmlDocument: false,
       xlinkHref: undefined,
     };
   }
-  const resolved = ancestry.xmlLinks.get(index) ?? UNRESOLVED;
+  if (ancestry.xml === undefined) {
+    return {
+      svgElement: false,
+      xmlDocument: undefined,
+      xlinkHref: undefined,
+    };
+  }
+  const resolved = ancestry.xmlLinks.get(index);
+  if (resolved === undefined) {
+    return {
+      svgElement: false,
+      xmlDocument: undefined,
+      xlinkHref: undefined,
+    };
+  }
   return {
     svgElement: resolved.svgElement,
     xmlDocument: true,
@@ -143,7 +161,9 @@ const resolveXmlElements = (
   const children = new Map<number, number[]>();
   const pending: XmlWalkStep[] = [];
   for (let node = 0; node < nodes.nodeNames.length; node += 1) {
-    const parent = Math.trunc(nodes.parents[node] ?? -1);
+    const parent = nodes.parents[node];
+    if (parent === undefined || parent < -1 || parent >= nodes.nodeNames.length)
+      continue;
     if (parent < 0) pending.push({ node });
     else if (parent < nodes.nodeNames.length && parent !== node) {
       const siblings = children.get(parent);
@@ -164,12 +184,13 @@ const resolveXmlElements = (
       continue;
     }
     const { node } = step;
+    if (!validSvgSourceNode(nodes, node)) continue;
     const attributes = numberArray(nodes.attributes[node]);
     const restore = applyDeclarations(bindings, attributes, nodes.strings);
     const svgElement =
-      Math.trunc(nodes.nodeTypes[node] ?? 0) === 1 &&
+      nodes.nodeTypes[node] === 1 &&
       elementNamespace(
-        stringAt(nodes.strings, nodes.nodeNames[node]),
+        cdpSnapshotString(nodes.strings, nodes.nodeNames[node]),
         bindings,
       ) === SVG_NAMESPACE;
     resolved.set(node, {
@@ -188,24 +209,30 @@ const resolveXmlElements = (
 
 const applyDeclarations = (
   bindings: Map<string, string>,
-  attributes: readonly number[],
-  strings: readonly string[],
+  attributes: readonly (number | undefined)[],
+  strings: readonly (string | undefined)[],
 ): readonly NamespaceRestore[] => {
   const restore: NamespaceRestore[] = [];
   const seen = new Set<string>();
   for (let index = 0; index + 1 < attributes.length; index += 2) {
-    const prefix = xmlnsPrefix(stringAt(strings, attributes[index]));
+    const nameIndex = attributes[index];
+    const valueIndex = attributes[index + 1];
+    if (nameIndex === undefined || valueIndex === undefined) continue;
+    const name = cdpSnapshotString(strings, nameIndex);
+    const value = cdpSnapshotValueString(strings, valueIndex);
+    if (name === undefined || value === undefined) continue;
+    const prefix = xmlnsPrefix(name);
     if (prefix === undefined || seen.has(prefix)) continue;
     seen.add(prefix);
     restore.push({ prefix, previous: bindings.get(prefix) });
-    const value = stringAt(strings, attributes[index + 1]);
     if (value.length === 0) bindings.delete(prefix);
     else bindings.set(prefix, value);
   }
   return restore;
 };
 
-const xmlnsPrefix = (name: string): string | undefined => {
+const xmlnsPrefix = (name: string | undefined): string | undefined => {
+  if (name === undefined) return undefined;
   if (name === "xmlns") return "";
   if (!name.startsWith("xmlns:")) return undefined;
   const prefix = name.slice("xmlns:".length);
@@ -215,9 +242,10 @@ const xmlnsPrefix = (name: string): string | undefined => {
 };
 
 const elementNamespace = (
-  nodeName: string,
+  nodeName: string | undefined,
   bindings: ReadonlyMap<string, string>,
 ): string => {
+  if (nodeName === undefined) return "";
   const colon = nodeName.indexOf(":");
   if (colon < 0) return bindings.get("") ?? "";
   const prefix = nodeName.slice(0, colon);
@@ -235,13 +263,17 @@ const elementNamespace = (
 // First prefixed href bound to the XLink namespace. Duplicate names keep the
 // earlier value. Plain href is applied by the caller and wins even when empty.
 const xlinkHrefValue = (
-  attributes: readonly number[],
-  strings: readonly string[],
+  attributes: readonly (number | undefined)[],
+  strings: readonly (string | undefined)[],
   bindings: ReadonlyMap<string, string>,
 ): string | undefined => {
   const seen = new Set<string>();
   for (let index = 0; index + 1 < attributes.length; index += 2) {
-    const name = stringAt(strings, attributes[index]);
+    const nameIndex = attributes[index];
+    const valueIndex = attributes[index + 1];
+    if (nameIndex === undefined || valueIndex === undefined) continue;
+    const name = cdpSnapshotString(strings, nameIndex);
+    if (name === undefined) continue;
     if (seen.has(name)) continue;
     seen.add(name);
     const colon = name.indexOf(":");
@@ -249,7 +281,25 @@ const xlinkHrefValue = (
     const prefix = name.slice(0, colon);
     const local = name.slice(colon + 1);
     if (local !== "href" || bindings.get(prefix) !== XLINK_NAMESPACE) continue;
-    return stringAt(strings, attributes[index + 1]);
+    return cdpSnapshotValueString(strings, valueIndex);
   }
   return undefined;
+};
+
+const validSvgSourceNode = (
+  nodes: DomSnapshotNodes,
+  index: number,
+): boolean => {
+  if (
+    nodes.nodeTypes[index] === undefined ||
+    cdpSnapshotString(nodes.strings, nodes.nodeNames[index]) === undefined
+  )
+    return false;
+  const rawAttributes = nodes.attributes[index];
+  if (!Array.isArray(rawAttributes)) return false;
+  const attributes = numberArray(rawAttributes);
+  return (
+    attributes.length === rawAttributes.length &&
+    cdpSnapshotAttributesResolve(nodes.strings, attributes)
+  );
 };

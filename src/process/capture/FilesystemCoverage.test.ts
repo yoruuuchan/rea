@@ -101,6 +101,45 @@ it("distinguishes unavailable content hashes from completed path enumeration", a
 });
 
 it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "retains readable entries and marks an unreadable directory subtree unknown",
+  async () => {
+    const root = await createTestTempDirectory("rea-fs-unreadable-directory-");
+    const visible = join(root, "a-visible.txt");
+    const blocked = join(root, "z-blocked");
+    await writeFile(visible, "visible");
+    await mkdir(blocked);
+    await chmod(blocked, 0);
+    const scenario = parseProcessScenario({
+      executable: process.execPath,
+      working_directory: root,
+      filesystem_observation_paths: [root],
+    });
+
+    try {
+      const snapshot = await snapshotRoots(scenario);
+      expect(snapshot.files.map(({ path }) => path)).toContain(
+        "root_0:a-visible.txt",
+      );
+      expect(snapshot.files.map(({ path }) => path)).toContain(
+        "root_0:z-blocked",
+      );
+      expect(snapshot.completeRoots).toEqual([]);
+      expect(snapshot.coverage.enumeration_omissions).toEqual([
+        {
+          path: "root_0:z-blocked",
+          reason: "directory_unavailable",
+          system_code: "EACCES",
+        },
+      ]);
+      expect(snapshot.truncated).toBe(true);
+    } finally {
+      await chmod(blocked, 0o700);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "retains unreadable-file and sibling observations in a complete snapshot",
   async () => {
     const root = await createTestTempDirectory("rea-fs-unreadable-file-");

@@ -122,6 +122,30 @@ it("reports a reached process memory limit only when the handle observed one", (
   }
 });
 
+it("projects provider output loss as truncated diagnostics without inventing a byte count", () => {
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  Object.defineProperty(producer, "outputIncomplete", { value: true });
+  const supervisor = new ProviderProcessSupervisor({
+    process: producer,
+    ownsProcessLifetime: false,
+  });
+  try {
+    expect(supervisor.snapshot()).toMatchObject({
+      diagnosticTruncated: true,
+      outputIncomplete: true,
+    });
+    expect(supervisor.snapshot()).not.toHaveProperty("discardedOutputBytes");
+  } finally {
+    supervisor.dispose();
+  }
+});
+
 it("unreferences process and stream handles when stop reports incomplete cleanup", async () => {
   const unrefProcess = vi.fn();
   const unrefStdin = vi.fn();

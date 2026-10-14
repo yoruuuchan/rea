@@ -411,7 +411,14 @@ describe("browser CLI capture parity", () => {
         operation: "discover_webmcp_tools",
         normalized_result: {
           tools: {
-            items: [expect.objectContaining({ name: "search_orders" })],
+            items: [
+              expect.objectContaining({
+                name: "search_orders",
+                annotations: expect.objectContaining({
+                  consequential: true,
+                }),
+              }),
+            ],
           },
         },
       });

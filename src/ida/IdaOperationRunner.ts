@@ -311,14 +311,12 @@ export class IdaOperationRunner {
       const current: number = offset;
       if (this.protocol === "legacy") {
         const page = legacyPageSchema.parse(
-          await this.call("list_strings", { offset, count: 100 }),
+          await this.call("list_strings", { offset, count: 0 }),
         );
-        result.push(
-          ...page.data.map((item) => {
-            const s = legacyStringSchema.parse(item);
-            return { address: s.address, value: s.string };
-          }),
-        );
+        for (const item of page.data) {
+          const s = legacyStringSchema.parse(item);
+          result.push({ address: s.address, value: s.string });
+        }
         offset = page.next_offset;
       } else {
         const page = (

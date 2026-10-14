@@ -101,3 +101,25 @@ describe("bounded FAT inventory classification", () => {
     },
   );
 });
+
+it("preserves path-selected inventory roles for XML content", () => {
+  const xml = Buffer.from(
+    '<?xml version="1.0"?><plist version="1.0"><dict/></plist>',
+  );
+  expect(classifyArtifactContent("state.archive", xml)).toEqual({
+    kind: "plist",
+    format: "plist",
+  });
+  expect(classifyArtifactContent("state.js", xml)).toEqual({
+    kind: "javascript",
+    format: "javascript-bundle",
+  });
+  expect(classifyArtifactContent("state.map", xml)).toEqual({
+    kind: "source-map",
+    format: "source-map",
+  });
+  expect(classifyArtifactContent("state.asar", xml)).toEqual({
+    kind: "resource",
+    format: "file",
+  });
+});

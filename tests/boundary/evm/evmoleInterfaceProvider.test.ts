@@ -202,6 +202,92 @@ it.runIf(!unsupportedHost)(
   },
 );
 
+it.runIf(!unsupportedHost).each(["completed", "malformed-reply"] as const)(
+  "retains worker facts or its primary reply failure while process cleanup is unresolved: %s",
+  async (scenario) => {
+    const { path } = await fixture();
+    let ownedRoot = "";
+    let launches = 0;
+    let mayClean = false;
+    const provider = new EvmoleInterfaceProvider({}, async (spawn) => {
+      launches += 1;
+      ownedRoot = spawn.cwd ?? "";
+      const requestPath = spawn.arguments.at(-1);
+      if (requestPath === undefined) throw new Error("Request missing");
+      const request = requestSchema.parse(
+        JSON.parse(await readFile(requestPath, "utf8")),
+      );
+      if (scenario === "malformed-reply")
+        await writeFile(request.reply_path, "malformed worker reply");
+      else {
+        const bytes = Buffer.from("60006000f3", "hex");
+        await writeFile(
+          request.reply_path,
+          JSON.stringify({
+            ok: true,
+            version: "0.9.3",
+            bytecode: {
+              sha256: createHash("sha256").update(bytes).digest("hex"),
+              bytes: bytes.length,
+              hex: bytes.toString("hex"),
+            },
+            raw: { functions: [] },
+          }),
+        );
+      }
+      const launched = await spawnOwnedProviderProcess({
+        ...spawn,
+        command: process.execPath,
+        arguments: ["-e", 'process.stderr.write("worker completed")'],
+      });
+      const cleanup =
+        launched.cleanup ??
+        (() => cleanupOwnedProcessGroup(launched.ownership));
+      return {
+        ...launched,
+        cleanup: async () => {
+          const stopped = await cleanup();
+          if (!mayClean) throw new Error("injected retained cleanup failure");
+          return stopped;
+        },
+      };
+    });
+    onTestFinished(async () => {
+      mayClean = true;
+      await provider.close();
+    });
+
+    const result = await provider.inspect({ path, encoding: "hex" });
+    if (result.ok)
+      throw new Error("Expected process cleanup to remain visible");
+    expect(result.error).toMatchObject({ cleanupIncomplete: true });
+    const projected = projectAnalysisError(result.error);
+    expect(projected.details?.["diagnostics"]).toMatchObject({
+      reason: "injected retained cleanup failure",
+      captured_output: { stderr: "worker completed", truncated: false },
+      ...(scenario === "malformed-reply"
+        ? { previous_error: { code: "output_failure" } }
+        : { previous_error: null }),
+    });
+    if (scenario === "completed")
+      expect(result.error.partialObservation).toMatchObject({
+        normalized_result: {
+          bytecode: { hex: "60006000f3" },
+          evidence_kind: "inferred",
+        },
+      });
+    else expect(result.error.partialObservation).toBeUndefined();
+    await access(ownedRoot);
+
+    const blocked = await provider.inspect({ path, encoding: "hex" });
+    expect(blocked.ok).toBe(false);
+    expect(launches).toBe(1);
+    mayClean = true;
+    await provider.close();
+    await expect(access(ownedRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
 it.runIf(!unsupportedHost).each([1048576, 1048577])(
   "keeps complete diagnostics or rejects a valid worker reply with %s diagnostic bytes",
   async (size) => {

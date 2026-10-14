@@ -44,11 +44,13 @@ import {
   type ProviderProcessDiagnostic,
   ProviderProcessSupervisor,
 } from "../process/ProviderProcess.js";
+import { observeProcessStartIdentity } from "../process/ProcessOwnershipObservation.js";
 import type { BridgeLaunch, BridgeLauncher } from "./BridgeLauncher.js";
 import { hopperOperationStage } from "./HopperOperationStage.js";
 import type { HopperDiagnostic } from "./HopperDiagnostics.js";
 import {
   cleanupHopperSession,
+  confirmExternalApplicationExit,
   type HopperOwnedResources,
 } from "./HopperCleanup.js";
 import {
@@ -113,6 +115,7 @@ export class HopperClient {
     processSupervisor: undefined,
     runtimeRoot: undefined,
     shutdownConfirmed: false,
+    externalApplication: undefined,
   };
   #token: string | undefined;
   readonly #lineage = new ProviderRunLineage();
@@ -434,6 +437,27 @@ export class HopperClient {
     }
     const parsed = parseHopperServerInfo(health.value, runId);
     if (!parsed.ok) return this.#startupFailure(parsed.error);
+    if (this.#resources.launch?.providerLifetime === "external-application") {
+      let identity;
+      try {
+        identity = await observeProcessStartIdentity(parsed.value.processId);
+      } catch (cause: unknown) {
+        identity = {
+          state: "unavailable" as const,
+          reason:
+            cause instanceof Error
+              ? cause.message
+              : "process identity observation failed",
+        };
+      }
+      this.#resources.externalApplication = {
+        pid: parsed.value.processId,
+        identity: identity ?? {
+          state: "unavailable",
+          reason: "process identity was not returned while Hopper was running",
+        },
+      };
+    }
     await this.#lineage.observe(this.#resources.launch);
     return parsed;
   }
@@ -535,6 +559,9 @@ export class HopperClient {
       // best-effort cleanup: a rejected startup must not mask close/cleanup;
       // #cleanup reports the authoritative close result.
       await starting?.catch(() => undefined);
+      await confirmExternalApplicationExit(this.#resources, this.#socket, () =>
+        this.#releaseTransport(),
+      );
       await this.#reconnectForCleanup();
       return await this.#cleanup(options);
     } finally {

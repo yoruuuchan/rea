@@ -15,7 +15,10 @@ import type {
 import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
-import { OwnedCommandFailure } from "../process/OwnedCommand.js";
+import {
+  OwnedCommandFailure,
+  ownedCommandResources,
+} from "../process/OwnedCommand.js";
 import type {
   AnalysisError,
   AnalysisCapturedOutput,
@@ -28,6 +31,7 @@ import {
   AnalysisOutputError,
 } from "../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { createEvidence } from "../domain/evidence.js";
 import type { InspectEvmInterfaceInput } from "../domain/evm/evmInterface.js";
 import { evmInterfaceSchema } from "../domain/evm/evmInterface.js";
 import { solidityMetadataSchema } from "../domain/evm/solidityMetadata.js";
@@ -79,6 +83,53 @@ const replySchema = z.discriminatedUnion("ok", [
   }),
 ]);
 type Launcher = NonNullable<Parameters<typeof runOwnedCommand>[2]>["launcher"];
+type EvmOutcome = Result<EvmInterfaceExecution, AnalysisError>;
+
+const evmExecutionEvidence = (
+  input: InspectEvmInterfaceInput,
+  execution: EvmInterfaceExecution,
+) =>
+  createEvidence(execution.subject ?? undefined, execution.provider, {
+    operation: OPERATION,
+    parameters: input,
+    result: execution.result,
+    ...(execution.rawResult === null ? {} : { rawResult: execution.rawResult }),
+    confidence: "inferred",
+    locations: execution.locations,
+    limitations: execution.limitations,
+  });
+
+const evmCleanupFailure = (
+  input: InspectEvmInterfaceInput,
+  result: EvmOutcome,
+  resources: readonly string[],
+  reason: string,
+  output?: AnalysisCapturedOutput,
+  cause?: unknown,
+): ProviderCleanupError => {
+  const partialObservation = result.ok
+    ? evmExecutionEvidence(input, result.value)
+    : result.error.partialObservation;
+  const capturedOutput = result.ok
+    ? output
+    : (result.error.capturedOutput ?? output);
+  return new ProviderCleanupError(
+    EVMOLE_PROVIDER_IDENTITY.id,
+    resources,
+    {
+      reason,
+      previous_error: result.ok ? null : projectAnalysisError(result.error),
+      ...(capturedOutput === undefined
+        ? {}
+        : { captured_output: { ...capturedOutput } }),
+    },
+    {
+      operation: OPERATION,
+      ...(cause === undefined ? {} : { cause }),
+      ...(partialObservation === undefined ? {} : { partialObservation }),
+    },
+  );
+};
 
 /** Run unchanged EVMole/WASM in an owned worker; no target, chain or network execution. */
 export class EvmoleInterfaceProvider implements EvmInterfacePort {
@@ -130,6 +181,12 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
     if (pending !== undefined) return err(pending);
     let root: Pick<PrivateRuntimeRoot, "path" | "close"> | undefined;
     let processOwner: ProviderProcessSupervisor | undefined;
+    let processCleanup:
+      | {
+          readonly reason: string;
+          readonly resources: readonly string[];
+        }
+      | undefined;
     let retainedOutput: AnalysisCapturedOutput | undefined;
     let phase: "configuration" | "artifact-read" | "worker" = "configuration";
     let workerLimits: EvmWorkerLimits | undefined;
@@ -245,6 +302,16 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         {
           ...(options?.signal === undefined ? {} : { signal: options.signal }),
           ...(this.launcher === undefined ? {} : { launcher: this.launcher }),
+          retainCleanup: (owner, cleanup) => {
+            processOwner = owner;
+            processCleanup = {
+              reason: cleanup.reason,
+              resources:
+                owner.launch.ownership === undefined
+                  ? ["owned-worker"]
+                  : ownedCommandResources(owner.launch.ownership, root?.path),
+            };
+          },
         },
       );
       const capturedOutput = capturedEvmOutput(execution);
@@ -452,9 +519,26 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
       );
     }
     if (processOwner !== undefined) {
-      this.#pendingCleanup = { root, process: processOwner };
-      // The command failure already owns this cleanup diagnostic and its resources.
-      return result;
+      this.#pendingCleanup = {
+        root,
+        process: processOwner,
+      };
+      if (processCleanup === undefined) return result;
+      return err(
+        evmCleanupFailure(
+          input,
+          result,
+          [
+            ...new Set([
+              ...(root === undefined ? [] : [root.path]),
+              ...processCleanup.resources,
+            ]),
+          ],
+          processCleanup.reason,
+          retainedOutput,
+          processOwner,
+        ),
+      );
     }
     if (root !== undefined) {
       try {
@@ -464,19 +548,13 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         this.#pendingCleanup = { root: retainedRoot, process: undefined };
         root = undefined;
         return err(
-          new ProviderCleanupError(
-            EVMOLE_PROVIDER_IDENTITY.id,
+          evmCleanupFailure(
+            input,
+            result,
             [retainedRoot.path],
-            {
-              reason: cause instanceof Error ? cause.message : String(cause),
-              previous_error: result.ok
-                ? null
-                : projectAnalysisError(result.error),
-              ...(retainedOutput === undefined
-                ? {}
-                : { captured_output: { ...retainedOutput } }),
-            },
-            { operation: OPERATION },
+            cause instanceof Error ? cause.message : String(cause),
+            retainedOutput,
+            cause,
           ),
         );
       }
@@ -553,7 +631,12 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
       if (stopped.status === "incomplete")
         return new ProviderCleanupError(
           EVMOLE_PROVIDER_IDENTITY.id,
-          [pending.process.launch.ownership?.runId ?? "owned-worker"],
+          [
+            ...(pending.root === undefined ? [] : [pending.root.path]),
+            ...(pending.process.launch.ownership === undefined
+              ? ["owned-worker"]
+              : ownedCommandResources(pending.process.launch.ownership)),
+          ],
           { reason: stopped.reason },
           { operation: OPERATION },
         );

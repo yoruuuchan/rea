@@ -3,8 +3,8 @@ import type {
   ProviderIdentity,
 } from "../application/AnalysisProvider.js";
 import {
-  hasWindowsNativeAuthority,
-  windowsNativeAuthorityUnavailableReason,
+  inspectWindowsNativeReadiness,
+  type WindowsNativeReadiness,
 } from "../process/WindowsAuthority.js";
 import { GHIDRA_FUNCTION_OPERATIONS } from "./GhidraFunctionValues.js";
 import { GHIDRA_INVENTORY_OPERATIONS } from "./GhidraInventoryValues.js";
@@ -197,8 +197,9 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = Object.freeze(
 );
 
 /** Capabilities advertised for the experimental Windows x64 P0 boundary. */
-export const windowsP0Capabilities = (): readonly CapabilityDescriptor[] => {
-  const available = hasWindowsNativeAuthority("win32");
+export const windowsP0Capabilities = (
+  readiness: WindowsNativeReadiness = inspectWindowsNativeReadiness("win32"),
+): readonly CapabilityDescriptor[] => {
   return Object.freeze(
     CAPABILITIES.map((capability): CapabilityDescriptor => {
       const limitations = Object.freeze([
@@ -213,13 +214,13 @@ export const windowsP0Capabilities = (): readonly CapabilityDescriptor[] => {
           availabilityCode: "unsupported_host",
           limitations,
         });
-      return available
+      return readiness.available
         ? Object.freeze({ ...capability, limitations })
         : Object.freeze({
             ...capability,
             available: false,
-            reason: windowsNativeAuthorityUnavailableReason("win32"),
-            availabilityCode: "unsupported_host",
+            reason: readiness.reason,
+            availabilityCode: readiness.code,
             limitations,
           });
     }),

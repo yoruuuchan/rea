@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
+import { execFileBoundedOutput } from "../process/ExecFileBoundedOutput.js";
 import { execFileOutput } from "../process/ExecFileOutput.js";
 import {
   downloadHopperPackage,
   HOPPER_DOWNLOAD_BYTES,
 } from "./HopperDownload.js";
 
-const execFileAsync = promisify(execFile);
+/** Package-manager output retained per stream without stopping the command. */
+const PACKAGE_MANAGER_OUTPUT_BYTES = 64 * 1024;
 const DOWNLOAD_PREFIX = "https://www.hopperapp.com:443/downloader/public/";
 const SUPPORTED_HOPPER_SHA256 = new Set([
   "0294ced141cc373468ee22d8343e7dac41980cb05a937994ca81c9f09afe7ded",
@@ -67,7 +67,7 @@ export const linuxHopperInstallDisclosure = (
       family,
       `<verified-hopper.${family}>`,
       isRoot,
-    ).map(({ executable, args }) => `${executable} ${args.join(" ")}`),
+    ).map(({ executable, args }) => formatCommandForDisplay(executable, args)),
   };
 };
 
@@ -111,6 +111,25 @@ export interface LinuxHopperDownload {
   readonly bytes: Uint8Array;
 }
 
+/** One failed package-manager command, with the output that explains it. */
+export interface LinuxPackageInstallFailure {
+  /** The executed executable and arguments, joined for display. */
+  readonly command: string;
+  readonly exitCode: string | number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  /** Whether the command produced more output than was retained. */
+  readonly outputTruncated: boolean;
+}
+
+/** Whether the package-manager step installed the verified package. */
+export type LinuxPackageInstallOutcome =
+  | { readonly status: "installed" }
+  | {
+      readonly status: "failed";
+      readonly failure: LinuxPackageInstallFailure;
+    };
+
 /** External effects required to install the official Linux package. */
 export interface LinuxHopperInstallHost {
   distribution(): Promise<LinuxDistribution | undefined>;
@@ -120,15 +139,20 @@ export interface LinuxHopperInstallHost {
   ): Promise<LinuxHopperDownload>;
   createTemporaryDirectory(): Promise<string>;
   writeArchive(path: string, bytes: Uint8Array): Promise<void>;
-  installPackage(family: LinuxPackageFamily, archive: string): Promise<boolean>;
+  installPackage(
+    family: LinuxPackageFamily,
+    archive: string,
+  ): Promise<LinuxPackageInstallOutcome>;
   launcherStatus(path: string): Promise<LinuxHopperLauncherStatus>;
   cleanup(path: string): Promise<void>;
 }
 
 /** Structured outcome for every expected Linux installation failure. */
 export type LinuxHopperInstallResult =
-  | { readonly status: "installed"; readonly launcherPath: string }
-  | {
+  | ({ readonly status: "installed"; readonly launcherPath: string } & {
+      readonly cleanupFailure?: LinuxHopperTemporaryCleanupFailure;
+    })
+  | ({
       readonly status: "failed";
       readonly reason:
         | "unsupported_host"
@@ -140,7 +164,49 @@ export type LinuxHopperInstallResult =
         | "runtime_dependencies"
         | "unsupported_hopper_build"
         | "cancelled";
-    };
+      /**
+       * The failing package-manager command and its output. Present only when
+       * the package-manager step itself failed, so setup can report what the
+       * package manager said instead of assuming an authorization problem.
+       */
+      readonly packageFailure?: LinuxPackageInstallFailure;
+    } & { readonly cleanupFailure?: LinuxHopperTemporaryCleanupFailure });
+
+/** Failed removal of an owned temporary install directory. */
+export interface LinuxHopperTemporaryCleanupFailure {
+  readonly path: string;
+  readonly reason: string;
+}
+
+/** Own failed temporary cleanup until a later retry succeeds. */
+export class LinuxHopperTemporaryCleanupOwner {
+  private readonly pending = new Map<
+    string,
+    LinuxHopperTemporaryCleanupFailure
+  >();
+
+  retain(failure: LinuxHopperTemporaryCleanupFailure): void {
+    this.pending.set(failure.path, failure);
+  }
+
+  async retry(
+    cleanup: (path: string) => Promise<void>,
+  ): Promise<string | undefined> {
+    const failures: string[] = [];
+    for (const path of this.pending.keys()) {
+      try {
+        await cleanup(path);
+        this.pending.delete(path);
+      } catch (cause: unknown) {
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        failures.push(
+          `Linux Hopper temporary cleanup failed for ${path}: ${reason}`,
+        );
+      }
+    }
+    return failures.length === 0 ? undefined : failures.join("; ");
+  }
+}
 
 export type LinuxHopperLauncherStatus =
   | "ready"
@@ -215,39 +281,81 @@ export const installLinuxHopper = async (
   if (distribution?.hopperSetupSupported !== true)
     return { status: "failed", reason: "unsupported_host" };
   let temporary: string | undefined;
+  let result: LinuxHopperInstallResult;
   try {
-    const release = (options.releases ?? SUPPORTED_RELEASES)[
-      distribution.packageFamily
-    ];
-    const archiveDownload = await host.download(release.filename, options);
-    if (!archiveDownload.ok) return { status: "failed", reason: "download" };
-    if (!packageIntegrityMatches(archiveDownload.bytes, release))
-      return { status: "failed", reason: "integrity" };
-    temporary = await host.createTemporaryDirectory();
-    const archive = join(temporary, `hopper.${distribution.packageFamily}`);
-    await host.writeArchive(archive, archiveDownload.bytes);
-    if (!(await host.installPackage(distribution.packageFamily, archive)))
-      return { status: "failed", reason: "authorization_or_package_manager" };
-    const launcherPath = "/opt/hopper/bin/Hopper";
-    const launcherStatus = await host.launcherStatus(launcherPath);
-    if (launcherStatus !== "ready")
-      return {
-        status: "failed",
-        reason:
-          launcherStatus === "missing" ? "launcher_missing" : launcherStatus,
-      };
-    return { status: "installed", launcherPath };
+    result = await (async (): Promise<LinuxHopperInstallResult> => {
+      const release = (options.releases ?? SUPPORTED_RELEASES)[
+        distribution.packageFamily
+      ];
+      const archiveDownload = await host.download(release.filename, options);
+      if (!archiveDownload.ok) return { status: "failed", reason: "download" };
+      if (!packageIntegrityMatches(archiveDownload.bytes, release))
+        return { status: "failed", reason: "integrity" };
+      temporary = await host.createTemporaryDirectory();
+      const archive = join(temporary, `hopper.${distribution.packageFamily}`);
+      await host.writeArchive(archive, archiveDownload.bytes);
+      const install = await host.installPackage(
+        distribution.packageFamily,
+        archive,
+      );
+      if (install.status === "failed")
+        return {
+          status: "failed",
+          reason: "authorization_or_package_manager",
+          packageFailure: install.failure,
+        };
+      const launcherPath = "/opt/hopper/bin/Hopper";
+      const launcherStatus = await host.launcherStatus(launcherPath);
+      if (launcherStatus !== "ready")
+        return {
+          status: "failed",
+          reason:
+            launcherStatus === "missing" ? "launcher_missing" : launcherStatus,
+        };
+      return { status: "installed", launcherPath };
+    })();
   } catch (cause: unknown) {
-    if (isAbortCause(cause)) return { status: "failed", reason: "cancelled" };
-    return { status: "failed", reason: "download" };
-  } finally {
-    if (temporary !== undefined) await host.cleanup(temporary);
+    result = {
+      status: "failed",
+      reason: isAbortCause(cause) ? "cancelled" : "download",
+    };
+  }
+  if (temporary === undefined) return result;
+  try {
+    await host.cleanup(temporary);
+    return result;
+  } catch (cause: unknown) {
+    return {
+      ...result,
+      cleanupFailure: {
+        path: temporary,
+        reason: cause instanceof Error ? cause.message : String(cause),
+      },
+    };
   }
 };
 
 /** Canonical launcher path for a legacy user-local Linux Hopper installation. */
 export const linuxHopperLauncherPath = (home: string): string =>
   join(home, ".local/share/rea/hopper/bin/Hopper");
+
+/** REA's managed Linux install path, preferred when no explicit launcher is set. */
+export const REA_MANAGED_LINUX_HOPPER_LAUNCHER = "/opt/hopper/bin/Hopper";
+
+/** Other system-wide Hopper paths used by package installations. */
+export const systemLinuxHopperLauncherCandidates: readonly string[] = [
+  "/opt/hopper-v4/bin/hopper",
+  "/usr/bin/hopper",
+];
+
+/** Probe REA-managed and user-local installs before arbitrary system builds. */
+export const linuxHopperLauncherCandidates = (
+  home: string,
+): readonly string[] => [
+  REA_MANAGED_LINUX_HOPPER_LAUNCHER,
+  linuxHopperLauncherPath(home),
+  ...systemLinuxHopperLauncherCandidates,
+];
 
 /** Compose package-manager and linker checks from the selected caller environment. */
 export const systemLinuxHopperInstallHost = (
@@ -304,23 +412,48 @@ const installSystemPackage = async (
   family: LinuxPackageFamily,
   archive: string,
   environment: Readonly<NodeJS.ProcessEnv>,
-): Promise<boolean> => {
-  try {
-    for (const command of linuxPackageManagerCommands(
-      family,
-      archive,
-      process.getuid?.() === 0,
-    ))
-      await execFileAsync(command.executable, command.args, {
+): Promise<LinuxPackageInstallOutcome> => {
+  for (const command of linuxPackageManagerCommands(
+    family,
+    archive,
+    process.getuid?.() === 0,
+  )) {
+    const output = await execFileBoundedOutput(
+      command.executable,
+      command.args,
+      {
         env: environment,
-      });
-    return true;
-  } catch (cause: unknown) {
-    // Package-manager failure is reported by the false return.
-    void cause;
-    return false;
+        limit: PACKAGE_MANAGER_OUTPUT_BYTES,
+      },
+    );
+    if (output.exitCode !== 0) {
+      return {
+        status: "failed",
+        failure: {
+          command: formatCommandForDisplay(command.executable, command.args),
+          exitCode: output.exitCode,
+          // The streams stay separate; their original interleaved order
+          // is not recoverable after capture.
+          stdout: output.stdout,
+          stderr: output.stderr,
+          outputTruncated: output.outputTruncated,
+        },
+      };
+    }
   }
+  return { status: "installed" };
 };
+
+/** Preserve argument boundaries in a command shown to the user. */
+export const formatCommandForDisplay = (
+  executable: string,
+  args: readonly string[],
+): string =>
+  [executable, ...args]
+    .map((part) =>
+      /^[A-Za-z0-9_./:@%+=,-]+$/u.test(part) ? part : JSON.stringify(part),
+    )
+    .join(" ");
 
 /** Select the native package manager and authorization boundary without shell evaluation. */
 export const linuxPackageManagerCommands = (

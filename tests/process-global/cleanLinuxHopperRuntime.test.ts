@@ -74,11 +74,12 @@ it
       const { stdout } = await parent;
       const { pid } = JSON.parse(stdout) as { pid: number };
       orphanPid = pid;
-      if (alternateMode) {
-        const processEntry = join(procRoot, String(pid));
-        await mkdir(processEntry);
-        await symlink(`/proc/${String(pid)}/exe`, join(processEntry, "exe"));
-      }
+      // The runtime check reads only the supplied proc root, so expose the
+      // fixture there in both modes.
+      const processEntry = join(procRoot, String(pid));
+      await mkdir(processEntry);
+      for (const name of ["cmdline", "comm", "exe"])
+        await symlink(`/proc/${String(pid)}/${name}`, join(processEntry, name));
       const { stdout: coordinates } = await execFileAsync("ps", [
         "-p",
         String(pid),

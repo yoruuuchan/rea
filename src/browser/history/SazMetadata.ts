@@ -1,4 +1,5 @@
 import { DOMParser, ParseError, type Node } from "@xmldom/xmldom";
+import { SaxesParser } from "saxes";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
 import { CaptureFormatError } from "./CaptureFormatError.js";
@@ -20,12 +21,21 @@ export const decodeSazMetadata = (bytes: Buffer): JsonValue => {
       "SAZ metadata must use UTF-8 or BOM-marked UTF-16.",
     );
   }
+  validateSazXml(xml);
   let parseFailed = false;
   let document: ReturnType<DOMParser["parseFromString"]>;
   try {
     document = new DOMParser({
       normalizeLineEndings: (source) => source,
-      onError: () => {
+      onError: (level, message) => {
+        // The parser warns whenever the source contains U+FFFD. It is a legal
+        // XML Char, and the fatal decoder above already rejected invalid
+        // source bytes, so only that warning is not a well-formedness failure.
+        if (
+          level === "warning" &&
+          message.startsWith("Unicode replacement character detected")
+        )
+          return;
         parseFailed = true;
       },
     }).parseFromString(xml, "application/xml");
@@ -36,13 +46,6 @@ export const decodeSazMetadata = (bytes: Buffer): JsonValue => {
       "SAZ metadata is not well-formed XML.",
     );
   }
-  // The pinned parser does not resolve external or DTD-defined entities.
-  // Inspect its parsed node; text inside comments/CDATA is ordinary evidence.
-  if (document.doctype !== null)
-    throw new CaptureFormatError(
-      "unsupported",
-      "SAZ metadata DTDs are unsupported.",
-    );
   if (parseFailed)
     throw new CaptureFormatError(
       "format",
@@ -80,4 +83,34 @@ export const decodeSazMetadata = (bytes: Buffer): JsonValue => {
     };
   };
   return visit(document, 0);
+};
+
+/** Validate well-formedness before the DOM parser projects retained evidence. */
+const validateSazXml = (xml: string): void => {
+  const parser = new SaxesParser({
+    defaultXMLVersion: "1.0",
+    forceXMLVersion: true,
+  });
+  let hasDoctype = false;
+  parser.on("doctype", () => {
+    hasDoctype = true;
+  });
+  try {
+    parser.write(xml).close();
+  } catch {
+    if (hasDoctype)
+      throw new CaptureFormatError(
+        "unsupported",
+        "SAZ metadata DTDs are unsupported.",
+      );
+    throw new CaptureFormatError(
+      "format",
+      "SAZ metadata is not well-formed XML.",
+    );
+  }
+  if (hasDoctype)
+    throw new CaptureFormatError(
+      "unsupported",
+      "SAZ metadata DTDs are unsupported.",
+    );
 };

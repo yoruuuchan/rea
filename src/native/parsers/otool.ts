@@ -134,6 +134,8 @@ export const parseOtoolLoadCommands = (raw: string) => {
     parseLoadCommand(block, state);
   validateLoadCommandFraming(header, state.commands);
   return {
+    wordSize: WORD_SIZES.get(header.magic ?? "") ?? null,
+    endian: header.cpuType === null ? null : cpuEndian(header.cpuType),
     fileType: header.fileType,
     flags: [...state.flags].sort(),
     uuid: state.uuid,
@@ -145,10 +147,27 @@ export const parseOtoolLoadCommands = (raw: string) => {
   };
 };
 
+/** otool prints the selected slice's magic in host order, symbolic with -v. */
+const WORD_SIZES: ReadonlyMap<string, 32 | 64> = new Map<string, 32 | 64>([
+  ["0xfeedface", 32],
+  ["0xfeedfacf", 64],
+  ["MH_MAGIC", 32],
+  ["MH_MAGIC_64", 64],
+]);
+
+/** Mach-O byte order by CPU family, ignoring the ABI bits; others stay unknown. */
+const cpuEndian = (cpuType: number): "little" | "big" | null => {
+  const family = cpuType & 0x00ffffff;
+  if (family === 7 || family === 12) return "little";
+  return family === 18 ? "big" : null;
+};
+
 const parseHeader = (
   output: string,
 ):
   | {
+      magic: string | null;
+      cpuType: number | null;
       fileType: string | null;
       flags: string[];
       commandCount: number;
@@ -175,7 +194,10 @@ const parseHeader = (
       : fileTypeIndex;
   const flagsEnd =
     flagsIndex >= 0 ? values.length - (columns.length - flagsIndex - 1) : 0;
+  const magicIndex = columns.indexOf("magic");
   return {
+    magic: magicIndex < 0 ? null : (values[magicIndex] ?? null),
+    cpuType: headerValue(columns, values, "cputype"),
     commandCount,
     commandBytes,
     fileType:

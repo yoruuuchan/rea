@@ -24,7 +24,6 @@ import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import { err, ok } from "../../domain/result.js";
 import { EvidenceLedger } from "../investigation/EvidenceLedger.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
-import { inspectAnalysisViewInputSchema } from "../../domain/analysisView/analysisView.js";
 
 it.each(["/fixtures/unknown.exe", ""])(
   "preserves recorded empty native identity fields: path=%j",
@@ -433,26 +432,39 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
   expect(ledger.forAnalysis(parent.evidence_id)).toBe(borrowed);
 });
 
-it("borrows inline Evidence until admission without invoking nested accessors", () => {
-  let accessed = false;
-  const evidence = {
-    get normalized_result() {
-      accessed = true;
-      throw new Error("Evidence must be admitted before parsing");
-    },
-  };
-  const input = {
-    source: { kind: "inline", evidence },
-    view: { kind: "api-surface" },
-  };
-  const parsed = inspectAnalysisViewInputSchema.parse(input);
-  if (parsed.source.kind !== "inline") throw new Error("Expected inline input");
-  expect(parsed.source.evidence).toBe(evidence);
-  expect(inspectAnalysisView(input)).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisInputError" },
-  });
-  expect(accessed).toBe(false);
+it("rejects accessor-backed inline Evidence before all view projections", () => {
+  const views = [
+    { kind: "summary" },
+    { kind: "capture" },
+    { kind: "api-surface" },
+  ] as const;
+  for (const view of views) {
+    let accessed = false;
+    const evidence = {
+      get normalized_result() {
+        accessed = true;
+        throw new Error("Evidence accessor must not be invoked");
+      },
+    };
+    const result = inspectAnalysisView({
+      source: { kind: "inline", evidence },
+      view,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisInputError" },
+    });
+    expect(accessed).toBe(false);
+  }
+
+  const parent = analysisViewCaptureEvidence();
+  for (const view of views)
+    expect(
+      inspectAnalysisView({
+        source: { kind: "inline", evidence: parent },
+        view,
+      }).ok,
+    ).toBe(true);
 });
 
 it("keeps inline-envelope admission live alongside capture validation and grouping", () => {

@@ -9,6 +9,11 @@ import { javascriptApplicationAnalysisResultSchema } from "../domain/javascript/
 import type { ApplicationNode } from "../domain/javascript/javascriptApplicationGraphSchemas.js";
 import { javaScriptExportShapeComparisonResultSchema } from "../domain/javascript/javascriptExportShapeComparisonSchemas.js";
 import {
+  applicationFeatureTraceResultSchema,
+  featureSeedMatchMode,
+} from "../domain/javascript/javascriptFeatureTraceSchemas.js";
+import { javaScriptSemanticTraceResultSchema } from "../domain/javascript/javascriptSemanticTraceSchemas.js";
+import {
   managedArtifactInspectionSchema,
   managedMemberInspectionSchema,
 } from "../domain/managed/managedArtifact.js";
@@ -28,6 +33,8 @@ export interface AgentEvaluationFixtureTargets {
   readonly javascriptSha256: string;
   readonly javascriptShapeLeft: string;
   readonly javascriptShapeRight: string;
+  readonly notesElectron: string;
+  readonly notesElectronSha256: string;
   readonly managed?: string;
   readonly managedSha256?: string;
 }
@@ -50,6 +57,8 @@ export const createAgentEvaluationFixtures = async (
   const javascript = join(root, "desktop-app.asar");
   const javascriptShapeLeft = join(root, "parser-v1");
   const javascriptShapeRight = join(root, "parser-v2");
+  const notesDirectory = join(root, "notes-electron");
+  const notesElectron = join(root, "notes-electron.asar");
   await Promise.all([
     mkdir(join(desktop, "renderer"), { recursive: true }),
     mkdir(javascriptShapeLeft, { recursive: true }),
@@ -67,8 +76,14 @@ export const createAgentEvaluationFixtures = async (
       join(repositoryRoot, "tests/fixtures/replay/parser-v2.mjs"),
       join(javascriptShapeRight, "parser.mjs"),
     ),
+    cp(
+      join(repositoryRoot, "website/public/examples/notes-electron"),
+      notesDirectory,
+      { recursive: true },
+    ),
   ]);
   await createPackage(desktop, javascript);
+  await createPackage(notesDirectory, notesElectron);
   return {
     javascript,
     javascriptSha256: createHash("sha256")
@@ -76,6 +91,10 @@ export const createAgentEvaluationFixtures = async (
       .digest("hex"),
     javascriptShapeLeft,
     javascriptShapeRight,
+    notesElectron,
+    notesElectronSha256: createHash("sha256")
+      .update(await readFile(notesElectron))
+      .digest("hex"),
   };
 };
 
@@ -189,21 +208,116 @@ const runtimeSemantics = (value: JsonValue): JsonValue | undefined => {
     : undefined;
 };
 
-const asarClaims = (
+const featureModules = (value: JsonValue): JsonValue | undefined => {
+  const result = applicationFeatureTraceResultSchema.safeParse(value);
+  if (!result.success || result.data.graph === null) return undefined;
+  if (
+    result.data.seed.kind !== "channel" ||
+    result.data.seed.value !== "notes:export" ||
+    featureSeedMatchMode(result.data.seed) !== "exact"
+  )
+    return undefined;
+  const paths = result.data.graph.nodes
+    .filter((node) => node.kind === "javascript-module")
+    .flatMap((node) => node.observations)
+    .filter(({ properties }) => properties.semantic_role === "source-module")
+    .map(({ properties }) => properties.path);
+  if (paths.length === 0 || !paths.every((path) => typeof path === "string"))
+    return undefined;
+  return {
+    paths: [...new Set(paths)].sort(compareUnicodeCodePoints),
+    coverage: result.data.coverage.status,
+  };
+};
+
+const semanticBoundary = (value: JsonValue): JsonValue | undefined => {
+  const result = javaScriptSemanticTraceResultSchema.safeParse(value);
+  if (!result.success) return undefined;
+  return {
+    status: result.data.status,
+    coverage: result.data.coverage.status,
+    relevant_unknowns: result.data.summary.relevant_unknowns,
+  };
+};
+
+const notesClaims = (
   targets: AgentEvaluationFixtureTargets,
+): readonly FixtureClaimExpectation[] => {
+  const subject = {
+    path: targets.notesElectron,
+    sha256: targets.notesElectronSha256,
+  };
+  const derived = {
+    authority: "analyst-inference",
+    confidence: "inferred",
+    linkedSubjects: [
+      { operation: "analyze_javascript_application", ...subject },
+    ],
+  } satisfies Pick<
+    FixtureClaimExpectation["source"],
+    "authority" | "confidence" | "linkedSubjects"
+  >;
+  // Fixture source establishes bridge/module facts; the semantic claim checks
+  // the bounded static-query contract, not execution or CSV formatter behavior.
+  return [
+    ...bridgeClaims(subject, "notes", ["exportCsv"], "notes:export"),
+    {
+      id: "feature_modules",
+      expectedValue: {
+        paths: ["csv.js", "main.js", "preload.js", "renderer.js"],
+        coverage: "complete-within-source",
+      },
+      source: {
+        ...derived,
+        operation: "trace_application_feature",
+        parameters: {
+          direction: "both",
+        },
+        select: featureModules,
+      },
+    },
+    {
+      id: "semantic_boundary",
+      expectedValue: {
+        status: "ambiguous",
+        coverage: "partial",
+        relevant_unknowns: 1,
+      },
+      source: {
+        ...derived,
+        operation: "trace_javascript_semantics",
+        parameters: {
+          query: {
+            seed: { kind: "property", name: "invoke" },
+            direction: "forward-influence",
+            include_ambiguous_dynamic_edges: false,
+            expected: null,
+          },
+        },
+        select: semanticBoundary,
+      },
+    },
+  ];
+};
+
+const bridgeClaims = (
+  subject: { readonly path: string; readonly sha256: string },
+  key: string,
+  members: readonly string[],
+  channel: string,
 ): readonly FixtureClaimExpectation[] => {
   const source = {
     operation: "analyze_javascript_application",
     authority: "shipped-artifact",
     confidence: "derived",
-    subject: { path: targets.javascript, sha256: targets.javascriptSha256 },
+    subject,
   } satisfies Omit<FixtureClaimExpectation["source"], "select">;
   return [
     {
       id: "renderer_api",
       expectedValue: {
-        key: "profileApi",
-        members: ["read"],
+        key,
+        members: [...members],
         world: "main",
         source: "preload.js",
       },
@@ -212,7 +326,7 @@ const asarClaims = (
     {
       id: "renderer_ipc",
       expectedValue: {
-        channel: "profile:read",
+        channel,
         operation: "invoke",
         source: "preload.js",
       },
@@ -221,7 +335,7 @@ const asarClaims = (
     {
       id: "main_ipc",
       expectedValue: {
-        channel: "profile:read",
+        channel,
         operation: "handle",
         source: "main.js",
       },
@@ -234,6 +348,16 @@ const asarClaims = (
     },
   ];
 };
+
+const asarClaims = (
+  targets: AgentEvaluationFixtureTargets,
+): readonly FixtureClaimExpectation[] =>
+  bridgeClaims(
+    { path: targets.javascript, sha256: targets.javascriptSha256 },
+    "profileApi",
+    ["read"],
+    "profile:read",
+  );
 
 const parserClaims = (
   targets: AgentEvaluationFixtureTargets,
@@ -399,24 +523,32 @@ export const agentFixtureClaims = (
   if (scenarioId === "asar") return asarClaims(targets);
   if (scenarioId === "managed") return managedClaims(targets);
   if (scenarioId === "javascript-export-shape") return parserClaims(targets);
+  if (scenarioId === "notes-export") return notesClaims(targets);
   return undefined;
 };
+
+const bridgeAnswerDescriptions = [
+  'renderer_api: {"key": string, "members": string[], "world": string, "source": string}, describing the exposed bridge API, its members, world, and source file.',
+  'renderer_ipc: {"channel": string, "operation": string, "source": string}, describing the renderer-side IPC operation and its source file.',
+  'main_ipc: {"channel": string, "operation": string, "source": string}, describing the main-side IPC operation and its source file.',
+  'preload: {"path": string, "resolution_status": string}, describing the BrowserWindow-declared preload resolved within the shipped artifact.',
+];
 
 const answerValueDescriptions: Readonly<Record<string, readonly string[]>> = {
   managed: [
     "public_types: string[], listing the exact public top-level type full names in Unicode code-point order from unfiltered member Evidence (omit type_names).",
     'entry_point: {"declaring_type": string, "name": string}, resolving the CLI metadata entry-point token against the member inventory from the same artifact SHA-256 and module MVID. Cite member Evidence; both artifact and member Evidence must be delivered.',
   ],
-  asar: [
-    'renderer_api: {"key": string, "members": string[], "world": string, "source": string}, describing the exposed bridge API, its members, world, and source file.',
-    'renderer_ipc: {"channel": string, "operation": string, "source": string}, describing the renderer-side IPC operation and its source file.',
-    'main_ipc: {"channel": string, "operation": string, "source": string}, describing the main-side IPC operation and its source file.',
-    'preload: {"path": string, "resolution_status": string}, describing the BrowserWindow-declared preload resolved within the shipped artifact.',
-  ],
+  asar: bridgeAnswerDescriptions,
   "javascript-export-shape": [
     'heading_change: {"status": string, "path": string, "discriminant": object or null, "left": object, "right": object}, copying the exact heading-change fields from the comparison result.',
     'comparison_coverage: {"status": string, "paired_variants": number, "added": number, "removed": number, "changed": number, "unknown": number}, copying comparison coverage and summary counts.',
     'runtime_semantics: "established" or "not_established", stating whether the cited comparison establishes runtime behavior.',
+  ],
+  "notes-export": [
+    ...bridgeAnswerDescriptions,
+    'feature_modules: {"paths": string[], "coverage": string}, listing the unique source-module observation paths in the feature trace in Unicode code-point order, and its coverage status.',
+    'semantic_boundary: {"status": string, "coverage": string, "relevant_unknowns": number}, copying the semantic trace status, coverage status, and summary.relevant_unknowns. Static traces do not establish runtime execution.',
   ],
 };
 

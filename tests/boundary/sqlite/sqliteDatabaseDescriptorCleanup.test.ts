@@ -1,7 +1,7 @@
 import { Cli } from "incur";
 import { access, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, onTestFinished, vi } from "vitest";
 
@@ -274,7 +274,7 @@ it("retains reply-read cancellation and retries the failed reply descriptor clos
     { signal: controller.signal },
   );
   if (result.ok) throw new Error("Expected cancelled reply read");
-  expect(projectAnalysisError(result.error)).toMatchObject({
+  const cancelled = {
     code: "cleanup_incomplete",
     details: {
       execution_failure: "cancelled",
@@ -285,7 +285,20 @@ it("retains reply-read cancellation and retries the failed reply descriptor clos
         truncated: false,
       },
     },
-  });
+  };
+  // Windows cannot remove a private root while the reply descriptor is open;
+  // the retained cancellation is then reported as the root cleanup's cause.
+  expect(projectAnalysisError(result.error)).toMatchObject(
+    process.platform === "win32"
+      ? {
+          code: "cleanup_incomplete",
+          details: {
+            resources: [dirname(descriptorCleanup.path)],
+            diagnostics: { previous_error: cancelled },
+          },
+        }
+      : cancelled,
+  );
   const handle = descriptorCleanup.handles[0];
   if (handle === undefined) throw new Error("Expected owned reply descriptor");
   expect(handle.fd).toBeGreaterThanOrEqual(0);

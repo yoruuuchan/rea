@@ -4,22 +4,34 @@ import {
   type DoctorHost,
 } from "./application/Doctor.js";
 import { fileURLToPath } from "node:url";
+import { inspectJadxProvider } from "./android/JadxDoctor.js";
 import { inspectSystemGhidraProvider } from "./ghidra/GhidraDoctor.js";
 import { inspectIdaRegistration } from "./ida/IdaDoctor.js";
+import { parseJebMcpEndpoint } from "./jeb/JebMcpEndpoint.js";
 import { selectLinuxPrivateDisplayStrategy } from "./hopper/LinuxPrivateDisplayProbe.js";
 
 /** Compose provider diagnostics at the outer CLI adapter boundary. */
 export const createSystemDoctorHost = (
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
-): DoctorHost =>
-  systemDoctorHost({
+): DoctorHost => {
+  const selectedJebEndpoint = environment.REA_JEB_MCP_URL;
+  const selectedJebRegistrationEnvironment: Readonly<Record<string, string>> =
+    selectedJebEndpoint !== undefined &&
+    selectedJebEndpoint.length > 0 &&
+    parseJebMcpEndpoint(selectedJebEndpoint).ok
+      ? { REA_JEB_MCP_URL: selectedJebEndpoint }
+      : {};
+  return systemDoctorHost({
     environment,
+    providerRegistrationEnvironment: () => selectedJebRegistrationEnvironment,
     providerInspections: async () => [
       await inspectSystemGhidraProvider(environment),
       inspectIdaRegistration(environment.REA_IDA_MCP_CONFIG),
+      await inspectJadxProvider(environment),
     ],
     linuxDemoRuntimeCheck: () => inspectLinuxPrivateDisplay(environment),
   });
+};
 
 const HOPPER_DEMO_HELPER_PATH = fileURLToPath(
   new URL("../scripts/hopper-demo-x11.py", import.meta.url),

@@ -13,4 +13,5 @@ export const MCP_STARTUP_POLICY = {
   toolsListBudgetMs: 5_000,
   firstCatalogBudgetMs: 20_000,
   doctorDeadlineMs: 30_000,
+  doctorStderrBytes: 64 * 1024,
 } as const;

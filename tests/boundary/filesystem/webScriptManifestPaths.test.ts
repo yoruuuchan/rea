@@ -75,3 +75,84 @@ it("still rejects changed source bytes after normalizing the selected manifest p
     "artifact_integrity_mismatch",
   );
 });
+
+const literalManifest = async () => {
+  const fixture = await materialize();
+  const selected = fixture.artifact.manifest.scripts[0];
+  if (selected?.content.state !== "exported")
+    throw new Error("Expected exported source");
+  selected.content.relative_path = "..\\sibling.js";
+  await writeFile(join(fixture.root, "sibling.js"), fixture.artifact.source);
+  if (process.platform !== "win32")
+    await writeFile(
+      join(fixture.root, "files", selected.content.relative_path),
+      fixture.artifact.source,
+    );
+  await writeFile(
+    fixture.manifestPath,
+    JSON.stringify(fixture.artifact.manifest),
+  );
+  return fixture;
+};
+
+it.each(["trace_web_module_imports", "trace_web_source_location"] as const)(
+  "refuses Windows backslash source interpretation for %s",
+  async (operation) => {
+    const fixture = await literalManifest();
+    const originalPlatform = Object.getOwnPropertyDescriptor(
+      process,
+      "platform",
+    );
+    const artifacts = new LocalWebScriptArtifacts(operation);
+    let response;
+    try {
+      // Exercise the Windows admission branch; this is not native Windows IO.
+      Object.defineProperty(process, "platform", { value: "win32" });
+      response = await artifacts.load({
+        manifest_path: fixture.manifestPath,
+        script_index: 0,
+      });
+    } finally {
+      if (originalPlatform !== undefined)
+        Object.defineProperty(process, "platform", originalPlatform);
+      await artifacts.close();
+    }
+    if (response.ok) throw new Error("Expected Windows source path refusal");
+    expect(projectAnalysisError(response.error)).toMatchObject({
+      code: "invalid_request",
+      details: {
+        issues: [
+          {
+            path: ["script_index"],
+            reason: "invalid_value",
+            message: expect.stringContaining(
+              "Windows source path cannot contain backslashes",
+            ),
+          },
+        ],
+      },
+    });
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "reads the same saved POSIX literal name without selecting its sibling",
+  async () => {
+    const fixture = await literalManifest();
+    await writeFile(join(fixture.root, "sibling.js"), "wrong sibling source");
+    const artifacts = new LocalWebScriptArtifacts("trace_web_module_imports");
+    try {
+      const result = await artifacts.load({
+        manifest_path: fixture.manifestPath,
+        script_index: 0,
+      });
+      if (!result.ok) throw result.error;
+      expect(result.value.source).toBe(fixture.artifact.source);
+      expect(result.value.sourceFile.path).toBe(
+        join(fixture.root, "files", "..\\sibling.js"),
+      );
+    } finally {
+      await artifacts.close();
+    }
+  },
+);

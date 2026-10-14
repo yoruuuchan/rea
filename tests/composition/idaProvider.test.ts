@@ -186,7 +186,7 @@ describe("IDA provider composition", () => {
 });
 
 describe("IDA binary_overview execution", () => {
-  it("reports document selection unavailable when binary_overview executes against an IDA session", async () => {
+  it("uses the bound IDA document and omits unsupported segment coverage", async () => {
     const { root, target } = await createIdaTarget();
     roots.push(root);
     const path = join(root, "registration.json");
@@ -200,17 +200,16 @@ describe("IDA binary_overview execution", () => {
     expect((await session.open(target.path)).ok).toBe(true);
     const tools = new EnhancedTools(session);
     const overview = await tools.execute("binary_overview", {});
-    expect(overview).toMatchObject({
-      ok: false,
-      error: {
-        _tag: "AnalysisCapabilityUnavailableError",
-        providerId: "ida",
-        operation: "list_documents",
-        message: expect.stringContaining(
-          "operation is not declared by this provider",
-        ),
-      },
-    });
+    expect(overview.ok).toBe(true);
+    if (overview.ok) {
+      expect(overview.value).toMatchObject({
+        document: target.path,
+        procedure_count: 1,
+        string_count: 1,
+      });
+      expect(overview.value).not.toHaveProperty("segments");
+      expect(overview.value).not.toHaveProperty("segment_count");
+    }
     const procedures = await session.execute("list_procedures", {});
     expect(procedures.ok).toBe(true);
     expect((await session.close()).ok).toBe(true);

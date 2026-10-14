@@ -3,14 +3,144 @@ import { describe, expect, it } from "vitest";
 import {
   recordWorkflowUnknowns,
   createWorkflowEvidence,
+  executeComposedWorkflow,
 } from "./WorkflowEvidence.js";
 import { InvestigationRecords } from "./investigation/InvestigationRecords.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
-import { err } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
+import {
+  createAnalysisExecution,
+  type AnalysisOperationPort,
+} from "./AnalysisProvider.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { nativeApiBoundarySchema } from "../domain/native/nativeApiBoundary.js";
 import { projectNativeApiInspection } from "./native/NativeApiInspection.js";
 import { functionDossierSchema } from "../domain/hopperValues.js";
 import { ghidraFunctionDossier } from "../domain/ghidraValues.fixture.js";
+
+const provider = { id: "fixture", name: "Fixture", version: "1" };
+
+it("keeps Evidence identity stable when dependent branches finish in opposite orders", async () => {
+  const run = async (order: readonly number[]) => {
+    const gate = () => {
+      let resolve: () => void = () => {
+        throw new Error("gate not initialized");
+      };
+      const promise = new Promise<void>((release) => {
+        resolve = release;
+      });
+      return { promise, resolve };
+    };
+    const parents = [gate(), gate()];
+    const children = [gate(), gate()];
+    const analysis: AnalysisOperationPort = {
+      execute: async (operation, parameters) => {
+        const index = Number(parameters.index);
+        if (operation === "procedure_address") {
+          await parents[index]!.promise;
+          return ok(createAnalysisExecution(String(index), provider));
+        }
+        children[index]!.resolve();
+        return ok(
+          createAnalysisExecution(String(index), provider, {
+            limitations: [
+              index === 0 ? "first child caveat" : "second child caveat",
+            ],
+          }),
+        );
+      },
+    };
+    const composed = await executeComposedWorkflow(
+      analysis,
+      async (observed) => {
+        const branches = Promise.all(
+          [0, 1].map(async (index) => {
+            await observed.execute("procedure_address", { index });
+            const child = await observed.execute("address_name", { index });
+            if (!child.ok) throw child.error;
+            return child.value.result;
+          }),
+        );
+        for (const index of order) {
+          parents[index]!.resolve();
+          await children[index]!.promise;
+        }
+        return ok(await branches);
+      },
+    );
+    if (!composed.ok) throw composed.error;
+    return createWorkflowEvidence({
+      target: undefined,
+      operation: "batch_decompile",
+      parameters: {},
+      result: composed.value.result,
+      upstreamProfile: undefined,
+      upstreamLimitations: composed.value.limitations,
+    });
+  };
+  const left = await run([0, 1]);
+  const right = await run([1, 0]);
+  expect(left.normalized_result).toEqual(right.normalized_result);
+  expect(left.limitations).toEqual(right.limitations);
+  expect(left.evidence_id).toBe(right.evidence_id);
+});
+
+it("retains unique upstream limits in canonical order across concurrent observations", async () => {
+  let release: () => void = () => {
+    throw new Error("gate not initialized");
+  };
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const options = { signal: new AbortController().signal };
+  const analysis: AnalysisOperationPort = {
+    execute: async (_, parameters, forwarded) => {
+      expect(parameters).toEqual({ marker: true });
+      expect(forwarded).toBe(options);
+      const call = calls++;
+      if (call === 0) await gate;
+      else release();
+      return ok(
+        createAnalysisExecution([], provider, {
+          limitations: call === 0 ? ["first", "shared"] : ["second", "shared"],
+        }),
+      );
+    },
+  };
+  const result = await executeComposedWorkflow(analysis, async (observed) => {
+    await Promise.all([
+      observed.execute("list_strings", { marker: true }, options),
+      observed.execute("list_procedures", { marker: true }, options),
+    ]);
+    return ok({ count: 0 });
+  });
+  expect(calls).toBe(2);
+  expect(result).toEqual(
+    ok({ result: { count: 0 }, limitations: ["first", "second", "shared"] }),
+  );
+});
+
+it("preserves a failed composed operation without an extra provider read", async () => {
+  const failure = err(new AnalysisCancelledError("list_strings"));
+  let calls = 0;
+  const result = await executeComposedWorkflow(
+    {
+      execute: async () => {
+        calls++;
+        return failure;
+      },
+    },
+    async (observed) => {
+      const observedResult = await observed.execute("list_strings", {});
+      return observedResult.ok
+        ? ok(observedResult.value.result)
+        : observedResult;
+    },
+  );
+  expect(result).toBe(failure);
+  expect(calls).toBe(1);
+});
 
 describe("workflow residual question retention", () => {
   it("keeps questions linked to workflow Evidence and records repeats idempotently", () => {
@@ -24,6 +154,7 @@ describe("workflow residual question retention", () => {
       parameters: { procedure: "0x1000" },
       result,
       upstreamProfile: undefined,
+      upstreamLimitations: [],
     });
     expect(records.recordEvidence(evidence).ok).toBe(true);
     const input = {
@@ -61,6 +192,7 @@ describe("workflow residual question retention", () => {
         parameters: {},
         result,
         upstreamProfile: undefined,
+        upstreamLimitations: [],
       });
 
       expect(records.recordEvidence(evidence).ok).toBe(true);
@@ -88,6 +220,7 @@ describe("workflow residual question retention", () => {
       parameters: {},
       result,
       upstreamProfile: undefined,
+      upstreamLimitations: [],
     });
 
     expect(records.recordEvidence(evidence).ok).toBe(true);
@@ -139,6 +272,7 @@ it.each([
       parameters: { procedure: "0x1000" },
       result,
       upstreamProfile: undefined,
+      upstreamLimitations: [],
     });
     const records = new InvestigationRecords();
     expect(records.recordEvidence(evidence).ok).toBe(true);

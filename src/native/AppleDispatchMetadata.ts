@@ -105,15 +105,22 @@ export const decodeAppleDispatchMetadata = (
     evidence,
     offset,
   };
-  const { failures, categoryIssues, examined, categoriesExamined } =
-    decodeObjcDispatchFacets({
-      bytes,
-      sections,
-      segments,
-      readers,
-      budget,
-      result,
-    });
+  const {
+    failures,
+    categoryIssues,
+    examined,
+    categoriesExamined,
+    objcListScanTruncated,
+    objcClassListScanTruncated,
+  } = decodeObjcDispatchFacets({
+    bytes,
+    sections,
+    segments,
+    readers,
+    budget,
+    maxListSlots: maxRecords,
+    result,
+  });
   const swiftRelative = createSwiftRelativeReader({
     bytes,
     readers,
@@ -163,6 +170,8 @@ export const decodeAppleDispatchMetadata = (
     categoryIssues,
     examined,
     categoriesExamined,
+    objcListScanTruncated,
+    objcClassListScanTruncated,
     truncated: budget.truncated,
     fixups,
     vtables,

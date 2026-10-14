@@ -89,6 +89,101 @@ describe("reference source import projections", () => {
 });
 
 describe("reference source symlink import", () => {
+  it.each([
+    { target: "dist", reason: "default-ignored", pattern: "dist/" },
+    { target: "generated", reason: "project-ignored", pattern: "generated/" },
+    { target: "cache", reason: "caller-excluded", pattern: "cache/" },
+  ])(
+    "retains links into a $reason directory without importing it",
+    async ({ target, reason, pattern }) => {
+      const root = await createTestTempDirectory(
+        "rea-reference-excluded-links-",
+      );
+      await mkdir(join(root, target, "nested"), { recursive: true });
+      await writeFile(
+        join(root, target, "nested", "output.js"),
+        "export const generated = true;\n",
+      );
+      await writeFile(join(root, "source.ts"), "export const value = 1;\n");
+      if (reason === "project-ignored")
+        await writeFile(join(root, ".gitignore"), `${pattern}\n`);
+      await symlink(target, join(root, "alias"));
+      await symlink(`${target}/nested/output.js`, join(root, "output-link"));
+
+      const result = await importReferenceSource({
+        root,
+        caller: "reference-import-test",
+        policy: { secretPatterns: [] },
+        ...(reason === "caller-excluded" ? { excludePaths: [pattern] } : {}),
+      });
+      if (!result.ok) throw result.error;
+      expect(result.value.inventory_state).toBe("partial");
+      expect(result.value.exclusions).toContainEqual({
+        path: target,
+        entry_kind: "directory",
+        reason,
+        pattern,
+      });
+      expect(result.value.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "source.ts",
+            kind: "file",
+            content_state: "hashed",
+          }),
+          expect.objectContaining({
+            path: "alias",
+            kind: "symlink",
+            target,
+            target_state: "internal",
+          }),
+          expect.objectContaining({
+            path: "output-link",
+            kind: "symlink",
+            target: `${target}/nested/output.js`,
+            target_state: "internal",
+          }),
+        ]),
+      );
+      expect(
+        result.value.entries.some(
+          ({ path }) => path === target || path.startsWith(`${target}/`),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("does not treat an excluded file as an excluded directory for a child link", async () => {
+    const root = await createTestTempDirectory(
+      "rea-reference-excluded-file-link-",
+    );
+    await writeFile(join(root, "secret.txt"), "secret\n");
+    await writeFile(join(root, "source.ts"), "export const value = 1;\n");
+    await symlink("secret.txt/child", join(root, "alias"));
+
+    const result = await importReferenceSource({
+      root,
+      caller: "reference-import-test",
+      policy: { secretPatterns: [] },
+      excludePaths: ["secret.txt"],
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.inventory_state).toBe("partial");
+    expect(
+      result.value.entries.find(({ path }) => path === "alias"),
+    ).toMatchObject({
+      kind: "symlink",
+      target: "secret.txt/child",
+      target_state: "missing",
+    });
+    expect(result.value.exclusions).toContainEqual({
+      path: "secret.txt",
+      entry_kind: "file",
+      reason: "caller-excluded",
+      pattern: "secret.txt",
+    });
+  });
+
   it("preserves an unreadable target as unknown instead of a synthetic path", () => {
     const read: ReferenceSourceRead = {
       root: "/reference",
@@ -160,6 +255,24 @@ describe("reference source manifest inventory", () => {
       ["out/widget_spec.js", "JavaScript", ["generated", "source", "test"]],
       ["vendor/widget_test.go", "Go", ["source", "test", "vendor"]],
       ["settings_spec.json", "JSON", ["config", "test"]],
+      [
+        "docs/api/client.ts",
+        "TypeScript",
+        ["documentation", "generated", "source"],
+      ],
+      [
+        "packages/widget/Docs/API/client.ts",
+        "TypeScript",
+        ["documentation", "generated", "source"],
+      ],
+      ["docs/apis/client.ts", "TypeScript", ["documentation", "source"]],
+      ["mydocs/api/client.ts", "TypeScript", ["source"]],
+      ["docs/manual/api/client.ts", "TypeScript", ["documentation", "source"]],
+      ["docs/api.ts", "TypeScript", ["documentation", "source"]],
+      ["public/client.ts", "TypeScript", ["generated", "source"]],
+      [".github", null, ["config"]],
+      [".husky", null, ["config"]],
+      [".gitignore", null, ["config"]],
     ] as const;
     await Promise.all(
       files.map(async ([path]) => {
@@ -183,6 +296,11 @@ describe("reference source manifest inventory", () => {
         kind: "file",
         language,
         classifications,
+      });
+    for (const path of ["docs/api", "packages/widget/Docs/API"])
+      expect(entries.get(path), path).toMatchObject({
+        kind: "directory",
+        classifications: ["documentation", "generated"],
       });
   });
 });
@@ -305,6 +423,7 @@ describe("reference source import behavior", () => {
       expect(left.value.parse_failures).toHaveLength(1);
       expect(left.value.exclusions).toContainEqual({
         path: ".env",
+        entry_kind: "file",
         reason: "configured-secret",
         pattern: ".env",
       });
@@ -505,46 +624,55 @@ describe.skipIf(process.platform === "win32")(
           expect.arrayContaining([
             {
               path: "project.tmp",
+              entry_kind: "file",
               reason: "project-ignored",
               pattern: "project.tmp",
             },
             {
               path: "project.log",
+              entry_kind: "file",
               reason: "configured-secret",
               pattern: "project.log",
             },
             {
               path: "keep.log",
+              entry_kind: "file",
               reason: "default-ignored",
               pattern: "*.log",
             },
             {
               path: "dist",
+              entry_kind: "directory",
               reason: "default-ignored",
               pattern: "dist/",
             },
             {
               path: "node_modules",
+              entry_kind: "directory",
               reason: "default-ignored",
               pattern: "node_modules/",
             },
             {
               path: "empty-ignored",
+              entry_kind: "directory",
               reason: "project-ignored",
               pattern: "empty-ignored/",
             },
             {
               path: "project-parent",
+              entry_kind: "directory",
               reason: "project-ignored",
               pattern: "project-parent/",
             },
             {
               path: "caller-parent",
+              entry_kind: "directory",
               reason: "caller-excluded",
               pattern: "caller-parent/",
             },
             {
               path: "secret-dir",
+              entry_kind: "directory",
               reason: "configured-secret",
               pattern: "secret-dir/",
             },

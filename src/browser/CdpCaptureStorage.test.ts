@@ -82,3 +82,61 @@ it.each([false, true])(
     expect(value.fingerprints_complete).toBe(!mixed);
   },
 );
+
+it("keeps an omitted IndexedDB remote value unknown", async () => {
+  const replies: Record<string, unknown> = {
+    "Storage.getUsageAndQuota": { usage: 0, quota: 1000 },
+    "DOMStorage.getDOMStorageItems": { entries: [] },
+    "IndexedDB.requestDatabaseNames": { databaseNames: ["db"] },
+    "CacheStorage.requestCacheNames": { caches: [] },
+    "Network.getCookies": { cookies: [] },
+    "IndexedDB.requestDatabase": {
+      databaseWithObjectStores: {
+        name: "db",
+        objectStores: [
+          {
+            name: "records",
+            keyPath: { type: "string", string: "id" },
+            autoIncrement: false,
+            indexes: [],
+          },
+        ],
+      },
+    },
+    "IndexedDB.requestData": {
+      objectStoreDataEntries: [
+        {
+          key: { type: "number", value: 1 },
+          primaryKey: { type: "number", value: 1 },
+        },
+      ],
+      hasMore: false,
+    },
+  };
+  const connection = {
+    async send(method: string): Promise<unknown> {
+      if (!(method in replies)) throw new Error(method);
+      return replies[method];
+    },
+  } as unknown as CdpConnection;
+  const { value } = await captureStorage(
+    {
+      connection,
+      sessionId: undefined,
+      input: inspectWebPageInputSchema.parse({
+        cdp_endpoint: "http://127.0.0.1:9222",
+        allowed_origins: ["https://example.test"],
+        target_id: "page-1",
+        include_storage_keys: true,
+        include_storage_fingerprints: true,
+      }),
+    },
+    "https://example.test/app",
+    [],
+  );
+  const record = value.content_fingerprints.find(
+    (item) => item.scope === "indexed_db_record",
+  );
+  expect(record).toMatchObject({ value_sha256: null, complete: false });
+  expect(value.fingerprints_complete).toBe(false);
+});

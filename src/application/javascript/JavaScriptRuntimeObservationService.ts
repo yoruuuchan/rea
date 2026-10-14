@@ -22,6 +22,8 @@ export const listJavaScriptRuntimeTargets = async (
   const ready = requireProvider(provider, "list_javascript_runtime_targets");
   if (!ready.ok) return ready;
   const result = await ready.value.listTargets(input, options);
+  if (result.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("list_javascript_runtime_targets"));
   return result.ok
     ? ok(
         createJavaScriptRuntimeObservationEvidence(

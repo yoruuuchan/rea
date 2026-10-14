@@ -1,3 +1,5 @@
+import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 
@@ -6,6 +8,7 @@ import { projectGhidraDoctorInspection } from "./GhidraDoctor.js";
 import {
   ghidraInstallationDiagnostics,
   ghidraJavaEnvironment,
+  discoverGhidraInstallationOnPath,
   inspectGhidraInstallation,
   type GhidraExecutableHeaderProbe,
   type GhidraInstallationHost,
@@ -17,6 +20,7 @@ import {
   ghidraApplicationProperties,
   ghidraJavaRequirement,
 } from "./GhidraInstallationPolicy.js";
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 
 // The real Java probe shells out via spawnSync; stub it so one test can run
 // the real probeJava against captured `-XshowSettings:properties` output.
@@ -66,6 +70,100 @@ const host = (
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+it.skipIf(process.platform === "win32")(
+  "resolves a PATH launcher only when its real target is a complete installation",
+  async () => {
+    const root = await createTestTempDirectory("rea-ghidra-path-");
+    const installation = join(root, "installation");
+    const pathDirectory = join(root, "bin");
+    const launcher = join(installation, "ghidraRun");
+    await mkdir(join(installation, "Ghidra"), { recursive: true });
+    await mkdir(join(installation, "support"), { recursive: true });
+    await mkdir(pathDirectory, { recursive: true });
+    await writeFile(
+      join(installation, "Ghidra", "application.properties"),
+      "application.version=12.1.4\n",
+    );
+    await writeFile(launcher, "#!/bin/sh\nexit 0\n");
+    await writeFile(
+      join(installation, "support", "analyzeHeadless"),
+      "#!/bin/sh\nexit 0\n",
+    );
+    await chmod(launcher, 0o700);
+    await chmod(join(installation, "support", "analyzeHeadless"), 0o700);
+    await symlink(launcher, join(pathDirectory, "ghidra"));
+
+    expect(
+      discoverGhidraInstallationOnPath(
+        { PATH: pathDirectory },
+        process.platform,
+      ),
+    ).toBe(installation);
+
+    const incomplete = join(root, "incomplete");
+    const incompletePath = join(root, "incomplete-bin");
+    await mkdir(join(incomplete, "Ghidra"), { recursive: true });
+    await mkdir(incompletePath, { recursive: true });
+    await writeFile(
+      join(incomplete, "Ghidra", "application.properties"),
+      "application.version=12.1.4\n",
+    );
+    await writeFile(join(incomplete, "ghidraRun"), "launcher\n");
+    await chmod(join(incomplete, "ghidraRun"), 0o700);
+    await symlink(
+      join(incomplete, "ghidraRun"),
+      join(incompletePath, "ghidra"),
+    );
+    expect(
+      discoverGhidraInstallationOnPath(
+        { PATH: incompletePath },
+        process.platform,
+      ),
+    ).toBeUndefined();
+
+    const nonExecutable = join(root, "non-executable");
+    const nonExecutablePath = join(root, "non-executable-bin");
+    await mkdir(join(nonExecutable, "Ghidra"), { recursive: true });
+    await mkdir(join(nonExecutable, "support"), { recursive: true });
+    await mkdir(nonExecutablePath, { recursive: true });
+    await writeFile(
+      join(nonExecutable, "Ghidra", "application.properties"),
+      "application.version=12.1.4\n",
+    );
+    await writeFile(
+      join(nonExecutable, "support", "analyzeHeadless"),
+      "headless\n",
+    );
+    await chmod(join(nonExecutable, "support", "analyzeHeadless"), 0o700);
+    await writeFile(join(nonExecutablePath, "ghidra"), "not executable\n");
+    expect(
+      discoverGhidraInstallationOnPath(
+        { PATH: nonExecutablePath },
+        process.platform,
+      ),
+    ).toBeUndefined();
+  },
+);
+
+it("does not fall back to PATH when an explicit Ghidra installation path is malformed", () => {
+  const inspection = inspectGhidraInstallation(
+    {
+      environment: { PATH: "/valid-ghidra-bin" },
+      installDir: "relative/ghidra",
+      platform: "linux",
+      architecture: "x64",
+    },
+    host({ discoverInstallDirOnPath: () => INSTALL }),
+  );
+  expect(inspection.status).toBe("unavailable");
+  expect(inspection.installDir).toBe("relative/ghidra");
+  expect(inspection.checks[0]).toMatchObject({
+    name: "configuration",
+    status: "failed",
+    detail: "GHIDRA_INSTALL_DIR must be absolute",
+  });
 });
 
 it("probes the selected Java environment without reading conflicting ambient settings", () => {

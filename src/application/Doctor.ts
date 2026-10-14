@@ -48,6 +48,7 @@ export interface DoctorCheck {
   readonly classification:
     | "healthy"
     | "missing_dependency"
+    | "runtime_failure"
     | "unsupported_host"
     | "unsupported_target"
     | "missing_analysis_engine"
@@ -65,6 +66,7 @@ export interface DoctorProviderCheck {
   readonly detail: string;
   readonly remediation: string | null;
   readonly classification: Exclude<DoctorCheck["classification"], "healthy">;
+  readonly details?: Readonly<Record<string, JsonValue>>;
 }
 
 /** Read-only provider inspection supplied by an outer composition adapter. */
@@ -97,6 +99,8 @@ export interface DoctorHost {
   brewHopperPath(): Promise<string | undefined>;
   manualHopperPaths(): Promise<readonly string[]>;
   providerInspections?(): Promise<readonly DoctorProviderInspection[]>;
+  /** Validated provider settings preserved by setup, independent of readiness. */
+  providerRegistrationEnvironment?(): Readonly<Record<string, string>>;
   installationPaths?(): Promise<readonly string[]>;
   installedSkillIdentity?(
     clientIds: readonly string[],
@@ -366,6 +370,9 @@ export interface SystemDoctorHostOptions {
   readonly providerInspections?: () => Promise<
     readonly DoctorProviderInspection[]
   >;
+  readonly providerRegistrationEnvironment?: () => Readonly<
+    Record<string, string>
+  >;
   readonly linuxDemoRuntimeCheck?: () => Promise<DoctorCheck>;
 }
 
@@ -476,6 +483,12 @@ export const systemDoctorHost = (
     ...(options.providerInspections === undefined
       ? {}
       : { providerInspections: options.providerInspections }),
+    ...(options.providerRegistrationEnvironment === undefined
+      ? {}
+      : {
+          providerRegistrationEnvironment:
+            options.providerRegistrationEnvironment,
+        }),
     async ilspyCmdVersion(path) {
       try {
         await access(path, constants.X_OK);

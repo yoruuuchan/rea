@@ -66,15 +66,13 @@ const native = <Name extends string, Schema extends z.ZodObject>(
 };
 
 /** Ordered single-line symbols; `swift-demangle` ends each result with LF. */
-export const swiftSymbolsSchema = z
-  .array(
-    z
-      .string()
-      .min(1)
-      .regex(/^[^\n]*$/u, "Each Swift symbol must be one line.")
-      .regex(/^[^\x00]*$/u, "Swift symbols cannot contain NUL."),
-  )
-  .min(1);
+export const swiftSymbolsSchema = z.array(
+  z
+    .string()
+    .min(1)
+    .regex(/^[^\n]*$/u, "Each Swift symbol must be one line.")
+    .regex(/^[^\x00]*$/u, "Swift symbols cannot contain NUL."),
+);
 
 /** Provider-neutral semantic operations backed initially by macOS utilities. */
 export const NATIVE_TOOL_CONTRACTS = [

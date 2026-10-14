@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   functionBodySchema,
+  addressDistance,
   procedureIdentitySchema,
   parseDocuments,
   parseListCount,
@@ -12,6 +13,15 @@ import {
 } from "./hopperValues.js";
 
 describe("Hopper boundary values", () => {
+  it("distinguishes measured zero, malformed, incomparable, reversed, and oversized extents", () => {
+    expect(addressDistance("not-an-address", "0x2000")).toBeNull();
+    expect(addressDistance("ram:0x1000", "rom:0x2000")).toBeNull();
+    expect(addressDistance("0x2000", "0x1000")).toBeNull();
+    expect(addressDistance("0x1000", "0x1000")).toBe(0);
+    expect(addressDistance("0x1000", "0x2000")).toBe(4096);
+    expect(addressDistance("0x0", "0x20000000000000")).toBeNull();
+  });
+
   it("parses Hopper's address-keyed name and string maps", () => {
     expect(parseNames({ "0x1000": "_main" })).toEqual({
       ok: true,

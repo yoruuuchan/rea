@@ -9,6 +9,7 @@ export const HOPPER_SHUTDOWN_TIMEOUT_MS = 30_000;
 export interface HopperServerInfo {
   readonly name: string;
   readonly version: string;
+  readonly processId: number;
 }
 
 /** Validate the bridge identity and exact per-launch run identifier. */
@@ -22,9 +23,16 @@ export const parseHopperServerInfo = (
     !Array.isArray(value) &&
     value.name === "REA Hopper bridge" &&
     typeof value.version === "string" &&
+    typeof value.process_id === "number" &&
+    Number.isSafeInteger(value.process_id) &&
+    value.process_id > 0 &&
     value.run_id === expectedRunId
   )
-    return ok({ name: value.name, version: value.version });
+    return ok({
+      name: value.name,
+      version: value.version,
+      processId: value.process_id,
+    });
   return err(new HopperProtocolError("Hopper bridge health result is invalid"));
 };
 

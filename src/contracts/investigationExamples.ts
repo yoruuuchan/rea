@@ -28,6 +28,7 @@ export const FUNCTION_COMPARISON_EVIDENCE = createEvidence(
     result: jsonValueSchema.parse(comparison),
     confidence: "derived",
     authority: "analyst-inference",
+    limitations: comparison.limitations,
     evidenceLinks: [
       FUNCTION_COMPARISON_EXAMPLE.left.evidence_id,
       FUNCTION_COMPARISON_EXAMPLE.right.evidence_id,

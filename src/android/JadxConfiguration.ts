@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { inspectWindowsNativeReadiness } from "../process/WindowsAuthority.js";
 import { systemWindowsNativeAuthority } from "../windows/WindowsNativeLoader.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 import type { AndroidOperation } from "../domain/android/androidAnalysis.js";
@@ -11,7 +12,15 @@ import {
   execFileOutput,
   execFileOutputFailure,
 } from "../process/ExecFileOutput.js";
-import { JADX_JAR_CONFIGURATION_REMEDIATION } from "./JadxRelease.js";
+import type { DoctorProviderCheck } from "../application/Doctor.js";
+import {
+  JADX_JAR_CONFIGURATION_REMEDIATION,
+  JADX_JAVA_PROBE_REMEDIATION,
+  JADX_JAVA_RUNTIME_REMEDIATION,
+  JADX_JVM_OPTIONS_REMEDIATION,
+  JADX_UNSUPPORTED_HOST_REMEDIATION,
+  JADX_WINDOWS_NATIVE_REMEDIATION,
+} from "./JadxRelease.js";
 
 const JAVA_MODULE_LISTING_TIMEOUT_MS = 10_000;
 const JAVA_MODULE_LISTING_MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -30,16 +39,110 @@ type ConfigurationFailureCode =
   | "not_configured"
   | "executable_missing"
   | "runtime_missing"
+  | "runtime_unavailable"
   | "unsupported_host"
   | "unsupported_version"
   | "version_unresolved"
   | "open_options_invalid";
+
+/**
+ * Failure kinds tagged at the JADX configuration boundary. Consumers (the
+ * doctor adapter) project the boundary's remediation and classification for
+ * a kind; they must not reinterpret the phase/setting evidence to derive
+ * them.
+ */
+export type JadxFailureKind =
+  | "windows_native_artifact"
+  | "windows_native_runtime"
+  | "java_runtime"
+  | "java_home"
+  | "jvm_options"
+  | "jar"
+  | "java_probe"
+  | "unsupported_host";
+
+/** Runtime mirror of JadxFailureKind for validating the loose diagnostics tag. */
+export const JADX_FAILURE_KINDS: readonly JadxFailureKind[] = [
+  "windows_native_artifact",
+  "windows_native_runtime",
+  "java_runtime",
+  "java_home",
+  "jvm_options",
+  "jar",
+  "java_probe",
+  "unsupported_host",
+];
+
+export interface JadxFailureOutcome {
+  readonly remediation: string;
+  readonly classification: DoctorProviderCheck["classification"];
+}
+
+/**
+ * Project the boundary-owned remediation and classification for a failure
+ * kind. A null kind (missing or corrupt tag) keeps JAR guidance, matching
+ * the previous fallthrough for unclassified failures.
+ */
+export const projectJadxFailureOutcome = (
+  kind: JadxFailureKind | null,
+  configured: boolean,
+): JadxFailureOutcome => {
+  const drift = configured ? "config_drift" : "missing_analysis_engine";
+  switch (kind) {
+    case "windows_native_artifact":
+      return {
+        remediation: JADX_WINDOWS_NATIVE_REMEDIATION,
+        classification: "missing_dependency",
+      };
+    case "windows_native_runtime":
+      return {
+        remediation: JADX_WINDOWS_NATIVE_REMEDIATION,
+        classification: "runtime_failure",
+      };
+    case "java_runtime":
+      return {
+        remediation: JADX_JAVA_RUNTIME_REMEDIATION,
+        classification: "missing_dependency",
+      };
+    case "java_home":
+      return {
+        remediation: JADX_JAVA_RUNTIME_REMEDIATION,
+        classification: drift,
+      };
+    case "jvm_options":
+      return {
+        remediation: JADX_JVM_OPTIONS_REMEDIATION,
+        classification: drift,
+      };
+    case "jar":
+      return {
+        remediation: JADX_JAR_CONFIGURATION_REMEDIATION,
+        classification: drift,
+      };
+    case "java_probe":
+      return {
+        remediation: JADX_JAVA_PROBE_REMEDIATION,
+        classification: drift,
+      };
+    case "unsupported_host":
+      return {
+        remediation: JADX_UNSUPPORTED_HOST_REMEDIATION,
+        classification: "unsupported_host",
+      };
+    case null:
+      return {
+        remediation: JADX_JAR_CONFIGURATION_REMEDIATION,
+        classification: drift,
+      };
+  }
+};
 
 class JadxConfigurationFailure extends Error {
   constructor(
     readonly code: ConfigurationFailureCode,
     message: string,
     readonly diagnostics: Readonly<Record<string, JsonValue>>,
+    readonly kind: JadxFailureKind,
     options?: ErrorOptions,
   ) {
     super(message, options);
@@ -75,7 +178,7 @@ export const inspectJadxAvailability = async (
         status: "unavailable",
         code: cause.code,
         reason: cause.message,
-        diagnostics: cause.diagnostics,
+        diagnostics: { ...cause.diagnostics, failure_kind: cause.kind },
       };
     throw cause;
   }
@@ -191,6 +294,7 @@ const requireEngineArchive = async (
         archive_error: reason,
         maximum_metadata_read_bytes: JAR_METADATA_READ_MAX_BYTES,
       },
+      "jar",
       cause,
     );
   } finally {
@@ -200,6 +304,7 @@ const requireEngineArchive = async (
     "unsupported_version",
     `REA_JADX_MCP_JAR ${jar} does not contain the required metadata bridge classes: ${[...missing].join(", ")}. ${JADX_JAR_CONFIGURATION_REMEDIATION}`,
     { jar_path: jar, phase: "jar-inspection", missing_classes: [...missing] },
+    "jar",
   );
 };
 
@@ -207,25 +312,52 @@ const requireSupportedHost = (): void => {
   if (process.platform === "linux" || process.platform === "darwin") return;
   if (process.platform === "win32" && process.arch === "x64") {
     const loaded = systemWindowsNativeAuthority();
-    if (loaded.available && loaded.authority.inspection.protocolStdin === true)
-      return;
+    if (loaded.available) {
+      if (loaded.authority.inspection.protocolStdin === true) return;
+      throw configurationFailure(
+        "runtime_missing",
+        "The bundled Windows native artifact lacks owned protocol stdin; use a matching current Windows x64 REA package.",
+        {
+          platform: process.platform,
+          architecture: process.arch,
+          phase: "process-ownership",
+          owned_protocol_stdin: false,
+        },
+        "windows_native_artifact",
+      );
+    }
+    const readiness = inspectWindowsNativeReadiness(process.platform, loaded);
     throw configurationFailure(
-      "runtime_missing",
-      loaded.available
-        ? "The bundled Windows native artifact lacks owned protocol stdin; use a matching current Windows x64 REA package."
-        : loaded.reason,
+      readiness.available ? "runtime_unavailable" : readiness.code,
+      readiness.available
+        ? "Windows native readiness disagreed with the native loader result."
+        : readiness.reason,
       {
         platform: process.platform,
         architecture: process.arch,
         phase: "process-ownership",
         owned_protocol_stdin: false,
+        ...(readiness.available
+          ? {}
+          : {
+              failure_stage: readiness.failureStage,
+              remediation: readiness.remediation,
+            }),
       },
+      readiness.available
+        ? "windows_native_runtime"
+        : readiness.code === "unsupported_host"
+          ? "unsupported_host"
+          : readiness.code === "runtime_missing"
+            ? "windows_native_artifact"
+            : "windows_native_runtime",
     );
   }
   throw configurationFailure(
     "unsupported_host",
     `Android JADX subprocess ownership is unsupported on ${process.platform}/${process.arch}; use Linux, macOS, or Windows x64 with its bundled native controls.`,
     { platform: process.platform },
+    "unsupported_host",
   );
 };
 
@@ -238,6 +370,7 @@ const resolveJar = async (
       "not_configured",
       JADX_JAR_CONFIGURATION_REMEDIATION,
       { jar_configured: false },
+      "jar",
     );
   try {
     await access(jar, constants.R_OK);
@@ -246,6 +379,7 @@ const resolveJar = async (
         "executable_missing",
         `REA_JADX_MCP_JAR is not a regular file: ${jar}`,
         { jar_path: jar },
+        "jar",
       );
     return await realpath(jar);
   } catch (cause) {
@@ -254,6 +388,7 @@ const resolveJar = async (
       "executable_missing",
       `Cannot read REA_JADX_MCP_JAR ${jar}: ${cause instanceof Error ? cause.message : String(cause)}`,
       { jar_path: jar },
+      "jar",
       cause,
     );
   }
@@ -293,6 +428,7 @@ const resolveJava = async (
           "runtime_missing",
           `Cannot inspect selected Java executable ${candidate}: ${errorText(cause)}`,
           { java_executable: candidate },
+          "java_runtime",
           cause,
         );
       }
@@ -301,6 +437,7 @@ const resolveJava = async (
       "runtime_missing",
       "Cannot find java.exe on the selected Windows PATH. Select a full JDK with JAVA_HOME or PATH, then verify it with java --list-modules. REA does not install Java.",
       { java_executable: executable },
+      "java_runtime",
     );
   }
   if (isAbsolute(environment.JAVA_HOME))
@@ -309,6 +446,7 @@ const resolveJava = async (
     "open_options_invalid",
     "JAVA_HOME must select an existing JDK by absolute path; omit it to use java on PATH.",
     { java_home: environment.JAVA_HOME },
+    "java_home",
   );
 };
 
@@ -324,6 +462,7 @@ const requireJavaHomeExecutable = async (
       "runtime_missing",
       `JAVA_HOME java is not a regular file: ${java}`,
       { java_executable: java },
+      "java_runtime",
     );
   } catch (cause) {
     if (cause instanceof JadxConfigurationFailure) throw cause;
@@ -331,6 +470,7 @@ const requireJavaHomeExecutable = async (
       "runtime_missing",
       `Cannot execute JAVA_HOME java ${java}: ${cause instanceof Error ? cause.message : String(cause)}`,
       { java_executable: java },
+      "java_runtime",
       cause,
     );
   }
@@ -351,6 +491,7 @@ const resolveJvmArguments = (
         "open_options_invalid",
         `${name} must be a positive safe integer; received ${value}.`,
         { setting: name, value },
+        "jvm_options",
       );
     if (
       name === "REA_JADX_ACTIVE_PROCESSOR_COUNT" &&
@@ -360,6 +501,7 @@ const resolveJvmArguments = (
         "open_options_invalid",
         `${name} exceeds the JVM's signed 32-bit processor-count range.`,
         { setting: name, value },
+        "jvm_options",
       );
     result.push(`${prefix}${value}${suffix}`);
   }
@@ -405,6 +547,7 @@ const inspectJavaRuntime = async (
           failure: "output_limit",
           output_limit_bytes: JAVA_MODULE_LISTING_MAX_OUTPUT_BYTES,
         },
+        "java_probe",
         cause,
       );
     if (output.killed)
@@ -416,12 +559,14 @@ const inspectJavaRuntime = async (
           failure: "probe_terminated",
           deadline_ms: JAVA_MODULE_LISTING_TIMEOUT_MS,
         },
+        "java_probe",
         cause,
       );
     throw configurationFailure(
       "runtime_missing",
       `Cannot inspect selected Java runtime ${java}: ${output.stderr.trim() || errorText(cause)}. Select a full JDK including jdk.compiler via JAVA_HOME or PATH; verify it with java --list-modules.`,
       diagnostics,
+      "java_runtime",
       cause,
     );
   }
@@ -438,6 +583,7 @@ const inspectJavaRuntime = async (
         stderr,
         output_truncated: false,
       },
+      "java_runtime",
     );
   const major = /^java\.base@(\d+)(?:[.+_-]|$)/mu.exec(stdout)?.[1];
   if (major === undefined)
@@ -453,6 +599,7 @@ const inspectJavaRuntime = async (
         stderr,
         output_truncated: false,
       },
+      "java_probe",
     );
   if (Number(major) < 17)
     throw configurationFailure(
@@ -467,6 +614,7 @@ const inspectJavaRuntime = async (
         stderr,
         output_truncated: false,
       },
+      "java_runtime",
     );
 };
 
@@ -474,12 +622,14 @@ const configurationFailure = (
   code: ConfigurationFailureCode,
   message: string,
   diagnostics: Readonly<Record<string, JsonValue>>,
+  kind: JadxFailureKind,
   cause?: unknown,
 ): JadxConfigurationFailure =>
   new JadxConfigurationFailure(
     code,
     message,
     diagnostics,
+    kind,
     cause === undefined ? undefined : { cause },
   );
 

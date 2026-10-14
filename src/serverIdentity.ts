@@ -74,7 +74,10 @@ export const createServerIdentity = (input: {
       name: PRODUCT_IDENTITY.skillName,
       expected_version: PRODUCT_IDENTITY.skillVersion,
     },
-    catalog: CATALOG_IDENTITY,
+    catalog: {
+      counts: CATALOG_IDENTITY.counts,
+      digests: CATALOG_IDENTITY.digests,
+    },
     protocol_features: {
       progress: true,
       cancellation: true,

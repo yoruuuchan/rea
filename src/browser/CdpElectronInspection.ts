@@ -232,7 +232,7 @@ const navigatedFrameId = (event: CdpEvent): string | undefined => {
   return undefined;
 };
 
-const captureFrames = async (
+export const captureFrames = async (
   result: unknown,
   completeness: CdpCaptureCompleteness,
 ): Promise<ElectronPageInspection["frames"]> => {
@@ -245,8 +245,12 @@ const captureFrames = async (
   )) {
     const frame = recordValue(tree.frame);
     const frameId = cdpStringValue(frame?.id);
-    const path = await authorizedElectronFile(cdpStringValue(frame?.url) ?? "");
-    if (frameId === undefined || path === undefined) {
+    if (frame === undefined || frameId === undefined) {
+      completeness.exclude("frames", "invalid_protocol_value");
+      continue;
+    }
+    const path = await authorizedElectronFile(cdpStringValue(frame.url) ?? "");
+    if (path === undefined) {
       completeness.exclude("frames", "out_of_target_scope");
       continue;
     }

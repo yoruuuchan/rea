@@ -84,7 +84,12 @@ export const decodeQlogCapture = (
           "Record ordinal is derived from trace/event source traversal, not global time order. Qlog lengths and FIN do not expose original HTTP body bytes or establish network completeness.",
         ],
       });
-      collectTransportFacts(projection, ordinal, { fact, streams, excluded });
+      collectTransportFacts(projection, ordinal, {
+        fact,
+        streams,
+        excluded,
+        name: object(event) && typeof event.name === "string" ? event.name : "",
+      });
     }
     for (const stream of streams.values()) {
       summarizeStream(stream);
@@ -223,14 +228,25 @@ const collectTransportFacts = (
     fact: Trace;
     streams: Map<string, Stream>;
     excluded: (value: string) => boolean;
+    /** Validated source event name, before declarations are applied. */
+    name: string;
   },
 ): void => {
-  const { fact, streams, excluded } = state;
+  const { fact, streams, excluded, name } = state;
   if (!object(projection.reported) || !object(projection.reported.data)) {
     fact.incomplete_fact_records.push(ordinal);
     return;
   }
   const visible = projection.reported;
+  // Facts are selected by event name, so a declaration that hides the name
+  // of a loss or packet event omits its facts like any other hidden field.
+  if (
+    (name === "recovery:packet_lost" || packetEvent(name)) &&
+    visible.name !== name
+  ) {
+    fact.incomplete_fact_records.push(ordinal);
+    return;
+  }
   const data = visible.data;
   if (!object(data)) return;
   const literals = new Map(

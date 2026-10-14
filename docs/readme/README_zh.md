@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > REA 官方来源： [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > 请通过这些官方来源提供的安装和发布链接获取 REA。相似的仓库名称或复制的 README 不能证明下载内容来自官方。
+
+<div align="center">
 
 <br />
 
@@ -139,15 +143,15 @@ REA 需要 Node.js 22.x（>=22.19）、24.x（>=24.11）或 26+，以及 npm。�
 
 | 目标                  | REA 返回的内容                                                | 要求与指南                                                                                                         |
 | --------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 原生二进制文件        | 伪代码、汇编、字符串、符号、调用和引用                        | Hopper、Ghidra 或 IDA；[原生分析](https://rea.tools/zh-CN/guides/native/)                                          |
+| 原生二进制文件        | 伪代码、汇编、字符串、符号、调用和引用                        | Hopper、Ghidra 或 IDA；[原生分析](../native-investigation.md)                                                      |
 | 离线 ELF 布局         | 节、段、原始符号/重定位信息及静态防护机制候选项               | Linux x64 上由调用方提供的 pwntools；[二进制诊断](../binary-diagnostics.md)                                        |
 | Go 二进制文件         | 内嵌编译器版本、模块、替换项和构建设置                        | 内置静态 ELF/PE/thin Mach-O 检查；无需安装 Go                                                                      |
 | WASM 工件             | 验证、节、精确的导入/导出 WAT 形式及解码后的 WAT              | 调用方提供的 WABT 1.0.42；`inspect_wasm_artifact`                                                                  |
 | EVM 字节码            | 分派选择器、字节偏移、推断的参数和状态可变性                  | Linux x64 上的本地原始字节/十六进制输入载体；[离线 EVM 指南](../evm-bytecode.md)                                   |
 | Rust binaries         | Embedded cargo-auditable dependency list                      | [Rust binaries](../rust-binaries.md)                                                                               |
 | 已记录的 Linux 崩溃   | 原始 note 记录、每个已记录线程的寄存器/信号及可选的映射候选项 | Linux x64 上由调用方提供的 pwntools；可选的 GDB/pwndbg；[已记录崩溃](../recorded-crashes.md)                       |
-| JavaScript / Electron | 模块、导入、source map、路由、IPC 和原生扩展关系              | Node.js 和 npm；[应用分析](https://rea.tools/zh-CN/guides/javascript/)                                             |
-| 网站                  | 页面结构、脚本、网络观察结果和按请求获取的截图                | Chrome 系浏览器；[浏览器分析](https://rea.tools/zh-CN/guides/browser/)                                             |
+| JavaScript / Electron | 模块、导入、source map、路由、IPC 和原生扩展关系              | Node.js 和 npm；[应用分析](../javascript-application-workflows.md)                                                 |
+| 网站                  | 页面结构、脚本、网络观察结果和按请求获取的截图                | Chrome 系浏览器；[浏览器分析](../browser-observation.md)                                                           |
 | 已保存的网络捕获      | 请求、响应、可访问的载荷和来源位置                            | HAR；原生 mitmproxy 捕获需要 Linux 上的 mitmdump；[捕获指南](../web-network-captures.md)                           |
 | 数据包捕获            | 端点、DNS、TLS SNI、协议分布和 HTTP 请求                      | 调用方提供的 tshark 和 capinfos；[pcap 指南](../pcap-analysis.md)                                                  |
 | .NET 程序集           | 元数据、CIL 指令、声明的原生依赖和构建对比                    | 静态检查；[托管代码指南](../managed-code-analysis.md)                                                              |
@@ -274,7 +278,7 @@ npx rea-agents@latest setup
 
 ## Star 历史
 
-🎉 **GitHub Star 达到 170,000 个，感谢大家！**
+🎉 **GitHub Star 达到 200,000 个，感谢大家！**
 
 感谢每一位使用 REA、报告错误、提出功能需求、测试构建和贡献修复的朋友。
 

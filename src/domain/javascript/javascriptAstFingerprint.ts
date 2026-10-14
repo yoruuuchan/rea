@@ -84,13 +84,19 @@ const semanticTokens = (node: t.Node): string[] => {
     tokens.push(`boolean:${String(node.value)}`);
   else if (t.isRegExpLiteral(node))
     tokens.push(`regexp:${node.pattern}/${node.flags}`);
+  else if (t.isTemplateElement(node))
+    tokens.push(`template:${JSON.stringify(node.value)}`);
   else if (t.isBinaryExpression(node) || t.isLogicalExpression(node))
     tokens.push(`operator:${node.operator}`);
   else if (t.isUnaryExpression(node) || t.isUpdateExpression(node))
     tokens.push(`operator:${node.operator}`);
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
-    const property = propertyName(node.property);
-    if (property !== "") tokens.push(`property:${property}`);
+    // A computed identifier names a local binding, not a fixed member.
+    tokens.push(`computed:${String(node.computed)}`);
+    if (!node.computed) {
+      const property = propertyName(node.property);
+      if (property !== "") tokens.push(`property:${property}`);
+    }
   }
   if ((t.isObjectProperty(node) || t.isObjectMethod(node)) && !node.computed) {
     const key = propertyName(node.key);

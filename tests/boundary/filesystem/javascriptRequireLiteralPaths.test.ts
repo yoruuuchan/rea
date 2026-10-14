@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
@@ -194,5 +195,40 @@ describe("literal CommonJS percent bytes in application graphs", () => {
     expect(unresolved.length).toBeGreaterThan(0);
     for (const edge of unresolved)
       expect(edge.properties.resolved_path).toBeNull();
+  });
+});
+
+it("reports a present non-JavaScript require target as unavailable with inventory identity", async () => {
+  const present = await createTestTempDirectory("rea-require-opaque-present-");
+  const absent = await createTestTempDirectory("rea-require-opaque-absent-");
+  const bytes = Buffer.from([0xde, 0xc0, 0x17, 0x0b, 0x00, 0x01, 0x02]);
+  const main = 'require("./core.jsc");';
+  await Promise.all([
+    writeFile(join(present, "main.cjs"), main),
+    writeFile(join(present, "core.jsc"), bytes),
+    writeFile(join(absent, "main.cjs"), main),
+  ]);
+  const edge = async (root: string) => {
+    const { graph } = await analyze(root);
+    return graph.edges.find(
+      ({ properties }) =>
+        properties.specifier === "./core.jsc" &&
+        properties.module_link_kind === "require",
+    );
+  };
+  const presentEdge = await edge(present);
+  expect(presentEdge?.properties).toMatchObject({
+    resolution_status: "unavailable",
+    candidate_path: "core.jsc",
+    resolved_path: null,
+  });
+  expect(presentEdge?.evidence.limitations).toContainEqual(
+    expect.stringContaining(
+      `core.jsc exists in the inventoried artifact container (sha256 ${createHash("sha256").update(bytes).digest("hex")}, ${String(bytes.length)} bytes)`,
+    ),
+  );
+  expect((await edge(absent))?.properties).toMatchObject({
+    resolution_status: "not-found",
+    resolved_path: null,
   });
 });

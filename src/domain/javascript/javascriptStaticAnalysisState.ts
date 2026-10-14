@@ -65,6 +65,7 @@ export interface JavaScriptFindingContext {
   readonly rpcScan: JavaScriptRpcScan;
   readonly source: string;
   readonly accumulator: JavaScriptAnalysisAccumulator;
+  readonly vitePreloadDependencyTable: readonly (string | undefined)[] | null;
   readonly openReceiverFacts?: ReadonlyMap<number, JavaScriptOpenReceiverFact>;
   /** Proven Electron export path segments by root offset. */
   readonly electronBindings?: ReadonlyMap<number, readonly string[]>;
@@ -83,6 +84,7 @@ export interface JavaScriptEndpointInput {
   readonly kind: JavaScriptStaticEndpoint["kind"];
   readonly value: string;
   readonly mechanism: string;
+  readonly interpretation?: "candidate";
 }
 
 /** Values required to append one module-attributable static finding. */

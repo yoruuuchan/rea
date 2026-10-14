@@ -263,7 +263,12 @@ tree matches that commit remains unknown. It honors the source tree's `.gitignor
 and applies default exclusions for common generated and dependency paths such
 as `node_modules/`, `dist/`, and `*.log`. Pattern-based exclusions record the
 matched pattern and whether it came from project, default, caller, or sensitive
-path policy. Set `REA_REFERENCE_SECRET_PATTERNS_JSON` to a JSON array of ignore
+path policy. Links into excluded paths retain their internal target metadata;
+the exclusion explains why the target has no inventory entry, and the inventory
+remains partial. Exclusions record `entry_kind` when the importer observed it;
+older saved exclusions without that field have unknown kind. An excluded
+ancestor proves an internal descendant only when its kind is `directory`.
+Set `REA_REFERENCE_SECRET_PATTERNS_JSON` to a JSON array of ignore
 patterns when you want to mark selected paths as sensitive; those patterns are
 reported separately as configured-secret exclusions.
 
@@ -287,6 +292,7 @@ Choose the guide for the target and intended interaction:
 - [Browser observation](browser-observation.md): inspect a selected page through CDP.
 - [Browser scenarios](browser-scenario-contract.md): run declared interactions and capture their results.
 - [Electron observation](electron-observation.md): inspect an Electron renderer or capture an application scenario.
+- [Electron fuses](electron-fuses.md): read packaged fuse bytes before expecting `--inspect` to reach an Electron main process.
 - [Node/Electron Inspector](javascript-runtime-observation.md): record script locations and execution contexts.
 - [Process capture](process-capture.md): run an executable and compare terminal, exit and filesystem observations.
 

@@ -1,6 +1,4 @@
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
-import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
-import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
 import {
   requireAnalysisViewRetention,
   summarizeRetainedAnalysis,
@@ -8,24 +6,17 @@ import {
 
 import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
 import { MANAGED_TOOL_CONTRACTS } from "../contracts/managed/managedToolContracts.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { err, ok } from "../domain/result.js";
-import type { Logger } from "pino";
 import { registerEvidenceTools } from "./registerEvidenceTools.js";
+import type { EvidenceToolFamilyOptions } from "./retainedSummaryDelivery.js";
 import { runManagedProviderExecution } from "../composition/directAnalysis.js";
 import { isManagedToolName } from "../contracts/managed/managedToolContracts.js";
 
 /** Register execution-free managed PE/CLI inspection. */
 export const registerManagedTools = (
   server: EvidenceMcpServer,
-  options: {
-    readonly logger: Logger;
-    readonly activeTarget: (() => BinaryTarget | undefined) | undefined;
-    readonly recordEvidence: EvidenceWriter["recordEvidence"] | undefined;
-    readonly evidenceById?: EvidenceLookup | undefined;
-    readonly withAdmittedAnalysis: import("./analysisAdmission.js").WithAdmittedAnalysis;
-  },
+  options: EvidenceToolFamilyOptions,
 ): void => {
   let selectedManagedPath: string | undefined;
   const analysisForAdmission = (

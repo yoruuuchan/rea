@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, writeFile } from "node:fs/promises";
+import { chmod, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -213,6 +213,7 @@ export class HopperApplicationLauncher implements BridgeLauncher {
       action,
       input.loadedPath,
     ];
+    let launched = false;
     try {
       if (signal?.aborted === true) return err(new HopperCancelledError());
       const display = await this.#privateDisplay(signal);
@@ -246,6 +247,7 @@ export class HopperApplicationLauncher implements BridgeLauncher {
         signal,
       });
       if (started === null) return err(new HopperCancelledError());
+      launched = true;
       const cleanup = () => cleanupOwnedProcessGroup(started.ownership);
       const ownedLauncher = {
         ...(this.options.preparedImage === undefined
@@ -283,6 +285,12 @@ export class HopperApplicationLauncher implements BridgeLauncher {
           });
     } catch (cause: unknown) {
       return err(hopperLaunchFailure(cause, signal));
+    } finally {
+      // Remove the token-bearing bootstrap file on every non-success path.
+      // Only the launched process needs the file; all error returns, early
+      // cancellations, and thrown exceptions must not leave it on disk.
+      if (!launched)
+        await rm(bootstrapPath, { force: true }).catch(() => undefined);
     }
   }
 
@@ -347,6 +355,8 @@ export class HopperApplicationLauncher implements BridgeLauncher {
       await chmod(bootstrapPath, 0o600);
       return ok(bootstrapPath);
     } catch (cause: unknown) {
+      // Clean up any partially written bootstrap file that may contain the token.
+      await rm(bootstrapPath, { force: true }).catch(() => undefined);
       return err(new HopperStartError({ cause }));
     }
   }

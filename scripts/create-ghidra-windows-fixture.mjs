@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeWindowsGhidraByteSearchFixture } from "./lib/ghidra-windows-byte-search.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Source-owned static fixtures: no compiler, target loading or execution.
@@ -61,7 +62,7 @@ for (const architecture of ["x86_64", "x86"]) {
     }
 
     bytes.write(".text", sectionTable, "ascii");
-    bytes.writeUInt32LE(dll ? 0x180 : 0x50, sectionTable + 8);
+    bytes.writeUInt32LE(0x200, sectionTable + 8);
     bytes.writeUInt32LE(0x1000, sectionTable + 12);
     bytes.writeUInt32LE(0x200, sectionTable + 16);
     bytes.writeUInt32LE(0x200, sectionTable + 20);
@@ -135,6 +136,8 @@ for (const architecture of ["x86_64", "x86"]) {
       bytes.write("fixture_caller\0", 0x320, "binary");
       bytes.write("fixture_return42\0", 0x340, "binary");
     }
+
+    writeWindowsGhidraByteSearchFixture(bytes);
 
     await mkdir(dirname(output), { recursive: true });
     await writeFile(output, bytes);

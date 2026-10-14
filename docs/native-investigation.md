@@ -227,6 +227,10 @@ nodes and edges. Node payloads are bounded to 8 MiB and serialized results to
 32 MiB. Pagination returns edges whose source is on the node page and preserves
 stable IDs for endpoints outside that page.
 
+Within one value trace, each exact procedure selector is attempted at most once,
+including failed analyses. Failures remain unknown observations and do not
+establish canonical function identity. A new trace can retry those selectors.
+
 The raw Java `is_dead` flag can remain set after Ghidra decodes a live block;
 `block_membership` reports actual syntax-tree membership separately.
 
@@ -319,7 +323,16 @@ complete observation.
   digest are preserved; key interpretation follows the pinned plist decoder.
 - `decode_interface_builder` / `rea decode-interface-builder <app>` reads
   compiled storyboard and nib resources into objects, outlets, actions,
-  connections and controller/class names. `verify:interface-builder` compiles
+  connections and controller/class names. A full app graph is often several
+  megabytes (XLD.app: 6.7 MB, about 2M tokens, which also exceeds the default
+  MCP response budget), so MCP callers should pass `detail: "summary"`. The
+  summary keeps every decoded document and node/edge/coverage counts and
+  retains the complete Evidence; page rows with `inspect_analysis_view`
+  `view: {kind: "interface-builder", collection: "nodes", document:
+  "Contents/Resources/Base.lproj/MainMenu.nib", offset: 0, limit: 64}`.
+  `document` selects rows whose evidence names that exact
+  `documents[].relative_path` (nodes and edges only); `source_truncated` keeps
+  graph incompleteness visible on every page. `verify:interface-builder` compiles
   a source-owned AppKit XIB with `ibtool`. Storyboards require an installed
   iOS platform; unsupported archive forms remain explicit.
   XML plist archives accept UTF-8 and BOM-marked UTF-16 in either byte order.

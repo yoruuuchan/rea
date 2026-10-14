@@ -175,6 +175,8 @@ if (tier === "reused") {
         file.startsWith(".github/ISSUE_TEMPLATE/")
       ) {
         selected.docs = true;
+        // Authored documentation code also belongs to the static checkers.
+        selected.code ||= /^docs\/.*\.(?:[cm]?[jt]s|[jt]sx)$/su.test(file);
         selected.website ||= matchesAny(file, SCOPES.website);
         continue;
       }
@@ -202,6 +204,9 @@ if (tier === "reused") {
         if (GUARDED_WORKFLOWS.has(file)) selected.code = true;
         if (file !== ".github/workflows/ci.yml") continue;
       }
+      // The Notes example is also the source-owned agent evaluation fixture.
+      if (file.startsWith("website/public/examples/notes-electron/"))
+        selected.code = true;
       if (owners.length === 1 && owners[0] === "website") continue;
       if (/^src\/(contracts|domain)\//.test(file)) selected.docs = true;
       if (file === "package.json") {

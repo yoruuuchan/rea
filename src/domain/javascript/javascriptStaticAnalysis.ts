@@ -25,6 +25,7 @@ import {
   inspectRouteProperty,
   inspectRoleProperty,
   inspectRpcNode,
+  indexVitePreloadDependencyTable,
 } from "./javascriptStaticAnalysisCalls.js";
 import {
   inspectBundlerRegistration,
@@ -101,6 +102,7 @@ export function* analyzeParsedJavaScriptStaticSourceSteps(
     {
       source,
       accumulator,
+      vitePreloadDependencyTable: indexVitePreloadDependencyTable(file.program),
       ...(openReceiverFacts === undefined ? {} : { openReceiverFacts }),
       electronBindings: electronIdentity.bindings,
       rpcScan: createJavaScriptRpcScan(source, clientRoots),

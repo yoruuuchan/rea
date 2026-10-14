@@ -202,7 +202,12 @@ export const webBundleAnalysisSchema = z.object({
   }),
   inferences: z.array(
     z.object({
-      kind: z.enum(["vendor_fingerprint", "route_framework", "bundle_runtime"]),
+      kind: z.enum([
+        "vendor_fingerprint",
+        "route_framework",
+        "bundle_runtime",
+        "endpoint_candidate",
+      ]),
       value: z.string(),
       confidence: z.enum(["low", "medium", "high"]),
       basis: z.array(basisSchema).min(1),

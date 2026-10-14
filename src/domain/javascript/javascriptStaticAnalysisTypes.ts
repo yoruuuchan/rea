@@ -1,5 +1,8 @@
 import type { ElectronStaticFindings } from "./electronStaticAnalysisTypes.js";
 
+/** Token semantics shared by bundle producers and worker admission. */
+export const JAVASCRIPT_AST_FINGERPRINT_ALGORITHM = "babel-ast-v2";
+
 /** Static syntax context retained for later artifact path resolution. */
 export type JavaScriptStaticPathContext =
   | "module-specifier"
@@ -42,6 +45,8 @@ export interface JavaScriptStaticEndpoint {
   readonly kind: "route" | "network";
   readonly value: string;
   readonly mechanism: string;
+  /** An overloaded callee name suggests this value; its network receiver is unproven. */
+  readonly interpretation?: "candidate";
   readonly module_key: string | null;
   /** Recovered factory runtime; absent in older or unbundled findings. */
   readonly module_runtime?: string;
@@ -75,7 +80,7 @@ interface JavaScriptBundlerModuleState {
 /** One exact module factory recovered from a Webpack/Rspack registration. */
 export interface JavaScriptBundlerModule extends JavaScriptBundlerModuleState {
   readonly structural_fingerprint_sha256: string;
-  readonly structural_fingerprint_algorithm: "babel-ast-v1";
+  readonly structural_fingerprint_algorithm: typeof JAVASCRIPT_AST_FINGERPRINT_ALGORITHM;
 }
 
 /** One statically recognized bundler chunk or module registration. */

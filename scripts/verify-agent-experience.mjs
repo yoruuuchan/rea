@@ -156,6 +156,18 @@ try {
       prompt: `請靜態分析已交付的 Electron 程式 ${targets.javascript}，說明 renderer 如何透過 preload 讀取 profile，以及 main handler 的關係。不要執行目標或安裝分析引擎；引用完整的產出 Evidence，保留 runtime 未知事項。`,
     },
     {
+      id: "notes-export",
+      expectedFirstTool: "analyze_javascript_application",
+      requiresEvidence: true,
+      requiredAnswerTermGroups: [],
+      requiredToolSubsequence: [
+        "analyze_javascript_application",
+        "trace_application_feature",
+        "trace_javascript_semantics",
+      ],
+      prompt: `Use REA on the shipped Electron application at ${targets.notesElectron} to investigate its notes export API, preload exposure and main handler. Do not read target files directly or launch Electron. Use the returned application Evidence to trace the exact notes:export IPC channel in both directions, then query semantic relations for the property invoke with forward influence, excluding ambiguous dynamic edges and without an expected sink. Report the selected static facts, source locations and coverage limits using the closed claim contract.`,
+    },
+    {
       id: "javascript-module-view",
       expectedFirstTool: "analyze_javascript_application",
       requiresEvidence: true,

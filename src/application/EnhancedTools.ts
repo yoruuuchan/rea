@@ -525,33 +525,47 @@ export class EnhancedTools {
         this.#call("list_strings", {}, signal),
       ],
     );
-    if (!segmentsResult.ok) return segmentsResult;
+    if (
+      !segmentsResult.ok &&
+      !(segmentsResult.error instanceof AnalysisCapabilityUnavailableError)
+    )
+      return segmentsResult;
     if (!proceduresResult.ok) return proceduresResult;
     if (!stringsResult.ok) return stringsResult;
 
-    const segments = parseSegments(segmentsResult.value);
-    if (!segments.ok) return segments;
+    const segments = segmentsResult.ok
+      ? parseSegments(segmentsResult.value)
+      : undefined;
+    if (segments !== undefined && !segments.ok) return segments;
     const procedureCount = parseListCount(proceduresResult.value, "procedures");
     if (!procedureCount.ok) return procedureCount;
     const stringCount = parseListCount(stringsResult.value, "strings");
     if (!stringCount.ok) return stringCount;
 
-    const imageBase = parseSegmentImageBase(segments.value);
+    const observedSegments = segments?.ok ? segments.value : undefined;
+    const imageBase =
+      observedSegments === undefined
+        ? undefined
+        : parseSegmentImageBase(observedSegments);
 
     return ok({
       document: document.value,
       ...(imageBase === undefined ? {} : { image_base: imageBase }),
-      segments: segments.value.map(
-        ({ name, start, end, image_base, address_space }) => ({
-          name,
-          start,
-          end,
-          length: addressDistance(start, end),
-          ...(image_base === undefined ? {} : { image_base }),
-          ...(address_space === undefined ? {} : { address_space }),
-        }),
-      ),
-      segment_count: segments.value.length,
+      ...(observedSegments === undefined
+        ? {}
+        : {
+            segments: observedSegments.map(
+              ({ name, start, end, image_base, address_space }) => ({
+                name,
+                start,
+                end,
+                length: addressDistance(start, end),
+                ...(image_base === undefined ? {} : { image_base }),
+                ...(address_space === undefined ? {} : { address_space }),
+              }),
+            ),
+            segment_count: observedSegments.length,
+          }),
       procedure_count: procedureCount.value,
       string_count: stringCount.value,
     });

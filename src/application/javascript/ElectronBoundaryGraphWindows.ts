@@ -140,6 +140,8 @@ const addWindowPreload = (
     sourcePath: input.file.path,
     context: resolutionContext,
     files: input.context.filesByPath,
+    directoryPaths: input.context.directoryPaths,
+    unanalyzedFiles: input.context.unanalyzedFiles,
     runtimePathKind: "exact-file",
   });
   const role = createElectronRoleNode(input.context, {
@@ -232,6 +234,23 @@ const addUtilityProcess = (
   input: FindingInput<ElectronUtilityProcessFinding>,
 ): void => {
   const { context, file, value, coverage } = input;
+  const resolution =
+    value.module_path === null
+      ? undefined
+      : resolveArtifactPathByContext({
+          declaredPath: value.module_path,
+          sourcePath: file.path,
+          context: value.module_resolution_context,
+          files: context.filesByPath,
+          directoryPaths: context.directoryPaths,
+          unanalyzedFiles: context.unanalyzedFiles,
+          runtimePathKind: "node-entrypoint",
+        });
+  const resolutionProperties = {
+    resolved_path: resolution?.resolved_path ?? null,
+    resolution_status: resolution?.resolution_status ?? null,
+    ...artifactPathResolutionProperties(resolution),
+  };
   const utility = context.accumulator.addNode({
     kind: "electron-utility",
     identity: artifactLocalIdentity(
@@ -256,18 +275,24 @@ const addUtilityProcess = (
           coverage,
         }),
       },
+      ...(resolution === undefined
+        ? []
+        : [
+            {
+              label: "utility process entrypoint resolution",
+              properties: resolutionProperties,
+              evidence: staticInferenceEvidence({
+                sha256: file.sha256,
+                path: file.path,
+                range: value.location,
+                operation: "resolve-utility-process-entrypoint",
+                coverage,
+                limitations: resolution.limitations,
+              }),
+            },
+          ]),
     ],
   });
-  const resolution =
-    value.module_path === null
-      ? undefined
-      : resolveArtifactPathByContext({
-          declaredPath: value.module_path,
-          sourcePath: file.path,
-          context: value.module_resolution_context,
-          files: context.filesByPath,
-          runtimePathKind: "node-entrypoint",
-        });
   addElectronInferenceEdge(context, {
     source: input.source,
     target: utility,
@@ -276,18 +301,11 @@ const addUtilityProcess = (
     coverage,
     relation: "loads",
     operation: "map-utility-process-launch",
+    limitations: resolution?.limitations ?? [],
     properties: {
       declared_path: value.module_path,
       expression: value.module_expression,
-      ...(resolution === undefined
-        ? {}
-        : {
-            resolution_context: resolution.resolution_context,
-            resolved_path: resolution.resolved_path,
-            resolution_status: resolution.resolution_status,
-            limitations: resolution.limitations,
-            ...artifactPathResolutionProperties(resolution),
-          }),
+      ...resolutionProperties,
     },
   });
   if (value.module_path === null) return;
@@ -311,6 +329,7 @@ const addUtilityProcess = (
       resolution_context: resolution.resolution_context,
       resolved_path: resolved,
       resolution_status: resolution.resolution_status,
+      ...artifactPathResolutionProperties(resolution),
     },
   });
 };

@@ -652,7 +652,9 @@ const readBindStream = (
     } else {
       binds.push({ start: state.address, count, stride, binding });
     }
-    state.address += count * stride;
+    // The dyld bind stream advances addresses modulo 64 bits; ld uses -8 to
+    // bind the current pointer slot again with DO_BIND_ADD_ADDR_ULEB.
+    state.address = (state.address + count * stride) & 0xffffffffffffffffn;
   };
   while (cursor.at < end) {
     const byte = bytes[cursor.at++] ?? 0;

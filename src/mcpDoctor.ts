@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Formatter, Help, z } from "incur";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import { CATALOG_IDENTITY } from "./catalogIdentity.js";
 import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
@@ -280,6 +281,7 @@ export const runProductionMcpDoctorCli = async (
   arguments_: readonly string[],
   input: { readonly dispatcherPath: string; readonly packageRoot: string },
 ): Promise<{ readonly output: string; readonly exitCode: number }> => {
+  const started = performance.now();
   const parsed = parseOutputArguments(arguments_);
   if (!parsed.ok) {
     if (parsed.help)
@@ -298,8 +300,18 @@ export const runProductionMcpDoctorCli = async (
     cwd: input.packageRoot,
     environment: process.env,
   });
+  const outputValue = parsed.fullOutput
+    ? {
+        ok: result.healthy,
+        ...(result.healthy ? { data: result } : { error: result }),
+        meta: {
+          command: MCP_DOCTOR_COMMAND,
+          duration: `${Math.round(performance.now() - started)}ms`,
+        },
+      }
+    : result;
   return {
-    output: `${Formatter.format(result, parsed.format)}\n`,
+    output: `${Formatter.format(outputValue, parsed.format)}\n`,
     exitCode: result.healthy ? 0 : 1,
   };
 };
@@ -369,7 +381,11 @@ const parseIdentityToolResult = (
  * flag is an output selector declared in `MCP_DOCTOR_OPTIONS`.
  */
 type McpDoctorArguments =
-  | { readonly ok: true; readonly format: OutputFormat }
+  | {
+      readonly ok: true;
+      readonly format: OutputFormat;
+      readonly fullOutput: boolean;
+    }
   | { readonly ok: false; readonly help: true }
   | {
       readonly ok: false;
@@ -387,6 +403,7 @@ const parseOutputArguments = (
   // masking the typo with usage.
   if (hasHelpInOptionPosition(arguments_)) return { ok: false, help: true };
   let format: OutputFormat = "toon";
+  let fullOutput = false;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--json") {
@@ -409,7 +426,10 @@ const parseOutputArguments = (
       format = candidate;
       continue;
     }
-    if (argument === "--full-output") continue;
+    if (argument === "--full-output") {
+      fullOutput = true;
+      continue;
+    }
     if (HELP_FLAGS.has(argument ?? "")) return { ok: false, help: true };
     return {
       ok: false,
@@ -418,7 +438,7 @@ const parseOutputArguments = (
       message: `Unknown mcp doctor option: ${argument ?? "missing"}`,
     };
   }
-  return { ok: true, format };
+  return { ok: true, format, fullOutput };
 };
 
 /**
@@ -464,19 +484,30 @@ const targetFreeEnvironment = (
 };
 
 const captureStderr = () => {
-  const chunks: Buffer[] = [];
+  const retained = Buffer.allocUnsafe(MCP_STARTUP_POLICY.doctorStderrBytes);
+  let retainedBytes = 0;
   let bytes = 0;
+  let truncated = false;
   return {
     append(chunk: unknown) {
       const buffer = Buffer.isBuffer(chunk)
         ? chunk
         : Buffer.from(String(chunk), "utf8");
       bytes += buffer.byteLength;
-      chunks.push(Buffer.from(buffer));
+      const remaining = retained.byteLength - retainedBytes;
+      const copied = Math.min(remaining, buffer.byteLength);
+      if (copied > 0) {
+        buffer.copy(retained, retainedBytes, 0, copied);
+        retainedBytes += copied;
+      }
+      if (copied < buffer.byteLength) truncated = true;
     },
     value: () => ({
-      stderr: Buffer.concat(chunks, bytes).toString("utf8"),
+      stderr: truncated
+        ? new StringDecoder("utf8").write(retained.subarray(0, retainedBytes))
+        : retained.toString("utf8", 0, retainedBytes),
       stderr_bytes: bytes,
+      stderr_truncated: truncated,
     }),
   };
 };

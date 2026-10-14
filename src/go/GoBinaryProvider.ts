@@ -55,7 +55,7 @@ const failureForPrimary = (
   if (cause instanceof GoBinaryResourceFailure)
     return new AnalysisResourceConstraintError(
       OPERATION,
-      "memory",
+      cause.boundary === "search" ? "cpu" : "memory",
       `Selected artifact ${path}: ${cause.message}`,
       { boundary: cause.boundary, maximum_bytes: cause.maximum_bytes },
       { cause },
@@ -194,7 +194,7 @@ export class GoBinaryProvider implements GoBinaryPort {
         limitations: [
           "Embedded build metadata is observed file content, not proof of compiler identity, dependency authenticity or runtime behavior.",
           "Only Go build information is inspected; function names, source mappings, type metadata and decompiled code are not recovered.",
-          "Resource guards bound stable artifact reads to 256 MiB, aggregate embedded strings to 1 MiB, structural table decoding to 16 MiB and complete metadata payloads to 8 MiB; these are not operating-system memory or CPU limits.",
+          "Resource guards bound stable artifact reads and cumulative header searches to 256 MiB each, aggregate embedded strings to 1 MiB, structural table decoding to 16 MiB and complete metadata payloads to 8 MiB; these are not operating-system memory or CPU limits.",
           ...(info !== null &&
           (info.go_version === null || info.module_text === null)
             ? [

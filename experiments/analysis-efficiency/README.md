@@ -19,6 +19,10 @@ Follow-up: [SQLite existing-control measurements](sqlite-existing-controls.md)
 tests QGIS's shipped GeoPackage through the existing column selection, preserving
 full selected-table schema and typed cells before considering another API.
 
+Follow-up: [small real PCAP recordings](pcap-small-captures.md) compares existing
+complete delivery with summary/pages. Preserve the negative SDK/model input
+results: compact captures do not justify another production mechanism.
+
 Follow-up: [native PE/DOS entry views and real model verification](native-entry-views.md)
 records the post-merge native continuation, including a small-function case where
 four selected replies cost more bytes than the complete dossier.

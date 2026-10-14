@@ -108,7 +108,9 @@ cliTest(
         ),
       ).toHaveLength(1);
       expect(repeatedNode.observations).toHaveLength(2);
-      expect(repeatedNode.identity).toMatchObject({ key: "/ok" });
+      expect(repeatedNode.identity).toMatchObject({
+        key: JSON.stringify(["literal", "/ok"]),
+      });
       expect(
         repeatedNode.observations.every(({ label }) => label === "/ok"),
       ).toBe(true);

@@ -22,6 +22,12 @@ import {
 import { parse as parseJsonc } from "jsonc-parser";
 import { skillReferenceIssues } from "./lib/docs-facts.mjs";
 
+export const terminalModesRestored = (termios) => {
+  if (typeof termios !== "string") return false;
+  const modes = new Set(termios.trim().split(/\s+/u));
+  return modes.has("icanon") && modes.has("echo");
+};
+
 const OPENCODE_ORIGINAL = `{
   // OpenCode preferences must survive setup.
   "model": "provider/model",
@@ -131,8 +137,7 @@ const verifyInteractiveSetup = async ({
         childResult?.status !== 0 ||
         !output.includes("\u001b[?25h") ||
         (process.platform !== "win32" &&
-          (!childResult.termios?.includes("icanon") ||
-            !childResult.termios?.includes("echo"))) ||
+          !terminalModesRestored(childResult.termios)) ||
         !output.includes("No changes were made.")
       ) {
         finish(
@@ -414,7 +419,8 @@ const verifySetupApply = async ({
   };
 };
 
-const assertClientConfig = async (cli, configPath) => {
+/** Verify the live registration and exact pre-setup backup bytes. */
+export const assertClientConfig = async (cli, configPath, original) => {
   const config = json(await readFile(configPath, "utf8"));
   if (
     config.existing !== true ||
@@ -422,9 +428,7 @@ const assertClientConfig = async (cli, configPath) => {
     JSON.stringify(config.mcpServers?.rea?.args) !== JSON.stringify(["mcp"])
   )
     throw new Error("packaged client readback failed");
-  if (
-    !(await readFile(`${configPath}.rea.backup`, "utf8")).includes("existing")
-  )
+  if (!(await readFile(`${configPath}.rea.backup`)).equals(original))
     throw new Error("packaged client backup failed");
 };
 
@@ -467,9 +471,7 @@ const assertCodexSymlink = async ({
     !codex.includes(`command = "${cli}"`) ||
     !codex.includes("startup_timeout_sec = 30") ||
     !codex.startsWith(CODEX_ORIGINAL) ||
-    (await readFile(`${codexConfig}.rea.backup`, "utf8")) !== CODEX_ORIGINAL ||
-    (await readFile(`${cursorConfig}.rea.backup`, "utf8")) !==
-      '{"existing":true}\n'
+    (await readFile(`${codexConfig}.rea.backup`, "utf8")) !== CODEX_ORIGINAL
   )
     throw new Error("packaged setup did not preserve config symlinks");
 };
@@ -534,9 +536,11 @@ const verifyConfigReadback = async ({
   siblingSkillPath,
   opencodeConfig,
   opencodeOriginal,
+  claudeOriginal,
+  cursorOriginal,
 }) => {
-  await assertClientConfig(cli, claudeConfig);
-  await assertClientConfig(cli, cursorConfig);
+  await assertClientConfig(cli, claudeConfig, claudeOriginal);
+  await assertClientConfig(cli, cursorConfig, cursorOriginal);
   await assertCodexSymlink({
     cli,
     codexConfig,
@@ -729,6 +733,9 @@ export async function verifyPackageSetup({
     opencodeConfig,
     skillPath,
   ];
+  const [claudeOriginal, cursorOriginal] = supportedSetupHost
+    ? await Promise.all([readFile(claudeConfig), readFile(cursorConfig)])
+    : [];
   await verifyInteractiveSetup({
     command: packageRunnerCli,
     environment,
@@ -772,6 +779,8 @@ export async function verifyPackageSetup({
       siblingSkillPath,
       opencodeConfig,
       opencodeOriginal: OPENCODE_ORIGINAL,
+      claudeOriginal,
+      cursorOriginal,
     });
     await verifySetupFailureRecovery({
       cli,

@@ -275,6 +275,12 @@ export type ProviderTargetSupport =
       readonly diagnostics: Readonly<Record<string, JsonValue>>;
     };
 
+/** One owner-observed availability/capability snapshot for provider discovery. */
+export interface AnalysisProviderReadinessSnapshot {
+  readonly availability: ProviderAvailability;
+  readonly capabilities: readonly CapabilityDescriptor[];
+}
+
 /** Deep provider candidate discoverable before one target-bound route is chosen. */
 export interface AnalysisProviderCandidate extends AnalysisProvider {
   resolveAnalysisProfile(
@@ -282,5 +288,6 @@ export interface AnalysisProviderCandidate extends AnalysisProvider {
     options?: AnalysisProfileResolutionOptions,
   ): Promise<Result<AnalysisProfileResolution, AnalysisError>>;
   inspectAvailability(): ProviderAvailability;
+  inspectReadinessSnapshot?(): AnalysisProviderReadinessSnapshot;
   inspectTargetSupport(target: BinaryTarget): ProviderTargetSupport;
 }

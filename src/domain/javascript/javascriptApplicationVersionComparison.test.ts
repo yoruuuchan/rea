@@ -143,7 +143,7 @@ const nativeEvidence = (sha256: string | undefined, ordinal: number) =>
     },
   );
 
-describe("application version comparison result", () => {
+describe("application version comparison Evidence links", () => {
   it("links every exact digest observation only to its paired or unmatched item", () => {
     const left = buildGraph(LEFT_SHA, 1);
     const right = buildGraph(RIGHT_SHA, 2);
@@ -227,7 +227,9 @@ describe("application version comparison result", () => {
       ].sort(),
     );
   });
+});
 
+describe("application version comparison graph ownership", () => {
   it("returns a sealed change graph that passes complete validation", () => {
     const result = compare();
     expect(
@@ -241,6 +243,58 @@ describe("application version comparison result", () => {
     expect(applicationVersionComparisonResultSchema.parse(result)).toEqual(
       result,
     );
+  });
+
+  it("retains deduplicated complete input limits on the change graph and inferred edge", () => {
+    const leftLimits = [
+      { name: "modules", value: 100, unit: "items" as const },
+    ];
+    const rightLimits = [
+      { name: "source-bytes", value: 4096, unit: "bytes" as const },
+      { name: "modules", value: 100, unit: "items" as const },
+    ];
+    const withLimits = (
+      graph: JavaScriptApplicationGraph,
+      limits: JavaScriptApplicationGraph["coverage"]["limits"],
+    ): JavaScriptApplicationGraph => {
+      const { graph_id: _graphId, ...input } = graph;
+      return createJavaScriptApplicationGraph({
+        ...input,
+        coverage: { ...graph.coverage, limits },
+      });
+    };
+    const result = compareJavaScriptApplicationVersions({
+      left: {
+        evidenceId: `ev_${"1".repeat(64)}`,
+        rootArtifactSha256: LEFT_SHA,
+        graph: withLimits(buildGraph(LEFT_SHA, 1), leftLimits),
+      },
+      right: {
+        evidenceId: `ev_${"2".repeat(64)}`,
+        rootArtifactSha256: RIGHT_SHA,
+        graph: withLimits(buildGraph(RIGHT_SHA, 2), rightLimits),
+      },
+      leftNativeEvidence: [],
+      rightNativeEvidence: [],
+    });
+    const expectedLimits = [leftLimits[0]!, rightLimits[0]!];
+    const changed = result.graph.edges.find(
+      ({ relation }) => relation === "changed_from",
+    );
+
+    expect(changed).toBeDefined();
+    expect(result.graph.coverage).toMatchObject({
+      status: "complete",
+      truncated: false,
+      omitted_count: 0,
+      limits: expectedLimits,
+    });
+    expect(changed?.evidence.coverage).toMatchObject({
+      status: "complete",
+      truncated: false,
+      omitted_count: 0,
+      limits: expectedLimits,
+    });
   });
 
   it("does not reuse a change graph without an owned proof", () => {

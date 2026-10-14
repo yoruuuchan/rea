@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > Oficjalne źródła REA: [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > Korzystaj z odnośników do instalacji i wydań w tych oficjalnych źródłach. Podobna nazwa repozytorium lub skopiowany README nie potwierdzają, że pobierany plik jest oficjalny.
+
+<div align="center">
 
 <br />
 
@@ -137,13 +141,13 @@ REA wymaga Node.js 22.x (>=22.19), 24.x (>=24.11) lub 26+ oraz npm. Dodatkowe na
 
 | Cel                                     | Co zwraca REA                                                                                                         | Wymagania i przewodnik                                                                                                               |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Natywne pliki binarne                   | Pseudokod, kod asemblera, ciągi znaków, symbole, wywołania i odwołania                                                | Hopper, Ghidra lub IDA; [analiza kodu natywnego](https://rea.tools/pl/guides/native/)                                                |
+| Natywne pliki binarne                   | Pseudokod, kod asemblera, ciągi znaków, symbole, wywołania i odwołania                                                | Hopper, Ghidra lub IDA; [analiza kodu natywnego](../native-investigation.md)                                                         |
 | Układ pliku ELF w trybie offline        | Sekcje, segmenty, oryginalne symbole/relokacje i potencjalne mechanizmy zabezpieczeń wskazane przez analizę statyczną | pwntools dostarczone przez użytkownika w systemie Linux x64; [diagnostyka plików binarnych](../binary-diagnostics.md)                |
 | Kod bajtowy EVM                         | Selektory wywołań, przesunięcia bajtowe, wywnioskowane argumenty i mutowalność                                        | Lokalny plik z surowymi bajtami lub zapisem szesnastkowym w systemie Linux x64; [przewodnik EVM offline](../evm-bytecode.md)         |
 | Rust binaries                           | Embedded cargo-auditable dependency list                                                                              | [Rust binaries](../rust-binaries.md)                                                                                                 |
 | Zarejestrowane awarie systemu Linux     | Surowe rekordy note, rejestry/sygnały każdego zarejestrowanego wątku i opcjonalni kandydaci na mapowania              | pwntools dostarczone przez użytkownika w systemie Linux x64; opcjonalnie GDB/pwndbg; [zarejestrowane awarie](../recorded-crashes.md) |
-| JavaScript / Electron                   | Moduły, importy, mapy źródeł, trasy, IPC i powiązania z natywnymi dodatkami                                           | Node.js i npm; [analiza aplikacji](https://rea.tools/pl/guides/javascript/)                                                          |
-| Strony internetowe                      | Struktura strony, skrypty, obserwacje sieciowe i zamówione zrzuty ekranu                                              | Przeglądarka z rodziny Chrome; [analiza w przeglądarce](https://rea.tools/pl/guides/browser/)                                        |
+| JavaScript / Electron                   | Moduły, importy, mapy źródeł, trasy, IPC i powiązania z natywnymi dodatkami                                           | Node.js i npm; [analiza aplikacji](../javascript-application-workflows.md)                                                           |
+| Strony internetowe                      | Struktura strony, skrypty, obserwacje sieciowe i zamówione zrzuty ekranu                                              | Przeglądarka z rodziny Chrome; [analiza w przeglądarce](../browser-observation.md)                                                   |
 | Zapisane przechwycenia ruchu sieciowego | Żądania, odpowiedzi, dostępne dane przesyłane i lokalizacje źródłowe                                                  | HAR; mitmdump w systemie Linux dla natywnych przechwyceń mitmproxy; [przewodnik przechwytywania](../web-network-captures.md)         |
 | Przechwytywanie pakietów                | Punkty końcowe, DNS, TLS SNI, dystrybucja protokołów i żądania HTTP                                                   | Dostarczone przez wywołującego tshark i capinfos; [przewodnik pcap](../pcap-analysis.md)                                             |
 | Zestawy .NET                            | Metadane, instrukcje CIL, zadeklarowane zależności natywne i porównania kompilacji                                    | Analiza statyczna; [przewodnik kodu zarządzanego](../managed-code-analysis.md)                                                       |
@@ -268,7 +272,7 @@ Zgłaszaj podatności zgodnie z [SECURITY.md](../../SECURITY.md).
 
 ## Historia gwiazdek
 
-🎉 **170 000 gwiazdek na GitHubie — dziękujemy!**
+🎉 **200 000 gwiazdek na GitHubie — dziękujemy!**
 
 Dziękujemy wszystkim, którzy używają REA, zgłaszają błędy, proponują nowe funkcje, testują kompilacje i przesyłają poprawki.
 

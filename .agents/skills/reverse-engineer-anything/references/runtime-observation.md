@@ -8,9 +8,11 @@ selected page's current origin. Electron discovery lists eligible local
 `file://` targets without a configured file-root allowlist.
 
 Start passive browser work with `list_browser_targets`; start Electron runtime work with
-`list_electron_targets`. Inspect the target selected for the user's task. Observation
-with these tools is passive: never claim REA clicked, navigated, evaluated page JavaScript,
-invoked IPC, or captured prior activity. REA does not contain the page's network.
+`list_electron_targets`. Before an electron-main Inspector attempt, check
+packaged fuses with `inspect_electron_fuses`. Inspect the target selected for
+the user's task. Observation with these tools is passive: never claim REA
+clicked, navigated, evaluated page JavaScript, invoked IPC, or captured prior
+activity. REA does not contain the page's network.
 
 Passive captures omit raw header collections, credential header values, storage
 values, and raw WebSocket/JSON bodies. Selected response metadata, including

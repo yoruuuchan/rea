@@ -26,6 +26,7 @@ import {
   thinMach,
 } from "../../../src/domain/binaryTarget.fixture.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+import { hasXmlPlistSignature } from "../../../src/domain/apple/appleArchiveFormat.js";
 import { parseExecutableHeader } from "../../../src/domain/binaryTarget.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -256,6 +257,46 @@ describe("binary target I/O: package classification", () => {
       kind: "artifact",
       format: "plist",
     });
+  });
+
+  it("classifies XML plists by content while preserving named formats", async () => {
+    const directory = await createTestTempDirectory("rea-xml-plist-target-");
+    const xml = Buffer.from(
+      '<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>$archiver</key><string>NSKeyedArchiver</string></dict></plist>',
+    );
+    const archivePath = join(directory, "Model.archive");
+    const javascriptPath = join(directory, "Model.js");
+    await writeFile(archivePath, xml);
+    await writeFile(javascriptPath, xml);
+
+    const archive = await parseBinaryTarget(archivePath);
+    const javascript = await parseBinaryTarget(javascriptPath);
+    expect(archive.ok && archive.value).toMatchObject({
+      kind: "artifact",
+      format: "plist",
+    });
+    expect(javascript.ok && javascript.value).toMatchObject({
+      kind: "artifact",
+      format: "javascript",
+    });
+  });
+
+  it("continues a bounded XML plist probe beyond the initial file window", async () => {
+    const directory = await createTestTempDirectory("rea-xml-long-prolog-");
+    const path = join(directory, "Model.archive");
+    await writeFile(
+      path,
+      `<?xml version="1.0"?>${" ".repeat(8192)}<plist><dict/></plist>`,
+    );
+
+    const result = await parseBinaryTarget(path);
+    expect(result.ok && result.value).toMatchObject({
+      kind: "artifact",
+      format: "plist",
+    });
+    expect(hasXmlPlistSignature(Buffer.from(`<root><plist/></root>`))).toBe(
+      false,
+    );
   });
 
   it("does not trust a ZIP-family extension without ZIP magic", async () => {

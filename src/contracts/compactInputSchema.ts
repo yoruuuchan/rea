@@ -37,6 +37,22 @@ const isSchemaObject = (value: unknown): value is Record<string, unknown> =>
 const serializedBytes = (value: unknown): number =>
   Buffer.byteLength(JSON.stringify(value), "utf8");
 
+const schemaDepth = (value: unknown, depth = 0): number => {
+  if (Array.isArray(value))
+    return Math.max(
+      depth,
+      ...value.map((child) => schemaDepth(child, depth + 1)),
+    );
+  if (!isSchemaObject(value)) return depth;
+  return Math.max(
+    depth,
+    ...Object.values(value).map((child) => schemaDepth(child, depth + 1)),
+  );
+};
+
+/** Strict clients commonly reject advertised schemas deeper than ten nodes. */
+const COMPACT_SCHEMA_MAX_DEPTH = 10;
+
 /** Rewrite every schema-valued position; literal data stays opaque. */
 const rebuildSchemaPositions = (
   node: unknown,
@@ -240,12 +256,24 @@ const reduceToShallowProperties = (
   const properties = isSchemaObject(schema.properties) ? schema.properties : {};
   const description = [
     typeof schema.description === "string" ? schema.description : undefined,
+    ...Object.entries(
+      isSchemaObject(schema.dependentRequired)
+        ? schema.dependentRequired
+        : isSchemaObject(schema.dependencies)
+          ? schema.dependencies
+          : {},
+    ).flatMap(([property, partners]) =>
+      Array.isArray(partners) &&
+      partners.every((partner) => typeof partner === "string")
+        ? [
+            `When ${property} is provided, also provide ${partners.join(" and ")}.`,
+          ]
+        : [],
+    ),
     REDUCED_ANNOTATION,
   ]
     .filter((text) => text !== undefined)
     .join(" ");
-  const $schema =
-    typeof schema.$schema === "string" ? { $schema: schema.$schema } : {};
   const shallow = Object.fromEntries(
     Object.entries(properties).map(([name, value]) => {
       const types = detectedTypes(value, schema);
@@ -261,7 +289,7 @@ const reduceToShallowProperties = (
     }),
   );
   return {
-    ...$schema,
+    ...(typeof schema.$schema === "string" ? { $schema: schema.$schema } : {}),
     type: "object",
     description,
     properties: shallow,
@@ -270,9 +298,6 @@ const reduceToShallowProperties = (
       : {}),
     ...(typeof schema.minProperties === "number"
       ? { minProperties: schema.minProperties }
-      : {}),
-    ...(isSchemaObject(schema.dependentRequired)
-      ? { dependentRequired: { ...schema.dependentRequired } }
       : {}),
     ...(schema.additionalProperties === false
       ? { additionalProperties: false }
@@ -292,7 +317,8 @@ export const compactAdvertisedInputSchema = (
   budgetBytes: number,
 ): CompactedInputSchema => {
   const inline = inlineWithinBudget(stripAnnotations(schema), budgetBytes);
-  if (inline !== undefined) return { schema: inline, presentation: "inline" };
+  if (inline !== undefined && schemaDepth(inline) <= COMPACT_SCHEMA_MAX_DEPTH)
+    return { schema: inline, presentation: "inline" };
   const reduced = reduceToShallowProperties(schema);
   if (serializedBytes(reduced) <= budgetBytes)
     return { schema: reduced, presentation: "reduced" };

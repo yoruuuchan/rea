@@ -4,6 +4,30 @@ import { captureWebScreenshotInputSchema } from "../../../src/domain/webScreensh
 import { startFakeCdpBrowser } from "../../fixtures/fakeCdpBrowser.js";
 describe("screenshot committed document identity", () => {
   it.each([
+    ["missing screenshot data", {}],
+    ["invalid base64 screenshot data", { data: "not base64%%%" }],
+  ])("reports %s as a protocol error", async (_label, result) => {
+    const browser = await startFakeCdpBrowser({
+      commandResult: ({ method }) =>
+        method === "Page.captureScreenshot" ? result : undefined,
+    });
+    onTestFinished(async () => {
+      await browser.close();
+    });
+    const observation = await new CdpBrowserProvider().captureScreenshot(
+      captureWebScreenshotInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+      }),
+    );
+    expect(observation).toMatchObject({
+      ok: false,
+      error: { reason: "protocol_error" },
+    });
+  });
+
+  it.each([
     { offset: 8, value: 14 },
     { offset: 16, value: 0x8000_0000 },
     { offset: 20, value: 0x8000_0000 },

@@ -361,7 +361,7 @@ it("reconstructs package, Electron roles, Webpack/Rspack modules, and cross-laye
           expect.objectContaining({
             properties: expect.objectContaining({
               module_key: "1",
-              structural_fingerprint_algorithm: "babel-ast-v1",
+              structural_fingerprint_algorithm: "babel-ast-v2",
             }),
           }),
         ]),

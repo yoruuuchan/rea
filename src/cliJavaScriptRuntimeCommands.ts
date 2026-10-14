@@ -16,6 +16,7 @@ import { analysisInputErrorFromIssues } from "./domain/inputIssueProjection.js";
 import { projectAnalysisError } from "./domain/analysisErrorProjection.js";
 import type { JsonValue } from "./domain/jsonValue.js";
 import type { Logger } from "pino";
+import { withCommandCancellation } from "./cli/commandCancellation.js";
 
 const observeOptionsSchema = z.object({
   runtimeKind: javascriptRuntimeKindSchema
@@ -42,30 +43,33 @@ export const registerJavaScriptRuntimeObservationCommands = (
       endpoint: z.string().describe("Literal-loopback Inspector endpoint"),
     }),
     run: ({ args }) =>
-      logCliCommand(
-        logger,
-        CLI_COMMANDS.listJavaScriptRuntimeTargets,
-        async () => {
-          const context = runtimeContext();
-          const input = {
-            inspector_endpoint: args.endpoint,
-          };
-          const parsed =
-            listJavaScriptRuntimeTargetsInputSchema.safeParse(input);
-          if (!parsed.success)
-            return cliError(
-              analysisInputErrorFromIssues(
-                "list_javascript_runtime_targets",
-                parsed.error.issues,
-                input,
-              ),
+      withCommandCancellation((signal) =>
+        logCliCommand(
+          logger,
+          CLI_COMMANDS.listJavaScriptRuntimeTargets,
+          async () => {
+            const context = runtimeContext();
+            const input = {
+              inspector_endpoint: args.endpoint,
+            };
+            const parsed =
+              listJavaScriptRuntimeTargetsInputSchema.safeParse(input);
+            if (!parsed.success)
+              return cliError(
+                analysisInputErrorFromIssues(
+                  "list_javascript_runtime_targets",
+                  parsed.error.issues,
+                  input,
+                ),
+              );
+            const result = await listJavaScriptRuntimeTargets(
+              context.provider,
+              parsed.data,
+              { signal },
             );
-          const result = await listJavaScriptRuntimeTargets(
-            context.provider,
-            parsed.data,
-          );
-          return result.ok ? result.value : cliError(result.error);
-        },
+            return result.ok ? result.value : cliError(result.error);
+          },
+        ),
       ),
   });
 
@@ -79,29 +83,36 @@ export const registerJavaScriptRuntimeObservationCommands = (
     }),
     options: observeOptionsSchema,
     run: ({ args, options }) =>
-      logCliCommand(logger, CLI_COMMANDS.observeJavaScriptRuntime, async () => {
-        const context = runtimeContext();
-        const input = {
-          inspector_endpoint: args.endpoint,
-          target_id: args.targetId,
-          runtime_kind: options.runtimeKind,
-          observation_ms: options.observationMs,
-        };
-        const parsed = observeJavaScriptRuntimeInputSchema.safeParse(input);
-        if (!parsed.success)
-          return cliError(
-            analysisInputErrorFromIssues(
-              "observe_javascript_runtime",
-              parsed.error.issues,
-              input,
-            ),
-          );
-        const result = await observeJavaScriptRuntime(
-          context.provider,
-          parsed.data,
-        );
-        return result.ok ? result.value : cliError(result.error);
-      }),
+      withCommandCancellation((signal) =>
+        logCliCommand(
+          logger,
+          CLI_COMMANDS.observeJavaScriptRuntime,
+          async () => {
+            const context = runtimeContext();
+            const input = {
+              inspector_endpoint: args.endpoint,
+              target_id: args.targetId,
+              runtime_kind: options.runtimeKind,
+              observation_ms: options.observationMs,
+            };
+            const parsed = observeJavaScriptRuntimeInputSchema.safeParse(input);
+            if (!parsed.success)
+              return cliError(
+                analysisInputErrorFromIssues(
+                  "observe_javascript_runtime",
+                  parsed.error.issues,
+                  input,
+                ),
+              );
+            const result = await observeJavaScriptRuntime(
+              context.provider,
+              parsed.data,
+              { signal },
+            );
+            return result.ok ? result.value : cliError(result.error);
+          },
+        ),
+      ),
   });
 };
 

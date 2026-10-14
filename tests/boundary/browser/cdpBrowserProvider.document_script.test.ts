@@ -256,63 +256,70 @@ describe("CdpBrowserProvider: transient WebMCP frames", () => {
 });
 
 describe("CdpBrowserProvider: WebMCP discovery and completeness", () => {
-  it("discovers untrusted WebMCP declarations without registering or invoking them", async () => {
-    const browser = await startFakeCdpBrowser({ webMcpTools: true });
-    trackBrowser(browser);
-    const result = await new CdpBrowserProvider().discoverWebMcpTools(
-      discoverWebMcpToolsInputSchema.parse({
-        cdp_endpoint: browser.endpoint,
-        allowed_origins: [browser.allowedOrigin],
-        target_id: "allowed-page",
-        observation_ms: 0,
-      }),
-    );
+  it.each([true, false])(
+    "discovers untrusted WebMCP declarations with consequential=%s without invoking them",
+    async (consequential) => {
+      const browser = await startFakeCdpBrowser({
+        webMcpTools: true,
+        webMcpConsequential: consequential,
+      });
+      trackBrowser(browser);
+      const result = await new CdpBrowserProvider().discoverWebMcpTools(
+        discoverWebMcpToolsInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+          allowed_origins: [browser.allowedOrigin],
+          target_id: "allowed-page",
+          observation_ms: 0,
+        }),
+      );
 
-    if (!result.ok) throw result.error;
-    expect(result.value).toMatchObject({
-      status: "available",
-      tools: {
-        total: 1,
-        items: [
-          {
-            name: "search_orders",
-            description: "Search orders; authorization=Bearer tool-secret",
-            declaration_kind: "declarative",
-            owner_origin: browser.allowedOrigin,
-            annotations: {
-              read_only: true,
-              untrusted_content: true,
-              autosubmit: false,
+      if (!result.ok) throw result.error;
+      expect(result.value).toMatchObject({
+        status: "available",
+        tools: {
+          total: 1,
+          items: [
+            {
+              name: "search_orders",
+              description: "Search orders; authorization=Bearer tool-secret",
+              declaration_kind: "declarative",
+              owner_origin: browser.allowedOrigin,
+              annotations: {
+                read_only: true,
+                untrusted_content: true,
+                consequential,
+                autosubmit: false,
+              },
+              trust: "page-declared-untrusted",
+              registration_source: {
+                url: `${browser.allowedOrigin}/app.js?token=tool-source-secret`,
+                line: 12,
+                column: 4,
+              },
             },
-            trust: "page-declared-untrusted",
-            registration_source: {
-              url: `${browser.allowedOrigin}/app.js?token=tool-source-secret`,
-              line: 12,
-              column: 4,
-            },
-          },
-        ],
-      },
-    });
-    expect(result.value.completeness.excluded).toContainEqual(
-      expect.objectContaining({
-        section: "webmcp_tools",
-        reason: "out_of_target_scope",
-      }),
-    );
-    expect(result.value.completeness.unavailable_sections).not.toContain(
-      "webmcp_tools",
-    );
-    const serialized = JSON.stringify(result.value);
-    expect(serialized).toContain("tool-secret");
-    expect(serialized).toContain("tool-source-secret");
-    expect(serialized).toContain("schema-secret");
-    expect(serialized).not.toContain("private-tool-secret");
-    const methods = browser.commands.map(({ method }) => method);
-    expect(methods).toContain("WebMCP.enable");
-    expect(methods).not.toContain("WebMCP.invokeTool");
-    expect(methods).not.toContain("Runtime.evaluate");
-  });
+          ],
+        },
+      });
+      expect(result.value.completeness.excluded).toContainEqual(
+        expect.objectContaining({
+          section: "webmcp_tools",
+          reason: "out_of_target_scope",
+        }),
+      );
+      expect(result.value.completeness.unavailable_sections).not.toContain(
+        "webmcp_tools",
+      );
+      const serialized = JSON.stringify(result.value);
+      expect(serialized).toContain("tool-secret");
+      expect(serialized).toContain("tool-source-secret");
+      expect(serialized).toContain("schema-secret");
+      expect(serialized).not.toContain("private-tool-secret");
+      const methods = browser.commands.map(({ method }) => method);
+      expect(methods).toContain("WebMCP.enable");
+      expect(methods).not.toContain("WebMCP.invokeTool");
+      expect(methods).not.toContain("Runtime.evaluate");
+    },
+  );
 
   it("reports WebMCP unavailable when the experimental domain is absent", async () => {
     const browser = await startFakeCdpBrowser({
@@ -756,6 +763,15 @@ describe("CdpBrowserProvider: WebMCP registration owners", () => {
       const tools = result.value.tools.items;
       expect(tools).toHaveLength(mode === "retain" ? 2 : 1);
       expect(result.value.tools.total).toBe(tools.length);
+      // Declarations without annotations report absent hints as null, never
+      // collapsed to a declared false.
+      for (const tool of tools)
+        expect(tool.annotations).toEqual({
+          read_only: null,
+          untrusted_content: null,
+          consequential: null,
+          autosubmit: null,
+        });
       expect(tools).toContainEqual(
         expect.objectContaining({
           name: "read_item",

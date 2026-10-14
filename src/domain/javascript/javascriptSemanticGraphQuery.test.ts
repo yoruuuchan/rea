@@ -2,6 +2,7 @@ import {
   semanticFixtureGraph,
   semanticFixtureInput,
   semanticGraphTestEvidence,
+  unknownSemanticGraphTestEvidence,
 } from "../../../tests/support/javascriptSemanticGraphFixture.js";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -10,6 +11,7 @@ import { digestCanonicalValue } from "../canonicalDigest.js";
 import type { JsonValue } from "../jsonValue.js";
 import type { ApplicationGraphEvidence } from "./javascriptApplicationEvidenceSchemas.js";
 import {
+  JAVASCRIPT_SEMANTIC_RELATION_FAMILIES,
   JAVASCRIPT_SEMANTIC_RELATION_FAMILY,
   JAVASCRIPT_SEMANTIC_NODE_KINDS,
   JAVASCRIPT_SEMANTIC_RELATIONS,
@@ -244,6 +246,86 @@ it("matches scalar literal seeds and skips non-scalar literal metadata", () => {
   expect(query("unmatched")).toEqual([]);
 });
 
+it("scopes callers unknowns to call relations while preserving graph uncertainty", () => {
+  const contexts = new JavaScriptSemanticEvidenceContextRegistry();
+  const caller = node("function", "caller", {}, contexts);
+  const seed = node("function", "seed", {}, contexts);
+  const call = createJavaScriptSemanticGraphRelation(
+    {
+      source_node_id: caller.node_id,
+      target_node_id: seed.node_id,
+      relation: "calls",
+      resolution: "resolved",
+      properties: {},
+      evidence: semanticGraphTestEvidence("inferred"),
+    },
+    contexts,
+  );
+  const readUnknown = createJavaScriptSemanticGraphUnknown(
+    {
+      node_id: caller.node_id,
+      family: "data-flow",
+      relation_kinds: ["reads"],
+      reason: "dynamic-property",
+      detail: "Unresolved property read at the caller.",
+      candidate_node_ids: [],
+      evidence: unknownSemanticGraphTestEvidence(),
+    },
+    contexts,
+  );
+  const graph = createJavaScriptSemanticGraph({
+    schema: "JavaScriptSemanticRelationGraph",
+    root_artifact_sha256: SHA,
+    application_graph_id: `jag_${"b".repeat(64)}`,
+    root_node_ids: [seed.node_id],
+    evidence_contexts: contexts.contexts,
+    nodes: [caller, seed],
+    relations: [call],
+    fingerprints: [],
+    unknowns: [readUnknown],
+    coverage: {
+      status: "partial",
+      truncated: false,
+      omitted_nodes: null,
+      omitted_relations: null,
+      limits: [],
+      families: JAVASCRIPT_SEMANTIC_RELATION_FAMILIES.map((family) => ({
+        family,
+        status:
+          family === "data-flow" ? ("unknown" as const) : ("complete" as const),
+        retained_relations:
+          JAVASCRIPT_SEMANTIC_RELATION_FAMILY[call.relation] === family ? 1 : 0,
+        omitted_relations: family === "data-flow" ? null : 0,
+        unknown_ids: family === "data-flow" ? [readUnknown.unknown_id] : [],
+      })),
+    },
+    limitations: ["One property read remains unresolved."],
+  });
+  const query = (
+    direction: "callers" | "backward-provenance",
+    allowed_relations?: ["calls"],
+  ) =>
+    queryJavaScriptSemanticGraph(graph, {
+      seed: { kind: "semantic-node", node_id: seed.node_id },
+      direction,
+      ...(allowed_relations === undefined ? {} : { allowed_relations }),
+    });
+  const callers = query("callers");
+  const filtered = query("callers", ["calls"]);
+  const backward = query("backward-provenance");
+  expect(callers.summary.traversed_nodes).toBe(2);
+  expect(callers.unknowns).toEqual([]);
+  expect(callers.summary.relevant_unknowns).toBe(0);
+  expect(callers.limitations).not.toContain(
+    "Relevant dynamic, unsupported, incomplete, or ambiguous semantics remain unknown.",
+  );
+  expect(filtered.unknowns).toEqual(callers.unknowns);
+  expect(backward.unknowns.map(({ unknown_id }) => unknown_id)).toEqual([
+    readUnknown.unknown_id,
+  ]);
+  expect(callers.coverage.status).toBe("partial");
+});
+
 it("counts candidate ownership cycles once and traverses them finitely", () => {
   const graph = graphWithCandidateRelations();
   const binding = graph.nodes.find(({ label }) => label === "binding");
@@ -334,6 +416,69 @@ it("rejects stale identities, dangling endpoints, and incomplete coverage claims
   expect(() => createJavaScriptSemanticGraph(unknownGraphInput)).toThrow(
     /candidate node is absent/u,
   );
+});
+
+it("rejects complete family coverage with an unlisted retained frontier", () => {
+  const input = semanticFixtureInput(true);
+  input.coverage = {
+    ...input.coverage,
+    status: "complete",
+    truncated: false,
+    omitted_nodes: 0,
+    omitted_relations: 0,
+    families: input.coverage.families.map((family) =>
+      family.family === "call-flow"
+        ? {
+            ...family,
+            status: "complete",
+            omitted_relations: 0,
+            unknown_ids: [],
+          }
+        : family,
+    ),
+  };
+  input.limitations = [];
+  expect(() => createJavaScriptSemanticGraph(input)).toThrow(
+    /Complete family coverage cannot omit or retain unknown facts/u,
+  );
+
+  const valid = createJavaScriptSemanticGraph(semanticFixtureInput(true));
+  const coverage = {
+    ...valid.coverage,
+    status: "complete" as const,
+    truncated: false,
+    omitted_nodes: 0,
+    omitted_relations: 0,
+    families: valid.coverage.families.map((family) =>
+      family.family === "call-flow"
+        ? {
+            ...family,
+            status: "complete" as const,
+            omitted_relations: 0,
+            unknown_ids: [],
+          }
+        : family,
+    ),
+  };
+  const { graph_id: _previousId, ...semantic } = valid;
+  const changed = { ...semantic, coverage, limitations: [] };
+  const invalid = {
+    ...changed,
+    graph_id: `jsrg_${digestCanonicalValue(
+      changed,
+      "JavaScript semantic graph",
+    )}`,
+  };
+  const parsed = javaScriptSemanticGraphSchema.safeParse(invalid);
+  expect(parsed.success).toBe(false);
+  if (parsed.success) throw new Error("Expected inconsistent graph rejection");
+  expect(parsed.error.issues.map(({ message }) => message)).toContain(
+    "Complete family coverage cannot omit or retain unknown facts",
+  );
+  expect(
+    javaScriptSemanticGraphSchema.safeParse(JSON.parse(JSON.stringify(invalid)))
+      .success,
+  ).toBe(false);
 });
 
 it("validates evidence context ownership and references", () => {

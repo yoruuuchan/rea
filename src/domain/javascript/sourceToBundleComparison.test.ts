@@ -330,11 +330,13 @@ describe("source to bundle path syntax", () => {
     });
   });
 
-  it.each([
-    "https://example.test/src/modified.ts?revision=2#section",
-    "webpack://fixture/./src/modified.ts?revision=2#section",
-  ])("still strips URL query and fragment from %s", (path) => {
-    const node = moduleNode("url", { path });
+  it.each(
+    [
+      "https://example.test/src/modified.ts?revision=2#section",
+      "webpack://fixture/./src/modified.ts?revision=2#section",
+    ].flatMap((path) => ["path", "module_path"].map((key) => ({ key, path }))),
+  )("still strips URL query and fragment from $key $path", ({ key, path }) => {
+    const node = moduleNode("url", { [key]: path });
     const graph = createJavaScriptApplicationGraph({
       schema: "JavaScriptApplicationGraph",
       root_node_ids: [node.node_id],

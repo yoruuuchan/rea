@@ -19,7 +19,7 @@ behavior, and complete CI evidence before merging.
 | `npm run test:boundary`           | Boundary, CLI boundary, MCP boundary, process boundary, and process-global projects                                     |
 | `npm run test:mcp`                | MCP boundary project                                                                                                    |
 | `npm run test:acceptance`         | Complete compiled CLI and MCP acceptance workflows                                                                      |
-| `npm run test:python`             | LLDB producer retention and launch contracts with a fake LLDB API; no native debugger required                          |
+| `npm run test:python`             | LLDB and mitmproxy producer contracts plus analysis-efficiency checks; no real debugger or proxy required               |
 | `npm run test:watch`              | Dirty source tests in watch mode, without build                                                                         |
 | `npm run test:watch:all`          | Changed tests from every project; builds at startup, so rebuild after production edits before relying on compiled tests |
 | `npm run check:changed`           | Cached typecheck/lint and branch-related source feedback                                                                |
@@ -449,8 +449,9 @@ adds in-place reparse, breakaway, environment, and token observations.
 The separate `scripts/verify-windows-native-inspection.mjs` lane uses the
 `.cache/windows-native-inspection-fixture` artifact built on Linux with
 `node scripts/build-windows-native.mjs --inspection-fixture`. Its controlled
-first deletion failure checks retained NTFS ownership, later-query recovery,
-successful-admission caching, and environment-teardown cleanup. It neither
+first deletion failure checks retained NTFS ownership across a same-volume
+rename, later-query handle-based recovery, successful-admission caching, and
+environment-teardown cleanup. It neither
 establishes the cause of the intermittent #1701 host failure nor replaces
 verification with the shipped production artifact.
 `npm run verify:ghidra:windows:package` additionally packs and installs REA into

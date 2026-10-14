@@ -240,11 +240,12 @@ const shellStub = (
 ): ((root: string) => string) => {
   const cases = Object.entries(dispatch)
     .map(([key, output]) => {
-      const [first, second] = key.split(":");
-      const guard =
-        second === undefined
-          ? `[ "$4" = "${first}" ]`
-          : `[ "$4" = "${first}" ] && [ "$5" = "${second}" ]`;
+      const [first, second, third] = key.split(":");
+      const guard = [
+        `[ "$4" = "${first}" ]`,
+        ...(second === undefined ? [] : [`[ "$5" = "${second}" ]`]),
+        ...(third === undefined ? [] : [`[ "$6" = "${third}" ]`]),
+      ].join(" && ");
       return `  if ${guard}; then printf '%b' '${output.replaceAll("\\", "\\\\").replaceAll("\0", "\\000").replace(/'/gu, "'\\''")}'; exit 0; fi`;
     })
     .join("\n");
@@ -379,6 +380,30 @@ exit 1`,
   expect(result.error.capturedOutput?.stdout).toContain(
     pmOutput.split("\n")[0],
   );
+  const projected = projectAnalysisError(result.error);
+  const duplicate = pmOutput.includes("\n");
+  expect(projected).toMatchObject({
+    code: "unreadable_output",
+    message: expect.stringContaining("pm path for com.example"),
+    remediation: { action: expect.stringContaining("details.diagnostics") },
+    details: {
+      reason: duplicate ? "duplicate_local_destination" : "unsafe_device_path",
+      diagnostics: {
+        package_name: "com.example",
+        ...(duplicate
+          ? { device_paths: ["/data/app/x/base.apk", "/data/app/y/base.apk"] }
+          : {
+              rejected_paths: [
+                {
+                  device_path: "/data/app/x/",
+                  reason: "empty_file_name",
+                },
+              ],
+            }),
+      },
+      captured_output: { stdout: expect.stringContaining("package:") },
+    },
+  });
   await expect(readFile(join(root, "pull-ran"))).rejects.toThrow();
   await expect(lstat(output)).rejects.toMatchObject({ code: "ENOENT" });
 });
@@ -410,7 +435,15 @@ it.each([
     if (aliases) {
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(result.error.message).toContain("unique local destinations");
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        message: expect.stringContaining("unique local destination"),
+        details: {
+          reason: "local_destination_unavailable",
+          diagnostics: {
+            device_path: `/data/app/y/${secondName}`,
+          },
+        },
+      });
       await expect(readFile(pullLog)).rejects.toThrow();
       await expect(lstat(packageDirectory)).rejects.toThrow();
       return;
@@ -1012,6 +1045,60 @@ it("inspects the display and window focus", async () => {
   });
   expect(window.focused_window).toBe(
     "Window{abcdef u0 com.example.app/com.example.app.MainActivity}",
+  );
+});
+
+it("reads Android 16 focus declarations from displays when windows omits them", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "dumpsys:window:windows": "Window state has no focus fields\\n",
+      "dumpsys:window:displays":
+        "mCurrentFocus=Window{abc u0 com.example/.Main}\nmFocusedApp=ActivityRecord{def u0 com.example/.Main t1}\n",
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_window",
+    input: { serial: "emulator-5554" },
+  });
+  expect(result).toMatchObject({
+    focused_window: "Window{abc u0 com.example/.Main}",
+    focused_app: "ActivityRecord{def u0 com.example/.Main t1}",
+    observed_lines: [
+      "Window{abc u0 com.example/.Main}",
+      "ActivityRecord{def u0 com.example/.Main t1}",
+    ],
+  });
+  const execution = await providerOver(binary).execute({
+    operation: "inspect_adb_window",
+    input: { serial: "emulator-5554" },
+  });
+  expect(execution.ok).toBe(true);
+  if (!execution.ok) throw execution.error;
+  expect(execution.value.limitations).toContainEqual(
+    expect.stringContaining("dumpsys window displays"),
+  );
+});
+
+it("describes missing window focus as unknown after both sections omit declarations", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "dumpsys:window:windows": "no focus\\n",
+      "dumpsys:window:displays": "no focus\\n",
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_window",
+    input: { serial: "emulator-5554" },
+  });
+  expect(result).toMatchObject({ focused_window: null, focused_app: null });
+  const execution = await providerOver(binary).execute({
+    operation: "inspect_adb_window",
+    input: { serial: "emulator-5554" },
+  });
+  expect(execution.ok).toBe(true);
+  if (!execution.ok) throw execution.error;
+  expect(execution.value.limitations).toContainEqual(
+    expect.stringContaining("focus is unknown"),
   );
 });
 

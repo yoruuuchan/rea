@@ -2,11 +2,11 @@ import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import { err, ok, type Result } from "../result.js";
+import { parseAnalysisViewResult } from "./analysisViewParent.js";
 import {
   wasmArtifactSchema,
   wasmArtifactMatchesSubject,
 } from "../wasm/wasmArtifact.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
 import {
   analysisViewInputError,
   type AnalysisViewParent,
@@ -81,20 +81,9 @@ export const projectWasmArtifactView = (
         },
       ]),
     );
-  const parsed = wasmArtifactSchema.safeParse(parent.normalizedResult);
-  if (!parsed.success)
-    return err(
-      analysisInputErrorFromIssues(
-        "inspect_analysis_view",
-        parsed.error.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: parent.normalizedResult } },
-        { cause: parsed.error },
-      ),
-    );
-  const report = parsed.data;
+  const parsed = parseAnalysisViewResult(wasmArtifactSchema, parent);
+  if (!parsed.ok) return parsed;
+  const report = parsed.value;
   if (
     !wasmArtifactMatchesSubject(
       report.artifact,

@@ -64,6 +64,38 @@ describe("Ghidra unresolved call locations", () => {
 });
 
 describe("Ghidra function-analysis result values", () => {
+  it("preserves unresolved Swift jump omissions", () => {
+    const dossier = {
+      ...functionDossierSchema.parse(ghidraFunctionDossier()),
+      swift_string_literals: [],
+      swift_string_literal_omissions: [
+        {
+          source_address: "0x401004",
+          representation: "small",
+          address: null,
+          byte_length: 5,
+          reason: "unresolved_jump",
+          registers: ["x0", "x1"],
+          words: ["0x5000000000000005", "0x0000000000000000"],
+        },
+      ],
+    };
+    expect(
+      parseGhidraFunctionResult("analyze_function", {
+        value: dossier,
+        limitations: [],
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        value: {
+          swift_string_literal_omissions:
+            dossier.swift_string_literal_omissions,
+        },
+      },
+    });
+  });
+
   it("retains unavailable pseudocode instead of treating its empty representation as observed source", () => {
     const availability = {
       pseudocode: {

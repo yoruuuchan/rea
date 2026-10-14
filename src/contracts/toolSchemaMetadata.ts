@@ -94,6 +94,14 @@ export const toolInputSchemaWithMetadata = <Contract extends ToolContract>(
     },
   );
 
+/** Return the same complete input JSON Schema projection registered on MCP. */
+export const advertisedInputJsonSchema = <Contract extends ToolContract>(
+  contract: Contract,
+): Record<string, unknown> =>
+  toolInputSchemaWithMetadata(contract)["~standard"].jsonSchema.input({
+    target: "draft-2020-12",
+  }) as Record<string, unknown>;
+
 /** Share output definitions and content-bound validator identities on the wire. */
 export const toolOutputSchemaWithMetadata = <Contract extends ToolContract>(
   contract: Contract,

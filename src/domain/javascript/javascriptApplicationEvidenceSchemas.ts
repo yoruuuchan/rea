@@ -6,7 +6,7 @@ const boundedTextSchema = z.string().min(1);
 const boundedKeySchema = z.string().min(1);
 const unsafePathSegments = new Set(["", ".", ".."]);
 const isSafeRelativePath = (path: string): boolean => {
-  if (path.startsWith("/") || path.includes("\\")) return false;
+  if (path.startsWith("/")) return false;
   return path.split("/").every((part) => !unsafePathSegments.has(part));
 };
 const relativePathSchema = z

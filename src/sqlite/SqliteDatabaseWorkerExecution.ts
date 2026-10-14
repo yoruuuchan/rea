@@ -19,6 +19,10 @@ import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { runOwnedCommand } from "../process/OwnedCommand.js";
+import type {
+  ProviderProcessSupervisor,
+  ProviderProcessStopResult,
+} from "../process/ProviderProcess.js";
 import { capturedSqliteOutput } from "./SqliteDatabaseFailures.js";
 import { SQLITE_DATABASE_LIMITS } from "./SqliteDatabaseLimits.js";
 
@@ -109,6 +113,10 @@ export const executeSqliteDatabaseWorker = async (request: {
   readonly launcher?: SqliteWorkerLauncher;
   readonly signal?: AbortSignal;
   readonly captured: (output: AnalysisCapturedOutput) => void;
+  readonly retainCleanup?: (
+    owner: ProviderProcessSupervisor,
+    result: Extract<ProviderProcessStopResult, { status: "incomplete" }>,
+  ) => void;
 }): Promise<z.output<typeof inspectionSchema>> => {
   const requestPath = join(request.root, "request.json");
   const replyPath = join(request.root, "reply.json");
@@ -143,6 +151,9 @@ export const executeSqliteDatabaseWorker = async (request: {
     {
       ...(request.signal === undefined ? {} : { signal: request.signal }),
       ...(request.launcher === undefined ? {} : { launcher: request.launcher }),
+      ...(request.retainCleanup === undefined
+        ? {}
+        : { retainCleanup: request.retainCleanup }),
     },
   );
   const capturedOutput = capturedSqliteOutput(execution);

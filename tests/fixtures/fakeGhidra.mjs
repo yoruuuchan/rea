@@ -32,7 +32,15 @@ if (mode === "silent") setInterval(() => undefined, 1_000);
 else {
   await rm(endpointPath, { force: true });
   const sockets = new Set();
+  let rejectedConnections = 0;
   const server = createServer((socket) => {
+    if (
+      mode === "reject_all_connections" ||
+      (mode === "reject_first_connection" && rejectedConnections++ === 0)
+    ) {
+      socket.destroy();
+      return;
+    }
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
     socket.setEncoding("utf8");

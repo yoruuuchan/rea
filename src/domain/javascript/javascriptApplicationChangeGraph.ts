@@ -180,7 +180,12 @@ const comparisonEvidence = (
       executable_sha256: null,
     },
     coverage: complete
-      ? { status: "complete", truncated: false, omitted_count: 0, limits: [] }
+      ? {
+          status: "complete",
+          truncated: false,
+          omitted_count: 0,
+          limits: sourceCoverageLimits(input),
+        }
       : {
           status: "partial",
           truncated:
@@ -210,7 +215,7 @@ const changeGraphCoverage = (
       status: "complete",
       truncated: false,
       omitted_count: 0,
-      limits: [],
+      limits: sourceCoverageLimits(input),
     };
   return {
     status: "partial",

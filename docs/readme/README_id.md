@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > Sumber resmi REA: [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > Gunakan tautan instalasi dan rilis dari sumber resmi ini. Nama repositori yang mirip atau README yang disalin tidak membuktikan bahwa unduhan tersebut resmi.
+
+<div align="center">
 
 <br />
 
@@ -143,14 +147,14 @@ Alat tambahan dan dukungan sistem host bergantung pada target yang dianalisis:
 
 | Target                     | Hasil yang diberikan REA                                                                              | Persyaratan dan panduan                                                                                                        |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Biner native               | Pseudocode, assembly, string, simbol, pemanggilan, dan referensi                                      | Hopper, Ghidra, atau IDA; [analisis native](https://rea.tools/id/guides/native/)                                               |
+| Biner native               | Pseudocode, assembly, string, simbol, pemanggilan, dan referensi                                      | Hopper, Ghidra, atau IDA; [analisis native](../native-investigation.md)                                                        |
 | Tata letak ELF offline     | Bagian, segmen, simbol/relokasi asli, dan kandidat mitigasi statis                                    | pwntools yang disediakan pemanggil pada Linux x64; [diagnostik biner](../binary-diagnostics.md)                                |
 | Artefak WASM               | Validasi, bagian, bentuk WAT import/ekspor yang tepat, dan WAT yang didekode                          | WABT 1.0.42 yang disediakan pemanggil; `inspect_wasm_artifact`                                                                 |
 | Bytecode EVM               | Selector dispatch, offset byte, argumen yang disimpulkan, dan sifat mutabilitas                       | Pembawa data raw/hex lokal; [panduan EVM offline](../evm-bytecode.md)                                                          |
 | Rust binaries              | Embedded cargo-auditable dependency list                                                              | [Rust binaries](../rust-binaries.md)                                                                                           |
 | Crash Linux yang direkam   | Catatan mentah, register/sinyal setiap thread yang direkam, dan kandidat pemetaan opsional            | pwntools yang disediakan pemanggil; GDB/pwndbg opsional; [crash yang direkam](../recorded-crashes.md)                          |
-| JavaScript / Electron      | Modul, impor, source map, rute, IPC, dan hubungan add-on native                                       | Node.js dan npm; [analisis aplikasi](https://rea.tools/id/guides/javascript/)                                                  |
-| Situs web                  | Struktur halaman, skrip, pengamatan jaringan, dan tangkapan layar yang diminta                        | Peramban berbasis Chrome; [analisis peramban](https://rea.tools/id/guides/browser/)                                            |
+| JavaScript / Electron      | Modul, impor, source map, rute, IPC, dan hubungan add-on native                                       | Node.js dan npm; [analisis aplikasi](../javascript-application-workflows.md)                                                   |
+| Situs web                  | Struktur halaman, skrip, pengamatan jaringan, dan tangkapan layar yang diminta                        | Peramban berbasis Chrome; [analisis peramban](../browser-observation.md)                                                       |
 | Rekaman jaringan tersimpan | Permintaan, respons, payload yang terekspos, dan lokasi sumber                                        | HAR; mitmdump di Linux untuk rekaman native mitmproxy; [panduan rekaman](../web-network-captures.md)                           |
 | Capturan paket             | Endpoint, DNS, TLS SNI, distribusi protokol, dan permintaan HTTP                                      | tshark dan capinfos buatan pemanggil; [panduan pcap](../pcap-analysis.md)                                                      |
 | Assembly .NET              | Metadata, instruksi CIL, dependensi native yang dideklarasikan, dan perbandingan build                | Tidak ada (hanya analisis statis); [panduan kode terkelola](../managed-code-analysis.md)                                       |
@@ -293,7 +297,7 @@ Laporkan kerentanan melalui [SECURITY.md](../../SECURITY.md).
 
 ## Riwayat Bintang
 
-🎉 **170.000 bintang GitHub, terima kasih!**
+🎉 **200.000 bintang GitHub, terima kasih!**
 
 Terima kasih kepada semua orang yang menggunakan REA, melaporkan bug, meminta fitur, menguji build, dan berkontribusi dalam perbaikan.
 

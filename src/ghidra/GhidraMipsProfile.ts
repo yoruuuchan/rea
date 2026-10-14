@@ -137,6 +137,11 @@ export const ghidraMipsUnsupportedReason = (
     if (load.symbolRelativeCount !== 0)
       return "Symbol-bearing R_MIPS_REL32 is unsupported: Ghidra normalizes MIPS16 function addresses and can lose the source function-pointer mode tag. Symbol-index-zero REL32 is verified separately.";
   }
+  if ((metadata.limitations?.length ?? 0) > 0)
+    return [
+      "MIPS ABI declaration inspection is incomplete; unsupported attributes or conflicting declaration sources may remain unknown.",
+      ...(metadata.limitations ?? []),
+    ].join(" ");
   const abi = metadata.abiFlags;
   if (shared && abi === null && (metadata.limitations?.length ?? 0) === 0)
     return null; // Inspected absence leaves FP semantics unknown, never inferred.

@@ -1,7 +1,9 @@
 import { readClientPolicyBlock } from "./GeminiClientSettings.js";
 import {
   readClientConfigurationFiles,
+  effectiveClientConfiguration,
   readConfigurationText,
+  type ClientConfigurationSource,
 } from "./ClientConfigurationFiles.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -18,9 +20,7 @@ import {
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
 import { dshDocument, DshCordisDocument } from "./DshCordisPatch.js";
-import { constants as fsConstants } from "node:fs";
-import { createHash } from "node:crypto";
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { clientRegistrationEnvironment } from "./ClientRegistrationEnvironment.js";
@@ -31,10 +31,13 @@ import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
 import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { packageReadTargetChanged } from "./MsixPackageStorage.js";
 import {
-  readRegularFile,
   readRegularFileText,
   RegularFileCleanupFailure,
 } from "./RegularFileRead.js";
+import {
+  preserveRecoveryBackup,
+  selectCurrentRecoveryBackup,
+} from "./SetupRecoveryBackup.js";
 import type { ClientConfigurationFileError } from "./ClientConfigurationFiles.js";
 import type {
   ClientConfigurationInspection,
@@ -90,7 +93,9 @@ const configureClientDocument = async (
     throwCleanupFailure(files.error);
     return { status: "failed", reason: "readback" };
   }
-  const existing = files.value.at(-1);
+  const existing = files.value.find(
+    ({ sourcePath }) => sourcePath === client.configPath,
+  );
   const editabilityError =
     existing?.dialect === "dsh"
       ? dshDocument(existing.document).editabilityError
@@ -104,7 +109,8 @@ const configureClientDocument = async (
       client,
       environment,
       command,
-      files.value.at(-1),
+      existing,
+      files.value,
     ),
   );
   if (!policy.ok) {
@@ -137,7 +143,13 @@ const configureClientDocument = async (
     const policy = await readClientPolicyBlock(
       client,
       parsed,
-      clientConfigurationDesired(client, environment, command, parsed),
+      clientConfigurationDesired(
+        client,
+        environment,
+        command,
+        parsed,
+        files.value,
+      ),
     );
     if (!policy.ok) {
       throwCleanupFailure(policy.error);
@@ -156,10 +168,16 @@ const configureClientDocument = async (
     throwCleanupFailure(fallback.error);
     return { status: "failed", reason: "readback" };
   }
-  const desired = clientConfigurationDesired(client, environment, command, {
-    ...parsed,
-    servers: { ...fallback.value, ...parsed.servers },
-  });
+  const desired = clientConfigurationDesired(
+    client,
+    environment,
+    command,
+    {
+      ...parsed,
+      servers: { ...fallback.value, ...parsed.servers },
+    },
+    files.value,
+  );
   if (registrationCurrent(parsed, desired)) return { status: "unchanged" };
   return persistClientConfiguration({
     client,
@@ -205,7 +223,10 @@ const persistClientConfiguration = async ({
     const selection = await selectCurrentRecoveryBackup(backupPath, original);
     if (!selection.ok) return { status: "failed", reason: "backup" };
     if (
-      !(await preserveConfigBackup(transactionPath, selection.value.backupPath))
+      !(await preserveRecoveryBackup(
+        transactionPath,
+        selection.value.backupPath,
+      ))
     )
       return { status: "failed", reason: "backup" };
     const verified = await selectCurrentRecoveryBackup(backupPath, original);
@@ -338,7 +359,13 @@ export const clientConfigurationAligned = async (
     const policy = await readClientPolicyBlock(
       client,
       parsed,
-      clientConfigurationDesired(client, providerEnvironment, command, parsed),
+      clientConfigurationDesired(
+        client,
+        providerEnvironment,
+        command,
+        parsed,
+        files.value,
+      ),
     );
     if (!policy.ok) {
       throwCleanupFailure(policy.error);
@@ -353,6 +380,7 @@ export const clientConfigurationAligned = async (
           providerEnvironment,
           command,
           parsed,
+          files.value,
         ),
       )
     );
@@ -400,7 +428,9 @@ const inspectClientDocument = async (
       remediation: files.error.detail,
     };
   }
-  const existing = files.value.at(-1);
+  const existing = files.value.find(
+    ({ sourcePath }) => sourcePath === client.configPath,
+  );
   const editabilityError =
     existing?.dialect === "dsh"
       ? dshDocument(existing.document).editabilityError
@@ -413,7 +443,13 @@ const inspectClientDocument = async (
   const policy = await readClientPolicyBlock(
     client,
     undefined,
-    clientConfigurationDesired(client, providerEnvironment, command, existing),
+    clientConfigurationDesired(
+      client,
+      providerEnvironment,
+      command,
+      existing,
+      files.value,
+    ),
   );
   if (!policy.ok) {
     throwCleanupFailure(policy.error);
@@ -456,7 +492,13 @@ const inspectClientDocument = async (
     const policy = await readClientPolicyBlock(
       client,
       parsed,
-      clientConfigurationDesired(client, providerEnvironment, command, parsed),
+      clientConfigurationDesired(
+        client,
+        providerEnvironment,
+        command,
+        parsed,
+        files.value,
+      ),
     );
     if (!policy.ok) {
       throwCleanupFailure(policy.error);
@@ -472,6 +514,7 @@ const inspectClientDocument = async (
       providerEnvironment,
       command,
       parsed,
+      files.value,
     );
     if (registrationCurrent(parsed, desired))
       return { status: "already_current" };
@@ -554,76 +597,6 @@ const readZcodeFallbackServers = async (
   }
 };
 
-const preserveConfigBackup = async (
-  source: string,
-  destination: string,
-): Promise<boolean> => {
-  try {
-    await copyFile(source, destination, fsConstants.COPYFILE_EXCL);
-    return true;
-  } catch (cause: unknown) {
-    return cause instanceof Error && "code" in cause && cause.code === "EEXIST";
-  }
-};
-
-interface RecoveryBackupSelection {
-  readonly backupPath: string;
-  readonly present: boolean;
-}
-
-interface RecoveryBackupSelectionFailure {
-  readonly kind: "unreadable" | "occupied";
-  readonly path: string;
-  readonly detail: string;
-}
-
-const selectCurrentRecoveryBackup = async (
-  firstBackupPath: string,
-  original: string,
-): Promise<Result<RecoveryBackupSelection, RecoveryBackupSelectionFailure>> => {
-  const expected = Buffer.from(original, "utf8");
-  let firstBackup: Buffer | undefined;
-  try {
-    firstBackup = await readRegularFile(firstBackupPath, {
-      symlinks: "reject",
-    });
-  } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure) throw cause;
-    if (!isMissing(cause))
-      return err({
-        kind: "unreadable",
-        path: firstBackupPath,
-        detail: `The recovery backup could not be checked: ${errorDetail(cause)}`,
-      });
-  }
-  if (firstBackup === undefined)
-    return ok({ backupPath: firstBackupPath, present: false });
-  if (firstBackup.equals(expected))
-    return ok({ backupPath: firstBackupPath, present: true });
-
-  const digest = createHash("sha256").update(original, "utf8").digest("hex");
-  const recoveryPath = `${firstBackupPath}.${digest}.recovery`;
-  let recovery: Buffer | undefined;
-  try {
-    recovery = await readRegularFile(recoveryPath, { symlinks: "reject" });
-  } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure) throw cause;
-    if (!isMissing(cause))
-      return err({
-        kind: "unreadable",
-        path: recoveryPath,
-        detail: `The recovery backup could not be checked: ${errorDetail(cause)}`,
-      });
-  }
-  if (recovery !== undefined && !recovery.equals(expected))
-    return err({
-      kind: "occupied",
-      path: recoveryPath,
-      detail: `The recovery path already contains different data: ${recoveryPath}`,
-    });
-  return ok({ backupPath: recoveryPath, present: recovery !== undefined });
-};
-
 const restoreConfig = async (
   path: string,
   original: string | undefined,
@@ -678,8 +651,18 @@ const clientConfigurationDesired = (
   client: SetupClient,
   providerEnvironment: SetupProviderEnvironment,
   command: readonly string[],
-  parsed?: ClientConfigurationDocument,
+  parsed: ClientConfigurationDocument | undefined,
+  sources: readonly ClientConfigurationSource[],
 ) => {
+  const effective = effectiveClientConfiguration(sources, {
+    client,
+    document: parsed,
+  });
+  const validated = clientRegistrationEnvironment(
+    effective,
+    providerEnvironment,
+  );
+  if (!validated.ok) throw validated.error;
   const format = parsed?.dialect ?? client.format ?? "json";
   const launcher =
     command.length === 0 ? [PRODUCT_IDENTITY.cliBinary, "mcp"] : command;
@@ -697,6 +680,7 @@ const clientConfigurationDesired = (
   const environment = clientRegistrationEnvironment(
     parsed,
     providerEnvironment,
+    "fragment",
   );
   if (!environment.ok) throw environment.error;
   const registration = clientRegistrationEntry(

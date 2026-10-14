@@ -16,6 +16,7 @@ import {
   type JavaScriptSemanticAnalysisState,
 } from "./javascriptSemanticState.js";
 import { isImportMetaUrl } from "./javascriptStaticAnalysisHelpers.js";
+import { semanticMutationInitializers } from "./javascriptSemanticMutationInitializers.js";
 
 const GLOBAL_OBJECT_NAMES = ["globalThis", "global", "window", "self"];
 
@@ -51,13 +52,17 @@ const createAmbientPathResolver = (
   possibleWrites: boolean,
 ) => {
   const cached = new WeakMap<t.Node, readonly AmbientPath[]>();
-  return (node: t.Node): readonly AmbientPath[] => {
-    const prior = cached.get(node);
+  return (node: t.Node, capture?: t.Node): readonly AmbientPath[] => {
+    const prior = possibleWrites ? undefined : cached.get(node);
     if (prior !== undefined) return prior;
     const result = new Map<string, AmbientPath>();
-    const pending: { node: t.Node; suffix: AmbientProjection }[] = [
-      { node, suffix: [] },
-    ];
+    // The caller's write site selects initializers for the written target.
+    // Reads reached through an initializer occur at their own position.
+    const pending: {
+      node: t.Node;
+      suffix: AmbientProjection;
+      readsAtSelf?: true;
+    }[] = [{ node, suffix: [] }];
     // Join projections at their producing expression, rather than enumerating
     // alias histories. Each key can only widen to a wildcard, and conflicting
     // depths widen to unknown, so diamonds and cycles have finite state.
@@ -104,7 +109,11 @@ const createAmbientPathResolver = (
       // A widened projection is a possible write, never proof of an intrinsic.
       if (suffix === undefined && !possibleWrites) continue;
       const continueWith = (node: t.Node, path: AmbientProjection = suffix) =>
-        pending.push({ node, suffix: path });
+        pending.push({
+          node,
+          suffix: path,
+          ...(current.readsAtSelf && { readsAtSelf: true }),
+        });
       if (
         t.isMetaProperty(root) &&
         root.meta.name === "import" &&
@@ -125,14 +134,19 @@ const createAmbientPathResolver = (
         const binding = resolveSemanticBindingState(state, root, root.name);
         if (binding === undefined) continue;
         const stable = semanticStableInitializer(binding, state);
+        const readAt = current.readsAtSelf ? root : capture;
         const initializers = possibleWrites
-          ? binding.initializers
+          ? readAt === undefined
+            ? binding.initializers
+            : semanticMutationInitializers(binding, readAt, state.parentsByNode)
+                .initializers
           : stable === undefined
             ? []
             : [stable];
         for (const initializer of initializers)
           pending.push({
             node: initializer.node,
+            readsAtSelf: true,
             suffix:
               suffix === undefined
                 ? undefined
@@ -221,7 +235,7 @@ const createAmbientPathResolver = (
       }
     }
     const paths = [...result.values()];
-    cached.set(node, paths);
+    if (!possibleWrites) cached.set(node, paths);
     return paths;
   };
 };
@@ -248,7 +262,7 @@ export function* indexJavaScriptAmbientWritesSteps(
   });
   yield* collectJavaScriptIdentityWritesSteps(
     program,
-    (root, kind) => {
+    (root, kind, writeSite) => {
       if (kind === "opaque-call") return [];
       // Reassigning a local alias changes the binding, not the referenced object.
       if (kind === "binding")
@@ -256,13 +270,14 @@ export function* indexJavaScriptAmbientWritesSteps(
           isUnshadowedGlobal(root, state, root.name)
           ? [["global", root.name]]
           : [];
-      return ambientWrites(root);
+      return ambientWrites(root, writeSite);
     },
     interop.intrinsicInvocation,
     interop.staticString,
     interop.isFreshObject,
-    (_node, path) => {
+    (node, path) => {
       state.ambientWrites.retain(path);
+      state.ambientWriteEffects.push({ path, node });
     },
   );
 }

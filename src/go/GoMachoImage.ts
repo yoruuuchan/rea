@@ -193,7 +193,7 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
     mappings,
     zero_fills: zeroFills,
     sections,
-    search: named[0] ?? fallback,
+    search: named.length > 0 ? named : fallback === null ? [] : [fallback],
   };
 };
 

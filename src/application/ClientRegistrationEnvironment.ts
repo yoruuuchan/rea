@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { parseEnvironment } from "../config/environment.js";
+import {
+  parseEnvironment,
+  parseEnvironmentValues,
+} from "../config/environment.js";
 import { ConfigurationError } from "../domain/configurationErrors.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -15,9 +18,10 @@ import { dshDocument } from "./DshCordisPatch.js";
 export const clientRegistrationEnvironment = (
   parsed: ClientConfigurationDocument | undefined,
   overrides: Readonly<Record<string, string>> = {},
+  validation: "fragment" | "effective" = "effective",
 ): Result<Readonly<Record<string, string>>, ConfigurationError> => {
   if (parsed?.dialect === "dsh")
-    return dshDocument(parsed.document).environment(overrides);
+    return dshDocument(parsed.document).environment(overrides, validation);
   const key =
     parsed?.dialect === "opencode" || parsed?.dialect === "opencode_v2"
       ? "environment"
@@ -46,7 +50,10 @@ export const clientRegistrationEnvironment = (
   // Validate known settings with the runtime's parser, but retain the original
   // string overrides, including unknown client-specific keys and no defaults.
   const environment = { ...existing.data, ...overrides };
-  const validated = parseEnvironment(environment);
+  const validated =
+    validation === "fragment"
+      ? parseEnvironmentValues(environment)
+      : parseEnvironment(environment);
   if (!validated.ok) return validated;
   return ok(
     Object.fromEntries(

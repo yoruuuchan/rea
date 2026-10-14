@@ -243,6 +243,7 @@ const createSnapshotReplayFixture = async (
       return {
         readConfiguration: () => parseConfig({}),
         createBinarySession: () => createTestBinarySession(provider),
+        createArtifactBinarySession: () => createTestBinarySession(provider),
         createManagedBinarySession: () => createTestBinarySession(provider),
       };
     },
@@ -924,6 +925,7 @@ describe("workflow snapshot profile and cancellation binding", () => {
     const dependencies: DirectAnalysisDependencies = {
       readConfiguration: () => parseConfig({}),
       createBinarySession: () => session,
+      createArtifactBinarySession: () => session,
       createManagedBinarySession: () => session,
     };
     const result = await runDirectAnalysis(

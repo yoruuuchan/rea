@@ -42,7 +42,7 @@ const outputFor = async (
   if (tool === "file")
     return arguments_.at(-1)?.endsWith(".plist") === true
       ? "XML 1.0 document text\n"
-      : "Mach-O 64-bit executable arm64, little-endian\n";
+      : "Mach-O 64-bit executable arm64\n";
   if (tool === "vtool") return "Load command 3 LC_BUILD_VERSION\n";
   if (tool === "swift-demangle") return nativeFixture("demangle.txt");
   if (tool === "plutil") return nativeFixture("plist.json");

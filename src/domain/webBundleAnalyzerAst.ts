@@ -1,7 +1,10 @@
 import * as t from "@babel/types";
 
 import { sanitizeBrowserUrl } from "./browserObservation.js";
-import { semanticStaticPropertyName } from "./javascript/javascriptAstValues.js";
+import {
+  readExactJavaScriptLiteral,
+  semanticStaticPropertyName,
+} from "./javascript/javascriptAstValues.js";
 
 /** Pick the endpoint argument for common network-call patterns. */
 
@@ -28,7 +31,11 @@ export const objectString = (
   name: string,
 ): string | undefined => {
   const value = objectValue(object, name);
-  return t.isStringLiteral(value) ? value.value : undefined;
+  if (value === undefined) return undefined;
+  const literal = readExactJavaScriptLiteral(value);
+  return literal.found && typeof literal.value === "string"
+    ? literal.value
+    : undefined;
 };
 
 /** Whether module syntax supplies a URL location without a package/import-map resolver. */

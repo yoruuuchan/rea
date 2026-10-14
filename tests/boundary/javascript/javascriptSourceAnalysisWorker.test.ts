@@ -162,10 +162,14 @@ it("ends worker stdin and unreferences process handles when cleanup reports insp
   let unreferenced = false;
   let permitCleanup = false;
   let childStdin: typeof process.stdin | undefined;
+  let childExit: Promise<void> | undefined;
   const worker = new JavaScriptAnalysisWorker(
     { heapMb: 128, timeoutMs: 30_000 },
     async (request) => {
       const launched = await spawnOwnedProviderProcess(request);
+      childExit = new Promise((resolve) => {
+        launched.process.once("exit", () => resolve());
+      });
       const originalUnref = launched.process.unref;
       launched.process.unref = () => {
         unreferenced = true;
@@ -208,6 +212,7 @@ it("ends worker stdin and unreferences process handles when cleanup reports insp
     expect(childStdin?.listenerCount("error")).toBeLessThanOrEqual(
       errorListeners ?? 0,
     );
+    await childExit;
     permitCleanup = true;
     await worker.close();
   } finally {

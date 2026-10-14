@@ -24,7 +24,7 @@ import {
 } from "./LinuxResourceLimits.js";
 import type { PrivateRuntimeRoot } from "./PrivateRuntimeRoot.js";
 import type { ProviderProcessSupervisor } from "./ProviderProcess.js";
-import { OwnedCommandFailure } from "./OwnedCommand.js";
+import { OwnedCommandFailure, ownedCommandResources } from "./OwnedCommand.js";
 
 export type ArtifactAnalysisRuntime = Pick<
   PrivateRuntimeRoot,
@@ -129,22 +129,67 @@ export class ArtifactAnalysisResources {
     return [...this.#pending.keys()].map((root) => root.path);
   }
 
+  #resourcesFor(root: ArtifactAnalysisRuntime): readonly string[] {
+    const ownership = this.#pending.get(root)?.owner?.launch.ownership;
+    return ownership === undefined
+      ? [root.path]
+      : ownedCommandResources(ownership, root.path);
+  }
+
+  get #pendingResources(): readonly string[] {
+    return [...this.#pending.keys()].flatMap((root) =>
+      this.#resourcesFor(root),
+    );
+  }
+
   async release(): Promise<void> {
     for (const [root, retained] of this.#pending) {
       try {
         const { owner } = retained;
         if (owner !== undefined) {
           const stopped = await owner.stop();
-          if (stopped.status === "incomplete") throw new Error(stopped.reason);
+          if (stopped.status === "incomplete") {
+            const cleanup = stopped.cleanupResult;
+            throw new ProviderCleanupError(
+              this.providerId,
+              this.#resourcesFor(root),
+              {
+                reason: stopped.reason,
+                ...(cleanup?.failures === undefined
+                  ? {}
+                  : {
+                      failures: cleanup.failures.map((failure) => ({
+                        ...failure,
+                      })),
+                    }),
+                ...(cleanup?.unverified === undefined
+                  ? {}
+                  : {
+                      unverified: cleanup.unverified.map((process) => ({
+                        ...process,
+                      })),
+                    }),
+              },
+              { operation: retained.operation },
+            );
+          }
           this.#pending.set(root, { ...retained, owner: undefined });
         }
         await root.close();
         this.#pending.delete(root);
       } catch (cause: unknown) {
+        const diagnostics =
+          cause instanceof ProviderCleanupError ? cause.diagnostics : undefined;
         throw new ProviderCleanupError(
           this.providerId,
-          [root.path],
-          { reason: String(cause) },
+          this.#resourcesFor(root),
+          {
+            ...diagnostics,
+            reason:
+              cause instanceof ProviderCleanupError
+                ? String(diagnostics?.reason ?? cause.message)
+                : String(cause),
+          },
           { operation: retained.operation, cause },
         );
       }
@@ -236,12 +281,18 @@ export class ArtifactAnalysisResources {
       const partialObservation = result.ok
         ? observation(result.value)
         : result.error.partialObservation;
+      const cleanupDiagnostics =
+        cause instanceof ProviderCleanupError ? cause.diagnostics : undefined;
       return err(
         new ProviderCleanupError(
           this.providerId,
-          this.pendingPaths,
+          this.#pendingResources,
           {
-            reason: String(cause),
+            ...cleanupDiagnostics,
+            reason:
+              cause instanceof ProviderCleanupError
+                ? String(cleanupDiagnostics?.reason ?? cause.message)
+                : String(cause),
             previous_error: result.ok
               ? null
               : projectAnalysisError(result.error),

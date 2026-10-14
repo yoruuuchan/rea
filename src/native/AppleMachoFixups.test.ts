@@ -907,6 +907,47 @@ describe("legacy pointer fixup streams", () => {
       target: 0x99n,
     });
   });
+
+  it("wraps a negative DO_BIND_ADD_ADDR_ULEB step and keeps decoding", () => {
+    // The unsigned 64-bit encoding of -8 revisits the current pointer slot.
+    const back = [0xf8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01];
+    const opcodes = Buffer.from([
+      0x11, // SET_DYLIB_ORDINAL_IMM 1
+      0x40,
+      ...Buffer.from("__ZdlPv\0"),
+      0x71,
+      0x08, // SET_SEGMENT_AND_OFFSET segment 1 + 8
+      0xa0,
+      ...back, // DO_BIND_ADD_ADDR_ULEB -8
+      0x90, // DO_BIND the same slot again
+      0x12, // SET_DYLIB_ORDINAL_IMM 2
+      0x40,
+      ...Buffer.from("_OBJC_CLASS_$_NSObject\0"),
+      0x90, // DO_BIND the next slot
+      0x00,
+    ]);
+    const fixups = parsePointerFixups(
+      opcodes,
+      {
+        chained: null,
+        binds: [{ offset: 0, size: opcodes.length, stream: "bind" }],
+        rebases: [],
+        dylibs: ["/usr/lib/libc++.1.dylib", "/usr/lib/libobjc.A.dylib"],
+      },
+      SEGMENTS,
+      BASE,
+    );
+    expect(fixups.failures).toEqual([]);
+    expect(fixups.decode(BASE + 0x4010n, 0n)).toMatchObject({
+      kind: "bind",
+      symbol: "_OBJC_CLASS_$_NSObject",
+      library: "/usr/lib/libobjc.A.dylib",
+    });
+    expect(fixups.decode(BASE + 0x4018n, 0x99n)).toEqual({
+      kind: "rebase",
+      target: 0x99n,
+    });
+  });
 });
 
 describe("Objective-C property attributes", () => {

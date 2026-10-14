@@ -21,6 +21,7 @@ import { analyzeJavaScriptApplicationValidated } from "../application/javascript
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { reconcileJavaScriptRuntimeEvidenceValidated } from "../application/javascript/JavaScriptRuntimeReconciliationService.js";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
+import type { ElectronFuseService } from "../application/electron/ElectronFuseService.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import type { ToolContract } from "../contracts/toolContractTypes.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -32,6 +33,7 @@ import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
+import { createEvidenceToolHandler } from "./contractToolHandler.js";
 
 interface ElectronToolRegistration {
   readonly artifactResources: ArtifactResourceScope;
@@ -40,6 +42,7 @@ interface ElectronToolRegistration {
   readonly activeLoadFailure?: OptionalProviderLoadFailure | undefined;
   readonly electron: ElectronObservationPort | undefined;
   readonly electronActive: ElectronActiveObservationPort | undefined;
+  readonly electronFuses: ElectronFuseService;
   readonly recordEvidence: EvidenceWriter["recordEvidence"] | undefined;
   readonly evidenceById: EvidenceLookup | undefined;
   readonly withAdmittedAnalysis?: WithAdmittedAnalysis;
@@ -57,6 +60,7 @@ export const registerElectronTools = (
   options: ElectronToolRegistration,
 ): void => {
   const registration = { ...options, delivery: server.delivery, server };
+  registerElectronFuseTool(server, options);
   const listContract = toolContract("list_electron_targets");
   const inspectContract = toolContract("inspect_electron_page");
   const analyzeContract = toolContract("analyze_javascript_application");
@@ -138,6 +142,25 @@ export const registerElectronTools = (
             progress,
           }),
       ),
+  );
+};
+
+const registerElectronFuseTool = (
+  server: EvidenceMcpServer,
+  options: ElectronToolRegistration,
+): void => {
+  const contract = toolContract("inspect_electron_fuses");
+  const handler = createEvidenceToolHandler(
+    server,
+    (input, execution) => options.electronFuses.inspect(input, execution),
+    options.logger,
+    options.recordEvidence,
+    options.withAdmittedAnalysis,
+  );
+  server.registerTool(
+    contract.name,
+    toolRegistrationOptions(contract),
+    handler(contract),
   );
 };
 

@@ -198,6 +198,8 @@ const normalizedNodeToken = (node: t.Node, parent: t.Node | null): string => {
     primitiveAttribute(node, "optional"),
     primitiveAttribute(node, "async"),
     primitiveAttribute(node, "generator"),
+    primitiveAttribute(node, "delegate"),
+    primitiveAttribute(node, "prefix"),
   ].filter((value): value is string => value !== null);
   return [node.type, ...attributes].join(":");
 };

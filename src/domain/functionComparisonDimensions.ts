@@ -121,12 +121,14 @@ const compareText = (
   right: string,
   context: ComparisonContext,
 ): FunctionDimension => {
-  const limitations =
-    dimension === "assembly"
+  const limitations = [
+    "Exact provider text is compared without address or generated-name normalization; layout-only differences do not establish a behavior change.",
+    ...(dimension === "assembly"
       ? [
           "Assembly is opaque provider text; relocation normalization is unavailable.",
         ]
-      : [];
+      : []),
+  ];
   if (context.providersDiffer)
     return unresolvedDimension({
       dimension,
@@ -149,6 +151,7 @@ const compareText = (
       leftCount: [...left].length,
       rightCount: [...right].length,
       limitations: [
+        ...limitations,
         "Bounded line diff exceeded its time or edit-distance limit.",
       ],
     });

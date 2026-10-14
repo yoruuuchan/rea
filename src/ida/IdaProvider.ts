@@ -68,13 +68,17 @@ export class IdaProvider implements AnalysisProviderCandidate {
       if (!privacy.available)
         return {
           status: "unavailable",
-          code: "unsupported_host",
+          code: privacy.code,
           reason: privacy.reason,
           diagnostics: {
             configured: true,
             mode: "headless",
             live_connection_probed: false,
             private_workspace_available: false,
+            windows_native_failure: {
+              stage: privacy.failureStage,
+              remediation: privacy.remediation,
+            },
           },
         };
     }

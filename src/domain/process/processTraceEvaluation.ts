@@ -248,38 +248,33 @@ const evaluateOrderingConstraints = (
   language: PartialOrderLanguage,
 ): { readonly failure: EvaluatedSide | null; readonly satisfied: string[] } => {
   const satisfied: string[] = [];
+  const failures: FailureInput[] = [];
   for (const edge of language.happens_before) {
     const before = trace.locationsById.get(edge.before) ?? [];
     const after = trace.locationsById.get(edge.after) ?? [];
     const lastBefore = before.at(-1);
     const firstAfter = after[0];
     if (lastBefore === undefined && firstAfter !== undefined)
-      return {
-        failure: failure({
-          kind: "edge",
-          message: `${edge.before} is required when ${edge.after} occurs.`,
-          eventIds: [edge.before, edge.after],
-          locations: [firstAfter],
-          rawTrace: trace.rawTrace,
-        }),
-        satisfied,
-      };
-    if (
+      failures.push({
+        kind: "edge",
+        message: `${edge.before} is required when ${edge.after} occurs.`,
+        eventIds: [edge.before, edge.after],
+        locations: [firstAfter],
+        rawTrace: trace.rawTrace,
+      });
+    else if (
       lastBefore !== undefined &&
       firstAfter !== undefined &&
       lastBefore.capture_order >= firstAfter.capture_order
     )
-      return {
-        failure: failure({
-          kind: "edge",
-          message: `${edge.before} must happen before ${edge.after}.`,
-          eventIds: [edge.before, edge.after],
-          locations: [lastBefore, firstAfter],
-          rawTrace: trace.rawTrace,
-        }),
-        satisfied,
-      };
-    satisfied.push(`happens_before:${edge.before}:${edge.after}`);
+      failures.push({
+        kind: "edge",
+        message: `${edge.before} must happen before ${edge.after}.`,
+        eventIds: [edge.before, edge.after],
+        locations: [lastBefore, firstAfter],
+        rawTrace: trace.rawTrace,
+      });
+    else satisfied.push(`happens_before:${edge.before}:${edge.after}`);
   }
   for (const constraint of language.not_before) {
     const events = trace.locationsById.get(constraint.event) ?? [];
@@ -287,34 +282,47 @@ const evaluateOrderingConstraints = (
     const firstEvent = events[0];
     const firstAnchor = anchors[0];
     if (firstEvent !== undefined && firstAnchor === undefined)
-      return {
-        failure: failure({
-          kind: "edge",
-          message: `${constraint.anchor} is required when ${constraint.event} occurs.`,
-          eventIds: [constraint.event, constraint.anchor],
-          locations: [firstEvent],
-          rawTrace: trace.rawTrace,
-        }),
-        satisfied,
-      };
-    if (
+      failures.push({
+        kind: "edge",
+        message: `${constraint.anchor} is required when ${constraint.event} occurs.`,
+        eventIds: [constraint.event, constraint.anchor],
+        locations: [firstEvent],
+        rawTrace: trace.rawTrace,
+      });
+    else if (
       firstEvent !== undefined &&
       firstAnchor !== undefined &&
       firstEvent.capture_order < firstAnchor.capture_order
     )
-      return {
-        failure: failure({
-          kind: "edge",
-          message: `${constraint.event} must not occur before ${constraint.anchor}.`,
-          eventIds: [constraint.event, constraint.anchor],
-          locations: [firstEvent, firstAnchor],
-          rawTrace: trace.rawTrace,
-        }),
-        satisfied,
-      };
-    satisfied.push(`not_before:${constraint.event}:${constraint.anchor}`);
+      failures.push({
+        kind: "edge",
+        message: `${constraint.event} must not occur before ${constraint.anchor}.`,
+        eventIds: [constraint.event, constraint.anchor],
+        locations: [firstEvent, firstAnchor],
+        rawTrace: trace.rawTrace,
+      });
+    else satisfied.push(`not_before:${constraint.event}:${constraint.anchor}`);
   }
-  return { failure: null, satisfied };
+  if (failures.length === 0) return { failure: null, satisfied };
+  const unique = <T>(values: readonly T[], key: (value: T) => string): T[] => [
+    ...new Map(values.map((value) => [key(value), value])).values(),
+  ];
+  return {
+    failure: failure({
+      kind: "edge",
+      message: failures.map(({ message }) => message).join(" "),
+      eventIds: unique(
+        failures.flatMap(({ eventIds }) => eventIds),
+        String,
+      ),
+      locations: unique(
+        failures.flatMap(({ locations }) => locations),
+        ({ collection, index }) => `${collection}:${String(index)}`,
+      ),
+      rawTrace: trace.rawTrace,
+    }),
+    satisfied,
+  };
 };
 
 const boundaryFailure = (

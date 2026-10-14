@@ -218,6 +218,47 @@ it("retains active hook evidence within its event-retention budget", async () =>
   );
 });
 
+it("classifies a dropped browser preload as preload configuration at capture", async () => {
+  const root = await createTestTempDirectory(
+    "rea-electron-hook-browser-preload-",
+  );
+  temporary.push(root);
+  await writeFile(join(root, "electron.js"), electronModuleSource);
+  const script = join(root, "browser-preload.cjs");
+  await writeFile(
+    script,
+    `Object.defineProperty(process, "type", { value: "browser" });
+const electron = require("electron");
+new electron.BrowserWindow({ webPreferences: { preload: "p".repeat(6 * 1024 * 1024) } });
+const snapshot = globalThis.__reaElectronActiveSnapshot();
+process.stdout.write(JSON.stringify(snapshot) + "\\n");
+`,
+  );
+  const hook = join(process.cwd(), "scripts/electron-active-hook.cjs");
+  const execution = await runNode(hook, script, root, root);
+  expect(execution.code, execution.stderr).toBe(0);
+  const snapshot = JSON.parse(
+    execution.stdout.trim().split("\n").at(-1) ?? "null",
+  ) as {
+    readonly dropped_event_families: readonly {
+      readonly family: string;
+      readonly count: number;
+    }[];
+    readonly dropped_event_roles: readonly {
+      readonly role: string;
+      readonly count: number;
+    }[];
+  };
+  expect(snapshot.dropped_event_families).toContainEqual({
+    family: "preload-configuration",
+    count: 1,
+  });
+  expect(snapshot.dropped_event_roles).toContainEqual({
+    role: "browser",
+    count: 1,
+  });
+});
+
 it("preserves fatal process termination after recording uncaught exceptions", async () => {
   const root = await createTestTempDirectory("rea-electron-hook-fatal-");
   temporary.push(root);

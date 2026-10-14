@@ -94,7 +94,7 @@ export const captureCdpScreenshot = async (
   const bytes =
     encoded === undefined ? undefined : decodeCanonicalBase64(encoded);
   if (bytes === undefined)
-    throw new BrowserObservationError("inspect_web_page", "payload_limit");
+    throw new BrowserObservationError("inspect_web_page", "protocol_error");
   const dimensions = readPngHeaderDimensions(bytes);
   if (dimensions === undefined)
     throw new BrowserObservationError("inspect_web_page", "protocol_error");

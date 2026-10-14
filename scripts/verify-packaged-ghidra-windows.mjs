@@ -6,6 +6,7 @@ import {
   requireMcpOperationResult,
 } from "./lib/mcp-verifier-results.mjs";
 import { verifyGhidraCompactReferences } from "./lib/real-ghidra-compact-references.mjs";
+import { verifyWindowsGhidraByteSearch } from "./lib/ghidra-windows-byte-search.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -358,11 +359,12 @@ try {
     const mapping = await call("address_to_file_offset", {
       address: procedure.address,
     });
+    const sourceBytes = await readFile(target);
     assert.equal(memory.complete, true);
     assert.equal(memory.returned_bytes, 16);
     assert.equal(
       memory.bytes_hex,
-      (await readFile(target))
+      sourceBytes
         .subarray(mapping.file_offset, mapping.file_offset + 16)
         .toString("hex"),
     );
@@ -374,6 +376,35 @@ try {
     await call("resolve_containing_procedure", { address: procedure.address });
     await call("search_procedures", { pattern: procedure.value });
     await call("search_strings", { pattern: "rea" });
+    report.byteSearch = await verifyWindowsGhidraByteSearch({
+      invoke: call,
+      sourceBytes,
+      architecture: parsedTarget.value.architecture,
+      sourceOwnedFixture: targetArgument === undefined,
+      fallbackAddress: procedure.address,
+      fallbackFileOffset: mapping.file_offset,
+      runCliPage: async (query) => {
+        const cliArguments = [entry, "search-bytes", target, query.pattern];
+        for (const [option, value] of [
+          ["--mask", query.mask],
+          ["--start", query.start],
+          ["--end", query.end],
+          ["--limit", String(query.limit)],
+        ]) {
+          if (value !== undefined) cliArguments.push(option, value);
+        }
+        cliArguments.push("--provider", "ghidra", "--json");
+        const result = await exec(process.execPath, cliArguments, {
+          env: environment,
+          cwd: callerDirectory,
+          timeout: 360_000,
+          maxBuffer: 8 * 1024 * 1024,
+        });
+        const evidence = JSON.parse(result.stdout);
+        assert.ok(evidence.error === undefined, "CLI byte search failed");
+        return evidence.normalized_result;
+      },
+    });
     for (const name of [
       "procedure_assembly",
       "procedure_callees",
@@ -429,9 +460,24 @@ try {
         name !== "shutdown" &&
         !GHIDRA_MUTATING_OPERATIONS.has(name),
     );
-    assert.ok(
-      expected.every((name) => report.mcpOperations.includes(name)),
-      "Packaged verification omitted an admitted operation.",
+    const expectedOperations = new Set([
+      ...expected,
+      "open_binary",
+      "binary_overview",
+      "binary_session",
+      "close_binary",
+    ]);
+    const observedOperations = new Set(report.mcpOperations);
+    const missingOperations = expected.filter(
+      (name) => !observedOperations.has(name),
+    );
+    const unexpectedOperations = [...observedOperations].filter(
+      (name) => !expectedOperations.has(name),
+    );
+    assert.deepEqual(
+      { missing: missingOperations, unexpected: unexpectedOperations },
+      { missing: [], unexpected: [] },
+      "Packaged verification operation coverage drifted.",
     );
     const session = await call("binary_session", {});
     assert.equal(

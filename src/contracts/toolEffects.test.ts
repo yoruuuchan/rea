@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { TOOL_CONTRACTS } from "./toolContracts.js";
-import { TOOL_EFFECTS, annotationsFromEffects } from "./toolEffects.js";
+import {
+  TOOL_EFFECTS,
+  annotationsFromEffects,
+  type ToolEffects,
+} from "./toolEffects.js";
 
 /**
  * Descriptions that name running, launching, executing, starting, installing,
@@ -159,8 +163,19 @@ describe("tool effects", () => {
   });
 
   it("derives destructiveHint from each destructive effect alone", () => {
-    const base = TOOL_EFFECTS["binary_session"];
-    if (base === undefined) throw new Error("binary_session is unaudited");
+    // Keep annotation algebra independent of any operation's audited effects.
+    const base: ToolEffects = {
+      mutatesTarget: false,
+      mutatesSession: false,
+      writesFilesystem: false,
+      launchesProcess: false,
+      accessesNetwork: false,
+      changesUiState: false,
+      mayDiscardData: false,
+      executesForeignCode: false,
+      mutatesDevice: false,
+      idempotent: true,
+    };
     expect(annotationsFromEffects(base)).toEqual({
       readOnlyHint: true,
       destructiveHint: false,

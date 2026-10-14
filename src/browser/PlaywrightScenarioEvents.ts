@@ -46,9 +46,30 @@ interface EventCaptureOptions {
   readonly signal?: AbortSignal;
 }
 
+// Conservative allocation accounting includes UTF-16 storage and worst-case
+// JSON escaping. Reserve before schema cloning; never serialize to measure.
+const MAX_EVENT_COST = 4 * 1024 * 1024;
+const MAX_CAPTURE_COST = 16 * 1024 * 1024;
+const MAX_EVENTS = 10_000;
+const MAX_LISTENER_OWNERS = 2048;
+const allocationCost = (value: unknown, remaining: number): number => {
+  if (typeof value === "string") return value.length * 8 + 2;
+  if (value === null || typeof value !== "object") return 32;
+  let cost = 2;
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    const item = (value as Record<string, unknown>)[key];
+    cost += key.length * 8 + 4 + allocationCost(item, remaining - cost);
+    if (cost > remaining) break;
+  }
+  return cost;
+};
+
 /** Arrival-ordered Playwright event capture with current-step attribution. */
 export class PlaywrightScenarioEvents {
   private readonly items: BrowserScenarioEvent[] = [];
+  private retainedCost = 0;
+  private dropped = 0;
   private stepIndex = 0;
   private sequence = 0;
   private readonly enabled: ReadonlySet<EventName>;
@@ -85,6 +106,7 @@ export class PlaywrightScenarioEvents {
         selection: network,
         secrets: options.secrets,
         emit: (event) => this.push(event),
+        admitText: (values) => this.admitProducerText(values),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
       this.network = collector;
@@ -157,6 +179,10 @@ export class PlaywrightScenarioEvents {
         `Popup ${family} events before Page discovery are unavailable; later events are retained.`,
     );
     const gaps = [...popupGaps, ...(this.network?.limitations() ?? [])];
+    if (this.dropped > 0)
+      gaps.push(
+        "Browser event collection reached its resource budget; omitted events and descendant observations are unknown.",
+      );
     return this.enabled.has("network") && !this.ownsContext
       ? [
           "Shared-context network capture excludes requests without a known root or descendant Page frame.",
@@ -172,14 +198,24 @@ export class PlaywrightScenarioEvents {
   } {
     return {
       retained: this.items.length,
-      dropped: 0,
+      dropped: this.dropped,
       items: this.items,
     };
   }
 
   private push(event: UnindexedEvent): number {
-    if (this.sealed) return this.sequence;
+    if (this.sealed) return 0;
     this.sequence += 1;
+    if (this.items.length >= MAX_EVENTS) {
+      this.dropped += 1;
+      return 0;
+    }
+    const cost = allocationCost(event, MAX_EVENT_COST) + 128;
+    if (cost > MAX_EVENT_COST || this.retainedCost + cost > MAX_CAPTURE_COST) {
+      this.dropped += 1;
+      return 0;
+    }
+    this.retainedCost += cost;
     const parsed = browserScenarioEventSchema.parse({
       ...event,
       sequence: this.sequence,
@@ -187,6 +223,44 @@ export class PlaywrightScenarioEvents {
     });
     this.items.push(parsed);
     return this.sequence;
+  }
+
+  private admitText(...values: readonly string[]): boolean {
+    return this.admitProducerText(values);
+  }
+
+  /** Admit conservative output cost before running redaction or cloning. */
+  private admitProducerText(values: Iterable<string>): boolean {
+    if (this.sealed) return false;
+    let cost = 4096;
+    for (const value of values) {
+      cost += this.secrets.redactionAllocationCost(value.length);
+      if (
+        cost > MAX_EVENT_COST ||
+        cost > MAX_CAPTURE_COST - this.retainedCost
+      ) {
+        this.sequence += 1;
+        this.dropped += 1;
+        return false;
+      }
+    }
+    if (
+      this.items.length >= MAX_EVENTS ||
+      cost > MAX_EVENT_COST ||
+      cost > MAX_CAPTURE_COST - this.retainedCost
+    ) {
+      this.sequence += 1;
+      this.dropped += 1;
+      return false;
+    }
+    return true;
+  }
+
+  private admitOwner(): boolean {
+    if (this.sealed) return false;
+    if (this.stopListeners.size < MAX_LISTENER_OWNERS) return true;
+    this.dropped += 1;
+    return false;
   }
 
   private retainListener(owner: object, stop: () => void): void {
@@ -220,6 +294,7 @@ export class PlaywrightScenarioEvents {
     }
     if (this.enabled.has("page-errors")) {
       const onError = (error: Error) => {
+        if (!this.admitText(error.message, error.stack ?? "")) return;
         this.push({
           kind: "page-error",
           message: this.secrets.redact(error.message),
@@ -271,16 +346,20 @@ export class PlaywrightScenarioEvents {
   }
 
   private console(message: ConsoleMessage): void {
+    const rawText = message.text();
     const location = message.location();
+    if (!this.admitText(rawText, location.url, message.type())) return;
     this.push({
       kind: "console",
       level: this.secrets.redact(message.type()),
-      text: this.secrets.redact(message.text()),
+      text: this.secrets.redact(rawText),
       url: location.url === "" ? null : this.safeUrl(location.url),
     });
   }
 
   private webSocket(socket: WebSocket): void {
+    if (!this.admitOwner()) return;
+    if (!this.admitText(socket.url())) return;
     const url = this.safeUrl(socket.url());
     this.push({ kind: "websocket-opened", url });
     const onSent = ({ payload }: { payload: string | Buffer }) =>
@@ -317,6 +396,7 @@ export class PlaywrightScenarioEvents {
       });
       return;
     }
+    if (!this.admitText(payload)) return;
     const text = this.secrets.redact(payload);
     this.push({
       kind,
@@ -332,6 +412,7 @@ export class PlaywrightScenarioEvents {
     kind: "frame-attached" | "frame-detached" | "frame-navigated",
     frame: Frame,
   ): void {
+    if (!this.admitText(frame.url(), frame.name())) return;
     this.push({
       kind,
       url: frame.url() === "" ? null : this.safeUrl(frame.url()),
@@ -340,6 +421,7 @@ export class PlaywrightScenarioEvents {
   }
 
   private worker(worker: Worker): void {
+    if (!this.admitOwner() || !this.admitText(worker.url())) return;
     const details = {
       url: this.safeUrl(worker.url()),
       name: null,
@@ -355,6 +437,7 @@ export class PlaywrightScenarioEvents {
 
   private popup(page: Page): void {
     if (this.pages.has(page)) return;
+    if (!this.admitOwner() || !this.admitText(page.url())) return;
     this.pages.add(page);
     for (const family of [
       "frames",
@@ -369,12 +452,14 @@ export class PlaywrightScenarioEvents {
     };
     if (this.enabled.has("popups")) {
       this.push({ kind: "popup-opened", ...opened });
-      const onClose = () =>
+      const onClose = () => {
+        if (!this.admitText(page.url())) return;
         this.push({
           kind: "popup-closed",
           url: page.url() === "" ? null : this.safeUrl(page.url()),
           name: null,
         });
+      };
       page.on("close", onClose);
       this.retainListener(page, () => page.off("close", onClose));
     }
@@ -382,11 +467,12 @@ export class PlaywrightScenarioEvents {
   }
 
   private download(download: Download): void {
-    this.push({
-      kind: "download-cancelled",
-      suggested_filename: this.secrets.redact(download.suggestedFilename()),
-      url: this.safeUrl(download.url()),
-    });
+    if (this.admitText(download.suggestedFilename(), download.url()))
+      this.push({
+        kind: "download-cancelled",
+        suggested_filename: this.secrets.redact(download.suggestedFilename()),
+        url: this.safeUrl(download.url()),
+      });
     void download.cancel().catch((cause: unknown) => {
       // best-effort cleanup: download cancellation must not reject unhandled.
       void cause;

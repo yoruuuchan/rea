@@ -365,6 +365,7 @@ it("cancels after snapshot acquisition before launch and removes private input d
 
 it.each([
   { reason: "input-limit", tag: "AnalysisInputError" },
+  { reason: "expanded-limit", tag: "AnalysisInputError" },
   { reason: "resource-limit", tag: "AnalysisResourceConstraintError" },
   { reason: "decoder", tag: "ProviderAdapterError" },
   { reason: "limit", tag: "AnalysisOutputError" },
@@ -420,6 +421,22 @@ it.each([
               reason: "out_of_range",
               expected: {
                 maximum_capture_nesting: WEB_NETWORK_CAPTURE_LIMITS.depth,
+              },
+            },
+          ],
+        },
+      });
+    } else if (reason === "expanded-limit") {
+      expect(projected).toMatchObject({
+        category: "invalid_input",
+        details: {
+          issues: [
+            {
+              path: ["capture_path", "/extension/child"],
+              reason: "out_of_range",
+              expected: {
+                maximum_expanded_capture_bytes:
+                  WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
               },
             },
           ],

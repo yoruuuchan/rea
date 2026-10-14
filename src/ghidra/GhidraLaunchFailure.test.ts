@@ -56,7 +56,8 @@ const launchOutcomeOf = (error: Error): Record<string, unknown> | undefined => {
     string,
     unknown
   >;
-  const outcome = cause["launch_outcome"] as Record<string, unknown>;
+  const nested = cause["cause"] as Record<string, unknown> | undefined;
+  const outcome = nested?.["command_outcome"] as Record<string, unknown>;
   return outcome === undefined ? undefined : outcome;
 };
 
@@ -78,12 +79,16 @@ describe("Ghidra launch failure diagnostics", () => {
         launched.error instanceof GhidraLaunchError
           ? launched.error.capturedOutput
           : undefined;
-      expect(captured).toBeDefined();
-      expect(captured?.exit_code).toBe(3);
-      expect(captured?.signal).toBeNull();
-      expect(captured?.stdout).toBe("");
-      expect(captured?.stderr).toContain("jvm probe exploded");
-      expect(captured?.truncated).toBe(false);
+      expect(captured).toBeUndefined();
+      const outcome = launchOutcomeOf(launched.error);
+      expect(outcome).toMatchObject({
+        killed: false,
+        outputTruncated: false,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        stdout: "",
+      });
+      expect(outcome?.["stderr"]).toContain("jvm probe exploded");
     } finally {
       await rm(javaHome, { recursive: true, force: true });
       await rm(runtimeRoot, { recursive: true, force: true });
@@ -103,10 +108,11 @@ describe("Ghidra launch failure diagnostics", () => {
       if (launched.ok) throw new Error("expected the launch to fail");
       const outcome = launchOutcomeOf(launched.error);
       expect(outcome).toBeDefined();
-      expect(outcome?.["exit_code"]).toBe(3);
-      expect(outcome?.["signal"]).toBeNull();
+      expect(outcome?.["killed"]).toBe(false);
+      expect(outcome?.["outputTruncated"]).toBe(false);
+      expect(outcome?.["stderrTruncated"]).toBe(false);
       expect(outcome?.["stderr"]).toContain("jvm probe exploded");
-      expect(outcome?.["truncated"]).toBe(false);
+      expect(outcome?.["outputTruncated"]).toBe(false);
     } finally {
       await rm(javaHome, { recursive: true, force: true });
       await rm(runtimeRoot, { recursive: true, force: true });
@@ -126,9 +132,9 @@ describe("Ghidra launch failure diagnostics", () => {
       expect(launched.ok).toBe(false);
       if (launched.ok) throw new Error("expected the launch to fail");
       const outcome = launchOutcomeOf(launched.error);
-      expect(outcome?.["truncated"]).toBe(true);
-      expect(outcome?.["exit_code"]).toBe(1);
-      expect(outcome?.["stderr_bytes"]).toBe(oversized.length);
+      expect(outcome?.["stderrTruncated"]).toBe(true);
+      expect(outcome?.["outputTruncated"]).toBe(false);
+      expect(outcome?.["stderrBytes"]).toBe(oversized.length);
       expect((outcome?.["stderr"] as string).length).toBeLessThanOrEqual(
         EXPECTED_OUTPUT_BOUND_BYTES,
       );

@@ -785,6 +785,33 @@ export const semanticObjectPropertyReferences = (
       continue;
     }
     const name = semanticStaticPropertyKey(property.key, property.computed);
+    if (
+      t.isObjectProperty(property) &&
+      !property.computed &&
+      !property.shorthand &&
+      name === "__proto__"
+    ) {
+      const selected = key ?? null;
+      if (
+        (selected === null || typeof selected === "object") &&
+        t.isExpression(property.value)
+      ) {
+        references.push({
+          node: property.value,
+          path: [selected, ...remaining],
+        });
+      } else if (
+        typeof selected === "string" &&
+        !objectExpressionDefinesKey(node, selected) &&
+        t.isExpression(property.value)
+      ) {
+        references.push({
+          node: property.value,
+          path: [selected, ...remaining],
+        });
+      }
+      continue;
+    }
     const isGetter = t.isObjectMethod(property) && property.kind === "get";
     const isSetter = t.isObjectMethod(property) && property.kind === "set";
     if (

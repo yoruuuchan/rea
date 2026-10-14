@@ -149,6 +149,9 @@ export const analyzeInterfaceBuilderBundle = async (input: {
             ? "storyboard_scene"
             : "nib",
           raw,
+          ...(nib === null || nib.omitted === 0
+            ? {}
+            : { omittedSerializedHierarchyReferences: nib.omitted }),
         });
       } catch (cause: unknown) {
         if (input.signal?.aborted === true) throw cause;
@@ -266,34 +269,14 @@ const finalizeHierarchyCoverage = (
     ...result,
     documents: result.documents.map((document) => ({
       ...document,
-      // The dictionary parser only sees connectors that were projected, so the
-      // omission recorded where an ownerless connector was dropped has to be
-      // added here for this producer to report the same document count as the
-      // keyed-archive producer for the same recognized connector.
       connection_count:
         document.connection_count +
         (unresolvedConnections.get(document.relative_path) ?? 0),
-      hierarchy_complete:
-        document.hierarchy_complete &&
-        !incompleteHierarchies.has(document.relative_path),
     })),
     graph: {
       ...result.graph,
       coverage: [
         ...result.graph.coverage.map((facet) => {
-          const omittedHierarchy = incompleteHierarchies.get(
-            facet.facet.replace(/^hierarchy:/u, ""),
-          );
-          if (
-            facet.facet.startsWith("hierarchy:") &&
-            omittedHierarchy !== undefined
-          )
-            return {
-              ...facet,
-              status: "partial" as const,
-              reason: "serialized_view_hierarchy_incomplete",
-              omitted: facet.omitted + omittedHierarchy,
-            };
           const omittedConnection = unresolvedConnections.get(
             facet.facet.replace(/^connections:/u, ""),
           );
@@ -336,7 +319,6 @@ const finalizeHierarchyCoverage = (
         result.graph.truncated ||
         counts.omitted > 0 ||
         archiveDecodePartial ||
-        incompleteHierarchies.size > 0 ||
         unresolvedConnections.size > 0,
     },
     limitations: [

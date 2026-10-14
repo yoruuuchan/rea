@@ -145,11 +145,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
           )
         : ok(capture);
     } catch (cause: unknown) {
-      if (
-        options.signal?.aborted &&
-        paths !== undefined &&
-        initialState !== undefined
-      ) {
+      if (paths !== undefined && initialState !== undefined) {
         const retainedCapture = projectElectronActiveCapture(
           paths,
           actions,
@@ -159,25 +155,33 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
           ...retainedCapture,
           limitations: [
             ...retainedCapture.limitations,
-            `Final Electron state was unavailable after cancellation: ${cause instanceof Error ? cause.message : String(cause)}. Windows, metrics, IPC, and timeline are the snapshot collected before actions and may omit their effects.`,
+            `Capture stopped after the initial pre-action snapshot: ${cause instanceof Error ? cause.message : String(cause)}. Final Windows, metrics, IPC, and timeline state is unknown; the retained snapshot may omit action effects.`,
           ],
         };
       }
-      outcome = err(
-        options.signal?.aborted === true
-          ? new BrowserObservationError(OPERATION, "cancelled", {
-              cause,
-              ...(capture === undefined
-                ? {}
-                : {
-                    partialObservation: {
-                      kind: "electron-active-observation" as const,
-                      capture,
-                    },
-                  }),
-            })
-          : providerError(cause),
-      );
+      if (options.signal?.aborted === true)
+        outcome = err(
+          new BrowserObservationError(OPERATION, "cancelled", {
+            cause,
+            ...(capture === undefined
+              ? {}
+              : {
+                  partialObservation: {
+                    kind: "electron-active-observation" as const,
+                    capture,
+                  },
+                }),
+          }),
+        );
+      else {
+        const error = providerError(cause);
+        if (capture !== undefined)
+          error.retainPartialObservation({
+            kind: "electron-active-observation",
+            capture,
+          });
+        outcome = err(error);
+      }
     }
     if (application !== undefined) {
       if (ownership !== undefined) {
@@ -358,9 +362,10 @@ export const cleanupElectronProcesses = async (
   };
 };
 
-const safeElectronEnvironment = (
+export const safeElectronEnvironment = (
   environment: Readonly<Record<string, string | undefined>>,
   runId: string,
+  platform = process.platform,
 ): Record<string, string> =>
   Object.fromEntries([
     ...[
@@ -372,6 +377,23 @@ const safeElectronEnvironment = (
       "USER",
       "DISPLAY",
       "WAYLAND_DISPLAY",
+      ...(platform === "win32"
+        ? [
+            "SYSTEMROOT",
+            "TEMP",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            "COMSPEC",
+            "PATHEXT",
+            "PROGRAMDATA",
+            "ALLUSERSPROFILE",
+            "USERNAME",
+            "SYSTEMDRIVE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+          ]
+        : []),
     ]
       .map((name) => [name, environment[name]] as const)
       .filter(

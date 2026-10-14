@@ -205,7 +205,7 @@ export const evaluateCodexEvents = (
   );
 
   const reaCalls = state.calls.filter(
-    ({ server }) => server === null || server.toLowerCase() === "rea",
+    ({ server }) => server?.toLowerCase() === "rea",
   );
   const signatures = new Map<string, number>();
   let targetRevision = 0;

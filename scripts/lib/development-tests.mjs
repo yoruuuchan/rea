@@ -43,6 +43,7 @@ const artifactConsumers = {
     "tests/boundary/mcp/toolSchemaValidity.test.ts",
   ],
   "artifacts:product-catalog": [
+    "tests/boundary/filesystem/documentationFacts.test.ts",
     "tests/boundary/filesystem/productCatalog.test.ts",
   ],
   "artifacts:managed-evidence": [

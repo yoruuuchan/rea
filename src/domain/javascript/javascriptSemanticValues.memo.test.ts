@@ -86,7 +86,7 @@ it("invalidates retained alias values at the producing mutation boundary", () =>
   expect(
     property(property(evaluateSemanticBinding(root, state), "alias"), "value"),
   ).toEqual({ status: "literal", value: 1 });
-  target.mutatedPaths.push(["value"]);
+  target.memberWrites.push({ path: ["value"], node: undefined });
   clearSemanticValueCaches(state);
   expect(
     property(property(evaluateSemanticBinding(root, state), "alias"), "value")

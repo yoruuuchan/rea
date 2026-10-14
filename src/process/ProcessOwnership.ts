@@ -227,6 +227,15 @@ export const readProcessRunId = async (
 ): Promise<string | undefined> =>
   (await host.environment(pid, signal)).REA_PROCESS_RUN_ID;
 
+/** Keep unrelated-process uncertainty attached to every outcome of this cleanup attempt. */
+const withUnverifiedObservations = (
+  result: ProcessCleanupFailure,
+  unverified: readonly OwnershipSweepUnverifiedProcess[],
+): ProcessCleanupFailure =>
+  unverified.length === 0 || (result.unverified?.length ?? 0) > 0
+    ? result
+    : { ...result, unverified };
+
 /** Token-validate every rooted POSIX process group before signaling any. */
 export const cleanupOwnedProcessGroup = async (
   ownership: OwnedProcessGroup,
@@ -252,7 +261,16 @@ export const cleanupOwnedProcessGroup = async (
       host,
       plan.tokenOwnedIdentities,
     );
-    if ("cleaned" in revalidation) return revalidation;
+    if ("cleaned" in revalidation) {
+      if (!revalidation.cleaned)
+        return withUnverifiedObservations(revalidation, plan.unverified);
+      return {
+        ...revalidation,
+        ...(revalidation.unverified?.length || plan.unverified.length === 0
+          ? {}
+          : { unverified: plan.unverified }),
+      };
+    }
     if (revalidation.empty) continue;
     try {
       host.signalGroup(processGroupId, "SIGKILL");
@@ -261,10 +279,13 @@ export const cleanupOwnedProcessGroup = async (
       const code =
         cause instanceof Error && "code" in cause ? cause.code : undefined;
       if (code !== "ESRCH")
-        return {
-          cleaned: false,
-          reason: `owned process group signal failed: ${errorMessage(cause)}`,
-        };
+        return withUnverifiedObservations(
+          {
+            cleaned: false,
+            reason: `owned process group signal failed: ${errorMessage(cause)}`,
+          },
+          plan.unverified,
+        );
     }
   }
   if (plan.unresolved.length > 0)
@@ -507,7 +528,8 @@ const createOwnedCleanupPlan = async (
     const scanFailures = tokenOwned.failures.filter(({ pid }) =>
       members.some((member) => member.pid === pid),
     );
-    if (failures.length > 0) unresolved.push(...failures);
+    for (const failure of failures)
+      mergeProcessOwnershipFailure(unresolved, failure);
     if (
       failures.length === 0 &&
       scanFailures.length === 0 &&
@@ -532,6 +554,36 @@ const createOwnedCleanupPlan = async (
     unverified: tokenOwned.unverified,
   };
 };
+
+/** Keep one current, most useful ownership diagnosis for each live PID. */
+const mergeProcessOwnershipFailure = (
+  failures: ProcessOwnershipValidationFailure[],
+  next: ProcessOwnershipValidationFailure,
+): void => {
+  const index = failures.findIndex(({ pid }) => pid === next.pid);
+  if (index < 0) {
+    failures.push(next);
+    return;
+  }
+  const previous = failures[index];
+  if (
+    previous !== undefined &&
+    ownershipFailurePriority(next.reason) >=
+      ownershipFailurePriority(previous.reason)
+  )
+    failures[index] = next;
+};
+
+const ownershipFailurePriority = (
+  reason: ProcessOwnershipValidationFailure["reason"],
+): number =>
+  reason === "run-token-mismatch"
+    ? 3
+    : reason === "process-identity-unavailable"
+      ? 2
+      : reason === "environment-unreadable"
+        ? 1
+        : 0;
 
 const revalidateOwnedProcessGroup = async (
   processGroupId: number,
@@ -768,9 +820,27 @@ const recheckOwnershipFailures = async (
   if (!failures.some(({ reason }) => reason !== "run-token-mismatch"))
     return failures;
   try {
-    const live = new Set(
-      liveProcesses(await host.listProcesses()).map(({ pid }) => pid),
-    );
+    let processes = await host.listProcesses();
+    const isDarwin = (host.platform ?? process.platform) === "darwin";
+    for (
+      let attempt = 0;
+      isDarwin &&
+      attempt < TOKEN_READ_RETRY_ATTEMPTS &&
+      processes.some(
+        ({ pid, state }) =>
+          failures.some(
+            (failure) =>
+              failure.pid === pid && failure.reason !== "run-token-mismatch",
+          ) && state.slice(1).includes("E"),
+      );
+      attempt += 1
+    ) {
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, TOKEN_READ_RETRY_DELAY_MS),
+      );
+      processes = await host.listProcesses();
+    }
+    const live = new Set(liveProcesses(processes).map(({ pid }) => pid));
     return failures.filter(
       ({ pid, reason }) => reason === "run-token-mismatch" || live.has(pid),
     );

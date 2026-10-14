@@ -10,6 +10,8 @@ import {
   type MipsElfRelocationSection,
 } from "./MipsElfSharedLoad.js";
 
+const SHT_GNU_ATTRIBUTES = 0x6ffffff5;
+
 /** Observed ABI and load declarations, retaining unavailable source coverage. */
 export interface MipsElfInspection {
   readonly abiFlags: MipsAbiFlags | null;
@@ -151,6 +153,10 @@ export const readMipsElfMetadata = async (
       checkCancelled();
       const position = i * table.entrySize;
       const type = u32(contents.value, position + table.typeOffset);
+      if (table.optional && type === SHT_GNU_ATTRIBUTES)
+        return err(
+          "MIPS ELF declares GNU ABI attributes that REA does not inspect; refusing provider selection until the declared ABI is parsed and reconciled",
+        );
       if (metadata.type === 3 && table.optional && (type === 4 || type === 9))
         relocationSections.push({
           type,

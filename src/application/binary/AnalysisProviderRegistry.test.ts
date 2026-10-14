@@ -13,6 +13,7 @@ import {
 import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
+import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import { ProviderSelectionError } from "../../domain/providerSelectionError.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { err, ok } from "../../domain/result.js";
@@ -63,6 +64,46 @@ it("rejects malformed provider capability declarations", () => {
   ).toThrow(/Invalid analysis provider ID: auto/u);
 });
 
+it("uses one owner readiness snapshot for candidate availability and capabilities", () => {
+  const base = candidate("alpha").provider;
+  let observed = 0;
+  let capabilityReads = 0;
+  const provider: AnalysisProviderCandidate = {
+    ...base,
+    inspectAvailability: () => {
+      throw new Error("availability must come from the owner snapshot");
+    },
+    capabilities: () => {
+      capabilityReads += 1;
+      return [capability(base.identity())];
+    },
+    inspectReadinessSnapshot: () => {
+      observed += 1;
+      return {
+        availability: {
+          status: "unavailable",
+          code: "runtime_unavailable",
+          reason: "native inspection failed",
+          diagnostics: { failure_stage: "self-test" },
+        },
+        capabilities: [capability(base.identity())],
+      };
+    },
+  };
+
+  const [status] = new AnalysisProviderRegistry([provider]).candidates();
+  expect(observed).toBe(1);
+  expect(capabilityReads).toBe(1);
+  expect(status).toMatchObject({
+    availability: {
+      status: "unavailable",
+      code: "runtime_unavailable",
+      diagnostics: { failure_stage: "self-test" },
+    },
+    capabilities: [{ operation: "address_name" }],
+  });
+});
+
 it("selects the sole available provider and honors explicit selection precedence", async () => {
   const alpha = candidate("alpha");
   const beta = candidate("beta", { available: false });
@@ -104,7 +145,7 @@ it("selects the sole available provider and honors explicit selection precedence
   });
 });
 
-describe("analysis provider registry: binding failures and cancellation", () => {
+describe("analysis provider registry: selection failures", () => {
   it("returns actionable unknown, unavailable, and unsupported failures", async () => {
     const unavailable = candidate("alpha", { available: false });
     const registry = new AnalysisProviderRegistry([unavailable.provider]);
@@ -207,7 +248,9 @@ describe("analysis provider registry: binding failures and cancellation", () => 
       });
     }
   });
+});
 
+describe("analysis provider registry: profile and cleanup failures", () => {
   it("does not bind a profile with unresolved version or adapter failure", async () => {
     const unresolved = candidate("unresolved", { profile: "missing" });
     const failed = candidate("failed", { profile: "error" });
@@ -238,6 +281,36 @@ describe("analysis provider registry: binding failures and cancellation", () => 
       _tag: "ProviderAdapterError",
       providerId: "failed",
     });
+  });
+
+  it("aborts automatic selection when a provider reports unconfirmed cleanup", async () => {
+    const ghidra = candidate("ghidra");
+    const alternate = candidate("hopper");
+    const cleanupFailure = new ProviderCleanupError(
+      "ghidra",
+      ["/opt/ghidra/data/languages/x86.ldefs"],
+      { reason: "descriptor close failed" },
+      { operation: "resolve_analysis_profile" },
+    );
+    const provider: AnalysisProviderCandidate = {
+      ...ghidra.provider,
+      resolveAnalysisProfile: () => Promise.resolve(err(cleanupFailure)),
+    };
+
+    const selected = await new AnalysisProviderRegistry([
+      alternate.provider,
+      provider,
+    ]).select(DATABASE_TARGET);
+
+    expect(selected).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ProviderAdapterError",
+        providerId: "ghidra",
+        cleanupIncomplete: true,
+      },
+    });
+    expect(alternate.created).toEqual([]);
   });
 
   it("cancels a pending profile probe even when the adapter ignores its signal", async () => {

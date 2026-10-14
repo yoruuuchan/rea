@@ -1,7 +1,5 @@
 import * as t from "@babel/types";
 
-import { semanticBuiltinNamespacePath } from "./javascriptSemanticProvenance.js";
-
 import type {
   JavaScriptSemanticBoundaryOperation,
   JavaScriptSemanticCallable,
@@ -140,12 +138,12 @@ const processConfigurationMember = (
   const object = node.object;
   if (!t.isMemberExpression(object) && !t.isOptionalMemberExpression(object))
     return null;
-  if (!isProcessObject(object.object, state)) return null;
   const family = semanticStaticPropertyName(object.property, object.computed);
   if (family !== "env" && family !== "argv") return null;
   // `process.env[""]` names an exact (empty) key; only a dynamic key is unknown.
   const key = semanticStaticPropertyKey(node.property, node.computed);
   if (family === "argv" && key !== null && !isArrayIndexKey(key)) return null;
+  if (!isProcessObject(object.object, state, family, key)) return null;
   return {
     kind: family === "env" ? "environment" : "argv",
     key,
@@ -375,22 +373,13 @@ const requestMethod = (
     if (t.isNewExpression(node) && unbound && name === "WebSocket")
       return "WebSocket";
   }
-  const member = memberCallee(node);
-  if (member === null || !t.isIdentifier(member.object)) return null;
-  const method = semanticStaticPropertyName(member.property, member.computed);
-  if (method !== "request" && method !== "get") return null;
-  const binding = resolveSemanticBindingState(
-    state,
-    member.object,
-    member.object.name,
-  );
-  return binding?.directOrigins.some(
-    ({ specifier, importedPath }) =>
-      ["http", "https", "node:http", "node:https"].includes(specifier) &&
-      semanticBuiltinNamespacePath(importedPath),
-  )
-    ? method
-    : null;
+  const method = builtinMethod(node.callee, state, [
+    "http",
+    "https",
+    "node:http",
+    "node:https",
+  ]);
+  return method === "request" || method === "get" ? method : null;
 };
 
 const requestFields = (

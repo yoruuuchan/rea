@@ -91,7 +91,10 @@ const jsonScalarBytes = (value) => {
 };
 
 const eventFamily = (kind, processTypeValue) => {
-  if (kind === "preload" && processTypeValue === "main")
+  if (
+    kind === "preload" &&
+    (processTypeValue === "main" || processTypeValue === "browser")
+  )
     return "preload-configuration";
   if (kind.startsWith("ipc-renderer"))
     return processTypeValue === "renderer" ? "renderer-ipc" : "ipc";

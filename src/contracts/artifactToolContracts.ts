@@ -89,11 +89,17 @@ export const ARTIFACT_TOOL_CONTRACTS = [
   ),
   artifact(
     "decode_interface_builder",
-    "Decode compiled storyboard and nib archives inside the active Apple app bundle, including keyed property lists and NIBArchive object tables, into a bounded object, hierarchy, and connection graph. This is static archive parsing; unrecognized archive classes and unresolved code handlers remain explicit unknowns.",
+    "Decode compiled storyboard and nib archives inside the active Apple app bundle, including keyed property lists and NIBArchive object tables, into a bounded object, hierarchy, and connection graph. This is static archive parsing; unrecognized archive classes and unresolved code handlers remain explicit unknowns. A full app graph is often several megabytes; detail summary retains it and returns documents with node, edge and coverage counts, then page rows, optionally one document's, with inspect_analysis_view kind interface-builder.",
     z.strictObject({
       max_documents: z.number().int().min(1).max(64).default(64),
       max_objects: z.number().int().min(1).max(20_000).default(20_000),
       max_connections: z.number().int().min(1).max(40_000).default(40_000),
+      detail: analysisDetailSchema
+        .unwrap()
+        .optional()
+        .describe(
+          "Omitted or complete returns the complete decoded graph Evidence. summary retains that complete Evidence in this session and returns its inspect_analysis_view summary; use normalized_result.parent_evidence_id for interface-builder pages.",
+        ),
     }),
   ),
   artifact(

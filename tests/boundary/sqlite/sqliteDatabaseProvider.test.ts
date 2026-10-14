@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it as nativeTest, onTestFinished } from "vitest";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { SqliteDatabaseProvider } from "../../../src/sqlite/SqliteDatabaseProvider.js";
+import { inspectSqliteDatabaseSnapshot } from "../../../src/sqlite/SqliteDatabaseInspection.js";
 import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import { waitForProviderProcessReady } from "../../fixtures/providerProcess.js";
@@ -48,6 +49,90 @@ const createFixture = async (wal = false) => {
 
 const expectPrivateRootRemoved = (path: string) =>
   expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
+
+it.each(["completed reply", "malformed reply"] as const)(
+  "preserves the primary result for a %s while retaining unconfirmed cleanup ownership",
+  async (replyKind) => {
+    const { workspace, database } = await createFixture();
+    let cleanupAttempts = 0;
+    let ownedRoot = "";
+    const provider = new SqliteDatabaseProvider(process.env, async (spawn) => {
+      ownedRoot = spawn.cwd ?? "";
+      const requestPath = spawn.arguments[2];
+      if (requestPath === undefined)
+        throw new Error("SQLite request path missing");
+      const request = JSON.parse(await readFile(requestPath, "utf8")) as {
+        snapshot_path: string;
+        reply_path: string;
+        input: Parameters<typeof inspectSqliteDatabaseSnapshot>[1];
+      };
+      const inspection =
+        replyKind === "completed reply"
+          ? inspectSqliteDatabaseSnapshot(request.snapshot_path, request.input)
+          : undefined;
+      await writeFile(
+        request.reply_path,
+        inspection === undefined
+          ? "{ malformed reply"
+          : JSON.stringify({ ok: true, inspection }),
+        { flag: "wx", mode: 0o600 },
+      );
+      const launched = await spawnOwnedProviderProcess({
+        ...spawn,
+        arguments: ["-e", "process.exit(0)"],
+      });
+      return {
+        ...launched,
+        cleanup: async () => {
+          cleanupAttempts += 1;
+          return cleanupAttempts === 1
+            ? { cleaned: false, reason: "fixture cleanup denial" }
+            : { cleaned: true, signaled: false };
+        },
+      };
+    });
+    onTestFinished(async () => {
+      await provider.close();
+      await removeTestWorkspace(workspace.root);
+    });
+
+    const result = await provider.inspect({
+      path: database.path,
+      table: "records",
+      columns: ["id"],
+      row_limit: 1,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        cleanupIncomplete: true,
+        cleanupResources: expect.arrayContaining([ownedRoot]),
+        diagnostics: {
+          reason: "fixture cleanup denial",
+          previous_error:
+            replyKind === "malformed reply" ? expect.any(Object) : null,
+        },
+        ...(replyKind === "completed reply"
+          ? {
+              partialObservation: {
+                operation: "inspect_sqlite_database",
+                confidence: "observed",
+                normalized_result: {
+                  schema: { tables: expect.any(Array) },
+                  rows: { returned_rows: 1 },
+                },
+              },
+            }
+          : { partialObservation: undefined }),
+      },
+    });
+    expect(cleanupAttempts).toBe(1);
+    await expect(access(`${ownedRoot}/reply.json`)).resolves.toBeUndefined();
+    await provider.close();
+    expect(cleanupAttempts).toBe(2);
+    await expectPrivateRootRemoved(ownedRoot);
+  },
+);
 
 it.each(["late-cancellation", "cleanup-failure"])(
   "preserves completed native-worker observations across %s",
@@ -626,27 +711,32 @@ nativeTest(
     const controller = new AbortController();
     let ownedRoot = "";
     let pid: number | undefined;
-    const provider = new SqliteDatabaseProvider({}, async (spawn) => {
-      ownedRoot = spawn.cwd ?? "";
-      const requestPath = spawn.arguments[2];
-      if (requestPath === undefined)
-        throw new Error("SQLite worker arguments missing");
-      const launched = await spawnOwnedProviderProcess({
-        ...spawn,
-        arguments: [
-          "--input-type=module",
-          "-e",
-          `await import(${JSON.stringify(workerUrl.href)}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`,
-          "sqlite-worker-test",
-          requestPath,
-        ],
-      });
-      pid = launched.process.pid;
-      await waitForProviderProcessReady(launched.process);
-      await access(`${ownedRoot}/reply.json`);
-      setImmediate(() => controller.abort());
-      return launched;
-    });
+    const provider = new SqliteDatabaseProvider(
+      process.platform === "win32" && process.env.SystemRoot !== undefined
+        ? { SystemRoot: process.env.SystemRoot }
+        : {},
+      async (spawn) => {
+        ownedRoot = spawn.cwd ?? "";
+        const requestPath = spawn.arguments[2];
+        if (requestPath === undefined)
+          throw new Error("SQLite worker arguments missing");
+        const launched = await spawnOwnedProviderProcess({
+          ...spawn,
+          arguments: [
+            "--input-type=module",
+            "-e",
+            `await import(${JSON.stringify(workerUrl.href)}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`,
+            "sqlite-worker-test",
+            requestPath,
+          ],
+        });
+        pid = launched.process.pid;
+        await waitForProviderProcessReady(launched.process);
+        await access(`${ownedRoot}/reply.json`);
+        setImmediate(() => controller.abort());
+        return launched;
+      },
+    );
     const result = await provider.inspect(
       { path: database.path, table: "records" },
       { signal: controller.signal },

@@ -9,6 +9,7 @@ import {
   semanticCapturePosition,
   semanticEscapeFollowsCapture,
   semanticBindingPrecedesCapture,
+  semanticReadInitializers,
 } from "./javascriptSemanticMutationInitializers.js";
 
 import { semanticSlotAtPath } from "./javascriptSemanticSlots.js";
@@ -228,6 +229,21 @@ export const evaluateSemanticProvenance = (
     memo: createEvaluationMemo(state),
   });
 
+/** Follow a namespace binding as it was read at a specific source position. */
+export const evaluateSemanticProvenanceAtRead = (
+  binding: JavaScriptSemanticBindingState,
+  read: t.Identifier,
+  state: JavaScriptSemanticAnalysisState,
+): JavaScriptBindingProvenance =>
+  provenanceForBindingAtRead(binding, read, {
+    state,
+    bindings: new Map(),
+    expressionDepth: 0,
+    primitiveBindingValues: primitiveBindingValuesFor(state),
+    dependence: { lowest: CALLER_INDEPENDENT },
+    memo: createEvaluationMemo(state),
+  });
+
 const readMemoizedEvaluation = <T>(
   entry: MemoizedEvaluation<T> | undefined,
   context: EvaluationContext,
@@ -383,7 +399,10 @@ const evaluateBinding = (
       ? callerDependence
       : Math.min(callerDependence, context.dependence.lowest);
   }
-  let projected = invalidateSemanticMutationPaths(value, binding.mutatedPaths);
+  let projected = invalidateSemanticMutationPaths(
+    value,
+    binding.memberWrites.map(({ path }) => path),
+  );
   for (const escape of binding.escapedPaths) {
     // Escapes only invalidate object references; other lattice values survive.
     if (projected.status !== "object" && projected.status !== "array") break;
@@ -912,7 +931,7 @@ const provenanceForExpression = (
           "unknown",
           `Unbound identifier ${node.name}.`,
         )
-      : provenanceForBinding(binding, nestedContext(context));
+      : provenanceForBindingAtRead(binding, node, nestedContext(context));
   }
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     const members: string[] = [];
@@ -981,6 +1000,40 @@ const provenanceForExpression = (
     "unknown",
     `Unsupported ${node.type} provenance.`,
   );
+};
+
+/** Resolve an alias from the value visible at this read, before later rebinds. */
+const provenanceForBindingAtRead = (
+  binding: JavaScriptSemanticBindingState,
+  read: t.Identifier,
+  context: EvaluationContext,
+): JavaScriptBindingProvenance => {
+  const selected = semanticReadInitializers(
+    binding,
+    read,
+    context.state.parentsByNode,
+  );
+  if (selected.initializers === binding.initializers)
+    return provenanceForBinding(binding, context);
+  if (context.bindings.has(binding.bindingId))
+    return semanticUnresolvedProvenance(
+      "cycle",
+      `Alias cycle at ${binding.name}.`,
+    );
+  const snapshot: JavaScriptSemanticBindingState = {
+    ...binding,
+    ...selected,
+    // Assignment facts after the read cannot change the captured value.
+    definitions: binding.definitions.filter(
+      ({ kind }) => kind !== "assignment",
+    ),
+  };
+  context.bindings.set(binding.bindingId, context.bindings.size);
+  try {
+    return provenanceForBindingValue(snapshot, context);
+  } finally {
+    context.bindings.delete(binding.bindingId);
+  }
 };
 
 const isLocallyCreatedValue = (node: t.Node): boolean =>

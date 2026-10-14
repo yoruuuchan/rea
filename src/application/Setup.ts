@@ -107,6 +107,7 @@ const runSetupWorkflow = async (
     host,
     providerEnvironment,
     forceHopperInstall: options.installHopper,
+    hopperLauncherConfigured: initialState.hopperLauncherConfigured === true,
     proposeHopper:
       options.proposeHopper ?? (confirm !== undefined && !options.structured),
     initialDoctor: initialState.doctor,

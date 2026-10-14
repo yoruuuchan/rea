@@ -58,6 +58,7 @@ import {
   sameRegularFileState,
 } from "../filesystem/RegularFile.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { redactCapturedTransportCredential } from "../process/ProviderDiagnosticRedaction.js";
 
 export type GhidraTargetSnapshot =
   | { readonly kind: "captured"; readonly bytes: Buffer }
@@ -119,7 +120,7 @@ export class GhidraClient {
   #closePromise: Promise<void> | undefined;
   readonly #failure = bindGhidraSessionFailure(
     () => this.#diagnostics(),
-    (value) => this.#redactAuthentication(value),
+    (value, incomplete) => this.#redactAuthentication(value, incomplete),
   );
   readonly #wire: GhidraWire;
   readonly #requestQueue: GhidraRequestQueue;
@@ -662,23 +663,45 @@ export class GhidraClient {
       maxDiagnosticBytes: GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
       onDiagnostic: (event) => this.#onProcessDiagnostic(event),
     });
-    const connected = await this.#connect(endpoint, deadline);
-    if (!connected.ok) {
-      const failure = connected.error;
-      return this.#startupFailure(failure);
-    }
-    const completed = await completeGhidraStartupHandshake({
-      deadline,
-      request: (method, params, requestOptions) =>
-        this.#wire.request(method, params, requestOptions),
-      parseSessionInfo: (value) => this.#parseSessionInfo(value),
-      failure: this.#failure,
-      startupTimeoutMs: this.#options.startupTimeoutMs,
-    });
+    const completed = await this.#connectAndHandshake(endpoint, deadline);
     if (!completed.ok) return this.#startupFailure(completed.error);
     await this.#lineage.observe(this.#launch);
     this.#requestQueue.reopen();
     return completed;
+  }
+
+  async #connectAndHandshake(
+    endpoint: GhidraEndpoint,
+    deadline: ProviderStartupDeadline,
+  ): Promise<GhidraStartResult> {
+    // Retry only a dropped loopback transport, never identity or protocol failures.
+    for (let attempt = 0; ; attempt += 1) {
+      const connected = await this.#connect(endpoint, deadline);
+      if (!connected.ok) return connected;
+      const completed = await completeGhidraStartupHandshake({
+        deadline,
+        request: (method, params, requestOptions) =>
+          this.#wire.request(method, params, requestOptions),
+        parseSessionInfo: (value) => this.#parseSessionInfo(value),
+        failure: this.#failure,
+        startupTimeoutMs: this.#options.startupTimeoutMs,
+      });
+      if (
+        completed.ok ||
+        completed.error.kind !== "process" ||
+        endpoint.transport !== "authenticated-loopback-tcp" ||
+        attempt >= 2 ||
+        deadline.signal.aborted ||
+        this.#closing ||
+        this.#process?.observedExit() !== undefined
+      )
+        return completed;
+      this.#detachSocket?.();
+      this.#detachSocket = undefined;
+      this.#socket?.destroy();
+      this.#socket = undefined;
+      this.#responseBuffer.reset();
+    }
   }
 
   async #connect(
@@ -880,9 +903,15 @@ export class GhidraClient {
       );
   }
 
-  #redactAuthentication(value: string): string {
-    for (const token of this.#authenticationTokens)
-      value = value.replaceAll(token, "[REDACTED]");
+  #redactAuthentication(value: string, incomplete = false): string {
+    for (const token of this.#authenticationTokens) {
+      const bytes = Buffer.byteLength(value);
+      value = redactCapturedTransportCredential(
+        { text: value, bytes, observedBytes: bytes + (incomplete ? 1 : 0) },
+        token,
+        "[REDACTED]",
+      );
+    }
     return value;
   }
 

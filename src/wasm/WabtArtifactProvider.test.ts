@@ -544,6 +544,49 @@ it("reports WABT output beyond the budget as a resource constraint with a bounde
     signal: "SIGKILL",
   });
 });
+it("does not attribute wasm-objdump output to a wasm2wat launch failure", async () => {
+  const selectedRoot = await createTestTempDirectory("rea-wabt-launch-");
+  const path = join(selectedRoot, "selected.wasm");
+  await writeFile(path, Buffer.alloc(76, 1));
+  for (const tool of ["wasm-validate", "wasm-objdump", "wasm2wat"])
+    await writeFile(
+      join(selectedRoot, tool + (process.platform === "win32" ? ".exe" : "")),
+      "source-owned executable seam",
+      { mode: 0o700 },
+    );
+  const dump = await readFile(
+    new URL("../../tests/fixtures/wasm/objdump.txt", import.meta.url),
+    "utf8",
+  );
+  const provider = new WabtArtifactProvider(
+    { REA_WABT_BIN_DIRECTORY: selectedRoot },
+    (input) => {
+      const version = input.arguments[0] === "--version";
+      if (!version && input.command.includes("wasm2wat"))
+        throw Object.assign(new Error("spawn E2BIG"), { code: "E2BIG" });
+      const script = version
+        ? 'process.stdout.write("1.0.42\\n")'
+        : input.command.includes("objdump")
+          ? `process.stdout.write(${JSON.stringify(dump)})`
+          : "";
+      return spawnOwnedProviderProcess({
+        ...input,
+        command: process.execPath,
+        arguments: ["-e", script],
+        expectedCommand: null,
+      });
+    },
+  );
+  const result = await provider.inspect({
+    path,
+    glue_paths: [],
+    candidate_paths: [],
+  });
+  if (result.ok) throw new Error("Expected the wasm2wat launch to fail");
+  expect(result.error.message).toContain("spawn E2BIG");
+  expect(result.error.capturedOutput).toBeUndefined();
+});
+
 it("bounds an oversized stderr to an excerpt", () => {
   expect(
     projectAnalysisError(

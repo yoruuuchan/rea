@@ -32,7 +32,6 @@ export type IdaOperation = (typeof IDA_OPERATIONS)[number];
 /** Operations only the modern headless profile implements. */
 const HEADLESS_ONLY_OPERATIONS: ReadonlySet<IdaOperation> = new Set([
   "resolve_containing_procedure",
-  "list_documents",
 ]);
 
 /** Whether the configured profile admits an operation. */

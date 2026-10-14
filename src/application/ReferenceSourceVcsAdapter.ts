@@ -162,14 +162,21 @@ const resolveSourceHead = async (
         // The library probes readFile() without a path to detect promise APIs.
         // Reject that invocation without attributing it to a source read.
         if (path === undefined)
-          throw new TypeError("Git filesystem read requires a path");
+          throw new TypeError("Git metadata path is required");
         try {
           const bytes = await readMetadataBytes(path);
           const encoding =
-            typeof options === "string" ? options : options?.encoding;
-          return encoding === undefined || encoding === null
-            ? bytes
-            : bytes.toString(encoding);
+            typeof options === "string"
+              ? options
+              : typeof options === "object" &&
+                  options !== null &&
+                  "encoding" in options
+                ? options.encoding
+                : undefined;
+          if (encoding === undefined || encoding === null) return bytes;
+          if (typeof encoding !== "string" || !Buffer.isEncoding(encoding))
+            throw new TypeError("Unsupported Git metadata text encoding");
+          return bytes.toString(encoding);
         } catch (cause: unknown) {
           if (cause instanceof ArtifactReaderFailure) {
             cleanupFailures.push(cause);

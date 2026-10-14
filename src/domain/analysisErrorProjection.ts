@@ -273,7 +273,13 @@ const requestErrorDetails = (
       boundary: "filesystem-read",
     };
   if (error instanceof AnalysisOutputError)
-    return { operation: error.operation, reason: error.reason };
+    return {
+      operation: error.operation,
+      reason: error.reason,
+      ...(error.diagnostics === undefined
+        ? {}
+        : { diagnostics: error.diagnostics }),
+    };
   if (error instanceof AnalysisInputError && error.issues.length > 0)
     return {
       operation: error.operation,

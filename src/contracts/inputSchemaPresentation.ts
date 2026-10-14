@@ -174,17 +174,6 @@ const flattenRootObjectUnion = (
   const required = sharedRequiredProperties(branches);
   // A field unique to a group still needs that group's required partners.
   // Counting properties alone would let optional fields pad an incomplete pair.
-  const dependencies = Object.fromEntries(
-    [...variants.keys()].flatMap((name) => {
-      const owners = branches.filter((branch) =>
-        Object.hasOwn(branch.properties ?? {}, name),
-      );
-      const partners = sharedRequiredProperties(owners).filter(
-        (partner) => partner !== name && !required.includes(partner),
-      );
-      return partners.length > 0 ? [[name, partners]] : [];
-    }),
-  );
   const fewestRequired = Math.min(
     ...branches.map((branch) => requiredProperties(branch).length),
   );
@@ -196,8 +185,13 @@ const flattenRootObjectUnion = (
       ? `Provide a complete input group: ${groups.join("; ")}.`
       : undefined,
   ].filter((text) => text !== undefined);
+  const {
+    dependencies: _dependencies,
+    dependentRequired: _dependentRequired,
+    ...presentation
+  } = rest;
   return {
-    ...rest,
+    ...presentation,
     type: "object",
     ...(description.length > 0 ? { description: description.join(" ") } : {}),
     properties: Object.fromEntries(
@@ -208,13 +202,6 @@ const flattenRootObjectUnion = (
     ),
     ...(required.length > 0 ? { required } : {}),
     ...(fewestRequired > 0 ? { minProperties: fewestRequired } : {}),
-    ...(Object.keys(dependencies).length > 0
-      ? {
-          [root.$schema === "http://json-schema.org/draft-07/schema#"
-            ? "dependencies"
-            : "dependentRequired"]: dependencies,
-        }
-      : {}),
     ...(branches.every((branch) => branch.additionalProperties === false)
       ? { additionalProperties: false }
       : {}),
@@ -228,7 +215,36 @@ export const presentInputJsonSchema = (
 ): Record<string, unknown> => {
   const flattened = flattenRootObjectUnion(root);
   const described = describeSchema(flattened, flattened, describeProperty);
-  return isObject(described) ? described : flattened;
+  if (!isObject(described)) return flattened;
+  const {
+    dependencies: _dependencies,
+    dependentRequired: _dependentRequired,
+    ...presentation
+  } = described;
+  const rootDependencies = isObject(described.dependentRequired)
+    ? described.dependentRequired
+    : isObject(described.dependencies)
+      ? described.dependencies
+      : undefined;
+  const dependencyGuidance =
+    rootDependencies === undefined
+      ? []
+      : Object.entries(rootDependencies).flatMap(([property, partners]) =>
+          Array.isArray(partners) &&
+          partners.every((partner) => typeof partner === "string")
+            ? [
+                `When ${property} is provided, also provide ${partners.join(" and ")}.`,
+              ]
+            : [],
+        );
+  if (dependencyGuidance.length === 0) return presentation;
+  const description = [
+    typeof presentation.description === "string"
+      ? presentation.description
+      : undefined,
+    ...dependencyGuidance,
+  ].filter((text) => text !== undefined);
+  return { ...presentation, description: description.join(" ") };
 };
 
 /**

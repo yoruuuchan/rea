@@ -63,6 +63,13 @@ import {
   projectMachoView,
 } from "./machoView.js";
 import {
+  interfaceBuilderSummarySchema,
+  interfaceBuilderViewContextSchema,
+  interfaceBuilderViewItemsSchema,
+  interfaceBuilderViewRequestSchema,
+  projectInterfaceBuilderView,
+} from "./interfaceBuilderView.js";
+import {
   projectWebNetworkCaptureView,
   captureViewRequestSchema,
   captureViewItemsSchema,
@@ -206,6 +213,7 @@ export const analysisViewRequestSchema = z.discriminatedUnion("kind", [
   inventoryViewSchema,
   wasmViewRequestSchema,
   machoViewRequestSchema,
+  interfaceBuilderViewRequestSchema,
   evmViewRequestSchema,
   managedViewRequestSchema,
   androidViewRequestSchema,
@@ -326,6 +334,7 @@ const viewResultBase = {
     "inventory_artifact",
     "inspect_wasm_artifact",
     "inspect_macho",
+    "decode_interface_builder",
     "inspect_evm_interface",
     "inspect_managed_artifact",
     "inspect_web_network_capture",
@@ -380,6 +389,13 @@ export const machoSummaryViewResultSchema = z.strictObject({
   ...summaryViewResultBase,
   parent_operation: z.literal("inspect_macho"),
   summary: machoSummarySchema,
+});
+
+/** Decoded documents and graph counts for Interface Builder's selected delivery. */
+export const interfaceBuilderSummaryViewResultSchema = z.strictObject({
+  ...summaryViewResultBase,
+  parent_operation: z.literal("decode_interface_builder"),
+  summary: interfaceBuilderSummarySchema,
 });
 
 /** Exact inferred-interface summary for EVM's caller-selected delivery. */
@@ -444,6 +460,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
       inventorySummarySchema,
       wasmSummarySchema,
       machoSummarySchema,
+      interfaceBuilderSummarySchema,
       evmSummarySchema,
       managedSummarySchema,
       captureSummarySchema,
@@ -513,6 +530,14 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     ...viewResultBase,
     ...machoViewContextSchema.shape,
     parent_operation: z.literal("inspect_macho"),
+  }),
+  z.strictObject({
+    kind: z.literal("interface-builder"),
+    view: interfaceBuilderViewRequestSchema,
+    items: interfaceBuilderViewItemsSchema,
+    ...viewResultBase,
+    ...interfaceBuilderViewContextSchema.shape,
+    parent_operation: z.literal("decode_interface_builder"),
   }),
   z.strictObject({
     kind: z.literal("evm"),
@@ -611,6 +636,10 @@ export type UnsignedAnalysisView =
     >
   | Omit<Extract<AnalysisViewResult, { readonly kind: "wasm" }>, "view_digest">
   | Omit<Extract<AnalysisViewResult, { readonly kind: "macho" }>, "view_digest">
+  | Omit<
+      Extract<AnalysisViewResult, { readonly kind: "interface-builder" }>,
+      "view_digest"
+    >
   | Omit<Extract<AnalysisViewResult, { readonly kind: "evm" }>, "view_digest">
   | Omit<Extract<AnalysisViewResult, { readonly kind: "qlog" }>, "view_digest">
   | Omit<Extract<AnalysisViewResult, { readonly kind: "pcap" }>, "view_digest">
@@ -674,7 +703,7 @@ const unsupportedParent = (
   new AnalysisUnsupportedTargetError(
     INSPECT_ANALYSIS_VIEW_OPERATION,
     parentArtifactPath(parent),
-    `Parent Evidence operation ${JSON.stringify(parent.operation)} does not support analysis views. Use completed binary layout, JavaScript application, native function, artifact inventory/inspection, WASM, Mach-O, EVM, managed artifact, Android package, Dart AOT, or web network capture Evidence.`,
+    `Parent Evidence operation ${JSON.stringify(parent.operation)} does not support analysis views. Use completed binary layout, JavaScript application, native function, artifact inventory/inspection, WASM, Mach-O, Interface Builder, EVM, managed artifact, Android package, Dart AOT, or web network capture Evidence.`,
   );
 
 const parentArtifactPath = (parent: AnalysisViewParent): string => {
@@ -702,6 +731,7 @@ const parentArtifactPath = (parent: AnalysisViewParent): string => {
 const retainedViewProjectors = new Map<string, typeof projectWasmArtifactView>([
   ["inspect_wasm_artifact", projectWasmArtifactView],
   ["inspect_macho", projectMachoView],
+  ["decode_interface_builder", projectInterfaceBuilderView],
   ["inspect_evm_interface", projectEvmInterfaceView],
   ["inspect_managed_artifact", projectManagedArtifactView],
   ["inspect_android_package", projectAndroidPackageView],

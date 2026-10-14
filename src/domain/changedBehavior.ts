@@ -6,7 +6,10 @@ import {
   compositeKey,
   compareUnicodeCodePoints,
 } from "./unicodeCodePointOrder.js";
-import { comparisonSourceEvidenceIds } from "./comparisonSourceEvidence.js";
+import {
+  assertComparisonFindingLinks,
+  comparisonSourceEvidenceIds,
+} from "./comparisonSourceEvidence.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
 import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
 import {
@@ -260,7 +263,7 @@ const parseResult = (
     const result = functionComparisonResultSchema.parse(
       evidence.normalized_result,
     );
-    assertNestedLinks(
+    assertComparisonFindingLinks(
       evidence,
       result.dimensions.flatMap(({ evidence_links: links }) => links),
     );
@@ -269,22 +272,11 @@ const parseResult = (
   const result = artifactComparisonResultSchema.parse(
     evidence.normalized_result,
   );
-  assertNestedLinks(
+  assertComparisonFindingLinks(
     evidence,
     result.changes.flatMap(({ evidence_links: links }) => links),
   );
   return { operation, evidence, result };
-};
-
-const assertNestedLinks = (
-  evidence: Evidence,
-  nestedLinks: readonly string[],
-): void => {
-  const topLevel = new Set(evidence.evidence_links);
-  if (nestedLinks.some((evidenceId) => !topLevel.has(evidenceId)))
-    throw new TypeError(
-      "Comparison finding cites Evidence outside its top-level closure",
-    );
 };
 
 const findingsFor = (comparison: ParsedComparison): Finding[] => {

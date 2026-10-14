@@ -16,6 +16,7 @@ prerelease_identifier="(${numeric_identifier}|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]
 build_identifier='[0-9A-Za-z-]+'
 version_pattern="${numeric_identifier}\\.${numeric_identifier}\\.${numeric_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?(\\+${build_identifier}(\\.${build_identifier})*)?"
 version="${REA_VERSION:-}"
+version_requested=false
 dry_run=false
 start_setup=true
 verbose=false
@@ -81,6 +82,7 @@ main() {
       --version)
         (($# >= 2)) || fail "--version requires a value."
         version="$2"
+        version_requested=true
         shift 2
         ;;
       --dry-run)
@@ -121,7 +123,7 @@ main() {
     fail_node_version "$node_version"
   fi
 
-  if [ -n "$version" ]; then
+  if [ "$version_requested" = true ] || [ -n "$version" ]; then
     matches "$version" "^${version_pattern}$" || fail "version must be an exact semantic version."
   else
     release_json="$(curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPOSITORY/releases/latest")" || fail "the latest REA release could not be resolved. Check network access or pass --version VERSION, then retry."
@@ -164,6 +166,7 @@ main() {
   npm "${install_args[@]}" || fail "npm could not install REA. Check registry access and npm permissions, then retry."
   [ -x "$install_bin" ] || fail "npm completed without installing the rea command. Check the npm global bin directory and PATH, then retry."
   installed_version="$("$install_bin" --version 2>/dev/null | tr -d '[:space:]')" || fail "the installed REA version could not be read. Reinstall the requested version, then retry."
+  [ -n "$installed_version" ] || fail "the installed REA version could not be read. Reinstall the requested version, then retry."
   [ "$installed_version" = "$version" ] || fail "installed version $installed_version does not match $version. Reinstall the requested version, then retry."
 
   printf 'REA %s is installed.\n' "$version"

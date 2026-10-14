@@ -257,6 +257,39 @@ it.each(["9007199254740993", "4740993", "99"])(
   },
 );
 
+it.each([
+  { encoded: "1e3", sensitive: "1000" },
+  { encoded: "123.4500", sensitive: "123.45" },
+  { encoded: "0.0000001", sensitive: "1e-7" },
+])(
+  "excludes sensitive numbers introduced by JSON normalization: $encoded",
+  ({ encoded, sensitive }) => {
+    const text = JSON.stringify(historicalHar())
+      .replace('"log":{', `"_number":${encoded},"log":{`)
+      .replace('"cache":{}', `"cache":{},"_number":${encoded}`);
+    const result = decodeHarCapture(text, [sensitive]);
+    for (const projection of [result.container, ...result.records]) {
+      expect(projection.reported).toMatchObject({ _number: null });
+      expect(projection.numeric_literals).not.toContainEqual(
+        expect.objectContaining({ pointer: "/_number" }),
+      );
+      expect(projection.redactions).toContainEqual({
+        pointer: "/_number",
+        reason: "explicit-sensitive-value",
+      });
+    }
+    const unmarked = decodeHarCapture(text, []);
+    for (const projection of [unmarked.container, ...unmarked.records]) {
+      expect(projection.reported).toMatchObject({ _number: Number(encoded) });
+      expect(projection.numeric_literals).toContainEqual({
+        pointer: "/_number",
+        producer_type: "json-number",
+        literal: encoded,
+      });
+    }
+  },
+);
+
 it("keeps unsafe extension numeric lexemes and rejects unsafe mandatory schema numbers", () => {
   const text = JSON.stringify(historicalHar());
   const result = decodeHarCapture(

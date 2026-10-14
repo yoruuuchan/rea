@@ -14,36 +14,42 @@ import { webModuleTraceResultSchema } from "../../dist/domain/webModuleTrace.js"
 import { NativeModuleResolver } from "../../dist/browser/modules/NativeModuleResolver.js";
 import { startBrowserModuleSite } from "../fixtures/browser-module-site.mjs";
 import { mcpTextValue } from "./mcp-verifier-results.mjs";
+import { closeVerifierResources } from "./verifier-cleanup.mjs";
 
 /** Check native URL resolution against an independently loaded module graph through CLI/MCP. */
 export async function verifyBrowserModules(
   executable,
   entrypoint = fileURLToPath(new URL("../rea.mjs", import.meta.url)),
 ) {
-  const site = await startBrowserModuleSite();
-  const root = await mkdtemp(join(tmpdir(), "rea-browser-modules-"));
-  const env = {
-    ...process.env,
-    REA_LOG_LEVEL: "silent",
-    REA_BROWSER_EXECUTABLE: executable,
-    HOPPER_LAUNCHER_PATH: "/rea-unconfigured-provider/hopper",
-  };
-  const cli = async (...args) => {
-    const { stdout } = await promisify(execFile)(
-      process.execPath,
-      [entrypoint, ...args, "--json"],
-      { env, timeout: 45000, maxBuffer: 16 * 1024 * 1024 },
-    );
-    return parseEvidence(JSON.parse(stdout));
-  };
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [entrypoint, "mcp"],
-    env,
-    stderr: "pipe",
-  });
-  const client = new Client({ name: "module-real-e2e", version: "1" });
+  let site;
+  let root;
+  let transport;
+  let client;
+  let primaryError;
   try {
+    site = await startBrowserModuleSite();
+    root = await mkdtemp(join(tmpdir(), "rea-browser-modules-"));
+    const env = {
+      ...process.env,
+      REA_LOG_LEVEL: "silent",
+      REA_BROWSER_EXECUTABLE: executable,
+      HOPPER_LAUNCHER_PATH: "/rea-unconfigured-provider/hopper",
+    };
+    const cli = async (...args) => {
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [entrypoint, ...args, "--json"],
+        { env, timeout: 45000, maxBuffer: 16 * 1024 * 1024 },
+      );
+      return parseEvidence(JSON.parse(stdout));
+    };
+    transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [entrypoint, "mcp"],
+      env,
+      stderr: "pipe",
+    });
+    client = new Client({ name: "module-real-e2e", version: "1" });
     const oracle = await loadingOracle(executable, site);
     const scenario = {
       browser: { mode: "launch", executable_path: executable },
@@ -298,11 +304,17 @@ export async function verifyBrowserModules(
       map_identity_verified: true,
       implicit_refetches: 0,
     };
+  } catch (cause) {
+    primaryError = cause;
+    throw cause;
   } finally {
-    await client.close();
-    await transport.close();
-    await site.close();
-    await rm(root, { recursive: true, force: true });
+    const cleanup = [];
+    if (client !== undefined) cleanup.push(() => client.close());
+    if (transport !== undefined) cleanup.push(() => transport.close());
+    if (site !== undefined) cleanup.push(() => site.close());
+    if (root !== undefined)
+      cleanup.push(() => rm(root, { recursive: true, force: true }));
+    await closeVerifierResources(cleanup, primaryError);
   }
 }
 

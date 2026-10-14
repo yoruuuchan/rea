@@ -17,6 +17,7 @@ import {
 import { runDoctor, systemDoctorHost, type DoctorHost } from "./Doctor.js";
 import {
   installLinuxHopper,
+  LinuxHopperTemporaryCleanupOwner,
   readLinuxDistribution,
   systemLinuxHopperInstallHost,
 } from "./LinuxHopper.js";
@@ -142,6 +143,8 @@ export const systemSetupHost = (
       ? systemMacHopperInstallHost(homeDirectory, environment)
       : undefined;
   const resources = new ArtifactResourceScope();
+  const linuxHopperHost = systemLinuxHopperInstallHost(environment);
+  const pendingLinuxHopperCleanup = new LinuxHopperTemporaryCleanupOwner();
   return {
     platform,
     homeDirectory,
@@ -151,7 +154,10 @@ export const systemSetupHost = (
     nodeVersion: process.versions.node,
     macosVersion: () => doctorHost.macosVersion(),
     linuxDistribution: readLinuxDistribution,
-    close: () => closeSetupResources(resources, macHopperHost, doctorHost),
+    close: () =>
+      closeSetupResources(resources, macHopperHost, doctorHost, () =>
+        pendingLinuxHopperCleanup.retry(linuxHopperHost.cleanup),
+      ),
     initialSetupState: async (
       scope?: DoctorScope,
     ): Promise<SetupInitialState> => {
@@ -160,10 +166,16 @@ export const systemSetupHost = (
         ...(diagnosis.hopperPath === undefined
           ? {}
           : { hopperPath: diagnosis.hopperPath }),
+        ...(typeof environment.HOPPER_LAUNCHER_PATH === "string" &&
+        environment.HOPPER_LAUNCHER_PATH.trim() !== "" &&
+        diagnosis.hopperPath === environment.HOPPER_LAUNCHER_PATH
+          ? { hopperLauncherConfigured: true }
+          : {}),
         providerEnvironment: {
           ...providerRegistrationEnvironment(
             diagnosis.providerInspections ?? [],
           ),
+          ...doctorHost.providerRegistrationEnvironment?.(),
           ...(diagnosis.hopperPath === undefined
             ? {}
             : { HOPPER_LAUNCHER_PATH: diagnosis.hopperPath }),
@@ -173,12 +185,12 @@ export const systemSetupHost = (
     },
     installHopper: async (replaceExisting) => {
       if (platform === "linux") {
-        const result = await installLinuxHopper(
-          systemLinuxHopperInstallHost(environment),
-        );
+        const result = await installLinuxHopper(linuxHopperHost);
+        if (result.cleanupFailure !== undefined)
+          pendingLinuxHopperCleanup.retain(result.cleanupFailure);
         return result.status === "installed"
-          ? result
-          : setupInstallFailure(result.reason);
+          ? { status: "installed", launcherPath: result.launcherPath }
+          : setupInstallFailure(result.reason, result.packageFailure);
       }
       if (macHopperHost === undefined)
         return setupInstallFailure("unsupported_host");
@@ -264,12 +276,14 @@ const closeSetupResources = async (
   resources: ArtifactResourceScope,
   macHopperHost: ReturnType<typeof systemMacHopperInstallHost> | undefined,
   doctorHost: DoctorHost,
+  retryLinuxHopperCleanup: () => Promise<string | undefined>,
 ): Promise<string | undefined> => {
-  const [resourceCleanup, hopperCleanup, doctorCleanup] =
+  const [resourceCleanup, hopperCleanup, doctorCleanup, linuxCleanup] =
     await Promise.allSettled([
       resources.close(),
       Promise.resolve().then(() => macHopperHost?.close()),
       Promise.resolve().then(() => doctorHost.close?.()),
+      retryLinuxHopperCleanup(),
     ]);
   const failures: string[] = [];
   if (hopperCleanup.status === "rejected")
@@ -284,6 +298,11 @@ const closeSetupResources = async (
     );
   else if (doctorCleanup.value !== undefined)
     failures.push(doctorCleanup.value);
+  if (linuxCleanup.status === "rejected")
+    failures.push(
+      `Linux Hopper cleanup retry failed: ${errorMessage(linuxCleanup.reason)}`,
+    );
+  else if (linuxCleanup.value !== undefined) failures.push(linuxCleanup.value);
   if (resourceCleanup.status === "rejected")
     failures.push(errorMessage(resourceCleanup.reason));
   return failures.length === 0 ? undefined : failures.join("; ");

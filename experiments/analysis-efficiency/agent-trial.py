@@ -180,7 +180,7 @@ def main():
                  'inspect_android_package', 'search_android_classes',
                  'inspect_android_class', 'inspect_android_method',
                  'inspect_firmware_regions', 'inspect_managed_artifact',
-                 'inspect_sqlite_database',
+                 'inspect_sqlite_database', 'inspect_pcap_capture',
                  'inspect_managed_members', 'inspect_managed_native_boundaries',
                  'inspect_artifact', 'inspect_wasm_artifact',
                  'inspect_evm_interface', 'get_evidence_bundle', 'export_evidence_bundle',

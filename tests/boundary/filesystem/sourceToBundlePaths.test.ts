@@ -6,7 +6,10 @@ import { analyzeJavaScriptApplication } from "../../support/javascriptApplicatio
 import { parseApplicationGraphEvidence } from "../../../src/application/javascript/JavaScriptApplicationEvidenceGraph.js";
 import { findApplicationFeatureSeeds } from "../../../src/domain/javascript/javascriptFeatureSeed.js";
 import { compareSourceToBundle } from "../../../src/domain/javascript/sourceToBundleComparison.js";
-import { resolveJavaScriptSourceMapUrl } from "../../../src/domain/javascript/javascriptSourceMapPaths.js";
+import {
+  resolveJavaScriptSourceMapReferences,
+  resolveJavaScriptSourceMapUrl,
+} from "../../../src/domain/javascript/javascriptSourceMapPaths.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 
@@ -704,3 +707,106 @@ const compareTrees = async (previous: string, current: string) => {
   });
   return { reference: reference.value, comparison, application };
 };
+
+it.skipIf(process.platform === "win32")(
+  "does not promote a POSIX literal backslash name to a different historical slash path",
+  async () => {
+    const root = await createTestTempDirectory("rea-backslash-source-match-");
+    const previous = join(root, "previous");
+    const current = join(root, "current");
+    await mkdir(join(previous, "literal"), { recursive: true });
+    await mkdir(current);
+    await writeFile(
+      join(previous, "literal", "name.js"),
+      "export const value = 1;\n",
+    );
+    await writeFile(
+      join(current, "literal\\name.js"),
+      "export const value = 2;\n",
+    );
+    const { comparison } = await compareTrees(previous, current);
+    const item = comparison.items.find(
+      ({ source_path }) => source_path === "literal/name.js",
+    );
+    expect(item?.current_node_ids).toEqual([]);
+    expect(
+      item?.candidates
+        .flatMap(({ signals }) => signals)
+        .some(({ kind }) => kind === "current-path-exact"),
+    ).toBe(false);
+  },
+);
+
+it.skipIf(process.platform === "win32").each([
+  { mapPath: "literal\\bundle.js.map", expected: "a.js" },
+  { mapPath: "literal\\dir/bundle.js.map", expected: "literal\\dir/a.js" },
+])(
+  "resolves source-map declarations from literal artifact base $mapPath",
+  async ({ mapPath, expected }) => {
+    const root = await createTestTempDirectory("rea-backslash-source-map-");
+    const previous = join(root, "previous");
+    const current = join(root, "current");
+    await mkdir(previous);
+    await mkdir(current);
+    await writeFile(join(previous, "a.js"), "export const value = 1;\n");
+    await mkdir(join(current, "literal\\dir"), { recursive: true });
+    await writeFile(join(current, mapPath.slice(0, -4)), "var value = 2;\n");
+    await writeFile(
+      join(current, mapPath),
+      JSON.stringify({
+        version: 3,
+        file: mapPath.slice(0, -4),
+        sources: ["a.js"],
+        sourcesContent: ["export const value = 2;\n"],
+        names: [],
+        mappings: "AAAA",
+      }),
+    );
+    const { application, comparison } = await compareTrees(previous, current);
+    const references = application.graph.nodes
+      .flatMap(({ observations }) =>
+        observations.map(({ source_map_reference }) => source_map_reference),
+      )
+      .filter((reference) => reference?.map_path === mapPath);
+    expect(references).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resolution: { kind: "artifact-relative", path: expected },
+        }),
+      ]),
+    );
+    const item = comparison.items.find(
+      ({ source_path }) => source_path === "a.js",
+    );
+    const signals = item?.candidates.flatMap(({ signals }) => signals) ?? [];
+    if (expected === "a.js")
+      expect(signals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "source-map-original-path",
+            current_values: ["a.js"],
+          }),
+        ]),
+      );
+    else
+      expect(
+        signals.some(({ kind }) => kind === "source-map-original-path"),
+      ).toBe(false);
+  },
+);
+
+it.each([
+  { source: "https://user%2Fname@host.test/a.js", expected: "host.test/a.js" },
+  {
+    source: "C:\\code\\literal%5Cname.js",
+    expected: "C:/code/literal%5Cname.js",
+  },
+])(
+  "checks encoded source-map separators in the parsed pathname of $source",
+  ({ source, expected }) => {
+    expect(
+      resolveJavaScriptSourceMapReferences([source], null, "ordinary.js.map")[0]
+        ?.resolution,
+    ).toEqual({ kind: "suffix", path: expected });
+  },
+);

@@ -14,7 +14,6 @@ const boundedRelativePathSchema = z
   .refine(
     (path) =>
       !path.startsWith("/") &&
-      !path.includes("\\") &&
       path.split("/").every((part) => part !== "" && part !== ".."),
     "Expected a normalized relative POSIX path without traversal",
   );

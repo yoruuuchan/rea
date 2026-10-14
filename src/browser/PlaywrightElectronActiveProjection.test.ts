@@ -40,12 +40,15 @@ it("projects hook retention and dropped event families through the result schema
         estimated_retained_bytes: 1_024,
         event_serialized_byte_upper_bound: 512,
         retained: 1,
-        dropped: 1,
-        dropped_ipc: 0,
+        dropped: 2,
+        dropped_ipc: 1,
         dropped_runtime: 1,
-        dropped_event_families: [{ family: "renderer-ipc", count: 1 }],
+        dropped_event_families: [
+          { family: "renderer-ipc", count: 1 },
+          { family: "preload-configuration", count: 1 },
+        ],
         dropped_event_roles: [{ role: "renderer", count: 1 }],
-        observed: 2,
+        observed: 3,
         observed_ipc: 1,
         observed_runtime: 1,
         hook_error: false,
@@ -58,18 +61,29 @@ it("projects hook retention and dropped event families through the result schema
     estimated_retained_bytes: 1_024,
     event_serialized_byte_upper_bound: 512,
     retained: 1,
-    dropped: 1,
-    dropped_event_families: [{ family: "renderer-ipc", count: 1 }],
+    dropped: 2,
+    dropped_event_families: [
+      { family: "renderer-ipc", count: 1 },
+      { family: "preload-configuration", count: 1 },
+    ],
     dropped_event_roles: [{ role: "renderer", count: 1 }],
   });
-  expect(result.ipc).toMatchObject({ observed: 1, dropped: 0 });
-  expect(result.timeline).toMatchObject({ observed: 2, dropped: 1 });
+  expect(result.ipc).toMatchObject({ observed: 1, dropped: 1 });
+  expect(result.timeline).toMatchObject({ observed: 3, dropped: 2 });
   expect(result.coverage.observed_event_families).toContain("renderer-ipc");
   expect(result.coverage.unavailable_event_families).not.toContain(
     "renderer-ipc",
   );
   expect(result.coverage.observed_roles).toContain("renderer");
-  expect(result.coverage.unavailable_event_families).toContain("preload");
+  expect(result.coverage.observed_event_families).toContain(
+    "preload-configuration",
+  );
+  expect(result.coverage.unavailable_event_families).not.toContain(
+    "preload-configuration",
+  );
+  expect(result.limitations).not.toContain(
+    "Preload configuration was not exposed by the observed Electron window metadata. Preload paths and execution remain unavailable.",
+  );
 });
 
 it("keeps renderer coverage unavailable when only the main process was observed", () => {
@@ -126,4 +140,57 @@ it("keeps renderer coverage unavailable when only the main process was observed"
 
   expect(result.coverage.observed_roles).not.toContain("renderer");
   expect(result.coverage.unavailable_event_families).toContain("renderer-ipc");
+});
+
+it("does not correlate legacy dropped families and roles", () => {
+  const result = projectElectronActiveCapture(
+    {
+      executable: "/opt/electron",
+      application: "/opt/app/main.js",
+    },
+    [],
+    {
+      windows: [],
+      metrics: [],
+      electronVersion: "test-electron",
+      hookSnapshot: {
+        events: [],
+        retention_budget_bytes: 16 * 1024 * 1024,
+        estimated_retained_bytes: 0,
+        event_serialized_byte_upper_bound: 0,
+        retained: 0,
+        dropped: 2,
+        dropped_ipc: 1,
+        dropped_runtime: 1,
+        dropped_event_families: [
+          { family: "preload", count: 1 },
+          { family: "renderer-ipc", count: 1 },
+        ],
+        dropped_event_roles: [
+          { role: "browser", count: 1 },
+          { role: "renderer", count: 1 },
+        ],
+        observed: 2,
+        observed_ipc: 1,
+        observed_runtime: 1,
+        hook_error: false,
+      },
+    },
+  );
+
+  expect(result.coverage.observed_event_families).toContain("preload");
+  expect(result.coverage.observed_event_families).not.toContain(
+    "preload-configuration",
+  );
+  expect(result.coverage.unavailable_event_families).toContain(
+    "preload-configuration",
+  );
+  expect(result.coverage.observed_roles).toEqual(["browser", "renderer"]);
+  expect(result.retention.dropped_event_families).toEqual([
+    { family: "preload", count: 1 },
+    { family: "renderer-ipc", count: 1 },
+  ]);
+  expect(result.limitations).toContain(
+    "Dropped preload-family events were not attributed to preload configuration; independently aggregated event families and roles cannot establish that relationship.",
+  );
 });

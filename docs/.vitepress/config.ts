@@ -44,6 +44,7 @@ export default defineConfig({
             link: "/web-network-captures",
           },
           { text: "Electron observation", link: "/electron-observation" },
+          { text: "Electron fuses", link: "/electron-fuses" },
           { text: "Process capture", link: "/process-capture" },
           { text: ".NET assemblies", link: "/managed-code-analysis" },
           { text: "Android applications", link: "/android-analysis" },

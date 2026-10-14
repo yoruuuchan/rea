@@ -74,10 +74,35 @@ export const createSemanticReturnedReferences = (
     const pending: Candidate[] = [
       { node: callee, path: [], bindings: new Set() },
     ];
+    // A shared initializer can be reached through both arms of every alias
+    // diamond. Expand an expression/path again only when its cycle context
+    // permits a binding that an earlier traversal blocked.
+    const expanded = new WeakMap<
+      t.Node,
+      Map<string, readonly ReadonlySet<string>[]>
+    >();
     for (let cursor = 0; cursor < pending.length; cursor++) {
       const item = pending[cursor];
       if (item === undefined) break;
       const node = unwrapJavaScriptExpression(item.node).node;
+      const pathKey = JSON.stringify(item.path);
+      const paths =
+        expanded.get(node) ?? new Map<string, readonly ReadonlySet<string>[]>();
+      const contexts = paths.get(pathKey) ?? [];
+      if (
+        contexts.some((context) =>
+          [...context].every((binding) => item.bindings.has(binding)),
+        )
+      )
+        continue;
+      paths.set(pathKey, [
+        ...contexts.filter(
+          (context) =>
+            ![...item.bindings].every((binding) => context.has(binding)),
+        ),
+        item.bindings,
+      ]);
+      expanded.set(node, paths);
       if (t.isIdentifier(node)) {
         const binding = resolveSemanticBindingState(state, node, node.name);
         if (binding === undefined || item.bindings.has(binding.bindingId))

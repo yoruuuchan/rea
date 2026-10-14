@@ -25,6 +25,36 @@ describe("Electron option evidence", () => {
     });
   });
 
+  it.each([
+    ["for initializer", 'for (var electron = require("electron"); false;) {}'],
+    ["do body", 'do { var electron = require("electron"); } while (false);'],
+  ])(
+    "recovers Electron bindings initialized unconditionally in a %s",
+    (_name, declaration) => {
+      const analysis = analyzeJavaScriptStaticSource(
+        `${declaration} new electron.BrowserWindow({webPreferences:{preload:"./preload.js"}});`,
+      );
+      expect(analysis.parse_error_count).toBe(0);
+      expect(analysis.electron.browser_windows).toMatchObject([
+        { preload_path: "./preload.js" },
+      ]);
+    },
+  );
+
+  it.each([
+    'for (; false;) { var electron = require("electron"); }',
+    'while (false) { var electron = require("electron"); }',
+    'if (flag) { for (var electron = require("electron"); false;) {} }',
+  ])(
+    "keeps conditionally skipped loop declarations unresolved: %s",
+    (declaration) => {
+      const analysis = analyzeJavaScriptStaticSource(
+        `${declaration} new electron.BrowserWindow({});`,
+      );
+      expect(analysis.electron.browser_windows).toEqual([]);
+    },
+  );
+
   it("does not read an audio or video preload attribute as a preload script", () => {
     const analysis = analyzeJavaScriptStaticSource(`
       jsx("audio", { controls: true, preload: "metadata", src });

@@ -115,6 +115,50 @@ const fixture = (
   return bytes;
 };
 const provenance = { path: "/fixture/app", sha256: "a".repeat(64) };
+
+const partialSiblingsFixture = (
+  options: {
+    readonly emptyMiddleClass?: boolean;
+  } = {},
+) => {
+  const bytes = Buffer.alloc(4096);
+  const imageBase = 0x100000000n;
+  bytes.writeUInt32LE(0xfeedfacf, 0);
+  bytes.writeUInt32LE(0x0100000c, 4);
+  bytes.writeUInt32LE(2, 12);
+  bytes.writeUInt32LE(1, 16);
+  bytes.writeUInt32LE(232, 20);
+  bytes.writeUInt32LE(0x19, 32);
+  bytes.writeUInt32LE(232, 36);
+  bytes.write("__DATA", 40);
+  bytes.writeBigUInt64LE(imageBase, 56);
+  bytes.writeBigUInt64LE(4096n, 64);
+  bytes.writeBigUInt64LE(4096n, 80);
+  bytes.writeUInt32LE(5, 92);
+  bytes.writeUInt32LE(2, 96);
+  bytes.write("__objc_classlist", 104);
+  bytes.writeBigUInt64LE(imageBase + 0x200n, 136);
+  bytes.writeBigUInt64LE(24n, 144);
+  bytes.write("__objc_protolist", 184);
+  bytes.writeBigUInt64LE(imageBase + 0x300n, 216);
+  bytes.writeBigUInt64LE(8n, 224);
+  for (const [slot, record, ro, name] of [
+    [0x200, 0x400, 0x500, 0x600],
+    [0x208, 0x440, 0x540, 0x620],
+    [0x210, 0x480, 0x580, 0x640],
+  ] as const) {
+    bytes.writeBigUInt64LE(imageBase + BigInt(record), slot);
+    bytes.writeBigUInt64LE(imageBase + BigInt(ro), record + 32);
+    bytes.writeUInt32LE(2, ro);
+    bytes.writeUInt32LE(16, ro + 8);
+    bytes.writeBigUInt64LE(imageBase + BigInt(name), ro + 24);
+  }
+  bytes.write("KeptClass\0", 0x600);
+  if (!options.emptyMiddleClass) bytes.write("OtherClass\0", 0x620);
+  bytes.write("LaterClass\0", 0x640);
+  return bytes;
+};
+
 describe("Apple dispatch pointer fixup metadata", () => {
   it("keeps decoded bindings and their coverage when an independent stream fails", () => {
     const bytes = fixture();
@@ -367,6 +411,23 @@ describe("Apple dispatch coverage ownership", () => {
 });
 
 describe("malformed Apple dispatch metadata", () => {
+  it("retains valid class siblings when one class has an empty name", () => {
+    const result = decodeAppleDispatchMetadata(
+      partialSiblingsFixture({ emptyMiddleClass: true }),
+      100,
+      provenance,
+    );
+    expect(result.objc_classes.map(({ name }) => name)).toEqual([
+      "KeptClass",
+      "LaterClass",
+    ]);
+    expect(
+      result.coverage.find(
+        ({ facet }) => facet === "objc_class_method_ivar_metadata",
+      ),
+    ).toMatchObject({ status: "partial", examined: 3 });
+  });
+
   it("rejects malformed command and section boundaries", () => {
     const bytes = fixture();
     bytes.writeUInt32LE(7, 36);
@@ -528,5 +589,220 @@ describe("byte-swapped universal Apple dispatch metadata", () => {
     expect(() => decodeAppleDispatchMetadata(bytes, 100, provenance)).toThrow(
       "FAT architecture 0 slice range extends beyond the file (FAT header byte order: little-endian)",
     );
+  });
+});
+
+const unmappedProtocolSectionBase = 0x100000000n;
+const unmappedProtocolImage = (bad: "protocol" | "class" | "neither") => {
+  const bytes = Buffer.alloc(4096);
+  bytes.writeUInt32LE(0xfeedfacf, 0);
+  bytes.writeUInt32LE(0x0100000c, 4);
+  bytes.writeUInt32LE(2, 12);
+  bytes.writeUInt32LE(1, 16);
+  bytes.writeUInt32LE(232, 20);
+  bytes.writeUInt32LE(0x19, 32);
+  bytes.writeUInt32LE(232, 36);
+  bytes.write("__DATA", 40);
+  bytes.writeBigUInt64LE(unmappedProtocolSectionBase, 56);
+  bytes.writeBigUInt64LE(4096n, 64);
+  bytes.writeBigUInt64LE(4096n, 80);
+  bytes.writeUInt32LE(5, 92);
+  bytes.writeUInt32LE(2, 96);
+  bytes.write("__objc_classlist", 104);
+  bytes.writeBigUInt64LE(
+    unmappedProtocolSectionBase + (bad === "class" ? 0x9000n : 0x200n),
+    136,
+  );
+  bytes.writeBigUInt64LE(8n, 144);
+  bytes.write("__objc_protolist", 184);
+  bytes.writeBigUInt64LE(
+    unmappedProtocolSectionBase + (bad === "protocol" ? 0x9000n : 0x300n),
+    216,
+  );
+  bytes.writeBigUInt64LE(8n, 224);
+  bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x400n, 0x200);
+  bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x500n, 0x420);
+  bytes.writeUInt32LE(2, 0x500);
+  bytes.writeUInt32LE(16, 0x508);
+  bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x600n, 0x518);
+  bytes.write("RetainedClass\0", 0x600);
+  return bytes;
+};
+const unmappedProtocolClassCoverage = (result: {
+  coverage: { facet: string; status: string; reason: string | null }[];
+}) =>
+  result.coverage.find(
+    ({ facet }) => facet === "objc_class_method_ivar_metadata",
+  );
+
+describe("Apple dispatch unmapped protocol-list slot", () => {
+  it("returns the class when every list slot is mapped", () => {
+    const result = decodeAppleDispatchMetadata(
+      unmappedProtocolImage("neither"),
+      100,
+      provenance,
+    );
+    expect(result.objc_classes).toMatchObject([{ name: "RetainedClass" }]);
+    expect(unmappedProtocolClassCoverage(result)).toMatchObject({
+      status: "complete",
+    });
+  });
+
+  it("records partial coverage when the class-list slot is unmapped", () => {
+    const result = decodeAppleDispatchMetadata(
+      unmappedProtocolImage("class"),
+      100,
+      provenance,
+    );
+    expect(unmappedProtocolClassCoverage(result)).toMatchObject({
+      status: "partial",
+      reason: expect.stringContaining("0x100009000"),
+    });
+  });
+
+  it("retains the class and partial coverage when the protocol-list slot is unmapped", () => {
+    const result = decodeAppleDispatchMetadata(
+      unmappedProtocolImage("protocol"),
+      100,
+      provenance,
+    );
+    expect(result.objc_classes).toMatchObject([{ name: "RetainedClass" }]);
+    expect(unmappedProtocolClassCoverage(result)).toMatchObject({
+      status: "partial",
+      reason: expect.stringContaining("0x100009000"),
+    });
+  });
+});
+
+describe("Apple dispatch list scan budget", () => {
+  it("bounds failed protocol-list slots by the record budget", () => {
+    // The section size is file-declared, so a crafted image can claim an
+    // arbitrarily large unmapped protocol list. Failed slots must spend the
+    // record budget like decoded ones, otherwise the loop runs unbounded.
+    const bytes = unmappedProtocolImage("protocol");
+    bytes.writeBigUInt64LE(80000n, 224);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    const coverage = unmappedProtocolClassCoverage(result);
+    expect(coverage).toMatchObject({ status: "partial" });
+    expect(coverage?.reason).toContain("max_records_reached");
+    const failures =
+      coverage?.reason?.match(/Unmapped or ambiguous metadata pointer/g) ?? [];
+    expect(failures.length).toBeLessThanOrEqual(100);
+  });
+
+  it("keeps independent facets complete when only zero-pointer list scanning is capped", () => {
+    const bytes = unmappedProtocolImage("neither");
+    bytes.writeBigUInt64LE(0n, 144);
+    bytes.writeBigUInt64LE(16n, 224);
+    const result = decodeAppleDispatchMetadata(bytes, 1, provenance);
+    expect(unmappedProtocolClassCoverage(result)).toMatchObject({
+      status: "partial",
+      reason: expect.stringContaining("max_records_reached"),
+    });
+    for (const facet of [
+      "objc_properties_categories",
+      "binary_relative_pointers",
+    ])
+      expect(
+        result.coverage.find((item) => item.facet === facet),
+      ).toMatchObject({
+        status: "complete",
+        reason: null,
+      });
+  });
+
+  it("marks class-dependent coverage partial when zero slots hide a later class", () => {
+    const bytes = unmappedProtocolImage("neither");
+    bytes.writeBigUInt64LE(0n, 224);
+    bytes.writeBigUInt64LE(16n, 144);
+    bytes.writeBigUInt64LE(0n, 0x200);
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x400n, 0x208);
+    const result = decodeAppleDispatchMetadata(bytes, 1, provenance);
+    expect(result.objc_classes).toEqual([]);
+    for (const facet of [
+      "objc_class_method_ivar_metadata",
+      "objc_properties_categories",
+      "binary_relative_pointers",
+    ])
+      expect(
+        result.coverage.find((item) => item.facet === facet),
+      ).toMatchObject({
+        status: "partial",
+        reason: expect.stringContaining("max_records_reached"),
+      });
+    for (const facet of [
+      "swift_class_vtable_descriptors",
+      "swift_conformances_static_witness_slots",
+    ])
+      expect(
+        result.coverage.find((item) => item.facet === facet),
+      ).toMatchObject({ status: "complete" });
+  });
+
+  it("bounds failed class-list slots by the record budget", () => {
+    // Same file-declared-size hazard as the protocol list: a crafted image
+    // can declare an arbitrarily large unmapped class list. Failed class
+    // slots must spend the record budget like decoded ones, otherwise the
+    // loop runs unbounded (each failed read produced an unbounded failure
+    // string with no budget spend).
+    const bytes = unmappedProtocolImage("class");
+    bytes.writeBigUInt64LE(80000n, 144);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    const coverage = unmappedProtocolClassCoverage(result);
+    expect(coverage).toMatchObject({ status: "partial" });
+    expect(coverage?.reason).toContain("max_records_reached");
+    const failures =
+      coverage?.reason?.match(/Unmapped or ambiguous metadata pointer/g) ?? [];
+    expect(failures.length).toBeLessThanOrEqual(100);
+  });
+
+  it("reports the real failure for a mapped-but-malformed class at the budget boundary", () => {
+    // The class-list slot itself is mapped, so readClass admits the record
+    // budget and only then throws on the unmapped class_ro pointer. The
+    // failure must be recorded as-is: it already spent one budget unit, so
+    // admitting again would break before the reason is appended and report
+    // only max_records_reached.
+    const bytes = unmappedProtocolImage("neither");
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x700n, 0x200);
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x9000n, 0x720);
+    const result = decodeAppleDispatchMetadata(bytes, 1, provenance);
+    const coverage = unmappedProtocolClassCoverage(result);
+    expect(coverage).toMatchObject({ status: "partial" });
+    expect(coverage?.reason).toContain(
+      "Unmapped or ambiguous metadata pointer 0x100009018",
+    );
+    expect(coverage?.reason).not.toContain("max_records_reached");
+  });
+
+  it("does not skip a valid class after a mapped-but-malformed class", () => {
+    // With two slots and a budget of two, the corrupt first slot must spend
+    // exactly one unit: admitting twice would exhaust the budget and skip
+    // the valid class behind it.
+    const bytes = unmappedProtocolImage("neither");
+    bytes.writeBigUInt64LE(16n, 144);
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x700n, 0x200);
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x9000n, 0x720);
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x400n, 0x208);
+    const result = decodeAppleDispatchMetadata(bytes, 2, provenance);
+    expect(result.objc_classes).toMatchObject([{ name: "RetainedClass" }]);
+    expect(unmappedProtocolClassCoverage(result)?.reason).toContain(
+      "Unmapped or ambiguous metadata pointer 0x100009018",
+    );
+  });
+
+  it("reports the real failure for a mapped-but-truncated protocol slot", () => {
+    // The protocol slot is mapped, so protocolReader.record admits the
+    // budget itself before throwing on the truncated declaration. The loop
+    // must not admit a second time; the recorded reason stays the
+    // declaration failure, not max_records_reached.
+    const bytes = unmappedProtocolImage("neither");
+    bytes.writeBigUInt64LE(unmappedProtocolSectionBase + 0x700n, 0x300);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    const coverage = unmappedProtocolClassCoverage(result);
+    expect(coverage).toMatchObject({ status: "partial" });
+    expect(coverage?.reason).toContain(
+      "Truncated Objective-C protocol declaration",
+    );
+    expect(coverage?.reason).not.toContain("max_records_reached");
   });
 });

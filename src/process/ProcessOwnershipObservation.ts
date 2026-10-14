@@ -510,6 +510,22 @@ export const observeProcessStartIdentity = async (
       };
 };
 
+/** Confirm whether the process that held an authenticated bridge has exited. */
+export const observeProcessStartIdentityExit = async (
+  pid: number,
+  expectedIdentity: string,
+  host: ProcessOwnershipHost = systemProcessOwnershipHost,
+): Promise<"exited" | "present" | "unverified"> => {
+  try {
+    const observed = await observeProcessStartIdentity(pid, host);
+    if (observed === undefined) return "exited";
+    if (observed.state !== "readable") return "unverified";
+    return observed.identity === expectedIdentity ? "present" : "exited";
+  } catch {
+    return "unverified";
+  }
+};
+
 /** Revalidate a launch-time start identity immediately before signaling a PID. */
 export const signalProcessWithStartIdentity = async (
   pid: number,

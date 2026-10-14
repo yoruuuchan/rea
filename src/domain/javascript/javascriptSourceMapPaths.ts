@@ -93,10 +93,7 @@ const resolveJavaScriptSourceMapPath = (
   const windowsPath = /^[a-z]:\//iu.test(portable) || source.startsWith("\\\\");
   // Preserve parent traversal rather than letting URL resolution clamp at '/'.
   const anchor = `/${"source/".repeat(portable.split("/").length + 1)}`;
-  const directory = posix.join(
-    anchor,
-    posix.dirname(mapPath.replaceAll("\\", "/")),
-  );
+  const directory = posix.join(anchor, posix.dirname(mapPath));
   const base = pathToFileURL(`${directory}/`, { windows: false });
   const absolute = windowsPath ? windowsFileUrl(source) : URL.parse(source);
   const resolved = windowsPath ? absolute : URL.parse(source, base);
@@ -116,8 +113,11 @@ const resolveJavaScriptSourceMapPath = (
       kind: "unresolved",
       reason: "Source reference names a directory rather than a file.",
     };
-  // Encoded separators must not manufacture a different filesystem hierarchy.
-  if (/%(?:2f|5c)/iu.test(resolved.pathname))
+  // Reject separators in declarations, not escaped literal names in the owned base.
+  const declaredPath = windowsPath
+    ? (absolute?.pathname ?? "")
+    : (URL.parse(source, "file:///")?.pathname ?? "");
+  if (/%(?:2f|5c)/iu.test(declaredPath))
     return {
       kind: "unresolved",
       reason: "Source reference contains an encoded path separator.",
@@ -170,10 +170,11 @@ const windowsFileUrl = (path: string): URL | null => {
 
 const decodedUrlPath = (url: URL): string | null => {
   try {
-    if (url.protocol === "file:")
-      return fileURLToPath(url, {
-        windows: url.hostname !== "" && url.hostname !== "localhost",
-      }).replaceAll("\\", "/");
+    if (url.protocol === "file:") {
+      const windows = url.hostname !== "" && url.hostname !== "localhost";
+      const path = fileURLToPath(url, { windows });
+      return windows ? path.replaceAll("\\", "/") : path;
+    }
     return `${url.host}${decodeURIComponent(url.pathname)}`;
   } catch (cause: unknown) {
     if (cause instanceof URIError || cause instanceof TypeError) return null;

@@ -1,6 +1,6 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { sep } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   createIdaTarget,
@@ -11,11 +11,34 @@ import { functionDossierSchema } from "../domain/hopperValues.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { WindowsPrivateRuntime } from "../windows/WindowsPrivateRuntime.js";
 
 const roots: string[] = [];
+const windowsRuntimes = new Set<WindowsPrivateRuntime>();
+beforeEach(() => {
+  if (process.platform !== "win32") return;
+  const create = WindowsPrivateRuntime.create;
+  vi.spyOn(WindowsPrivateRuntime, "create").mockImplementation(
+    (parent, prefix) => {
+      const runtime = create(parent, prefix);
+      windowsRuntimes.add(runtime);
+      return runtime;
+    },
+  );
+});
 afterEach(async () => {
-  for (const root of roots.splice(0))
-    await rm(root, { recursive: true, force: true });
+  try {
+    // These pure producer fixtures spawn no IDA worker. After the retention
+    // assertions, release only the actual native owners this test created.
+    for (const runtime of windowsRuntimes) {
+      await runtime.close();
+      windowsRuntimes.delete(runtime);
+    }
+    for (const root of roots.splice(0))
+      await rm(root, { recursive: true, force: true });
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 /** A failed close whose diagnostic names exactly these unverified sessions. */
 const reportsSessions = (...sessions: readonly object[]) => ({
@@ -130,7 +153,28 @@ describe("headless IDA producer pagination", () => {
   });
 });
 
-describe("attached IDA observation semantics", () => {
+describe("attached IDA readiness and queued cancellation", () => {
+  it("allows ready-only work after an attached provider has initialized", async () => {
+    const { producer, client } = await fixture("attached");
+    await expect(client.executeIfReady("list_procedures", {})).resolves.toBe(
+      undefined,
+    );
+
+    const startup = await client.execute("list_procedures", {});
+    if (!startup.ok) throw startup.error;
+    const result = await client.executeIfReady("list_procedures", {});
+    if (result === undefined)
+      throw new Error("expected ready attached IDA dispatch");
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toEqual([
+      expect.objectContaining({ address: "0x1000", value: "main" }),
+    ]);
+    expect(
+      producer.calls.filter(({ name }) => name === "idb_open"),
+    ).toHaveLength(0);
+    await client.close();
+  });
+
   it("returns cold and pending startup calls immediately, then cancels queued work before dispatch", async () => {
     const { producer, client } = await fixture("headless");
     await expect(client.executeIfReady("list_procedures", {})).resolves.toBe(
@@ -210,7 +254,9 @@ describe("attached IDA observation semantics", () => {
     );
     await client.close();
   });
+});
 
+describe("attached IDA input identity and validation", () => {
   it("accepts a normalized spelling of the bound document path", async () => {
     const { target, producer, client } = await fixture();
     const equivalent =
@@ -1493,6 +1539,38 @@ it("binds retained transport diagnostics to the requested operation and recovery
     },
   });
   await client.close();
+});
+
+describe("attached IDA legacy string inventory", () => {
+  it("fetches legacy strings and literal searches in single upstream calls", async () => {
+    const { producer, client } = await fixture();
+    const all = Array.from({ length: 250 }, (_, i) => ({
+      address: `0x${(0x3000 + i).toString(16)}`,
+      length: 5,
+      string: `hello-${i}`,
+    }));
+    producer.overrideCall = (name, args) => {
+      if (name !== "list_strings") return undefined;
+      const offset = Number(args.offset ?? 0);
+      const count = Number(args.count ?? 100);
+      const data = count === 0 ? all : all.slice(offset, offset + count);
+      return {
+        data,
+        next_offset:
+          count === 0 || offset + count >= all.length ? null : offset + count,
+      };
+    };
+    const listed = await client.execute("list_strings", {});
+    expect(listed.ok && listed.value.result).toHaveLength(250);
+    expect(
+      producer.calls.filter(({ name }) => name === "list_strings")[0]?.args
+        .count,
+    ).toBe(0);
+    expect(
+      producer.calls.filter(({ name }) => name === "list_strings"),
+    ).toHaveLength(1);
+    await client.close();
+  });
 });
 
 it("retains transport diagnostics on a cancellation regardless of stderr", async () => {

@@ -31,7 +31,14 @@ export async function verifyPackageCapabilitiesAndSearch({ cli, environment }) {
     const searchResult = json(
       await run(
         cli,
-        ["search", process.execPath, "fixture", "--json"],
+        [
+          "search",
+          process.execPath,
+          "fixture",
+          "--provider",
+          "hopper",
+          "--json",
+        ],
         environment,
       ),
     );

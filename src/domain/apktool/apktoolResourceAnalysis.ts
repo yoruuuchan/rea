@@ -3,6 +3,32 @@ import { localPathStringSchema } from "../localPath.js";
 import { digestSchema } from "../digests.js";
 
 const MAX_STRINGS = 2_000;
+const ANDROID_NON_LOCALE_QUALIFIERS = new Set([
+  "car",
+  "desk",
+  "television",
+  "appliance",
+  "watch",
+  "vrheadset",
+  "night",
+  "notnight",
+]);
+
+const localeQualifierSchema = z
+  .string()
+  .min(2)
+  .max(16)
+  .regex(
+    /^(?:[a-z]{2,3}(?:-(?:r?[A-Z]{2}|r?[0-9]{3}))?|b\+[a-z]{2,3}(?:\+[A-Za-z0-9]{2,8})*)$/u,
+    "Locale must look like de, pt-BR, pt-rBR, or b+zh+Hans+CN",
+  )
+  .refine(
+    (value) => !ANDROID_NON_LOCALE_QUALIFIERS.has(value.toLowerCase()),
+    "Android resource configuration qualifiers are not locales",
+  );
+
+/** Locale language tags admitted by Android resource table selection. */
+export const androidLocaleQualifierSchema = localeQualifierSchema;
 
 /**
  * Caller intent for Apktool-backed resource decoding. Apktool is
@@ -19,14 +45,7 @@ export const apktoolInputSchemas = {
       .describe(
         `Project res/values/strings.xml entries (bounded to ${String(MAX_STRINGS)} entries)`,
       ),
-    locale: z
-      .string()
-      .min(2)
-      .max(16)
-      .regex(
-        /^(?:[a-z]{2,3}(?:-(?:r?[A-Z]{2}|r?[0-9]{3}))?|b\+[a-z]{2,3}(?:\+[A-Za-z0-9]{2,8})*)$/u,
-        "Locale must look like de, pt-BR, pt-rBR, or b+zh+Hans+CN",
-      )
+    locale: androidLocaleQualifierSchema
       .optional()
       .describe(
         "Project strings from res/values-<locale>/strings.xml instead of the default table",

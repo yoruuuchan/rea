@@ -9,6 +9,10 @@ This family is present on repository main and in npm 4.1.0. Check the
 [released package boundary](installation.md#released-package-and-main) and the
 connected server's tool list before selecting it.
 
+On Linux, JADX launches an REA-owned process and requires a procps-compatible
+`ps` on REA's `PATH`; see the shared
+[Linux process prerequisite](installation.md#linux-owned-process-prerequisite).
+
 ## Optional package delivery
 
 The MCP `inspect_android_package` request keeps complete output when `detail` is

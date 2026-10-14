@@ -94,6 +94,41 @@ export const semanticObjectPatternKeys = (
     return key === null ? [] : [key];
   });
 
+/** Return the syntactic node whose target this construct writes. */
+export const semanticWriteSiteTarget = (node: t.Node): t.Node | null => {
+  if (t.isAssignmentExpression(node)) return node.left;
+  if (t.isUpdateExpression(node)) return node.argument;
+  if (t.isUnaryExpression(node, { operator: "delete" })) return node.argument;
+  if (t.isForOfStatement(node) || t.isForInStatement(node)) return node.left;
+  return null;
+};
+
+/** Whether a write site reads the previous target value before writing. */
+export const semanticWriteSiteReadsFirst = (site: t.Node): boolean =>
+  (t.isAssignmentExpression(site) && site.operator !== "=") ||
+  t.isUpdateExpression(site);
+
+/** Find the owning write site through inert TypeScript and parenthesis wrappers. */
+export const semanticWrappedWriteSite = (
+  node: t.Node,
+  parent: t.Node,
+  ancestors: readonly t.Node[],
+): t.Node | null => {
+  const chain =
+    ancestors.at(-1) === parent ? ancestors : [...ancestors, parent];
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const candidate = chain[index];
+    if (candidate === undefined) return null;
+    const target = semanticWriteSiteTarget(candidate);
+    if (target !== null)
+      return unwrapJavaScriptExpression(target).node === node
+        ? candidate
+        : null;
+    if (unwrapJavaScriptExpression(candidate).depth === 0) return null;
+  }
+  return null;
+};
+
 /** Visit binding and member leaves in direct and destructuring write targets. */
 export function* semanticWriteTargets(
   root: t.Node,

@@ -42,7 +42,28 @@ const root = () => ({
   subtasks: [],
 });
 
-describe("firmware producer boundaries", () => {
+/** A chunk whose extraction failed on a missing dependency, when asked for it. */
+const nestedDependencyChunk = (id: string, offset: number) => ({
+  __typename__: "ChunkReport",
+  id,
+  start_offset: offset,
+  end_offset: offset + 10,
+  size: 10,
+  handler_name: `handler-${id}`,
+  is_encrypted: false,
+  extraction_reports:
+    id === "gzip-id"
+      ? [
+          {
+            __typename__: "ExtractorDependencyNotFoundReport",
+            severity: "ERROR",
+            dependencies: ["sasquatch"],
+          },
+        ]
+      : [],
+});
+
+describe("firmware producer chunk observations", () => {
   it("retains unknown chunks and their selected original-file range", () => {
     const normalized = normalizeUnblobReport([root()], context);
     expect(normalized.coverage).toBe("partial");
@@ -51,6 +72,412 @@ describe("firmware producer boundaries", () => {
       range: { offset: 0, length: 20 },
       root_file_range: { offset: 64, length: 20 },
     });
+    expect(normalized.missing_dependencies).toEqual([]);
+  });
+});
+
+describe("firmware producer dependency ownership", () => {
+  it("derives missing extractor dependencies from chunk and multi-file reports", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: record.reports.filter(
+            (item) => item.__typename__ !== "UnknownChunkReport",
+          ),
+          subtasks: [
+            {
+              path: `${context.outputRoot}/rootfs`,
+              depth: 1,
+              blob_id: "sq-id",
+              is_multi_file: false,
+            },
+          ],
+        },
+        {
+          task: {
+            path: `${context.outputRoot}/rootfs`,
+            depth: 1,
+            blob_id: "sq-id",
+            is_multi_file: false,
+          },
+          reports: [
+            {
+              __typename__: "StatReport",
+              path: `${context.outputRoot}/rootfs`,
+              size: 0,
+              is_file: false,
+              is_dir: true,
+              is_link: false,
+              link_target: null,
+            },
+            {
+              __typename__: "MultiFileReport",
+              id: "sq-id",
+              handler_name: "squashfs",
+              name: "rootfs",
+              paths: [],
+              extraction_reports: [
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: ["sasquatch"],
+                },
+              ],
+            },
+          ],
+          subtasks: [],
+        },
+      ],
+      context,
+    );
+    expect(normalized.missing_dependencies).toEqual([]);
+    expect(normalized.failed_extraction_stages).toEqual([
+      {
+        input_path: "$output/rootfs",
+        provider_id: "sq-id",
+        handler: "squashfs",
+        dependencies: ["sasquatch"],
+        kind: "missing-extractor-dependency",
+      },
+    ]);
+    expect(normalized.chunk_missing_dependencies).toEqual([]);
+  });
+  it("orders chunk dependencies totally across provider ids", () => {
+    const record = root();
+    const chunkWithDependency = (id: string, offset: number) => ({
+      __typename__: "ChunkReport",
+      id,
+      start_offset: offset,
+      end_offset: offset + 10,
+      size: 10,
+      handler_name: `handler-${id}`,
+      is_encrypted: false,
+      extraction_reports: [
+        {
+          __typename__: "ExtractorDependencyNotFoundReport",
+          severity: "ERROR",
+          dependencies: [`${id}-tool`],
+        },
+      ],
+    });
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports.filter(
+              (item) => item.__typename__ !== "UnknownChunkReport",
+            ),
+            chunkWithDependency("b-id", 0),
+            chunkWithDependency("a-id", 10),
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.chunk_missing_dependencies).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "a-id",
+        dependencies: ["a-id-tool"],
+      },
+      {
+        input_path: "$input",
+        provider_id: "b-id",
+        dependencies: ["b-id-tool"],
+      },
+    ]);
+  });
+  it("keeps chunk-nested dependency reports bound to their owning chunk", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports.filter(
+              (item) => item.__typename__ !== "UnknownChunkReport",
+            ),
+            nestedDependencyChunk("gzip-id", 0),
+            nestedDependencyChunk("other-id", 10),
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.missing_dependencies).toEqual([]);
+    expect(normalized.chunk_missing_dependencies).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "gzip-id",
+        dependencies: ["sasquatch"],
+      },
+    ]);
+  });
+});
+
+describe("firmware dependency failures with unavailable identities", () => {
+  it.each([{ dependencies: [] }, { dependencies: ["", ""] }])(
+    "retains unnamed chunk dependency ownership ($dependencies)",
+    ({ dependencies }) => {
+      const record = root();
+      const normalized = normalizeUnblobReport(
+        [
+          {
+            ...record,
+            reports: [
+              ...record.reports.filter(
+                (item) => item.__typename__ !== "UnknownChunkReport",
+              ),
+              {
+                ...nestedDependencyChunk("gzip-id", 0),
+                extraction_reports: [
+                  {
+                    __typename__: "ExtractorDependencyNotFoundReport",
+                    severity: "ERROR",
+                    dependencies,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        context,
+      );
+      expect(normalized.missing_dependencies).toEqual([]);
+      expect(normalized.chunk_missing_dependencies).toEqual([
+        {
+          input_path: "$input",
+          provider_id: "gzip-id",
+          dependencies: [],
+        },
+      ]);
+    },
+  );
+  it("retains the missing-dependency reason on an unnamed multi-file stage", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports,
+            {
+              __typename__: "MultiFileReport",
+              id: "multi-id",
+              handler_name: "multipart-firmware",
+              name: "parts",
+              paths: [],
+              extraction_reports: [
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.failed_extraction_stages).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "multi-id",
+        handler: "multipart-firmware",
+        dependencies: [],
+        kind: "missing-extractor-dependency",
+      },
+    ]);
+  });
+  it("retains named and unnamed dependency reports on one multi-file stage", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports,
+            {
+              __typename__: "MultiFileReport",
+              id: "multi-id",
+              handler_name: "multipart-firmware",
+              name: "parts",
+              paths: [],
+              extraction_reports: [
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: ["sasquatch"],
+                },
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.failed_extraction_stages).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "multi-id",
+        handler: "multipart-firmware",
+        dependencies: ["sasquatch"],
+        kind: "missing-extractor-dependency",
+      },
+      {
+        input_path: "$input",
+        provider_id: "multi-id",
+        handler: "multipart-firmware",
+        dependencies: [],
+        kind: "missing-extractor-dependency",
+      },
+    ]);
+  });
+});
+
+describe("firmware producer chunk failures", () => {
+  it("marks chunks whose extraction reported problems", () => {
+    const record = root();
+    const failing = {
+      __typename__: "ChunkReport",
+      id: "zip-id",
+      start_offset: 0,
+      end_offset: 20,
+      size: 20,
+      handler_name: "zip",
+      is_encrypted: false,
+      extraction_reports: [
+        { __typename__: "SomeProducerFailure", severity: "ERROR" },
+      ],
+    };
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports.filter(
+              (item) => item.__typename__ !== "UnknownChunkReport",
+            ),
+            failing,
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.chunks).toHaveLength(1);
+    expect(normalized.chunks[0]).toMatchObject({
+      handler: "zip",
+      extraction_failed: true,
+    });
+    expect(normalized.coverage).toBe("partial");
+  });
+});
+
+describe("firmware task dependency failures", () => {
+  it.each([{ dependencies: [] }, { dependencies: ["", ""] }])(
+    "retains unnamed dependency failures ($dependencies)",
+    ({ dependencies }) => {
+      const record = root();
+      const normalized = normalizeUnblobReport(
+        [
+          {
+            ...record,
+            reports: [
+              ...record.reports,
+              {
+                __typename__: "ExtractorDependencyNotFoundReport",
+                severity: "ERROR",
+                dependencies,
+              },
+            ],
+          },
+        ],
+        context,
+      );
+      expect(normalized.missing_dependencies).toEqual([
+        { input_path: "$input", dependencies: [] },
+      ]);
+      expect(normalized.diagnostics).toHaveLength(1);
+    },
+  );
+  it("retains named and unnamed task dependency reports together", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports,
+            {
+              __typename__: "ExtractorDependencyNotFoundReport",
+              severity: "ERROR",
+              dependencies: ["sasquatch"],
+            },
+            {
+              __typename__: "ExtractorDependencyNotFoundReport",
+              severity: "ERROR",
+              dependencies: [],
+            },
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.missing_dependencies).toEqual([
+      { input_path: "$input", dependencies: ["sasquatch"] },
+      { input_path: "$input", dependencies: [] },
+    ]);
+  });
+});
+
+describe("firmware chunk dependency failures", () => {
+  it("retains named and unnamed dependency reports on one chunk", () => {
+    const record = root();
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...record,
+          reports: [
+            ...record.reports.filter(
+              (item) => item.__typename__ !== "UnknownChunkReport",
+            ),
+            {
+              ...nestedDependencyChunk("gzip-id", 0),
+              extraction_reports: [
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: ["sasquatch"],
+                },
+                {
+                  __typename__: "ExtractorDependencyNotFoundReport",
+                  severity: "ERROR",
+                  dependencies: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      context,
+    );
+    expect(normalized.chunk_missing_dependencies).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "gzip-id",
+        dependencies: ["sasquatch"],
+      },
+      { input_path: "$input", provider_id: "gzip-id", dependencies: [] },
+    ]);
   });
   it("preserves unfamiliar report types as explicit diagnostics", () => {
     const record = root();
@@ -237,6 +664,77 @@ describe("Unblob task derivation identities", () => {
         report: multiFileReport,
       },
     ]);
+    expect(normalized.failed_extraction_stages).toEqual([
+      {
+        input_path: "$input",
+        provider_id: "multi-id",
+        handler: "multipart-firmware",
+        dependencies: ["sasquatch"],
+        kind: "missing-extractor-dependency",
+      },
+    ]);
+  });
+});
+
+describe("failed multi-file extraction stages", () => {
+  it("records a failed multi-file stage for a recovery row without chunks", () => {
+    const outputPath = `${context.outputRoot}/multi`;
+    const childTask = {
+      path: outputPath,
+      depth: 1,
+      blob_id: "multi-id",
+      is_multi_file: true,
+    };
+    const stageFailure = {
+      __typename__: "ExtractorExecutionErrorReport",
+      severity: "ERROR",
+      handler: "multipart-firmware",
+    };
+    const normalized = normalizeUnblobReport(
+      [
+        {
+          ...root(),
+          reports: root().reports.filter(
+            (item) => item.__typename__ !== "UnknownChunkReport",
+          ),
+          subtasks: [childTask],
+        },
+        {
+          task: childTask,
+          reports: [
+            {
+              __typename__: "StatReport",
+              path: outputPath,
+              size: 0,
+              is_dir: true,
+              is_file: false,
+              is_link: false,
+              link_target: null,
+            },
+            {
+              __typename__: "MultiFileReport",
+              id: "multi-id",
+              handler_name: "multipart-firmware",
+              name: "rootfs",
+              paths: [`${outputPath}/part-a`],
+              extraction_reports: [stageFailure],
+            },
+          ],
+          subtasks: [],
+        },
+      ],
+      context,
+    );
+    expect(normalized.failed_extraction_stages).toEqual([
+      {
+        input_path: "$output/multi",
+        provider_id: "multi-id",
+        handler: "multipart-firmware",
+        dependencies: [],
+        kind: "extractor-failure",
+      },
+    ]);
+    expect(normalized.missing_dependencies).toEqual([]);
   });
 });
 

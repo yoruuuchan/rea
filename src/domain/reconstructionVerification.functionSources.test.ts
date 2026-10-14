@@ -662,7 +662,7 @@ describe("function reconstruction admission controls", () => {
     ]);
   });
 
-  it("rejects selected-dimension citations outside comparison closure", () => {
+  it("rejects any comparison finding link outside the top-level closure", () => {
     const evidence = comparison(singular, {
       result: jsonValueSchema.parse({
         ...baselineResult,
@@ -677,7 +677,7 @@ describe("function reconstruction admission controls", () => {
       }),
     });
     expect(admittedVerification(evidence, [left, right, extra])).toThrow(
-      /dimension cites Evidence outside comparison closure/u,
+      /finding cites Evidence outside its top-level closure/u,
     );
   });
 });

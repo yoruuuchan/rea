@@ -380,3 +380,10 @@ const createFakeJdk = async (
   await chmod(java, 0o700);
   return javaHome;
 };
+
+it("tags unavailable diagnostics with the boundary failure kind", async () => {
+  const availability = await inspectJadxAvailability({});
+  expect(availability.status).toBe("unavailable");
+  if (availability.status !== "unavailable") throw new Error("unreachable");
+  expect(availability.diagnostics["failure_kind"]).toBe("jar");
+});

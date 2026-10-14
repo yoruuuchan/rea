@@ -1,9 +1,25 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import { expect } from "vitest";
 import { z } from "zod";
 
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import type { TestCli } from "./cliFixture.js";
+
+const execute = promisify(execFile);
+
+export const runNodeJsonControl = async (
+  root: string,
+  filename: string,
+): Promise<unknown> => {
+  const { stdout } = await execute(process.execPath, [filename], {
+    cwd: root,
+    timeout: 5_000,
+  });
+  return JSON.parse(stdout) as unknown;
+};
 
 /** Analyze a directory through a public adapter and validate its result contract. */
 export const analyzeJavaScriptDirectory = async (

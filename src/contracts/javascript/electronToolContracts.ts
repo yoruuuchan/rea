@@ -1,6 +1,8 @@
 import type { ToolContract } from "../toolContractTypes.js";
 import { toolContractMetadata } from "../toolEffects.js";
+import { electronFuseOutputSchemas } from "../toolOutputSchemaGroups.js";
 import { evidenceResultOf } from "../toolOutputSchemaPrimitives.js";
+import { inspectElectronFusesInputSchema } from "../../domain/electron/electronFuses.js";
 import {
   electronPageInspectionSchema,
   electronTargetListSchema,
@@ -145,6 +147,21 @@ export const ELECTRON_TOOL_CONTRACTS = [
     outputSchema: evidenceResultOf(electronActiveObservationResultSchema),
     examples: [
       { title: "Exercise an owned Electron application", input: activeExample },
+    ],
+  },
+  {
+    name: "inspect_electron_fuses",
+    ...toolContractMetadata("inspect_electron_fuses"),
+    kind: "artifact-provider",
+    description:
+      "Inspect packaged Electron fuse bytes in one local macOS app bundle, Electron Framework binary, Windows PE executable, or Linux ELF executable. Returns the artifact digest, per-slice wire version, fuse index, version-1 name, state, and raw byte, plus derived implications for Inspector flags, ELECTRON_RUN_AS_NODE, embedded ASAR integrity, and app.asar-only loading. A missing sentinel is unknown fuse state. Reads artifact bytes only and does not modify the selected file or open a runtime target.",
+    inputSchema: inspectElectronFusesInputSchema,
+    outputSchema: electronFuseOutputSchemas.inspect_electron_fuses,
+    examples: [
+      {
+        title: "Read packaged Electron fuse state",
+        input: { path: "/Applications/Example.app" },
+      },
     ],
   },
 ] as const satisfies readonly ToolContract[];

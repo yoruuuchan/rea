@@ -243,9 +243,9 @@ export class CdpConnection {
     const hasResult = "result" in message;
     const hasError = "error" in message;
     if (
-      ("sessionId" in message &&
-        (typeof message.sessionId !== "string" ||
-          message.sessionId !== pending.sessionId)) ||
+      (pending.sessionId === undefined
+        ? "sessionId" in message
+        : message.sessionId !== pending.sessionId) ||
       hasResult === hasError
     ) {
       this.#failPending("protocol_error");

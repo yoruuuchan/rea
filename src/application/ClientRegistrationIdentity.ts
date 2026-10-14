@@ -76,18 +76,24 @@ const unwrapCmdCommand = (command: readonly string[]): readonly string[] => {
   return [];
 };
 
-const packageRunnerReference = (
+/** Preserve the package argument from a supported package-runner command. */
+export const clientRegistrationPackageReference = (
   command: readonly string[],
 ): string | undefined => {
+  const arguments_ = unwrapCmdCommand(command);
   if (
-    command.length === 4 &&
-    command[0] === "npx" &&
-    command[1] === "-y" &&
-    command[3] === "mcp"
+    arguments_.length === 4 &&
+    arguments_[0] === "npx" &&
+    arguments_[1] === "-y" &&
+    arguments_[3] === "mcp"
   )
-    return command[2];
-  if (command.length === 3 && command[0] === "bunx" && command[2] === "mcp")
-    return command[1];
+    return arguments_[2];
+  if (
+    arguments_.length === 3 &&
+    arguments_[0] === "bunx" &&
+    arguments_[2] === "mcp"
+  )
+    return arguments_[1];
   return undefined;
 };
 
@@ -129,7 +135,7 @@ export const isOwnedClientRegistrationCommand = (
       return true;
   }
 
-  const packageReference = packageRunnerReference(unwrapCmdCommand(command));
+  const packageReference = clientRegistrationPackageReference(command);
   return (
     packageReference !== undefined && isOwnedPackageReference(packageReference)
   );

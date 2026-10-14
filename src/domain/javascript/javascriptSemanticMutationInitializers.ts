@@ -73,6 +73,94 @@ const positionPrecedes = (
       left.declaratorIndex >= 0 &&
       left.declaratorIndex < right.declaratorIndex));
 
+/** Order effects only in a non-repeating top-level activation. */
+export const semanticTopLevelEffectFollowsCapture = (
+  capture: t.Node,
+  effect: t.Node | undefined,
+  parents: WeakMap<t.Node, t.Node>,
+): boolean => {
+  const position = (node: t.Node | undefined): StatementPosition | null => {
+    let selected: StatementPosition | null = null;
+    let declarator: t.VariableDeclarator | undefined;
+    let child: t.Node | undefined;
+    while (node !== undefined) {
+      if (t.isFunction(node) || t.isLoop(node)) return null;
+      if (
+        (t.isClassProperty(node) ||
+          t.isClassPrivateProperty(node) ||
+          t.isClassAccessorProperty(node)) &&
+        !node.static &&
+        node.value === child
+      )
+        return null;
+      if (t.isVariableDeclarator(node)) declarator = node;
+      if (selected === null && t.isStatement(node))
+        selected = statementPosition(node, parents, declarator);
+      if (t.isProgram(node)) return selected;
+      child = node;
+      node = parents.get(node);
+    }
+    return null;
+  };
+  const before = position(capture);
+  const after = position(effect);
+  if (before === null || after === null) return false;
+  if (positionPrecedes(before, after)) return true;
+  if (
+    before.body !== after.body ||
+    before.index !== after.index ||
+    before.declaratorIndex !== after.declaratorIndex
+  )
+    return false;
+  return expressionEvaluationPrecedes(capture, effect, parents);
+};
+
+/** Prove ordering only where JavaScript evaluates sibling expressions left-to-right. */
+const expressionEvaluationPrecedes = (
+  earlier: t.Node,
+  later: t.Node | undefined,
+  parents: WeakMap<t.Node, t.Node>,
+): boolean => {
+  if (later === undefined) return false;
+  const earlierAncestors = new Set<t.Node>();
+  let current: t.Node | undefined = earlier;
+  while (current !== undefined) {
+    earlierAncestors.add(current);
+    current = parents.get(current);
+  }
+  const laterPath: t.Node[] = [];
+  current = later;
+  while (current !== undefined && !earlierAncestors.has(current)) {
+    laterPath.push(current);
+    current = parents.get(current);
+  }
+  const common = current;
+  if (common === undefined || common === earlier || common === later)
+    return false;
+  let earlierChild: t.Node = earlier;
+  while (parents.get(earlierChild) !== common) {
+    const parent = parents.get(earlierChild);
+    if (parent === undefined) return false;
+    earlierChild = parent;
+  }
+  const laterChild = laterPath.at(-1);
+  if (laterChild === undefined) return false;
+  const orderedChildren = ((): readonly t.Node[] | null => {
+    if (t.isSequenceExpression(common)) return common.expressions;
+    if (t.isCallExpression(common) || t.isOptionalCallExpression(common))
+      return [common.callee, ...common.arguments];
+    if (t.isNewExpression(common)) return [common.callee, ...common.arguments];
+    if (t.isBinaryExpression(common) || t.isLogicalExpression(common))
+      return [common.left, common.right];
+    if (t.isConditionalExpression(common)) return [common.test];
+    return null;
+  })();
+  if (orderedChildren === null) return false;
+  const earlierIndex = orderedChildren.indexOf(earlierChild);
+  const laterIndex = orderedChildren.indexOf(laterChild);
+  return earlierIndex >= 0 && laterIndex > earlierIndex;
+};
+
 const computeDirectInitializerPosition = (
   node: t.Node,
   parents: WeakMap<t.Node, t.Node>,
@@ -211,12 +299,64 @@ export const semanticMutationInitializers = (
   parents: WeakMap<t.Node, t.Node>,
 ): Pick<
   JavaScriptSemanticBindingState,
-  "initializers" | "referenceInitializers"
+  "initializers" | "referenceInitializers" | "directOrigins"
 > => {
   const mutationPosition =
     directMutationPosition(mutation, parents) ??
     referenceInitializerPosition(mutation, parents);
-  return selectInitializers(binding, mutationPosition, parents);
+  if (mutationPosition === null) return binding;
+  const origins = [
+    ...binding.initializers.map((initializer) => ({
+      initializer,
+      position:
+        initializer.entryBody === undefined
+          ? directInitializerPosition(initializer.node, parents)
+          : {
+              body: initializer.entryBody.body,
+              index: -1,
+              declaratorIndex: -1,
+            },
+    })),
+    ...binding.referenceInitializers.map((initializer) => ({
+      initializer,
+      position: referenceInitializerPosition(initializer.node, parents),
+    })),
+  ];
+  if (
+    origins.some(
+      ({ position }) =>
+        position === null || !positionPrecedes(position, mutationPosition),
+    )
+  )
+    return binding;
+  const latest = origins.reduce<StatementPosition | null>(
+    (latest, { position }) =>
+      position !== null &&
+      (latest === null || positionPrecedes(latest, position))
+        ? position
+        : latest,
+    null,
+  );
+  const retained = new Set(
+    origins
+      .filter(
+        ({ position }) =>
+          position?.index === latest?.index &&
+          position?.declaratorIndex === latest?.declaratorIndex,
+      )
+      .map(({ initializer }) => initializer),
+  );
+  return {
+    // A proven earlier assignment replaces even an import-equals value. A
+    // capture before or inside an uncertain assignment retains the full binding.
+    directOrigins: origins.length === 0 ? binding.directOrigins : [],
+    initializers: binding.initializers.filter((initializer) =>
+      retained.has(initializer),
+    ),
+    referenceInitializers: binding.referenceInitializers.filter((initializer) =>
+      retained.has(initializer),
+    ),
+  };
 };
 
 /** Select a local alias at its read, before any later straight-line reassignment. */
@@ -309,6 +449,16 @@ const selectInitializers = (
       )
       .map(({ initializer }) => initializer),
   );
+  // Preserve the owner's identity when selection removes no facts. Consumers
+  // can then reuse the binding's dependency-aware provenance memo rather than
+  // treating every equivalent read as a new temporal snapshot.
+  if (
+    binding.initializers.every((initializer) => retained.has(initializer)) &&
+    binding.referenceInitializers.every((initializer) =>
+      retained.has(initializer),
+    )
+  )
+    return binding;
   return {
     initializers: binding.initializers.filter((initializer) =>
       retained.has(initializer),

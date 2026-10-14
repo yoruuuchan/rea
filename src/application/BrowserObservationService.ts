@@ -11,7 +11,10 @@ import type {
   CaptureWebScreenshotInput,
   CompareWebScreenshotsInput,
 } from "../domain/webScreenshot.js";
-import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisCapabilityUnavailableError,
+} from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { ExecutionOptions } from "./AnalysisProvider.js";
@@ -27,6 +30,8 @@ export const listBrowserTargets = async (
   const ready = requireBrowser(browser, "list_browser_targets");
   if (!ready.ok) return ready;
   const result = await ready.value.listTargets(input, options);
+  if (result.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("list_browser_targets"));
   return result.ok
     ? ok(
         createBrowserEvidence(
@@ -48,6 +53,8 @@ export const inspectWebPage = async (
   const ready = requireBrowser(browser, "inspect_web_page");
   if (!ready.ok) return ready;
   const result = await ready.value.inspectPage(input, options);
+  if (result.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("inspect_web_page"));
   return result.ok
     ? ok(
         createBrowserEvidence(
@@ -69,6 +76,8 @@ export const analyzeWebBundle = async (
   const ready = requireBrowser(browser, "analyze_web_bundle");
   if (!ready.ok) return ready;
   const analyzed = await ready.value.analyzeBundle(input, options);
+  if (analyzed.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("analyze_web_bundle"));
   if (!analyzed.ok) return analyzed;
   return ok(
     createBrowserEvidence(
@@ -89,6 +98,8 @@ export const observeWebSession = async (
   const ready = requireBrowser(browser, "observe_web_session");
   if (!ready.ok) return ready;
   const observed = await ready.value.observeSession(input, options);
+  if (observed.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("observe_web_session"));
   return observed.ok
     ? ok(
         createBrowserEvidence(
@@ -110,6 +121,8 @@ export const discoverWebMcpTools = async (
   const ready = requireBrowser(browser, "discover_webmcp_tools");
   if (!ready.ok) return ready;
   const discovered = await ready.value.discoverWebMcpTools(input, options);
+  if (discovered.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("discover_webmcp_tools"));
   return discovered.ok
     ? ok(
         createBrowserEvidence(
@@ -151,6 +164,8 @@ export const captureWebScreenshot = async (
   const ready = requireBrowser(browser, "capture_web_screenshot");
   if (!ready.ok) return ready;
   const captured = await ready.value.captureScreenshot(input, options);
+  if (captured.ok && options.signal?.aborted === true)
+    return err(new AnalysisCancelledError("capture_web_screenshot"));
   return captured.ok
     ? ok(
         createBrowserEvidence(

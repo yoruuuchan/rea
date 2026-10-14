@@ -24,9 +24,13 @@
 
 <code>npx rea-agents setup</code>
 
+</div>
+
 > [!IMPORTANT]
 > REA 官方來源： [morluto/rea](https://github.com/morluto/rea), [rea.tools](https://rea.tools/), [rea-agents](https://www.npmjs.com/package/rea-agents) (npm).
 > 請透過這些官方來源提供的安裝與發布連結取得 REA。相似的儲存庫名稱或複製的 README 不能證明下載內容來自官方。
+
+<div align="center">
 
 <br />
 
@@ -139,15 +143,15 @@ REA 需要 Node.js 22.x（>=22.19）、24.x（>=24.11）或 26+，以及 npm。�
 
 | 目標                  | REA 返回的內容                                                  | 要求與指南                                                                                                         |
 | --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 原生二進位檔案        | 偽程式碼、組合語言、字串、符號、呼叫和引用                      | Hopper、Ghidra 或 IDA；[原生分析](https://rea.tools/zh-TW/guides/native/)                                          |
+| 原生二進位檔案        | 偽程式碼、組合語言、字串、符號、呼叫和引用                      | Hopper、Ghidra 或 IDA；[原生分析](../native-investigation.md)                                                      |
 | 離線 ELF 佈局         | 節、段、原始符號/重定位資訊及靜態防護機制候選項                 | Linux x64 上由呼叫方提供的 pwntools；[二進位診斷](../binary-diagnostics.md)                                        |
 | Go 二進位檔案         | 內嵌編譯器版本、模組、替換項和建置設定                          | 內建靜態 ELF/PE/thin Mach-O 檢查；無需安裝 Go                                                                      |
 | WASM 工件             | 驗證、節、精確的匯入/匯出 WAT 形式及解碼後的 WAT                | 呼叫方提供的 WABT 1.0.42；`inspect_wasm_artifact`                                                                  |
 | EVM 位元組碼          | 分派選擇器、位元組偏移、推斷的參數和狀態可變性                  | Linux x64 上的本地原始位元組/十六進位輸入載體；[離線 EVM 指南](../evm-bytecode.md)                                 |
 | Rust binaries         | Embedded cargo-auditable dependency list                        | [Rust binaries](../rust-binaries.md)                                                                               |
 | 已記錄的 Linux 崩潰   | 原始 note 記錄、每個已記錄執行緒的暫存器/訊號及可選的對映候選項 | Linux x64 上由呼叫方提供的 pwntools；可選的 GDB/pwndbg；[已記錄崩潰](../recorded-crashes.md)                       |
-| JavaScript / Electron | 模組、匯入、source map、路由、IPC 和原生附加元件關係            | Node.js 和 npm；[應用分析](https://rea.tools/zh-TW/guides/javascript/)                                             |
-| 網站                  | 頁面結構、腳本、網路觀察結果和按請求獲取的螢幕擷取畫面          | Chrome 系瀏覽器；[瀏覽器分析](https://rea.tools/zh-TW/guides/browser/)                                             |
+| JavaScript / Electron | 模組、匯入、source map、路由、IPC 和原生附加元件關係            | Node.js 和 npm；[應用分析](../javascript-application-workflows.md)                                                 |
+| 網站                  | 頁面結構、腳本、網路觀察結果和按請求獲取的螢幕擷取畫面          | Chrome 系瀏覽器；[瀏覽器分析](../browser-observation.md)                                                           |
 | 已保存的網路擷取      | 請求、回應、可訪問的酬載和來源位置                              | HAR；原生 mitmproxy 擷取需要 Linux 上的 mitmdump；[擷取指南](../web-network-captures.md)                           |
 | 封包擷取              | 端點、DNS、TLS SNI、通訊協定分佈和 HTTP 請求                    | 呼叫端提供的 tshark 和 capinfos；[pcap 指南](../pcap-analysis.md)                                                  |
 | .NET 程式集           | 中繼資料、CIL 指令、聲明的原生依賴和建置對比                    | 靜態檢查；[托管程式碼指南](../managed-code-analysis.md)                                                            |
@@ -274,7 +278,7 @@ npx rea-agents@latest setup
 
 ## Star 歷史
 
-🎉 **GitHub Star 達到 170,000 個，感謝大家！**
+🎉 **GitHub Star 達到 200,000 個，感謝大家！**
 
 感謝每一位使用 REA、報告錯誤、提出功能需求、測試建置和貢獻修復的朋友。
 

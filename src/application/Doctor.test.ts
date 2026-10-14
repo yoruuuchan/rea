@@ -588,6 +588,9 @@ describe("doctor Linux and Hopper discovery", () => {
       result.checks.find(({ name }) => name === "hopper-version")?.remediation,
     ).toContain("Unset or update HOPPER_LAUNCHER_PATH");
   });
+});
+
+describe("doctor installed Hopper discovery", () => {
   it("detects a Homebrew cask installed outside /Applications", async () => {
     const path =
       "/opt/homebrew/Caskroom/hopper/Hopper Disassembler.app/Contents/MacOS/hopper";
@@ -612,7 +615,9 @@ describe("doctor Linux and Hopper discovery", () => {
     );
     expect(result.hopperPath).toBe(path);
   });
+});
 
+describe("doctor target admission on Linux", () => {
   it("uses shared app target validation when a target is supplied", async () => {
     const result = await runDoctor(
       "/Applications/Notes.app",
@@ -650,6 +655,30 @@ describe("doctor Linux and Hopper discovery", () => {
       }),
     );
   });
+});
+
+describe("doctor standard Linux Hopper paths", () => {
+  it.each(["/opt/hopper-v4/bin/hopper", "/usr/bin/hopper"])(
+    "detects Hopper at the standard path %s",
+    async (path) => {
+      const result = await runDoctor(
+        undefined,
+        host({
+          platform: "linux",
+          macosVersion: () => Promise.resolve(undefined),
+          linuxDistribution: () =>
+            Promise.resolve({
+              id: "ubuntu",
+              versionId: "24.04",
+              packageFamily: "deb",
+              hopperSetupSupported: true,
+            }),
+          executable: (candidate) => Promise.resolve(candidate === path),
+        }),
+      );
+      expect(result.hopperPath).toBe(path);
+    },
+  );
 });
 
 describe("doctor target admission diagnostics", () => {

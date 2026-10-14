@@ -230,6 +230,7 @@ export class BrowserScenarioSecrets {
   private readonly urlReplacements: readonly SecretReplacement[];
   private readonly textReplacements: readonly SecretReplacement[];
   private readonly textNeedles: readonly SecretNeedle[];
+  private readonly redactionCostPerCharacter: number;
 
   private constructor(private readonly values: ReadonlyMap<string, string>) {
     this.urlPatterns = declaredPatterns(values, "url");
@@ -237,6 +238,19 @@ export class BrowserScenarioSecrets {
     this.urlReplacements = secretReplacements(values, "url");
     this.textReplacements = secretReplacements(values, "text");
     this.textNeedles = secretNeedles(this.textReplacements, this.textPatterns);
+    this.redactionCostPerCharacter = 8;
+    for (const [replacements, patterns] of [
+      [this.textReplacements, this.textPatterns],
+      [this.urlReplacements, this.urlPatterns],
+    ] as const)
+      for (const replacement of replacements)
+        this.redactionCostPerCharacter = Math.max(
+          this.redactionCostPerCharacter,
+          8 +
+            (Buffer.byteLength(redactionMarker(replacement.id, patterns)) * 8 +
+              128) /
+              replacement.text.length,
+        );
   }
 
   static resolve(
@@ -269,6 +283,14 @@ export class BrowserScenarioSecrets {
     for (const { name, value } of destination.query)
       url.searchParams.append(name, this.value(value));
     return url.href;
+  }
+
+  /** Conservative preflight for output expansion and per-match part arrays.
+   * Callers measuring untrusted observations must reserve this cost before
+   * invoking redaction. A one-byte secret can otherwise expand every byte.
+   */
+  redactionAllocationCost(length: number): number {
+    return Math.ceil(length * this.redactionCostPerCharacter);
   }
 
   redact(value: string): string {

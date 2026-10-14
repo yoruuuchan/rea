@@ -1,5 +1,8 @@
 import { isMap, isSeq, type Node, type YAMLMap } from "yaml";
-import { parseEnvironment } from "../config/environment.js";
+import {
+  parseEnvironment,
+  parseEnvironmentValues,
+} from "../config/environment.js";
 import { ConfigurationError } from "../domain/configurationErrors.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { ClientConfigurationDocument } from "./ClientConfigurationDocument.js";
@@ -181,6 +184,7 @@ export class DshCordisDocument {
   /** Validate literals without treating expression source as an environment value. */
   environment(
     overrides: Readonly<Record<string, string>> = {},
+    validation: "fragment" | "effective" = "effective",
   ): Result<Readonly<Record<string, string>>, ConfigurationError> {
     const config = this.#field("config");
     if (config instanceof CordisExpression)
@@ -215,8 +219,12 @@ export class DshCordisDocument {
         new ConfigurationError("Cordis server environment must be a mapping"),
       );
     const literals: Record<string, string> = {};
+    const unresolvedSettings = new Set<string>();
     for (const [key, value] of Object.entries(raw ?? {})) {
-      if (value instanceof CordisExpression) continue;
+      if (value instanceof CordisExpression) {
+        if (overrides[key] === undefined) unresolvedSettings.add(key);
+        continue;
+      }
       if (typeof value !== "string")
         return err(
           new ConfigurationError("Invalid Cordis server environment", {
@@ -232,7 +240,10 @@ export class DshCordisDocument {
       literals[key] = value;
     }
     const environment = { ...literals, ...overrides };
-    const validated = parseEnvironment(environment);
+    const validated =
+      validation === "fragment"
+        ? parseEnvironmentValues(environment)
+        : parseEnvironment(environment, unresolvedSettings);
     return validated.ok ? ok(environment) : validated;
   }
 

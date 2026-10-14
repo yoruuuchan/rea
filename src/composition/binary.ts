@@ -41,3 +41,17 @@ export const createManagedBinarySession = (): BinarySession =>
   composeBinarySession(new AnalysisProviderRegistry([]), [
     new ManagedStaticProvider(),
   ]);
+
+/** Compose the artifact operations without candidates for deep analysis engines. */
+export const createArtifactBinarySession = (
+  selectedEnvironment: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<BinarySession> =>
+  import("../artifacts/ArtifactProvider.js").then(({ ArtifactProvider }) =>
+    composeBinarySession(new AnalysisProviderRegistry([]), [
+      new ArtifactProvider(
+        snapshotEnvironment(selectedEnvironment, platform),
+        platform,
+      ),
+    ]),
+  );

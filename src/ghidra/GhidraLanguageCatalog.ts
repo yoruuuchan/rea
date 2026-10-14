@@ -1,9 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { DOMParser, onWarningStopParsing } from "@xmldom/xmldom";
 
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import { ConfigurationError } from "../domain/configurationErrors.js";
+import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 
 /** One language definition and the compiler specs it declares. */
 export interface GhidraLanguageDefinition {
@@ -15,6 +18,62 @@ export interface GhidraLanguageDefinition {
 const MAX_LDEFS_BYTES = 4 * 1024 * 1024;
 // Processor modules ship under Processors; installed extensions may add more.
 const LANGUAGE_ROOTS = ["Ghidra/Processors", "Ghidra/Extensions"] as const;
+
+interface RetainedLanguageFile {
+  readonly path: string;
+  readonly owner: OwnedFileHandle<FileHandle>;
+}
+
+/** Language definition handles whose close is unconfirmed but retryable. */
+const pendingLanguageFileCleanup = new Set<RetainedLanguageFile>();
+
+/**
+ * Cleanup of one or more language definition handles is unconfirmed. Any
+ * read failure that preceded it is kept as the primary failure.
+ */
+export class GhidraLanguageCatalogCleanupError extends Error {
+  constructor(
+    readonly paths: readonly string[],
+    readonly causes: readonly unknown[],
+    readonly readFailure?: unknown,
+  ) {
+    super(
+      `Language definition cleanup is unconfirmed: ${paths.join(", ")}`,
+      readFailure === undefined ? undefined : { cause: readFailure },
+    );
+  }
+}
+
+/** Close one owner; retain it only while a later close can still succeed. */
+const closeLanguageFile = async (
+  file: RetainedLanguageFile,
+): Promise<unknown> => {
+  try {
+    await file.owner.close();
+    pendingLanguageFileCleanup.delete(file);
+    return undefined;
+  } catch (cause: unknown) {
+    // Descriptor invalidation does not prove that this owner confirmed close.
+    // Keep even sticky failures in the lifecycle scope so later reads surface
+    // the unresolved cleanup instead of silently abandoning ownership.
+    pendingLanguageFileCleanup.add(file);
+    return cause;
+  }
+};
+
+/** Retry every retained owner before reporting the failures together. */
+const retryLanguageFileCleanup = async (): Promise<void> => {
+  const failed: { readonly path: string; readonly cause: unknown }[] = [];
+  for (const file of pendingLanguageFileCleanup) {
+    const cause = await closeLanguageFile(file);
+    if (cause !== undefined) failed.push({ path: file.path, cause });
+  }
+  if (failed.length > 0)
+    throw new GhidraLanguageCatalogCleanupError(
+      failed.map(({ path }) => path),
+      failed.map(({ cause }) => cause),
+    );
+};
 
 /** Parse the `<language>` elements of one `.ldefs` document. */
 export const parseGhidraLanguageDefinitions = (
@@ -59,10 +118,40 @@ const languageDirectories = async (installDir: string): Promise<string[]> => {
   return directories;
 };
 
+/** Read at most the catalog limit; undefined marks an oversized file. */
+const readLanguageDefinitionFile = async (
+  path: string,
+): Promise<Buffer | undefined> => {
+  await retryLanguageFileCleanup();
+  const file = { path, owner: new OwnedFileHandle(await open(path, "r")) };
+  let read:
+    | { readonly ok: true; readonly bytes: Buffer | undefined }
+    | { readonly ok: false; readonly cause: unknown };
+  try {
+    read = {
+      ok: true,
+      bytes: await readBoundedFileBytes(file.owner.handle, MAX_LDEFS_BYTES),
+    };
+  } catch (cause: unknown) {
+    read = { ok: false, cause };
+  }
+  const cleanup = await closeLanguageFile(file);
+  if (cleanup !== undefined)
+    throw new GhidraLanguageCatalogCleanupError(
+      [path],
+      [cleanup],
+      read.ok ? undefined : read.cause,
+    );
+  if (!read.ok) throw read.cause;
+  return read.bytes;
+};
+
 /** Read every language definition shipped by one Ghidra installation. */
 export const readGhidraLanguageCatalog = async (
   installDir: string,
 ): Promise<readonly GhidraLanguageDefinition[]> => {
+  // Surface retained cleanup even when this catalog has no definitions to read.
+  await retryLanguageFileCleanup();
   const definitions: GhidraLanguageDefinition[] = [];
   for (const directory of await languageDirectories(installDir)) {
     let entries: string[];
@@ -73,8 +162,8 @@ export const readGhidraLanguageCatalog = async (
     }
     for (const entry of entries.sort()) {
       if (!entry.endsWith(".ldefs")) continue;
-      const bytes = await readFile(join(directory, entry));
-      if (bytes.length > MAX_LDEFS_BYTES) continue;
+      const bytes = await readLanguageDefinitionFile(join(directory, entry));
+      if (bytes === undefined) continue;
       // XML 1.0 section 4.3.3: a leading UTF-8 BOM is an encoding signature,
       // not document content; TextDecoder consumes it, Buffer#toString does not.
       definitions.push(

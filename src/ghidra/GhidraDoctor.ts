@@ -2,10 +2,7 @@ import type {
   DoctorProviderCheck,
   DoctorProviderInspection,
 } from "../application/Doctor.js";
-import {
-  hasWindowsNativeAuthority,
-  windowsNativeAuthorityUnavailableReason,
-} from "../process/WindowsAuthority.js";
+import { inspectWindowsNativeReadiness } from "../process/WindowsAuthority.js";
 import {
   inspectGhidraInstallation,
   type GhidraInstallationCheck,
@@ -16,10 +13,11 @@ import {
 export const projectGhidraDoctorInspection = (
   inspection: GhidraInstallationInspection,
 ): DoctorProviderInspection => {
-  const windowsAuthorityUnavailable =
-    inspection.status === "available" &&
-    inspection.platform === "win32" &&
-    !hasWindowsNativeAuthority(inspection.platform);
+  const readiness =
+    inspection.status === "available" && inspection.platform === "win32"
+      ? inspectWindowsNativeReadiness(inspection.platform)
+      : undefined;
+  const windowsAuthorityUnavailable = readiness?.available === false;
   return {
     id: "ghidra",
     configured: inspection.installDir !== null,
@@ -37,19 +35,22 @@ export const projectGhidraDoctorInspection = (
       ...selectedChecks(inspection).map((check) =>
         projectCheck(check, inspection.installDir !== null),
       ),
-      ...(inspection.status === "available" && inspection.platform === "win32"
+      ...(readiness !== undefined
         ? [
             {
               name: "native_authority",
               ok: !windowsAuthorityUnavailable,
-              code: windowsAuthorityUnavailable ? "unsupported_host" : null,
-              detail: windowsAuthorityUnavailable
-                ? windowsNativeAuthorityUnavailableReason(inspection.platform)
+              code: !readiness.available ? readiness.code : null,
+              detail: !readiness.available
+                ? readiness.reason
                 : "Verified Windows native Job Object, private DACL, and reparse-safe handle controls; local NTFS only.",
-              remediation: windowsAuthorityUnavailable
-                ? "Use the matching Windows x64 REA package with its bundled native addon and a writable local NTFS temporary directory. The native failure above identifies the failed constraint; Ghidra installation or registration changes cannot enable a missing native backend."
-                : null,
-              classification: "unsupported_host" as const,
+              remediation: !readiness.available ? readiness.remediation : null,
+              classification:
+                !readiness.available && readiness.code === "runtime_unavailable"
+                  ? ("runtime_failure" as const)
+                  : !readiness.available && readiness.code === "runtime_missing"
+                    ? ("missing_dependency" as const)
+                    : ("unsupported_host" as const),
             },
           ]
         : []),

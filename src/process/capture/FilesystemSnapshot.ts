@@ -74,12 +74,14 @@ export const hashFile = async (
   signal?: AbortSignal,
 ): Promise<FileHashOutcome> => {
   signal?.throwIfAborted();
+  const noFollowAvailable =
+    typeof fsConstants.O_NOFOLLOW === "number" && fsConstants.O_NOFOLLOW !== 0;
   let handle: FileHandle;
   try {
     handle = await open(
       path,
       fsConstants.O_RDONLY |
-        (fsConstants.O_NOFOLLOW ?? 0) |
+        (noFollowAvailable ? fsConstants.O_NOFOLLOW : 0) |
         (fsConstants.O_NONBLOCK ?? 0),
     );
   } catch (cause: unknown) {
@@ -94,6 +96,18 @@ export const hashFile = async (
   }
   try {
     signal?.throwIfAborted();
+    // On hosts without O_NOFOLLOW, compare the leaf's identity with the
+    // captured regular file. Ancestor aliases do not change file identity.
+    if (!noFollowAvailable) {
+      const named = await lstat(path);
+      signal?.throwIfAborted();
+      if (!hasSameFileState(expected, named))
+        return {
+          state: "omitted",
+          reason: "file_changed_or_short_read",
+          system_code: null,
+        };
+    }
     const stats = await handle.stat();
     signal?.throwIfAborted();
     if (!hasSameFileState(expected, stats) || stats.size > maxBytes)
@@ -124,7 +138,13 @@ export const hashFile = async (
     }
     const after = await handle.stat();
     signal?.throwIfAborted();
-    if (!hasSameFileState(stats, after))
+    let unchanged = hasSameFileState(stats, after);
+    if (unchanged && !noFollowAvailable) {
+      const namedAfter = await lstat(path);
+      signal?.throwIfAborted();
+      unchanged = hasSameFileState(after, namedAfter);
+    }
+    if (!unchanged)
       return {
         state: "omitted",
         reason: "file_changed_or_short_read",
@@ -158,6 +178,7 @@ export const snapshotRoots = async (
   const enumerationReasons = new Set<
     FilesystemCoverage["enumeration_reasons"][number]
   >();
+  const enumerationOmissions: FilesystemCoverage["enumeration_omissions"] = [];
   const hashOmissions: FilesystemCoverage["hash_omissions"] = [];
   const visit = async (
     root: string,
@@ -252,7 +273,23 @@ export const snapshotRoots = async (
     let complete = true;
     const remainingEntries =
       scenario.limits.files - entries.length - pendingNames;
-    const directory = await opendir(path);
+    let directory;
+    try {
+      directory = await opendir(path);
+    } catch (cause: unknown) {
+      signal?.throwIfAborted();
+      const systemCode = fileUnavailableSystemCode(cause);
+      if (systemCode === undefined) throw cause;
+      truncated = true;
+      complete = false;
+      enumerationReasons.add("directory_unavailable");
+      enumerationOmissions.push({
+        path: `${rootAlias}:${relativePath}`,
+        reason: "directory_unavailable",
+        system_code: systemCode,
+      });
+      return false;
+    }
     for await (const child of directory) {
       signal?.throwIfAborted();
       if (
@@ -305,6 +342,7 @@ export const snapshotRoots = async (
       enumeration_truncated:
         completeRoots.length !== scenario.filesystem_observation_paths.length,
       enumeration_reasons: [...enumerationReasons],
+      enumeration_omissions: enumerationOmissions,
       hash_budget_bytes: scenario.limits.file_bytes,
       hashed_bytes: scenario.limits.file_bytes - remainingBytes,
       hash_omissions: hashOmissions,

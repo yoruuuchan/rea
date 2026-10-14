@@ -30,6 +30,7 @@ interface DirectoryTraversalOptions extends ArtifactTraversalOptions {
 export class DirectoryArtifactReader implements ArtifactReader {
   readonly format = "directory" as const;
   #rootPromise: Promise<string> | undefined;
+  #rootIdentity: { readonly dev: bigint; readonly ino: bigint } | undefined;
   readonly #rootPath: string;
   readonly #directories = new Set<OwnedDirectoryHandle>();
   readonly #files = new Map<OwnedFileHandle, string>();
@@ -52,7 +53,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
       const directory = pending.pop();
       if (directory === undefined) break;
       await withDirectoryIoContext("inspect directory", directory, () =>
-        assertContainedDirectory(root, directory),
+        assertContainedDirectory(root, directory, this.#rootIdentity),
       );
       for await (const entry of this.#readDirectory(
         directory,
@@ -62,21 +63,26 @@ export class DirectoryArtifactReader implements ArtifactReader {
       ))
         yield entry;
       await withDirectoryIoContext("inspect directory", directory, () =>
-        assertContainedDirectory(root, directory),
+        assertContainedDirectory(root, directory, this.#rootIdentity),
       );
     }
   }
 
   async #resolveRoot(): Promise<string> {
-    return (this.#rootPromise ??= realpath(this.#rootPath)).catch(
-      (cause: unknown) => {
-        throw directoryIoFailure(
-          "resolve artifact root",
-          this.#rootPath,
-          cause,
+    return (this.#rootPromise ??= (async () => {
+      const root = await realpath(this.#rootPath);
+      const metadata = await lstat(root, { bigint: true });
+      if (metadata.isSymbolicLink() || !metadata.isDirectory())
+        throw new ArtifactReaderFailure(
+          "path",
+          "Artifact root changed during traversal",
         );
-      },
-    );
+      this.#rootIdentity = { dev: metadata.dev, ino: metadata.ino };
+      return root;
+    })().catch((cause: unknown) => {
+      if (cause instanceof ArtifactReaderFailure) throw cause;
+      throw directoryIoFailure("resolve artifact root", this.#rootPath, cause);
+    }));
   }
 
   async *#readDirectory(
@@ -100,6 +106,9 @@ export class DirectoryArtifactReader implements ArtifactReader {
     };
     try {
       for (;;) {
+        await withDirectoryIoContext("inspect directory", directory, () =>
+          assertContainedDirectory(root, directory, this.#rootIdentity),
+        );
         const child = await handle.handle.read();
         if (child === null) break;
         abortIfNeeded(signal);
@@ -440,11 +449,16 @@ const abortIfNeeded = (signal?: AbortSignal): void => {
 const assertContainedDirectory = async (
   root: string,
   directory: string,
+  rootIdentity: { readonly dev: bigint; readonly ino: bigint } | undefined,
 ): Promise<void> => {
   const canonical = await realpath(directory);
   const fromRoot = relative(root, canonical);
   const metadata = await lstat(directory);
+  const currentRoot = await lstat(root, { bigint: true });
   if (
+    rootIdentity === undefined ||
+    currentRoot.dev !== rootIdentity.dev ||
+    currentRoot.ino !== rootIdentity.ino ||
     metadata.isSymbolicLink() ||
     !metadata.isDirectory() ||
     fromRoot === ".." ||

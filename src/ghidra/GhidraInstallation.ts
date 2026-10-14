@@ -8,9 +8,10 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   statSync,
 } from "node:fs";
-import { posix, win32 } from "node:path";
+import { delimiter as pathDelimiter, dirname, posix, win32 } from "node:path";
 
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
 import {
@@ -252,7 +253,9 @@ export interface GhidraJavaObservation {
   readonly version: string;
   readonly major: number;
   readonly home: string;
-  readonly bits: number;
+  readonly bits: number | null;
+  /** Present when Java reported a bitness value that could not be parsed exactly. */
+  readonly unparsedBits?: string;
   readonly runtime: "jdk" | "jre";
   readonly vmName?: string;
   /**
@@ -293,6 +296,11 @@ export interface GhidraInstallationHost {
     command: string,
     environment: NodeJS.ProcessEnv,
   ): GhidraJavaObservation | undefined;
+  /** Resolve a PATH launcher to a validated installation without executing it. */
+  discoverInstallDirOnPath?(
+    environment: Readonly<NodeJS.ProcessEnv>,
+    platform: NodeJS.Platform,
+  ): string | undefined;
 }
 
 interface GhidraInstallationCoordinates {
@@ -403,7 +411,12 @@ const installationCoordinates = (
   host: GhidraInstallationHost,
 ): GhidraInstallationCoordinates => {
   const path = platform === "win32" ? win32 : posix;
-  const installDir = options.installDir ?? null;
+  // An explicit setting remains authoritative even when malformed or stale;
+  // automatic discovery is only a fallback when the caller supplied none.
+  const installDir =
+    options.installDir ??
+    host.discoverInstallDirOnPath?.(options.environment, platform) ??
+    null;
   const applicationPropertiesPath =
     installDir === null
       ? null
@@ -803,12 +816,23 @@ const javaCheck = (
     ghidraJavaMajorAccepted(observation.major, requirement) &&
     observation.bits === 64 &&
     observation.runtime === "jdk";
+  const bitness =
+    observation === undefined
+      ? undefined
+      : observation.bits === null
+        ? `bitness unknown${observation.unparsedBits === undefined ? "" : ` (sun.arch.data.model = ${JSON.stringify(observation.unparsedBits)})`}`
+        : `${String(observation.bits)}-bit`;
+  const knownMismatch =
+    observation !== undefined &&
+    (!ghidraJavaMajorAccepted(observation.major, requirement) ||
+      (observation.bits !== null && observation.bits !== 64) ||
+      observation.runtime !== "jdk");
   const detail =
     observation === undefined
       ? requirement.unresolved === null
         ? command
         : `${command}; ${requirement.unresolved}`
-      : `${observation.version}; ${String(observation.bits)}-bit; ${observation.runtime === "jdk" ? "JDK" : "runtime only"}; ${observation.home}; accepted ${range}`;
+      : `${observation.version}; ${bitness}; ${observation.runtime === "jdk" ? "JDK" : "runtime only"}; ${observation.home}; accepted ${range}`;
   return installationCheck({
     name: "java",
     passed: supported,
@@ -817,7 +841,9 @@ const javaCheck = (
         ? "version_unresolved"
         : observation === undefined
           ? "runtime_missing"
-          : "unsupported_version",
+          : knownMismatch
+            ? "unsupported_version"
+            : "version_unresolved",
     detail,
     remediation: javaRemediation(requirement, configuredHome, range),
   });
@@ -905,11 +931,22 @@ const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
     const vmName = javaProperty(output, "java.vm.name");
     const osArch = javaProperty(output, "os.arch");
     const osName = javaProperty(output, "os.name");
-    const bits = Number.parseInt(
-      javaProperty(output, "sun.arch.data.model") ?? "0",
-      10,
-    );
-    if (version === null || home === null) return undefined;
+    const reportedBits = javaProperty(output, "sun.arch.data.model");
+    const parsedBits =
+      reportedBits !== null && /^\d+$/.test(reportedBits)
+        ? Number(reportedBits)
+        : null;
+    const bits =
+      parsedBits !== null && Number.isSafeInteger(parsedBits)
+        ? parsedBits
+        : null;
+    if (
+      version === null ||
+      version.length === 0 ||
+      home === null ||
+      home.length === 0
+    )
+      return undefined;
     return {
       version,
       major: javaMajor(version),
@@ -918,6 +955,9 @@ const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
       ...(osArch === null ? {} : { osArch }),
       ...(osName === null ? {} : { osName }),
       bits,
+      ...(reportedBits === null || bits !== null
+        ? {}
+        : { unparsedBits: reportedBits }),
       runtime: executablePath(
         (process.platform === "win32" ? win32 : posix).join(
           home,
@@ -929,12 +969,56 @@ const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
         : "jre",
     };
   },
+  discoverInstallDirOnPath: discoverGhidraInstallationOnPath,
 });
+
+/** Find a PATH launcher whose real target is inside a complete Ghidra tree. */
+export const discoverGhidraInstallationOnPath = (
+  environment: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform,
+): string | undefined => {
+  if (platform !== process.platform) return undefined;
+  const path = platform === "win32" ? win32 : posix;
+  const pathValue = environment.PATH;
+  if (pathValue === undefined || pathValue.length === 0) return undefined;
+  const launchers =
+    platform === "win32"
+      ? ["ghidra.bat", "ghidraRun.bat", "ghidra.exe", "ghidraRun.exe"]
+      : ["ghidra", "ghidraRun"];
+  for (const directory of pathValue.split(pathDelimiter)) {
+    if (directory.length === 0) continue;
+    for (const launcher of launchers) {
+      let resolved: string;
+      try {
+        const candidate = path.resolve(directory, launcher);
+        if (!executablePath(candidate)) continue;
+        resolved = realpathSync(candidate);
+      } catch (cause: unknown) {
+        void cause;
+        continue;
+      }
+      const root = dirname(resolved);
+      const properties = path.join(root, "Ghidra", "application.properties");
+      const headless = path.join(
+        root,
+        "support",
+        platform === "win32" ? "analyzeHeadless.bat" : "analyzeHeadless",
+      );
+      try {
+        if (statSync(properties).isFile() && executablePath(headless))
+          return root;
+      } catch (cause: unknown) {
+        void cause;
+      }
+    }
+  }
+  return undefined;
+};
 
 const executablePath = (path: string): boolean => {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return statSync(path).isFile();
   } catch (cause: unknown) {
     // best-effort cleanup: optional executable probing; failure means missing.
     void cause;
@@ -944,7 +1028,7 @@ const executablePath = (path: string): boolean => {
 
 const javaProperty = (output: string, name: string): string | null =>
   new RegExp(
-    `^\\s*${name.replaceAll(".", "\\.")}\\s*=\\s*(.+?)\\s*$`,
+    `^[ \\t]*${name.replaceAll(".", "\\.")}[ \\t]*=[ \\t]*([^\\r\\n]*?)[ \\t]*\\r?$`,
     "mu",
   ).exec(output)?.[1] ?? null;
 

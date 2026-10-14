@@ -192,6 +192,25 @@ export const parsePackageListOutput = (
   return { packages, unparsedLines };
 };
 
+/** Quote raw device paths for prose without allowing bidi or invisible text. */
+export const displayDevicePath = (devicePath: string): string => {
+  let excerpt = "";
+  let count = 0;
+  for (const character of devicePath) {
+    if (count === 160) break;
+    excerpt += character;
+    count += 1;
+  }
+  const quoted = JSON.stringify(excerpt).replace(
+    /[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}\u2800]/gu,
+    (character) =>
+      character === " "
+        ? character
+        : `\\u{${character.codePointAt(0)!.toString(16).toUpperCase()}}`,
+  );
+  return excerpt.length === devicePath.length ? quoted : `${quoted} (excerpt)`;
+};
+
 /** One APK of an installed package exactly as `pm path` reports it. */
 export interface AdbPackagePathEntry {
   readonly device_path: string;

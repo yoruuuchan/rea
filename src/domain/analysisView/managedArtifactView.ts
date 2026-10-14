@@ -1,12 +1,12 @@
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
 import {
   managedArtifactInspectionSchema,
   managedMemberInspectionSchema,
 } from "../managed/managedArtifact.js";
 import { err, ok, type Result } from "../result.js";
+import { parseAnalysisViewResult } from "./analysisViewParent.js";
 import {
   analysisViewInputError,
   type AnalysisViewParent,
@@ -67,22 +67,12 @@ export const projectManagedArtifactView = (
         },
       ]),
     );
-  const parsed = managedArtifactInspectionSchema.safeParse(
-    parent.normalizedResult,
+  const parsed = parseAnalysisViewResult(
+    managedArtifactInspectionSchema,
+    parent,
   );
-  if (!parsed.success)
-    return err(
-      analysisInputErrorFromIssues(
-        "inspect_analysis_view",
-        parsed.error.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: parent.normalizedResult } },
-        { cause: parsed.error },
-      ),
-    );
-  const report = parsed.data;
+  if (!parsed.ok) return parsed;
+  const report = parsed.value;
   const identity_scope = {
     token_identity: "build-local" as const,
     requires_artifact_sha256: report.artifact.sha256,

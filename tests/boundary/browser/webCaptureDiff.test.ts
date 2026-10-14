@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CdpBrowserProvider } from "../../../src/browser/CdpBrowserProvider.js";
 import { inspectWebPageInputSchema } from "../../../src/domain/browserObservation.js";
 import type { WebPageInspection } from "../../../src/domain/browserObservationSchemas.js";
+import { discoverWebMcpToolsInputSchema } from "../../../src/domain/webMcpDiscovery.js";
 import { compareWebCaptures } from "../../../src/domain/webCaptureDiff.js";
 import {
   compareWebCapturesInputSchema,
@@ -202,6 +203,64 @@ afterEach(async () => {
 });
 
 describe("web capture diff", () => {
+  it.each([
+    { missing: "before", changed: false, expected: "unknown" },
+    { missing: "after", changed: false, expected: "unknown" },
+    { missing: "before", changed: true, expected: "changed" },
+    { missing: "after", changed: true, expected: "changed" },
+    { missing: "neither", changed: false, expected: "changed" },
+  ] as const)(
+    "preserves consequential uncertainty: $missing, other change $changed",
+    async ({ missing, changed, expected }) => {
+      const browser = await startFakeCdpBrowser({ webMcpTools: true });
+      browsers.push(browser);
+      const provider = new CdpBrowserProvider();
+      const request = {
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+        observation_ms: 0,
+      };
+      const inspection = await provider.inspectPage(
+        inspectWebPageInputSchema.parse(request),
+      );
+      const discovery = await provider.discoverWebMcpTools(
+        discoverWebMcpToolsInputSchema.parse(request),
+      );
+      if (!inspection.ok) throw inspection.error;
+      if (!discovery.ok) throw discovery.error;
+      const before = structuredClone(discovery.value);
+      const after = structuredClone(discovery.value);
+      markSectionsComplete(before, ["webmcp_tools"]);
+      markSectionsComplete(after, ["webmcp_tools"]);
+      const left = before.tools.items[0];
+      const right = after.tools.items[0];
+      if (left === undefined || right === undefined)
+        throw new Error("missing WebMCP registration fixture");
+      left.annotations.consequential = true;
+      right.annotations.consequential = false;
+      if (missing === "before") delete left.annotations.consequential;
+      if (missing === "after") delete right.annotations.consequential;
+      if (changed) right.description += " changed";
+      const result = compareWebCaptures(
+        compareWebCapturesInputSchema.parse({
+          before: { inspection: inspection.value, webmcp: before },
+          after: { inspection: inspection.value, webmcp: after },
+        }),
+      );
+      expect(result.dimensions.webmcp).toMatchObject({
+        status: expected,
+        total_changes: expected === "changed" ? 1 : 0,
+      });
+      if (expected === "changed")
+        expect(result.dimensions.webmcp.changes[0]).toMatchObject({
+          change: "modified",
+        });
+    },
+  );
+});
+
+describe("web capture dimension uncertainty", () => {
   it("reports stable observed changes while preserving unknown dimensions", async () => {
     const browser = await startFakeCdpBrowser();
     browsers.push(browser);
@@ -625,6 +684,44 @@ describe("web capture WebSocket payload byte coverage", () => {
 });
 
 describe("web capture diff", () => {
+  it("reports request membership changes when selected body shapes are unavailable", async () => {
+    const browser = await startFakeCdpBrowser();
+    browsers.push(browser);
+    const captured = await new CdpBrowserProvider().inspectPage(
+      inspectWebPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        allowed_origins: [browser.allowedOrigin],
+        target_id: "allowed-page",
+        observation_ms: 0,
+      }),
+    );
+    if (!captured.ok) throw captured.error;
+    const before = structuredClone(captured.value);
+    const after = structuredClone(captured.value);
+    const original = before.network.requests[0];
+    if (original === undefined) throw new Error("Missing request fixture");
+    after.network.requests.push({
+      ...structuredClone(original),
+      request_id: `${original.request_id}-added`,
+      url: `${browser.allowedOrigin}/added`,
+    });
+    for (const inspection of [before, after]) {
+      markSectionsComplete(inspection, [
+        "network_requests",
+        "websocket_connections",
+        "websocket_frames",
+      ]);
+      for (const request of inspection.network.requests)
+        request.body_shapes.status = "unavailable";
+    }
+
+    expect(compareNetwork(before, after)).toMatchObject({
+      status: "changed",
+      total_changes: 1,
+      changes: [expect.objectContaining({ change: "added" })],
+    });
+  });
+
   it.each(["status", "mime_type"] as const)(
     "keeps an independently unavailable HTTP %s unknown",
     async (field) => {

@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { FridaInstrumentationService } from "../dist/application/frida/FridaInstrumentationService.js";
 import { FridaInstrumentationManager } from "../dist/frida/FridaInstrumentationManager.js";
 import { isValidFridaRemoteAddress } from "../dist/contracts/fridaRemoteAddress.js";
+import { closeVerifierResources } from "./lib/verifier-cleanup.mjs";
 
 const options = parseArguments(process.argv.slice(2));
 if (options.help) {
@@ -30,6 +31,8 @@ const remote =
           : { keepaliveInterval: options.keepaliveInterval }),
       };
 
+let primaryFailure;
+let report;
 try {
   let targetProcess;
   let input;
@@ -92,7 +95,7 @@ try {
   );
   if (!messageObserved)
     throw new Error("Selected target did not return the Frida marker");
-  const report = {
+  report = {
     ok: result.value.cleanupError === null,
     provider: "frida",
     host_platform: process.platform,
@@ -103,15 +106,28 @@ try {
     script_message_observed: true,
     cleanup_error: result.value.cleanupError,
   };
-  process.stdout.write(`${JSON.stringify(report)}\n`);
-  if (!report.ok) process.exitCode = 1;
 } catch (cause) {
+  primaryFailure = cause;
+}
+
+let cleanupFailure;
+try {
+  await closeVerifierResources([() => manager.closeAll()], primaryFailure);
+} catch (cause) {
+  cleanupFailure = cause;
+}
+if (primaryFailure !== undefined || cleanupFailure !== undefined) {
+  const causes =
+    cleanupFailure instanceof AggregateError
+      ? cleanupFailure.errors
+      : [cleanupFailure ?? primaryFailure];
   process.stderr.write(
-    `Frida real-provider verification failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+    `Frida real-provider verification failed: ${causes.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join("; ")}\n`,
   );
   process.exitCode = 1;
-} finally {
-  await manager.closeAll().catch(() => undefined);
+} else {
+  process.stdout.write(`${JSON.stringify(report)}\n`);
+  if (!report.ok) process.exitCode = 1;
 }
 
 function parseArguments(args) {

@@ -96,6 +96,7 @@ const SOURCE_PATHS = {
   webNetworkCaptureProvider: "dist/browser/history/CaptureRelease.js",
   browserScenarioContracts: "dist/contracts/browserScenarioToolContracts.js",
   electronContracts: "dist/contracts/javascript/electronToolContracts.js",
+  electronFuseProvider: "dist/electron/ElectronFuseProvider.js",
   javascriptRuntimeObservationContracts:
     "dist/contracts/javascript/javascriptRuntimeObservationToolContracts.js",
   applicationContracts: "dist/contracts/applicationToolContracts.js",

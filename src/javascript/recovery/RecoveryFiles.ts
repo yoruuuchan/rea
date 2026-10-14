@@ -167,6 +167,11 @@ export const snapshotRecoveryInputs = async (
         ? "bundle.js"
         : relative(commonDirectory, resolve(path)).split(sep).join("/");
     try {
+      // Wakaru's multi-input public paths interpret backslashes as separators.
+      if (relativePath.includes("\\"))
+        throw new TypeError(
+          "Wakaru cannot preserve literal backslashes in input paths",
+        );
       if (normalizeArtifactPath(relativePath) !== relativePath)
         throw new TypeError(
           "Input names must already use NFC Unicode spelling",

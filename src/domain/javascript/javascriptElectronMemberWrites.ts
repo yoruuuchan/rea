@@ -2,6 +2,7 @@ import * as t from "@babel/types";
 
 import {
   semanticStaticPropertyKey,
+  semanticWriteSiteTarget,
   semanticWriteTargets,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
@@ -62,6 +63,7 @@ export function* collectJavaScriptIdentityWritesSteps(
   origin: (
     root: t.Node,
     kind: "binding" | "member" | "opaque-call",
+    writeSite: t.Node,
   ) => readonly (readonly (string | null)[])[],
   intrinsicInvocation: (
     node: t.CallExpression | t.OptionalCallExpression,
@@ -88,7 +90,8 @@ export function* collectJavaScriptIdentityWritesSteps(
       if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
         const invocation = intrinsicInvocation(node);
         if (invocation?.kind === "opaque") {
-          for (const scope of origin(node, "opaque-call")) retain(node, scope);
+          for (const scope of origin(node, "opaque-call", node))
+            retain(node, scope);
           return;
         }
         const callee = invocation?.path;
@@ -117,11 +120,11 @@ export function* collectJavaScriptIdentityWritesSteps(
             // A known mutator with an opaque argument list can overwrite any
             // captured intrinsic. Do not turn an unexamined target into proof.
             if (target === undefined || t.isSpreadElement(target)) {
-              for (const scope of origin(node, "opaque-call"))
+              for (const scope of origin(node, "opaque-call", node))
                 retain(node, scope);
             }
             if (t.isNode(target) && !t.isSpreadElement(target)) {
-              const identities = origin(target, "member");
+              const identities = origin(target, "member", node);
               if (identities.length > 0) {
                 const key = keyedMutators.has(method ?? "")
                   ? [staticString(arguments_?.[1]) ?? null]
@@ -129,26 +132,18 @@ export function* collectJavaScriptIdentityWritesSteps(
                 for (const identity of identities)
                   retain(node, [...identity, ...key]);
               } else if (!freshObject(target)) {
-                for (const scope of origin(node, "opaque-call"))
+                for (const scope of origin(node, "opaque-call", node))
                   retain(node, scope);
               }
             }
           }
         }
       }
-      const target = t.isAssignmentExpression(node)
-        ? node.left
-        : t.isUpdateExpression(node)
-          ? node.argument
-          : t.isUnaryExpression(node, { operator: "delete" })
-            ? node.argument
-            : t.isForOfStatement(node) || t.isForInStatement(node)
-              ? node.left
-              : undefined;
-      if (target === undefined) return;
+      const target = semanticWriteSiteTarget(node);
+      if (target === null) return;
       for (const leaf of semanticWriteTargets(target)) {
         if (t.isIdentifier(leaf)) {
-          for (const identity of origin(leaf, "binding"))
+          for (const identity of origin(leaf, "binding", node))
             retain(node, identity);
           continue;
         }
@@ -159,7 +154,7 @@ export function* collectJavaScriptIdentityWritesSteps(
         )
           continue;
         const key = semanticStaticPropertyKey(member.property, member.computed);
-        for (const identity of origin(member.object, "member"))
+        for (const identity of origin(member.object, "member", node))
           retain(node, [...identity, key]);
       }
     },

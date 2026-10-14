@@ -17,6 +17,7 @@ import { signature, type ManagedMethod } from "./ManagedMemberInspectorCore.js";
 import { ManagedReaderFailure } from "./ManagedReaderFailure.js";
 import { managedMemberInspectionSchema } from "../domain/managed/managedArtifact.js";
 import { comparisonLimitations } from "../domain/managed/managedMemberComparisonCoverage.js";
+import { buildManagedPeFixture as buildMultiMethodManagedPeFixture } from "../../scripts/fixtures/managed/pe.mjs";
 
 import {
   buildManagedPeFixture,
@@ -1733,5 +1734,63 @@ describe("managed member type selection", () => {
     expect(result.call_edges).toEqual([]);
     expect(result.field_accesses).toEqual([]);
     expect(result.member_refs).toEqual(everything.member_refs);
+  });
+});
+
+describe("managed member method paging", () => {
+  it("returns only the requested MethodDef rows", () => {
+    const image = buildMultiMethodManagedPeFixture({
+      methods: [
+        { name: "First", body: Buffer.from([0x2a]) },
+        { name: "Second", body: Buffer.from([0x2a]) },
+        { name: "Third", body: Buffer.from([0x2a]) },
+      ],
+    });
+    const all = inspectManagedMembersBytes(
+      image,
+      managedPeFixtureTarget(image),
+    );
+    expect(all.methods.map(({ name }) => name)).toEqual([
+      "First",
+      "Second",
+      "Third",
+    ]);
+
+    const page = inspectManagedMembersBytes(
+      image,
+      managedPeFixtureTarget(image),
+      { methodOffset: 1, methodLimit: 1 },
+    );
+
+    expect(page.methods.map(({ name, token }) => ({ name, token }))).toEqual([
+      { name: "Second", token: "0x06000002" },
+    ]);
+    expect(page.coverage.state).toBe("complete");
+
+    const offsetOnly = inspectManagedMembersBytes(
+      image,
+      managedPeFixtureTarget(image),
+      { methodOffset: 1 },
+    );
+    expect(offsetOnly.methods.map(({ name }) => name)).toEqual([
+      "Second",
+      "Third",
+    ]);
+
+    const emptyPage = inspectManagedMembersBytes(
+      image,
+      managedPeFixtureTarget(image),
+      { methodOffset: 1, methodLimit: 0 },
+    );
+    expect(emptyPage.methods).toEqual([]);
+  });
+
+  it("rejects invalid method page bounds", () => {
+    const image = buildManagedPeFixture();
+    expect(() =>
+      inspectManagedMembersBytes(image, managedPeFixtureTarget(image), {
+        methodOffset: -1,
+      }),
+    ).toThrow(RangeError);
   });
 });

@@ -8,6 +8,28 @@ import {
 } from "./javascriptSemanticAnalysis.fixture.js";
 
 describe("JavaScript semantic analysis: calls 1", () => {
+  it("does not assign computed method-name reads to method closures", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      function outer() {
+        const name = "m";
+        const object = { [name]() { return 1; }, ["literal"]() { return 2; } };
+        class Example {
+          [name]() { return 3; }
+          ["literal"]() { return 4; }
+        }
+      }
+    `);
+    expect(ir.closureCaptures).toEqual([]);
+
+    const bodyRead = analyzeJavaScriptSemantics(`
+      function outer() {
+        const value = 1;
+        const object = { method() { return value; } };
+      }
+    `);
+    expect(bodyRead.closureCaptures).toHaveLength(1);
+  });
+
   it("links exact local calls to parameters, returns, and closure captures", () => {
     const ir = analyzeJavaScriptSemantics(`
       const prefix = "rea";

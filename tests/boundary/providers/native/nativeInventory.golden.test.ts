@@ -142,7 +142,7 @@ it("rejects nonzero supplemental codesign output that is not an unsigned observa
 
 it("retains native inventory facts from captured Apple tool output", async () => {
   const outputs: Record<string, string> = {};
-  for (const tool of ["file", "lipo", "otool", "nm", "dwarfdump", "vtool"])
+  for (const tool of ["lipo", "otool", "nm", "dwarfdump", "vtool"])
     outputs[tool] = await fixture(`dyld-inventory/${tool}.txt`);
   outputs.otool = withOtoolMachHeader(outputs.otool ?? "");
   outputs["dyld_info:-imports"] = await fixture("dyld-inventory/imports.txt");

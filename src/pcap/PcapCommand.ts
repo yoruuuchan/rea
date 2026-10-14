@@ -9,6 +9,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import {
   OwnedCommandFailure,
+  ownedCommandResources,
   runOwnedCommand,
 } from "../process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
@@ -19,6 +20,26 @@ import {
   WindowsBatchCommandError,
 } from "../process/WindowsBatchCommand.js";
 import { pcapToolUnavailable } from "./PcapConfiguration.js";
+
+export type PcapCommandLauncher = NonNullable<
+  Parameters<typeof runOwnedCommand>[2]
+>["launcher"];
+
+export interface PcapCommandCleanup {
+  readonly reason: string;
+  readonly resources: readonly string[];
+  readonly capturedOutput: {
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly truncated: boolean;
+  };
+}
+
+export interface PcapCommandOutput {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly cleanup?: PcapCommandCleanup;
+}
 
 export interface PcapCommandLimits {
   readonly timeoutMs: number;
@@ -38,11 +59,14 @@ export const runPcapCommand = async (options: {
     readonly limiter?: { command: string; arguments: readonly string[] };
     readonly memoryLimitBytes?: number;
   };
+  readonly launcher?: PcapCommandLauncher;
   readonly retain: (
     owner: ProviderProcessSupervisor,
     resources: readonly string[],
+    reason: string,
+    capturedOutput: PcapCommandCleanup["capturedOutput"],
   ) => void;
-}): Promise<{ stdout: string; stderr: string }> => {
+}): Promise<PcapCommandOutput> => {
   const { operation, command, limits, signal } = options;
   if (signal?.aborted)
     throw new AnalysisCancelledError(operation, { cause: signal.reason });
@@ -52,6 +76,7 @@ export const runPcapCommand = async (options: {
     LC_ALL: "C",
     LANG: "C",
   };
+  let cleanup: PcapCommandCleanup | undefined;
   try {
     const batch = process.platform === "win32" && isWindowsBatchFile(command);
     const invocation = batch
@@ -87,26 +112,64 @@ export const runPcapCommand = async (options: {
           : { memoryLimitBytes: options.nativeBound.memoryLimitBytes }),
       },
       { timeoutMs: limits.timeoutMs, diagnosticBytes: limits.maxOutputBytes },
-      signal === undefined ? {} : { signal },
+      {
+        ...(signal === undefined ? {} : { signal }),
+        ...(options.launcher === undefined
+          ? {}
+          : { launcher: options.launcher }),
+        retainCleanup: (owner, stopped) => {
+          const resources =
+            owner.launch.ownership === undefined
+              ? ["owned-process"]
+              : ownedCommandResources(owner.launch.ownership);
+          const snapshot = owner.snapshot();
+          const capturedOutput = {
+            stdout: snapshot.stdout.text,
+            stderr: snapshot.stderr.text,
+            truncated:
+              snapshot.diagnosticTruncated === true ||
+              snapshot.outputIncomplete === true,
+          };
+          options.retain(owner, resources, stopped.reason, capturedOutput);
+          cleanup = { reason: stopped.reason, resources, capturedOutput };
+        },
+      },
     );
-    return { stdout: output.stdout.text, stderr: output.stderr.text };
+    return {
+      stdout: output.stdout.text,
+      stderr: output.stderr.text,
+      ...(cleanup === undefined ? {} : { cleanup }),
+    };
   } catch (cause) {
     if (cause instanceof AnalysisError) throw cause;
     if (
       cause instanceof OwnedCommandFailure &&
       cause.cleanupOwner !== undefined
     )
-      options.retain(cause.cleanupOwner, cause.resources);
+      options.retain(
+        cause.cleanupOwner,
+        cause.resources,
+        cause.cleanupFailure ?? cause.message,
+        cause.snapshot === null
+          ? { stdout: "", stderr: "", truncated: true }
+          : {
+              stdout: cause.snapshot.stdout.text,
+              stderr: cause.snapshot.stderr.text,
+              truncated:
+                cause.snapshot.diagnosticTruncated === true ||
+                cause.snapshot.outputIncomplete === true,
+            },
+      );
     const details = {
       cause,
       ...(cause instanceof OwnedCommandFailure && cause.snapshot !== null
         ? {
             capturedOutput: {
-              stdout: "",
+              stdout: cause.snapshot.stdout.text,
               stderr: cause.snapshot.stderr.text,
               truncated:
-                cause.snapshot.stdout.observedBytes > 0 ||
-                (cause.snapshot.diagnosticTruncated ?? false),
+                cause.snapshot.diagnosticTruncated === true ||
+                cause.snapshot.outputIncomplete === true,
               exit_code: cause.snapshot.exitCode ?? null,
               signal: cause.snapshot.signal ?? null,
             },

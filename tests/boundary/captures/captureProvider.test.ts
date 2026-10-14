@@ -53,6 +53,8 @@ else { if(readFileSync('capture', 'utf8') !== 'recording bytes') throw Error('wr
     },
     async (input) => {
       calls++;
+      if (mode === "launch-failure" && !input.arguments.includes("--version"))
+        throw Object.assign(new Error("spawn E2BIG"), { code: "E2BIG" });
       if (mode === "file-limit" && !input.arguments.includes("--version")) {
         const stdout = { text: "", bytes: 0, observedBytes: 0 };
         const stderr = {
@@ -252,6 +254,21 @@ it.each([
         name.startsWith("decoder-"),
       ),
     ).toEqual([]);
+  },
+);
+
+it.each(["capture", "fields"] as const)(
+  "does not attribute the version probe's output to a %s command that fails to launch",
+  async (operation) => {
+    const f = await fixture("launch-failure");
+    const result =
+      operation === "capture"
+        ? await f.service.inspect({ path: f.path, fields: ["ip.addr"] })
+        : await f.service.inspectFields({ kind: "fields" });
+    if (result.ok) throw new Error("Expected launch failure");
+    expect(f.calls()).toBe(2);
+    expect(result.error.message).toContain("spawn E2BIG");
+    expect(result.error.capturedOutput).toBeUndefined();
   },
 );
 

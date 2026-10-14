@@ -5,7 +5,10 @@ import type { EvidenceLookup } from "../EvidenceInputResolver.js";
 import { resolveEvidenceInput } from "../EvidenceInputResolver.js";
 import type { EvidenceWriter } from "../investigation/InvestigationRecordPort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCapabilityUnavailableError,
+  AnalysisInputError,
+} from "../../domain/analysisErrorCore.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import {
@@ -159,6 +162,18 @@ const resolveAnalysisViewSource = (
 ): Result<Evidence, AnalysisError> => {
   if (source.kind === "retained-evidence")
     return resolveEvidenceInput(source, lookup);
+  const invalidDataPath = inlineEvidenceInvalidDataPath(source.evidence);
+  if (invalidDataPath !== undefined)
+    return err(
+      new AnalysisInputError(INSPECT_ANALYSIS_VIEW_OPERATION, undefined, [
+        {
+          path: ["source", "evidence", ...invalidDataPath],
+          reason: "invalid_type",
+          message:
+            "Inline Evidence must contain plain JSON data properties without accessors or cycles.",
+        },
+      ]),
+    );
   try {
     return ok(parseEvidence(source.evidence));
   } catch (cause: unknown) {
@@ -183,6 +198,53 @@ const resolveAnalysisViewSource = (
       );
     throw cause;
   }
+};
+
+/** Reject non-JSON object behavior before Zod reads caller-owned Evidence. */
+const inlineEvidenceInvalidDataPath = (
+  root: unknown,
+): readonly (string | number)[] | undefined => {
+  const active = new Set<object>();
+  const pending: {
+    readonly value: unknown;
+    readonly path: readonly (string | number)[];
+    readonly exit?: object;
+  }[] = [{ value: root, path: [] }];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) continue;
+    if (current.exit !== undefined) {
+      active.delete(current.exit);
+      continue;
+    }
+    const { value, path } = current;
+    if (typeof value !== "object" || value === null) continue;
+    const isArray = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      (isArray && prototype !== Array.prototype) ||
+      (!isArray && prototype !== Object.prototype && prototype !== null) ||
+      active.has(value)
+    )
+      return path;
+
+    active.add(value);
+    pending.push({ value, path, exit: value });
+    const keys = Object.getOwnPropertyNames(value);
+    for (let index = keys.length - 1; index >= 0; index -= 1) {
+      const key = keys[index];
+      if (key === undefined) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      const childPath = [
+        ...path,
+        isArray && /^(0|[1-9]\d*)$/u.test(key) ? Number(key) : key,
+      ];
+      if (descriptor === undefined || !Object.hasOwn(descriptor, "value"))
+        return childPath;
+      pending.push({ value: descriptor.value, path: childPath });
+    }
+  }
+  return undefined;
 };
 
 const createAnalysisViewEvidence = (

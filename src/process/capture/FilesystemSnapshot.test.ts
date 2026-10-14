@@ -1,6 +1,8 @@
 import { fstatSync } from "node:fs";
 import {
   mkdtemp,
+  mkdir,
+  symlink,
   lstat,
   open,
   readdir,
@@ -34,6 +36,27 @@ const countOpenDescriptorsFor = async (path: string): Promise<number> => {
   );
   return matches.filter(Boolean).length;
 };
+
+it.skipIf(process.platform === "win32")(
+  "omits a captured regular file replaced by a symlink",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-symlink-"));
+    const selected = join(directory, "selected");
+    const replacement = join(directory, "replacement");
+    try {
+      await writeFile(selected, "captured bytes");
+      await writeFile(replacement, "unselected bytes");
+      const expected = await lstat(selected);
+      await rm(selected);
+      await symlink(replacement, selected);
+      const outcome = await hashFile(selected, expected, 1_000);
+      expect(outcome.state).toBe("omitted");
+      expect(outcome).not.toHaveProperty("sha256");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 it("does not hash a replacement file using the earlier path metadata", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-identity-"));
@@ -154,3 +177,43 @@ it.skipIf(process.platform === "win32")(
     }
   },
 );
+
+for (const variant of [
+  "unchanged",
+  "case-alias",
+  "ancestor-junction",
+  "replaced-junction",
+] as const) {
+  it.runIf(process.platform === "win32")(
+    `hashes only the captured Windows file through ${variant}`,
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-windows-"));
+      try {
+        const original = join(directory, "original");
+        const replacement = join(directory, "replacement");
+        await mkdir(original);
+        await mkdir(replacement);
+        await writeFile(join(original, "TestFile.txt"), "captured bytes");
+        await writeFile(join(replacement, "TestFile.txt"), "replaced bytes");
+        const alias = join(directory, "alias");
+        if (variant === "ancestor-junction" || variant === "replaced-junction")
+          await symlink(original, alias, "junction");
+        const path = join(
+          variant.includes("junction") ? alias : original,
+          variant === "case-alias" ? "testfile.txt" : "TestFile.txt",
+        );
+        const expected = await lstat(path);
+        if (variant === "replaced-junction") {
+          await rm(alias);
+          await symlink(replacement, alias, "junction");
+        }
+        const result = await hashFile(path, expected, 1_000);
+        expect(result.state).toBe(
+          variant === "replaced-junction" ? "omitted" : "hashed",
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+}

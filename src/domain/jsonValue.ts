@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import { z } from "zod";
 import { isImmutableJsonSnapshot } from "./immutableJson.js";
 
@@ -15,7 +16,6 @@ export type JsonValue =
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-const recordShape = z.record(z.string(), z.unknown());
 const immutableValidation = new WeakMap<object, string | undefined>();
 
 /** Validate JSON meaning and nesting without cloning a trusted immutable value. */
@@ -57,6 +57,8 @@ export function* jsonValueValidationSteps(
         `JSON value exceeds maximum nesting depth of ${MAX_JSON_DEPTH}`,
       );
     const value = item.value;
+    if (typeof value === "object" && value !== null && types.isProxy(value))
+      return finish("JSON values cannot contain proxies");
     if (
       value === null ||
       typeof value === "string" ||
@@ -66,12 +68,27 @@ export function* jsonValueValidationSteps(
     if (typeof value === "number") {
       if (!Number.isFinite(value)) return finish("JSON numbers must be finite");
     } else if (Array.isArray(value)) {
-      for (const child of value)
-        pending.push({ value: child, depth: item.depth + 1 });
-    } else if (isRecord(value) && recordShape.safeParse(value).success) {
-      // Inspect every own member, including keys Zod's record parser skips.
-      for (const child of Object.values(value))
-        pending.push({ value: child, depth: item.depth + 1 });
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (descriptor === undefined || !Object.hasOwn(descriptor, "value"))
+          return finish(
+            "JSON arrays require dense data properties without accessors",
+          );
+        pending.push({ value: descriptor.value, depth: item.depth + 1 });
+      }
+    } else if (isRecord(value)) {
+      const prototype: unknown = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null)
+        return finish("JSON objects require ordinary data properties");
+      for (const key of Reflect.ownKeys(value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor?.enumerable !== true) continue;
+        if (typeof key !== "string")
+          return finish("JSON object keys must be strings");
+        if (!Object.hasOwn(descriptor, "value"))
+          return finish("JSON objects cannot contain accessors");
+        pending.push({ value: descriptor.value, depth: item.depth + 1 });
+      }
     } else return finish("Invalid JSON value");
   }
   return finish(undefined);
@@ -80,7 +97,12 @@ export function* jsonValueValidationSteps(
 const preserveJsonValue = (value: JsonValue): JsonValue => {
   const immutableCandidate: unknown = value;
   if (isImmutableJsonSnapshot(immutableCandidate)) return value;
-  if (Array.isArray(value)) return value.map(preserveJsonValue);
+  if (Array.isArray(value)) {
+    const copy: JsonValue[] = [];
+    for (let index = 0; index < value.length; index += 1)
+      copy.push(preserveJsonValue(value[index]!));
+    return copy;
+  }
   if (value !== null && typeof value === "object")
     return Object.fromEntries<JsonValue>(
       Object.entries(value).map(([key, child]) => [
@@ -91,13 +113,14 @@ const preserveJsonValue = (value: JsonValue): JsonValue => {
   return value;
 };
 
-const validatedJsonValue = z.custom<JsonValue>(
-  (value) => jsonValueValidationIssue(value) === undefined,
-  {
-    error: (issue) =>
-      jsonValueValidationIssue(issue.input) ?? "Invalid JSON value",
-  },
-);
+const validatedJsonValue = z
+  .unknown()
+  .superRefine((value, context) => {
+    const issue = jsonValueValidationIssue(value);
+    if (issue !== undefined)
+      context.addIssue({ code: "custom", message: issue });
+  })
+  .transform((value) => value as JsonValue);
 // Keep both stages nonrecursive in public and Standard Schema projections.
 validatedJsonValue._zod.toJSONSchema = () => ({});
 

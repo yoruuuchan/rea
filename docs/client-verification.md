@@ -377,6 +377,11 @@ Such a stall leaves the initial page unloaded with empty or placeholder CDP URLs
 it does not establish permission to capture that page. See
 [the keyring diagnosis](https://github.com/morluto/rea/issues/1384#issuecomment-6093781686).
 
+On Windows, browser verifier lanes that launch an owned fixture require a
+standard, non-elevated caller token. They inspect the verifier caller before
+allocating fixture resources and refuse elevated or unobservable tokens; they do
+not change caller authority or claim to inspect the browser process token.
+
 `verify:browser` also captures a source-owned noise canvas as a real PNG above
 8 MiB through the CLI and stdio MCP, with complete byte/digest parity and real PNG
 decoding. Its SDK client explicitly permits the larger inline JSON response;

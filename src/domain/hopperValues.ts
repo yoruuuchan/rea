@@ -25,17 +25,14 @@ export interface SegmentSummary {
 }
 
 /** Return a bounded byte distance between canonical addresses in one space. */
-export const addressDistance = (start: string, end: string): number => {
+export const addressDistance = (start: string, end: string): number | null => {
   const left = addressCoordinate(start);
   const right = addressCoordinate(end);
-  if (left === null || right === null || left.space !== right.space) return 0;
+  if (left === null || right === null || left.space !== right.space)
+    return null;
   const distance = right.offset - left.offset;
-  if (distance <= 0n) return 0;
-  return Number(
-    distance > BigInt(Number.MAX_SAFE_INTEGER)
-      ? BigInt(Number.MAX_SAFE_INTEGER)
-      : distance,
-  );
+  if (distance < 0n || distance > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(distance);
 };
 
 const procedureMapSchema = z.record(z.string(), z.string());
@@ -319,15 +316,15 @@ const swiftStringLiteralOmissionFields = {
   source_address: swiftStringLiteralFields.source_address,
   byte_length: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   reason: z
-    .literal("capacity")
+    .enum(["capacity", "unresolved_jump"])
     .describe(
-      "The record did not fit the provider's memory budget for this dossier; decoding stopped here, so later use sites were not examined.",
+      "Why this candidate is omitted: capacity stopped decoding, or an unresolved jump left its use unknown.",
     ),
   registers: swiftStringLiteralFields.registers,
   words: swiftStringLiteralFields.words,
 };
 
-/** A Swift literal whose layout matched but whose record did not fit; decoding stopped there. */
+/** A Swift literal candidate omitted because decoding capacity or control flow left it unknown. */
 export const swiftStringLiteralOmissionSchema = z.discriminatedUnion(
   "representation",
   [
@@ -410,7 +407,7 @@ export const functionDossierSchema = z
       .array(swiftStringLiteralOmissionSchema)
       .exactOptional()
       .describe(
-        "The literal at which decoding stopped for capacity. Present exactly when swift_string_literals is present; empty when decoding examined every use site.",
+        "Literal candidates omitted for capacity or unresolved control flow. Present exactly when swift_string_literals is present; empty when all examined use sites were classified.",
       ),
     basic_blocks: z.array(
       z

@@ -131,6 +131,32 @@ describe("client registration status", () => {
       }),
     ]);
   });
+
+  it("reports the exact requested package version when it differs from this CLI", async () => {
+    const home = await createTestTempDirectory(
+      "rea-registration-version-drift-",
+    );
+    await mkdir(join(home, ".codex"));
+    const command = ["npx", "-y", "rea-agents@4.1.0", "mcp"];
+    await writeFile(
+      join(home, ".codex/config.toml"),
+      `[mcp_servers.rea]\ncommand = "${command[0]}"\nargs = ["${command[1]}", "${command[2]}", "${command[3]}"]\n`,
+    );
+
+    const [status] = await readClientRegistrationStatuses(home);
+
+    expect(status).toMatchObject({
+      client: "codex",
+      command,
+      package_reference: "rea-agents@4.1.0",
+      state: "stale",
+      remediation: expect.stringContaining(
+        `current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}`,
+      ),
+    });
+    expect(status?.remediation).toContain("does not resolve package-runner");
+    expect(status?.remediation).toContain("rea setup --client codex");
+  });
 });
 
 describe("commandcode registration status", () => {

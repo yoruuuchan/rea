@@ -252,7 +252,14 @@ export const reconstructJavaScriptArtifact = async (
           : { source_selection: files.source_selection }),
         graph,
         semantic_graph: semanticGraph,
-        electron_summary: summarizeElectronBoundaries(analysis),
+        electron_summary: summarizeElectronBoundaries(
+          analysis,
+          new Set(
+            snapshot.occurrences
+              .filter(({ entry_kind }) => entry_kind === "directory")
+              .map(({ logical_path }) => logical_path),
+          ),
+        ),
         statistics: {
           relevant_files: files.files.length,
           nested_asar_containers: files.containers.length,

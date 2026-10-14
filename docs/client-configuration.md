@@ -129,6 +129,12 @@ and Claude Code reports that autocompact is thrashing. To avoid this:
 The sizes above come from REA's own `tools/list`. A live Claude Code session
 against DeepSeek's API is unverified.
 
+For a client whose stdio reader rejects the complete catalog frame, add
+`"REA_MCP_OUTPUT_SCHEMA_PROFILE": "off"` to REA's `env` object and restart the
+client. This omits only advertised output schemas; REA still validates complete
+structured results against its canonical contracts. See [MCP output schema
+profiles](mcp-contracts.md#output-schemas).
+
 ## Kimi Code
 
 Setup registers `rea` in `~/.kimi-code/mcp.json`, or

@@ -9,36 +9,51 @@ export const normalizeProcessElapsedTime = (
   timeBucketMs: number,
 ): number => Math.floor(elapsedMs / timeBucketMs) * timeBucketMs;
 
-/** Normalize one terminal/protocol payload under explicitly selected scenario rules. */
+/** Prepare capture-local matchers while retaining a live terminal PID lookup. */
+export const createProcessTextNormalizer = (
+  scenario: ProcessScenario,
+  temporaryRoot: string,
+  pid: number | (() => number),
+): ((value: string) => string) => {
+  const normalizePaths = scenario.normalization.paths
+    ? createPathNormalizer(scenario, temporaryRoot)
+    : (value: string): string => value;
+  let previousPid: number | undefined;
+  let normalizePids = (value: string): string => value;
+  return (value) => {
+    let normalized = normalizePaths(value);
+    if (scenario.normalization.ports)
+      normalized = normalizePortTokens(normalized);
+    if (scenario.normalization.pids) {
+      const currentPid = typeof pid === "number" ? pid : pid();
+      if (currentPid !== previousPid) {
+        previousPid = currentPid;
+        normalizePids = createPidNormalizer([currentPid]);
+      }
+      normalized = normalizePids(normalized);
+    }
+    for (const pattern of scenario.normalization.patterns)
+      normalized = normalized.replaceAll(
+        pattern.pattern,
+        () => pattern.replacement,
+      );
+    return normalized;
+  };
+};
+
+/** Normalize one payload when its caller does not retain a capture-local matcher. */
 export const normalizeProcessText = (
   value: string,
   scenario: ProcessScenario,
   temporaryRoot: string,
   pid: number,
-): string => {
-  let normalized = value;
-  if (scenario.normalization.paths)
-    normalized = normalizePathTokens(normalized, scenario, temporaryRoot);
-  if (scenario.normalization.ports)
-    normalized = normalizePortTokens(normalized);
-  if (scenario.normalization.pids)
-    normalized = normalizePidTokens(normalized, [pid]);
-  // A callback keeps replacement text literal while preserving replaceAll's
-  // empty-pattern boundaries, which the process scenario contract permits.
-  for (const pattern of scenario.normalization.patterns)
-    normalized = normalized.replaceAll(
-      pattern.pattern,
-      () => pattern.replacement,
-    );
-  return normalized;
-};
+): string => createProcessTextNormalizer(scenario, temporaryRoot, pid)(value);
 
 /** Match original paths once, preferring the most specific selected identity. */
-const normalizePathTokens = (
-  value: string,
+const createPathNormalizer = (
   scenario: ProcessScenario,
   temporaryRoot: string,
-): string => {
+): ((value: string) => string) => {
   const aliases = new Map<string, string>();
   const selected: readonly (readonly [string, string])[] = [
     [temporaryRoot, "<temporary-root>"],
@@ -56,14 +71,12 @@ const normalizePathTokens = (
   const paths = [...aliases.keys()].sort(
     (left, right) => right.length - left.length,
   );
-  if (paths.length === 0) return value;
+  if (paths.length === 0) return (value) => value;
   const pattern = paths
     .map((path) => path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
     .join("|");
-  return value.replace(
-    new RegExp(pattern, "gu"),
-    (path) => aliases.get(path) ?? path,
-  );
+  const matcher = new RegExp(pattern, "gu");
+  return (value) => value.replace(matcher, (path) => aliases.get(path) ?? path);
 };
 
 // A port may end a sentence, but a period followed by a letter, digit, or
@@ -109,16 +122,17 @@ export const normalizeProcessSamples = (
   for (const identifier of identifiers)
     if (identifier > 0 && !mapping.has(identifier))
       mapping.set(identifier, mapping.size + 1);
+  const normalizeText = createProcessTextNormalizer(
+    scenario,
+    "<no-temporary-root>",
+    rootPid,
+  );
+  const normalizeSamplePids = scenario.normalization.pids
+    ? createPidNormalizer(identifiers)
+    : undefined;
   const normalizeCommand = (command: string): string => {
-    const normalized = normalizeProcessText(
-      command,
-      scenario,
-      "<no-temporary-root>",
-      rootPid,
-    );
-    const withNormalizedPids = scenario.normalization.pids
-      ? normalizePidTokens(normalized, identifiers)
-      : normalized;
+    const normalized = normalizeText(command);
+    const withNormalizedPids = normalizeSamplePids?.(normalized) ?? normalized;
     return withNormalizedPids.trim();
   };
   return samples.map((sample) => ({
@@ -144,17 +158,14 @@ export const normalizeProcessSamples = (
   }));
 };
 
-const normalizePidTokens = (
-  value: string,
+const createPidNormalizer = (
   identifiers: readonly number[],
-): string => {
+): ((value: string) => string) => {
   const tokens = [...new Set(identifiers)]
     .filter((identifier) => Number.isSafeInteger(identifier) && identifier > 0)
     .sort((left, right) => right - left)
     .map(String);
-  if (tokens.length === 0) return value;
-  return value.replace(
-    new RegExp(`(?<!\\d)(?:${tokens.join("|")})(?!\\d)`, "gu"),
-    "<pid>",
-  );
+  if (tokens.length === 0) return (value) => value;
+  const matcher = new RegExp(`(?<!\\d)(?:${tokens.join("|")})(?!\\d)`, "gu");
+  return (value) => value.replace(matcher, "<pid>");
 };

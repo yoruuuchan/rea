@@ -93,6 +93,32 @@ const chunk = z.strictObject({
   handler: z.string().nullable(),
   encrypted: z.boolean().nullable(),
   root_file_range: range.nullable(),
+  /** The producer reported extraction problems for this chunk. */
+  extraction_failed: z.boolean(),
+});
+/** One unextracted region or failing task/stage, with a supported continuation
+ * using already configured capabilities when one exists. */
+export const extractionGap = z.strictObject({
+  kind: z.enum([
+    "missing-extractor-dependency",
+    "unknown-chunk-handler",
+    "encrypted-chunk",
+    "depth-limited",
+    "extractor-failure",
+    "unpublished-entry",
+  ]),
+  /** Logical task path from the producer report; `$output/…` for unpublished entries. */
+  input_path: z.string(),
+  relative_path: z.string().nullable(),
+  handler: z.string().nullable(),
+  /** Reported chunk or multi-file stage identity; it does not imply a byte range. */
+  provider_id: z.string().nullable(),
+  range: range.nullable(),
+  root_file_range: range.nullable(),
+  /** Extractor executables named by the producer; empty when it named none. */
+  dependencies: z.array(z.string()),
+  /** Lookup key in the result's extraction_continuations table. */
+  continuation_id: z.string(),
 });
 
 /** Completed firmware result retained when private-runtime cleanup cannot be confirmed. */
@@ -158,6 +184,11 @@ export const firmwareResultSchemas = {
     ),
     depth_limited_paths: z.array(z.string()),
     diagnostics: z.array(jsonValueSchema),
+    extraction_gaps: z.array(extractionGap),
+    /** Each distinct recovery instruction is serialized once, shared by gap ID. */
+    extraction_continuations: z.array(
+      z.strictObject({ id: z.string(), instruction: z.string() }),
+    ),
     published_bytes: bytes,
   }),
 } as const;

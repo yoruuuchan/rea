@@ -165,6 +165,7 @@ const createShouldExclude =
         throw new Error(`Ignored secret path has no matching rule: ${path}`);
       exclusions.push({
         path,
+        entry_kind: kind,
         reason: "configured-secret",
         pattern: secretMatch.rule.pattern,
       });
@@ -181,7 +182,12 @@ const createShouldExclude =
       reason !== "caller-excluded"
     )
       throw new Error(`Ignored path has unknown rule origin: ${path}`);
-    exclusions.push({ path, reason, pattern: match.rule.pattern });
+    exclusions.push({
+      path,
+      entry_kind: kind,
+      reason,
+      pattern: match.rule.pattern,
+    });
     return true;
   };
 

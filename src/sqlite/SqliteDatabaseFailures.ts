@@ -7,6 +7,7 @@ import {
 import {
   AnalysisAccessDeniedError,
   AnalysisArtifactChangedError,
+  AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
   AnalysisInputError,
   AnalysisOutputError,
@@ -28,6 +29,15 @@ export const capturedSqliteOutput = (
   stderr: snapshot.stderr.text,
   truncated: snapshot.diagnosticTruncated === true,
 });
+
+/** The file-set member a filesystem error names, if it is the database, its WAL or its journal. */
+const busyMember = (cause: Error, path: string): string => {
+  const failed = "path" in cause ? cause.path : undefined;
+  return typeof failed === "string" &&
+    [path, `${path}-wal`, `${path}-journal`].includes(failed)
+    ? failed
+    : path;
+};
 
 /** Preserve artifact, caller, process, resource and output failure meanings. */
 export const sqliteDatabaseFailure = (
@@ -85,6 +95,21 @@ export const sqliteDatabaseFailure = (
       return new AnalysisAccessDeniedError(operation, path, cause.code, {
         cause,
       });
+    // Windows reports a sharing violation as EBUSY: another process holds the file without read
+    // sharing. The unchanged request succeeds once that process releases it. Name the member of the
+    // file set that was busy (the database, its WAL or its journal) when the error identifies it.
+    if (cause.code === "EBUSY")
+      return new AnalysisCapabilityUnavailableError(
+        SQLITE_PROVIDER_IDENTITY.id,
+        operation,
+        `Selected database file set is in use by another process (EBUSY): ${busyMember(cause, path)}`,
+        {
+          cause,
+          retryable: true,
+          userMessage:
+            "The selected SQLite database is held open by another process without read sharing. Close that application or inspect a copy, then retry.",
+        },
+      );
     if (cause.code === "ENOENT" || cause.code === "ENOTDIR")
       return new AnalysisInputError(operation, { cause }, [
         {

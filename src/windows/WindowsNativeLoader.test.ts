@@ -111,24 +111,28 @@ describe("packaged Windows native admission", () => {
   });
 
   it.each([
-    { platform: "linux" as const },
-    { architecture: "arm64" },
-    { nodeApiVersion: "7" },
-    { nodeApiVersion: undefined },
-    { packageVersion: "2.0.0" },
-  ])("rejects incompatible host metadata before loading: %j", (override) => {
-    const value = fixture();
-    expect(
-      loadWindowsNativeAuthority({ ...value.host, ...override }).available,
-    ).toBe(false);
-    expect(value.loads()).toBe(0);
-  });
+    [{ platform: "linux" as const }, "host"],
+    [{ architecture: "arm64" }, "host"],
+    [{ nodeApiVersion: "7" }, "host"],
+    [{ nodeApiVersion: undefined }, "host"],
+    [{ packageVersion: "2.0.0" }, "artifact"],
+  ] as const)(
+    "rejects incompatible host metadata before loading: %j",
+    (override, failureStage) => {
+      const value = fixture();
+      expect(
+        loadWindowsNativeAuthority({ ...value.host, ...override }),
+      ).toMatchObject({ available: false, failureStage });
+      expect(value.loads()).toBe(0);
+    },
+  );
 
   it("rejects tampering even when the original file was a valid PE image", () => {
     const value = fixture();
     value.bytes[127] = 1;
     expect(loadWindowsNativeAuthority(value.host)).toMatchObject({
       available: false,
+      failureStage: "artifact",
       reason: expect.stringContaining("SHA-256"),
     });
     expect(value.loads()).toBe(0);
@@ -190,6 +194,7 @@ describe("packaged Windows native admission", () => {
       }),
     ).toMatchObject({
       available: false,
+      failureStage: "self-test",
       retryable: true,
       reason: expect.stringContaining("private DACL: access denied"),
     });
@@ -202,6 +207,7 @@ describe("packaged Windows native admission", () => {
       loadArtifact: () => ({ call: () => ({ privateDacl: true }) }),
     });
     expect(loaded.available).toBe(false);
+    expect(loaded).toMatchObject({ failureStage: "inspection" });
     expect(loaded).not.toHaveProperty("retryable");
   });
 

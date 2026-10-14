@@ -171,6 +171,34 @@ it("invalidates a bootstrap module slot mutated through an alias", () => {
 });
 
 it.each([
+  [
+    "destructuring assignment",
+    `[table[1]] = [function(module) { module.exports = require("other"); }];`,
+  ],
+  ["for-of head", `for (table[1] of replacements) {}`],
+  [
+    "wrapped assignment",
+    `(table as never)[1] = function(module) { module.exports = require("other"); };`,
+  ],
+])(
+  "invalidates a bootstrap module slot overwritten through %s",
+  (_name, write) => {
+    const values = inspectedValues(`(() => {
+    const modules = {
+      1(module) { module.exports = require("electron"); },
+      2(module, exports, load) { inspect(load(1)); }
+    };
+    const table = modules;
+    function load(id) { const m = {exports:{}}; modules[id](m,m.exports,load); return m.exports; }
+    ${write}
+    load(2);
+  })();`);
+    expect(values).toHaveLength(1);
+    expect(values[0]).toEqual(expect.objectContaining({ kind: "unknown" }));
+  },
+);
+
+it.each([
   `const electron=require("electron"); const ipc=electron.ipcMain; ipc.handle=()=>null; inspect(electron.ipcMain.handle);`,
   `require("electron").ipcMain.handle=()=>null; inspect(require("electron").ipcMain.handle);`,
   `const electron=require("electron"); ({ipcMain:electron.ipcMain}=replacement); inspect(electron.ipcMain);`,
@@ -361,6 +389,62 @@ it("composes fallthrough guards across successive conditional returns", () => {
   ]);
 });
 
+it.each([
+  ["while", 'inspect((() => { while (flag) { return "loop"; } })());'],
+  ["for", 'inspect((() => { for (;;) { return "forever"; } })());'],
+  ["try", 'inspect((() => { try { return "try"; } finally {} })());'],
+  [
+    "switch",
+    'inspect((() => { switch (x) { default: return "switch"; } })());',
+  ],
+])(
+  "keeps unsupported %s return control flow explicitly unknown",
+  (_name, source) => {
+    const value = inspectOne(source);
+    expect(
+      symbolicVariants(value).some((variant) => variant.kind === "unknown"),
+    ).toBe(true);
+    expect(value).not.toEqual({ kind: "literal", value: undefined });
+  },
+);
+
+it("preserves later returns with unresolved conditions after unsupported return flow", () => {
+  const variants = symbolicVariants(
+    inspectOne(`inspect((() => {
+      while (flag) { return "inside"; }
+      return "after";
+    })());`),
+  );
+
+  expect(variants.some((variant) => variant.kind === "unknown")).toBe(true);
+  expect(variants).toContainEqual(
+    expect.objectContaining({
+      kind: "literal",
+      value: "after",
+      conditionUnresolved: true,
+    }),
+  );
+});
+
+it("does not treat loops without owned returns as unknown return flow", () => {
+  expect(
+    inspectOne(`inspect((() => {
+      while (flag) { work(); }
+      return "after";
+    })());`),
+  ).toEqual({ kind: "literal", value: "after" });
+});
+
+it("does not treat nested-function returns as wrapper return flow", () => {
+  expect(
+    inspectOne(`inspect((() => {
+      try { function nested() { return "inner"; } }
+      catch {}
+      return "outer";
+    })());`),
+  ).toEqual({ kind: "literal", value: "outer" });
+});
+
 it("marks return guards unresolved when a nested join cannot be represented", () => {
   const value = inspectOne(`
     function choose() {
@@ -437,4 +521,56 @@ it("propagates branch guards through object properties and function calls", () =
       false,
     ]);
   }
+});
+
+it("completes a loaded module past a very large array without stack overflow", () => {
+  const parsed = parseJavaScriptSource(`(() => {
+    const modules = {
+      4(module) {
+        module.exports = { table: [0] };
+        if (module) { return; }
+        return;
+      },
+      8(module, exports, load) { const dep = load(4); inspect(dep); }
+    };
+    function load(id) { const m = {exports:{}}; modules[id](m,m.exports,load); return m.exports; }
+    load(8);
+  })();`);
+  if (parsed === null) throw new Error("symbolic source fixture did not parse");
+  const arrays: t.ArrayExpression[] = [];
+  const bareReturns: t.ReturnStatement[] = [];
+  let inspectCall: t.CallExpression | undefined;
+  traverseJavaScriptAst(parsed.program, {
+    enter: (node) => {
+      if (t.isArrayExpression(node)) arrays.push(node);
+      if (t.isReturnStatement(node) && node.argument == null)
+        bareReturns.push(node);
+      if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "inspect" })
+      )
+        inspectCall = node;
+    },
+  });
+  for (const array of arrays)
+    array.elements = Array.from({ length: 1_000_000 }, () =>
+      t.numericLiteral(0),
+    );
+  const earliestReturn = bareReturns.toSorted(
+    (left, right) => (left.start ?? 0) - (right.start ?? 0),
+  )[0];
+  const inspected = inspectCall?.arguments[0];
+  if (earliestReturn === undefined || inspected === undefined)
+    throw new Error("symbolic source fixture is missing its probes");
+
+  const state = completeSemanticSteps(
+    indexJavaScriptBindingsSteps(parsed.program),
+  );
+  const resolver = new JavaScriptSymbolicBindings(state, parsed.program);
+  const namespace = symbolicVariants(resolver.evaluate(inspected)).find(
+    (variant) => variant.kind === "namespace",
+  );
+  if (namespace?.kind !== "namespace")
+    throw new Error("loaded module namespace missing");
+  expect(namespace.environment.completedAt).toBe(earliestReturn);
 });

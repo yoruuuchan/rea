@@ -52,13 +52,15 @@ section names or the record being inside the initial 4 KiB header probe.
 Program and section declarations must agree; duplicate, conflicting, truncated
 or out-of-file records are rejected. Stripped section tables and section-only
 records are supported. Extended table numbering is explicitly unsupported.
-For carved ELFs whose section table extends beyond the captured file, REA
-examines every complete captured section header and records the unavailable
-headers as a limitation. A valid program-header ABI record can still establish
-the supported declaration. Available section declarations must agree with it;
-their duplicate, conflicting or unreadable records remain errors. A missing
-program-header record does not make ABI declarations in uncaptured sections
-absent or supply a default ABI.
+GNU `SHT_GNU_ATTRIBUTES` sections are refused by numeric section type until REA
+parses and reconciles their declarations; section names and payload sizes do not
+control detection or allocation. For carved ELFs whose section table extends
+beyond the captured file, REA examines every complete captured section header
+and records the unavailable headers as a limitation. The provider refuses an
+incomplete ABI declaration inspection even when a program-header ABI record is
+valid, because an unavailable section header could carry an unsupported or
+conflicting declaration. A missing program-header record does not make ABI
+declarations in uncaptured sections absent or supply a default ABI.
 The field layout follows
 [`Elf_MIPS_ABIFlags_v0`](https://github.com/bminor/glibc/blob/master/elf/elf.h).
 
