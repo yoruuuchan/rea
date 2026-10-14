@@ -28,6 +28,7 @@ it("retains batched TraceMap-resolved paths and null source positions", () => {
         text: { included: true, value: sourceMapText },
       },
     ],
+    unavailable_relevant_files: [],
     containers: [],
     text_bytes_read: Buffer.byteLength(sourceMapText),
     invalid_utf8_files: 0,

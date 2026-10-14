@@ -314,12 +314,21 @@ class WebsiteTranslationChecks(unittest.TestCase):
 
     def test_broken_placeholders_and_inline_markup_fail_before_replacing_preview(self):
         with self.translated_project() as root:
+            page = root / "website/public/index.html"
+            page.write_text(page.read_text().replace(
+                "</main>",
+                '<p>Translation test <a href="get-started/">read more</a>.</p></main>',
+            ))
+            extract_catalogs(root)
+            path = root / "website/locales/zh-CN/messages.po"
+            catalog = polib.pofile(path)
+            entry = catalog.find("Translation test {ph0}read more{ph1}.", msgctxt="page:index.html")
+            self.assertIsNotNone(entry)
+            entry.msgstr = "翻译测试：{ph0}继续阅读{ph1}。"
+            catalog.save(path)
             site = root / "website/_site"
             build_translations(root, site)
             before = (site / "zh-CN/index.html").read_bytes()
-            path = root / "website/locales/zh-CN/messages.po"
-            catalog = polib.pofile(path)
-            entry = catalog.find("Already know RE? {ph0}Skip to analysis guides →{ph1}", msgctxt="page:index.html")
             original = entry.msgstr
             for bad, reason in (("丢失链接", "changed placeholders"), ("{ph1}错误的链接{ph0}", "invalid inline markup")):
                 with self.subTest(reason=reason):

@@ -7,16 +7,17 @@ import {
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
 import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { z } from "zod";
 import { valid } from "semver";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
+import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
 import {
   clientRegistrationPackageReference,
-  isOwnedClientRegistrationCommand,
+  classifyClientRegistrationCommand,
   packageRunnerRegistrationCommand,
 } from "./ClientRegistrationIdentity.js";
 import {
@@ -48,6 +49,11 @@ export type ClientRegistrationStatus = ClientRegistrationStatusBase &
     | {
         readonly command: RegistrationCommand;
         readonly state: "stale";
+        readonly remediation: string;
+      }
+    | {
+        readonly command: RegistrationCommand;
+        readonly state: "unknown";
         readonly remediation: string;
       }
     | {
@@ -93,7 +99,7 @@ export interface ClientRegistrationInspection {
 /** Project diagnostics from the same inspection used to select maintenance. */
 export const readClientRegistrationStatuses = async (
   home: string,
-  currentCommandPath: string = resolve(process.argv[1] ?? "unknown"),
+  currentCommandPath: string | undefined = CURRENT_ENTRYPOINT_PATH,
   options: ClientRegistrationReadOptions = {},
 ): Promise<readonly ClientRegistrationStatus[]> =>
   (
@@ -103,7 +109,7 @@ export const readClientRegistrationStatuses = async (
 /** Parse effective registrations and their client-specific activation once. */
 export const readClientRegistrationInspections = async (
   home: string,
-  currentCommandPath: string = resolve(process.argv[1] ?? "unknown"),
+  currentCommandPath: string | undefined = CURRENT_ENTRYPOINT_PATH,
   options: ClientRegistrationReadOptions = {},
 ): Promise<readonly ClientRegistrationInspection[]> => {
   const inspections: ClientRegistrationInspection[] = [];
@@ -219,26 +225,32 @@ export const readClientRegistrationInspections = async (
       const packageVersionDrift =
         packageVersion !== undefined &&
         packageVersion !== PRODUCT_IDENTITY.packageVersion;
+      const alignment = registrationAligned(
+        registration,
+        effectiveClient,
+        currentCommandPath,
+        options.platform ?? process.platform,
+      );
       record(
         configuredStatus(
           effectiveClient,
           command,
-          activation === "enabled" &&
-            !packageVersionDrift &&
-            registrationAligned(
-              registration,
-              effectiveClient,
-              currentCommandPath,
-              options.platform ?? process.platform,
-            ) &&
-            (parsed.dialect !== "dsh" || dshDocument(parsed.document).ready) &&
-            policyBlock === undefined
-            ? "aligned"
-            : "stale",
+          alignment === "unknown"
+            ? "unknown"
+            : activation === "enabled" &&
+                !packageVersionDrift &&
+                alignment === "aligned" &&
+                (parsed.dialect !== "dsh" ||
+                  dshDocument(parsed.document).ready) &&
+                policyBlock === undefined
+              ? "aligned"
+              : "stale",
           policyBlock ??
             (packageVersionDrift
               ? packageVersionRemediation(packageReference ?? "", client)
-              : undefined),
+              : alignment === "unknown"
+                ? unknownEntryPointRemediation()
+                : undefined),
           packageReference,
         ),
         activation,
@@ -275,25 +287,29 @@ const registrationActivation = (
 const registrationAligned = (
   registration: z.output<typeof registrationSchema>,
   client: SetupClient,
-  currentCommandPath: string,
+  currentCommandPath: string | undefined,
   platform: NodeJS.Platform,
-): boolean => {
+): "aligned" | "stale" | "unknown" => {
   const command = [registration.command, ...registration.args];
-  if (!isOwnedClientRegistrationCommand(command, currentCommandPath))
-    return false;
+  const identity = classifyClientRegistrationCommand(
+    command,
+    currentCommandPath,
+  );
+  if (identity === "unknown") return "unknown";
+  if (identity === "foreign") return "stale";
   if (
     (client.name === "codex" || client.name === "grok_build") &&
     registration.startup_timeout_sec !==
       MCP_STARTUP_POLICY.codexStartupTimeoutSeconds
   )
-    return false;
+    return "stale";
   if (
     client.name === "kimi" &&
     (registration.startupTimeoutMs !==
       MCP_STARTUP_POLICY.kimiStartupTimeoutMs ||
       registration.toolTimeoutMs !== MCP_STARTUP_POLICY.kimiToolTimeoutMs)
   )
-    return false;
+    return "stale";
   if (
     (client.format === "kimi" ||
       client.format === "omp" ||
@@ -301,45 +317,55 @@ const registrationAligned = (
     registration.type !== undefined &&
     registration.type !== "stdio"
   )
-    return false;
-  if (client.format === "vscode" && registration.type !== "stdio") return false;
+    return "stale";
+  if (client.format === "vscode" && registration.type !== "stdio")
+    return "stale";
   // A Harness registration only connects as the rea stdio server; another
   // server name or transport leaves the session without REA tools.
   if (
     client.format === "dsh" &&
     (registration.serverName !== "rea" || registration.transport !== "stdio")
   )
-    return false;
+    return "stale";
   if (
     client.format === "copilot_cli" &&
     (registration.type !== "stdio" ||
       JSON.stringify(registration.tools) !== JSON.stringify(["*"]))
   )
-    return false;
+    return "stale";
   if (client.format === "commandcode" && registration.transport !== "stdio")
-    return false;
-  if (
-    command.length === 3 &&
-    command[2] === "mcp" &&
-    resolve(command[0] ?? "") === resolve(process.execPath) &&
-    resolve(command[1] ?? "") === currentCommandPath
-  )
-    return true;
+    return "stale";
   if (
     (["npx", "bunx"] as const).some((runner) => {
-      const runnerCommand = packageRunnerRegistrationCommand(runner, platform);
+      const expected = packageRunnerRegistrationCommand(runner, platform);
       return (
-        command.length === runnerCommand.length &&
-        command.every((argument, index) => argument === runnerCommand[index])
+        command.length === expected.length &&
+        command.every((argument, index) => argument === expected[index])
       );
     })
   )
-    return true;
-  return (
+    return "aligned";
+  if (
+    currentCommandPath !== undefined &&
+    currentCommandPath.length > 0 &&
+    command.length === 3 &&
+    command[2] === "mcp" &&
+    isAbsolute(command[0] ?? "") &&
+    isAbsolute(command[1] ?? "") &&
+    resolve(command[0] ?? "") === resolve(process.execPath) &&
+    resolve(command[1] ?? "") === currentCommandPath
+  )
+    return "aligned";
+  if (
+    currentCommandPath !== undefined &&
+    currentCommandPath.length > 0 &&
     command.length === 2 &&
     command[1] === "mcp" &&
+    isAbsolute(command[0] ?? "") &&
     resolve(command[0] ?? "") === currentCommandPath
-  );
+  )
+    return "aligned";
+  return "stale";
 };
 
 const parseRegistration = (
@@ -400,10 +426,13 @@ const remediation = (client: SetupClient): string => {
   return `Quit ${name} fully, run rea setup to refresh this registration, then start ${name} again. A running ${name} can rewrite its configuration from memory and drop the registration.`;
 };
 
+const unknownEntryPointRemediation = (): string =>
+  "The existing registration was retained because its executable identity cannot be verified. Run the installed REA CLI or a supported package runner, then rerun rea doctor; no registration was changed.";
+
 const configuredStatus = (
   client: SetupClient,
   command: RegistrationCommand,
-  state: "aligned" | "stale",
+  state: "aligned" | "stale" | "unknown",
   policyRemediation?: string,
   packageReference?: string,
 ): ClientRegistrationStatus =>

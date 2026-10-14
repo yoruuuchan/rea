@@ -16,21 +16,27 @@ const exampleInput = () =>
     MANAGED_NATIVE_VERIFICATION_EXAMPLE,
   );
 
-const nativeEvidenceWithExports = (names: readonly string[], path?: string) => {
+const nativeEvidenceWithExports = (
+  names: readonly string[],
+  path?: string,
+  subjectless = false,
+) => {
   const input = exampleInput();
   const native = input.native_observations[0];
   if (native === undefined || native.subject === null)
     throw new Error("missing native example");
   const macho = inspectMachoSchema.parse(native.normalized_result);
   return createEvidence(
-    {
-      path: path ?? native.subject.local_path,
-      sha256: native.subject.digest.sha256,
-      format: native.subject.format,
-      ...(native.subject.architecture === null
-        ? {}
-        : { architecture: native.subject.architecture }),
-    },
+    subjectless
+      ? undefined
+      : {
+          path: path ?? native.subject.local_path,
+          sha256: native.subject.digest.sha256,
+          format: native.subject.format,
+          ...(native.subject.architecture === null
+            ? {}
+            : { architecture: native.subject.architecture }),
+        },
     native.provider,
     {
       operation: native.operation,
@@ -60,7 +66,7 @@ const nativeEvidenceWithExports = (names: readonly string[], path?: string) => {
   );
 };
 
-const inputWithImportScope = (scope: string) => {
+const inputWithImportScope = (scope: string | null) => {
   const input = exampleInput();
   const managed = input.managed_boundaries;
   const normalized = managedNativeBoundaryInspectionSchema.parse(
@@ -223,6 +229,41 @@ it("keeps literal module names distinct and accepts the shared-library lib alias
     status: "verified",
     basis: "exact-export-name",
     matched_native: { module_path: "/examples/libfoo.dylib" },
+  });
+});
+
+it("keeps name candidates unresolved when a required module identity is absent", () => {
+  for (const scope of [null, "", "   "]) {
+    const result = verifyManagedNativeBoundaries({
+      ...inputWithImportScope(scope),
+      native_observations: [nativeEvidenceWithExports(["open_native"])],
+    });
+    expect(result.pinvoke_imports[0]).toMatchObject({
+      status: "unresolved",
+      basis: "module-identity-unknown",
+      matched_native: { name: "open_native" },
+      candidates: [{ name: "open_native" }],
+    });
+    expect(result.pinvoke_imports[0]?.limitations).toContain(
+      "A native name candidate exists, but a required module identity is unavailable; module correspondence is unknown.",
+    );
+  }
+
+  const subjectless = verifyManagedNativeBoundaries({
+    ...inputWithImportScope("nativehelper.dll"),
+    native_observations: [
+      nativeEvidenceWithExports(["open_native"], undefined, true),
+    ],
+  });
+  expect(subjectless.pinvoke_imports[0]).toMatchObject({
+    status: "unresolved",
+    basis: "module-identity-unknown",
+    matched_native: {
+      name: "open_native",
+      module_name: null,
+      module_path: null,
+    },
+    candidates: [{ name: "open_native" }],
   });
 });
 

@@ -480,6 +480,71 @@ it("preserves observed SaveHar null post-data without broadening arbitrary HAR p
   ).toThrow("HAR schema validation failed");
 });
 
+it.each(["[2001:db8::1]", "[::1]", "[::ffff:192.0.2.1]"])(
+  "retains Playwright 1.58.2 bracketed IPv6 spelling in reported Evidence: %s",
+  (address) => {
+    const fixture = historicalHar();
+    const first = fixture.log.entries[0];
+    if (first === undefined) throw new Error("fixture missing");
+    const input = {
+      log: {
+        ...fixture.log,
+        creator: { name: "Playwright", version: "1.58.2" },
+        entries: [
+          {
+            ...first,
+            serverIPAddress: address,
+            _extension: { serverIPAddress: address },
+          },
+          structuredClone(first),
+        ],
+      },
+    };
+    const decoded = decodeHarCapture(JSON.stringify(input), []);
+    expect(decoded.records[0]).toMatchObject({
+      reported: {
+        serverIPAddress: address,
+        _extension: { serverIPAddress: address },
+      },
+    });
+    expect(decoded.records[0]?.limitations).toContain(
+      "This capture declares Playwright 1.58.2 and reports bracketed IPv6 serverIPAddress. Original spellings are retained; brackets were removed only from valid IPv6 values in the validation copy. Producer declarations are not authenticated.",
+    );
+    expect(
+      decoded.records[1]?.limitations.some((limitation) =>
+        limitation.includes("bracketed IPv6 serverIPAddress"),
+      ),
+    ).toBe(false);
+  },
+);
+
+it.each([
+  { name: "other", version: "1.58.2", address: "[2001:db8::1]" },
+  { name: "Playwright", version: "1.58.1", address: "[2001:db8::1]" },
+  { name: "Playwright", version: "1.58.2", address: "[192.0.2.1]" },
+  { name: "Playwright", version: "1.58.2", address: "[2001:db8::1]:443" },
+  { name: "Playwright", version: "1.58.2", address: "[fe80::1%eth0]" },
+])(
+  "rejects unrecognized bracketed HAR address input: $name $version $address",
+  ({ name, version, address }) => {
+    const fixture = historicalHar();
+    const first = fixture.log.entries[0];
+    if (first === undefined) throw new Error("fixture missing");
+    expect(() =>
+      decodeHarCapture(
+        JSON.stringify({
+          log: {
+            ...fixture.log,
+            creator: { name, version },
+            entries: [{ ...first, serverIPAddress: address }],
+          },
+        }),
+        [],
+      ),
+    ).toThrow("HAR schema validation failed");
+  },
+);
+
 it.each([
   "c2VjcmV0",
   "c2Vj",

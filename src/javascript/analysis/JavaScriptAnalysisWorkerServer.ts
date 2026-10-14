@@ -189,7 +189,13 @@ const analyzeJob = async (
         cause instanceof AnalysisResourceConstraintError
           ? cause.reportedLimits
           : null,
-      message: cause instanceof Error ? cause.message : String(cause),
+      // The parent owns resource-error formatting; send its canonical reason.
+      message:
+        cause instanceof AnalysisResourceConstraintError
+          ? cause.reason
+          : cause instanceof Error
+            ? cause.message
+            : String(cause),
     });
   }
 };

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { buildManagedPeFixture } from "../../scripts/fixtures/managed/pe.mjs";
+import { inspectManagedArtifactBytes } from "./ManagedArtifactInspector.js";
 import { inspectManagedMembersBytes } from "./ManagedMemberInspector.js";
+import { readManagedPeLayout } from "./ManagedPeReader.js";
 import { managedPeFixtureTarget } from "./ManagedPe.fixture.js";
 
 const rawOffset = (rva: number) => 0x200 + (rva - 0x2000);
@@ -70,5 +72,71 @@ describe("managed PE fixture layout", () => {
         .subarray(rawOffset(nativeHeaderRva), rawOffset(nativeHeaderRva) + 4)
         .toString("latin1"),
     ).toBe("RTR\0");
+  });
+
+  it("keeps all 2045 requested resource bytes file-backed and inspectable", () => {
+    const resourceData = Buffer.alloc(2045, 0x41);
+    const image = buildManagedPeFixture({ resourceData });
+    const layout = readManagedPeLayout(image);
+    if (layout.cli === null) throw new Error("fixture omitted CLI header");
+    const directoryOffset = layout.rvaToOffset(
+      layout.cli.resources.rva,
+      layout.cli.resources.size,
+      "cli.resources",
+    );
+    const inspection = inspectManagedArtifactBytes(
+      image,
+      managedPeFixtureTarget(image),
+    );
+
+    expect(layout.cli.resources.size).toBe(resourceData.length + 4);
+    expect(image.readUInt32LE(directoryOffset)).toBe(resourceData.length);
+    expect(
+      image.subarray(
+        directoryOffset + 4,
+        directoryOffset + 4 + resourceData.length,
+      ),
+    ).toEqual(resourceData);
+    expect(inspection.classification.status).toBe("managed");
+    expect(inspection.resources).toMatchObject([
+      {
+        name: "Fixture.resources",
+        embedded: true,
+        data_length: resourceData.length,
+      },
+    ]);
+    expect(inspection.coverage).toMatchObject({
+      state: "complete",
+      issues: [],
+    });
+  });
+
+  it("keeps metadata for all 60 requested assembly references file-backed", () => {
+    const references = Array.from(
+      { length: 60 },
+      (_, index) => `System.Reference.Assembly.${index}`,
+    );
+    const image = buildManagedPeFixture({ references });
+    const layout = readManagedPeLayout(image);
+    if (layout.cli === null) throw new Error("fixture omitted CLI header");
+    const metadataOffset = layout.rvaToOffset(
+      layout.cli.metadata.rva,
+      layout.cli.metadata.size,
+      "cli.metadata",
+    );
+    const inspection = inspectManagedArtifactBytes(
+      image,
+      managedPeFixtureTarget(image),
+    );
+
+    expect(metadataOffset + layout.cli.metadata.size).toBeLessThanOrEqual(
+      image.length,
+    );
+    expect(inspection.classification.status).toBe("managed");
+    expect(inspection.references.map(({ name }) => name)).toEqual(references);
+    expect(inspection.coverage).toMatchObject({
+      state: "complete",
+      issues: [],
+    });
   });
 });

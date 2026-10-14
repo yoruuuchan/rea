@@ -869,6 +869,89 @@ describe("web capture redirect comparison", () => {
       changes: [expect.objectContaining({ change: "modified" })],
     });
   });
+
+  it.each([
+    ["status", 302],
+    ["mime_type", "text/plain"],
+    ["encoded_data_length", 12],
+  ] as const)(
+    "keeps unavailable redirect %s evidence unknown without suppressing known changes",
+    async (field, knownValue) => {
+      const browser = await startFakeCdpBrowser();
+      browsers.push(browser);
+      const captured = await new CdpBrowserProvider().inspectPage(
+        inspectWebPageInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+          allowed_origins: [browser.allowedOrigin],
+          target_id: "allowed-page",
+          observation_ms: 0,
+        }),
+      );
+      if (!captured.ok) throw captured.error;
+      const before = structuredClone(captured.value);
+      const beforeRequest = before.network.requests[0];
+      if (beforeRequest === undefined)
+        throw new Error("Missing network request");
+      beforeRequest.redirects = [
+        {
+          url: `${browser.allowedOrigin}/prior`,
+          response_url: `${browser.allowedOrigin}/prior`,
+          method: "GET",
+          resource_type: "Fetch",
+          status: 302,
+          mime_type: "text/plain",
+          encoded_data_length: 12,
+          request_timestamp: 1,
+          redirect_event_timestamp: 2,
+        },
+      ];
+      markSectionsComplete(before, [
+        "network_requests",
+        "websocket_connections",
+        "websocket_frames",
+      ]);
+
+      const compare = (left: typeof before, right: typeof before) =>
+        compareWebCaptures(
+          compareWebCapturesInputSchema.parse({
+            before: { inspection: left },
+            after: { inspection: right },
+          }),
+        ).dimensions.network;
+      for (const missingOnRight of [false, true]) {
+        const known = structuredClone(before);
+        const missing = structuredClone(before);
+        const knownHop = known.network.requests[0]?.redirects?.[0];
+        const missingHop = missing.network.requests[0]?.redirects?.[0];
+        if (knownHop === undefined || missingHop === undefined)
+          throw new Error("Missing redirect fixture");
+        Reflect.set(knownHop, field, knownValue);
+        Reflect.set(missingHop, field, null);
+        const result = missingOnRight
+          ? compare(known, missing)
+          : compare(missing, known);
+        expect(result).toMatchObject({
+          status: "unknown",
+          total_changes: 0,
+          reason: expect.stringContaining("redirect"),
+        });
+        expect(compare(missing, missing)).toMatchObject({
+          status: "unknown",
+          total_changes: 0,
+          reason: expect.stringContaining("redirect"),
+        });
+      }
+
+      const changed = structuredClone(before);
+      const changedHop = changed.network.requests[0]?.redirects?.[0];
+      if (changedHop === undefined) throw new Error("Missing redirect fixture");
+      changedHop.status = 307;
+      expect(compare(before, changed)).toMatchObject({
+        status: "changed",
+        changes: [expect.objectContaining({ change: "modified" })],
+      });
+    },
+  );
 });
 
 describe("web capture diff incomplete inventories", () => {

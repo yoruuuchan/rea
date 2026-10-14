@@ -2,19 +2,15 @@ import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect } from "vitest";
-import { z } from "zod";
+
+import { demangleSwiftSchema } from "../../../src/domain/native/nativeInspection.js";
+import { evidenceResultOf } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { mcpTest } from "../../support/mcp/mcpFixture.js";
 import { openProductionTarget } from "../../support/mcp/productionSession.js";
 
-const demangledSchema = z.object({
-  normalized_result: z.object({
-    symbols: z.array(
-      z.object({ input: z.string(), output: z.string(), status: z.string() }),
-    ),
-  }),
-});
+const demangledSchema = evidenceResultOf(demangleSwiftSchema);
 
 describe.skipIf(process.platform !== "darwin")(
   "native Swift demangling through MCP",

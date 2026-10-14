@@ -2,23 +2,43 @@ import { DOMParser, ParseError, type Node } from "@xmldom/xmldom";
 import { SaxesParser } from "saxes";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
+import {
+  decodeXmlPlistText,
+  XmlPlistTextDecodeError,
+} from "../../domain/propertyListXmlText.js";
 import { CaptureFormatError } from "./CaptureFormatError.js";
 
 /** Preserve XML node order, attribute names and text without interpreting producer-specific flags. */
 export const decodeSazMetadata = (bytes: Buffer): JsonValue => {
   let xml: string;
   try {
-    const encoding =
-      bytes[0] === 0xff && bytes[1] === 0xfe
-        ? "utf-16le"
-        : bytes[0] === 0xfe && bytes[1] === 0xff
-          ? "utf-16be"
-          : "utf-8";
-    xml = new TextDecoder(encoding, { fatal: true }).decode(bytes);
-  } catch {
+    xml = decodeXmlPlistText(bytes);
+  } catch (cause: unknown) {
+    if (
+      cause instanceof XmlPlistTextDecodeError &&
+      cause.reason === "unsupported-encoding"
+    )
+      throw new CaptureFormatError(
+        "unsupported",
+        `SAZ metadata declares unsupported XML encoding ${cause.declaredEncoding}.`,
+        "",
+        cause,
+      );
+    if (
+      cause instanceof XmlPlistTextDecodeError &&
+      cause.reason === "encoding-mismatch"
+    )
+      throw new CaptureFormatError(
+        "format",
+        "SAZ metadata encoding declaration disagrees with its bytes.",
+        "",
+        cause,
+      );
     throw new CaptureFormatError(
       "unsupported",
       "SAZ metadata must use UTF-8 or BOM-marked UTF-16.",
+      "",
+      cause,
     );
   }
   validateSazXml(xml);

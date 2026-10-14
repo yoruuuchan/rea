@@ -5,6 +5,7 @@ import type {
   JavaScriptSemanticPromiseOperation,
 } from "./javascriptSemanticIr.js";
 import { semanticCallableIdForNode } from "./javascriptSemanticProjection.js";
+import { createSemanticCallableIdStack } from "./javascriptSemanticCallableStack.js";
 import {
   semanticStaticPropertyName,
   unwrapJavaScriptExpression,
@@ -106,20 +107,18 @@ const collectCandidates = (
   const admittedCallables = new Set(
     callables.map(({ callableId }) => callableId),
   );
-  const callableStack: string[] = [];
+  const callableStack = createSemanticCallableIdStack(admittedCallables);
   const ancestors: t.Node[] = [];
   traverseJavaScriptAst(program, {
-    enter: (node) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && admittedCallables.has(callableId))
-        callableStack.push(callableId);
+    enter: (node, parent) => {
+      callableStack.enter(node, parent);
       const details = promiseCandidateDetails(node, state);
       if (details !== null) {
         output.push({
           node,
           ...details,
           promiseId: semanticPromiseId(details.kind, node),
-          ownerCallableId: callableStack.at(-1) ?? null,
+          ownerCallableId: callableStack.callables.at(-1) ?? null,
           ancestors: [...ancestors],
         });
       }
@@ -127,9 +126,7 @@ const collectCandidates = (
     },
     exit: (node) => {
       ancestors.pop();
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && callableStack.at(-1) === callableId)
-        callableStack.pop();
+      callableStack.exit(node);
     },
   });
   return output;

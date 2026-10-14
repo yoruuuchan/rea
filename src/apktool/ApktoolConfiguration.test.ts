@@ -58,7 +58,28 @@ describe("parseApktoolVersionOutput", () => {
   });
 
   it("reports null when the launcher prints nothing usable", () => {
-    expect(parseApktoolVersionOutput(" \n")).toEqual({ version: null });
+    expect(parseApktoolVersionOutput(" \n")).toEqual({
+      version: null,
+      reportedVersion: null,
+    });
+    expect(parseApktoolVersionOutput("successful but not a version\n")).toEqual(
+      {
+        version: null,
+        reportedVersion: "successful but not a version",
+      },
+    );
+  });
+
+  it("parses semantic prerelease versions without claiming they meet the minimum", () => {
+    expect(parseApktoolVersionOutput("2.7.0-beta.1\n")).toEqual({
+      version: "2.7.0-beta.1",
+    });
+  });
+
+  it("validates normalized semantic versions while preserving caller spelling", () => {
+    expect(parseApktoolVersionOutput("v2.7.0\n")).toEqual({
+      version: "v2.7.0",
+    });
   });
 });
 

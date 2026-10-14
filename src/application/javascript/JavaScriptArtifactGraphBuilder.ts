@@ -178,6 +178,7 @@ const graphCoverage = (context: JavaScriptArtifactGraphContext) => {
   );
   const unknownGap =
     (context.fileSet.source_selection?.unselected_files ?? 0) > 0 ||
+    context.fileSet.unavailable_relevant_files.length > 0 ||
     context.analysis.files.some(
       ({ analysis_failure, application_projection_failure }) =>
         analysis_failure !== undefined ||

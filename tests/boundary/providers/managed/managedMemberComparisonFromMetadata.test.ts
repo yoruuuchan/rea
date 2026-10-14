@@ -12,6 +12,75 @@ import {
   managedPeFixtureTarget,
 } from "../../../../src/dotnet/ManagedPe.fixture.js";
 
+describe("managed member structural matching", () => {
+  it("keeps unequal constants from becoming a structural remap", () => {
+    const observe = (
+      typeName: string,
+      methodName: string,
+      constant: number,
+      branchOffset: number,
+    ) =>
+      inspect(
+        buildManagedPeFixture({
+          typeName,
+          methodName,
+          ilBody: Buffer.from([
+            0x1e,
+            0x1f,
+            constant,
+            0x26,
+            0x2b,
+            branchOffset,
+            0x00,
+            0x2a,
+          ]),
+        }),
+        `/tmp/${typeName}-${constant}.dll`,
+      );
+    const left = observe("OldType", "OldMethod", 5, 1);
+    const differentConstant = observe("NewType", "NewMethod", 7, 1);
+    const sameConstant = observe("NewType", "NewMethod", 5, 0);
+    for (const [observed, constant] of [
+      [left, 5],
+      [differentConstant, 7],
+      [sameConstant, 5],
+    ] as const) {
+      expect(observed.result.methods[0]?.body).toMatchObject({
+        status: "present",
+        normalized_il_sha256: expect.any(String),
+        anchors: expect.arrayContaining([
+          expect.objectContaining({
+            operand_kind: "constant",
+            operand: String(constant),
+          }),
+        ]),
+      });
+    }
+
+    const different = compareManagedMembers(left, differentConstant);
+    expect(different.methods.map(({ status }) => status)).toEqual([
+      "removed",
+      "added",
+    ]);
+    expect(
+      different.methods.some(
+        ({ match }) => match.basis === "structural-method-shape",
+      ),
+    ).toBe(false);
+
+    expect(compareManagedMembers(left, sameConstant).methods).toContainEqual(
+      expect.objectContaining({
+        status: "changed",
+        match: expect.objectContaining({
+          status: "matched",
+          basis: "structural-method-shape",
+          confidence: "high",
+        }),
+      }),
+    );
+  });
+});
+
 describe("managed member comparison", () => {
   it("remaps renamed methods by exact CIL/signature without using names", () => {
     const leftBytes = buildManagedPeFixture();

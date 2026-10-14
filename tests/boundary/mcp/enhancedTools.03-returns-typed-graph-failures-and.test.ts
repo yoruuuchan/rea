@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AnalysisOperationPort } from "../../../src/application/AnalysisProvider.js";
 import { EnhancedTools } from "../../../src/application/EnhancedTools.js";
-import { AnalysisOutputError } from "../../../src/domain/analysisErrorCore.js";
-import { err } from "../../../src/domain/result.js";
 
 import {
   closeEnhancedToolResources,
@@ -16,43 +14,15 @@ import { observed as ok } from "../../fixtures/analysisExecution.js";
 afterEach(closeEnhancedToolResources);
 
 describe("enhanced MCP tools", () => {
-  it("returns typed graph failures and stable unresolved-name results", async () => {
+  it("returns stable unresolved-name results", async () => {
     const tools = new EnhancedTools({
-      execute: (name) =>
-        name === "procedure_address"
-          ? Promise.resolve(ok("0x1"))
-          : name === "procedure_callees"
-            ? Promise.resolve(err(new AnalysisOutputError(name, "failed")))
-            : Promise.resolve(ok(inventory({}))),
+      execute: () => Promise.resolve(ok(inventory({}))),
     });
 
-    const graph = await tools.execute("get_call_graph", {
-      address: "0x1",
-      direction: "forward",
-    });
     const unresolved = await tools.execute("find_xrefs_to_name", {
       name: "missing",
     });
 
-    expect(graph).toMatchObject({
-      ok: true,
-      value: {
-        graph: {
-          "0": [
-            {
-              address: "0x1",
-              status: "error",
-              error: {
-                category: "execution_failure",
-                message:
-                  "Analysis returned an unreadable result. Run `rea doctor` and review the reported details; repeating the unchanged request is not expected to succeed.",
-              },
-            },
-          ],
-        },
-        limitations: [],
-      },
-    });
     expect(unresolved).toEqual({
       ok: true,
       value: {

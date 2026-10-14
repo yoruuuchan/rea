@@ -50,14 +50,17 @@ export interface MutableOccurrence {
   limitations: string[];
 }
 
-/** Index the first occurrence for each canonical logical path. */
+/** Index every occurrence by canonical logical path without choosing an owner. */
 export const indexOccurrencesByPath = (
   occurrences: readonly MutableOccurrence[],
-): ReadonlyMap<string, MutableOccurrence> => {
-  const byPath = new Map<string, MutableOccurrence>();
-  for (const occurrence of occurrences)
-    if (!byPath.has(occurrence.logical_path))
-      byPath.set(occurrence.logical_path, occurrence);
+): ReadonlyMap<string, readonly MutableOccurrence[]> => {
+  const byPath = new Map<string, MutableOccurrence[]>();
+  for (const occurrence of occurrences) {
+    const matches = byPath.get(occurrence.logical_path);
+    if (matches === undefined)
+      byPath.set(occurrence.logical_path, [occurrence]);
+    else matches.push(occurrence);
+  }
   return byPath;
 };
 
@@ -70,6 +73,7 @@ export const createOccurrence = (
   entry: ArtifactEntry,
   path: string,
   parent: string | null,
+  duplicateOrdinal = 0,
 ): MutableOccurrence => {
   const role =
     entry.kind === "directory"
@@ -83,7 +87,12 @@ export const createOccurrence = (
         ? classifyArtifactPath(path)
         : ({ kind: "unknown", format: "unknown" } as const);
   return {
-    occurrence_id: `occ_${digestCanonicalValue({ path, kind: entry.kind }, "Artifact")}`,
+    occurrence_id: `occ_${digestCanonicalValue(
+      duplicateOrdinal === 0
+        ? { path, kind: entry.kind }
+        : { path, kind: entry.kind, duplicate_ordinal: duplicateOrdinal },
+      "Artifact",
+    )}`,
     artifact_id: null,
     parent_occurrence_id: parent,
     logical_path: path,
@@ -128,7 +137,10 @@ export const materializeDirectoryNodes = (
   nodes: Map<string, ArtifactNode>,
 ): void => {
   const directories = occurrences
-    .filter(({ entry_kind: kind }) => kind === "directory")
+    .filter(
+      ({ entry_kind: kind, hash_status }) =>
+        kind === "directory" && hash_status !== "unavailable",
+    )
     .sort(
       (left, right) => depth(right.logical_path) - depth(left.logical_path),
     );
@@ -249,15 +261,20 @@ export const rekeyOccurrences = (
   occurrences: MutableOccurrence[],
 ): void => {
   const replacements = new Map<string, string>();
-  for (const occurrence of occurrences)
+  const ordinalByPath = new Map<string, number>();
+  for (const occurrence of occurrences) {
+    const ordinal = ordinalByPath.get(occurrence.logical_path) ?? 0;
+    ordinalByPath.set(occurrence.logical_path, ordinal + 1);
     replacements.set(
       occurrence.occurrence_id,
       occurrenceIdForLocation({
         rootArtifactId,
         logicalPath: occurrence.logical_path,
         entryKind: occurrence.entry_kind,
+        ...(ordinal === 0 ? {} : { duplicateOrdinal: ordinal }),
       }),
     );
+  }
   for (const occurrence of occurrences) {
     occurrence.occurrence_id =
       replacements.get(occurrence.occurrence_id) ?? occurrence.occurrence_id;
@@ -272,19 +289,45 @@ export const createArtifactEdges = (
   rootArtifactId: string,
   occurrences: MutableOccurrence[],
   producer?: ArtifactCommand,
-): ArtifactEdge[] => {
+): { readonly edges: ArtifactEdge[]; readonly limitations: string[] } => {
   const byId = new Map(occurrences.map((item) => [item.occurrence_id, item]));
   const byPath = indexOccurrencesByPath(occurrences);
   const edges: ArtifactEdge[] = [];
+  const limitations: string[] = [];
   for (const occurrence of occurrences) {
+    const isSourceMap = occurrence.logical_path.toLowerCase().endsWith(".map");
+    const sourcePath = isSourceMap
+      ? occurrence.logical_path.slice(0, -".map".length)
+      : undefined;
+    const sourceCandidates =
+      sourcePath === undefined ? [] : (byPath.get(sourcePath) ?? []);
+    const mappedSource =
+      sourceCandidates.length === 1 && sourceCandidates[0]?.artifact_id !== null
+        ? sourceCandidates[0]
+        : undefined;
+    if (sourcePath !== undefined) {
+      const unknownMapping =
+        sourceCandidates.length > 1
+          ? {
+              occurrence: `Source-map target is unknown because multiple occurrences share ${JSON.stringify(sourcePath)}.`,
+              coverage: `Source-map relationships are unknown because multiple occurrences share ${JSON.stringify(sourcePath)}.`,
+            }
+          : sourceCandidates.length === 1 && mappedSource === undefined
+            ? {
+                occurrence: `Source-map target identity is unknown because the matching occurrence at ${JSON.stringify(sourcePath)} has no content identity.`,
+                coverage: `Source-map relationships are unknown because the matching occurrence at ${JSON.stringify(sourcePath)} has no content identity.`,
+              }
+            : undefined;
+      if (unknownMapping !== undefined) {
+        occurrence.limitations.push(unknownMapping.occurrence);
+        limitations.push(unknownMapping.coverage);
+      }
+    }
     if (
       occurrence.parent_occurrence_id === null ||
       occurrence.artifact_id === null
     )
       continue;
-    const mappedSource = occurrence.logical_path.toLowerCase().endsWith(".map")
-      ? byPath.get(occurrence.logical_path.slice(0, -".map".length))
-      : undefined;
     const parentArtifactId =
       mappedSource?.artifact_id ??
       byId.get(occurrence.parent_occurrence_id)?.artifact_id ??
@@ -294,7 +337,9 @@ export const createArtifactEdges = (
       relation:
         occurrence.entry_kind === "slice"
           ? ("slice-of" as const)
-          : relationFor(occurrence.logical_path),
+          : isSourceMap && mappedSource === undefined
+            ? ("contains" as const)
+            : relationFor(occurrence.logical_path),
       occurrence_id: occurrence.occurrence_id,
     };
     edges.push({
@@ -304,29 +349,44 @@ export const createArtifactEdges = (
       ordinal: edges.length,
     });
   }
-  return edges;
+  return { edges, limitations };
 };
 
 interface ArtifactParentIndex {
   readonly children: Map<string, ArtifactParentIndex>;
-  occurrence?: MutableOccurrence;
+  occurrences?: readonly MutableOccurrence[];
 }
 
 /** Resolve strict observed ancestors without rebuilding every path prefix. */
 export const resolveOccurrenceParents = (
   occurrences: readonly MutableOccurrence[],
-  byPath: ReadonlyMap<string, MutableOccurrence>,
+  byPath: ReadonlyMap<string, readonly MutableOccurrence[]>,
   expandedContainerIds: ReadonlySet<string>,
-): void => {
+): {
+  readonly limitations: readonly string[];
+  readonly unknownParentOccurrences: ReadonlySet<MutableOccurrence>;
+} => {
   const root: ArtifactParentIndex = { children: new Map() };
-  for (const occurrence of byPath.values()) {
-    if (
-      occurrence.entry_kind !== "directory" &&
-      !expandedContainerIds.has(occurrence.occurrence_id)
-    )
-      continue;
+  for (const matches of byPath.values()) {
+    const parents = matches.filter(
+      (occurrence) =>
+        occurrence.entry_kind === "directory" ||
+        expandedContainerIds.has(occurrence.occurrence_id),
+    );
+    if (parents.length === 0) continue;
+    if (parents.length > 1)
+      for (const parent of parents)
+        if (parent.entry_kind === "directory") {
+          parent.artifact_id = null;
+          parent.hash_status = "unavailable";
+          parent.limitations.push(
+            "This directory occurrence cannot be materialized because multiple directory entries share its logical path.",
+          );
+        }
+    const path = matches[0]?.logical_path;
+    if (path === undefined) continue;
     let branch = root;
-    for (const segment of occurrence.logical_path.split("/")) {
+    for (const segment of path.split("/")) {
       let child = branch.children.get(segment);
       if (child === undefined) {
         child = { children: new Map() };
@@ -334,12 +394,16 @@ export const resolveOccurrenceParents = (
       }
       branch = child;
     }
-    branch.occurrence = occurrence;
+    branch.occurrences = parents;
   }
+  const limitations = new Set<string>();
+  const unknownParentOccurrences = new Set<MutableOccurrence>();
   for (const occurrence of occurrences) {
     const path = occurrence.logical_path;
     let branch = root;
     let parent: MutableOccurrence | undefined;
+    let ambiguousParentPath: string | undefined;
+    let prefix = "";
     // Walk parent segments only. Stop scanning the path once no observed
     // directory or expanded container can be an ancestor.
     for (let start = 0; ;) {
@@ -349,11 +413,29 @@ export const resolveOccurrenceParents = (
       const child = branch.children.get(segment);
       if (child === undefined) break;
       branch = child;
-      parent = branch.occurrence ?? parent;
+      prefix = prefix.length === 0 ? segment : `${prefix}/${segment}`;
+      const candidates = branch.occurrences ?? [];
+      if (candidates.length === 1) {
+        parent = candidates[0];
+        ambiguousParentPath = undefined;
+      } else if (candidates.length > 1) {
+        parent = undefined;
+        ambiguousParentPath = prefix;
+      }
       start = slash + 1;
     }
     occurrence.parent_occurrence_id = parent?.occurrence_id ?? null;
+    if (ambiguousParentPath !== undefined) {
+      const limitation = `The parent occurrence for ${JSON.stringify(path)} is unknown because multiple observed directory or container occurrences share ${JSON.stringify(ambiguousParentPath)}.`;
+      occurrence.limitations.push(limitation);
+      limitations.add(limitation);
+      unknownParentOccurrences.add(occurrence);
+    }
   }
+  return {
+    limitations: [...limitations].sort(compareUnicodeCodePoints),
+    unknownParentOccurrences,
+  };
 };
 
 /**

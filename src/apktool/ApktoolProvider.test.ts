@@ -17,7 +17,7 @@ import type { ApktoolRequest } from "../domain/apktool/apktoolResourceAnalysis.j
 
 const it = test.skipIf(process.platform === "win32");
 
-const VERSION_BLOCK = "printf '2.7.0-stub\\n'";
+const VERSION_BLOCK = "printf '2.7.0-dirty\\n'";
 
 const REAL_YML = [
   "!!brut.androlib.meta.MetaInfo",
@@ -172,7 +172,7 @@ it("inspects the apktool launcher", async () => {
   expect(result.client).toEqual({
     command,
     command_source: "environment",
-    apktool_version: "2.7.0-stub",
+    apktool_version: "2.7.0-dirty",
   });
 });
 
@@ -352,6 +352,39 @@ it("reports a missing launcher as a capability gap with recovery", async () => {
   expect(projected.details).toMatchObject({
     provider_id: "apktool",
     reason: expect.stringContaining("REA_APKTOOL_COMMAND") as unknown,
+  });
+});
+
+it("fails closed for unrecognized and unsupported Apktool versions", async () => {
+  const invalidOutput = `unexpected Apktool output ${"x".repeat(700)}\n`;
+  const unrecognized = await writeApktoolStub(
+    () => `printf '%s' '${invalidOutput}'; exit 0`,
+  );
+  await expect(
+    providerOver(unrecognized.command).inspectAvailability(),
+  ).resolves.toMatchObject({
+    status: "unavailable",
+    code: "version_unresolved",
+    diagnostics: {
+      reported_version: invalidOutput.trim(),
+      stdout: invalidOutput,
+    },
+  });
+
+  const old = await writeApktoolStub(() => `printf '2.6.3\\n'`);
+  await expect(
+    providerOver(old.command).inspectAvailability(),
+  ).resolves.toMatchObject({
+    status: "unavailable",
+    code: "unsupported_version",
+  });
+
+  const prerelease = await writeApktoolStub(() => `printf '2.7.0-beta.1\\n'`);
+  await expect(
+    providerOver(prerelease.command).inspectAvailability(),
+  ).resolves.toMatchObject({
+    status: "unavailable",
+    code: "unsupported_version",
   });
 });
 

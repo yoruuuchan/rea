@@ -75,7 +75,7 @@ const failedEntry = (
       classifications,
       limitations: [limitation],
     };
-  if (entry.kind === "unknown")
+  if (entry.kind === "unknown" || entry.kind === "other")
     return {
       path: entry.path,
       kind: "unknown",

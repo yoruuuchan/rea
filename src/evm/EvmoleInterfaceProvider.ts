@@ -85,6 +85,16 @@ const replySchema = z.discriminatedUnion("ok", [
 type Launcher = NonNullable<Parameters<typeof runOwnedCommand>[2]>["launcher"];
 type EvmOutcome = Result<EvmInterfaceExecution, AnalysisError>;
 
+const compactErrorProjection = (error: AnalysisError) => {
+  const projection = projectAnalysisError(error);
+  if (error.capturedOutput === undefined) return projection;
+  // The cleanup result owns this exact captured stream. Other diagnostics and
+  // partial Evidence retain their original fields, including stdout/stderr.
+  const details = { ...projection.details };
+  delete details.captured_output;
+  return { ...projection, details };
+};
+
 const evmExecutionEvidence = (
   input: InspectEvmInterfaceInput,
   execution: EvmInterfaceExecution,
@@ -118,7 +128,7 @@ const evmCleanupFailure = (
     resources,
     {
       reason,
-      previous_error: result.ok ? null : projectAnalysisError(result.error),
+      previous_error: result.ok ? null : compactErrorProjection(result.error),
       ...(capturedOutput === undefined
         ? {}
         : { captured_output: { ...capturedOutput } }),
@@ -444,7 +454,10 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         }),
       );
     } catch (cause: unknown) {
-      if (cause instanceof OwnedCommandFailure)
+      if (
+        cause instanceof OwnedCommandFailure &&
+        cause.cleanupOwner !== undefined
+      )
         processOwner = cause.cleanupOwner;
       let fileFailure: EvmFileSizeFailureEvidence | undefined;
       let markerCleanupFailure: ArtifactReaderFailure | undefined;

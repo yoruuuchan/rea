@@ -13,6 +13,7 @@ import {
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
 import {
+  RUST_AUDITABLE_FORMAT_VERSIONS,
   rustBinarySchema,
   type InspectRustBinaryInput,
   type RustBinary,
@@ -97,6 +98,7 @@ const limitationsFor = (
         "No .dep-v0 section was found. Absence of .dep-v0 does not mean the binary has no dependencies.",
       ]
     : []),
+  ...unknownFormatLimitation(image.auditable_metadata?.format_version),
   ...(image.auditable_metadata?.packages.some((pkg) => pkg.kind === null)
     ? [
         "An omitted package kind is left null. The embedded format treats an omitted kind as runtime, and that default was not stored in the section.",
@@ -110,6 +112,20 @@ const limitationsFor = (
     : []),
   ...rustcLimitation(image.rustc_commit),
 ];
+
+const unknownFormatLimitation = (
+  format: number | null | undefined,
+): string[] => {
+  if (format === null || format === undefined) return [];
+  let preceding = 0;
+  for (const known of RUST_AUDITABLE_FORMAT_VERSIONS) {
+    if (known === format) return [];
+    if (known < format) preceding = known;
+  }
+  return [
+    `cargo-auditable format revision ${format} is unknown. Its schema directs readers to interpret it using the highest known preceding revision (${preceding}); this specific revision has not been independently verified.`,
+  ];
+};
 
 const rustcLimitation = (
   commit: ReturnType<typeof readRustBinaryImage>["rustc_commit"],

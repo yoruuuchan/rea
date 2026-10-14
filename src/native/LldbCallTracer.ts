@@ -123,6 +123,7 @@ const tracerOutputSchema = z.discriminatedUnion("status", [
       "tracer-error",
     ]),
     error: z.string().nullable(),
+    target_process_created: z.boolean().optional(),
   }),
 ]);
 
@@ -423,11 +424,12 @@ export class LldbCallTracer implements NativeCallTracer {
     let targetTermination: TargetTermination = exited.targetLaunched
       ? await ensureTerminated(paths.pid, exited.targetIdentity, true)
       : "terminated";
-    // These two bridge outcomes are emitted before a target process exists.
-    // Other missing-PID cases, including a missing result, remain unknown.
+    // Only an explicit bridge phase fact may prove that no target process was
+    // created. A missing PID or an integrity-error status alone is ambiguous.
     if (
       output !== undefined &&
-      (output.status === "target-error" || output.status === "launch-error") &&
+      output.status !== "traced" &&
+      output.target_process_created === false &&
       (await readTargetPid(paths.pid)) === undefined
     )
       targetTermination = "terminated";

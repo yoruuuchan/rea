@@ -502,10 +502,72 @@ it("keeps ASAR analysis usable when unpacked native companion bytes are absent",
       "ASAR unpacked companion bytes were unavailable; no content hash or child artifact was produced.",
     ]),
   });
+  if (missingNative === undefined)
+    throw new Error("Inventory omitted the unavailable native companion");
 
-  await reconstructAsarArchive(archive, [
+  const result = await reconstructAsarArchive(archive, [
     expect.objectContaining({ kind: "javascript-asset" }),
   ]);
+  const missingEntry = result.graph.nodes.find(
+    ({ kind, observations }) =>
+      kind === "asar-entry" &&
+      observations.some(({ label }) => label === missingNative.logical_path),
+  );
+  expect(missingEntry).toMatchObject({
+    identity: {
+      strategy: "canonical-path",
+      stability: "artifact-version",
+      artifact_sha256: snapshot.manifest.root_sha256,
+      path: missingNative.logical_path,
+    },
+    observations: [
+      expect.objectContaining({
+        label: missingNative.logical_path,
+        properties: expect.objectContaining({
+          entry_sha256: null,
+          bytes: missingNative.declared_size,
+          inventory_artifact_id: null,
+          inventory_occurrence_id: missingNative.occurrence_id,
+          hash_status: "unavailable",
+          artifact_kind: "native-addon",
+          kind: "native-addon",
+          content_available: false,
+        }),
+        evidence: expect.objectContaining({
+          limitations: expect.arrayContaining([
+            "ASAR unpacked companion bytes were unavailable; no content hash or child artifact was produced.",
+            "The inventoried native-addon entry has unavailable bytes; no content artifact identity can be established.",
+          ]),
+        }),
+      }),
+    ],
+  });
+  const unavailableAddon = result.graph.nodes.find(
+    ({ kind, observations }) =>
+      kind === "native-addon" &&
+      observations.some(({ label }) => label === missingNative.logical_path),
+  );
+  expect(unavailableAddon).toMatchObject({
+    identity: {
+      strategy: "canonical-path",
+      stability: "artifact-version",
+      artifact_sha256: snapshot.manifest.root_sha256,
+      path: missingNative.logical_path,
+    },
+    observations: [
+      expect.objectContaining({
+        label: missingNative.logical_path,
+        properties: expect.objectContaining({
+          availability: "unavailable",
+          hash_status: "unavailable",
+          artifact_kind: "native-addon",
+          bytes: missingNative.declared_size,
+          inventory_artifact_id: null,
+          inventory_occurrence_id: missingNative.occurrence_id,
+        }),
+      }),
+    ],
+  });
 });
 
 it("recurses into filesystem-backed ASAR containers without losing container-relative paths", async () => {

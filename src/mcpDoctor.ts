@@ -5,7 +5,11 @@ import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
-import { CATALOG_IDENTITY } from "./catalogIdentity.js";
+import { createCatalogIdentity } from "./catalogIdentity.js";
+import {
+  compactPresentationForMcpInputSchemaProfile,
+  parseMcpInputSchemaProfile,
+} from "./config/mcpInputSchemaProfile.js";
 import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
 import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
 import { err, ok } from "./domain/result.js";
@@ -75,6 +79,7 @@ interface McpDoctorCheck {
 
 /** Diagnose the actual production stdio adapter with one startup-bounded SDK session. */
 export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
+  const catalog = catalogIdentityForEnvironment(options.environment);
   const deadline =
     performance.now() +
     (options.deadlineMs ?? MCP_STARTUP_POLICY.doctorDeadlineMs);
@@ -104,6 +109,7 @@ export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
       client,
       deadline,
       controller.signal,
+      catalog,
     );
   } catch (cause: unknown) {
     result = {
@@ -189,6 +195,7 @@ const inspectProductionMcpSession = async (
   client: Client,
   deadline: number,
   signal: AbortSignal,
+  catalog: ReturnType<typeof createCatalogIdentity>,
 ) => {
   const request = requestOptions(deadline, signal);
   const [tools, prompts] = await Promise.all([
@@ -238,8 +245,7 @@ const inspectProductionMcpSession = async (
       name: "server-identity",
       ok:
         observedIdentity.packageVersion === PRODUCT_IDENTITY.packageVersion &&
-        observedIdentity.catalogDigest ===
-          CATALOG_IDENTITY.digests.combined_sha256,
+        observedIdentity.catalogDigest === catalog.digests.combined_sha256,
       detail: `package=${observedIdentity.packageVersion ?? "missing"}; catalog=${observedIdentity.catalogDigest ?? "missing"}`,
     },
     {
@@ -262,7 +268,7 @@ const inspectProductionMcpSession = async (
     identity: {
       expected_package_version: PRODUCT_IDENTITY.packageVersion,
       observed_package_version: observedIdentity.packageVersion,
-      expected_catalog_digest: CATALOG_IDENTITY.digests.combined_sha256,
+      expected_catalog_digest: catalog.digests.combined_sha256,
       observed_catalog_digest: observedIdentity.catalogDigest,
     },
     request_flow: {
@@ -481,6 +487,19 @@ const targetFreeEnvironment = (
   ])
     delete result[name];
   return result;
+};
+
+const catalogIdentityForEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>,
+): ReturnType<typeof createCatalogIdentity> => {
+  const parsed = parseMcpInputSchemaProfile(
+    environment.REA_MCP_INPUT_SCHEMA_PROFILE,
+  );
+  return createCatalogIdentity(
+    compactPresentationForMcpInputSchemaProfile(
+      parsed.ok ? parsed.value : undefined,
+    ),
+  );
 };
 
 const captureStderr = () => {

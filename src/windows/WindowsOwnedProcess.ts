@@ -387,11 +387,13 @@ export class WindowsOwnedProcess extends EventEmitter {
     if (this.#closed) return;
     if (this.#timer !== undefined) clearTimeout(this.#timer);
     this.#clearBlockedWake();
-    this.#authority.call("process_close", [this.#handle]);
-    this.#closed = true;
     this.stdin?.destroy();
     if (!this.stdout.destroyed) this.stdout.end();
     if (!this.stderr.destroyed) this.stderr.end();
+    // End local streams before releasing the native handle. If release fails,
+    // the retained job can be retried without leaving output streams open.
+    this.#authority.call("process_close", [this.#handle]);
+    this.#closed = true;
     this.#settle?.();
     this.emit("close", this.exitCode, null);
   }

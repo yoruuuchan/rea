@@ -47,6 +47,7 @@ describe("parameter references copied into function body bindings", () => {
         scopeId: "body",
         name: "arg",
         kind: "variable",
+        declarationKinds: new Set(),
         mutable: true,
         memberWrites: [],
         escapedPaths: [],

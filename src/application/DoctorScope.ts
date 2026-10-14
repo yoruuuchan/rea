@@ -8,6 +8,7 @@ import type {
   DoctorCheck,
   DoctorProviderInspection,
   DoctorScope,
+  DoctorSkillState,
 } from "./Doctor.js";
 
 /** Normalized readiness boundary included in every doctor response. */
@@ -29,7 +30,7 @@ interface DoctorProviderState {
 interface DoctorScopeInput {
   readonly checks: readonly DoctorCheck[];
   readonly registrations: readonly ClientRegistrationStatus[];
-  readonly skillState: "aligned" | "stale" | "missing";
+  readonly skillState: DoctorSkillState;
   readonly providers: DoctorProviderState;
   readonly scope: DoctorScopeReport;
 }
@@ -173,7 +174,7 @@ const registrationCheck = (
 ): DoctorCheck => ({
   name: `registration:${status.client}`,
   ok: false,
-  classification: "config_drift",
+  classification: status.state === "unknown" ? "unknown" : "config_drift",
   detail: status.config_path,
   remediation: status.remediation,
 });
@@ -188,7 +189,14 @@ const selectedSkillCheck = (
     classification: state === "aligned" ? "healthy" : "config_drift",
     ...(state === "aligned"
       ? { detail: "Installed REA skill identity is aligned." }
-      : { remediation: "Run rea setup to update the installed REA skill." }),
+      : {
+          remediation:
+            state === "unmanaged"
+              ? "Use regular skill directories, or run rea setup with --skill=false to configure the client without installing the skill."
+              : state === "unknown"
+                ? "Verify access to the reported skill files before retrying."
+                : "Run rea setup to update the installed REA skill.",
+        }),
   };
 
 const doctorProviderCheckName = (providerId: string, name: string): boolean =>

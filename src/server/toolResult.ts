@@ -1,12 +1,10 @@
+import { INSPECT_ANALYSIS_VIEW_OPERATION } from "../domain/analysisView/analysisViewErrors.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 
 import type { ToolContract } from "../contracts/toolContractTypes.js";
 import type { Evidence } from "../domain/evidence.js";
-import {
-  INSPECT_ANALYSIS_VIEW_OPERATION,
-  inspectAnalysisViewInputSchema,
-} from "../domain/analysisView/analysisView.js";
+import { inspectAnalysisViewInputSchema } from "../domain/analysisView/analysisView.js";
 import {
   projectAnalysisError,
   type AnalysisErrorProjection,

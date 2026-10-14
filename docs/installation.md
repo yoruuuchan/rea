@@ -122,6 +122,16 @@ See [client configuration](client-configuration.md) for client-specific roots,
 profiles, and environment overrides. A mixed selection plans each distinct
 destination. Selecting the skill without a client uses `~/.agents/skills`.
 Setup leaves existing skill copies in other locations untouched.
+Setup refuses symbolic links at the selected skill directory or its managed
+`references` directory, matching uninstall and update's ownership rules. Use a
+regular skill directory, or select `--skill=false` to configure the client
+registration without installing the bundled skill.
+The final selected directories are checked before approval and again before
+setup changes any client or Hopper installation. Unselected client destinations
+do not block other setup choices. Doctor reports linked or non-directory skill
+paths as `unmanaged`, names the affected paths, and provides those alternatives;
+an unreadable skill identity remains `unknown`. Uninstall retains and reports
+files it cannot safely remove, including their ownership manifest.
 
 `rea setup --skill-client claude_code --yes --json` refreshes and verifies the
 selected skill destination independently of MCP registration selection. The
@@ -567,8 +577,13 @@ sessions before removing that recovery directory and retrying.
 
 ### Launcher paths and troubleshooting
 
-On macOS, REA uses
-`/Applications/Hopper Disassembler.app/Contents/MacOS/hopper` by default.
+On macOS, REA checks executable Hopper launchers in this order: the canonical
+system application, the canonical application installed by `rea setup` under
+`~/Applications`, then other `Hopper*.app` bundles in `/Applications` and
+`~/Applications`. The Homebrew cask location is an optional `rea doctor`
+diagnostic; to use a Homebrew-installed launcher for CLI/MCP startup, set
+`HOPPER_LAUNCHER_PATH` to the path reported by doctor. REA does not run Homebrew
+while loading runtime configuration.
 On Linux, it prefers executable `/opt/hopper/bin/Hopper`, then executable
 `~/.local/share/rea/hopper/bin/Hopper`, followed by `/opt/hopper-v4/bin/hopper`
 and `/usr/bin/hopper`; if none exists, the former remains the diagnostic
@@ -629,12 +644,18 @@ memory has no original file offset. For FAT Mach-O, offsets refer to the origina
 container file. Results retain Hopper's image-relative offset, the observed slice
 base, and the source executable path.
 Loader selection reads the Mach-O container header, including FAT files with a
-single architecture. For FAT64, REA validates the architecture table and selected
-Mach-O header, prepares a private thin image, and loads it with Hopper's native
-Mach-O loader. It checks the entire source's SHA-256 while copying the slice;
-source identity and reported offsets still refer to the original container.
-An ambiguous architecture subtype requires an explicitly extracted thin image;
-REA does not guess. Configured loader arguments remain explicit overrides.
+single architecture. For FAT32 and FAT64 containers, REA validates the
+architecture table and selected Mach-O header, prepares a private thin image,
+and loads it with Hopper's native Mach-O loader instead of Hopper's implicit
+FAT slice choice. For arm64 targets, REA ranks subtype bases 0 (plain arm64) and
+2 (arm64e), ignoring capability bits for ranking while retaining the raw subtype
+for slice identity. These slices' function-entry encodings decode under
+`--aarch64`, ahead of Apple's arm64e.x1 variant (base subtype 12), which is
+selected only when it is the arm64 family's only candidate. REA checks the
+entire source's SHA-256 while copying the slice; source identity and reported
+offsets still refer to the original container. Any other ambiguous architecture
+subtype requires an explicitly extracted thin image; REA does not guess.
+Configured loader arguments remain explicit overrides.
 FAT64 is distinct from the CPU architecture: FAT32 containers can contain 64-bit
 executable images. This preparation avoids the Raw Binary loader dialog observed
 with native FAT64 loading on Hopper 6.1.0-demo.

@@ -46,6 +46,7 @@ const classifyLayer = (
 ): { readonly states: JavaScriptStaticLoadState[] } => {
   const nodes = layer.graph.nodes.filter(isLoadStateNode);
   const direct = new Map<string, string[]>();
+  const ambiguous = new Set<string>();
   for (const match of matches)
     if (
       match.status === "matched" &&
@@ -53,6 +54,10 @@ const classifyLayer = (
       match.static_node_id !== null
     )
       append(direct, match.static_node_id, match.runtime_node_id);
+    else if (match.status === "ambiguous")
+      for (const candidate of match.candidate_static_nodes)
+        if (candidate.static_layer_id === layer.layerId)
+          ambiguous.add(candidate.static_node_id);
   const resident = residentNodes(layer, new Set(direct.keys()));
   const runtimeScope = createStaticRuntimeScope(layer, runtimeEntities);
   const scopedEntities = runtimeEntities.filter(
@@ -76,6 +81,12 @@ const classifyLayer = (
         status: "resident-in-loaded-asset",
         runtimeNodeIds: [],
         reason: "containing-asset-was-loaded",
+      });
+    if (ambiguous.has(node.node_id))
+      return state(layer, node, {
+        status: "unknown",
+        runtimeNodeIds: [],
+        reason: "ambiguous-runtime-candidate",
       });
     const nodeWithinScope = staticNodeWithinRuntimeScope(node, runtimeScope);
     if (layerComplete && nodeWithinScope)

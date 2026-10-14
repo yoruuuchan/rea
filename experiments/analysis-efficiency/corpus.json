@@ -291,6 +291,58 @@
         "upstream_expected_digest": null,
         "derivation": "Unmodified capture published by official Wireshark wiki. Local digest pins downloaded bytes; no independently published upstream digest is claimed."
       }
+    },
+    {
+      "id": "wireshark-pgsql-jdbc.pcap",
+      "file": "pgsql-jdbc.pcap",
+      "bytes": 4906316,
+      "sha256": "6e68b8b792a0f4336092f98856abc7de8c54b55a29112854d28d676f9093c16b",
+      "provenance": {
+        "project": "Wireshark public sample captures",
+        "source_page": "https://wiki.wireshark.org/SampleCaptures",
+        "url": "https://wiki.wireshark.org/uploads/__moin_import__/attachments/SampleCaptures/pgsql-jdbc.pcap.gz",
+        "resolved_url": "https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/pgsql-jdbc.pcap.gz",
+        "upstream_expected_digest": null,
+        "license": "not stated in inspected upstream catalogue",
+        "derivation": "Unmodified official saved sample; decompressed gzip where indicated. Local digest pins acquired bytes, not an upstream-published digest.",
+        "compressed_source": {
+          "name": "pgsql-jdbc.pcap.gz",
+          "bytes": 590093,
+          "sha256": "15b51bb4cc197753c1ac6b7dc3cf5697f22a81e3bb5d2e1d24d15de469c3a06b"
+        }
+      }
+    },
+    {
+      "id": "wireshark-dns.cap",
+      "file": "dns.cap",
+      "bytes": 4338,
+      "sha256": "041eeb6f98bb398f1ee8b09651b5b5a84f6a62639f95bf226f9e7b77355d9f28",
+      "provenance": {
+        "project": "Wireshark public sample captures",
+        "source_page": "https://wiki.wireshark.org/SampleCaptures",
+        "url": "https://wiki.wireshark.org/uploads/__moin_import__/attachments/SampleCaptures/dns.cap",
+        "resolved_url": "https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/dns.cap",
+        "upstream_expected_digest": null,
+        "license": "not stated in inspected upstream catalogue",
+        "derivation": "Unmodified official saved sample; decompressed gzip where indicated. Local digest pins acquired bytes, not an upstream-published digest.",
+        "compressed_source": null
+      }
+    },
+    {
+      "id": "wireshark-dhcp.pcap",
+      "file": "dhcp.pcap",
+      "bytes": 1400,
+      "sha256": "2471b5420bdac826eecf8f61a2bbb4a3eb20dbfab7c02ff2be502f349f368214",
+      "provenance": {
+        "project": "Wireshark public sample captures",
+        "source_page": "https://wiki.wireshark.org/SampleCaptures",
+        "url": "https://wiki.wireshark.org/uploads/__moin_import__/attachments/SampleCaptures/dhcp.pcap",
+        "resolved_url": "https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/dhcp.pcap",
+        "upstream_expected_digest": null,
+        "license": "not stated in inspected upstream catalogue",
+        "derivation": "Unmodified official saved sample; decompressed gzip where indicated. Local digest pins acquired bytes, not an upstream-published digest.",
+        "compressed_source": null
+      }
     }
   ]
 }

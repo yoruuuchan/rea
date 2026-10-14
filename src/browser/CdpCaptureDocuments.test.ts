@@ -268,7 +268,9 @@ describe("CDP frame capture", () => {
   it("walks deeply nested frame trees and returns every frame and resource", () => {
     let frameTree: Record<string, unknown> = {
       frame: { id: "frame-0", url: `${origin}/0` },
-      resources: [{ url: `${origin}/0.js`, type: "Script" }],
+      resources: [
+        { url: `${origin}/0.js`, type: "Script", mimeType: "text/javascript" },
+      ],
     };
     for (let index = 1; index < 2_000; index += 1) {
       frameTree = {
@@ -276,7 +278,13 @@ describe("CDP frame capture", () => {
           id: `frame-${String(index)}`,
           url: `${origin}/${String(index)}`,
         },
-        resources: [{ url: `${origin}/${String(index)}.js`, type: "Script" }],
+        resources: [
+          {
+            url: `${origin}/${String(index)}.js`,
+            type: "Script",
+            mimeType: "text/javascript",
+          },
+        ],
         childFrames: [frameTree],
       };
     }

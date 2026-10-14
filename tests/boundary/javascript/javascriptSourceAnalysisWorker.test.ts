@@ -277,6 +277,55 @@ catch (error) {
   }
 });
 
+// The real server reports a parent-declined semantic budget through its
+// resource frame.
+it("formats a real worker's declined semantic budget once", async () => {
+  const worker = new JavaScriptAnalysisWorker(
+    { heapMb: 128, timeoutMs: 30_000 },
+    async (request) => {
+      const spawned = await spawnOwnedProviderProcess(request);
+      const stdin = spawned.process.stdin;
+      if (stdin === null || stdin === undefined)
+        throw new Error("Owned analyzer has no stdin");
+      const write = stdin.write.bind(stdin) as (
+        chunk: string,
+        callback: (error?: Error | null) => void,
+      ) => boolean;
+      stdin.write = ((
+        chunk: string,
+        callback: (error?: Error | null) => void,
+      ) =>
+        write(
+          chunk.replace(
+            /"semantic_result_budget_bytes":\d+/u,
+            '"semantic_result_budget_bytes":0',
+          ),
+          callback,
+        )) as typeof stdin.write;
+      return spawned;
+    },
+  );
+  try {
+    const result = await worker.analyze(
+      source("main.js", "export const observed = 7;"),
+      100,
+    );
+    if (result.ok) throw new Error("expected a declined semantic budget");
+    const { error } = result.error;
+    expect(error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      reason:
+        "The parent reserved its remaining result capacity for static observations; semantic analysis of main.js was not started",
+      reportedLimits: { semantic_result_budget_bytes: 0 },
+    });
+    expect(error.message.match(/Resource constraint during/gu)).toHaveLength(1);
+    expect(error.message.match(/main\.js:/gu)).toBeNull();
+    expect(result.error.javascript?.parse_status).toBe("complete");
+  } finally {
+    await worker.close();
+  }
+});
+
 // The handshake mirrors the real server: only Node.js reports an enforced V8 heap limit.
 const resourceFailureWorker = (heapLimit: string) =>
   new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 30_000 }, (request) =>

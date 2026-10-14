@@ -1,4 +1,7 @@
-import { digestProcessCommitment } from "./processScenario.js";
+import {
+  digestProcessCommitment,
+  processScenarioOutputBudgetProjectionSchema,
+} from "./processScenario.js";
 import { hasCaptureTruncation } from "./processCaptureCoverage.js";
 
 import type {
@@ -312,8 +315,31 @@ const validateCoverage = (
       retention.observed_bytes >= retention.retained_bytes &&
       (retention.observed_frames > count ||
         retention.observed_bytes === retention.retained_bytes) &&
-      retention.retained_bytes <=
-        retention.budget_bytes, `truncation_details.${name}`, "retained observations and budget accounting do not agree");
+      retention.retained_bytes <= retention.budget_bytes &&
+      (retention.unknown_size_frames ?? 0) <=
+        retention.observed_frames -
+          retention.retained_frames, `truncation_details.${name}`, "retained observations and budget accounting do not agree");
+  }
+  const normalized = details.normalized_terminal;
+  if (normalized !== undefined) {
+    const committedOutputBudget =
+      processScenarioOutputBudgetProjectionSchema.safeParse(
+        capture.manifest.scenario["limits"],
+      );
+    require(committedOutputBudget.success, "manifest.scenario.limits.output_bytes", "committed process scenario must include an explicit valid output_bytes budget");
+    const retainedBytes = capture.frames.reduce(
+      (total, frame) => total + Buffer.byteLength(frame.data),
+      0,
+    );
+    if (committedOutputBudget.success)
+      require(normalized.budget_bytes ===
+        committedOutputBudget.data.output_bytes &&
+        normalized.retained_bytes === retainedBytes &&
+        normalized.retained_bytes <= normalized.budget_bytes &&
+        normalized.omitted_frames <=
+          details.raw_terminal.observed_frames -
+            details.raw_terminal
+              .retained_frames, "truncation_details.normalized_terminal", "normalized terminal retention must agree with the committed budget and retained frames");
   }
   for (const [name, coverage, files, checkpoint] of [
     [

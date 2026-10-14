@@ -25,14 +25,16 @@ type Projection = Pick<
   "reported" | "numeric_literals" | "binary_fields" | "redactions"
 >;
 
-/** Decode a retained HAR with exact numeric lexemes and unchanged upstream schema validation. */
+/** Decode a retained HAR, validating a disposable projection of source facts. */
 export const decodeHarCapture = (
   text: string,
   sensitiveValues: readonly string[],
 ): DecodedCapture => {
   const raw = parseCaptureJson(text, "HAR");
   const validation = projectHar(raw, [], false);
-  createHarValidator()(validation.reported);
+  const adaptedPlaywrightEntries = new Set(
+    createHarValidator()(validation.reported),
+  );
   if (
     !captureObject(raw) ||
     !captureObject(raw.log) ||
@@ -73,6 +75,11 @@ export const decodeHarCapture = (
       ...projection,
       limitations: [
         "HAR text is producer-decoded Unicode. Original body bytes remain unknown unless content explicitly uses valid base64; declared sizes are preserved independently of retained bytes. mitmproxy 12.2.3 SaveHar may report null optional postData.text; that null is retained and omitted only from the upstream validation copy.",
+        ...(adaptedPlaywrightEntries.has(ordinal)
+          ? [
+              "This capture declares Playwright 1.58.2 and reports bracketed IPv6 serverIPAddress. Original spellings are retained; brackets were removed only from valid IPv6 values in the validation copy. Producer declarations are not authenticated.",
+            ]
+          : []),
         ...(recordsExcluded
           ? [
               "This record's payload and sidecars are excluded because its structural ancestor property was explicitly marked sensitive.",

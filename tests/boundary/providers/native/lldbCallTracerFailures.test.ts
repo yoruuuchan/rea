@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -213,5 +213,167 @@ describe("LLDB failure retention through the production tracer", () => {
       code: "cleanup_incomplete",
       details: { execution_failure: "evidence_integrity_mismatch" },
     });
+  });
+});
+
+describe("LLDB pre-target phase proof", () => {
+  it("releases a proven pre-target integrity rejection and allows tracer reuse", async () => {
+    let launches = 0;
+    let firstRuntime: string | undefined;
+    const tracer = new LldbCallTracer(
+      {},
+      async (_executable, arguments_) => {
+        const { config } = await configFromArguments(arguments_);
+        launches += 1;
+        if (firstRuntime === undefined)
+          firstRuntime = dirname(config.result_path);
+        await writeFile(config.observation_path, "");
+        await writeFile(config.stdout_capture_path, "");
+        await writeFile(
+          config.result_path,
+          JSON.stringify(
+            launches === 1
+              ? {
+                  status: "target-integrity-error",
+                  error:
+                    "selected executable digest changed before LLDB target creation",
+                  target_process_created: false,
+                }
+              : {
+                  status: "target-error",
+                  error: "second launch reached the bridge",
+                },
+          ),
+        );
+        return {
+          kind: "exited",
+          targetLaunched: launches === 1,
+          exitCode: 1,
+          output: "",
+          targetIdentity: undefined,
+          cleanupFailure: undefined,
+        };
+      },
+      async () => ok(fakeTool),
+    );
+
+    const rejected = await tracer.trace(request);
+    if (rejected.ok) throw new Error("expected pre-target integrity failure");
+    expect(rejected.error).toBeInstanceOf(EvidenceIntegrityError);
+    expect(projectAnalysisError(rejected.error).code).toBe(
+      "evidence_integrity_mismatch",
+    );
+    if (firstRuntime === undefined) throw new Error("LLDB was not launched");
+    await expect(access(firstRuntime)).rejects.toThrow();
+
+    const retried = await tracer.trace(request);
+    expect(launches).toBe(2);
+    if (retried.ok) throw new Error("expected the second bridge result");
+    expect(retried.error).toMatchObject({
+      _tag: "AnalysisCapabilityUnavailableError",
+      reason: expect.stringContaining("second launch reached the bridge"),
+    });
+  });
+});
+
+describe("LLDB retains ambiguous target ownership", () => {
+  it("keeps a post-target integrity rejection unresolved when its PID is missing", async () => {
+    let runtime: string | undefined;
+    const tracer = new LldbCallTracer(
+      {},
+      async (_executable, arguments_) => {
+        const { config } = await configFromArguments(arguments_);
+        runtime = dirname(config.result_path);
+        await writeFile(config.observation_path, "");
+        await writeFile(config.stdout_capture_path, "");
+        await writeFile(
+          config.result_path,
+          JSON.stringify({
+            status: "target-integrity-error",
+            error: "selected executable changed during LLDB launch",
+            target_process_created: true,
+          }),
+        );
+        return {
+          kind: "exited",
+          targetLaunched: true,
+          exitCode: 1,
+          output: "",
+          targetIdentity: undefined,
+          cleanupFailure: undefined,
+        };
+      },
+      async () => ok(fakeTool),
+    );
+
+    try {
+      const result = await tracer.trace(request);
+      if (result.ok) throw new Error("expected unresolved target identity");
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "cleanup_incomplete",
+        details: {
+          resources: expect.arrayContaining(["native-target:unknown"]),
+        },
+      });
+      expect(runtime).toBeDefined();
+      if (runtime !== undefined) await access(runtime);
+      const retry = await tracer.trace(request);
+      if (retry.ok) throw new Error("expected retained target cleanup");
+      expect(projectAnalysisError(retry.error).code).toBe("cleanup_incomplete");
+    } finally {
+      if (runtime !== undefined)
+        await rm(runtime, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an invalid process after Launch unresolved without producer proof", async () => {
+    let launches = 0;
+    let runtime: string | undefined;
+    const tracer = new LldbCallTracer(
+      {},
+      async (_executable, arguments_) => {
+        launches += 1;
+        const { config } = await configFromArguments(arguments_);
+        runtime = dirname(config.result_path);
+        await writeFile(config.observation_path, "");
+        await writeFile(config.stdout_capture_path, "");
+        await writeFile(
+          config.result_path,
+          JSON.stringify({
+            status: "launch-error",
+            error: "LLDB returned an invalid process after Launch",
+          }),
+        );
+        return {
+          kind: "exited",
+          targetLaunched: true,
+          exitCode: 1,
+          output: "",
+          targetIdentity: undefined,
+          cleanupFailure: undefined,
+        };
+      },
+      async () => ok(fakeTool),
+    );
+
+    try {
+      const result = await tracer.trace(request);
+      if (result.ok) throw new Error("expected unresolved launch cleanup");
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "cleanup_incomplete",
+        details: {
+          resources: expect.arrayContaining(["native-target:unknown"]),
+        },
+      });
+      expect(runtime).toBeDefined();
+      if (runtime !== undefined) await access(runtime);
+      const retry = await tracer.trace(request);
+      if (retry.ok) throw new Error("expected retained target cleanup");
+      expect(projectAnalysisError(retry.error).code).toBe("cleanup_incomplete");
+      expect(launches).toBe(1);
+    } finally {
+      if (runtime !== undefined)
+        await rm(runtime, { recursive: true, force: true });
+    }
   });
 });

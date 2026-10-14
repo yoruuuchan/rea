@@ -536,6 +536,12 @@ unresolved runtime/value semantics remain visible in results.
 
 ## Interface Builder hierarchy coverage
 
+A document's `hierarchy_complete` flag follows its own hierarchy coverage.
+If graph limits omit a hierarchy source or destination, or prevent a hierarchy
+edge or traversal from being retained, that document reports partial hierarchy
+coverage. Retained unresolved edges remain in the graph and do not add to the
+omitted-edge count. Coverage is evaluated separately for each document.
+
 A keyed-archive hierarchy UID without an object-table entry marks the hierarchy
 as partial while preserving decoded objects and known links. UID 0 remains
 archived nil and does not count as a missing reference. Archive and evidence

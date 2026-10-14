@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { Cli } from "incur";
 import { resolve } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -6,6 +7,7 @@ import type { BrowserScenarioCapturePort } from "../../src/application/BrowserSc
 import { createBrowserScenarioEvidence } from "../../src/application/BrowserScenarioEvidence.js";
 import type { BrowserScenarioSessionPort } from "../../src/browser/BrowserScenarioSessionPort.js";
 import { PlaywrightBrowserScenarioProvider } from "../../src/browser/PlaywrightBrowserScenarioProvider.js";
+import { PlaywrightScenarioSession } from "../../src/browser/PlaywrightScenarioSession.js";
 import { PlaywrightScenarioBrowserCleanupOwner } from "../../src/browser/PlaywrightScenarioBrowser.js";
 import { registerBrowserScenarioCommands } from "../../src/cliBrowserScenarioCommands.js";
 import { sanitizeBrowserUrl } from "../../src/domain/browserObservation.js";
@@ -27,7 +29,18 @@ import { ok } from "../../src/domain/result.js";
 
 const state = vi.hoisted(() => ({
   provider: undefined as BrowserScenarioCapturePort | undefined,
+  launchPersistentContext: vi.fn(),
 }));
+vi.mock("playwright-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("playwright-core")>();
+  return {
+    ...actual,
+    chromium: {
+      ...actual.chromium,
+      launchPersistentContext: state.launchPersistentContext,
+    },
+  };
+});
 vi.mock("../../src/composition/browserScenario.js", () => ({
   createBrowserScenarioProvider: () => state.provider,
 }));
@@ -183,6 +196,96 @@ it("retries retained browser cleanup before the one-shot CLI releases its provid
     await provider.close();
     state.provider = undefined;
     process.exitCode = savedExitCode;
+  }
+});
+
+it("retries a late Playwright open after cancellation before accepting another capture", async () => {
+  let finishLateOpen!: (context: unknown) => void;
+  const lateOpen = new Promise<unknown>((resolve) => {
+    finishLateOpen = resolve;
+  });
+  let finishFirstClose!: () => void;
+  const firstClose = new Promise<void>((resolve) => {
+    finishFirstClose = resolve;
+  });
+  let firstCloseStarted!: () => void;
+  const closeStarted = new Promise<void>((resolve) => {
+    firstCloseStarted = resolve;
+  });
+  let launchCount = 0;
+  let firstCloseAttempts = 0;
+  const makeContext = () => {
+    const page = Object.assign(new EventEmitter(), {
+      url: () => "https://app.example.test/",
+      goto: async () => undefined,
+      waitForTimeout: async () => undefined,
+    });
+    const browser = {
+      contexts: () => [],
+      close: async () => undefined,
+      version: () => "Fixture Chromium",
+    };
+    return Object.assign(new EventEmitter(), {
+      setDefaultTimeout: () => undefined,
+      setDefaultNavigationTimeout: () => undefined,
+      addCookies: async () => undefined,
+      browser: () => browser,
+      pages: () => [page],
+      newPage: async () => page,
+      close: async () => {
+        if (launchCount === 1) {
+          firstCloseAttempts += 1;
+          if (firstCloseAttempts === 1) {
+            firstCloseStarted();
+            await firstClose;
+            throw new Error("injected late browser close failure");
+          }
+        }
+      },
+    });
+  };
+  state.launchPersistentContext.mockImplementation(() => {
+    launchCount += 1;
+    return launchCount === 1 ? lateOpen : Promise.resolve(makeContext());
+  });
+  const provider = new PlaywrightBrowserScenarioProvider((input, options) =>
+    PlaywrightScenarioSession.open(input, {}, options),
+  );
+  const cancellation = new AbortController();
+  const firstCapture = provider.captureScenario(scenario, {
+    signal: cancellation.signal,
+  });
+  try {
+    await vi.waitFor(() => expect(launchCount).toBe(1));
+    cancellation.abort();
+    const cancelled = await firstCapture;
+    if (cancelled.ok) throw new Error("Expected the first capture to cancel.");
+    expect(cancelled.error).toBeInstanceOf(AnalysisCancelledError);
+
+    finishLateOpen(makeContext());
+    await closeStarted;
+    finishFirstClose();
+
+    const failedRetry = await provider.captureScenario(scenario);
+    expect(failedRetry.ok).toBe(false);
+    if (!failedRetry.ok) expect(failedRetry.error.cleanupIncomplete).toBe(true);
+
+    const retried = await provider.captureScenario(scenario);
+    expect(retried.ok).toBe(true);
+    if (retried.ok) expect(retried.value.steps).toHaveLength(2);
+    expect(firstCloseAttempts).toBe(2);
+    expect(launchCount).toBe(2);
+    await provider.close();
+    expect(launchCount).toBe(2);
+  } finally {
+    cancellation.abort();
+    finishLateOpen(makeContext());
+    finishFirstClose();
+    try {
+      await provider.close();
+    } finally {
+      state.launchPersistentContext.mockReset();
+    }
   }
 });
 

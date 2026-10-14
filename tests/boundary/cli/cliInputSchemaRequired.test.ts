@@ -200,4 +200,27 @@ describe("web module CLI advertised input schema", () => {
     expect(options({ importMapBaseUrl: "" })).toBe(false);
   });
 });
+
+describe("reference-source outline-depth input schema", () => {
+  it("aligns advertised bounds with the parser's accepted values", async () => {
+    const cli = createCli({});
+    const advertised = await advertisedSchema(cli, "import-reference-source");
+    const outlineDepth = advertised.options?.properties?.outlineDepth;
+    expect(outlineDepth).toMatchObject({ type: "integer", minimum: 0 });
+
+    const parser = parserSchema(cli, "import-reference-source", "options");
+    expect(parser?.safeParse({ outlineDepth: -1 }).success).toBe(false);
+    expect(parser?.safeParse({ outlineDepth: 0 }).success).toBe(true);
+    expect(parser?.safeParse({ outlineDepth: 2 }).success).toBe(true);
+
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile({
+      ...advertised.options,
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+    });
+    expect(validate({ outlineDepth: -1 })).toBe(false);
+    expect(validate({ outlineDepth: 0 })).toBe(true);
+    expect(validate({ outlineDepth: 2 })).toBe(true);
+  });
+});
 import { resolve } from "node:path";

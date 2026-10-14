@@ -13,6 +13,56 @@ const rpcEndpoints = (source: string) =>
       mechanism.startsWith("trpc:") || mechanism.startsWith("graphql:"),
   );
 
+describe("RPC object property ownership", () => {
+  it.each([
+    ['url: "/trpc/old", url: "/trpc/live"', "/trpc/live"],
+    ['url: "/trpc/old", url: runtimeUrl', null],
+    ['url: "/trpc/old", ...options', null],
+    ['url: "/trpc/old", [key]: runtimeUrl', null],
+    ['url: "/trpc/old", get url() { return runtimeUrl; }', null],
+    ['url: "/trpc/old", url() {}', null],
+    ['...options, url: "/trpc/live", headers: {}', "/trpc/live"],
+    ['[key]: runtimeUrl, url: "/trpc/live"', "/trpc/live"],
+    ['url: "/trpc/old", ["url"]: "/trpc/live"', "/trpc/live"],
+    ['url: "/trpc/old", [`url`]: "/trpc/live"', "/trpc/live"],
+    ['url: "/trpc/live", [`headers`]: {}', "/trpc/live"],
+    ['url: "/trpc/live", [1n]: {}', "/trpc/live"],
+    ['url: "/trpc/live", [0x1n]: {}', "/trpc/live"],
+    ['url: "/trpc/live", [0b1n]: {}', "/trpc/live"],
+    ['url: "/trpc/live", [-1n]: {}', "/trpc/live"],
+  ] as const)(
+    "reads only the final known link URL from {%s}",
+    (options, value) => {
+      expect(rpcEndpoints(`httpBatchLink({ ${options} });`)).toEqual(
+        value === null
+          ? []
+          : [{ kind: "network", value, mechanism: "trpc:link:httpBatchLink" }],
+      );
+    },
+  );
+
+  it.each([
+    ['operation: "mutation"', "Old", "graphql:mutation"],
+    ['name: { kind: "Name", value: "Current" }', "Current", "graphql:query"],
+    ['kind: "FragmentDefinition"', null, null],
+    ["name: runtimeName", null, null],
+    ["get name() { return runtimeName; }", null, null],
+    ["...options", null, null],
+    ["[key]: runtimeValue", null, null],
+  ] as const)(
+    "honors final GraphQL document properties: %s",
+    (override, value, mechanism) => {
+      const source = `const doc = {
+      kind: "OperationDefinition", operation: "query",
+      name: { kind: "Name", value: "Old" }, ${override}
+    };`;
+      expect(rpcEndpoints(source)).toEqual(
+        value === null ? [] : [{ kind: "network", value, mechanism }],
+      );
+    },
+  );
+});
+
 describe("tRPC procedure recognition", () => {
   it("recognizes React hook procedures on a renamed proxy root", () => {
     expect(
@@ -348,7 +398,9 @@ describe("GraphQL operation recognition", () => {
       { kind: "network", value: name, mechanism: "graphql:query" },
     ]);
   });
+});
 
+describe("GraphQL document ownership", () => {
   it("recognizes precompiled GraphQL document objects", () => {
     expect(
       rpcEndpoints(`
@@ -394,6 +446,36 @@ describe("GraphQL operation recognition", () => {
       `),
     ).toEqual([
       { kind: "network", value: "GetUser", mechanism: "graphql:query" },
+    ]);
+  });
+
+  it.each([
+    `body: "query Old { user }", body: "query Current { user }", locationOffset: { line: 1, column: 1 }`,
+    `body: "query Old { user }", locationOffset: { line: 1, column: 1 }, ...sourceOptions`,
+    `body: "query Old { user }", locationOffset: { line: 1, column: 1 }, ...{ body: "query Current { user }" }`,
+    `...{ body: "query Old { user }" }, ...runtimeOptions, locationOffset: { line: 1, column: 1 }`,
+  ])(
+    "does not report overwritten or uncertain GraphQL source bodies: %s",
+    (sourceFields) => {
+      expect(
+        rpcEndpoints(`
+          const source = { ${sourceFields} };
+          const operation = {
+            kind: "OperationDefinition",
+            operation: "query",
+            name: { kind: "Name", value: "Current" },
+            loc: { source },
+          };
+        `),
+      ).toEqual([
+        { kind: "network", value: "Current", mechanism: "graphql:query" },
+      ]);
+    },
+  );
+
+  it("keeps ordinary GraphQL string scans outside Source-shaped objects", () => {
+    expect(rpcEndpoints('const text = "query Standalone { user }";')).toEqual([
+      { kind: "network", value: "Standalone", mechanism: "graphql:query" },
     ]);
   });
 });

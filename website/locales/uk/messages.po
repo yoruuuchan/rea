@@ -69,12 +69,12 @@ msgstr "Автор: N0zoM1z0 · 10 жовтня 2026"
 #: website/public/blog/touhou-reconstruction/index.html:1082
 #: website/public/examples/dino-lab/index.html:477
 #: website/public/faq/index.html:575
-#: website/public/first-investigation/index.html:525
-#: website/public/get-started/index.html:884
+#: website/public/first-investigation/index.html:536
+#: website/public/get-started/index.html:1819
 #: website/public/guides/browser/index.html:509
 #: website/public/guides/index.html:284
 #: website/public/guides/javascript/index.html:505
-#: website/public/guides/native/index.html:511 website/public/index.html:1193
+#: website/public/guides/native/index.html:511 website/public/index.html:1224
 #: website/public/showcase/aegis/index.html:810
 #: website/public/showcase/ctf/index.html:779
 #: website/public/showcase/dx-ball/index.html:787
@@ -2988,7 +2988,8 @@ msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Ваш кодуючий аген
 #: website/public/first-investigation/index.html:258
 #: website/public/first-investigation/index.html:286
 #: website/public/first-investigation/index.html:408
-#: website/public/first-investigation/index.html:450
+#: website/public/first-investigation/index.html:449
+#: website/public/first-investigation/index.html:466
 msgctxt "page:first-investigation/index.html"
 msgid "Copy"
 msgstr "Копіювати"
@@ -3138,27 +3139,17 @@ msgctxt "page:first-investigation/index.html"
 msgid "Open a terminal in the unpacked {ph0} folder:"
 msgstr "Відкрийте термінал у розпакованій папці {ph0}:"
 
-#: website/public/first-investigation/index.html:464
-msgctxt "page:first-investigation/index.html"
-msgid ""
-"This command uses a shell with here-document support, such as Bash or Zsh. "
-"Your agent can run the same JavaScript in your platform’s shell."
-msgstr ""
-"Ця команда використовує оболонку з підтримкою here-document, таку як Bash "
-"або Zsh. Ваш агент може запустити той самий JavaScript в оболонці вашої "
-"платформи."
-
-#: website/public/first-investigation/index.html:472
+#: website/public/first-investigation/index.html:483
 msgctxt "page:first-investigation/index.html"
 msgid "5. Ask another question"
 msgstr "5. Задайте ще одне питання"
 
-#: website/public/first-investigation/index.html:473
+#: website/public/first-investigation/index.html:484
 msgctxt "page:first-investigation/index.html"
 msgid "Try a follow-up in the same conversation:"
 msgstr "Спробуйте продовжити ту саму розмову:"
 
-#: website/public/first-investigation/index.html:475
+#: website/public/first-investigation/index.html:486
 msgctxt "page:first-investigation/index.html"
 msgid ""
 "What happens if the file can’t be written? Follow the error back to the "
@@ -3167,7 +3158,7 @@ msgstr ""
 "Що станеться, якщо файл не може бути записаний? Поверніться на сторінку, "
 "вказану в повідомленні про помилку."
 
-#: website/public/first-investigation/index.html:480
+#: website/public/first-investigation/index.html:491
 msgctxt "page:first-investigation/index.html"
 msgid ""
 "Or give your agent an app of your own and ask about one button, file or "
@@ -3180,7 +3171,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span >
 #. {ph3}: </span >
-#: website/public/first-investigation/index.html:485
+#: website/public/first-investigation/index.html:496
 #, python-brace-format
 msgctxt "page:first-investigation/index.html"
 msgid ""
@@ -3194,7 +3185,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span >
 #. {ph3}: </span >
-#: website/public/first-investigation/index.html:491
+#: website/public/first-investigation/index.html:502
 #, python-brace-format
 msgctxt "page:first-investigation/index.html"
 msgid ""
@@ -3208,7 +3199,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span >
 #. {ph3}: </span >
-#: website/public/first-investigation/index.html:499
+#: website/public/first-investigation/index.html:510
 #, python-brace-format
 msgctxt "page:first-investigation/index.html"
 msgid ""
@@ -3263,12 +3254,13 @@ msgctxt "page:first-investigation/index.html"
 msgid "Copy CSV check prompt"
 msgstr "Скопіювати запит перевірки CSV"
 
-#: website/public/first-investigation/index.html:450
+#: website/public/first-investigation/index.html:449
+#: website/public/first-investigation/index.html:466
 msgctxt "page:first-investigation/index.html"
 msgid "Copy formatter check command"
 msgstr "Команда перевірки форматування копії"
 
-#: website/public/first-investigation/index.html:525
+#: website/public/first-investigation/index.html:536
 msgctxt "page:first-investigation/index.html"
 msgid "Back to top"
 msgstr "Нагору"
@@ -3291,57 +3283,57 @@ msgctxt "page:get-started/index.html"
 msgid "Set up REA."
 msgstr "Налаштуйте REA ."
 
-#: website/public/get-started/index.html:198
-msgctxt "page:get-started/index.html"
-msgid ""
-"Connect REA to your coding agent, or inspect a local app from your terminal."
-msgstr ""
-"Підключіть REA до свого програміста або перевірте локальну програму зі свого"
-" терміналу."
-
-#: website/public/get-started/index.html:210
+#: website/public/get-started/index.html:262
 msgctxt "page:get-started/index.html"
 msgid "Open a terminal and check:"
 msgstr "Відкрийте термінал і перевірте:"
 
-#: website/public/get-started/index.html:213
-#: website/public/get-started/index.html:470
+#: website/public/get-started/index.html:265
 msgctxt "page:get-started/index.html"
 msgid "Terminal"
 msgstr "Термінал"
 
-#: website/public/get-started/index.html:214
-#: website/public/get-started/index.html:235
-#: website/public/get-started/index.html:258
-#: website/public/get-started/index.html:274
+#: website/public/get-started/index.html:266
 #: website/public/get-started/index.html:289
-#: website/public/get-started/index.html:304
-#: website/public/get-started/index.html:320
-#: website/public/get-started/index.html:339
-#: website/public/get-started/index.html:425
-#: website/public/get-started/index.html:471
-#: website/public/get-started/index.html:547
+#: website/public/get-started/index.html:319
+#: website/public/get-started/index.html:344
+#: website/public/get-started/index.html:367
+#: website/public/get-started/index.html:382
+#: website/public/get-started/index.html:416
+#: website/public/get-started/index.html:447
+#: website/public/get-started/index.html:461
+#: website/public/get-started/index.html:479
+#: website/public/get-started/index.html:531
+#: website/public/get-started/index.html:545
+#: website/public/get-started/index.html:577
 #: website/public/get-started/index.html:606
-#: website/public/get-started/index.html:647
-#: website/public/get-started/index.html:679
-#: website/public/get-started/index.html:736
-#: website/public/get-started/index.html:777
-#: website/public/get-started/index.html:817
-#: website/public/get-started/index.html:833
+#: website/public/get-started/index.html:741
+#: website/public/get-started/index.html:771
+#: website/public/get-started/index.html:796
+#: website/public/get-started/index.html:811
+#: website/public/get-started/index.html:859
+#: website/public/get-started/index.html:892
+#: website/public/get-started/index.html:1044
+#: website/public/get-started/index.html:1106
+#: website/public/get-started/index.html:1129
+#: website/public/get-started/index.html:1153
+#: website/public/get-started/index.html:1201
+#: website/public/get-started/index.html:1276
+#: website/public/get-started/index.html:1302
+#: website/public/get-started/index.html:1319
+#: website/public/get-started/index.html:1562
+#: website/public/get-started/index.html:1621
+#: website/public/get-started/index.html:1640
+#: website/public/get-started/index.html:1662
+#: website/public/get-started/index.html:1705
+#: website/public/get-started/index.html:1735
+#: website/public/get-started/index.html:1756
 msgctxt "page:get-started/index.html"
 msgid "Copy"
 msgstr "Копіювати"
 
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/get-started/index.html:231
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid "{ph0}Windows (PowerShell){ph1}"
-msgstr "{ph0} Windows (PowerShell){ph1}"
-
 #. {ph0}: <code>node -v</code>
-#: website/public/get-started/index.html:246
+#: website/public/get-started/index.html:300
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3351,51 +3343,9 @@ msgstr ""
 "Введіть Y, якщо вас попросять прийняти умови. Закрийте PowerShell, відкрийте"
 " його знову, а потім запустіть {ph0}."
 
-#. {ph0}: <em>
-#. {ph1}: </em>
-#. {ph2}: <code>npx</code>
-#: website/public/get-started/index.html:250
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"If PowerShell later says {ph0}\"running scripts is disabled on this "
-"system\"{ph1} when you run {ph2}, run this once and try again:"
-msgstr ""
-"Якщо пізніше PowerShell повідомляє, що {ph0}\"запуск сценаріїв у цій системі"
-" вимкнено\"{ph1}, коли ви запустите {ph2}, запустіть це один раз і повторіть"
-" спробу:"
-
-#: website/public/get-started/index.html:270
-msgctxt "page:get-started/index.html"
-msgid "If you use Homebrew:"
-msgstr "Якщо ви використовуєте Homebrew :"
-
-#: website/public/get-started/index.html:285
-msgctxt "page:get-started/index.html"
-msgid "Otherwise:"
-msgstr "Не інакше як:"
-
-#: website/public/get-started/index.html:300
-msgctxt "page:get-started/index.html"
-msgid "Close Terminal, open it again, then:"
-msgstr "Закрийте термінал, відкрийте його знову, потім:"
-
-#. {ph0}: <code>curl</code>
-#. {ph1}: <code>unzip</code>
-#. {ph2}: <code>sudo apt install curl unzip</code>
-#: website/public/get-started/index.html:331
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"The installer needs {ph0} and {ph1} (on Debian/Ubuntu: {ph2}). Close the "
-"terminal, open it again, then:"
-msgstr ""
-"Для установки буде потрібно {ph0} і {ph1} файл (у Debian / Ubuntu: {ph2}). "
-"Закрийте термінал, відкрийте його знову, потім:"
-
 #. {ph0}: <code>nodejs</code>
 #. {ph1}: <code>node -v</code>
-#: website/public/get-started/index.html:351
+#: website/public/get-started/index.html:395
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3407,7 +3357,7 @@ msgstr ""
 
 #. {ph0}: <a href="https://nodejs.org/en/download">
 #. {ph1}: </a>
-#: website/public/get-started/index.html:355
+#: website/public/get-started/index.html:401
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3417,133 +3367,21 @@ msgstr ""
 "Віддаєте перевагу звичайному інсталятору? Завантажте версію LTS з сайту "
 "{ph0}nodejs.org{ph1}."
 
-#: website/public/get-started/index.html:363
-msgctxt "page:get-started/index.html"
-msgid "Setup options"
-msgstr "Параметри налаштування"
-
-#. {ph0}: <a href="#agent">
-#. {ph1}: </a>
-#: website/public/get-started/index.html:365
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid "{ph0}Connect your coding agent{ph1}"
-msgstr "{ph0}Підключіть свій кодуючий агент{ph1}"
-
 #. {ph0}: <a href="#terminal">
 #. {ph1}: </a>
-#: website/public/get-started/index.html:366
+#: website/public/get-started/index.html:216
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Use the CLI{ph1}"
 msgstr "{ph0}Використовуйте CLI{ph1}"
 
-#. {ph0}: <a href="#native">
-#. {ph1}: </a>
-#: website/public/get-started/index.html:367
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid "{ph0}Set up native analysis{ph1}"
-msgstr "{ph0}Налаштування аналізу програм з машинним кодом{ph1}"
-
 #. {ph0}: <a href="#help">
 #. {ph1}: </a>
-#: website/public/get-started/index.html:368
+#: website/public/get-started/index.html:217
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Getting help{ph1}"
 msgstr "{ph0}Отримання допомоги{ph1}"
-
-#: website/public/get-started/index.html:373
-msgctxt "page:get-started/index.html"
-msgid "Connect your coding agent"
-msgstr "Підключіть свій кодуючий агент"
-
-#: website/public/get-started/index.html:374
-msgctxt "page:get-started/index.html"
-msgid ""
-"Run setup to connect REA to your coding agent. Client choices include Claude"
-" Code, Codex, Cursor, Gemini CLI, Windsurf, Grok Build, and other supported "
-"MCP clients. Grok Bot's connector is added from its chat."
-msgstr ""
-"Запустіть програму встановлення, щоб підключити REA до свого програміста. "
-"Серед доступних клієнтів Claude Code, Codex, Cursor, Gemini CLI, Windsurf, "
-"Grok Build та інші підтримувані клієнти MCP. Коннектор Grok Bot доданий з "
-"його чату."
-
-#: website/public/get-started/index.html:381
-msgctxt "page:get-started/index.html"
-msgid "New to coding agents?"
-msgstr "Новачок у кодуванні агентів?"
-
-#: website/public/get-started/index.html:382
-msgctxt "page:get-started/index.html"
-msgid ""
-"A coding agent is an AI assistant that works on your computer instead of in "
-"a browser tab. It can read files and run commands, and it asks before making"
-" changes. REA gives it reverse-engineering tools."
-msgstr ""
-"Програміст-це помічник зі штучним інтелектом, який працює на вашому "
-"комп'ютері, а не на вкладці браузера. Він може читати файли та виконувати "
-"команди, а також запитує їх перед внесенням змін.  REA надає йому "
-"інструменти для зворотного проектування."
-
-#: website/public/get-started/index.html:388
-msgctxt "page:get-started/index.html"
-msgid ""
-"If you don't have one yet, pick one, follow its install page and sign in:"
-msgstr ""
-"Якщо у вас його ще немає, виберіть його, перейдіть на сторінку встановлення "
-"та увійдіть:"
-
-#. {ph0}: <strong >
-#. {ph1}: <a href="https://code.claude.com/docs/en/setup" >
-#. {ph2}: </a >
-#. {ph3}: </strong >
-#: website/public/get-started/index.html:393
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"{ph0}{ph1}Claude Code{ph2}{ph3} by Anthropic. Needs a paid Claude plan."
-msgstr ""
-"{ph0}{ph1} Claude Code{ph2}{ph3} від Anthropic . Потрібен платний тарифний "
-"план Claude."
-
-#. {ph0}: <strong >
-#. {ph1}: <a href="https://github.com/openai/codex">
-#. {ph2}: </a>
-#. {ph3}: </strong >
-#: website/public/get-started/index.html:401
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"{ph0}{ph1}Codex{ph2}{ph3} by OpenAI. Sign in with your ChatGPT account."
-msgstr ""
-"{ph0}{ph1} Codex{ph2}{ph3} за допомогою OpenAI . Увійдіть у свій обліковий "
-"запис ChatGPT."
-
-#. {ph0}: <strong >
-#. {ph1}: <a href="https://opencode.ai/docs">
-#. {ph2}: </a>
-#. {ph3}: </strong >
-#: website/public/get-started/index.html:407
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"{ph0}{ph1}OpenCode{ph2}{ph3}, open source. Connect the model provider of "
-"your choice."
-msgstr ""
-"{ph0}{ph1} OpenCode{ph2}{ph3} , з відкритим кодом. Підключіть Постачальника "
-"моделі за вашим вибором."
-
-#: website/public/get-started/index.html:413
-msgctxt "page:get-started/index.html"
-msgid ""
-"Then open it and copy the prompt below into it. The agent runs REA's setup "
-"and shows you the plan before changing anything."
-msgstr ""
-"Потім відкрийте його і скопіюйте в нього наведене нижче запрошення. Перш ніж"
-" щось змінити, агент запустить Налаштування REA і покаже вам план."
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
@@ -3553,18 +3391,19 @@ msgstr ""
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/get-started/index.html:420
+#: website/public/get-started/index.html:766
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Your coding agent"
-msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Ваш кодуючий агент"
+msgstr ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Ваш ШІ-помічник для програмування"
 
-#: website/public/get-started/index.html:445
+#: website/public/get-started/index.html:792
 msgctxt "page:get-started/index.html"
 msgid "Or run setup yourself"
 msgstr "Або запустіть програму налаштування самостійно"
 
-#: website/public/get-started/index.html:447
+#: website/public/get-started/index.html:228
 msgctxt "page:get-started/index.html"
 msgid "How do I open a terminal?"
 msgstr "Як відкрити термінал?"
@@ -3573,7 +3412,7 @@ msgstr "Як відкрити термінал?"
 #. {ph1}: </strong>
 #. {ph2}: <em>
 #. {ph3}: </em>
-#: website/public/get-started/index.html:449
+#: website/public/get-started/index.html:230
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3589,7 +3428,7 @@ msgstr ""
 #. {ph3}: <kbd>Space</kbd>
 #. {ph4}: <em>
 #. {ph5}: </em>
-#: website/public/get-started/index.html:453
+#: website/public/get-started/index.html:234
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3603,7 +3442,7 @@ msgstr ""
 #. {ph2}: <kbd>Ctrl</kbd>
 #. {ph3}: <kbd>Alt</kbd>
 #. {ph4}: <kbd>T</kbd>
-#: website/public/get-started/index.html:457
+#: website/public/get-started/index.html:238
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Linux:{ph1} press {ph2} {ph3} {ph4} on most desktops."
@@ -3618,7 +3457,7 @@ msgstr ""
 #. {ph4}: <kbd>Ctrl</kbd>
 #. {ph5}: <kbd>Shift</kbd>
 #. {ph6}: <kbd>V</kbd>
-#: website/public/get-started/index.html:462
+#: website/public/get-started/index.html:243
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3628,23 +3467,18 @@ msgstr ""
 "Введіть команду за допомогою {ph0} {ph1} ( macOS : {ph2} {ph3}; Linux для "
 "терміналів: {ph4} {ph5} {ph6}), потім натисніть Enter."
 
-#: website/public/get-started/index.html:483
+#: website/public/get-started/index.html:828
 msgctxt "page:get-started/index.html"
 msgid ""
 "Choose your client and review the setup plan. REA adds its MCP connection "
 "and the matching investigation skill, keeping a backup of existing "
 "configuration. It asks before applying the changes."
 msgstr ""
-"Виберіть свого клієнта та ознайомтеся з планом Налаштування.  REA додає "
-"підключення MCP і відповідний навик дослідження, зберігаючи резервну копію "
-"існуючої конфігурації. Перед застосуванням змін програма запитує доступ."
+"Виберіть клієнт і перегляньте план налаштування. REA додає підключення MCP і"
+" відповідну навичку дослідження, зберігаючи резервну копію наявної "
+"конфігурації. Перед застосуванням змін він запитує вашого дозволу."
 
-#: website/public/get-started/index.html:488
-msgctxt "page:get-started/index.html"
-msgid "Restart your client when setup finishes."
-msgstr "Після завершення встановлення перезавантажте клієнт."
-
-#: website/public/get-started/index.html:490
+#: website/public/get-started/index.html:842
 msgctxt "page:get-started/index.html"
 msgid "How do I restart my client?"
 msgstr "Як перезапустити клієнта?"
@@ -3653,7 +3487,7 @@ msgstr "Як перезапустити клієнта?"
 #. {ph1}: </strong>
 #. {ph2}: <kbd>⌘</kbd>
 #. {ph3}: <kbd>Q</kbd>
-#: website/public/get-started/index.html:491
+#: website/public/get-started/index.html:843
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3669,7 +3503,7 @@ msgstr ""
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/get-started/index.html:498
+#: website/public/get-started/index.html:850
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3679,32 +3513,7 @@ msgstr ""
 "{ph0}Термінальні агенти{ph1} (Claude Code, Codex, Gemini CLI): вийдіть із "
 "сеансу та запустіть його знову."
 
-#: website/public/get-started/index.html:503
-msgctxt "page:get-started/index.html"
-msgid ""
-"Give your agent a target path and a specific question. For a JavaScript or "
-"Electron app, you might start with:"
-msgstr ""
-"Вкажіть своєму агенту цільовий шлях і задайте конкретне запитання. Для "
-"програми JavaScript або Electron ви можете почати з:"
-
-#. {ph0}: <code>/absolute/path/to/app</code>
-#: website/public/get-started/index.html:508
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"Look at {ph0} and find how it exports data. Show the entry points, calls and"
-" dependencies involved, with the source locations for your findings."
-msgstr ""
-"Подивіться на {ph0} і дізнайтеся, як він експортує дані. Вкажіть точки "
-"входу, виклики та залежності, а також вихідні місця для Ваших результатів."
-
-#: website/public/get-started/index.html:514
-msgctxt "page:get-started/index.html"
-msgid "Replace the path with your local target."
-msgstr "Замініть шлях на ваш локальний цільовий об'єкт."
-
-#: website/public/get-started/index.html:516
+#: website/public/get-started/index.html:954
 msgctxt "page:get-started/index.html"
 msgid "How do I get a folder's full path?"
 msgstr "Як отримати повний шлях до папки?"
@@ -3713,7 +3522,7 @@ msgstr "Як отримати повний шлях до папки?"
 #. {ph1}: </strong>
 #. {ph2}: <em>
 #. {ph3}: </em>
-#: website/public/get-started/index.html:518
+#: website/public/get-started/index.html:956
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3728,7 +3537,7 @@ msgstr ""
 #. {ph1}: </strong>
 #. {ph2}: <em>
 #. {ph3}: </em>
-#: website/public/get-started/index.html:523
+#: website/public/get-started/index.html:961
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3740,7 +3549,7 @@ msgstr ""
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/get-started/index.html:527
+#: website/public/get-started/index.html:965
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3750,17 +3559,13 @@ msgstr ""
 "{ph0}Будь-яка система:{ph1} перетягніть папку у вікно терміналу, і з'явиться"
 " шлях до неї."
 
-#: website/public/get-started/index.html:532
+#: website/public/get-started/index.html:970
+#: website/public/get-started/index.html:1728
 msgctxt "page:get-started/index.html"
 msgid "In a terminal, put quotes around a path that contains spaces."
 msgstr "У терміналі вкладіть шлях, що містить пробіли, у лапки."
 
-#: website/public/get-started/index.html:539
-msgctxt "page:get-started/index.html"
-msgid "Use the CLI"
-msgstr "Використовуйте CLI"
-
-#: website/public/get-started/index.html:540
+#: website/public/get-started/index.html:1555
 msgctxt "page:get-started/index.html"
 msgid ""
 "Analyze a JavaScript or Electron application folder or ASAR archive without "
@@ -3769,14 +3574,14 @@ msgstr ""
 "Проаналізуйте папку Програми JavaScript або Electron або архів ASAR, не "
 "запускаючи програму:"
 
-#: website/public/get-started/index.html:546
+#: website/public/get-started/index.html:1561
 msgctxt "page:get-started/index.html"
 msgid "Static application analysis"
 msgstr "Статичний аналіз додатків"
 
 #. {ph0}: <code>.asar</code>
 #. {ph1}: <code>"D:/apps/example"</code>
-#: website/public/get-started/index.html:559
+#: website/public/get-started/index.html:1573
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3786,13 +3591,13 @@ msgstr ""
 "Замініть шлях на каталог витягнутої Програми або файл {ph0}. У Windows тут "
 "працює шлях, наприклад {ph1}."
 
-#: website/public/get-started/index.html:565
+#: website/public/get-started/index.html:1579
 msgctxt "page:get-started/index.html"
 msgid "Where do I find an app's .asar file?"
 msgstr "Де я можу знайти файл програми asar?"
 
 #. {ph0}: <code>resources</code>
-#: website/public/get-started/index.html:566
+#: website/public/get-started/index.html:1580
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "Electron apps usually keep it in a {ph0} folder:"
@@ -3803,7 +3608,7 @@ msgstr "Програми Electron зазвичай зберігають його
 #. {ph2}: <code
 #. >C:\Users\&lt;you&gt;\AppData\Local\Programs\&lt;App&gt;\resources\app.asar</code
 #. >
-#: website/public/get-started/index.html:571
+#: website/public/get-started/index.html:1585
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Windows:{ph1} {ph2}"
@@ -3815,7 +3620,7 @@ msgstr "{ph0} Windows :{ph1} {ph2}"
 #. >/Applications/&lt;App&gt;.app/Contents/Resources/app.asar</code >
 #. {ph3}: <em>
 #. {ph4}: </em>
-#: website/public/get-started/index.html:577
+#: website/public/get-started/index.html:1591
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -3828,14 +3633,14 @@ msgstr ""
 #. {ph0}: <strong>
 #. {ph1}: </strong>
 #. {ph2}: <code>/opt/&lt;App&gt;/resources/app.asar</code>
-#: website/public/get-started/index.html:585
+#: website/public/get-started/index.html:1599
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Linux:{ph1} often {ph2}"
 msgstr "{ph0} Linux :{ph1} часто {ph2}"
 
 #. {ph0}: <code>app.asar</code>
-#: website/public/get-started/index.html:590
+#: website/public/get-started/index.html:1604
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "Some apps install elsewhere. Search the app's folder for {ph0}."
@@ -3843,7 +3648,7 @@ msgstr ""
 "Деякі додатки встановлюються в іншому місці. Знайдіть у папці програми "
 "{ph0}."
 
-#: website/public/get-started/index.html:595
+#: website/public/get-started/index.html:1609
 msgctxt "page:get-started/index.html"
 msgid ""
 "The result identifies the app, shows connections between modules and gives "
@@ -3855,84 +3660,36 @@ msgstr ""
 "може вирішити."
 
 #. {ph0}: <code>rea</code>
-#: website/public/get-started/index.html:600
+#: website/public/get-started/index.html:1614
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "If you'd like a permanent {ph0} command in your shell:"
 msgstr "Якщо ви хочете, щоб у вашій оболонці була постійна команда {ph0}:"
 
-#: website/public/get-started/index.html:605
+#: website/public/get-started/index.html:1620
 msgctxt "page:get-started/index.html"
 msgid "Install the CLI"
 msgstr "Встановіть CLI"
 
 #. {ph0}: <a href="../guides/javascript/" >
 #. {ph1}: </a >
-#: website/public/get-started/index.html:617
+#: website/public/get-started/index.html:1632
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "{ph0}Continue with the JavaScript application guide{ph1}"
 msgstr "{ph0}Продовжуйте читати посібник із застосування JavaScript{ph1}"
 
-#: website/public/get-started/index.html:625
-msgctxt "page:get-started/index.html"
-msgid "Set up native analysis"
-msgstr "Налаштування аналізу програм з машинним кодом"
-
-#: website/public/get-started/index.html:626
-msgctxt "page:get-started/index.html"
-msgid ""
-"Native binaries need a local analysis tool. Choose and configure one below, "
-"then give REA your executable or library."
-msgstr ""
-"Програмам з машинним кодом потрібен локальний інструмент аналізу. Виберіть і"
-" налаштуйте один із наведених нижче інструментів, а потім вкажіть REA ваш "
-"виконуваний файл або бібліотеку."
-
-#: website/public/get-started/index.html:631
-msgctxt "page:get-started/index.html"
-msgid "Choose a tool: Ghidra, Hopper or IDA"
-msgstr "Виберіть інструмент: Ghidra, Hopper або IDA"
-
-#: website/public/get-started/index.html:636
-msgctxt "page:get-started/index.html"
-msgid ""
-"Use an existing Ghidra 12.1.x installation and a 64-bit JDK 21 or newer on "
-"Linux or macOS, on x64 or arm64. Your Ghidra installation needs a native "
-"decompiler for your host architecture. Set the paths before running setup:"
-msgstr ""
-"Використовуйте існуючу версію Ghidra 12.1.x і 64-розрядну версію JDK 21 або "
-"новіше на Linux або macOS , на x64 або arm64. Для встановлення Ghidra "
-"потрібен власний декомпілятор для архітектури вашого хоста. Задайте шляхи "
-"перед запуском програми установки:"
-
-#: website/public/get-started/index.html:643
+#: website/public/get-started/index.html:1149
 msgctxt "page:get-started/index.html"
 msgid "Connect your Ghidra installation"
 msgstr "Підключіть вашу установку Ghidra"
 
-#: website/public/get-started/index.html:646
-msgctxt "page:get-started/index.html"
-msgid "Ghidra connection · macOS / Linux"
-msgstr "Підключення Ghidra * macOS / Linux"
-
-#: website/public/get-started/index.html:661
-msgctxt "page:get-started/index.html"
-msgid ""
-"Replace both paths with your existing installations. Setup checks them and "
-"records valid settings for your selected client. On Linux arm64, you may "
-"need to build Ghidra's native decompiler separately."
-msgstr ""
-"Замініть обидва шляхи на існуючі установки. Програма установки перевіряє їх "
-"і записує коректні настройки для обраного Вами клієнта. У Linux arm64 вам "
-"може знадобитися окремо зібрати власний декомпілятор Ghidra."
-
-#: website/public/get-started/index.html:669
+#: website/public/get-started/index.html:1119
 msgctxt "page:get-started/index.html"
 msgid "Connect Ghidra on Windows"
 msgstr "Підключіть Ghidra до Windows"
 
-#: website/public/get-started/index.html:670
+#: website/public/get-started/index.html:1120
 msgctxt "page:get-started/index.html"
 msgid ""
 "Windows x64 has experimental, read-only support for native x86 and x64 PE "
@@ -3944,12 +3701,7 @@ msgstr ""
 "Використовуйте існуючу установку Ghidra 12.1.x і 64-розрядну версію JDK 21 "
 "або новіше:"
 
-#: website/public/get-started/index.html:678
-msgctxt "page:get-started/index.html"
-msgid "Ghidra connection · Windows PowerShell"
-msgstr "Підключення Ghidra * Windows PowerShell"
-
-#: website/public/get-started/index.html:693
+#: website/public/get-started/index.html:1143
 msgctxt "page:get-started/index.html"
 msgid ""
 "Replace the two paths with your installations, then review setup's plan."
@@ -3957,7 +3709,7 @@ msgstr ""
 "Замініть ці два шляхи на свої установки, а потім перегляньте план "
 "встановлення."
 
-#: website/public/get-started/index.html:703
+#: website/public/get-started/index.html:1025
 msgctxt "page:get-started/index.html"
 msgid ""
 "Connect Hopper on macOS or Linux. Run the setup command above; it detects an"
@@ -3967,141 +3719,18 @@ msgstr ""
 "встановлення; вона виявить існуючу установку або запропонує план "
 "встановлення для вашого схвалення."
 
-#: website/public/get-started/index.html:708
-msgctxt "page:get-started/index.html"
-msgid ""
-"On macOS, complete Hopper's first-run choice of demo mode or license "
-"activation before an unattended analysis."
-msgstr ""
-"На macOS перед автоматичним аналізом виконайте перший запуск Hopper, "
-"вибравши демонстраційний режим або активацію ліцензії."
-
-#: website/public/get-started/index.html:717
-msgctxt "page:get-started/index.html"
-msgid ""
-"The verified IDA setups use Windows, with an existing MCP registration for "
-"an attached GUI or a headless database. Linux and macOS headless analysis "
-"remains unverified."
-msgstr ""
-"Перевірені Налаштування IDA використовують Windows з наявною реєстрацією MCP"
-" для підключеного графічного інтерфейсу користувача або безголової бази "
-"даних.  Аналіз Linux і macOS без урахування даних залишається неперевіреним."
-
-#: website/public/get-started/index.html:723
-msgctxt "page:get-started/index.html"
-msgid "Connect an existing IDA MCP registration"
-msgstr "Підключіть існуючу реєстрацію IDA MCP"
-
-#. {ph0}: <code>command</code>
-#. {ph1}: <code>args</code>
-#. {ph2}: <code>env</code>
-#. {ph3}: <code>mcpServers</code>
-#. {ph4}: <code>ida-pro-mcp</code>
-#: website/public/get-started/index.html:726
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"Keep the upstream server's working {ph0}, {ph1} and optional {ph2} in a JSON"
-" file. An existing {ph3} object with an {ph4} entry is also accepted. Point "
-"REA at that file before setup:"
-msgstr ""
-"Збережіть робочу {ph0} вищого сервера, {ph1} і необов'язковий {ph2} у файлі "
-"JSON. Також приймається існуючий {ph3}об'єкт mcpServers із записом {ph4}. "
-"Вкажіть REA у цьому файлі перед встановленням:"
-
-#: website/public/get-started/index.html:735
-msgctxt "page:get-started/index.html"
-msgid "IDA connection · Windows PowerShell"
-msgstr "Підключення IDA * Windows PowerShell"
-
-#. {ph0}: <code>"mode": "headless"</code>
-#: website/public/get-started/index.html:750
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"The attached profile uses upstream legacy 1.4.0 tools with the original "
-"binary already open in IDA. The headless profile uses the upstream database-"
-"supervisor API and a registration with {ph0}; real verification covers an "
-"IDA 9.3 Windows x64 supervisor. Doctor checks the registration without "
-"starting IDA."
-msgstr ""
-"Доданий профіль використовує застарілі інструменти версії 1.4.0, а вихідний "
-"двійковий файл уже відкритий у IDA . У профілі headless використовується "
-"вищестоящий API database-supervisor і реєстрація в {ph0}; для реальної "
-"перевірки використовується супервізор IDA 9.3 Windows x64. Лікар перевіряє "
-"реєстрацію, не запускаючи IDA ."
-
-#. {ph0}: <code>--provider ida</code>
-#. {ph1}: <code>REA_IDA_MCP_CONFIG</code>
-#: website/public/get-started/index.html:759
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"Give REA the original executable path, with {ph0} in a CLI query. For an "
-"agent, include {ph1} in the REA registration's environment and select IDA "
-"when opening the binary."
-msgstr ""
-"Вкажіть REA вихідний шлях до виконуваного файлу за допомогою {ph0} у запиті "
-"CLI. Для агента включіть {ph1} у середу реєстрації REA і виберіть IDA при "
-"відкритті двійкового файлу."
-
-#: website/public/get-started/index.html:771
-msgctxt "page:get-started/index.html"
-msgid "For an existing Ghidra setup, inspect a function with:"
-msgstr "Для існуючого Налаштування Ghidra перевірте функцію за допомогою:"
-
-#: website/public/get-started/index.html:776
-msgctxt "page:get-started/index.html"
-msgid "Function analysis"
-msgstr "Функціональний аналіз"
-
-#. {ph0}: <code>main</code>
-#: website/public/get-started/index.html:789
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid "Replace {ph0} with the function name or address you want to inspect."
-msgstr "Замінивши {ph0} на ім'я функції або адресу, яку ви хочете перевірити."
-
-#: website/public/get-started/index.html:794
-msgctxt "page:get-started/index.html"
-msgid "How native analysis sessions work"
-msgstr "Як працюють сеанси аналізу програм з машинним кодом"
-
-#: website/public/get-started/index.html:795
-msgctxt "page:get-started/index.html"
-msgid ""
-"Each CLI command imports and analyzes the binary, then closes its session. "
-"Your agent's MCP queries reuse the imported binary while that session is "
-"open."
-msgstr ""
-"Кожна команда CLI імпортує та аналізує двійковий файл, а потім закриває свій"
-" сеанс. Запити MCP вашого агента повторно використовують імпортований "
-"двійковий файл, поки цей сеанс відкритий."
-
-#. {ph0}: <a href="../guides/native/">
-#. {ph1}: </a>
-#: website/public/get-started/index.html:801
-#, python-brace-format
-msgctxt "page:get-started/index.html"
-msgid ""
-"{ph0}Follow a native analysis example{ph1} to see how the function result "
-"leads to a recovered calculation."
-msgstr ""
-"{ph0}Дотримуйтесь прикладу аналізу програм з машинним кодом{ph1}, щоб "
-"побачити, як результат функції призводить до відновленого обчислення."
-
-#: website/public/get-started/index.html:808
+#: website/public/get-started/index.html:1686
 msgctxt "page:get-started/index.html"
 msgid "Getting help"
 msgstr "Отримання допомоги"
 
-#: website/public/get-started/index.html:809
+#: website/public/get-started/index.html:1688
 msgctxt "page:get-started/index.html"
 msgid "If your agent doesn't see REA"
 msgstr "Якщо ваш агент не бачить REA"
 
 #. {ph0}: <code>doctor</code>
-#: website/public/get-started/index.html:810
+#: website/public/get-started/index.html:1689
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -4111,27 +3740,22 @@ msgstr ""
 "Перезапустіть або підключіть клієнт після встановлення. Перевірте його "
 "REA-з'єднання з {ph0}; для Codex :"
 
-#: website/public/get-started/index.html:816
-msgctxt "page:get-started/index.html"
-msgid "Check one client"
-msgstr "Перевірте одного клієнта"
-
-#: website/public/get-started/index.html:828
+#: website/public/get-started/index.html:1700
 msgctxt "page:get-started/index.html"
 msgid "If a provider needs attention"
 msgstr "Якщо постачальник послуг потребує уваги"
 
-#: website/public/get-started/index.html:829
+#: website/public/get-started/index.html:1701
 msgctxt "page:get-started/index.html"
 msgid "Check the provider you're using. For Ghidra:"
 msgstr "Перевірте, яким провайдером ви користуєтесь. Для Ghidra :"
 
-#: website/public/get-started/index.html:832
+#: website/public/get-started/index.html:1704
 msgctxt "page:get-started/index.html"
 msgid "Check one provider"
 msgstr "Перевірте одного постачальника"
 
-#: website/public/get-started/index.html:844
+#: website/public/get-started/index.html:1716
 msgctxt "page:get-started/index.html"
 msgid "The report gives the failed check and a suggested next step."
 msgstr ""
@@ -4142,7 +3766,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span>
 #. {ph3}: </span>
-#: website/public/get-started/index.html:846
+#: website/public/get-started/index.html:1781
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -4154,7 +3778,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span >
 #. {ph3}: </span >
-#: website/public/get-started/index.html:850
+#: website/public/get-started/index.html:1785
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -4168,7 +3792,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span>
 #. {ph3}: </span>
-#: website/public/get-started/index.html:857
+#: website/public/get-started/index.html:1792
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -4182,7 +3806,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <span>
 #. {ph3}: </span>
-#: website/public/get-started/index.html:861
+#: website/public/get-started/index.html:1796
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -4202,111 +3826,67 @@ msgid ""
 "Connect REA to your coding agent or inspect a local JavaScript or Electron "
 "app from the terminal. Setup, first questions and native provider guides."
 msgstr ""
-"Підключіть REA до Вашого програміста або скористайтеся локальним додатком "
-"JavaScript або Electron з терміналу. Налаштування, перші Питання та "
-"інструкції для місцевих провайдерів."
+"Підключіть REA до ШІ-помічника для програмування або дослідіть локальний "
+"застосунок JavaScript чи Electron з термінала. Налаштування, перші запитання"
+" та посібники з інструментів аналізу машинного коду."
 
-#: website/public/get-started/index.html:214
+#: website/public/get-started/index.html:266
 msgctxt "page:get-started/index.html"
 msgid "Copy Node.js version check"
 msgstr "Скопіюйте перевірку версії Node.js"
 
-#: website/public/get-started/index.html:235
+#: website/public/get-started/index.html:289
 msgctxt "page:get-started/index.html"
 msgid "Copy Node.js installation command for Windows"
 msgstr "Скопіюйте команду встановлення Node.js для Windows"
 
-#: website/public/get-started/index.html:258
-msgctxt "page:get-started/index.html"
-msgid "Copy PowerShell execution policy command"
-msgstr "Скопіюйте команду політики виконання PowerShell"
-
-#: website/public/get-started/index.html:274
+#: website/public/get-started/index.html:344
 msgctxt "page:get-started/index.html"
 msgid "Copy Homebrew Node.js installation command"
 msgstr "Скопіювати команду установки Homebrew Node.js"
 
-#: website/public/get-started/index.html:289
-msgctxt "page:get-started/index.html"
-msgid "Copy fnm installation command for macOS"
-msgstr "Скопіюйте команду встановлення fnm для macOS"
-
-#: website/public/get-started/index.html:304
-msgctxt "page:get-started/index.html"
-msgid "Copy Node.js 24 commands for macOS"
-msgstr "Скопіюйте 24 команди Node.js для macOS"
-
-#: website/public/get-started/index.html:320
+#: website/public/get-started/index.html:367
 msgctxt "page:get-started/index.html"
 msgid "Copy fnm installation command for Linux"
 msgstr "Скопіюйте команду встановлення fnm для Linux"
 
-#: website/public/get-started/index.html:339
+#: website/public/get-started/index.html:382
 msgctxt "page:get-started/index.html"
 msgid "Copy Node.js 24 commands for Linux"
 msgstr "Скопіюйте 24 команди Node.js для Linux"
 
-#: website/public/get-started/index.html:362
+#: website/public/get-started/index.html:209
+#: website/public/get-started/index.html:208
 msgctxt "page:get-started/index.html"
 msgid "On this page"
 msgstr "На цій сторінці"
 
-#: website/public/get-started/index.html:371
+#: website/public/get-started/index.html:220
 msgctxt "page:get-started/index.html"
 msgid "REA getting started guide"
 msgstr "REA Керівництво по початку роботи"
 
-#: website/public/get-started/index.html:425
+#: website/public/get-started/index.html:771
 msgctxt "page:get-started/index.html"
 msgid "Copy REA installation prompt"
 msgstr "Скопіюйте запит на встановлення REA"
 
-#: website/public/get-started/index.html:471
-msgctxt "page:get-started/index.html"
-msgid "Copy agent setup command"
-msgstr "Команда Налаштування агента копіювання"
-
-#: website/public/get-started/index.html:547
+#: website/public/get-started/index.html:1562
 msgctxt "page:get-started/index.html"
 msgid "Copy JavaScript analysis command"
 msgstr "Скопіювати команду аналізу JavaScript"
 
-#: website/public/get-started/index.html:606
+#: website/public/get-started/index.html:1621
 msgctxt "page:get-started/index.html"
 msgid "Copy CLI installation command"
 msgstr "Скопіювати команду установки CLI"
 
-#: website/public/get-started/index.html:647
-msgctxt "page:get-started/index.html"
-msgid "Copy Ghidra connection for macOS and Linux"
-msgstr "Скопіювати команду підключення Ghidra для macOS і Linux"
-
-#: website/public/get-started/index.html:679
-msgctxt "page:get-started/index.html"
-msgid "Copy Ghidra connection for Windows PowerShell"
-msgstr "Скопіюйте підключення Ghidra для Windows PowerShell"
-
-#: website/public/get-started/index.html:736
-msgctxt "page:get-started/index.html"
-msgid "Copy IDA connection for Windows PowerShell"
-msgstr "Скопіюйте підключення IDA для Windows PowerShell"
-
-#: website/public/get-started/index.html:777
-msgctxt "page:get-started/index.html"
-msgid "Copy native function analysis command"
-msgstr "Скопіювати команду аналізу власної функції"
-
-#: website/public/get-started/index.html:817
-msgctxt "page:get-started/index.html"
-msgid "Copy client diagnosis command"
-msgstr "Скопіювати команду діагностики клієнта"
-
-#: website/public/get-started/index.html:833
+#: website/public/get-started/index.html:1705
 msgctxt "page:get-started/index.html"
 msgid "Copy provider diagnosis command"
 msgstr "Команда діагностики Постачальника копіювання"
 
-#: website/public/get-started/index.html:884
+#: website/public/get-started/index.html:1819
 msgctxt "page:get-started/index.html"
 msgid "Back to top"
 msgstr "Нагору"
@@ -6009,7 +5589,7 @@ msgctxt "page:index.html"
 msgid "On this page"
 msgstr "На цій сторінці"
 
-#: website/public/index.html:199 website/public/index.html:253
+#: website/public/index.html:199 website/public/index.html:247
 msgctxt "page:index.html"
 msgid "Set up REA"
 msgstr "Налаштування REA"
@@ -6022,25 +5602,9 @@ msgctxt "page:index.html"
 msgid "{ph0}Set up REA{ph1}"
 msgstr "{ph0}Налаштування REA{ph1}"
 
-#. {ph0}: <a href="#what-is-re">
-#. {ph1}: </a>
-#: website/public/index.html:211
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}What is RE?{ph1}"
-msgstr "{ph0}Що таке вогонь?{ph1}"
-
-#. {ph0}: <a href="#how-rea-helps">
-#. {ph1}: </a>
-#: website/public/index.html:212
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}How REA helps{ph1}"
-msgstr "{ph0}Як допомагає REA{ph1}"
-
 #. {ph0}: <a href="#dinosaur">
 #. {ph1}: </a>
-#: website/public/index.html:213
+#: website/public/index.html:212
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Dinosaur game{ph1}"
@@ -6048,7 +5612,7 @@ msgstr "{ph0}Гра в динозаврів{ph1}"
 
 #. {ph0}: <a href="#calculator">
 #. {ph1}: </a>
-#: website/public/index.html:214
+#: website/public/index.html:213
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Calculator{ph1}"
@@ -6070,60 +5634,19 @@ msgctxt "page:index.html"
 msgid "{ph0}Go deeper{ph1}"
 msgstr "{ph0}Дізнатися більше{ph1}"
 
-#. {ph0}: <a href="#questions">
-#. {ph1}: </a>
-#: website/public/index.html:217
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}Help & feedback{ph1}"
-msgstr "{ph0}Допомога та зворотній зв'язок{ph1}"
-
-#. {ph0}: <a href="#community">
-#. {ph1}: </a>
-#: website/public/index.html:218
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}Community{ph1}"
-msgstr "{ph0}Товариство{ph1}"
-
-#: website/public/index.html:227
+#: website/public/index.html:225
 msgctxt "page:index.html"
 msgid "Reverse engineering, with your coding agent"
 msgstr "Зворотне проектування за допомогою агента кодування"
 
 #. {ph0}: <br />
-#: website/public/index.html:228
+#: website/public/index.html:226
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Find out how{ph0}software works."
 msgstr "Дізнайтеся, як{ph0}працює програма."
 
-#: website/public/index.html:229
-msgctxt "page:index.html"
-msgid ""
-"REA gives your agent the tools to inspect a program and explain what it "
-"does."
-msgstr ""
-"REA надає вашому ШІ-помічнику інструменти, щоб дослідити програму й пояснити"
-" її поведінку."
-
-#. {ph0}: <a href="#analysis-guides">
-#. {ph1}: </a>
-#: website/public/index.html:243
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Already know RE? {ph0}Skip to analysis guides →{ph1}"
-msgstr "Вже знайомі з RE? {ph0}Перейти до посібників з аналізу →{ph1}"
-
-#. {ph0}: <a href="blog/">
-#. {ph1}: </a>
-#: website/public/index.html:247
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Want to go deeper? {ph0}Read the Blog →{ph1}"
-msgstr "Хочете копнути глибше? {ph0}Читати блог →{ph1}"
-
-#: website/public/index.html:254
+#: website/public/index.html:248
 msgctxt "page:index.html"
 msgid "Copy this into your coding agent:"
 msgstr "Вставте цей запит у свого ШІ-помічника для програмування:"
@@ -6136,73 +5659,33 @@ msgstr "Вставте цей запит у свого ШІ-помічника �
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:257
+#: website/public/index.html:251
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Your coding agent"
 msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Ваш кодуючий агент"
 
-#: website/public/index.html:262 website/public/index.html:284
-#: website/public/index.html:499 website/public/index.html:667
-#: website/public/index.html:903 website/public/index.html:1065
-#: website/public/index.html:1093
+#: website/public/index.html:256 website/public/index.html:280
+#: website/public/index.html:516 website/public/index.html:597
+#: website/public/index.html:821 website/public/index.html:1133
+#: website/public/index.html:1161
 msgctxt "page:index.html"
 msgid "Copy"
 msgstr "Копіювати"
 
-#: website/public/index.html:281
+#: website/public/index.html:277
 msgctxt "page:index.html"
 msgid "Or run this in your terminal:"
 msgstr "Або виконайте цю команду в терміналі:"
 
-#: website/public/index.html:293
+#: website/public/index.html:289
 msgctxt "page:index.html"
 msgid "Approve the setup plan, then restart your agent."
 msgstr "Перевірте й схваліть план змін, а потім перезапустіть помічника."
 
-#: website/public/index.html:308
-msgctxt "page:index.html"
-msgid "What is reverse engineering?"
-msgstr "Що таке зворотна розробка?"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:309
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"Finding out how software works by {ph0}examining the program itself.{ph1}"
-msgstr ""
-"З’ясування того, як працює програма, через {ph0}дослідження самої "
-"програми.{ph1}"
-
-#. {ph0}: <mark class="prose-highlight">
-#. {ph1}: </mark>
-#. {ph2}: <mark class="prose-highlight">
-#. {ph3}: </mark>
-#. {ph4}: <mark class="prose-highlight">
-#. {ph5}: </mark>
-#: website/public/index.html:314
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"The goal: understand a feature well enough to {ph0}explain it{ph1}, "
-"{ph2}change it{ph3} or {ph4}rebuild it.{ph5}"
-msgstr ""
-"Мета: зрозуміти функцію досить добре, щоб {ph0}пояснити її{ph1}, "
-"{ph2}змінивши{ph3} або {ph4}перебудувати заново.{ph5}"
-
-#. {ph0}: <strong class="prose-highlight">
-#. {ph1}: </strong>
-#: website/public/index.html:332
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Before REA · You investigate it {ph0}yourself{ph1}"
-msgstr "До REA · Ви досліджуєте {ph0}самостійно{ph1}"
-
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:341
+#: website/public/index.html:365
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}01{ph1} Decode branches"
@@ -6210,7 +5693,7 @@ msgstr "{ph0}01{ph1} Декодування гілок"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:349
+#: website/public/index.html:373
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}02{ph1} Trace calls"
@@ -6218,7 +5701,7 @@ msgstr "{ph0}02{ph1} Відстеження викликів"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#: website/public/index.html:357
+#: website/public/index.html:381
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}03{ph1} Recover the rule"
@@ -6226,22 +5709,22 @@ msgstr "{ph0}03{ph1} Відновіть правило"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
-#. {ph2}: <span class="assembly-disclosure" aria-hidden="true">
+#. {ph2}: <span class="assembly-disclosure" aria-hidden="true" >
 #. {ph3}: </span>
-#: website/public/index.html:372
+#: website/public/index.html:392
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Original x64 · selected instructions{ph1} {ph2}{ph3}"
 msgstr "{ph0}Оригінальні вибрані інструкції для x64 ·{ph1}{ph2}{ph3}"
 
-#: website/public/index.html:411
+#: website/public/index.html:434
 msgctxt "page:index.html"
 msgid "01 · Which branch?"
 msgstr "01 * в якій філії?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:412
+#: website/public/index.html:435
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6251,29 +5734,29 @@ msgstr ""
 "“{ph0}0x5b? 0x5c?{ph1} Два переходи в одне і те ж місце. Що це за "
 "оператори?”"
 
-#: website/public/index.html:416
+#: website/public/index.html:439
 msgctxt "page:index.html"
 msgid "Look up the command IDs, then label the branch."
 msgstr "Знайдіть ідентифікатори команд, а потім позначте гілку."
 
-#: website/public/index.html:422
+#: website/public/index.html:445
 msgctxt "page:index.html"
 msgid "Divide ÷"
 msgstr "Розділити ÷"
 
-#: website/public/index.html:426
+#: website/public/index.html:449
 msgctxt "page:index.html"
 msgid "Multiply ×"
 msgstr "Помноживши ×"
 
-#: website/public/index.html:431
+#: website/public/index.html:454
 msgctxt "page:index.html"
 msgid "02 · What do the calls do?"
 msgstr "02 · Що роблять викликані функції?"
 
-#. {ph0}: <strong>
+#. {ph0}: <strong >
 #. {ph1}: </strong >
-#: website/public/index.html:432
+#: website/public/index.html:455
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6283,24 +5766,24 @@ msgstr ""
 "\"100-це чисто. Дзвінки-це лише адреси. {ph0}Який з них ділиться? Яке "
 "значення входить в?{ph1}”"
 
-#: website/public/index.html:437
+#: website/public/index.html:461
 msgctxt "page:index.html"
 msgid "Inspect the helpers and trace the stored values."
 msgstr "Перевірте допоміжні функції та простежте збережені значення."
 
-#: website/public/index.html:447
+#: website/public/index.html:471
 msgctxt "page:index.html"
 msgid "Divide"
 msgstr "Діливши"
 
-#: website/public/index.html:452
+#: website/public/index.html:476
 msgctxt "page:index.html"
 msgid "03 · What is the rule?"
 msgstr "03 * яке це правило?"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:453
+#: website/public/index.html:477
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6310,19 +5793,19 @@ msgstr ""
 "\"Цей шлях множиться на інші вхідні дані. Таким чином, {ph0}10% означає 10% "
 "від 200{ph1} після +”."
 
-#: website/public/index.html:457
+#: website/public/index.html:481
 msgctxt "page:index.html"
 msgid "Name the operands and check both operator paths."
 msgstr "Назвіть операнди та перевірте обидва шляхи до операторів."
 
-#: website/public/index.html:473 website/public/index.html:401
+#: website/public/index.html:497 website/public/index.html:424
 msgctxt "page:index.html"
 msgid "Illustrative expert reasoning"
 msgstr "Наочне міркування експерта"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
-#: website/public/index.html:476
+#: website/public/index.html:500
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6332,27 +5815,6 @@ msgstr ""
 "{ph0}Ви розшифровуєте інструкції, виконуєте виклики функцій і відновлюєте "
 "обчислення.{ph1}"
 
-#. {ph0}: <strong class="prose-highlight">
-#. {ph1}: </strong>
-#: website/public/index.html:484
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "With REA · You ask {ph0}your agent{ph1}"
-msgstr "З REA · Ви запитуєте {ph0}свого помічника{ph1}"
-
-#: website/public/index.html:488
-msgctxt "page:index.html"
-msgid "One prompt."
-msgstr "Лише один запит."
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:489
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Ask your agent {ph0}in plain English.{ph1}"
-msgstr "Запитайте помічника {ph0}звичайними словами.{ph1}"
-
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
 #. {ph2}: </i>
@@ -6361,21 +5823,21 @@ msgstr "Запитайте помічника {ph0}звичайними слов
 #. {ph5}: <i>
 #. {ph6}: </i>
 #. {ph7}: </span >
-#: website/public/index.html:494
+#: website/public/index.html:511
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Calculator"
 msgstr ""
 "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки * Калькулятор"
 
-#: website/public/index.html:516
+#: website/public/index.html:533
 msgctxt "page:index.html"
 msgid "Example answer · based on the findings"
 msgstr "Приклад відповіді * заснований на результатах дослідження"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
-#: website/public/index.html:519
+#: website/public/index.html:536
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6383,175 +5845,72 @@ msgid ""
 msgstr ""
 "Після + кнопка % виводить {ph0}процентне значення від першого числа.{ph1}"
 
-#: website/public/index.html:531
+#: website/public/index.html:549
 msgctxt "page:index.html"
 msgid "REA supplies"
 msgstr "REA надає"
 
-#: website/public/index.html:532
+#: website/public/index.html:550
 msgctxt "page:index.html"
 msgid "The handler’s instructions, decompiled code and calls."
 msgstr "Інструкції обробника, декомпільований код та виклики."
 
-#: website/public/index.html:537
+#: website/public/index.html:555
 msgctxt "page:index.html"
 msgid "Your agent explains"
 msgstr "Помічник пояснює"
 
-#: website/public/index.html:538
+#: website/public/index.html:556
 msgctxt "page:index.html"
 msgid "Which branch applies, what it calculates and how to rebuild it."
 msgstr "Яка гілка застосовується, що вона обчислює і як її перебудувати."
 
-#. {ph0}: <a href="#calculator">
-#. {ph1}: </a>
-#: website/public/index.html:545
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"Selected assembly from the installed Calculator DLL. The thoughts and reply "
-"illustrate the findings. {ph0}Continue with the Calculator example ↓{ph1}"
-msgstr ""
-"Виберіть збірку з встановленої бібліотеки DLL Calculator. Міркування та "
-"відповідь ілюструють отримані результати. {ph0}Продовжимо з прикладом з "
-"калькулятором ↓{ph1}"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:556
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}Let's try two examples.{ph1} Change a game's speed, then return to "
-"Calculator and rebuild its % button."
-msgstr ""
-"{ph0}Давайте розглянемо два приклади.{ph1} Змініть швидкість гри, потім "
-"поверніться до калькулятора та відновіть його кнопку %."
-
-#: website/public/index.html:562
+#: website/public/index.html:580
 msgctxt "page:index.html"
 msgid "Example 01 · Chrome’s dinosaur game"
 msgstr "Приклад 01 * гра в динозаврів Chrome"
 
-#: website/public/index.html:563
+#: website/public/index.html:581
 msgctxt "page:index.html"
 msgid "Why does the dinosaur get faster?"
 msgstr "Чому динозавр прискорюється?"
 
-#: website/public/index.html:567 website/public/index.html:805
-msgctxt "page:index.html"
-msgid "Goal"
-msgstr "Мета"
-
-#. {ph0}: <mark class="prose-highlight">
-#. {ph1}: </mark>
-#: website/public/index.html:568
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Rebuild the game with {ph0}adjustable speed.{ph1}"
-msgstr "Перебудовуйте гру з {ph0}регульованою швидкістю.{ph1}"
-
-#: website/public/index.html:574 website/public/index.html:812
-msgctxt "page:index.html"
-msgid "Why reverse engineer it?"
-msgstr "Навіщо його перепроектувати?"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:575
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"To reproduce its acceleration, we need {ph0}the rule in the running "
-"game{ph1}: how fast it starts, how much it increases and when it stops."
-msgstr ""
-"Щоб відтворити його прискорення, нам потрібно {ph0}правило в біговій "
-"грі{ph1}: як швидко воно починається, наскільки збільшується і коли "
-"припиняється."
-
-#: website/public/index.html:584
-msgctxt "page:index.html"
-msgid "Play the reconstruction"
-msgstr "Грати у відтворену версію"
-
-#: website/public/index.html:616
+#: website/public/index.html:660
 msgctxt "page:index.html"
 msgid "Play"
 msgstr "Грати"
 
-#: website/public/index.html:619
+#: website/public/index.html:663
 msgctxt "page:index.html"
 msgid "Jump ↑"
 msgstr "Стрибок ↑"
 
-#: website/public/index.html:620
+#: website/public/index.html:664
 msgctxt "page:index.html"
 msgid "Restart"
 msgstr "Почати знову"
 
-#: website/public/index.html:623
+#: website/public/index.html:667
 msgctxt "page:index.html"
 msgid "Speed"
 msgstr "Швидкість"
 
-#: website/public/index.html:633
+#: website/public/index.html:677
 msgctxt "page:index.html"
 msgid "Use the recovered acceleration rule"
 msgstr "Використовуйте правило відновленого прискорення"
 
-#: website/public/index.html:637
+#: website/public/index.html:681
 msgctxt "page:index.html"
 msgid "Original rule: start at 6, then increase toward 13."
 msgstr "Початкове правило: починайте з 6, потім збільшуйте до 13."
 
-#: website/public/index.html:640
+#: website/public/index.html:684
 msgctxt "page:index.html"
 msgid "Move the slider to set your own speed. Space or Jump clears a cactus."
 msgstr ""
 "Перемістіть повзунок, щоб встановити власну швидкість. Пробіл або стрибок "
 "прибирають кактус."
-
-#: website/public/index.html:645
-msgctxt "page:index.html"
-msgid ""
-"Enable JavaScript to play the reconstruction. The code and explanation above"
-" remain readable."
-msgstr ""
-"Увімкніть JavaScript для відтворення реконструкції. Наведений вище код та "
-"пояснення залишаються читабельними."
-
-#: website/public/index.html:653 website/public/index.html:883
-msgctxt "page:index.html"
-msgid "REA returned"
-msgstr "REA повернув"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:654
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}The script actually running in the page.{ph1} The agent reads its "
-"update function and speed settings, then uses that rule in a new game."
-msgstr ""
-"{ph0}Скрипт, фактично запущений на сторінці.{ph1} Агент зчитує свою функцію "
-"оновлення та налаштування швидкості, а потім використовує це правило в новій"
-" грі."
-
-#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
-#. {ph1}: <i>
-#. {ph2}: </i>
-#. {ph3}: <i>
-#. {ph4}: </i>
-#. {ph5}: <i>
-#. {ph6}: </i>
-#. {ph7}: </span >
-#: website/public/index.html:662
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Dinosaur game"
-msgstr ""
-"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки * гра в динозаврів"
 
 #. {ph0}: <span class="prompt-symbol" aria-hidden="true">
 #. {ph1}: </span >
@@ -6559,7 +5918,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph5}: </span>
-#: website/public/index.html:676
+#: website/public/index.html:606
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6573,35 +5932,19 @@ msgstr ""
 
 #. {ph0}: <a href="https://wayou.github.io/t-rex-runner/" >
 #. {ph1}: </a >
-#: website/public/index.html:685
+#: website/public/index.html:704
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Inspected target: {ph0}wayou’s Chromium-derived browser edition{ph1}."
 msgstr ""
 "Перевірена мета: {ph0}версія браузера wayou, заснована{ph1} на Chromium."
 
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#. {ph2}: <strong>
-#. {ph3}: </strong>
-#. {ph4}: <strong>
-#. {ph5}: </strong>
-#: website/public/index.html:702
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}Start at 6.{ph1} Add {ph2}0.001{ph3} each update without a collision, "
-"while speed is below {ph4}13{ph5}."
-msgstr ""
-"{ph0}Почніть з 6.{ph1} Додавайте 0,001 при кожному оновленні без збоїв, поки"
-" швидкість нижче 13.{ph2}{ph3}{ph4}{ph5}"
-
-#: website/public/index.html:707
+#: website/public/index.html:695
 msgctxt "page:index.html"
 msgid "Open the speed lab →"
 msgstr "Відкрийте лабораторію швидкості →"
 
-#: website/public/index.html:713
+#: website/public/index.html:726
 msgctxt "page:index.html"
 msgid "What each part does"
 msgstr "Що робить кожна частина"
@@ -6612,7 +5955,7 @@ msgstr "Що робить кожна частина"
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:715
+#: website/public/index.html:728
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6628,7 +5971,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:722
+#: website/public/index.html:735
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6645,7 +5988,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:730
+#: website/public/index.html:743
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6655,13 +5998,13 @@ msgstr ""
 "{ph0}03 * ви{ph1}{ph2} міняєте швидкість і граєте{ph3}{ph4} з оригінальним "
 "прискоренням, потім вибираєте свій власний темп.{ph5}"
 
-#: website/public/index.html:741
+#: website/public/index.html:701
 msgctxt "page:index.html"
 msgid "See the script, checks and how to try the analysis"
 msgstr "Ознайомтеся зі сценарієм, перевірками та як спробувати аналіз"
 
 #. {ph0}: <code>index.js</code>
-#: website/public/index.html:744
+#: website/public/index.html:753
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6671,7 +6014,7 @@ msgstr ""
 "REA перевірив версію браузера HTTP через локальне з'єднання Налагодження та "
 "повернув завантажений {ph0}, включаючи його вихідний код та дайджест."
 
-#: website/public/index.html:757
+#: website/public/index.html:766
 msgctxt "page:index.html"
 msgid ""
 "We called the original game’s update function in a controlled browser check,"
@@ -6685,7 +6028,7 @@ msgstr ""
 
 #. {ph0}: <a href="examples/dino-lab/">
 #. {ph1}: </a>
-#: website/public/index.html:763
+#: website/public/index.html:772
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6702,7 +6045,7 @@ msgstr ""
 #. {ph1}: </a>
 #. {ph2}: <a href="https://wayou.github.io/t-rex-runner/" >
 #. {ph3}: </a >
-#: website/public/index.html:769
+#: website/public/index.html:778
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6720,7 +6063,7 @@ msgstr ""
 #. {ph1}: </a >
 #. {ph2}: <a href="assets/licenses/dinosaur.txt" >
 #. {ph3}: </a >
-#: website/public/index.html:778
+#: website/public/index.html:787
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6729,97 +6072,38 @@ msgstr ""
 "{ph0}Перевірений код швидкості{ph1} · {ph2}Автори Chromium * Ліцензія "
 "BSD{ph3}"
 
-#: website/public/index.html:795
+#: website/public/index.html:804
 msgctxt "page:index.html"
 msgid "Example 02 · Windows Calculator"
 msgstr "Приклад 02 * Калькулятор Windows"
 
-#: website/public/index.html:796
+#: website/public/index.html:805
 msgctxt "page:index.html"
 msgid "Rebuild Calculator’s % button."
 msgstr "Відтворіть кнопку % калькулятора."
 
-#. {ph0}: <mark class="prose-highlight">
-#. {ph1}: </mark>
-#: website/public/index.html:806
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"Build a small calculator that handles {ph0}both + and × correctly.{ph1}"
-msgstr ""
-"Створіть невеликий калькулятор, який {ph0}коректно обробляє як+, так і "
-"×.{ph1}"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#: website/public/index.html:813
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"The same button uses {ph0}different rules after + and ×.{ph1} We inspect the"
-" installed app to find which number the percentage is applied to."
-msgstr ""
-"Одна і та ж кнопка використовує {ph0}різні правила після + і ×.{ph1} Ми "
-"перевіряємо встановлене додаток, щоб визначити, до якого числа "
-"застосовується процентне співвідношення."
-
-#: website/public/index.html:822
-msgctxt "page:index.html"
-msgid "Try the calculation"
-msgstr "Спробуйте зробити розрахунок"
-
-#: website/public/index.html:866
+#: website/public/index.html:910
 msgctxt "page:index.html"
 msgid "Reset"
 msgstr "Скинути"
 
-#: website/public/index.html:874
+#: website/public/index.html:918
 msgctxt "page:index.html"
 msgid "10% of 200 = 20. Then 200 + 20 = 220."
 msgstr "10% від 200 = 20. Тоді 200 + 20 = 220."
 
-#: website/public/index.html:877
+#: website/public/index.html:921
 msgctxt "page:index.html"
 msgid "Interactive illustration of the inspected percentage rule."
 msgstr "Інтерактивна ілюстрація перевіряється процентного правила."
 
-#. {ph0}: <strong >
-#. {ph1}: </strong >
-#: website/public/index.html:884
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}One branch divides by 100. The other also multiplies by the first "
-"number.{ph1} The agent uses both to recreate the % button."
-msgstr ""
-"{ph0}Одна гілка ділиться на 100. Інша також множиться на перше число.{ph1} "
-"Агент використовує обидві гілки для відтворення кнопки%."
-
 #. {ph0}: <code>previous = 200</code>
 #. {ph1}: <code>current = 10</code>
-#: website/public/index.html:892
+#: website/public/index.html:929
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "For this example, {ph0} and {ph1}."
 msgstr "У цьому прикладі {ph0}, а {ph1}."
-
-#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
-#. {ph1}: <i>
-#. {ph2}: </i>
-#. {ph3}: <i>
-#. {ph4}: </i>
-#. {ph5}: <i>
-#. {ph6}: </i>
-#. {ph7}: </span >
-#: website/public/index.html:898
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Rebuild the % "
-"button"
-msgstr ""
-"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки · перебудувати "
-"кнопку %"
 
 #. {ph0}: <span class="prompt-symbol" aria-hidden="true">
 #. {ph1}: </span >
@@ -6827,7 +6111,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph5}: </span>
-#: website/public/index.html:912
+#: website/public/index.html:830
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6839,35 +6123,35 @@ msgstr ""
 "Windows. Відновіть правила після + і×, а потім створіть невеликий "
 "калькулятор, який використовує обидва параметри.{ph3}{ph4}{ph5}"
 
-#: website/public/index.html:933
+#: website/public/index.html:846
 msgctxt "page:index.html"
 msgid "With +"
 msgstr "Со +"
 
-#. {ph0}: <strong>
-#. {ph1}: </strong >
+#. {ph0}: <span>
+#. {ph1}: </span >
 #. {ph2}: <code>10% of 200 = 20 → 200 + 20 = 220</code>
-#: website/public/index.html:934
+#: website/public/index.html:847
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Take 10% of the first number.{ph1}{ph2}"
 msgstr "{ph0}Візьмемо 10% від першого числа.{ph1}{ph2}"
 
-#: website/public/index.html:940
+#: website/public/index.html:853
 msgctxt "page:index.html"
 msgid "With ×"
 msgstr "Со ×"
 
-#. {ph0}: <strong>
-#. {ph1}: </strong >
+#. {ph0}: <span>
+#. {ph1}: </span>
 #. {ph2}: <code>200 × 0.1 = 20</code>
-#: website/public/index.html:941
+#: website/public/index.html:854
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Turn 10% into 0.1.{ph1}{ph2}"
 msgstr "{ph0}Перетворіть 10% на 0,1200{ph1}{ph2}"
 
-#: website/public/index.html:950
+#: website/public/index.html:944
 msgctxt "page:index.html"
 msgid "From the installed app to a working % button"
 msgstr "Від встановленого додатка до робочої кнопки %"
@@ -6879,7 +6163,7 @@ msgstr "Від встановленого додатка до робочої к�
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: <code>100</code>
 #. {ph6}: </span >
-#: website/public/index.html:963
+#: website/public/index.html:957
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6896,7 +6180,7 @@ msgstr ""
 #. {ph3}: </span >
 #. {ph4}: <span class="flow-note" >
 #. {ph5}: </span >
-#: website/public/index.html:971
+#: website/public/index.html:965
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6908,12 +6192,12 @@ msgstr ""
 "правила{ph3}{ph4}, звіряє гілку з вихідним кодом Microsoft, а потім "
 "спробуйте + і × вище.{ph5}"
 
-#: website/public/index.html:982
+#: website/public/index.html:928
 msgctxt "page:index.html"
 msgid "See the real code and how the answer was checked"
 msgstr "Подивіться реальний код і те, як була перевірена відповідь"
 
-#: website/public/index.html:1008
+#: website/public/index.html:1000
 msgctxt "page:index.html"
 msgid ""
 "Inspected with REA 4.1.0: Windows Calculator 11.2508.4.0, x64. The readable "
@@ -6934,7 +6218,7 @@ msgstr ""
 #. {ph3}: </a >
 #. {ph4}: <a href="guides/native/">
 #. {ph5}: </a>
-#: website/public/index.html:1013
+#: website/public/index.html:1005
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -6944,17 +6228,17 @@ msgstr ""
 "{ph0}Відсоток реалізації{ph1} · {ph2}Тестові приклади Microsoft{ph3} * "
 "Керівництво по {ph4}вбудованої налаштуванні{ph5}"
 
-#: website/public/index.html:1032
+#: website/public/index.html:1074
 msgctxt "page:index.html"
 msgid "Your first investigation"
 msgstr "Ваше перше розслідування"
 
-#: website/public/index.html:1033
+#: website/public/index.html:1075
 msgctxt "page:index.html"
 msgid "Try REA on a small app."
 msgstr "Спробуйте REA у невеликому додатку."
 
-#: website/public/index.html:1034
+#: website/public/index.html:1076
 msgctxt "page:index.html"
 msgid ""
 "Download our Notes example, trace its CSV export, and check one changed "
@@ -6963,105 +6247,17 @@ msgstr ""
 "Завантажте наш приклад Notes, простежте його експорт CSV і перевірте один "
 "змінений вхід."
 
-#: website/public/index.html:1039
+#: website/public/index.html:1081
 msgctxt "page:index.html"
 msgid "Try the guided example"
 msgstr "Спробуйте керуватися наведеним прикладом"
 
-#: website/public/index.html:1048
-msgctxt "page:index.html"
-msgid "Want to go deeper?"
-msgstr "Хочете дізнатися більше?"
-
-#. {ph0}: <strong>
-#. {ph1}: </strong>
-#. {ph2}: <strong>
-#. {ph3}: </strong>
-#: website/public/index.html:1049
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"Tell your agent what you want to understand or build. With REA, you can work"
-" together on anything from {ph0}cloning this website{ph1} to "
-"{ph2}reconstructing a game from its executable.{ph3}"
-msgstr ""
-"Скажіть своєму агенту, що ви хочете зрозуміти або доопрацювати. З REA ви "
-"можете працювати разом над чим завгодно-від {ph0}клонування цього веб-"
-"сайту{ph1} до {ph2}відтворення гри по її виконуваному файлу.{ph3}"
-
-#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
-#. {ph1}: <i>
-#. {ph2}: </i>
-#. {ph3}: <i>
-#. {ph4}: </i>
-#. {ph5}: <i>
-#. {ph6}: </i>
-#. {ph7}: </span >
-#: website/public/index.html:1060
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Website"
-msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад запиту * Веб-сайт"
-
-#: website/public/index.html:1083
-msgctxt "page:index.html"
-msgid "Yes, this one."
-msgstr "Так, ось цей."
-
-#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
-#. {ph1}: <i>
-#. {ph2}: </i>
-#. {ph3}: <i>
-#. {ph4}: </i>
-#. {ph5}: <i>
-#. {ph6}: </i>
-#. {ph7}: </span >
-#: website/public/index.html:1088
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Game reconstruction"
-msgstr ""
-"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки · Реконструкція гри"
-
-#. {ph0}: <span class="prompt-symbol" aria-hidden="true">
-#. {ph1}: </span >
-#. {ph2}: <span id="game-project-prompt" >
-#. {ph3}: </span >
-#. {ph4}: <span class="terminal-cursor" aria-hidden="true">
-#. {ph5}: </span>
-#: website/public/index.html:1102
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}›{ph1}{ph2}Use REA to reconstruct this game from its executable. "
-"Recover the gameplay logic in C and test it against the "
-"original.{ph3}{ph4}{ph5}"
-msgstr ""
-"{ph0}\"{ph1}{ph2}Використовуйте REA, щоб відтворити цю гру за її виконуваним"
-" файлом. Відновіть логіку ігрового процесу на C і порівняйте її з "
-"оригіналом.{ph3}{ph4}{ph5}"
-
-#. {ph0}: <a href="showcase/dx-ball/">
-#. {ph1}: </a>
-#: website/public/index.html:1111
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "{ph0}See the DX-Ball case study →{ph1}"
-msgstr "{ph0}Дивіться тематичне дослідження DX-Ball →{ph1}"
-
-#: website/public/index.html:1116
-msgctxt "page:index.html"
-msgid "For setup and analysis steps, choose your target:"
-msgstr ""
-"Для виконання етапів настройки і аналізу виберіть свій цільовий об'єкт:"
-
-#: website/public/index.html:1121
+#: website/public/index.html:1098
 msgctxt "page:index.html"
 msgid "Native binaries"
 msgstr "Програми з машинним кодом"
 
-#: website/public/index.html:1122
+#: website/public/index.html:1099
 msgctxt "page:index.html"
 msgid ""
 "Inspect functions, strings, references and call relationships in executables"
@@ -7070,17 +6266,17 @@ msgstr ""
 "Перевірте функції, рядки, посилання та зв'язки між викликами функцій у "
 "виконуваних файлах та бібліотеках."
 
-#: website/public/index.html:1126
+#: website/public/index.html:1103
 msgctxt "page:index.html"
 msgid "Native analysis guide"
 msgstr "Керівництво по аналізу програм з машинним кодом"
 
-#: website/public/index.html:1129
+#: website/public/index.html:1106
 msgctxt "page:index.html"
 msgid "JavaScript & Electron"
 msgstr "JavaScript і Electron"
 
-#: website/public/index.html:1130
+#: website/public/index.html:1107
 msgctxt "page:index.html"
 msgid ""
 "Map modules, routes, IPC and native dependencies from an application folder "
@@ -7089,17 +6285,17 @@ msgstr ""
 "Відображайте модулі, маршрути, IPC та власні залежності з папки програми або"
 " архіву ASAR."
 
-#: website/public/index.html:1134
+#: website/public/index.html:1111
 msgctxt "page:index.html"
 msgid "Application workflows"
 msgstr "Робочі процеси додатків"
 
-#: website/public/index.html:1137
+#: website/public/index.html:1114
 msgctxt "page:index.html"
 msgid "Browser & runtime activity"
 msgstr "Активність у браузері та під час виконання"
 
-#: website/public/index.html:1138
+#: website/public/index.html:1115
 msgctxt "page:index.html"
 msgid ""
 "Capture selected browser or process activity, then compare the results "
@@ -7108,46 +6304,15 @@ msgstr ""
 "Фіксуйте активність обраного браузера або процесу, а потім порівнюйте "
 "результати в різних запусках."
 
-#: website/public/index.html:1142
+#: website/public/index.html:1119
 msgctxt "page:index.html"
 msgid "Browser observation guide"
 msgstr "Керівництво по спостереженню за браузером"
 
-#: website/public/index.html:1149
+#: website/public/index.html:1190
 msgctxt "page:index.html"
 msgid "Any questions?"
 msgstr "Маєте запитання?"
-
-#. {ph0}: <a href="faq/">
-#. {ph1}: </a>
-#. {ph2}: <a href="https://discord.gg/GkcryMnJDM">
-#. {ph3}: </a>
-#. {ph4}: <a href="https://github.com/morluto/rea/issues/new/choose" >
-#. {ph5}: </a >
-#: website/public/index.html:1150
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}Read the FAQ{ph1}, {ph2}chat with us on Discord{ph3}, or {ph4}open a "
-"GitHub issue{ph5} for bugs and feature requests."
-msgstr ""
-"{ph0}Ознайомтеся з часто{ph1} задавати питання, {ph2}поспілкуйтеся з нами по"
-" Discord{ph3} або {ph4}відкрийте випуск{ph5} GitHub, щоб дізнатися про "
-"помилки та запити функцій."
-
-#: website/public/index.html:1163 website/public/index.html:1169
-msgctxt "page:index.html"
-msgid "Join the community"
-msgstr "Приєднатися до спільноти"
-
-#: website/public/index.html:1164
-msgctxt "page:index.html"
-msgid ""
-"Share investigations and get help from other REA users on Discord. Follow "
-"REA on X for project updates."
-msgstr ""
-"Діліться результатами досліджень і отримуйте допомогу від інших користувачів"
-" REA на Discord. Слідкуйте за оновленнями проекту REA на X."
 
 #: website/public/index.html:6
 msgctxt "page:index.html"
@@ -7164,27 +6329,27 @@ msgstr ""
 "агента кодування. Дотримуйтесь чітких інструкцій та спробуйте інтерактивні "
 "приклади з REA."
 
-#: website/public/index.html:262
+#: website/public/index.html:256
 msgctxt "page:index.html"
 msgid "Copy REA installation prompt"
 msgstr "Скопіюйте запит на встановлення REA"
 
-#: website/public/index.html:284
+#: website/public/index.html:280
 msgctxt "page:index.html"
 msgid "Copy setup command"
 msgstr "Команда Налаштування Копіювання"
 
-#: website/public/index.html:336
+#: website/public/index.html:360
 msgctxt "page:index.html"
 msgid "Follow the manual Calculator analysis"
 msgstr "Дотримуйтесь інструкцій ручного калькулятора для аналізу"
 
-#: website/public/index.html:499
+#: website/public/index.html:516
 msgctxt "page:index.html"
 msgid "Copy Calculator percentage question"
 msgstr "Процентне питання калькулятора копіювання"
 
-#: website/public/index.html:606
+#: website/public/index.html:650
 msgctxt "page:index.html"
 msgid ""
 "Dinosaur mini-game. Use the Jump button or press Space while the game is "
@@ -7193,32 +6358,22 @@ msgstr ""
 "Міні-гра про динозаврів. Використовуйте кнопку переходу або натисніть "
 "пробіл, поки гра зосереджена."
 
-#: website/public/index.html:667
+#: website/public/index.html:597
 msgctxt "page:index.html"
 msgid "Copy dinosaur analysis prompt"
 msgstr "Запит на копіювання результатів аналізу динозаврів"
 
-#: website/public/index.html:823
+#: website/public/index.html:867
 msgctxt "page:index.html"
 msgid "Choose the calculation"
 msgstr "Виберіть спосіб розрахунку"
 
-#: website/public/index.html:903
+#: website/public/index.html:821
 msgctxt "page:index.html"
 msgid "Copy Calculator analysis prompt"
 msgstr "Запит на аналіз за допомогою калькулятора копіювання"
 
-#: website/public/index.html:1065
-msgctxt "page:index.html"
-msgid "Copy website project prompt"
-msgstr "Запит на копіювання проекту веб-сайту"
-
-#: website/public/index.html:1093
-msgctxt "page:index.html"
-msgid "Copy game reconstruction prompt"
-msgstr "Запит на копіювання реконструкції гри"
-
-#: website/public/index.html:1193
+#: website/public/index.html:1224
 msgctxt "page:index.html"
 msgid "Back to top"
 msgstr "Нагору"
@@ -11229,7 +10384,7 @@ msgctxt "runtime"
 msgid "Code selected. Use your keyboard to copy it."
 msgstr "Обраний код. Скопіюйте його з клавіатури."
 
-#: website/public/assets/main.js:148
+#: website/public/assets/main.js:158
 #, python-brace-format
 msgctxt "runtime"
 msgid "REA on GitHub ({count})"
@@ -11780,12 +10935,12 @@ msgstr "Посібники"
 #: website/public/blog/touhou-reconstruction/index.html:1074
 #: website/public/examples/dino-lab/index.html:469
 #: website/public/faq/index.html:567
-#: website/public/first-investigation/index.html:517
-#: website/public/get-started/index.html:876
+#: website/public/first-investigation/index.html:528
+#: website/public/get-started/index.html:1811
 #: website/public/guides/browser/index.html:501
 #: website/public/guides/index.html:276
 #: website/public/guides/javascript/index.html:497
-#: website/public/guides/native/index.html:503 website/public/index.html:1185
+#: website/public/guides/native/index.html:503 website/public/index.html:1216
 #: website/public/showcase/aegis/index.html:802
 #: website/public/showcase/ctf/index.html:771
 #: website/public/showcase/dx-ball/index.html:779
@@ -11801,12 +10956,12 @@ msgstr "Вихідний код"
 #: website/public/blog/touhou-reconstruction/index.html:1075
 #: website/public/examples/dino-lab/index.html:470
 #: website/public/faq/index.html:568
-#: website/public/first-investigation/index.html:518
-#: website/public/get-started/index.html:877
+#: website/public/first-investigation/index.html:529
+#: website/public/get-started/index.html:1812
 #: website/public/guides/browser/index.html:502
 #: website/public/guides/index.html:277
 #: website/public/guides/javascript/index.html:498
-#: website/public/guides/native/index.html:504 website/public/index.html:1186
+#: website/public/guides/native/index.html:504 website/public/index.html:1217
 #: website/public/showcase/aegis/index.html:803
 #: website/public/showcase/ctf/index.html:772
 #: website/public/showcase/dx-ball/index.html:780
@@ -11822,12 +10977,12 @@ msgstr "Ліцензія MIT"
 #: website/public/blog/touhou-reconstruction/index.html:1076
 #: website/public/examples/dino-lab/index.html:471
 #: website/public/faq/index.html:569
-#: website/public/first-investigation/index.html:519
-#: website/public/get-started/index.html:878
+#: website/public/first-investigation/index.html:530
+#: website/public/get-started/index.html:1813
 #: website/public/guides/browser/index.html:503
 #: website/public/guides/index.html:278
 #: website/public/guides/javascript/index.html:499
-#: website/public/guides/native/index.html:505 website/public/index.html:1187
+#: website/public/guides/native/index.html:505 website/public/index.html:1218
 #: website/public/showcase/aegis/index.html:804
 #: website/public/showcase/ctf/index.html:773
 #: website/public/showcase/dx-ball/index.html:781
@@ -11843,12 +10998,12 @@ msgstr "Приєднатися до спільноти"
 #: website/public/blog/touhou-reconstruction/index.html:1077
 #: website/public/examples/dino-lab/index.html:472
 #: website/public/faq/index.html:570
-#: website/public/first-investigation/index.html:520
-#: website/public/get-started/index.html:879
+#: website/public/first-investigation/index.html:531
+#: website/public/get-started/index.html:1814
 #: website/public/guides/browser/index.html:504
 #: website/public/guides/index.html:279
 #: website/public/guides/javascript/index.html:500
-#: website/public/guides/native/index.html:506 website/public/index.html:1188
+#: website/public/guides/native/index.html:506 website/public/index.html:1219
 #: website/public/showcase/aegis/index.html:805
 #: website/public/showcase/ctf/index.html:774
 #: website/public/showcase/dx-ball/index.html:782
@@ -11955,40 +11110,30 @@ msgctxt "page:guides/native/index.html"
 msgid "Recovered C · excerpt"
 msgstr "Відновлений уривок з C ·"
 
-#: website/public/index.html:234
-msgctxt "page:index.html"
-msgid "See how REA works ↓"
-msgstr "Подивіться, як працює REA ↓"
-
-#: website/public/index.html:241
+#: website/public/index.html:1031
 msgctxt "page:index.html"
 msgid "Showcases →"
 msgstr "Вітрина →"
 
-#: website/public/index.html:751
+#: website/public/index.html:760
 msgctxt "page:index.html"
 msgid "Selected settings from the inspected script"
 msgstr "Вибрані налаштування з перевіреного скрипта"
 
-#: website/public/index.html:923
+#: website/public/index.html:935
 msgctxt "page:index.html"
 msgid "Readable summary of the % handler"
 msgstr "Читається зведення про обробнику %"
 
-#: website/public/index.html:987
+#: website/public/index.html:979
 msgctxt "page:index.html"
 msgid "REA · selected original instructions"
 msgstr "REA * вибрані оригінальні інструкції"
 
-#: website/public/index.html:998
+#: website/public/index.html:990
 msgctxt "page:index.html"
 msgid "Operator IDs · Microsoft’s source"
 msgstr "Ідентифікатори операторів * вихідний код Microsoft"
-
-#: website/public/index.html:1172
-msgctxt "page:index.html"
-msgid "Follow @reatools on X"
-msgstr "Слідкуйте за @reatools на X"
 
 #: website/public/showcase/aegis/index.html:401
 #: website/public/showcase/aegis/index.html:433
@@ -12376,7 +11521,7 @@ msgstr ""
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/get-started/index.html:434
+#: website/public/get-started/index.html:780
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -12395,7 +11540,7 @@ msgstr ""
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/index.html:271
+#: website/public/index.html:265
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12406,23 +11551,6 @@ msgstr ""
 "{ph0}›{ph1}{ph2}Встанови REA та підключи його до цього ШІ-помічника за "
 "допомогою {ph3}. Спочатку покажи план змін і дочекайся мого схвалення. Потім"
 " перевір встановлення.{ph4}{ph5}{ph6}"
-
-#. {ph0}: <span class="prompt-symbol" aria-hidden="true">
-#. {ph1}: </span >
-#. {ph2}: <span id="website-project-prompt" >
-#. {ph3}: <span translate="no">https://rea.tools/</span>
-#. {ph4}: </span >
-#. {ph5}: <span class="terminal-cursor" aria-hidden="true">
-#. {ph6}: </span>
-#: website/public/index.html:1074
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"{ph0}›{ph1}{ph2}Use REA to inspect {ph3}. Clone this website for "
-"me.{ph4}{ph5}{ph6}"
-msgstr ""
-"{ph0}\"{ph1}{ph2}Використовуйте REA для перевірки {ph3}. Скопіюйте цей веб-"
-"сайт для мене.{ph4}{ph5}{ph6}"
 
 #. {ph0}: <span translate="no">dino-speed.js</span>
 #: website/public/examples/dino-lab/index.html:322
@@ -12558,15 +11686,8 @@ msgstr ""
 " {ph0}."
 
 #. {ph0}: <span translate="no">Node.js</span>
-#: website/public/first-investigation/index.html:448
-#, python-brace-format
-msgctxt "page:first-investigation/index.html"
-msgid "{ph0} · CSV formatter"
-msgstr "{ph0} * Засіб форматування CSV"
-
-#. {ph0}: <span translate="no">Node.js</span>
 #. {ph1}: <span translate="no">Node.js</span>
-#: website/public/get-started/index.html:202
+#: website/public/get-started/index.html:253
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -12576,7 +11697,7 @@ msgstr ""
 "входить {ph1}npm ."
 
 #. {ph0}: <span translate="no">Node.js</span>
-#: website/public/get-started/index.html:207
+#: website/public/get-started/index.html:259
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid "Don't have {ph0}, or not sure?"
@@ -12584,7 +11705,7 @@ msgstr "У вас немає {ph0} або ви не впевнені?"
 
 #. {ph0}: <code>node -v</code>
 #. {ph1}: <span translate="no">Node.js</span>
-#: website/public/get-started/index.html:226
+#: website/public/get-started/index.html:278
 #, python-brace-format
 msgctxt "page:get-started/index.html"
 msgid ""
@@ -12646,7 +11767,7 @@ msgstr ""
 #. {ph0}: <span translate="no">Node.js</span>
 #. {ph1}: <a href="get-started/">
 #. {ph2}: </a>
-#: website/public/index.html:296
+#: website/public/index.html:310
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12656,15 +11777,6 @@ msgstr ""
 "Перший раз або відсутній {ph0} або використовується засіб кодування? "
 "{ph1}Дотримуйтесь покрокового керівництва по налаштуванню →{ph2}"
 
-#. {ph0}: <strong >
-#. {ph1}: <span translate="no">200 + 10%</span>
-#. {ph2}: </strong >
-#: website/public/index.html:320
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "One question: {ph0}why does Calculator give 220 for {ph1}?{ph2}"
-msgstr "Наприклад: {ph0}чому калькулятор дає 220 для {ph1}?{ph2}"
-
 #. {ph0}: <span class="prompt-symbol" aria-hidden="true">
 #. {ph1}: </span >
 #. {ph2}: <span id="home-analysis-prompt" >
@@ -12672,7 +11784,7 @@ msgstr "Наприклад: {ph0}чому калькулятор дає 220 дл
 #. {ph4}: </span >
 #. {ph5}: <span class="terminal-cursor" aria-hidden="true">
 #. {ph6}: </span>
-#: website/public/index.html:508
+#: website/public/index.html:525
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12683,24 +11795,11 @@ msgstr ""
 "{ph3} дають 220?{ph4}{ph5}{ph6}"
 
 #. {ph0}: <span translate="no">index.js</span>
-#: website/public/index.html:693
+#: website/public/index.html:712
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "REA · loaded {ph0} · selected lines"
 msgstr "REA · завантажено {ph0} * вибрані рядки"
-
-#. {ph0}: <strong>
-#. {ph1}: <span translate="no">200 + 10%</span>
-#. {ph2}: </strong>
-#: website/public/index.html:797
-#, python-brace-format
-msgctxt "page:index.html"
-msgid ""
-"We saw why {ph0}{ph1} gives 220.{ph2} Now let’s recover the rules for both +"
-" and ×, and try them."
-msgstr ""
-"Ми бачили, чому {ph0}{ph1} дають 220.{ph2} Тепер давайте відновимо правила "
-"для + і × і спробуємо їх застосувати."
 
 #. {ph0}: <span class="flow-label" >
 #. {ph1}: <span translate="no">calc.exe</span>
@@ -12710,7 +11809,7 @@ msgstr ""
 #. {ph5}: <span class="flow-note" >
 #. {ph6}: <code>ms-calculator:</code>
 #. {ph7}: </span >
-#: website/public/index.html:954
+#: website/public/index.html:948
 #, python-brace-format
 msgctxt "page:index.html"
 msgid ""
@@ -12768,16 +11867,6 @@ msgstr "main/{ph0} * помічник обробника"
 msgctxt "page:showcase/notion/index.html"
 msgid "main/{ph0} · clipboard receiver"
 msgstr "головний/{ph0} * приймач буфера обміну"
-
-# Use the same label as the Get started navigation link. The arrow is
-# decorative.
-#. {ph0}: <span class="button-arrow" aria-hidden="true" data-i18n-skip
-#. >→</span >
-#: website/public/index.html:235
-#, python-brace-format
-msgctxt "page:index.html"
-msgid "Get started {ph0}"
-msgstr "Почати {ph0}"
 
 #: website/public/assets/theme.js:52
 msgctxt "runtime"
@@ -14168,6 +13257,2670 @@ msgid ""
 msgstr ""
 "{ph0}Докладні записи доказів{ph1} містять результати порівнянь і контекст "
 "експериментів."
+
+#. {ph0}: <a href="#showcases">
+#. {ph1}: </a>
+#: website/public/index.html:214
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}Showcases{ph1}"
+msgstr "{ph0}Приклади{ph1}"
+
+#: website/public/index.html:1025
+msgctxt "page:index.html"
+msgid "REA case studies."
+msgstr "Тематичні дослідження REA."
+
+#: website/public/index.html:1035
+msgctxt "page:index.html"
+msgid "Android · APK analysis"
+msgstr "Android * аналіз APK"
+
+#: website/public/index.html:1036
+msgctxt "page:index.html"
+msgid "How an authenticator generates a login code"
+msgstr "Як аутентифікатор генерує код входу"
+
+#: website/public/index.html:1041
+msgctxt "page:index.html"
+msgid "Read the Android case study"
+msgstr "Ознайомтеся з тематичним дослідженням Android"
+
+#: website/public/index.html:1046
+msgctxt "page:index.html"
+msgid "Electron · Feature tracing"
+msgstr "Electron * відстеження об'єктів"
+
+#: website/public/index.html:1047
+msgctxt "page:index.html"
+msgid "How Notion copies text and HTML"
+msgstr "Як Notion копіює текст та HTML"
+
+#: website/public/index.html:1052
+msgctxt "page:index.html"
+msgid "Read the Notion case study"
+msgstr "Ознайомтеся з тематичним дослідженням Notion"
+
+#: website/public/index.html:1057
+msgctxt "page:index.html"
+msgid "Native · Reconstruction"
+msgstr "Нативна * Реконструкція"
+
+#: website/public/index.html:1058
+msgctxt "page:index.html"
+msgid "DX-Ball's sound-pan calculation"
+msgstr "DX-Ball обчислює положення звуку зліва / справа"
+
+#: website/public/index.html:1063
+msgctxt "page:index.html"
+msgid "Read the DX-Ball case study"
+msgstr "Ознайомтеся з тематичним дослідженням DX-Ball"
+
+#: website/public/index.html:292
+msgctxt "page:index.html"
+msgid "Setup options"
+msgstr "Параметри налаштування"
+
+#: website/public/get-started/index.html:198
+msgctxt "page:get-started/index.html"
+msgid ""
+"Set up your computer and coding agent, connect REA, then investigate a small"
+" app."
+msgstr ""
+"Підготуйте комп’ютер і ШІ-помічника для програмування, підключіть REA, а "
+"потім дослідіть невеликий застосунок."
+
+#. {ph0}: <a href="#agent">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:202
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"New to this? Follow the four steps below. Already have an agent? Go straight"
+" to {ph0}Connect REA{ph1}."
+msgstr ""
+"Пробуєте вперше? Пройдіть чотири кроки нижче. Уже користуєтеся агентом? "
+"Одразу перейдіть до розділу {ph0}«Підключіть REA»{ph1}."
+
+#. {ph0}: <a href="#computer">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:211
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}1. Prepare your computer{ph1}"
+msgstr "{ph0}1. Підготуйте комп’ютер{ph1}"
+
+#. {ph0}: <a href="#choose-agent">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:212
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}2. Choose an agent{ph1}"
+msgstr "{ph0}2. Виберіть агента{ph1}"
+
+#. {ph0}: <a href="#agent">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:213
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}3. Connect REA{ph1}"
+msgstr "{ph0}3. Підключіть REA{ph1}"
+
+#. {ph0}: <a href="#first-task">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:214
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}4. Try an investigation{ph1}"
+msgstr "{ph0}4. Спробуйте дослідження{ph1}"
+
+#. {ph0}: <a href="#native">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:215
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Other targets and providers{ph1}"
+msgstr "{ph0}Інші цілі та інструменти аналізу{ph1}"
+
+#: website/public/get-started/index.html:222
+msgctxt "page:get-started/index.html"
+msgid "1. Prepare your computer"
+msgstr "1. Підготуйте комп’ютер"
+
+#: website/public/get-started/index.html:223
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use the computer where your target files are stored. A local coding agent "
+"can read those files and run tools for you."
+msgstr ""
+"Використовуйте комп’ютер, на якому зберігаються досліджувані файли. "
+"Локальний ШІ-помічник для програмування може читати їх і запускати "
+"інструменти для вас."
+
+#: website/public/get-started/index.html:248
+msgctxt "page:get-started/index.html"
+msgid ""
+"Commands go in the terminal. Prompts labeled “Your coding agent” go in the "
+"agent's chat."
+msgstr ""
+"Команди вводьте в терміналі. Запити з позначкою «Ваш ШІ-помічник для "
+"програмування» надсилайте в чат агента."
+
+#. {ph0}: <a href="https://nodejs.org/en/download" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:304
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Download the Node.js installer{ph1} if winget is unavailable."
+msgstr "Якщо winget недоступний, {ph0}завантажте інсталятор Node.js{ph1}."
+
+#. {ph0}: <em>
+#. {ph1}: </em>
+#. {ph2}: <code>npx</code>
+#. {ph3}: <code>npx.cmd</code>
+#. {ph4}: <code>npm.cmd</code>
+#: website/public/get-started/index.html:310
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"If PowerShell later says {ph0}\"running scripts is disabled on this "
+"system\"{ph1} when you run {ph2}, use {ph3} instead. For npm, use {ph4}:"
+msgstr ""
+"Якщо згодом під час запуску {ph2} PowerShell повідомить {ph0}\"running "
+"scripts is disabled on this system\"{ph1}, використовуйте натомість {ph3}. "
+"Для npm використовуйте {ph4}:"
+
+#: website/public/get-started/index.html:408
+msgctxt "page:get-started/index.html"
+msgid "Make a working folder for your agent"
+msgstr "Створіть робочу папку для агента"
+
+#: website/public/get-started/index.html:409
+msgctxt "page:get-started/index.html"
+msgid "In your terminal, make a folder for the exercise, then move into it:"
+msgstr "У терміналі створіть папку для вправи й перейдіть до неї:"
+
+#: website/public/get-started/index.html:428
+msgctxt "page:get-started/index.html"
+msgid ""
+"Keep this terminal open for the next step. If you already have a working "
+"folder, open it instead."
+msgstr ""
+"Залиште цей термінал відкритим для наступного кроку. Якщо ви вже маєте "
+"робочу папку, відкрийте її замість нової."
+
+#: website/public/get-started/index.html:435
+msgctxt "page:get-started/index.html"
+msgid "2. Choose a coding agent"
+msgstr "2. Виберіть ШІ-помічника для програмування"
+
+#: website/public/get-started/index.html:436
+msgctxt "page:get-started/index.html"
+msgid ""
+"Your agent is the AI you talk to. REA supplies the inspection tools it uses."
+" Pick one client below; open its instructions if you haven't used it before."
+msgstr ""
+"Агент — це ШІ, з яким ви спілкуєтеся. REA надає йому інструменти для "
+"дослідження програм. Виберіть один застосунок-клієнт нижче; якщо раніше ним "
+"не користувалися, відкрийте інструкції."
+
+#: website/public/get-started/index.html:442
+msgctxt "page:get-started/index.html"
+msgid "Codex · use your ChatGPT account"
+msgstr "Codex · використовуйте свій обліковий запис ChatGPT"
+
+#: website/public/get-started/index.html:490
+msgctxt "page:get-started/index.html"
+msgid ""
+"Choose “Sign in with ChatGPT”, complete the browser sign-in, then return to "
+"the terminal. When the message box appears, continue to step 3."
+msgstr ""
+"Виберіть «Sign in with ChatGPT», завершіть вхід у браузері та поверніться до"
+" термінала. Коли з’явиться поле для повідомлення, переходьте до кроку 3."
+
+#. {ph0}: <a href="https://learn.chatgpt.com/docs/codex/cli" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:495
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Codex installation and sign-in{ph1}"
+msgstr "{ph0}Встановлення Codex і вхід в обліковий запис{ph1}"
+
+#: website/public/get-started/index.html:502
+msgctxt "page:get-started/index.html"
+msgid "Cursor, Windsurf or VS Code · use an editor"
+msgstr "Cursor, Windsurf або VS Code · використовуйте редактор"
+
+#: website/public/get-started/index.html:504
+msgctxt "page:get-started/index.html"
+msgid "Install the editor for your operating system and sign in."
+msgstr ""
+"Встановіть редактор для своєї операційної системи та увійдіть в обліковий "
+"запис."
+
+#: website/public/get-started/index.html:507
+msgctxt "page:get-started/index.html"
+msgid "Open the rea-work folder you made in step 1."
+msgstr "Відкрийте папку rea-work, створену на кроці 1."
+
+#: website/public/get-started/index.html:526
+msgctxt "page:get-started/index.html"
+msgid "Claude Code · use your Claude account"
+msgstr "Claude Code · використовуйте свій обліковий запис Claude"
+
+#: website/public/get-started/index.html:527
+msgctxt "page:get-started/index.html"
+msgid "Install using the command for your operating system:"
+msgstr "Встановіть за допомогою команди для своєї операційної системи:"
+
+#. {ph0}: <code>claude</code>
+#: website/public/get-started/index.html:556
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Reopen your terminal, return to your working folder and run {ph0}. Follow "
+"the sign-in prompts. Access uses an eligible Claude subscription or a "
+"configured API account."
+msgstr ""
+"Знову відкрийте термінал, поверніться до робочої папки та запустіть {ph0}. "
+"Дотримуйтеся підказок для входу. Для доступу потрібна відповідна підписка "
+"Claude або налаштований обліковий запис API."
+
+#. {ph0}: <a href="https://code.claude.com/docs/en/setup" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:561
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Claude Code installation and account options{ph1}"
+msgstr "{ph0}Встановлення Claude Code та варіанти облікових записів{ph1}"
+
+#: website/public/get-started/index.html:568
+msgctxt "page:get-started/index.html"
+msgid "Claude Desktop · use a desktop chat"
+msgstr "Claude Desktop · використовуйте настільний чат"
+
+#. {ph0}: <a href="https://claude.ai/download">
+#. {ph1}: </a>
+#. {ph2}: <a href="https://github.com/morluto/rea/blob/main/docs/client-
+#. configuration.md#claude-desktop" >
+#. {ph3}: </a >
+#: website/public/get-started/index.html:592
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}Download Claude Desktop{ph1} · {ph2}Claude Desktop connection "
+"details{ph3}"
+msgstr ""
+"{ph0}Завантажити Claude Desktop{ph1} · {ph2}Подробиці підключення Claude "
+"Desktop{ph3}"
+
+#. {ph0}: <code>opencode</code>
+#. {ph1}: <code>/connect</code>
+#: website/public/get-started/index.html:617
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Run {ph0} in your working folder. Use {ph1} in its chat to connect your "
+"model account, then select a model."
+msgstr ""
+"Запустіть {ph0} у робочій папці. У його чаті використайте {ph1}, щоб "
+"підключити свій обліковий запис для доступу до моделей, а потім виберіть "
+"модель."
+
+#. {ph0}: <a href="https://opencode.ai/docs/" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:622
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}OpenCode installation and model setup{ph1}"
+msgstr "{ph0}Встановлення OpenCode та налаштування моделі{ph1}"
+
+#: website/public/get-started/index.html:629
+msgctxt "page:get-started/index.html"
+msgid "All supported clients and setup IDs"
+msgstr "Усі підтримувані клієнти та їхні ідентифікатори для налаштування"
+
+#. {ph0}: <code>--client</code>
+#: website/public/get-started/index.html:630
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"The npm 6.4.0 release supports the clients below. Use the ID with {ph0} when"
+" choosing a client explicitly."
+msgstr ""
+"Випуск 6.4.0 у npm підтримує перелічені нижче клієнти. Щоб явно вибрати "
+"клієнт, укажіть його ідентифікатор із {ph0}."
+
+#: website/public/get-started/index.html:638
+msgctxt "page:get-started/index.html"
+msgid "Client"
+msgstr "Клієнт"
+
+#: website/public/get-started/index.html:639
+msgctxt "page:get-started/index.html"
+msgid "Setup ID"
+msgstr "Ідентифікатор для налаштування"
+
+#. {ph0}: <code>qoder</code>
+#. {ph1}: <code>droid</code>
+#. {ph2}: <code>trae</code>
+#. {ph3}: <code>zcode</code>
+#. {ph4}: <code>dsh</code>
+#: website/public/get-started/index.html:714
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Qoder ({ph0}), Factory Droid ({ph1}), Trae ({ph2}), ZCode ({ph3}) and "
+"DeepSeek Harness ({ph4}) are available on repository main; use a source "
+"build or a release containing those integrations."
+msgstr ""
+"Qoder ({ph0}), Factory Droid ({ph1}), Trae ({ph2}), ZCode ({ph3}) і DeepSeek"
+" Harness ({ph4}) доступні в гілці main репозиторію; використовуйте збірку з "
+"вихідного коду або випуск із цими інтеграціями."
+
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/client-
+#. configuration.md" >
+#. {ph1}: </a >
+#. {ph2}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#released-
+#. package-and-main" >
+#. {ph3}: </a >
+#: website/public/get-started/index.html:721
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}Client configuration and troubleshooting{ph1} · {ph2}Release "
+"availability{ph3}"
+msgstr ""
+"{ph0}Налаштування клієнтів та усунення неполадок{ph1} · {ph2}Доступність у "
+"випусках{ph3}"
+
+#: website/public/get-started/index.html:733
+msgctxt "page:get-started/index.html"
+msgid "Grok Bot · connect on its hosted computer"
+msgstr "Grok Bot · підключіть на комп’ютері, де він працює"
+
+#. {ph0}: <code>rea</code>
+#: website/public/get-started/index.html:734
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"In Grok Bot's chat, ask it to add a custom MCP server named {ph0} using this"
+" command on the Bot's computer:"
+msgstr ""
+"У чаті Grok Bot попросіть додати власний MCP-сервер з іменем {ph0}, "
+"використавши цю команду на комп’ютері бота:"
+
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/client-
+#. configuration.md#other-client-settings" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:752
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Grok Bot connector instructions{ph1}"
+msgstr "{ph0}Інструкції з підключення Grok Bot{ph1}"
+
+#: website/public/get-started/index.html:762
+msgctxt "page:get-started/index.html"
+msgid "3. Connect REA"
+msgstr "3. Підключіть REA"
+
+#: website/public/get-started/index.html:763
+msgctxt "page:get-started/index.html"
+msgid "Copy this into your coding agent:"
+msgstr "Вставте цей запит у свого ШІ-помічника для програмування:"
+
+#: website/public/get-started/index.html:807
+msgctxt "page:get-started/index.html"
+msgid "For one specific client, add its setup ID:"
+msgstr "Для конкретного клієнта додайте його ідентифікатор для налаштування:"
+
+#. {ph0}: <code>y</code>
+#: website/public/get-started/index.html:822
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"If npm asks to download the package, type {ph0} and press Enter. In REA's "
+"client list, use the arrow keys to move, Space to select your client and "
+"Enter to continue."
+msgstr ""
+"Якщо npm попросить дозволити завантаження пакета, введіть {ph0} і натисніть "
+"Enter. У списку клієнтів REA переміщуйтеся стрілками, виберіть клієнт "
+"клавішею Space й натисніть Enter для продовження."
+
+#: website/public/get-started/index.html:833
+msgctxt "page:get-started/index.html"
+msgid ""
+"MCP is the connection that lets your agent call REA. The skill gives it a "
+"workflow for investigating software."
+msgstr ""
+"MCP — це з’єднання, через яке агент викликає REA. Навичка задає порядок дій "
+"для дослідження програм."
+
+#: website/public/get-started/index.html:837
+msgctxt "page:get-started/index.html"
+msgid ""
+"For the first exercise, you can skip the optional Hopper installation. "
+"Restart your client when setup finishes."
+msgstr ""
+"Для першої вправи можна пропустити необов’язкове встановлення Hopper. Коли "
+"налаштування завершиться, перезапустіть клієнт."
+
+#. {ph0}: <code>codex</code>
+#. {ph1}: <code>"healthy": true</code>
+#: website/public/get-started/index.html:870
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Replace {ph0} with your client's setup ID. A successful check reports {ph1}."
+" Then ask your agent:"
+msgstr ""
+"Замініть {ph0} ідентифікатором свого клієнта для налаштування. Успішна "
+"перевірка виводить {ph1}. Потім попросіть агента:"
+
+#: website/public/get-started/index.html:876
+msgctxt "page:get-started/index.html"
+msgid "Check that REA is connected and show me which REA tools you can use."
+msgstr ""
+"Перевір, що REA підключено, і покажи, які інструменти REA ти можеш "
+"використовувати."
+
+#: website/public/get-started/index.html:883
+msgctxt "page:get-started/index.html"
+msgid "4. Try your first investigation"
+msgstr "4. Спробуйте перше дослідження"
+
+#. {ph0}: <strong>
+#. {ph1}: </strong>
+#: website/public/get-started/index.html:884
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"The example is a six-file Electron app with an {ph0}Export notes{ph1} "
+"button. Your agent can inspect its code without installing or launching "
+"Electron."
+msgstr ""
+"Прикладом може служити додаток Electron, що складається з шести файлів, з "
+"кнопкою {ph0}експорту заміток{ph1}. Ваш агент може перевірити його код, не "
+"встановлюючи та не запускаючи Electron."
+
+#: website/public/get-started/index.html:891
+msgctxt "page:get-started/index.html"
+msgid "Your coding agent"
+msgstr "Ваш ШІ-помічник для програмування"
+
+#. {ph0}: <span class="prompt-symbol" aria-hidden="true">
+#. {ph1}: </span >
+#. {ph2}: <span id="setup-first-prompt" >
+#. {ph3}: <span translate="no" >https://rea.tools/examples/notes-
+#. example.zip</span >
+#. {ph4}: <span translate="no">notes.csv</span>
+#. {ph5}: </span >
+#. {ph6}: <span class="terminal-cursor" aria-hidden="true">
+#. {ph7}: </span>
+#: website/public/get-started/index.html:901
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}›{ph1}{ph2}Download {ph3} into a new example folder and unpack it. Use "
+"REA to find what happens when I click Export notes. Show where {ph4} is "
+"written, which fields it contains, and the relevant files and "
+"lines.{ph5}{ph6}{ph7}"
+msgstr ""
+"{ph0}›{ph1}{ph2}Завантаж {ph3} у нову папку для прикладу та розпакуй архів. "
+"За допомогою REA з’ясуй, що відбувається після натискання Export notes. "
+"Покажи, куди записується {ph4}, які поля він містить, а також відповідні "
+"файли й рядки.{ph5}{ph6}{ph7}"
+
+#: website/public/get-started/index.html:915
+msgctxt "page:get-started/index.html"
+msgid "Look for a short explanation with file and line references:"
+msgstr "Шукайте коротке пояснення з посиланнями на файли та рядки:"
+
+#. {ph0}: <code>notes:export</code>
+#. {ph1}: <code>notes.csv</code>
+#. {ph2}: <code>id</code>
+#. {ph3}: <code>title</code>
+#: website/public/get-started/index.html:917
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"The button sends a {ph0} message. The main process formats the notes as CSV "
+"and writes {ph1} in the user’s Downloads folder. The columns are {ph2} and "
+"{ph3}."
+msgstr ""
+"Кнопка надсилає повідомлення {ph0}. Основний процес форматує нотатки як CSV "
+"і записує {ph1} в папку завантажень користувача. Це стовпці {ph2} і {ph3}."
+
+#. {ph0}: <a href="../first-investigation/#check" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:924
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Check a prediction in the guided exercise →{ph1}"
+msgstr "{ph0}Перевірте передбачення в покроковій вправі →{ph1}"
+
+#: website/public/get-started/index.html:930
+msgctxt "page:get-started/index.html"
+msgid "Download the example yourself, or use your own app"
+msgstr "Завантажте приклад самостійно або використовуйте свій застосунок"
+
+#. {ph0}: <a class="button" href="../examples/notes-example.zip"
+#. download="notes-example.zip" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:933
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Download example ZIP{ph1}"
+msgstr "{ph0}Приклад завантаження ZIP-файлу{ph1}"
+
+#. {ph0}: <code>notes-example</code>
+#: website/public/get-started/index.html:941
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"If your agent can’t download files, unzip this archive yourself. Give it the"
+" path to the {ph0} folder and the same export question."
+msgstr ""
+"Якщо ваш агент не може завантажити файли, розпакуйте цей архів самостійно. "
+"Вкажіть шлях до папки {ph0} і задайте те саме питання щодо експорту."
+
+#. {ph0}: <code>/absolute/path/to/app</code>
+#: website/public/get-started/index.html:947
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use REA to inspect the app at {ph0}. Find how it exports data and show the "
+"relevant files and lines."
+msgstr ""
+"Досліди застосунок за шляхом {ph0} за допомогою REA. Знайди, як він "
+"експортує дані, і покажи відповідні файли та рядки."
+
+#: website/public/get-started/index.html:977
+msgctxt "page:get-started/index.html"
+msgid "Analyze another kind of software"
+msgstr "Дослідіть інший вид програм"
+
+#: website/public/get-started/index.html:978
+msgctxt "page:get-started/index.html"
+msgid ""
+"Choose the section for your target. A provider is the local analysis tool "
+"REA uses for that kind of software."
+msgstr ""
+"Виберіть розділ для своєї цілі. Провайдер аналізу — це локальний інструмент,"
+" який REA використовує для цього виду програм."
+
+#: website/public/get-started/index.html:983
+msgctxt "page:get-started/index.html"
+msgid "Native executables and libraries · Hopper, Ghidra or IDA"
+msgstr ""
+"Виконувані файли та бібліотеки машинного коду · Hopper, Ghidra або IDA"
+
+#: website/public/get-started/index.html:986
+msgctxt "page:get-started/index.html"
+msgid ""
+"Install one analysis tool on the computer running REA. The host is your "
+"operating system; the target is the program you want to inspect."
+msgstr ""
+"Встановіть один інструмент аналізу на комп’ютер, де працює REA. Хост — це "
+"ваша операційна система, а ціль — програма, яку ви хочете дослідити."
+
+#: website/public/get-started/index.html:995
+msgctxt "page:get-started/index.html"
+msgid "Provider"
+msgstr "Провайдер аналізу"
+
+#: website/public/get-started/index.html:1004
+msgctxt "page:get-started/index.html"
+msgid "Unavailable"
+msgstr "Недоступно"
+
+#: website/public/get-started/index.html:1006
+msgctxt "page:get-started/index.html"
+msgid "Supported distributions"
+msgstr "Підтримувані дистрибутиви"
+
+#: website/public/get-started/index.html:1010
+msgctxt "page:get-started/index.html"
+msgid "x64 · experimental"
+msgstr "x64 · експериментально"
+
+#: website/public/get-started/index.html:1016
+msgctxt "page:get-started/index.html"
+msgid "Verified profiles"
+msgstr "Перевірені профілі"
+
+#: website/public/get-started/index.html:1017
+msgctxt "page:get-started/index.html"
+msgid "Verified headless profile"
+msgstr "Перевірений профіль без графічного інтерфейсу"
+
+#: website/public/get-started/index.html:1018
+msgctxt "page:get-started/index.html"
+msgid "See provider guide"
+msgstr "Див. посібник провайдера"
+
+#: website/public/get-started/index.html:1024
+msgctxt "page:get-started/index.html"
+msgid "Hopper · let setup install or connect it"
+msgstr "Hopper · дозвольте налаштуванню встановити або підключити його"
+
+#: website/public/get-started/index.html:1030
+msgctxt "page:get-started/index.html"
+msgid ""
+"Choose Hopper in setup and review its separate installation plan. On macOS, "
+"choose demo mode or activate your license when Hopper first opens. On Linux,"
+" setup prepares the supported demo and its private display."
+msgstr ""
+"Виберіть Hopper під час налаштування та перегляньте окремий план його "
+"встановлення. У macOS під час першого відкриття Hopper виберіть деморежим "
+"або активуйте ліцензію. У Linux налаштування готує підтримувану демоверсію "
+"та окремий дисплей для неї."
+
+#: website/public/get-started/index.html:1036
+msgctxt "page:get-started/index.html"
+msgid ""
+"Linux hosts: Ubuntu 24.04+, Fedora 41+, Nobara 44+, Arch Linux, CachyOS or "
+"Omarchy. Hopper is commercial software; its demo has vendor-defined limits."
+msgstr ""
+"Хости Linux: Ubuntu 24.04+, Fedora 41+, Nobara 44+, Arch Linux, CachyOS або "
+"Omarchy. Hopper — комерційна програма; обмеження демоверсії визначає "
+"розробник."
+
+#: website/public/get-started/index.html:1055
+msgctxt "page:get-started/index.html"
+msgid ""
+"If macOS asks for Automation permission, allow the app that starts REA in "
+"System Settings → Privacy & Security → Automation, then retry."
+msgstr ""
+"Якщо macOS попросить дозвіл на автоматизацію, дозвольте застосунку, який "
+"запускає REA, доступ у «Системні параметри → Приватність і безпека → "
+"Автоматизація», а потім повторіть спробу."
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#hopper"
+#. >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1060
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Hopper setup and troubleshooting{ph1}"
+msgstr "{ph0}Налаштування Hopper та усунення неполадок{ph1}"
+
+#: website/public/get-started/index.html:1068
+msgctxt "page:get-started/index.html"
+msgid "Ghidra · install the free analysis tool and Java"
+msgstr "Ghidra · встановіть безкоштовний інструмент аналізу та Java"
+
+#: website/public/get-started/index.html:1072
+msgctxt "page:get-started/index.html"
+msgid ""
+"Install a 64-bit JDK 21 or newer, including the Java compiler. Choose the "
+"package matching your computer's architecture."
+msgstr ""
+"Встановіть 64-бітний JDK 21 або новіший, що містить компілятор Java. "
+"Виберіть пакет для архітектури свого комп’ютера."
+
+#. {ph0}: <code>ghidra_…_PUBLIC_….zip</code>
+#: website/public/get-started/index.html:1077
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Download Ghidra 12.1.4 from the release's Assets list and extract the {ph0} "
+"archive. Choose the release archive, not “Source code”."
+msgstr ""
+"Завантажте Ghidra 12.1.4 зі списку Assets випуску та розпакуйте архів {ph0}."
+" Виберіть архів випуску, а не «Source code»."
+
+#. {ph0}: <code>ghidraRun</code>
+#. {ph1}: <code>ghidraRun.bat</code>
+#. {ph2}: <code>GHIDRA_INSTALL_DIR</code>
+#: website/public/get-started/index.html:1082
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Find the extracted folder containing {ph0} or {ph1}. Use that folder for "
+"{ph2}."
+msgstr ""
+"Знайдіть розпаковану папку, яка містить {ph0} або {ph1}. Використовуйте її "
+"для {ph2}."
+
+#. {ph0}: <a href="https://adoptium.net/temurin/releases/?version=21" >
+#. {ph1}: </a >
+#. {ph2}: <a
+#. href="https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build"
+#. >
+#. {ph3}: </a >
+#: website/public/get-started/index.html:1088
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Download a JDK{ph1} · {ph2}Download Ghidra 12.1.4{ph3}"
+msgstr "{ph0}Завантажити JDK{ph1} · {ph2}Завантажити Ghidra 12.1.4{ph3}"
+
+#. {ph0}: <code>java.home</code>
+#. {ph1}: <code>JAVA_HOME</code>
+#: website/public/get-started/index.html:1098
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Check Java. The first command prints {ph0}; use that folder for {ph1}. The "
+"second confirms the compiler is installed:"
+msgstr ""
+"Перевірте Java. Перша команда виводить {ph0}; використовуйте цю папку для "
+"{ph1}. Друга підтверджує, що компілятор встановлено:"
+
+#: website/public/get-started/index.html:1214
+msgctxt "page:get-started/index.html"
+msgid ""
+"Keep these commands in the same terminal session. Rerun setup after setting "
+"the paths, approve the updated client configuration, then restart your "
+"agent."
+msgstr ""
+"Виконуйте ці команди в одному сеансі термінала. Після зазначення шляхів "
+"знову запустіть налаштування, схваліть оновлену конфігурацію клієнта та "
+"перезапустіть агента."
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#ghidra"
+#. >
+#. {ph1}: </a >
+#. {ph2}: <a href="https://github.com/morluto/rea/blob/main/docs/windows-
+#. ghidra-p0.md" >
+#. {ph3}: </a >
+#: website/public/get-started/index.html:1219
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}Ghidra setup and architecture requirements{ph1} · {ph2}Windows Ghidra "
+"guide{ph3}"
+msgstr ""
+"{ph0}Налаштування Ghidra та вимоги до архітектури{ph1} · {ph2}Посібник із "
+"Ghidra у Windows{ph3}"
+
+#: website/public/get-started/index.html:1232
+msgctxt "page:get-started/index.html"
+msgid "IDA · connect an existing installation"
+msgstr "IDA · підключіть наявне встановлення"
+
+#: website/public/get-started/index.html:1233
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use the IDA provider guide to prepare an upstream MCP registration. Choose "
+"an attached GUI with the original binary open, or a headless supervisor that"
+" opens a private database."
+msgstr ""
+"За посібником провайдера IDA підготуйте реєстрацію MCP-сервера на боці IDA. "
+"Виберіть підключення до графічного інтерфейсу з відкритим оригінальним "
+"бінарним файлом або до супервізора без графічного інтерфейсу, який відкриває"
+" окрему базу даних."
+
+#: website/public/get-started/index.html:1238
+msgctxt "page:get-started/index.html"
+msgid ""
+"Verified profiles include the Windows legacy GUI and headless supervisor, "
+"plus a macOS arm64 headless supervisor with IDA Professional 9.1. The "
+"optional native GUI bridge has its own version and platform requirements."
+msgstr ""
+"Перевірені профілі охоплюють попереднє підключення до GUI у Windows і "
+"супервізор без графічного інтерфейсу, а також супервізор без графічного "
+"інтерфейсу в macOS arm64 з IDA Professional 9.1. Необов’язковий нативний "
+"міст до GUI має власні вимоги до версій і платформ."
+
+#: website/public/get-started/index.html:1333
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use the JSON registration file you prepared with the provider guide, then "
+"rerun setup and restart your agent."
+msgstr ""
+"Використовуйте JSON-файл реєстрації, підготовлений за посібником провайдера,"
+" а потім знову запустіть налаштування та перезапустіть агента."
+
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/ida-
+#. provider.md" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1337
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}IDA profiles, registration examples and verified platforms{ph1}"
+msgstr "{ph0}Профілі IDA, приклади реєстрації та перевірені платформи{ph1}"
+
+#: website/public/get-started/index.html:1345
+msgctxt "page:get-started/index.html"
+msgid ""
+"Once connected, give your agent the original executable's full path and name"
+" your provider:"
+msgstr ""
+"Після підключення надайте агенту повний шлях до оригінального виконуваного "
+"файлу та вкажіть провайдер аналізу:"
+
+#. {ph0}: <a href="../guides/native/">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:1357
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Follow a native analysis example{ph1}"
+msgstr "{ph0}Пройдіть приклад аналізу машинного коду{ph1}"
+
+#: website/public/get-started/index.html:1362
+msgctxt "page:get-started/index.html"
+msgid "Websites, Android, .NET, firmware and other targets"
+msgstr "Сайти, Android, .NET, прошивки та інші цілі"
+
+#: website/public/get-started/index.html:1365
+msgctxt "page:get-started/index.html"
+msgid ""
+"Open the guide for the target you have. Each guide gives the additional "
+"tools, supported hosts and first command."
+msgstr ""
+"Відкрийте посібник для своєї цілі. Кожен містить додаткові інструменти, "
+"підтримувані хости та першу команду."
+
+#: website/public/get-started/index.html:1373
+msgctxt "page:get-started/index.html"
+msgid "Target"
+msgstr "Ціль"
+
+#: website/public/get-started/index.html:1374
+msgctxt "page:get-started/index.html"
+msgid "Tools to prepare"
+msgstr "Потрібні інструменти"
+
+#: website/public/get-started/index.html:1375
+msgctxt "page:get-started/index.html"
+msgid "Guide"
+msgstr "Посібник"
+
+#: website/public/get-started/index.html:1380
+msgctxt "page:get-started/index.html"
+msgid "JavaScript / Electron"
+msgstr "JavaScript / Electron"
+
+#. {ph0}: <a href="../guides/javascript/">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:1382
+#: website/public/get-started/index.html:1387
+#: website/public/get-started/index.html:1392
+#: website/public/get-started/index.html:1402
+#: website/public/get-started/index.html:1412
+#: website/public/get-started/index.html:1422
+#: website/public/get-started/index.html:1432
+#: website/public/get-started/index.html:1442
+#: website/public/get-started/index.html:1452
+#: website/public/get-started/index.html:1462
+#: website/public/get-started/index.html:1472
+#: website/public/get-started/index.html:1482
+#: website/public/get-started/index.html:1492
+#: website/public/get-started/index.html:1502
+#: website/public/get-started/index.html:1512
+#: website/public/get-started/index.html:1522
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Open guide{ph1}"
+msgstr "{ph0}Відкрити посібник{ph1}"
+
+#: website/public/get-started/index.html:1385
+msgctxt "page:get-started/index.html"
+msgid "Website"
+msgstr "Сайт"
+
+#: website/public/get-started/index.html:1390
+msgctxt "page:get-started/index.html"
+msgid ".NET / Flutter / packages"
+msgstr ".NET / Flutter / пакети"
+
+#: website/public/get-started/index.html:1400
+msgctxt "page:get-started/index.html"
+msgid "Android APK"
+msgstr "Android APK"
+
+#: website/public/get-started/index.html:1410
+msgctxt "page:get-started/index.html"
+msgid "Android device"
+msgstr "Пристрій Android"
+
+#: website/public/get-started/index.html:1420
+msgctxt "page:get-started/index.html"
+msgid "Android resources"
+msgstr "Ресурси Android"
+
+#: website/public/get-started/index.html:1430
+msgctxt "page:get-started/index.html"
+msgid "JEB project"
+msgstr "Проєкт JEB"
+
+#: website/public/get-started/index.html:1440
+msgctxt "page:get-started/index.html"
+msgid "Firmware"
+msgstr "Прошивка"
+
+#: website/public/get-started/index.html:1450
+msgctxt "page:get-started/index.html"
+msgid "WASM"
+msgstr "WASM"
+
+#: website/public/get-started/index.html:1480
+msgctxt "page:get-started/index.html"
+msgid "ELF / Linux crash"
+msgstr "ELF / збій Linux"
+
+#: website/public/get-started/index.html:1490
+msgctxt "page:get-started/index.html"
+msgid "HAR / SAZ / mitmproxy"
+msgstr "HAR / SAZ / mitmproxy"
+
+#: website/public/get-started/index.html:1500
+msgctxt "page:get-started/index.html"
+msgid "PCAP / PCAPNG"
+msgstr "PCAP / PCAPNG"
+
+#: website/public/get-started/index.html:1510
+msgctxt "page:get-started/index.html"
+msgid "Logic signals"
+msgstr "Логічні сигнали"
+
+#: website/public/get-started/index.html:1520
+msgctxt "page:get-started/index.html"
+msgid "Process behavior"
+msgstr "Поведінка процесу"
+
+#. {ph0}: <a href="https://github.com/morluto/rea/blob/main/docs/flutter-
+#. analysis.md" >
+#. {ph1}: </a >
+#. {ph2}: <a href="https://github.com/morluto/rea/blob/main/docs/javascript-
+#. artifact-reconstruction.md" >
+#. {ph3}: </a >
+#. {ph4}: <a href="https://github.com/morluto/rea/blob/main/docs/evm-
+#. bytecode.md" >
+#. {ph5}: </a >
+#. {ph6}: <a href="../guides/">
+#. {ph7}: </a>
+#: website/public/get-started/index.html:1532
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}Flutter guide{ph1} · {ph2}Packages and resources{ph3} · {ph4}EVM "
+"bytecode{ph5} · {ph6}All investigation guides{ph7}"
+msgstr ""
+"{ph0}Посібник із Flutter{ph1} · {ph2}Пакети та ресурси{ph3} · {ph4}Байткод "
+"EVM{ph5} · {ph6}Усі посібники з дослідження{ph7}"
+
+#: website/public/get-started/index.html:1552
+msgctxt "page:get-started/index.html"
+msgid "Use REA from a terminal"
+msgstr "Використовуйте REA з термінала"
+
+#: website/public/get-started/index.html:1554
+msgctxt "page:get-started/index.html"
+msgid "CLI commands, global installation and curl"
+msgstr "Команди CLI, глобальне встановлення та curl"
+
+#. {ph0}: <code>main</code>
+#: website/public/get-started/index.html:1651
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Replace {ph0} with a function name or address from the target's function "
+"list. Ghidra must be configured first."
+msgstr ""
+"Замініть {ph0} назвою або адресою функції зі списку функцій цілі. Спочатку "
+"потрібно налаштувати Ghidra."
+
+#: website/public/get-started/index.html:1655
+msgctxt "page:get-started/index.html"
+msgid ""
+"On macOS or Linux, you can also use the curl installer after preparing "
+"Node.js:"
+msgstr ""
+"У macOS або Linux після підготовки Node.js можна також скористатися "
+"інсталятором через curl:"
+
+#: website/public/get-started/index.html:1693
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use the client check in step 3 with your setup ID. In editor clients, enable"
+" REA in MCP settings and allow its tools in the agent chat."
+msgstr ""
+"Виконайте перевірку клієнта з кроку 3 зі своїм ідентифікатором для "
+"налаштування. У редакторах увімкніть REA в параметрах MCP і дозвольте його "
+"інструменти в чаті агента."
+
+#: website/public/get-started/index.html:1721
+msgctxt "page:get-started/index.html"
+msgid "Windows, WSL and paths with spaces"
+msgstr "Windows, WSL і шляхи з пробілами"
+
+#: website/public/get-started/index.html:1722
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use Windows PowerShell for Windows clients and analysis tools. If your agent"
+" runs inside WSL, install Node.js and REA inside that Linux environment and "
+"use Linux paths there. Headless providers run on the same host as REA."
+msgstr ""
+"Для клієнтів та інструментів аналізу Windows використовуйте Windows "
+"PowerShell. Якщо агент працює всередині WSL, встановіть Node.js і REA в це "
+"середовище Linux та використовуйте там шляхи Linux. Провайдери без "
+"графічного інтерфейсу працюють на тому самому хості, що й REA."
+
+#: website/public/get-started/index.html:1731
+msgctxt "page:get-started/index.html"
+msgid "Windows setup command:"
+msgstr "Команда налаштування для Windows:"
+
+#: website/public/get-started/index.html:1748
+msgctxt "page:get-started/index.html"
+msgid "Update or remove REA"
+msgstr "Оновіть або видаліть REA"
+
+#: website/public/get-started/index.html:1749
+msgctxt "page:get-started/index.html"
+msgid ""
+"To refresh your agent connection, run the latest setup command again, review"
+" its plan and restart your client."
+msgstr ""
+"Щоб оновити підключення агента, ще раз виконайте найновішу команду "
+"налаштування, перегляньте її план і перезапустіть клієнт."
+
+#. {ph0}: <code>rea update</code>
+#. {ph1}: <code>npx rea-agents@latest uninstall</code>
+#: website/public/get-started/index.html:1767
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"If you installed the global CLI, update it with {ph0}. Use {ph1} to remove "
+"REA's client configuration and skill."
+msgstr ""
+"Якщо CLI встановлено глобально, оновіть його за допомогою {ph0}. "
+"Використовуйте {ph1}, щоб видалити конфігурацію клієнта REA та навичку."
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#diagnose-
+#. update-and-remove" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1773
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Update and uninstall details{ph1}"
+msgstr "{ph0}Докладніше про оновлення та видалення{ph1}"
+
+#: website/public/get-started/index.html:319
+msgctxt "page:get-started/index.html"
+msgid "Copy Windows REA setup command"
+msgstr "Копіювати команду налаштування REA для Windows"
+
+#: website/public/get-started/index.html:416
+#: website/public/get-started/index.html:447
+#: website/public/get-started/index.html:461
+#: website/public/get-started/index.html:479
+#: website/public/get-started/index.html:531
+#: website/public/get-started/index.html:545
+#: website/public/get-started/index.html:577
+#: website/public/get-started/index.html:606
+#: website/public/get-started/index.html:741
+#: website/public/get-started/index.html:796
+#: website/public/get-started/index.html:811
+#: website/public/get-started/index.html:859
+#: website/public/get-started/index.html:1044
+#: website/public/get-started/index.html:1106
+#: website/public/get-started/index.html:1129
+#: website/public/get-started/index.html:1153
+#: website/public/get-started/index.html:1201
+#: website/public/get-started/index.html:1276
+#: website/public/get-started/index.html:1302
+#: website/public/get-started/index.html:1319
+#: website/public/get-started/index.html:1640
+#: website/public/get-started/index.html:1662
+#: website/public/get-started/index.html:1735
+#: website/public/get-started/index.html:1756
+msgctxt "page:get-started/index.html"
+msgid "Copy command"
+msgstr "Копіювати команду"
+
+#: website/public/get-started/index.html:892
+msgctxt "page:get-started/index.html"
+msgid "Copy Notes investigation prompt"
+msgstr "Запит на копіювання нотаток для розслідування"
+
+#. {ph0}: <code>sudo apt install curl unzip</code>
+#: website/public/get-started/index.html:359
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Install curl and unzip first if they are missing. On Debian or Ubuntu, run "
+"{ph0}; on other distributions, use your package manager."
+msgstr ""
+"Якщо curl і unzip відсутні, спочатку встановіть їх. У Debian або Ubuntu "
+"виконайте {ph0}; в інших дистрибутивах використовуйте свій пакетний "
+"менеджер."
+
+#: website/public/get-started/index.html:378
+msgctxt "page:get-started/index.html"
+msgid "Close the terminal, open it again, then:"
+msgstr "Закрийте термінал, відкрийте його знову, а потім виконайте:"
+
+#: website/public/get-started/index.html:508
+msgctxt "page:get-started/index.html"
+msgid ""
+"Open its AI chat and choose Agent mode. In Windsurf or Devin Desktop, open "
+"the agent chat; in VS Code, set up GitHub Copilot first."
+msgstr ""
+"Відкрийте чат із ШІ в редакторі та виберіть режим Agent. У Windsurf або "
+"Devin Desktop відкрийте чат агента; у VS Code спочатку налаштуйте GitHub "
+"Copilot."
+
+#. {ph0}: <a href="https://cursor.com/docs">
+#. {ph1}: </a>
+#. {ph2}: <a href="https://docs.windsurf.com/windsurf/getting-started" >
+#. {ph3}: </a >
+#. {ph4}: <a href="https://code.visualstudio.com/docs/setup/copilot" >
+#. {ph5}: </a >
+#: website/public/get-started/index.html:514
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"{ph0}Cursor setup{ph1} · {ph2}Windsurf / Devin Desktop setup{ph3} · {ph4}VS "
+"Code and Copilot setup{ph5}"
+msgstr ""
+"{ph0}Налаштування Cursor{ph1} · {ph2}Налаштування Windsurf / Devin "
+"Desktop{ph3} · {ph4}Налаштування VS Code та Copilot{ph5}"
+
+#: website/public/get-started/index.html:602
+msgctxt "page:get-started/index.html"
+msgid "OpenCode · choose an AI model"
+msgstr "OpenCode · виберіть модель ШІ"
+
+#: website/public/get-started/index.html:1260
+msgctxt "page:get-started/index.html"
+msgid "Prepare the IDA registration file"
+msgstr "Підготуйте файл реєстрації IDA"
+
+#. {ph0}: <code>ida-mcp.json</code>
+#. {ph1}: <code>.txt</code>
+#: website/public/get-started/index.html:1261
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Install and configure the upstream server using the IDA guide below. Then "
+"save its working registration as {ph0} in a text editor. On Windows, choose "
+"“All files” when saving in Notepad so it doesn't add {ph1}."
+msgstr ""
+"Встановіть і налаштуйте сервер на боці IDA за посібником нижче. Потім "
+"збережіть його робочу реєстрацію як {ph0} у текстовому редакторі. У Windows "
+"під час збереження в Блокноті виберіть «Усі файли», щоб він не додав {ph1}."
+
+#. {ph0}: <code>idb_open</code>
+#. {ph1}: <code>idb_list</code>
+#. {ph2}: <code>idb_close</code>
+#: website/public/get-started/index.html:1268
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"For a headless supervisor providing {ph0}, {ph1} and {ph2}, the file can "
+"look like this:"
+msgstr ""
+"Для супервізора без графічного інтерфейсу з інструментами {ph0}, {ph1} і "
+"{ph2} файл може виглядати так:"
+
+#. {ph0}: <code>command</code>
+#. {ph1}: <code>args</code>
+#. {ph2}: <code>env</code>
+#: website/public/get-started/index.html:1291
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"For an attached legacy 1.4.0 GUI server, copy its working {ph0}, {ph1} and "
+"optional {ph2} into the file. Open the original binary in IDA and start its "
+"upstream plugin before asking REA to inspect it."
+msgstr ""
+"Для підключеного попереднього GUI-сервера версії 1.4.0 скопіюйте у файл його"
+" робочі значення {ph0}, {ph1} і, за наявності, {ph2}. Відкрийте оригінальний"
+" бінарний файл у IDA та запустіть плагін на боці IDA, перш ніж просити REA "
+"його дослідити."
+
+#: website/public/get-started/index.html:1460
+msgctxt "page:get-started/index.html"
+msgid "SQLite database"
+msgstr "База даних SQLite"
+
+#: website/public/get-started/index.html:1470
+msgctxt "page:get-started/index.html"
+msgid "EVM bytecode"
+msgstr "Байткод EVM"
+
+#: website/public/get-started/index.html:443
+msgctxt "page:get-started/index.html"
+msgid "Install Codex using the command for your operating system:"
+msgstr "Встановіть Codex за допомогою команди для своєї операційної системи:"
+
+#: website/public/get-started/index.html:472
+msgctxt "page:get-started/index.html"
+msgid ""
+"After installation, reopen your terminal and return to the working folder. "
+"Then start Codex:"
+msgstr ""
+"Після встановлення знову відкрийте термінал і поверніться до робочої папки. "
+"Потім запустіть Codex:"
+
+#. {ph0}: <a href="https://nodejs.org/en/download" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:333
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"For a first installation, download the {ph0}Node.js 24 LTS macOS installer "
+"(.pkg){ph1}, open it and follow the installer. Then reopen Terminal."
+msgstr ""
+"Для першого встановлення завантажте {ph0}інсталятор Node.js 24 LTS для macOS"
+" (.pkg){ph1}, відкрийте його та дотримуйтеся інструкцій. Потім знову "
+"відкрийте Термінал."
+
+#: website/public/get-started/index.html:340
+msgctxt "page:get-started/index.html"
+msgid "Already use Homebrew?"
+msgstr "Уже користуєтеся Homebrew?"
+
+#: website/public/get-started/index.html:569
+msgctxt "page:get-started/index.html"
+msgid ""
+"Install Claude Desktop on Windows or macOS and sign in. Quit it completely, "
+"then run this command in a terminal you opened outside Claude:"
+msgstr ""
+"Встановіть Claude Desktop у Windows або macOS та увійдіть в обліковий запис."
+" Повністю закрийте застосунок, а потім виконайте цю команду в терміналі, "
+"відкритому поза Claude:"
+
+#. {ph0}: <a href="#check-connection">
+#. {ph1}: </a>
+#: website/public/get-started/index.html:588
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Review and approve the plan, reopen Claude, then {ph0}check the connection "
+"in step 3{ph1}."
+msgstr ""
+"Перегляньте й схваліть план, знову відкрийте Claude, а потім {ph0}перевірте "
+"підключення за кроком 3{ph1}."
+
+#: website/public/get-started/index.html:1165
+msgctxt "page:get-started/index.html"
+msgid ""
+"Replace both paths with your existing installations. For a fresh macOS or "
+"Linux arm64 installation, build the native decompiler for your computer "
+"before continuing."
+msgstr ""
+"Замініть обидва шляхи шляхами до наявних встановлень. Для нового "
+"встановлення в macOS або Linux arm64 перед продовженням зберіть нативний "
+"декомпілятор для свого комп’ютера."
+
+#: website/public/get-started/index.html:1171
+msgctxt "page:get-started/index.html"
+msgid "Build Ghidra's native decompiler"
+msgstr "Зберіть нативний декомпілятор Ghidra"
+
+#: website/public/get-started/index.html:1172
+msgctxt "page:get-started/index.html"
+msgid ""
+"On macOS, the build needs Xcode Command Line Tools, make and bison. Use the "
+"guide for your computer:"
+msgstr ""
+"Для збирання в macOS потрібні Xcode Command Line Tools, make і bison. "
+"Використовуйте посібник для свого комп’ютера:"
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#missing-
+#. macos-native-decompiler" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1177
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}macOS · Intel{ph1}"
+msgstr "{ph0}macOS · Intel{ph1}"
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/docs/installation.md#macos-
+#. arm64-native-decompiler" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1183
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}macOS · Apple Silicon{ph1}"
+msgstr "{ph0}macOS · Apple Silicon{ph1}"
+
+#. {ph0}: <a
+#. href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_12.1.4_build/GhidraDocs/GettingStarted.md#building-
+#. native-components" >
+#. {ph1}: </a >
+#: website/public/get-started/index.html:1189
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid "{ph0}Linux arm64 · native build instructions{ph1}"
+msgstr "{ph0}Linux arm64 · інструкції з нативного збирання{ph1}"
+
+#: website/public/get-started/index.html:1197
+msgctxt "page:get-started/index.html"
+msgid "Then check Ghidra and save its paths for your client:"
+msgstr "Потім перевірте Ghidra та збережіть шляхи до нього для свого клієнта:"
+
+#. {ph0}: <span translate="no">200 + 10%</span>
+#: website/public/index.html:348
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "Why does Calculator give 220 for {ph0}?"
+msgstr "Чому {ph0} дає 220 у Калькуляторі?"
+
+#. {ph0}: <a href="#what-is-re">
+#. {ph1}: </a>
+#: website/public/index.html:211
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}How it works{ph1}"
+msgstr "{ph0}Як це працює{ph1}"
+
+#: website/public/index.html:227
+msgctxt "page:index.html"
+msgid ""
+"Ask your coding agent about an app, a game or a website. REA gives it the "
+"tools to inspect the code behind the answer."
+msgstr ""
+"Запитайте свого агента-програміста про застосунок, гру або сайт. REA дає "
+"йому інструменти для дослідження коду, на якому ґрунтується відповідь."
+
+#: website/public/index.html:232
+msgctxt "page:index.html"
+msgid "Get started"
+msgstr "Почати"
+
+#: website/public/index.html:233
+msgctxt "page:index.html"
+msgid "See an example ↓"
+msgstr "Переглянути приклад ↓"
+
+#: website/public/index.html:323
+msgctxt "page:index.html"
+msgid "How it works"
+msgstr "Як це працює"
+
+#: website/public/index.html:325
+msgctxt "page:index.html"
+msgid ""
+"Reverse engineering means learning how software works by inspecting the "
+"program itself. With REA, your agent can follow the code, explain a feature "
+"and help you rebuild it."
+msgstr ""
+"Зворотна розробка — це вивчення роботи ПЗ через дослідження самої програми. "
+"З REA ваш агент може простежити код, пояснити функцію та допомогти "
+"відтворити її."
+
+#: website/public/index.html:332
+msgctxt "page:index.html"
+msgid "Ask about one feature"
+msgstr "Запитайте про одну функцію"
+
+#: website/public/index.html:333
+msgctxt "page:index.html"
+msgid "Give your agent a program or page and a question."
+msgstr "Дайте агенту програму або сторінку й поставте запитання."
+
+#: website/public/index.html:336
+msgctxt "page:index.html"
+msgid "Inspect the program"
+msgstr "Дослідіть програму"
+
+#: website/public/index.html:337
+msgctxt "page:index.html"
+msgid "REA returns code, references and runtime observations."
+msgstr "REA повертає код, посилання та спостереження під час виконання."
+
+#: website/public/index.html:340
+msgctxt "page:index.html"
+msgid "Explain it, then try a change"
+msgstr "Зрозумійте й спробуйте зміну"
+
+#: website/public/index.html:341
+msgctxt "page:index.html"
+msgid "Your agent uses the findings to explain or rebuild the feature."
+msgstr ""
+"Агент використовує результати дослідження, щоб пояснити або відтворити "
+"функцію."
+
+#: website/public/index.html:357
+msgctxt "page:index.html"
+msgid "Follow the instructions step by step"
+msgstr "Простежити інструкції крок за кроком"
+
+#: website/public/index.html:508
+msgctxt "page:index.html"
+msgid "Ask your agent the same question"
+msgstr "Поставити агенту те саме запитання"
+
+#: website/public/index.html:721
+msgctxt "page:index.html"
+msgid ""
+"Start at 6. Add 0.001 each update without a collision, while speed is below "
+"13."
+msgstr ""
+"Почніть з 6. Додавайте 0,001 при кожному оновленні без збоїв, поки швидкість"
+" нижче 13."
+
+#: website/public/index.html:1026
+msgctxt "page:index.html"
+msgid ""
+"Explore a feature in a released app or game, with code and checked results."
+msgstr ""
+"Дослідіть функцію випущеного застосунку або гри разом із кодом і "
+"перевіреними результатами."
+
+#: website/public/index.html:1037
+msgctxt "page:index.html"
+msgid ""
+"Trace Aegis's six-digit login code through its released APK, then move a "
+"demo clock to see why it changes every 30 seconds."
+msgstr ""
+"Простежте обчислення шестизначного коду входу Aegis у випущеному APK. Потім "
+"пересуньте демонстраційний годинник, щоб побачити, чому код змінюється кожні"
+" 30 секунд."
+
+#: website/public/index.html:1048
+msgctxt "page:index.html"
+msgid ""
+"Follow Notion's packaged JavaScript to the system clipboard and see how a "
+"copy preserves rich block data."
+msgstr ""
+"Простежте JavaScript із пакета Notion до системного буфера обміну та "
+"дізнайтеся, як копіювання зберігає розширені дані блоків."
+
+#: website/public/index.html:1059
+msgctxt "page:index.html"
+msgid ""
+"Recover how a ball's position becomes left/right sound in a 1996 Windows "
+"game."
+msgstr ""
+"Відновіть, як положення м'яча перетворюється на звук ліворуч або праворуч у "
+"грі для Windows 1996 року."
+
+#: website/public/index.html:1090
+msgctxt "page:index.html"
+msgid "Choose your target."
+msgstr "Оберіть ціль."
+
+#: website/public/index.html:1091
+msgctxt "page:index.html"
+msgid ""
+"These guides cover setup and a first investigation for each kind of "
+"software."
+msgstr ""
+"Ці посібники описують налаштування й перше дослідження для кожного типу ПЗ."
+
+#. {ph0}: <a href="#calculator">
+#. {ph1}: </a>
+#: website/public/index.html:563
+#, python-brace-format
+msgctxt "page:index.html"
+msgid ""
+"Selected assembly from the installed Calculator DLL. The thoughts and reply "
+"illustrate the findings. {ph0}Continue with the Calculator example ↓{ph1}"
+msgstr ""
+"Виберіть збірку з встановленої бібліотеки DLL Calculator. Міркування та "
+"відповідь ілюструють отримані результати. {ph0}Продовжимо з прикладом з "
+"калькулятором ↓{ph1}"
+
+#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
+#. {ph1}: <i>
+#. {ph2}: </i>
+#. {ph3}: <i>
+#. {ph4}: </i>
+#. {ph5}: <i>
+#. {ph6}: </i>
+#. {ph7}: </span >
+#: website/public/index.html:1128
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Website"
+msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад запиту * Веб-сайт"
+
+#: website/public/index.html:1151
+msgctxt "page:index.html"
+msgid "Yes, this one."
+msgstr "Так, ось цей."
+
+#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
+#. {ph1}: <i>
+#. {ph2}: </i>
+#. {ph3}: <i>
+#. {ph4}: </i>
+#. {ph5}: <i>
+#. {ph6}: </i>
+#. {ph7}: </span >
+#: website/public/index.html:1156
+#, python-brace-format
+msgctxt "page:index.html"
+msgid ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Game reconstruction"
+msgstr ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки · Реконструкція гри"
+
+#. {ph0}: <span class="prompt-symbol" aria-hidden="true">
+#. {ph1}: </span >
+#. {ph2}: <span id="game-project-prompt" >
+#. {ph3}: </span >
+#. {ph4}: <span class="terminal-cursor" aria-hidden="true">
+#. {ph5}: </span>
+#: website/public/index.html:1170
+#, python-brace-format
+msgctxt "page:index.html"
+msgid ""
+"{ph0}›{ph1}{ph2}Use REA to reconstruct this game from its executable. "
+"Recover the gameplay logic in C and test it against the "
+"original.{ph3}{ph4}{ph5}"
+msgstr ""
+"{ph0}\"{ph1}{ph2}Використовуйте REA, щоб відтворити цю гру за її виконуваним"
+" файлом. Відновіть логіку ігрового процесу на C і порівняйте її з "
+"оригіналом.{ph3}{ph4}{ph5}"
+
+#. {ph0}: <a href="showcase/dx-ball/">
+#. {ph1}: </a>
+#: website/public/index.html:1179
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}See the DX-Ball case study →{ph1}"
+msgstr "{ph0}Дивіться тематичне дослідження DX-Ball →{ph1}"
+
+#: website/public/index.html:1133
+msgctxt "page:index.html"
+msgid "Copy website project prompt"
+msgstr "Запит на копіювання проекту веб-сайту"
+
+#: website/public/index.html:1161
+msgctxt "page:index.html"
+msgid "Copy game reconstruction prompt"
+msgstr "Запит на копіювання реконструкції гри"
+
+#. {ph0}: <span class="prompt-symbol" aria-hidden="true">
+#. {ph1}: </span >
+#. {ph2}: <span id="website-project-prompt" >
+#. {ph3}: <span translate="no">https://rea.tools/</span>
+#. {ph4}: </span >
+#. {ph5}: <span class="terminal-cursor" aria-hidden="true">
+#. {ph6}: </span>
+#: website/public/index.html:1142
+#, python-brace-format
+msgctxt "page:index.html"
+msgid ""
+"{ph0}›{ph1}{ph2}Use REA to inspect {ph3}. Clone this website for "
+"me.{ph4}{ph5}{ph6}"
+msgstr ""
+"{ph0}\"{ph1}{ph2}Використовуйте REA для перевірки {ph3}. Скопіюйте цей веб-"
+"сайт для мене.{ph4}{ph5}{ph6}"
+
+#. {ph0}: <a href="showcase/">
+#. {ph1}: </a>
+#: website/public/index.html:236
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}Showcases →{ph1} — investigations and interactive demos."
+msgstr "{ph0}Приклади →{ph1} — дослідження й інтерактивні демонстрації."
+
+#. {ph0}: <a href="blog/">
+#. {ph1}: </a>
+#: website/public/index.html:240
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}Blog →{ph1} — methods and reconstruction notes."
+msgstr "{ph0}Блог →{ph1} — методи й нотатки про відтворення ПЗ."
+
+#: website/public/index.html:347
+msgctxt "page:index.html"
+msgid "See the full Calculator investigation"
+msgstr "Переглянути повне дослідження Калькулятора"
+
+#: website/public/index.html:1123
+msgctxt "page:index.html"
+msgid "Try a larger project"
+msgstr "Спробувати більший проєкт"
+
+#: website/public/index.html:575
+msgctxt "page:index.html"
+msgid ""
+"Let’s try two examples: change a game’s speed, then rebuild Calculator’s % "
+"button."
+msgstr ""
+"Спробуймо два приклади: змінимо швидкість гри, а потім відтворимо кнопку % "
+"Калькулятора."
+
+#: website/public/index.html:583
+msgctxt "page:index.html"
+msgid ""
+"The game gets faster as you run. To rebuild it with a speed control, we "
+"first need to find out how the speed changes."
+msgstr ""
+"Гра прискорюється під час бігу. Щоб відтворити її з регулюванням швидкості, "
+"спершу треба з'ясувати, як змінюється швидкість."
+
+#: website/public/index.html:589
+msgctxt "page:index.html"
+msgid "1. Ask about the speed"
+msgstr "1. Запитайте про швидкість"
+
+#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
+#. {ph1}: <i>
+#. {ph2}: </i>
+#. {ph3}: <i>
+#. {ph4}: </i>
+#. {ph5}: <i>
+#. {ph6}: </i>
+#. {ph7}: </span >
+#: website/public/index.html:592
+#, python-brace-format
+msgctxt "page:index.html"
+msgid ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example question · Dinosaur game"
+msgstr ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад запитання · Гра з динозавром"
+
+#: website/public/index.html:615
+msgctxt "page:index.html"
+msgid "2. Find the speed rule"
+msgstr "2. Знайдіть правило зміни швидкості"
+
+#: website/public/index.html:616
+msgctxt "page:index.html"
+msgid ""
+"REA lets the agent read the game’s running code. The speed starts at 6 and "
+"increases a little each update while it is below 13."
+msgstr ""
+"REA дає агенту змогу читати код запущеної гри. Швидкість починається з 6 і "
+"трохи зростає під час кожного оновлення, поки вона менша за 13."
+
+#: website/public/index.html:623
+msgctxt "page:index.html"
+msgid "3. Play the result"
+msgstr "3. Пограйте в результат"
+
+#: website/public/index.html:624
+msgctxt "page:index.html"
+msgid ""
+"We rebuilt that rule in the mini-game below and added a speed slider. Press "
+"Play, then choose your own speed."
+msgstr ""
+"Ми відтворили це правило в мінігрі нижче й додали повзунок швидкості. "
+"Почніть гру та виберіть свою швидкість."
+
+#: website/public/index.html:689
+msgctxt "page:index.html"
+msgid ""
+"Enable JavaScript to play. You can still read the rule and open the source "
+"code below."
+msgstr ""
+"Увімкніть JavaScript, щоб грати. Ви й далі можете читати правило та "
+"відкривати вихідний код нижче."
+
+#: website/public/index.html:807
+msgctxt "page:index.html"
+msgid ""
+"The % button does different things after + and ×. Let’s find both rules and "
+"try them in a small calculator."
+msgstr ""
+"Кнопка % працює по-різному після + і ×. Знайдемо обидва правила й перевіримо"
+" їх у невеликому калькуляторі."
+
+#: website/public/index.html:813
+msgctxt "page:index.html"
+msgid "1. Ask about the % button"
+msgstr "1. Запитайте про кнопку %"
+
+#. {ph0}: <span class="terminal-dots" aria-hidden="true" >
+#. {ph1}: <i>
+#. {ph2}: </i>
+#. {ph3}: <i>
+#. {ph4}: </i>
+#. {ph5}: <i>
+#. {ph6}: </i>
+#. {ph7}: </span >
+#: website/public/index.html:816
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example question · Calculator"
+msgstr ""
+"{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад запитання · Калькулятор"
+
+#: website/public/index.html:839
+msgctxt "page:index.html"
+msgid "2. Find both rules"
+msgstr "2. Знайдіть обидва правила"
+
+#: website/public/index.html:840
+msgctxt "page:index.html"
+msgid ""
+"REA helps the agent read the code behind the % button. It applies two "
+"different rules:"
+msgstr ""
+"REA допомагає агенту читати код кнопки %. У ньому застосовуються два різні "
+"правила:"
+
+#: website/public/index.html:861
+msgctxt "page:index.html"
+msgid "3. Try the % button"
+msgstr "3. Спробуйте кнопку %"
+
+#: website/public/index.html:862
+msgctxt "page:index.html"
+msgid "We recreated both rules below. Choose + or ×, press %, then press =."
+msgstr ""
+"Ми відтворили обидва правила нижче. Виберіть + або ×, натисніть %, а потім "
+"=."
+
+#. {ph0}: <a href="faq/">
+#. {ph1}: </a>
+#: website/public/index.html:1192
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}Read the FAQ{ph1} — setup and common questions."
+msgstr "{ph0}Прочитайте FAQ{ph1} — налаштування та поширені запитання."
+
+#. {ph0}: <a href="https://discord.gg/GkcryMnJDM">
+#. {ph1}: </a>
+#: website/public/index.html:1195
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}Join Discord{ph1} — get help and discuss your investigations."
+msgstr ""
+"{ph0}Приєднайтеся до Discord{ph1} — отримайте допомогу й обговоріть свої "
+"дослідження."
+
+#. {ph0}: <a href="https://github.com/morluto/rea/issues/new/choose" >
+#. {ph1}: </a >
+#: website/public/index.html:1199
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "{ph0}GitHub issues{ph1} — report a bug or request a feature."
+msgstr ""
+"{ph0}GitHub issues{ph1} — повідомте про помилку або запропонуйте функцію."
+
+#: website/public/index.html:293
+msgctxt "page:index.html"
+msgid "Setup for your platform:"
+msgstr "Налаштування для вашої платформи:"
+
+#. {ph0}: <a href="get-started/#curl-installation" >
+#. {ph1}: <span translate="no">curl</span>
+#. {ph2}: </a >
+#: website/public/index.html:304
+#, python-brace-format
+msgctxt "page:index.html"
+msgid "Other install options: {ph0}{ph1} →{ph2}"
+msgstr "Інші способи встановлення: {ph0}{ph1} →{ph2}"
+
+#. {ph0}: <code>rea setup</code>
+#: website/public/get-started/index.html:1673
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Follow the setup prompts to connect your agent. If they don't appear, run "
+"{ph0}."
+msgstr ""
+"Дотримуйтеся підказок налаштування, щоб підключити агента. Якщо вони не "
+"з'явилися, запустіть {ph0}."
+
+#. {ph0}: <a
+#. href="https://github.com/morluto/rea/blob/main/CONTRIBUTING.md#development-
+#. setup" >
+#. {ph1}: </a >
+#. {ph2}: <code>6.4.0</code>
+#: website/public/get-started/index.html:1244
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"The macOS headless profile and native GUI bridge require a {ph0}REA source "
+"build{ph1} or a release containing those changes. npm {ph2} does not include"
+" them."
+msgstr ""
+"Для headless-профілю macOS і нативного GUI-моста потрібна {ph0}збірка REA з "
+"вихідного коду{ph1} або випуск із цими змінами. У npm {ph2} їх немає."
+
+#. {ph0}: <code>node scripts/rea.mjs doctor --provider ida --json</code>
+#. {ph1}: <code>node scripts/rea.mjs setup</code>
+#. {ph2}: <code>npx</code>
+#: website/public/get-started/index.html:1253
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"From the built checkout, run {ph0} and {ph1} instead of the {ph2} commands "
+"below."
+msgstr ""
+"Із каталогу зібраного вихідного коду запустіть {ph0} і {ph1} замість "
+"наведених нижче команд {ph2}."
+
+#. {ph0}: <code>rea</code>
+#. {ph1}: <code>"$HOME/.local/bin/rea" setup</code>
+#: website/public/get-started/index.html:1677
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"If your shell can't find {ph0}, use the executable path printed by the "
+"installer. On Linux, the default setup command is {ph1}."
+msgstr ""
+"Якщо оболонка не знаходить {ph0}, використайте шлях до виконуваного файлу, "
+"який вивів інсталятор. У Linux стандартна команда налаштування — {ph1}."
+
+#. {ph0}: <code>/absolute/path/to/program</code>
+#: website/public/get-started/index.html:1350
+#, python-brace-format
+msgctxt "page:get-started/index.html"
+msgid ""
+"Use REA with my configured provider to inspect {ph0}. List its functions and"
+" strings, then explain the part that handles user input with references to "
+"the code."
+msgstr ""
+"Використай REA з налаштованим мною провайдером, щоб дослідити {ph0}. "
+"Перелічи функції та рядки, а потім поясни частину, що обробляє введення "
+"користувача, з посиланнями на код."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Use REA with Ghidra to inspect {ph0}. List its functions and strings, then "
+#~ "explain the part that handles user input with references to the code."
+#~ msgstr ""
+#~ "Досліди {ph0} за допомогою REA та Ghidra. Перелічи функції й рядки, а потім "
+#~ "поясни частину, яка обробляє введення користувача, з посиланнями на код."
+
+#~ msgctxt "page:index.html"
+#~ msgid "Play the reconstruction"
+#~ msgstr "Грати у відтворену версію"
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Enable JavaScript to play the reconstruction. The code and explanation above"
+#~ " remain readable."
+#~ msgstr ""
+#~ "Увімкніть JavaScript для відтворення реконструкції. Наведений вище код та "
+#~ "пояснення залишаються читабельними."
+
+#~ msgctxt "page:index.html"
+#~ msgid "REA returned"
+#~ msgstr "REA повернув"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Dinosaur game"
+#~ msgstr ""
+#~ "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки * гра в динозаврів"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Try the calculation"
+#~ msgstr "Спробуйте зробити розрахунок"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Rebuild the % "
+#~ "button"
+#~ msgstr ""
+#~ "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Приклад підказки · перебудувати "
+#~ "кнопку %"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}Read the FAQ{ph1}, {ph2}chat with us on Discord{ph3}, or {ph4}open a "
+#~ "GitHub issue{ph5} for bugs and feature requests."
+#~ msgstr ""
+#~ "{ph0}Ознайомтеся з часто{ph1} задавати питання, {ph2}поспілкуйтеся з нами по"
+#~ " Discord{ph3} або {ph4}відкрийте випуск{ph5} GitHub, щоб дізнатися про "
+#~ "помилки та запити функцій."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "We inspected the game's speed rule, then rebuilt it with a slider. Play the "
+#~ "result and choose your own pace."
+#~ msgstr ""
+#~ "Ми дослідили правило швидкості гри та відтворили його з повзунком. Грайте й "
+#~ "обирайте власний темп."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "The running script contains the speed settings and update function. The "
+#~ "agent uses them to recover the acceleration."
+#~ msgstr ""
+#~ "Скрипт, що виконується, містить налаштування швидкості та функцію оновлення."
+#~ " Агент використовує їх, щоб відновити правило прискорення."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "The % button behaves differently after + and ×. We inspected the installed "
+#~ "app to recover both rules. Try them below."
+#~ msgstr ""
+#~ "Кнопка % поводиться по-різному після + та ×. Ми дослідили встановлений "
+#~ "застосунок, щоб відновити обидва правила. Спробуйте їх нижче."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "One branch divides by 100. The other also multiplies by the first number. "
+#~ "The agent uses both to recreate the % button."
+#~ msgstr ""
+#~ "Одна гілка ділиться на 100. Інша також множиться на перше число. Агент "
+#~ "використовує обидві гілки для відтворення кнопки%."
+
+#~ msgctxt "page:index.html"
+#~ msgid "See a code-level example with Calculator"
+#~ msgstr "Переглянути приклад аналізу коду Калькулятора"
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Selected assembly from the installed Calculator DLL. The thoughts and reply "
+#~ "illustrate the findings."
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}What is RE?{ph1}"
+#~ msgstr "{ph0}Що таке вогонь?{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}How REA helps{ph1}"
+#~ msgstr "{ph0}Як допомагає REA{ph1}"
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "REA gives your agent the tools to inspect a program and explain what it "
+#~ "does."
+#~ msgstr ""
+#~ "REA надає вашому ШІ-помічнику інструменти, щоб дослідити програму й пояснити"
+#~ " її поведінку."
+
+#~ msgctxt "page:index.html"
+#~ msgid "What is reverse engineering?"
+#~ msgstr "Що таке зворотна розробка?"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Finding out how software works by {ph0}examining the program itself.{ph1}"
+#~ msgstr ""
+#~ "З’ясування того, як працює програма, через {ph0}дослідження самої "
+#~ "програми.{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "The goal: understand a feature well enough to {ph0}explain it{ph1}, "
+#~ "{ph2}change it{ph3} or {ph4}rebuild it.{ph5}"
+#~ msgstr ""
+#~ "Мета: зрозуміти функцію досить добре, щоб {ph0}пояснити її{ph1}, "
+#~ "{ph2}змінивши{ph3} або {ph4}перебудувати заново.{ph5}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "With REA · You ask {ph0}your agent{ph1}"
+#~ msgstr "З REA · Ви запитуєте {ph0}свого помічника{ph1}"
+
+#~ msgctxt "page:index.html"
+#~ msgid "One prompt."
+#~ msgstr "Лише один запит."
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Ask your agent {ph0}in plain English.{ph1}"
+#~ msgstr "Запитайте помічника {ph0}звичайними словами.{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}Let's try two examples.{ph1} Change a game's speed, then return to "
+#~ "Calculator and rebuild its % button."
+#~ msgstr ""
+#~ "{ph0}Давайте розглянемо два приклади.{ph1} Змініть швидкість гри, потім "
+#~ "поверніться до калькулятора та відновіть його кнопку %."
+
+#~ msgctxt "page:index.html"
+#~ msgid "Goal"
+#~ msgstr "Мета"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Rebuild the game with {ph0}adjustable speed.{ph1}"
+#~ msgstr "Перебудовуйте гру з {ph0}регульованою швидкістю.{ph1}"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Why reverse engineer it?"
+#~ msgstr "Навіщо його перепроектувати?"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "To reproduce its acceleration, we need {ph0}the rule in the running "
+#~ "game{ph1}: how fast it starts, how much it increases and when it stops."
+#~ msgstr ""
+#~ "Щоб відтворити його прискорення, нам потрібно {ph0}правило в біговій "
+#~ "грі{ph1}: як швидко воно починається, наскільки збільшується і коли "
+#~ "припиняється."
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}The script actually running in the page.{ph1} The agent reads its "
+#~ "update function and speed settings, then uses that rule in a new game."
+#~ msgstr ""
+#~ "{ph0}Скрипт, фактично запущений на сторінці.{ph1} Агент зчитує свою функцію "
+#~ "оновлення та налаштування швидкості, а потім використовує це правило в новій"
+#~ " грі."
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}Start at 6.{ph1} Add {ph2}0.001{ph3} each update without a collision, "
+#~ "while speed is below {ph4}13{ph5}."
+#~ msgstr ""
+#~ "{ph0}Почніть з 6.{ph1} Додавайте 0,001 при кожному оновленні без збоїв, поки"
+#~ " швидкість нижче 13.{ph2}{ph3}{ph4}{ph5}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Build a small calculator that handles {ph0}both + and × correctly.{ph1}"
+#~ msgstr ""
+#~ "Створіть невеликий калькулятор, який {ph0}коректно обробляє як+, так і "
+#~ "×.{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "The same button uses {ph0}different rules after + and ×.{ph1} We inspect the"
+#~ " installed app to find which number the percentage is applied to."
+#~ msgstr ""
+#~ "Одна і та ж кнопка використовує {ph0}різні правила після + і ×.{ph1} Ми "
+#~ "перевіряємо встановлене додаток, щоб визначити, до якого числа "
+#~ "застосовується процентне співвідношення."
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}One branch divides by 100. The other also multiplies by the first "
+#~ "number.{ph1} The agent uses both to recreate the % button."
+#~ msgstr ""
+#~ "{ph0}Одна гілка ділиться на 100. Інша також множиться на перше число.{ph1} "
+#~ "Агент використовує обидві гілки для відтворення кнопки%."
+
+#~ msgctxt "page:index.html"
+#~ msgid "Want to go deeper?"
+#~ msgstr "Хочете дізнатися більше?"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Tell your agent what you want to understand or build. With REA, you can work"
+#~ " together on anything from {ph0}cloning this website{ph1} to "
+#~ "{ph2}reconstructing a game from its executable.{ph3}"
+#~ msgstr ""
+#~ "Скажіть своєму агенту, що ви хочете зрозуміти або доопрацювати. З REA ви "
+#~ "можете працювати разом над чим завгодно-від {ph0}клонування цього веб-"
+#~ "сайту{ph1} до {ph2}відтворення гри по її виконуваному файлу.{ph3}"
+
+#~ msgctxt "page:index.html"
+#~ msgid "For setup and analysis steps, choose your target:"
+#~ msgstr ""
+#~ "Для виконання етапів настройки і аналізу виберіть свій цільовий об'єкт:"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Join the community"
+#~ msgstr "Приєднатися до спільноти"
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Share investigations and get help from other REA users on Discord. Follow "
+#~ "REA on X for project updates."
+#~ msgstr ""
+#~ "Діліться результатами досліджень і отримуйте допомогу від інших користувачів"
+#~ " REA на Discord. Слідкуйте за оновленнями проекту REA на X."
+
+#~ msgctxt "page:index.html"
+#~ msgid "See how REA works ↓"
+#~ msgstr "Подивіться, як працює REA ↓"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Follow @reatools on X"
+#~ msgstr "Слідкуйте за @reatools на X"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "One question: {ph0}why does Calculator give 220 for {ph1}?{ph2}"
+#~ msgstr "Наприклад: {ph0}чому калькулятор дає 220 для {ph1}?{ph2}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "We saw why {ph0}{ph1} gives 220.{ph2} Now let’s recover the rules for both +"
+#~ " and ×, and try them."
+#~ msgstr ""
+#~ "Ми бачили, чому {ph0}{ph1} дають 220.{ph2} Тепер давайте відновимо правила "
+#~ "для + і × і спробуємо їх застосувати."
+
+# Use the same label as the Get started navigation link. The arrow is
+# decorative.
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Get started {ph0}"
+#~ msgstr "Почати {ph0}"
+
+#~ msgctxt "page:index.html"
+#~ msgid "One question:"
+#~ msgstr "Одне запитання:"
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Android, games, Electron and a CTF challenge, with code, figures and checked"
+#~ " results."
+#~ msgstr ""
+#~ "Android, ігри, Electron і конкурс CTF з кодом, цифрами і перевіреними "
+#~ "результатами."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Find Aegis's six-digit code calculation in its released APK. Trace the "
+#~ "generating methods with REA, then move a demo clock to see why the code "
+#~ "changes every 30 seconds."
+#~ msgstr ""
+#~ "Дізнайтеся, як Aegis обчислює шестизначний код у опублікованому APK . "
+#~ "Слідкуйте за методами генерації за допомогою REA, а потім подивіться на "
+#~ "демонстраційний годинник, щоб зрозуміти, чому код змінюється кожні 30 "
+#~ "секунд."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Trace a page-facing API through Notion's packaged JavaScript. Follow its IPC"
+#~ " wrappers to the system clipboard, then see how a small HTML marker keeps "
+#~ "rich block data connected to a copy."
+#~ msgstr ""
+#~ "Відстежуйте API, що працює на сторінці, за допомогою JavaScript, вбудованого"
+#~ " в Notion. Слідкуйте за його оболонками IPC у системному буфері обміну, а "
+#~ "потім подивіться, як маленький маркер HTML пов'язує дані розширеного блоку з"
+#~ " копією."
+
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "Recover a sound-pan calculation from a 1996 Windows game. REA's "
+#~ "instructions, caller references and numeric constants lead to a small C "
+#~ "function, checked against the original behavior and all 63 compiled bytes."
+#~ msgstr ""
+#~ "Відновіть розрахунок положення звуку зліва / справа з гри Windows 1996 року "
+#~ "випуску.  Інструкції REA, посилання на виклик та Числові константи "
+#~ "призводять до невеликої функції C, яка перевіряється на відповідність "
+#~ "вихідній поведінці та всім 63 скомпільованим байтам."
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Before REA · You investigate it {ph0}yourself{ph1}"
+#~ msgstr "До REA · Ви досліджуєте {ph0}самостійно{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Use REA to inspect Windows Calculator. Why does {ph0} give 220?"
+#~ msgstr ""
+#~ "Використовувати REA для перевірки Windows Calculator. Чому {ph0} дають 220?"
+
+#~ msgctxt "page:first-investigation/index.html"
+#~ msgid ""
+#~ "This command uses a shell with here-document support, such as Bash or Zsh. "
+#~ "Your agent can run the same JavaScript in your platform’s shell."
+#~ msgstr ""
+#~ "Ця команда використовує оболонку з підтримкою here-document, таку як Bash "
+#~ "або Zsh. Ваш агент може запустити той самий JavaScript в оболонці вашої "
+#~ "платформи."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "If you use Homebrew:"
+#~ msgstr "Якщо ви використовуєте Homebrew :"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Otherwise:"
+#~ msgstr "Не інакше як:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Close Terminal, open it again, then:"
+#~ msgstr "Закрийте термінал, відкрийте його знову, потім:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Replace both paths with your existing installations. Setup checks them and "
+#~ "records valid settings for your selected client. On Linux arm64, you may "
+#~ "need to build Ghidra's native decompiler separately."
+#~ msgstr ""
+#~ "Замініть обидва шляхи на існуючі установки. Програма установки перевіряє їх "
+#~ "і записує коректні настройки для обраного Вами клієнта. У Linux arm64 вам "
+#~ "може знадобитися окремо зібрати власний декомпілятор Ghidra."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy fnm installation command for macOS"
+#~ msgstr "Скопіюйте команду встановлення fnm для macOS"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy Node.js 24 commands for macOS"
+#~ msgstr "Скопіюйте 24 команди Node.js для macOS"
+
+#, python-brace-format
+#~ msgctxt "page:first-investigation/index.html"
+#~ msgid "{ph0} · CSV formatter"
+#~ msgstr "{ph0} * Засіб форматування CSV"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "For a first installation, download the Node.js 24 LTS macOS installer "
+#~ "(.pkg), open it and follow the installer. Then reopen Terminal."
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Install Claude Desktop on Windows or macOS and sign in. Quit it completely "
+#~ "before running REA setup in your terminal. Choose {ph0}, approve the plan, "
+#~ "then reopen Claude and start a chat."
+#~ msgstr ""
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "In the terminal you prepared above, install Codex:"
+#~ msgstr ""
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Then start it:"
+#~ msgstr ""
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Open its AI chat and choose Agent mode. In Windsurf, open Cascade; in VS "
+#~ "Code, set up GitHub Copilot first."
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "{ph0}Cursor setup{ph1} · {ph2}Windsurf setup{ph3} · {ph4}VS Code and Copilot"
+#~ " setup{ph5}"
+#~ msgstr ""
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "OpenCode · choose a model provider"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "The installer needs {ph0} and {ph1} (on Debian/Ubuntu: {ph2}). Close the "
+#~ "terminal, open it again, then:"
+#~ msgstr ""
+#~ "Для установки буде потрібно {ph0} і {ph1} файл (у Debian / Ubuntu: {ph2}). "
+#~ "Закрийте термінал, відкрийте його знову, потім:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Connect REA to your coding agent, or inspect a local app from your terminal."
+#~ msgstr ""
+#~ "Підключіть REA до свого програміста або перевірте локальну програму зі свого"
+#~ " терміналу."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "{ph0}Windows (PowerShell){ph1}"
+#~ msgstr "{ph0} Windows (PowerShell){ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "If PowerShell later says {ph0}\"running scripts is disabled on this "
+#~ "system\"{ph1} when you run {ph2}, run this once and try again:"
+#~ msgstr ""
+#~ "Якщо пізніше PowerShell повідомляє, що {ph0}\"запуск сценаріїв у цій системі"
+#~ " вимкнено\"{ph1}, коли ви запустите {ph2}, запустіть це один раз і повторіть"
+#~ " спробу:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Setup options"
+#~ msgstr "Параметри налаштування"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "{ph0}Connect your coding agent{ph1}"
+#~ msgstr "{ph0}Підключіть свій кодуючий агент{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "{ph0}Set up native analysis{ph1}"
+#~ msgstr "{ph0}Налаштування аналізу програм з машинним кодом{ph1}"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Connect your coding agent"
+#~ msgstr "Підключіть свій кодуючий агент"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Run setup to connect REA to your coding agent. Client choices include Claude"
+#~ " Code, Codex, Cursor, Gemini CLI, Windsurf, Grok Build, and other supported "
+#~ "MCP clients. Grok Bot's connector is added from its chat."
+#~ msgstr ""
+#~ "Запустіть програму встановлення, щоб підключити REA до свого програміста. "
+#~ "Серед доступних клієнтів Claude Code, Codex, Cursor, Gemini CLI, Windsurf, "
+#~ "Grok Build та інші підтримувані клієнти MCP. Коннектор Grok Bot доданий з "
+#~ "його чату."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "New to coding agents?"
+#~ msgstr "Новачок у кодуванні агентів?"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "A coding agent is an AI assistant that works on your computer instead of in "
+#~ "a browser tab. It can read files and run commands, and it asks before making"
+#~ " changes. REA gives it reverse-engineering tools."
+#~ msgstr ""
+#~ "Програміст-це помічник зі штучним інтелектом, який працює на вашому "
+#~ "комп'ютері, а не на вкладці браузера. Він може читати файли та виконувати "
+#~ "команди, а також запитує їх перед внесенням змін.  REA надає йому "
+#~ "інструменти для зворотного проектування."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "If you don't have one yet, pick one, follow its install page and sign in:"
+#~ msgstr ""
+#~ "Якщо у вас його ще немає, виберіть його, перейдіть на сторінку встановлення "
+#~ "та увійдіть:"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "{ph0}{ph1}Claude Code{ph2}{ph3} by Anthropic. Needs a paid Claude plan."
+#~ msgstr ""
+#~ "{ph0}{ph1} Claude Code{ph2}{ph3} від Anthropic . Потрібен платний тарифний "
+#~ "план Claude."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "{ph0}{ph1}Codex{ph2}{ph3} by OpenAI. Sign in with your ChatGPT account."
+#~ msgstr ""
+#~ "{ph0}{ph1} Codex{ph2}{ph3} за допомогою OpenAI . Увійдіть у свій обліковий "
+#~ "запис ChatGPT."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "{ph0}{ph1}OpenCode{ph2}{ph3}, open source. Connect the model provider of "
+#~ "your choice."
+#~ msgstr ""
+#~ "{ph0}{ph1} OpenCode{ph2}{ph3} , з відкритим кодом. Підключіть Постачальника "
+#~ "моделі за вашим вибором."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Then open it and copy the prompt below into it. The agent runs REA's setup "
+#~ "and shows you the plan before changing anything."
+#~ msgstr ""
+#~ "Потім відкрийте його і скопіюйте в нього наведене нижче запрошення. Перш ніж"
+#~ " щось змінити, агент запустить Налаштування REA і покаже вам план."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Restart your client when setup finishes."
+#~ msgstr "Після завершення встановлення перезавантажте клієнт."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Give your agent a target path and a specific question. For a JavaScript or "
+#~ "Electron app, you might start with:"
+#~ msgstr ""
+#~ "Вкажіть своєму агенту цільовий шлях і задайте конкретне запитання. Для "
+#~ "програми JavaScript або Electron ви можете почати з:"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Look at {ph0} and find how it exports data. Show the entry points, calls and"
+#~ " dependencies involved, with the source locations for your findings."
+#~ msgstr ""
+#~ "Подивіться на {ph0} і дізнайтеся, як він експортує дані. Вкажіть точки "
+#~ "входу, виклики та залежності, а також вихідні місця для Ваших результатів."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Replace the path with your local target."
+#~ msgstr "Замініть шлях на ваш локальний цільовий об'єкт."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Use the CLI"
+#~ msgstr "Використовуйте CLI"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Set up native analysis"
+#~ msgstr "Налаштування аналізу програм з машинним кодом"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Native binaries need a local analysis tool. Choose and configure one below, "
+#~ "then give REA your executable or library."
+#~ msgstr ""
+#~ "Програмам з машинним кодом потрібен локальний інструмент аналізу. Виберіть і"
+#~ " налаштуйте один із наведених нижче інструментів, а потім вкажіть REA ваш "
+#~ "виконуваний файл або бібліотеку."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Choose a tool: Ghidra, Hopper or IDA"
+#~ msgstr "Виберіть інструмент: Ghidra, Hopper або IDA"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Use an existing Ghidra 12.1.x installation and a 64-bit JDK 21 or newer on "
+#~ "Linux or macOS, on x64 or arm64. Your Ghidra installation needs a native "
+#~ "decompiler for your host architecture. Set the paths before running setup:"
+#~ msgstr ""
+#~ "Використовуйте існуючу версію Ghidra 12.1.x і 64-розрядну версію JDK 21 або "
+#~ "новіше на Linux або macOS , на x64 або arm64. Для встановлення Ghidra "
+#~ "потрібен власний декомпілятор для архітектури вашого хоста. Задайте шляхи "
+#~ "перед запуском програми установки:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Ghidra connection · macOS / Linux"
+#~ msgstr "Підключення Ghidra * macOS / Linux"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Ghidra connection · Windows PowerShell"
+#~ msgstr "Підключення Ghidra * Windows PowerShell"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "On macOS, complete Hopper's first-run choice of demo mode or license "
+#~ "activation before an unattended analysis."
+#~ msgstr ""
+#~ "На macOS перед автоматичним аналізом виконайте перший запуск Hopper, "
+#~ "вибравши демонстраційний режим або активацію ліцензії."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "The verified IDA setups use Windows, with an existing MCP registration for "
+#~ "an attached GUI or a headless database. Linux and macOS headless analysis "
+#~ "remains unverified."
+#~ msgstr ""
+#~ "Перевірені Налаштування IDA використовують Windows з наявною реєстрацією MCP"
+#~ " для підключеного графічного інтерфейсу користувача або безголової бази "
+#~ "даних.  Аналіз Linux і macOS без урахування даних залишається неперевіреним."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Connect an existing IDA MCP registration"
+#~ msgstr "Підключіть існуючу реєстрацію IDA MCP"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Keep the upstream server's working {ph0}, {ph1} and optional {ph2} in a JSON"
+#~ " file. An existing {ph3} object with an {ph4} entry is also accepted. Point "
+#~ "REA at that file before setup:"
+#~ msgstr ""
+#~ "Збережіть робочу {ph0} вищого сервера, {ph1} і необов'язковий {ph2} у файлі "
+#~ "JSON. Також приймається існуючий {ph3}об'єкт mcpServers із записом {ph4}. "
+#~ "Вкажіть REA у цьому файлі перед встановленням:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "IDA connection · Windows PowerShell"
+#~ msgstr "Підключення IDA * Windows PowerShell"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "The attached profile uses upstream legacy 1.4.0 tools with the original "
+#~ "binary already open in IDA. The headless profile uses the upstream database-"
+#~ "supervisor API and a registration with {ph0}; real verification covers an "
+#~ "IDA 9.3 Windows x64 supervisor. Doctor checks the registration without "
+#~ "starting IDA."
+#~ msgstr ""
+#~ "Доданий профіль використовує застарілі інструменти версії 1.4.0, а вихідний "
+#~ "двійковий файл уже відкритий у IDA . У профілі headless використовується "
+#~ "вищестоящий API database-supervisor і реєстрація в {ph0}; для реальної "
+#~ "перевірки використовується супервізор IDA 9.3 Windows x64. Лікар перевіряє "
+#~ "реєстрацію, не запускаючи IDA ."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Give REA the original executable path, with {ph0} in a CLI query. For an "
+#~ "agent, include {ph1} in the REA registration's environment and select IDA "
+#~ "when opening the binary."
+#~ msgstr ""
+#~ "Вкажіть REA вихідний шлях до виконуваного файлу за допомогою {ph0} у запиті "
+#~ "CLI. Для агента включіть {ph1} у середу реєстрації REA і виберіть IDA при "
+#~ "відкритті двійкового файлу."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "For an existing Ghidra setup, inspect a function with:"
+#~ msgstr "Для існуючого Налаштування Ghidra перевірте функцію за допомогою:"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Function analysis"
+#~ msgstr "Функціональний аналіз"
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Replace {ph0} with the function name or address you want to inspect."
+#~ msgstr "Замінивши {ph0} на ім'я функції або адресу, яку ви хочете перевірити."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "How native analysis sessions work"
+#~ msgstr "Як працюють сеанси аналізу програм з машинним кодом"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "Each CLI command imports and analyzes the binary, then closes its session. "
+#~ "Your agent's MCP queries reuse the imported binary while that session is "
+#~ "open."
+#~ msgstr ""
+#~ "Кожна команда CLI імпортує та аналізує двійковий файл, а потім закриває свій"
+#~ " сеанс. Запити MCP вашого агента повторно використовують імпортований "
+#~ "двійковий файл, поки цей сеанс відкритий."
+
+#, python-brace-format
+#~ msgctxt "page:get-started/index.html"
+#~ msgid ""
+#~ "{ph0}Follow a native analysis example{ph1} to see how the function result "
+#~ "leads to a recovered calculation."
+#~ msgstr ""
+#~ "{ph0}Дотримуйтесь прикладу аналізу програм з машинним кодом{ph1}, щоб "
+#~ "побачити, як результат функції призводить до відновленого обчислення."
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Check one client"
+#~ msgstr "Перевірте одного клієнта"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy PowerShell execution policy command"
+#~ msgstr "Скопіюйте команду політики виконання PowerShell"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy agent setup command"
+#~ msgstr "Команда Налаштування агента копіювання"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy Ghidra connection for macOS and Linux"
+#~ msgstr "Скопіювати команду підключення Ghidra для macOS і Linux"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy Ghidra connection for Windows PowerShell"
+#~ msgstr "Скопіюйте підключення Ghidra для Windows PowerShell"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy IDA connection for Windows PowerShell"
+#~ msgstr "Скопіюйте підключення IDA для Windows PowerShell"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy native function analysis command"
+#~ msgstr "Скопіювати команду аналізу власної функції"
+
+#~ msgctxt "page:get-started/index.html"
+#~ msgid "Copy client diagnosis command"
+#~ msgstr "Скопіювати команду діагностики клієнта"
+
+#~ msgctxt "page:index.html"
+#~ msgid "Windows (PowerShell)"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}REA supplies"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}Your agent explains"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}Try the calculation"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Windows (PowerShell){ph0}"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid ""
+#~ "{ph0}{ph1}REA supplies{ph2} {ph3}The handler’s instructions, decompiled code"
+#~ " and calls.{ph4}"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}{ph1}Your agent explains{ph2} {ph3}10% of 200 = 20{ph4}"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}{ph1}Try the calculation{ph2} {ph3}200 + 20 = 220{ph4}"
+#~ msgstr ""
+
+#~ msgctxt "page:index.html"
+#~ msgid "Windows (PowerShell) →"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Before REA · You investigate it {ph0}yourself{ph1} {ph2}{ph3}"
+#~ msgstr ""
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}Help & feedback{ph1}"
+#~ msgstr "{ph0}Допомога та зворотній зв'язок{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "{ph0}Community{ph1}"
+#~ msgstr "{ph0}Товариство{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Already know RE? {ph0}Skip to analysis guides →{ph1}"
+#~ msgstr "Вже знайомі з RE? {ph0}Перейти до посібників з аналізу →{ph1}"
+
+#, python-brace-format
+#~ msgctxt "page:index.html"
+#~ msgid "Want to go deeper? {ph0}Read the Blog →{ph1}"
+#~ msgstr "Хочете копнути глибше? {ph0}Читати блог →{ph1}"
 
 #~ msgctxt "page:blog/index.html"
 #~ msgid "By N0zoM1z0 · 13 October 2026 · Draft for review"

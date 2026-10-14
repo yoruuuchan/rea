@@ -15,6 +15,7 @@ import {
 import type { ProviderAvailability } from "../application/AnalysisProvider.js";
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { gte, valid } from "semver";
 import {
   isWindowsBatchFile,
   windowsBatchCommand,
@@ -148,7 +149,8 @@ export type ApktoolConfigurationFailureCode =
   | "command_missing"
   | "command_unresolved"
   | "launcher_unsupported"
-  | "version_unresolved";
+  | "version_unresolved"
+  | "unsupported_version";
 
 export class ApktoolConfigurationFailure extends Error {
   constructor(
@@ -161,9 +163,9 @@ export class ApktoolConfigurationFailure extends Error {
   }
 }
 
-export interface ApktoolClientIdentity {
-  readonly version: string | null;
-}
+export type ApktoolClientIdentity =
+  | { readonly version: string; readonly reportedVersion?: never }
+  | { readonly version: null; readonly reportedVersion: string | null };
 
 /** Process creation for one apktool run on the selected host. */
 export interface ApktoolInvocation {
@@ -199,7 +201,7 @@ export const apktoolInvocation = (
         windowsVerbatimArguments: false,
       };
 
-/** Read the version from `apktool --version` output (first non-empty line). */
+/** Read the version from Apktool's single-line `--version` response. */
 export const parseApktoolVersionOutput = (
   stdout: string,
 ): ApktoolClientIdentity => {
@@ -207,7 +209,17 @@ export const parseApktoolVersionOutput = (
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
     .find((entry) => entry !== "");
-  return { version: line === undefined ? null : line };
+  if (line === undefined || valid(line) === null)
+    return { version: null, reportedVersion: line ?? null };
+  return { version: line };
+};
+
+const supportsDocumentedApktoolVersion = (version: string): boolean => {
+  // Debian's verified 2.7.0-dirty build is a downstream build marker, not a
+  // prerelease. Treat only that known marker as build metadata for the floor.
+  const comparisonVersion = version.replace(/-dirty$/u, "+dirty");
+  const parsedVersion = valid(comparisonVersion);
+  return parsedVersion !== null && gte(parsedVersion, "2.7.0");
 };
 
 /** Probe the selected apktool launcher without decoding anything. */
@@ -239,8 +251,10 @@ export const inspectApktoolClient = async (
       { cause },
     );
   }
+  let stdout: string;
+  let stderr: string;
   try {
-    const { stdout } = await execFileOutput(
+    ({ stdout, stderr } = await execFileOutput(
       invocation.command,
       invocation.arguments,
       {
@@ -251,8 +265,7 @@ export const inspectApktoolClient = async (
         env: hostEnvironment,
         ...(signal === undefined ? {} : { signal }),
       },
-    );
-    return parseApktoolVersionOutput(stdout);
+    ));
   } catch (cause) {
     const failure = execFileOutputFailure(cause);
     if (signal?.aborted || failure?.code === "ABORT_ERR")
@@ -283,6 +296,33 @@ export const inspectApktoolClient = async (
       { cause },
     );
   }
+  const identity = parseApktoolVersionOutput(stdout);
+  if (identity.version === null)
+    throw new ApktoolConfigurationFailure(
+      "version_unresolved",
+      "The selected apktool launcher exited successfully but did not report a recognizable version",
+      {
+        selected_command: selection.command,
+        command_source: selection.commandSource,
+        version_probe: "unrecognized_output",
+        reported_version: identity.reportedVersion,
+        stdout,
+        stderr,
+      },
+    );
+  if (!supportsDocumentedApktoolVersion(identity.version))
+    throw new ApktoolConfigurationFailure(
+      "unsupported_version",
+      `The selected Apktool version ${identity.version} is older than the supported minimum 2.7.0`,
+      {
+        selected_command: selection.command,
+        command_source: selection.commandSource,
+        reported_version: identity.version,
+        minimum_version: "2.7.0",
+        remediation: `Use Apktool 2.7.0 or newer; see docs/apktool-resource-analysis.md.`,
+      },
+    );
+  return identity;
 };
 
 /** Availability in the shape shared by every provider. */
@@ -295,7 +335,9 @@ const rejectionCodeOf = (
         code === "launcher_unsupported" ||
         code === "command_unresolved"
       ? "not_configured"
-      : "version_unresolved";
+      : code === "unsupported_version"
+        ? "unsupported_version"
+        : "version_unresolved";
 
 export const apktoolConfigurationAvailability = (
   cause: ApktoolConfigurationFailure,

@@ -104,6 +104,45 @@ it.each([
   },
 );
 
+it("retains Playwright IPv6 spelling through public CLI and MCP workflows", async () => {
+  const root = await createTestTempDirectory("rea-har-ipv6-");
+  const path = join(root, "capture.har");
+  const original = JSON.stringify(historicalHar())
+    .replace(
+      '"name":"rea-source-owned-fixture","version":"1"',
+      '"name":"Playwright","version":"1.58.2"',
+    )
+    .replace(
+      '"startedDateTime":',
+      '"serverIPAddress":"[2001:db8::1]","startedDateTime":',
+    );
+  await writeFile(path, original);
+  const { call } = await connectLocalToolsMcp();
+  const fromCli = await cli(path, "har");
+  expect(fromCli.ok, fromCli.stdout).toBe(true);
+  const cliEvidence = parseEvidence(JSON.parse(fromCli.stdout));
+  const response = await call("inspect_web_network_capture", {
+    capture_path: path,
+    format: "har",
+  });
+  expect(response.isError, JSON.stringify(response)).not.toBe(true);
+  const mcpEvidence = parseEvidence(response.structuredContent);
+  expect(mcpEvidence.evidence_id).toBe(cliEvidence.evidence_id);
+  expect(mcpEvidence.normalized_result).toEqual(cliEvidence.normalized_result);
+  const capture = webNetworkCaptureSchema.parse(cliEvidence.normalized_result);
+  expect(capture.records[0]).toMatchObject({
+    reported: {
+      serverIPAddress: "[2001:db8::1]",
+    },
+  });
+  expect(
+    capture.records[0]?.limitations.some((limitation) =>
+      limitation.includes("bracketed IPv6 serverIPAddress"),
+    ),
+  ).toBe(true);
+  expect(await readFile(path, "utf8")).toBe(original);
+});
+
 it("excludes declared binary lengths through CLI, MCP and retained capture pages", async () => {
   const root = await createTestTempDirectory("rea-har-byte-length-");
   const path = join(root, "capture.har");

@@ -22,6 +22,8 @@ const config = {
   concurrency: 2,
   timeoutMS: 30000,
   reporters: ["clear-text", "progress", "html", "json"],
+  jsonReporter: { fileName: "reports/mutation/reverse-tools.json" },
+  htmlReporter: { fileName: "reports/mutation/reverse-tools.html" },
 };
 
 export default {

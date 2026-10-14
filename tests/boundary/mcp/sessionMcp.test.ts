@@ -19,6 +19,8 @@ import type {
   ProviderAvailability,
 } from "../../../src/application/AnalysisProvider.js";
 import type { AndroidAnalysisPort } from "../../../src/application/android/AndroidAnalysisPort.js";
+import type { AdbDeviceAnalysisPort } from "../../../src/application/adb/AdbDeviceAnalysisPort.js";
+import type { ApktoolResourceAnalysisPort } from "../../../src/application/apktool/ApktoolResourceAnalysisPort.js";
 import { observed as ok } from "../../fixtures/analysisExecution.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { silentLogger } from "../../../src/logger.js";
@@ -26,7 +28,10 @@ import { createAnalysisProfile } from "../../../src/domain/analysisProfile.js";
 import { MAX_JSON_DEPTH } from "../../../src/domain/jsonValue.js";
 import { parseAnalysisSnapshot } from "../../../src/domain/analysisSnapshot.js";
 import { INVESTIGATION_EXAMPLES } from "../../../src/contracts/investigationExamples.js";
-import { expandProviderCapabilities } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
+import {
+  expandProviderCapabilities,
+  toolAvailabilityInventory,
+} from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import {
@@ -151,6 +156,92 @@ describe("MCP snapshot lifecycle ordering", () => {
       ).isError,
     ).not.toBe(true);
   }, 10_000);
+});
+
+describe("public provider availability", () => {
+  it("reports ADB and Apktool host probes in the public session inventory", async () => {
+    const closed: string[] = [];
+    const session = createTestBinarySession(provider(closed));
+    const available: ProviderAvailability = {
+      status: "available",
+      code: null,
+      reason: null,
+      diagnostics: { version: "1.0.41" },
+    };
+    const unavailable: ProviderAvailability = {
+      status: "unavailable",
+      code: "unsupported_version",
+      reason: "Use Apktool 2.7.0 or newer.",
+      diagnostics: { minimum_version: "2.7.0" },
+    };
+    const adbDeviceAnalysis: AdbDeviceAnalysisPort = {
+      inspectAvailability: async () => available,
+      close: async () => {},
+      execute: async () => ok(null),
+    };
+    const apktoolAnalysis: ApktoolResourceAnalysisPort = {
+      inspectAvailability: async () => unavailable,
+      close: async () => {},
+      execute: async () => ok(null),
+    };
+    const server = createServer(
+      { kind: "session", session },
+      { adbDeviceAnalysis, apktoolAnalysis, logger: silentLogger },
+    );
+    const mcp = new Client({
+      name: "provider-host-readiness",
+      version: "1.0.0",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    resources.push(mcp, server);
+    await server.connect(serverTransport);
+    await mcp.connect(clientTransport);
+
+    const status = structured(
+      await mcp.callTool({ name: "binary_session", arguments: {} }),
+    );
+    const availability = toolAvailabilityInventory.parse(
+      (status.result as { tool_availability: unknown }).tool_availability,
+    );
+    expect(
+      availability.groups.find(({ names }) =>
+        names.includes("inspect_adb_client"),
+      ),
+    ).toMatchObject({ available: true, reason: "available" });
+    expect(
+      availability.groups.find(({ names }) =>
+        names.includes("inspect_apktool_client"),
+      ),
+    ).toMatchObject({ available: false, reason: "provider_unavailable" });
+  });
+});
+
+describe("target-free MCP fixture host isolation", () => {
+  it("uses fixed unavailable ports instead of probing installed Android tools", async () => {
+    directory = await createTestTempDirectory("rea-mcp-host-isolation-");
+    const { mcp } = await createSessionMcpHarness(
+      directory,
+      provider,
+      resources,
+    );
+
+    const status = structured(
+      await mcp.callTool({ name: "binary_session", arguments: {} }),
+    );
+    const availability = toolAvailabilityInventory.parse(
+      (status.result as { tool_availability: unknown }).tool_availability,
+    );
+    for (const name of [
+      "inspect_android_package",
+      "inspect_adb_client",
+      "inspect_apktool_client",
+    ]) {
+      expect(
+        availability.groups.find((group) => group.names.includes(name)),
+      ).toMatchObject({ available: false, reason: "provider_missing" });
+    }
+  });
 });
 
 describe("target-free MCP lifecycle", () => {

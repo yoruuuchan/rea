@@ -24,6 +24,7 @@ import {
   readManagedMetadataLayout,
   type ManagedMetadataLayout,
 } from "./ManagedMetadataLayout.js";
+import { readTypeMemberListFacts } from "./ManagedTypeMemberLists.js";
 import { ManagedReaderFailure } from "./ManagedReaderFailure.js";
 
 const flagNames = (flags: number): string[] => {
@@ -384,10 +385,12 @@ export const inspectManagedArtifactBytes = (
     resourceIssues,
   );
   try {
+    const memberLists = readTypeMemberListFacts(bytes, metadata);
     const inventory = readManagedMetadataInventory(
       bytes,
       metadata,
       resourceDirectory,
+      memberLists,
     );
     const issues = [...resourceIssues, ...inventory.issues];
     const limitations = [

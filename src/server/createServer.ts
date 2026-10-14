@@ -43,7 +43,7 @@ import {
 import { parseMcpResponseBudget } from "../config/mcpResponseBudget.js";
 import { parseMcpOutputSchemaProfile } from "../config/mcpOutputSchemaProfile.js";
 import {
-  COMPACT_INPUT_SCHEMA_BUDGET_BYTES,
+  compactPresentationForMcpInputSchemaProfile,
   parseMcpInputSchemaProfile,
 } from "../config/mcpInputSchemaProfile.js";
 import type { CompactInputSchemaPresentation } from "./EvidenceMcpServer.js";
@@ -577,6 +577,10 @@ export const createServer = (
         : { availabilityPolicy: availability.policy }),
       androidAnalysisAvailability: (signal) =>
         android.inspectAvailability(signal),
+      adbAnalysisAvailability: (signal) =>
+        adbDevice.inspectAvailability(signal),
+      apktoolAnalysisAvailability: (signal) =>
+        apktool.inspectAvailability(signal),
       startedAt,
     });
   }
@@ -612,9 +616,7 @@ const selectCompactInputSchemaPresentation = (
     environment.REA_MCP_INPUT_SCHEMA_PROFILE,
   );
   if (!configured.ok) throw configured.error;
-  return configured.value === "compact"
-    ? { budgetBytes: COMPACT_INPUT_SCHEMA_BUDGET_BYTES }
-    : undefined;
+  return compactPresentationForMcpInputSchemaProfile(configured.value);
 };
 
 const registerConfiguredAnalysisTools = (

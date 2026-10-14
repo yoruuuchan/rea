@@ -140,13 +140,21 @@ export const readJavaScriptArtifactFiles = async (
     if (leftPriority !== rightPriority) return leftPriority - rightPriority;
     return compareUnicodeCodePoints(left.path, right.path);
   });
+  const unanalyzedFiles = createUnanalyzedArtifactLookup(
+    snapshot,
+    context.containers,
+  );
+  const unavailableRelevantFiles = [...inventory.unavailableFiles]
+    .sort(compareUnicodeCodePoints)
+    .flatMap((path) => {
+      const unavailable = unanalyzedFiles.get(path);
+      return unavailable === undefined ? [] : [unavailable];
+    });
   assertExpectedFilesWereVisited(expected, files);
   return {
     files,
-    unanalyzed_files: createUnanalyzedArtifactLookup(
-      snapshot,
-      context.containers,
-    ),
+    unanalyzed_files: unanalyzedFiles,
+    unavailable_relevant_files: unavailableRelevantFiles,
     containers: context.containers.sort((left, right) =>
       compareUnicodeCodePoints(left.path, right.path),
     ),
@@ -488,6 +496,10 @@ const createUnanalyzedArtifactLookup = (
   const isOpaque = (occurrence: ArtifactOccurrence): boolean =>
     occurrence.entry_kind === "file" &&
     relevantKind(occurrence.logical_path) === undefined;
+  const isUnavailableRelevant = (occurrence: ArtifactOccurrence): boolean =>
+    occurrence.entry_kind === "file" &&
+    occurrence.artifact_id === null &&
+    relevantKind(occurrence.logical_path) !== undefined;
   return {
     get(path) {
       if (requested.has(path)) return requested.get(path);
@@ -495,8 +507,10 @@ const createUnanalyzedArtifactLookup = (
         snapshot.occurrences[
           lowerBound(snapshot.occurrences, path, (entry) => entry.logical_path)
         ];
+      const kind = relevantKind(path);
       const id =
-        occurrence?.logical_path === path && isOpaque(occurrence)
+        occurrence?.logical_path === path &&
+        (isOpaque(occurrence) || isUnavailableRelevant(occurrence))
           ? occurrence.artifact_id
           : undefined;
       const candidate =
@@ -507,7 +521,8 @@ const createUnanalyzedArtifactLookup = (
             ];
       const node = candidate?.artifact_id === id ? candidate : undefined;
       const file =
-        occurrence?.logical_path !== path || !isOpaque(occurrence)
+        occurrence?.logical_path !== path ||
+        (!isOpaque(occurrence) && !isUnavailableRelevant(occurrence))
           ? undefined
           : {
               path,
@@ -515,6 +530,10 @@ const createUnanalyzedArtifactLookup = (
               sha256: node?.sha256 ?? null,
               bytes: node?.size ?? occurrence.declared_size,
               inventory_artifact_id: occurrence.artifact_id,
+              inventory_occurrence_id: occurrence.occurrence_id,
+              ...(kind === undefined ? {} : { kind }),
+              artifact_kind: occurrence.artifact_kind,
+              hash_status: occurrence.hash_status,
               limitations: occurrence.limitations,
             };
       requested.set(path, file);
@@ -539,7 +558,7 @@ const createUnanalyzedArtifactLookup = (
         if (entry === undefined || !entry.logical_path.startsWith(prefix))
           break;
         if (
-          isOpaque(entry) &&
+          (isOpaque(entry) || isUnavailableRelevant(entry)) &&
           (containerSha256 === undefined ||
             containerFor(entry.logical_path) === containerSha256)
         ) {

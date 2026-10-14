@@ -8,6 +8,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 
 fake_lldb = sys.modules.setdefault("lldb", types.ModuleType("lldb"))
@@ -22,6 +23,42 @@ spec.loader.exec_module(tracer)
 
 
 class NativeTraceBudgetTests(unittest.TestCase):
+    def test_pre_target_integrity_failure_reports_no_process_created(self):
+        original_debugger = getattr(tracer.lldb, "SBDebugger", None)
+
+        class DebuggerApi:
+            @staticmethod
+            def SetInternalVariable(*_arguments):
+                return None
+
+        class Debugger:
+            def SetAsync(self, _enabled):
+                return None
+
+            def GetInstanceName(self):
+                return "fixture"
+
+            def CreateTarget(self, *_arguments):
+                raise AssertionError("integrity failure precedes target creation")
+
+        tracer.lldb.SBDebugger = DebuggerApi
+        try:
+            with patch.object(tracer, "_hash_file", return_value="changed"), patch.object(
+                tracer, "_file_identity", return_value=(1, 2)
+            ):
+                result = tracer.trace(
+                    Debugger(),
+                    {"executable": "fixture", "expected_sha256": "expected"},
+                )
+        finally:
+            if original_debugger is None:
+                del tracer.lldb.SBDebugger
+            else:
+                tracer.lldb.SBDebugger = original_debugger
+
+        self.assertEqual(result["status"], "target-integrity-error")
+        self.assertIs(result["target_process_created"], False)
+
     def test_journal_checks_exact_byte_budget_before_writing(self):
         record = {"kind": "other-stop", "reason": "signal"}
         encoded_size = len((tracer.json.dumps(record) + "\n").encode("utf-8"))

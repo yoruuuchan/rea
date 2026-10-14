@@ -28,10 +28,8 @@ import {
   bridgeCandidateCoverageSchema,
   projectCartesianCandidates,
 } from "../bridgeCandidateProjection.js";
-import {
-  compareProjectionStrings,
-  projectionDigest,
-} from "../mobileApplicationGraphProjection.js";
+import { projectionDigest } from "../mobileApplicationGraphProjection.js";
+import { compareUnicodeCodePoints as compare } from "../unicodeCodePointOrder.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const pathSchema = z.string().min(1);
@@ -251,6 +249,9 @@ const appleRootFormat = (format: string): RootFormat => {
   return root;
 };
 
+const isNativeLibrary = (path: string): boolean =>
+  /\.(?:dylib|so)$/iu.test(path);
+
 const classifyComponents = (
   entries: readonly AppleInventoryEntry[],
   all: readonly Component[],
@@ -273,11 +274,13 @@ const classifyComponents = (
     bundle_metadata: all.filter(({ path }) =>
       anatomyNameIs(lastSegment(path), "Info.plist"),
     ),
+    // An unrooted IPA library is listed only under native_libraries.
     executables: all.filter(
-      ({ path, format }) => withinApp(path) && isMachOFormat(format),
+      ({ path, format }) =>
+        isMachOFormat(format) && (withinApp(path) || !isNativeLibrary(path)),
     ),
     frameworks: all.filter(({ path }) => /\.framework\//u.test(path)),
-    native_libraries: all.filter(({ path }) => /\.(?:dylib|so)$/iu.test(path)),
+    native_libraries: all.filter(({ path }) => isNativeLibrary(path)),
     javascript: all.filter(({ format }) => format === "javascript-bundle"),
     signing: all.filter(
       ({ path }) =>
@@ -450,6 +453,5 @@ const projectionLimitations = (facts: {
   "A bridge basis is inferred from the native path and is repeated for every managed component.",
 ];
 
-const compare = compareProjectionStrings;
 const digest = (value: unknown): string =>
   projectionDigest(value, "Apple application projection");

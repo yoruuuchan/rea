@@ -2,6 +2,7 @@ import type { FileHandle } from "node:fs/promises";
 import type {
   MipsAbiFlags,
   MipsElfMetadata,
+  MipsGnuAttributes,
 } from "../domain/binaryTargetTypes.js";
 import { readElfFixedHeader } from "../domain/elfFixedHeader.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -9,12 +10,17 @@ import {
   readMipsElfSharedLoad,
   type MipsElfRelocationSection,
 } from "./MipsElfSharedLoad.js";
+import {
+  MIPS_GNU_ATTRIBUTES_MAX_BYTES,
+  parseMipsGnuAttributes,
+} from "./MipsGnuAttributes.js";
 
 const SHT_GNU_ATTRIBUTES = 0x6ffffff5;
 
 /** Observed ABI and load declarations, retaining unavailable source coverage. */
 export interface MipsElfInspection {
   readonly abiFlags: MipsAbiFlags | null;
+  readonly gnuAttributes: MipsGnuAttributes | null;
   readonly limitations: readonly string[];
   readonly sharedLoad?: MipsElfMetadata["sharedLoad"];
 }
@@ -120,6 +126,7 @@ export const readMipsElfMetadata = async (
   let programHeaders: Buffer | undefined;
   const relocationSections: MipsElfRelocationSection[] = [];
   const limitations: string[] = [];
+  let gnuAttributes: MipsGnuAttributes | null = null;
   for (const table of tables) {
     if (table.count === 0) {
       if (table.offset !== 0)
@@ -153,10 +160,25 @@ export const readMipsElfMetadata = async (
       checkCancelled();
       const position = i * table.entrySize;
       const type = u32(contents.value, position + table.typeOffset);
-      if (table.optional && type === SHT_GNU_ATTRIBUTES)
-        return err(
-          "MIPS ELF declares GNU ABI attributes that REA does not inspect; refusing provider selection until the declared ABI is parsed and reconciled",
+      if (table.optional && type === SHT_GNU_ATTRIBUTES) {
+        if (gnuAttributes !== null)
+          return err("duplicate MIPS GNU attribute sections");
+        const size = u32(contents.value, position + 20);
+        if (size === 0 || size > MIPS_GNU_ATTRIBUTES_MAX_BYTES)
+          return err(
+            `MIPS GNU attribute section size ${size} is outside REA's inspected bound of ${MIPS_GNU_ATTRIBUTES_MAX_BYTES} bytes`,
+          );
+        const section = await read(
+          u32(contents.value, position + 16),
+          size,
+          "GNU attribute section",
         );
+        if (!section.ok) return section;
+        const parsed = parseMipsGnuAttributes(section.value, little);
+        if (!parsed.ok) return parsed;
+        gnuAttributes = parsed.value;
+        continue;
+      }
       if (metadata.type === 3 && table.optional && (type === 4 || type === 9))
         relocationSections.push({
           type,
@@ -208,7 +230,7 @@ export const readMipsElfMetadata = async (
         }
       : {};
   if (record === undefined)
-    return ok({ abiFlags: null, limitations, ...shared });
+    return ok({ abiFlags: null, gnuAttributes, limitations, ...shared });
   // Preserve declarations verbatim, including unknown versions/values. Provider
   // admission, not parsing, decides which interpretations have been verified.
   const abiFlags: MipsAbiFlags = {
@@ -224,5 +246,14 @@ export const readMipsElfMetadata = async (
     flags1: u32(record, 16),
     flags2: u32(record, 20),
   };
-  return ok({ abiFlags, limitations, ...shared });
+  if (
+    gnuAttributes !== null &&
+    gnuAttributes.fpAbi !== null &&
+    gnuAttributes.fpAbi !== 0 &&
+    gnuAttributes.fpAbi !== abiFlags.fpAbi
+  )
+    return err(
+      "conflicting MIPS ABI flags and GNU floating-point ABI declarations",
+    );
+  return ok({ abiFlags, gnuAttributes, limitations, ...shared });
 };

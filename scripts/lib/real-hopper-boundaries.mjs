@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { copyFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -20,6 +21,8 @@ import {
   verifyHopperSearch,
   verifyHopperRegexIsolation,
 } from "./real-hopper-search.mjs";
+
+const dispatcher = fileURLToPath(new URL("../rea.mjs", import.meta.url));
 
 /** Exercise real Hopper annotation and malformed-input boundaries over MCP. */
 export async function verifyHopperBoundaryContracts(
@@ -342,7 +345,7 @@ export async function verifyHopperLifecycleAndCli(client, options, targets) {
         ? await verifyLinuxHopperLaunchIsolation({
             call,
             runCli,
-            dispatcher: new URL("../rea.mjs", import.meta.url).pathname,
+            dispatcher,
             primary,
             secondary,
           })
@@ -368,7 +371,6 @@ export async function verifyHopperLifecycleAndCli(client, options, targets) {
     assert.deepEqual(expectedTrace.matches, []);
     await call("close_binary");
 
-    const dispatcher = new URL("../rea.mjs", import.meta.url).pathname;
     const common = [
       "--length",
       "8",

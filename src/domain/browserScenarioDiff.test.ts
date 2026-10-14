@@ -539,6 +539,65 @@ describe("browser scenario network comparison stability", () => {
   });
 });
 
+describe("scenario comparison recovery guidance", () => {
+  it("retains network guidance beside a changed console event", () => {
+    const before = scenarioCapture({});
+    const afterBase = scenarioCapture({});
+    const consoleEvent = afterBase.events.items[0];
+    if (consoleEvent?.kind !== "console")
+      throw new Error("Expected console fixture");
+    const after = browserScenarioCaptureSchema.parse({
+      ...afterBase,
+      scenario: {
+        ...afterBase.scenario,
+        network_content: {
+          ...afterBase.scenario.network_content,
+          response_body: true,
+        },
+      },
+      events: {
+        ...afterBase.events,
+        items: [{ ...consoleEvent, text: "settings-ready-again" }],
+      },
+    });
+    const compare = (left: typeof before, right: typeof before) =>
+      compareBrowserScenarios(
+        compareBrowserScenariosInputSchema.parse({
+          before_scenario: left,
+          after_scenario: right,
+        }),
+      );
+
+    const changed = compare(before, after);
+    expect(changed.overall_status).toBe("changed");
+    expect(changed.steps.flatMap((step) => step.artifact_diffs)).toContainEqual(
+      expect.objectContaining({
+        artifact: "events",
+        status: "changed",
+        reason: expect.stringContaining("Network content selections differ"),
+      }),
+    );
+    const sameSelection = compare(before, scenarioCapture({}));
+    expect(sameSelection.overall_status).toBe("unchanged");
+    expect(
+      sameSelection.steps.flatMap((step) => step.artifact_diffs),
+    ).not.toContainEqual(expect.objectContaining({ artifact: "events" }));
+    const quietMismatch = compare(
+      before,
+      browserScenarioCaptureSchema.parse({ ...after, events: before.events }),
+    );
+    expect(
+      quietMismatch.steps.flatMap((step) => step.artifact_diffs),
+    ).toContainEqual(
+      expect.objectContaining({
+        artifact: "events",
+        status: "unknown",
+        reason: expect.stringContaining("Network content selections differ"),
+      }),
+    );
+  });
+});
+
 describe("browser scenario comparison", () => {
   it("records canonical literal normalization and ignores declared volatile fields", () => {
     const before = scenarioCapture({

@@ -24,6 +24,8 @@ interface Behavior {
   readonly limitations?: readonly string[];
   /** Also report the first string match as a procedure match. */
   readonly duplicateProcedure?: boolean;
+  /** Return no reference rows for this address while preserving cap metadata. */
+  readonly emptyXrefsOf?: string;
   /** Fail the references read of this address. */
   readonly failXrefsOf?: string;
   readonly calls?: string[];
@@ -70,7 +72,9 @@ const provider = (behavior: Behavior = {}): AnalysisOperationPort => ({
         const reported = behavior.coverage?.[address];
         return ok(
           createAnalysisExecution(
-            [address === "0x10" ? "0x20" : "0x21"],
+            address === behavior.emptyXrefsOf
+              ? []
+              : [address === "0x10" ? "0x20" : "0x21"],
             PROVIDER,
             {
               limitations: behavior.limitations ?? [],
@@ -92,6 +96,7 @@ const provider = (behavior: Behavior = {}): AnalysisOperationPort => ({
 const expectedTrace = (
   residual: readonly string[],
   extraMatches: readonly object[] = [],
+  emptyReferenceTargets: readonly string[] = [],
 ) => ({
   query: "hello",
   search_mode: "literal",
@@ -116,7 +121,9 @@ const expectedTrace = (
       source_address: "0x20",
       containing_procedure: containing("0x20"),
     })),
-  ],
+  ].filter(
+    ({ target_address }) => !emptyReferenceTargets.includes(target_address),
+  ),
   truncated: residual.length > 0,
   residual_unknowns: residual,
 });
@@ -144,6 +151,19 @@ describe("trace_feature reference coverage", () => {
       output.normalized_result,
       "the received references are kept and only the capped target is a residual unknown",
     ).toEqual(expectedTrace([unknownFor("0x10")]));
+  });
+
+  it("keeps an empty capped reference page as an unknown, not proof of absence", async () => {
+    const output = await trace(
+      provider({
+        coverage: { "0x10": true, "0x11": false },
+        emptyXrefsOf: "0x10",
+      }),
+    );
+
+    expect(output.normalized_result).toEqual(
+      expectedTrace([unknownFor("0x10")], [], ["0x10"]),
+    );
   });
 
   it("does not carry a truncation over to the next target that reports nothing", async () => {

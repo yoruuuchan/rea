@@ -116,7 +116,7 @@ export const MANAGED_WORKFLOW_TOOL_CONTRACTS = [
     name: "verify_managed_native_boundaries",
     ...toolContractMetadata("verify_managed_native_boundaries"),
     description:
-      "Verify managed P/Invoke/native-boundary declarations against authenticated native export or function Evidence without executing managed code or translating managed metadata tokens into native addresses. The workflow preserves declaration-only, verified, inferred, contradicted, and unresolved states.",
+      "Verify managed P/Invoke/native-boundary declarations against authenticated native export or function Evidence without executing managed code or translating managed metadata tokens into native addresses. The workflow preserves declaration-only, verified, inferred, contradicted, and unresolved states; a name candidate with missing managed or native module identity remains unresolved with its candidate evidence retained.",
     kind: "application",
     inputSchema: managedNativeVerificationInputSchema,
     outputSchema: nativeVerificationOutputSchema,

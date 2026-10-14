@@ -68,6 +68,46 @@ it("preserves a UTF-8 BOM inside a CBOR text value rather than stripping it", ()
 });
 
 it.each([
+  [
+    "value",
+    "a1617860",
+    { kind: "text", value: "x" },
+    { kind: "text", value: "" },
+  ],
+  [
+    "key",
+    "a1606178",
+    { kind: "text", value: "" },
+    { kind: "text", value: "x" },
+  ],
+  [
+    "long-form value",
+    "a161787800",
+    { kind: "text", value: "x" },
+    { kind: "text", value: "" },
+  ],
+])(
+  "decodes an empty CBOR text %s like any other text",
+  (_name, hex, key, value) => {
+    expect(inspectSolidityMetadata(bytecode(hex))).toMatchObject({
+      status: "decoded",
+      entries: [{ key, value }],
+    });
+  },
+);
+
+it("keeps the compiler version beside a shortest-form empty text", () => {
+  const result = inspectSolidityMetadata(
+    bytecode("a264736f6c634300081e617860"),
+  );
+  expect(result).toMatchObject({
+    status: "decoded",
+    compiler_version: { representation: "release-bytes", value: "0.8.30" },
+  });
+  expect(result.entries).toHaveLength(2);
+});
+
+it.each([
   ["invalid text", "a1617861ff"],
   ["truncated value", "a16178"],
   ["unsupported tag", "a16178c000"],

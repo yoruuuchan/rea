@@ -10,11 +10,13 @@ const HOST_TEST_OWNERS = ["apple", "package", "sqlite"];
 // workflows' release, publication and self-hosted runner safeguards.
 const GUARDED_WORKFLOWS = new Set([
   ".github/workflows/pr-title.yml",
+  ".github/workflows/pr-readiness.yml",
   ".github/workflows/ci-full-pr.yml",
   ".github/workflows/release.yml",
   ".github/workflows/real-ghidra-windows.yml",
   ".github/workflows/sqlite-runtime.yml",
   ".github/workflows/ci-timings.yml",
+  ".github/workflows/mutation.yml",
 ]);
 // Sources compiled by build-conformance-fixtures.mjs. The readiness journey
 // analyzes the built C fixture as well as its own applications.
@@ -175,8 +177,11 @@ if (tier === "reused") {
         file.startsWith(".github/ISSUE_TEMPLATE/")
       ) {
         selected.docs = true;
-        // Authored documentation code also belongs to the static checkers.
-        selected.code ||= /^docs\/.*\.(?:[cm]?[jt]s|[jt]sx)$/su.test(file);
+        // Authored code and its Node package scopes belong to static checkers.
+        selected.code ||=
+          file.startsWith("docs/") &&
+          (/\.(?:[cm]?[jt]s|[jt]sx)$/u.test(file) ||
+            file.endsWith("/package.json"));
         selected.website ||= matchesAny(file, SCOPES.website);
         continue;
       }

@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { encodeNibArchiveFixture } from "./NibArchive.fixture.js";
+import type { analyzeInterfaceBuilderBundle } from "./InterfaceBuilderAnalysis.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import {
   analyzeAppleAssetCatalogs,
@@ -205,4 +206,91 @@ it("keeps recognized image fields on NIBArchive controls out of resource joins",
     runAssetUtil: () => Promise.resolve(JSON.stringify([{ Name: "Toolbar" }])),
   });
   expect(result.resource_key_matches).toEqual([]);
+});
+
+describe("Apple asset catalog and Interface Builder concurrency", () => {
+  const catalogBundle = async () => {
+    const bundle = await createTestTempDirectory("rea-asset-catalog-ib-");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    await writeFile(join(resources, "Assets.car"), "catalog");
+    return bundle;
+  };
+  const emptyGraph = {
+    graph: { nodes: [], truncated: false },
+  } as unknown as Awaited<ReturnType<typeof analyzeInterfaceBuilderBundle>>;
+
+  it("keeps the Interface Builder analysis running while catalogs are inspected", async () => {
+    // The Interface Builder analysis can finish only after catalog inspection
+    // starts, so a sequential implementation would never complete.
+    let catalogStarted!: () => void;
+    const catalogStart = new Promise<void>((resolve) => {
+      catalogStarted = resolve;
+    });
+    const result = await analyzeAppleAssetCatalogs({
+      environment: {},
+      bundlePath: await catalogBundle(),
+      targetSha256: "a".repeat(64),
+      analyzeInterfaceBuilder: async () => {
+        await catalogStart;
+        return emptyGraph;
+      },
+      runAssetUtil: async () => {
+        catalogStarted();
+        return "[]";
+      },
+    });
+    expect(result.catalogs).toHaveLength(1);
+  }, 5_000);
+
+  it("cancels the Interface Builder analysis and reports a catalog failure", async () => {
+    let cancelled = false;
+    let settled = false;
+    const rejected = await analyzeAppleAssetCatalogs({
+      environment: {},
+      bundlePath: await catalogBundle(),
+      targetSha256: "a".repeat(64),
+      analyzeInterfaceBuilder: ({ signal }) =>
+        new Promise((_, reject) => {
+          signal?.addEventListener("abort", () => {
+            cancelled = true;
+            setImmediate(() => {
+              settled = true;
+              reject(new Error("interface builder cancelled"));
+            });
+          });
+        }),
+      runAssetUtil: () => Promise.reject(new Error("assetutil failed")),
+    }).catch((cause: unknown) => cause);
+    expect(rejected).toMatchObject({ message: "assetutil failed" });
+    expect(cancelled).toBe(true);
+    expect(settled).toBe(true);
+  });
+
+  it("reports an early Interface Builder failure only after catalogs are inspected", async () => {
+    let finishCatalog!: (output: string) => void;
+    let catalogStarted = false;
+    let settled = false;
+    const analysis = analyzeAppleAssetCatalogs({
+      environment: {},
+      bundlePath: await catalogBundle(),
+      targetSha256: "a".repeat(64),
+      analyzeInterfaceBuilder: () =>
+        Promise.reject(new Error("interface builder failed")),
+      runAssetUtil: () => {
+        catalogStarted = true;
+        return new Promise((resolve) => {
+          finishCatalog = resolve;
+        });
+      },
+    }).finally(() => {
+      settled = true;
+    });
+    analysis.catch(() => undefined);
+    await vi.waitFor(() => expect(catalogStarted).toBe(true));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finishCatalog("[]");
+    await expect(analysis).rejects.toThrow("interface builder failed");
+  });
 });

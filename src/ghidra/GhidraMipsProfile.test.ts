@@ -37,6 +37,7 @@ const target = (change: Partial<MipsElfMetadata> = {}): BinaryTarget => ({
     byteOrder: "little",
     type: 2,
     flags: 0x70001001,
+    gnuAttributes: null,
     abiFlags: {
       version: 0,
       isaLevel: 32,
@@ -95,6 +96,7 @@ describe("bounded Ghidra MIPS admission", () => {
         flags1: 0,
         flags2: 0,
       },
+      gnu_attributes: null,
     });
     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
     const windows = new GhidraProvider(
@@ -470,7 +472,7 @@ describe("MIPS16 shared-image profile", () => {
       );
     },
   );
-  it.each(["sharedLoad", "abiFlags"] as const)(
+  it.each(["sharedLoad", "abiFlags", "gnuAttributes"] as const)(
     "refuses an uninspected %s declaration",
     (declaration) => {
       const value = shared();
@@ -484,9 +486,11 @@ describe("MIPS16 shared-image profile", () => {
       ).toMatchObject({
         status: "unsupported",
         reason: expect.stringContaining(
-          declaration === "abiFlags"
-            ? "inspected ABI flags"
-            : "have not been inspected",
+          {
+            abiFlags: "inspected ABI flags",
+            gnuAttributes: "GNU MIPS ABI attribute inspection is unavailable",
+            sharedLoad: "have not been inspected",
+          }[declaration],
         ),
       });
     },

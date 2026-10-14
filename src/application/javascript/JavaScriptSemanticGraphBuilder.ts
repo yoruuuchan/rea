@@ -648,7 +648,7 @@ function* projectDefinitionsAndReferences(
         resolution: "resolved",
         evidence: inferredSemanticEvidenceAt(context.file, reference.location),
       });
-    else
+    else if (reference.role === "write")
       addRelation(context.state, {
         source: expression,
         target: binding,

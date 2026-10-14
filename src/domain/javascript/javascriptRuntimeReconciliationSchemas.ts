@@ -228,6 +228,7 @@ const staticLoadStateSchema = z.strictObject({
     "not-observed-in-bounded-capture",
     "layer-outside-runtime-scope",
     "static-or-runtime-coverage-incomplete",
+    "ambiguous-runtime-candidate",
   ]),
 });
 

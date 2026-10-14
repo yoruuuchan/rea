@@ -234,7 +234,7 @@ export const adbInputSchemas = {
       .boolean()
       .default(false)
       .describe(
-        "Replace an existing installation and keep its data (adb install -r)",
+        "Request replacement mode and keep existing app data if present (adb install -r); does not establish whether the app was already installed",
       ),
   }),
   uninstall_adb_package: z.strictObject({
@@ -685,7 +685,8 @@ export const adbResultSchemas = {
     apk_path: z.string().min(1),
     bytes: z.number().int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    replaced: z.boolean(),
+    replace_requested: z.boolean(),
+    replaced: z.boolean().nullable(),
   }),
   uninstall_adb_package: z.strictObject({
     client,

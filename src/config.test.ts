@@ -368,3 +368,29 @@ describe("default Linux Hopper launcher", () => {
     ).toBe(`${home}/.local/share/rea/hopper/bin/Hopper`);
   });
 });
+
+describe("default macOS Hopper launcher", () => {
+  it("selects the system path before the installer user path", () => {
+    const home = "/fixture/home";
+    const system =
+      "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper";
+    const user =
+      "/fixture/home/Applications/Hopper Disassembler.app/Contents/MacOS/hopper";
+    const executable = (path: string): boolean =>
+      path === system || path === user;
+
+    expect(defaultHopperLauncherPath("darwin", home, executable)).toBe(system);
+    expect(
+      defaultHopperLauncherPath("darwin", home, (path) => path === user),
+    ).toBe(user);
+  });
+
+  it("keeps an explicit launcher path unchanged", () => {
+    const configured = "/custom/../Hopper launcher";
+    const parsed = parseConfig({ HOPPER_LAUNCHER_PATH: configured });
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { hopperLauncherPath: configured },
+    });
+  });
+});

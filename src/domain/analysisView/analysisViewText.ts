@@ -1,9 +1,7 @@
+import { analysisViewInputError } from "./analysisViewErrors.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { err, ok, type Result } from "../result.js";
-import {
-  analysisViewInputError,
-  type AnalysisViewCoverage,
-} from "./analysisView.js";
+import type { AnalysisViewCoverage } from "./analysisView.js";
 import { pageViewCoverage } from "./analysisViewCoverage.js";
 
 const viewError = (message: string): AnalysisError =>

@@ -330,7 +330,7 @@ describe("doctor scoped readiness", () => {
         client: "cursor",
         config_path: "/home/user/.cursor/mcp.json",
         command: ["/old/rea", "mcp"],
-        state: "stale",
+        state: "unknown",
         remediation: "Run rea setup to refresh this registration.",
       },
     ];
@@ -349,7 +349,11 @@ describe("doctor scoped readiness", () => {
       expect.objectContaining({ name: "registration:codex", ok: true }),
     );
     expect(scoped.informational_checks).toContainEqual(
-      expect.objectContaining({ name: "registration:cursor", ok: false }),
+      expect.objectContaining({
+        name: "registration:cursor",
+        ok: false,
+        classification: "unknown",
+      }),
     );
 
     const staleSelected = await runDoctor(
@@ -591,6 +595,28 @@ describe("doctor Linux and Hopper discovery", () => {
 });
 
 describe("doctor installed Hopper discovery", () => {
+  it("checks the canonical user install after the system launcher", async () => {
+    const userPath =
+      "/fixture/home/Applications/Hopper Disassembler.app/Contents/MacOS/hopper";
+    const checked: string[] = [];
+    const result = await runDoctor(
+      undefined,
+      host({
+        homeDirectory: "/fixture/home",
+        executable: (candidate) => {
+          checked.push(candidate);
+          return Promise.resolve(candidate === userPath);
+        },
+      }),
+    );
+
+    expect(result.hopperPath).toBe(userPath);
+    expect(checked.slice(0, 2)).toEqual([
+      "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper",
+      userPath,
+    ]);
+  });
+
   it("detects a Homebrew cask installed outside /Applications", async () => {
     const path =
       "/opt/homebrew/Caskroom/hopper/Hopper Disassembler.app/Contents/MacOS/hopper";

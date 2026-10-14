@@ -58,6 +58,8 @@ export type HeaderArchitecture = Exclude<
 export interface MipsElfMetadata extends ElfFamilyMetadata {
   /** Undefined until inspected; null means no ABI record was observed. */
   readonly abiFlags?: MipsAbiFlags | null;
+  /** Undefined until inspected; null means no GNU attribute section was observed. */
+  readonly gnuAttributes?: MipsGnuAttributes | null;
   /** Unavailable declaration sources; missing records there remain unknown. */
   readonly limitations?: readonly string[];
   /** Complete dynamic REL declarations, or the reason they could not be inspected. */
@@ -84,6 +86,14 @@ export interface MipsAbiFlags {
   readonly ases: number;
   readonly flags1: number;
   readonly flags2: number;
+}
+
+/** File-scope GNU object attributes parsed from `SHT_GNU_ATTRIBUTES`. */
+export interface MipsGnuAttributes {
+  /** Tag_GNU_MIPS_ABI_FP; null means this file did not declare the tag. */
+  readonly fpAbi: number | null;
+  /** Tag_GNU_MIPS_ABI_MSA vector-argument ABI; null means undeclared. */
+  readonly msa: number | null;
 }
 
 /**

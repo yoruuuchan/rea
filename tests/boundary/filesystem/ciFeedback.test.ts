@@ -38,6 +38,9 @@ const workflow = async () =>
                 z
                   .object({
                     run: z.string().optional(),
+                    if: z.string().optional(),
+                    uses: z.string().optional(),
+                    with: z.record(z.string(), z.unknown()).optional(),
                     env: z.record(z.string(), z.string()).optional(),
                   })
                   .passthrough(),
@@ -55,6 +58,143 @@ const workflow = async () =>
         ),
       ),
     ).jobs;
+
+const evaluateCondition = (
+  condition: string,
+  context: Record<string, unknown>,
+): boolean =>
+  z
+    .boolean()
+    .parse(
+      runInNewContext(
+        condition.startsWith("${{") ? condition.slice(3, -2) : condition,
+        context,
+        { timeout: 1_000 },
+      ),
+    );
+
+it.each(["fast", "full"] as const)(
+  "requires coverage and both actual mutation preflights in %s qualification",
+  async (tier) => {
+    const jobs = await workflow();
+    expect(jobs["reverse-tools-quality"]?.if).toBe(
+      "needs.changes.outputs.reverse_tools == 'true'",
+    );
+    expect(jobs.required?.needs).toContain("reverse-tools-quality");
+    const steps = jobs["reverse-tools-quality"]?.steps ?? [];
+    const commands = steps
+      .filter(
+        (step) =>
+          step.if === undefined ||
+          evaluateCondition(step.if, {
+            needs: { changes: { outputs: { tier } } },
+            cancelled: () => false,
+            success: () => true,
+            failure: () => false,
+            always: () => true,
+          }),
+      )
+      .flatMap((step) => step.run?.trim().split("\n") ?? [])
+      .map((command) => command.trim());
+    const mutationCommands = commands.filter(
+      (command) => command.includes("mutation") || command.includes("stryker"),
+    );
+    expect(mutationCommands).toEqual([
+      "node scripts/prepare-reverse-tools-mutation.mjs",
+      "npx --no-install stryker run stryker.config.mjs --dryRunOnly",
+      "npx --no-install stryker run stryker.semantics.config.mjs --dryRunOnly",
+    ]);
+    const coverage = commands.indexOf("npm run test:coverage:reverse-tools");
+    expect(coverage).toBeGreaterThanOrEqual(0);
+    expect(coverage).toBeLessThan(commands.indexOf(mutationCommands[0]!));
+
+    const flags = await scopeFlags();
+    const context: Record<
+      string,
+      { result: string; outputs?: Record<string, string> }
+    > = Object.fromEntries(
+      Object.keys(jobs).map((name) => [name, { result: "success" }]),
+    );
+    context.changes = {
+      result: "success",
+      outputs: {
+        ...Object.fromEntries(
+          flags.map((flag) => [flag, tier === "full" ? "true" : "false"]),
+        ),
+        tier,
+        code: "true",
+        reverse_tools: "true",
+      },
+    };
+    for (const result of [
+      "success",
+      "failure",
+      "cancelled",
+      "skipped",
+      "missing",
+    ]) {
+      const needs = { ...context };
+      if (result === "missing") delete needs["reverse-tools-quality"];
+      else needs["reverse-tools-quality"] = { result };
+      const execution = execute(
+        process.execPath,
+        [
+          fileURLToPath(
+            new URL("../../../scripts/ci/required.mjs", import.meta.url),
+          ),
+        ],
+        {
+          env: {
+            ...process.env,
+            CI_JOBS: JSON.stringify(needs),
+            CI_QUALIFICATION_DIRECTORY: "",
+          },
+        },
+      );
+      if (result === "success")
+        await expect(execution).resolves.toMatchObject({ stderr: "" });
+      else
+        await expect(execution).rejects.toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining("reverse-tools-quality"),
+        });
+    }
+  },
+);
+
+it("retains available quality diagnostics after failure without keeping canceled uploads alive", async () => {
+  const steps = (await workflow())["reverse-tools-quality"]?.steps ?? [];
+  const upload = steps.find((step) =>
+    step.uses?.startsWith("actions/upload-artifact@"),
+  );
+  const condition = z.string().parse(upload?.if);
+  for (const cancelled of [false, true])
+    expect(
+      evaluateCondition(condition, {
+        cancelled: () => cancelled,
+        success: () => false,
+        failure: () => true,
+        always: () => true,
+      }),
+    ).toBe(!cancelled);
+  const options = upload?.with ?? {};
+  expect(z.string().parse(options.name)).toContain(
+    "${{ needs.changes.outputs.tier }}",
+  );
+  expect(z.string().parse(options.name)).toContain("${{ github.run_attempt }}");
+  expect(
+    z
+      .string()
+      .parse(options.path)
+      .trim()
+      .split("\n")
+      .map((path) => path.trim()),
+  ).toEqual(
+    expect.arrayContaining(["coverage/reverse-tools/", "reports/mutation/"]),
+  );
+  expect(options["retention-days"]).toBe(7);
+  expect(options["if-no-files-found"]).toBe("warn");
+});
 
 it("starts source feedback before build and requires both groups without waiving missing jobs", async () => {
   const jobs = await workflow();

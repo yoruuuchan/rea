@@ -13,6 +13,12 @@ import {
   type FakeCdpBrowser,
 } from "../../fixtures/fakeCdpBrowser.js";
 import { writeElectronBoundaryFixture } from "../../fixtures/electronBoundaryApplication.js";
+import {
+  SOURCE,
+  applicationFixture,
+  analyzeFixture,
+  electronRuntimeEvidence,
+} from "../../fixtures/javascriptRuntimeReconciliation.js";
 import { JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE } from "../../../src/contracts/javascript/javascriptRuntimeReconciliationExample.js";
 
 const execute = promisify(execFile);
@@ -219,7 +225,122 @@ describe("Electron CLI runtime reconciliation", () => {
     },
     INTEGRATION_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps ambiguous runtime candidates unknown while unrelated scoped assets remain absent",
+    async () => {
+      const application = await applicationFixture();
+      const assets = await createTestTempDirectory("rea-runtime-cli-assets-");
+      const runtime = await createTestTempDirectory("rea-runtime-cli-live-");
+      const inputPath = join(assets, "reconciliation.json");
+      temporary.push(application, assets, runtime);
+      await Promise.all([
+        writeFile(join(assets, "app.js"), SOURCE),
+        writeFile(join(assets, "absent.js"), "export const absent = true;\n"),
+        writeFile(join(runtime, "app.js"), SOURCE),
+      ]);
+      const rootMapping = [{ kind: "file-root", root: runtime }] as const;
+      const input = {
+        static_layers: [
+          {
+            role: "application",
+            analysis: await analyzeFixture(application),
+            runtime_mappings: rootMapping,
+          },
+          {
+            role: "assets",
+            analysis: await analyzeFixture(assets),
+            runtime_mappings: rootMapping,
+          },
+        ],
+        runtime_observations: [
+          electronRuntimeEvidence(runtime, SOURCE, { includeWorker: false }),
+        ],
+      };
+      await writeFile(inputPath, JSON.stringify(input));
+      const reconciled = await runCli(
+        ["reconcile-javascript-runtime", inputPath, "--json"],
+        process.env,
+      );
+
+      const normalized =
+        isRecord(reconciled) && isRecord(reconciled.normalized_result)
+          ? reconciled.normalized_result
+          : undefined;
+      const reconciliations = normalized?.reconciliations;
+      const loadStates = normalized?.static_load_states;
+      if (!Array.isArray(reconciliations) || !Array.isArray(loadStates))
+        throw new Error("Missing runtime reconciliation output");
+      const ambiguous = reconciliations.find(
+        (item) =>
+          isRecord(item) &&
+          item.status === "ambiguous" &&
+          item.entity_kind === "script",
+      );
+      if (
+        !isRecord(ambiguous) ||
+        !Array.isArray(ambiguous.candidate_static_nodes)
+      )
+        throw new Error("Missing ambiguous runtime script");
+      const candidateIds = ambiguous.candidate_static_nodes.flatMap((item) =>
+        isRecord(item) && typeof item.static_node_id === "string"
+          ? [item.static_node_id]
+          : [],
+      );
+      expect(candidateIds).toHaveLength(2);
+      const candidateStates = loadStates.filter(
+        (item) =>
+          isRecord(item) &&
+          typeof item.static_node_id === "string" &&
+          candidateIds.includes(item.static_node_id),
+      );
+      expect(candidateStates).toHaveLength(2);
+      expect(
+        candidateStates.every(
+          (item) =>
+            isRecord(item) &&
+            item.status === "unknown" &&
+            item.reason === "ambiguous-runtime-candidate",
+        ),
+      ).toBe(true);
+      expect(loadStates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: "not-observed-in-capture",
+            reason: "not-observed-in-bounded-capture",
+          }),
+        ]),
+      );
+
+      const singleLayerPath = join(application, "single-reconciliation.json");
+      await writeFile(
+        singleLayerPath,
+        JSON.stringify({
+          static_layers: [input.static_layers[0]],
+          runtime_observations: input.runtime_observations,
+        }),
+      );
+      const uniquelyMatched = await runCli(
+        ["reconcile-javascript-runtime", singleLayerPath, "--json"],
+        process.env,
+      );
+      expect(uniquelyMatched).toMatchObject({
+        normalized_result: {
+          static_load_states: expect.arrayContaining([
+            expect.objectContaining({
+              status: "loaded",
+              reason: "runtime-script-correspondence",
+            }),
+          ]),
+        },
+      });
+    },
+    INTEGRATION_TEST_TIMEOUT_MS,
+  );
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const runCli = async (
   arguments_: readonly string[],

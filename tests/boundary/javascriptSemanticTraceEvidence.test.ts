@@ -12,6 +12,7 @@ import { createEvidence, parseEvidence } from "../../src/domain/evidence.js";
 import type { JsonValue } from "../../src/domain/jsonValue.js";
 import { analysisCliErrorEnvelopeSchema } from "../../src/contracts/errorSchemas.js";
 import { toolContract } from "../../src/contracts/toolContracts.js";
+import { javascriptApplicationAnalysisResultSchema } from "../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { javaScriptSemanticTraceResultSchema } from "../../src/domain/javascript/javascriptSemanticTraceSchemas.js";
 import { resolveJavaScriptSemanticEvidence } from "../../src/domain/javascript/javascriptSemanticGraph.js";
 
@@ -124,12 +125,88 @@ it("reports invalid nested semantic graph Evidence as caller input through CLI a
   }
 });
 
+it("excludes local exports from writes-only traces through CLI and MCP", async () => {
+  const root = await createTestTempDirectory("rea-semantic-export-trace-");
+  await mkdir(join(root, "src"));
+  await writeFile(
+    join(root, "src", "main.js"),
+    [
+      "const answer = 42;",
+      "export { answer, answer as result };",
+      "let mutable = 0;",
+      "mutable = 1;",
+      "export { mutable };",
+    ].join("\n"),
+  );
+
+  const cli = createCli({});
+  const analyzed = await serveCli(cli, [
+    "analyze-javascript-application",
+    root,
+    "--json",
+  ]);
+  expect(analyzed.exitCode).toBe(0);
+  const application = parseEvidence(JSON.parse(analyzed.stdout));
+  const analysisResult = javascriptApplicationAnalysisResultSchema.parse(
+    application.normalized_result,
+  );
+  const bindingId = (label: string): string => {
+    const binding = analysisResult.semantic_graph.nodes.find(
+      (node) => node.kind === "binding" && node.label === label,
+    );
+    if (binding === undefined)
+      throw new Error(`CLI semantic graph must include the ${label} binding`);
+    return binding.node_id;
+  };
+
+  const harness = await createApplicationMcpHarness();
+  try {
+    const exportTrace = await assertSuccessfulTraceParity(
+      cli,
+      harness,
+      application,
+      {
+        seed: { kind: "semantic-node", node_id: bindingId("answer") },
+        direction: "backward-provenance",
+        allowed_relations: ["writes"],
+      },
+    );
+    expect(exportTrace.summary).toMatchObject({
+      total_seed_matches: 1,
+      traversed_relations: 0,
+    });
+    expect(exportTrace.relations).toEqual([]);
+
+    const assignmentTrace = await assertSuccessfulTraceParity(
+      cli,
+      harness,
+      application,
+      {
+        seed: { kind: "semantic-node", node_id: bindingId("mutable") },
+        direction: "backward-provenance",
+        allowed_relations: ["writes"],
+      },
+    );
+    expect(assignmentTrace.summary).toMatchObject({
+      total_seed_matches: 1,
+      traversed_relations: 1,
+    });
+    expect(assignmentTrace.relations).toHaveLength(1);
+  } finally {
+    await harness.close();
+  }
+});
+
 const assertSuccessfulTraceParity = async (
   cli: ReturnType<typeof createCli>,
   harness: Awaited<ReturnType<typeof createApplicationMcpHarness>>,
   application: ReturnType<typeof parseEvidence>,
-  query: { readonly seed: unknown; readonly direction: string },
-): Promise<void> => {
+  query: {
+    readonly seed: unknown;
+    readonly direction: string;
+    readonly allowed_relations?: readonly string[];
+  },
+): Promise<ReturnType<typeof javaScriptSemanticTraceResultSchema.parse>> => {
   const arguments_ = { application, query };
   const cliResponse = await serveCli(cli, [
     "trace-javascript-semantics",
@@ -162,6 +239,7 @@ const assertSuccessfulTraceParity = async (
   ).outputSchema.parse(mcpResponse.structuredContent);
   expect(mcpEvidence.normalized_result).toEqual(cliResult);
   expect(mcpEvidence).toEqual(cliEvidence);
+  return cliResult;
 };
 
 const assertTraceContextsResolve = (

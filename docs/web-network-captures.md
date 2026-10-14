@@ -69,6 +69,13 @@ The observed mitmproxy 12.2.3 `SaveHar` profile can emit `postData.text: null`
 for a missing request body. REA preserves that reported null, omitting the
 optional field only from its validation copy for this exact producer profile;
 it does not invent an empty string or body bytes.
+The observed Playwright 1.58.2 profile can report a bracketed IPv6
+`serverIPAddress`, forwarded from Chromium's `remoteIPAddress` through
+[Playwright's HAR tracer](https://github.com/microsoft/playwright/blob/v1.58.2/packages/playwright-core/src/server/har/harTracer.ts).
+REA preserves the original spelling in reported Evidence and removes brackets
+only from its validation copy, only for this declared producer and a valid IPv6
+literal. Invalid addresses, bracketed IPv4, ports and zone identifiers remain
+validation failures. Producer declarations do not authenticate origin.
 
 Native mitmproxy decoding requires a caller-supplied **mitmdump 12.2.3 on
 Linux**. Set its absolute executable path:

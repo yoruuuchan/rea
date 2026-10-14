@@ -273,6 +273,12 @@ RPC client syntax also contributes network endpoint candidates, in both
   `OperationDefinition` document object. A graphql-tag `loc.source.body` copy is
   not reported twice. Anonymous operations are not reported.
 
+Literal link options and precompiled document fields follow object property
+order: the final definition owns the key. A later spread, dynamic computed key,
+method, or accessor can make a field unknown, so an overwritten literal is not
+reported as the endpoint or operation. A final explicit property after a spread
+or dynamic key remains usable.
+
 A procedure path is the server-side procedure name, not a resolved URL; the
 transport URL depends on the link configuration and batching. When the proxy is
 reached through a member expression, such as a webpack module binding

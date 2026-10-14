@@ -252,8 +252,10 @@ const registerReferenceSourceCommand = (
       outlineDepth: z
         .number()
         .int()
-        .nonnegative()
         .safe()
+        // After .safe(): its safe-range check overwrites an earlier minimum,
+        // which advertised negative depths the parser rejects.
+        .nonnegative()
         .optional()
         .describe(
           "Summary outline path depth (default: 2; 0 omits entries); requires --detail summary",

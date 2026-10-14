@@ -81,6 +81,20 @@ export const semanticStaticPropertyKey = (
   property = unwrapJavaScriptExpression(property).node;
   if (t.isStringLiteral(property) || t.isNumericLiteral(property))
     return String(property.value);
+  if (t.isBigIntLiteral(property)) return String(property.value);
+  if (
+    t.isUnaryExpression(property, { operator: "-" }) &&
+    t.isBigIntLiteral(property.argument)
+  )
+    return String(-BigInt(property.argument.value));
+  if (
+    t.isTemplateLiteral(property) &&
+    property.expressions.length === 0 &&
+    property.quasis.length === 1
+  ) {
+    const cooked = property.quasis[0]?.value.cooked;
+    return cooked === null || cooked === undefined ? null : cooked;
+  }
   return !computed && t.isIdentifier(property) ? property.name : null;
 };
 

@@ -47,12 +47,26 @@ const fileUnavailableSystemCode = (cause: unknown): string | undefined => {
     : undefined;
 };
 
-const lstatIfPresent = async (path: string): Promise<Stats | undefined> => {
+const lstatIfPresent = async (
+  path: string,
+  previouslyObservedRoot = false,
+  signal?: AbortSignal,
+): Promise<Stats | undefined> => {
+  signal?.throwIfAborted();
   try {
-    return await lstat(path);
+    const stats = await lstat(path);
+    signal?.throwIfAborted();
+    return stats;
   } catch (cause: unknown) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
+    if (
+      cause instanceof Error &&
+      "code" in cause &&
+      (cause.code === "ENOENT" ||
+        (previouslyObservedRoot && cause.code === "ENOTDIR"))
+    ) {
+      signal?.throwIfAborted();
       return undefined;
+    }
     throw cause;
   }
 };
@@ -169,7 +183,11 @@ export const hashFile = async (
 export const snapshotRoots = async (
   scenario: ProcessScenario,
   signal?: AbortSignal,
+  previous?: ProcessFilesystemSnapshot,
 ): Promise<ProcessFilesystemSnapshot> => {
+  // A prior root entry establishes same-run admission. Preserve initial
+  // obstruction errors; a later non-directory ancestor makes it absent.
+  const previousPaths = new Set(previous?.files.map(({ path }) => path));
   const entries: FileState[] = [];
   const completeRoots: string[] = [];
   let remainingBytes = scenario.limits.file_bytes;
@@ -198,7 +216,11 @@ export const snapshotRoots = async (
         enumerationReasons.add("depth_limit");
       return false;
     }
-    const stats = await lstatIfPresent(path);
+    const stats = await lstatIfPresent(
+      path,
+      previousPaths.has(`${rootAlias}:.`),
+      signal,
+    );
     if (stats === undefined) return true;
     const relativePath = relative(root, path) || ".";
     if (stats.isSymbolicLink()) {
@@ -326,7 +348,10 @@ export const snapshotRoots = async (
   };
   for (const [index, root] of scenario.filesystem_observation_paths.entries()) {
     const alias = `root_${String(index)}`;
-    if ((await lstatIfPresent(root)) === undefined) {
+    if (
+      (await lstatIfPresent(root, previousPaths.has(`${alias}:.`), signal)) ===
+      undefined
+    ) {
       completeRoots.push(alias);
       continue;
     }

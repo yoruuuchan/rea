@@ -40,6 +40,7 @@ const authority = (
     readonly jobMemoryLimit?: true;
     readonly polls?: readonly unknown[];
     readonly appliedLimit?: (requested: unknown) => unknown;
+    readonly failClose?: () => boolean;
   } = {},
 ) => {
   const calls: { operation: string; arguments_: readonly unknown[] }[] = [];
@@ -83,7 +84,10 @@ const authority = (
         };
       if (operation === "process_poll") return polls.shift();
       if (operation === "process_terminate") return true;
-      if (operation === "process_close") return null;
+      if (operation === "process_close") {
+        if (options.failClose?.()) throw new Error("native close failed");
+        return null;
+      }
       throw new Error(`Unmodeled native operation ${operation}`);
     },
   };
@@ -105,6 +109,43 @@ const launch = (
       ...(memoryLimitBytes === undefined ? {} : { memoryLimitBytes }),
     },
   );
+
+describe("Windows native release retry", () => {
+  it("ends output streams and retains ownership for a failed close retry", async () => {
+    vi.useFakeTimers();
+    let shouldFailClose = true;
+    try {
+      const { native, calls } = authority({
+        polls: [{ ...settledPoll }, { ...settledPoll }],
+        failClose: () => shouldFailClose,
+      });
+      const child = launch(native);
+      const failures: string[] = [];
+      child.on("error", (error: Error) => failures.push(error.message));
+      const closed = new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+      expect(child.stdout.writableEnded).toBe(true);
+      expect(child.stderr.writableEnded).toBe(true);
+      expect(failures).toContain("native close failed");
+      expect(calls.some(({ operation }) => operation === "process_close")).toBe(
+        true,
+      );
+
+      shouldFailClose = false;
+      const cleanup = child.cleanup();
+      await vi.advanceTimersByTimeAsync(25);
+      expect(await cleanup).toMatchObject({ cleaned: true });
+      await closed;
+      expect(child.stdout.writableEnded).toBe(true);
+      expect(child.stderr.writableEnded).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("Windows Job Object memory limits", () => {
   it("emits close only after descendants leave the Job Object", async () => {

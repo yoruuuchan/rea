@@ -86,7 +86,14 @@ outside this mutation pass.
 
 Function fingerprints commit normalized syntax, control-flow shape, relation
 shape, literal sets, arity, and detected effects without using local names or
-source offsets. Equal duplicate fingerprints remain ambiguous. Dynamic
+source offsets. Function-local directive literals contribute their values while
+preserving escape spelling: `"use\x20strict"` differs from `"use strict"`.
+Quote style, formatting, and local names remain normalized. Equal duplicate
+fingerprints remain ambiguous.
+Fingerprints are static candidates, not behavioral-equivalence proofs or a
+version-independent identity. Re-analyze affected sources and obtain new seeds
+after analyzer corrections; previously retained Evidence remains queryable using
+its original component commitments. Dynamic
 calls/properties/names, parser recovery, unresolved handles, and unsupported API
 shapes stay explicit unknowns; a missing relation is never reported as proven
 behavioral absence.

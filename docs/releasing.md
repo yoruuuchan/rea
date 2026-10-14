@@ -10,6 +10,9 @@ SHA returned by Release Please. Before either registry is published, the release
 run calls full CI qualification at that exact revision, including coverage,
 portable providers, and every native package host. Later main commits cannot
 change or cancel that proof.
+The required reverse-tools lane runs fresh coverage and both mutation
+preflights. Complete mutation sweeps run separately on a schedule or manual
+dispatch and do not block publication; see [the testing guide](testing.md).
 Ordinary main pushes and closed, unmerged PRs cannot publish packages. Check
 both publication jobs and the published-package canary; a merged PR or GitHub
 tag alone does not establish that publication finished. Retry failed jobs in

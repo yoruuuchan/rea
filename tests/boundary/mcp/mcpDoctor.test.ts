@@ -40,34 +40,38 @@ describe("production MCP doctor", () => {
     });
   });
 
-  it("connects to the production stdio child and verifies the canonical catalog", async () => {
-    const result = await runProductionMcpDoctor({
-      command: process.execPath,
-      args: [resolve("scripts/rea.mjs"), "mcp"],
-      cwd: process.cwd(),
-      environment: process.env,
-    });
+  it.each(["full", "compact"] as const)(
+    "connects to the production stdio child and verifies the %s catalog",
+    async (profile) => {
+      const result = await runProductionMcpDoctor({
+        command: process.execPath,
+        args: [resolve("scripts/rea.mjs"), "mcp"],
+        cwd: process.cwd(),
+        environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: profile },
+      });
 
-    expect(result).toMatchObject({
-      healthy: true,
-      adapter: "production-stdio",
-      inventory: {
-        tools: {
-          expected: expect.any(Number),
-          observed: expect.any(Number),
-          missing: [],
-          unexpected: [],
+      expect(result).toMatchObject({
+        healthy: true,
+        adapter: "production-stdio",
+        inventory: {
+          tools: {
+            expected: expect.any(Number),
+            observed: expect.any(Number),
+            missing: [],
+            unexpected: [],
+          },
         },
-      },
-      request_flow: { tool: "binary_session", ok: true },
-    });
-    expect(result.inventory?.tools.expected).toBe(
-      result.inventory?.tools.observed,
-    );
-    expect(result.inventory?.tools.expected).toBe(
-      CATALOG_IDENTITY.counts.mcp_tools,
-    );
-  }, 30_000);
+        request_flow: { tool: "binary_session", ok: true },
+      });
+      expect(result.inventory?.tools.expected).toBe(
+        result.inventory?.tools.observed,
+      );
+      expect(result.inventory?.tools.expected).toBe(
+        CATALOG_IDENTITY.counts.mcp_tools,
+      );
+    },
+    30_000,
+  );
 });
 
 describe("production MCP doctor probe validation", () => {

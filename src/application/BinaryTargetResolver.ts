@@ -223,6 +223,10 @@ export const parseBinaryTarget = async (
     }
   } catch (cause: unknown) {
     if (cause instanceof AnalysisCancelledError) return err(cause);
+    if (signal?.aborted === true && cause === signal.reason)
+      return err(
+        new AnalysisCancelledError("resolve_binary_target", { cause }),
+      );
     if (cause instanceof BinaryTargetError) return err(cause);
     if (!(cause instanceof Error)) throw cause;
     const failure = classifyBinaryTargetFilesystemFailure(candidate, cause);
@@ -551,6 +555,7 @@ const readExecutableMetadata = async (
     mips: {
       ...parsed.value.mips,
       abiFlags: declarations.value.abiFlags,
+      gnuAttributes: declarations.value.gnuAttributes,
       ...(declarations.value.sharedLoad === undefined
         ? {}
         : { sharedLoad: declarations.value.sharedLoad }),

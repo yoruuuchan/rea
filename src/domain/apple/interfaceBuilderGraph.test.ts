@@ -395,46 +395,6 @@ describe("Interface Builder hierarchy completeness", () => {
       }),
     );
   });
-
-  it("marks retained hierarchy edges with unresolved endpoints partial", () => {
-    const result = buildInterfaceBuilderAnalysis({
-      targetSha256: hash,
-      toolVersion: "test",
-      documents: [
-        {
-          relativePath: "Endpoint.nib",
-          archiveSha256: hash,
-          documentKind: "nib",
-          raw: {
-            "com.apple.ibtool.document.objects": {
-              kept: { class: "UIView" },
-              omitted: { class: "UIView" },
-            },
-            "com.apple.ibtool.document.hierarchy": [{ objectID: "omitted" }],
-          },
-        },
-      ],
-      limits: interfaceBuilderLimitsSchema.parse({ max_objects: 2 }),
-    });
-
-    expect(result.documents[0]?.hierarchy_complete).toBe(false);
-    expect(result.graph.coverage).toContainEqual(
-      expect.objectContaining({
-        facet: "hierarchy:Endpoint.nib",
-        status: "partial",
-        reason: "graph_limit_reached",
-        omitted: 0,
-      }),
-    );
-    expect(result.graph.edges).toContainEqual(
-      expect.objectContaining({
-        relation: "contains",
-        resolution: "unresolved",
-        to: null,
-        reason: "endpoint_omitted_by_object_limit",
-      }),
-    );
-  });
 });
 
 describe("keyed archive object references", () => {

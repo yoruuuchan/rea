@@ -61,7 +61,7 @@ export class ArtifactPathRegistry {
       }
       node = child;
       if (index === parts.length - 1) {
-        if (node.kind !== undefined)
+        if (node.kind !== undefined && node.kind !== kind)
           throw new ArtifactReaderFailure(
             "path",
             `Artifact path collision: ${path}`,

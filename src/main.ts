@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { snapshotEnvironment } from "./process/snapshotEnvironment.js";
+import { CURRENT_ENTRYPOINT_PATH } from "./process/CurrentEntrypointPath.js";
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 
@@ -122,7 +123,6 @@ const isDirectEntrypoint = (
   }
 };
 
-const entryPath = process.argv[1];
-if (isDirectEntrypoint(entryPath, import.meta.url)) {
+if (isDirectEntrypoint(CURRENT_ENTRYPOINT_PATH, import.meta.url)) {
   void runEntrypoint();
 }

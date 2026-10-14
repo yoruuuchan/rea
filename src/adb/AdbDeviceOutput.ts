@@ -30,6 +30,12 @@ export interface AdbDeviceEntry {
 
 const DEVICE_LINE = /^(\S+)\s+(.*)$/u;
 
+const normalizeAdbOutputLine = (rawLine: string): string => rawLine.trimEnd();
+
+const isSuccessfulDaemonStartNotice = (line: string): boolean =>
+  line === "* daemon started successfully" ||
+  line === "* daemon started successfully *";
+
 const metadataValue = (remainder: string, key: string): string | null => {
   const match = new RegExp(`(?:^|\\s)${key}:(\\S+)`, "u").exec(remainder);
   return match === null ? null : match[1]!;
@@ -42,6 +48,7 @@ const metadataValue = (remainder: string, key: string): string | null => {
  */
 export const parseAdbDevicesOutput = (
   stdout: string,
+  stderr = "",
 ): {
   devices: readonly AdbDeviceEntry[];
   unparsedLines: readonly string[];
@@ -51,12 +58,13 @@ export const parseAdbDevicesOutput = (
   const unparsedLines: string[] = [];
   let daemonStarted = false;
   for (const rawLine of stdout.split(/\r?\n/u)) {
-    const line = rawLine.trimEnd();
-    if (line === "" || line.startsWith("List of devices attached")) continue;
-    if (line.startsWith("* daemon")) {
-      if (line.includes("started successfully")) daemonStarted = true;
+    const line = normalizeAdbOutputLine(rawLine);
+    if (isSuccessfulDaemonStartNotice(line)) {
+      daemonStarted = true;
       continue;
     }
+    if (line === "" || line.startsWith("List of devices attached")) continue;
+    if (line.startsWith("* daemon")) continue;
     const match = DEVICE_LINE.exec(line);
     const state = ADB_DEVICE_STATES.find((candidate) => {
       const remainder = match?.[2];
@@ -104,6 +112,15 @@ export const parseAdbDevicesOutput = (
             ? "usb_transport"
             : "none",
     });
+  }
+  if (!daemonStarted && stderr !== "") {
+    for (const rawLine of stderr.split(/\r?\n/u)) {
+      const line = normalizeAdbOutputLine(rawLine);
+      if (isSuccessfulDaemonStartNotice(line)) {
+        daemonStarted = true;
+        break;
+      }
+    }
   }
   return { devices, unparsedLines, daemonStarted };
 };

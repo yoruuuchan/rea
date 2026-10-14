@@ -15,6 +15,10 @@ import {
 } from "../domain/runtimeVersion.js";
 import { installedCaskAppdir, probeHomebrew } from "./homebrew.js";
 import {
+  macHopperApplicationRoots,
+  macHopperRenamedLauncherCandidates,
+} from "./MacHopperPaths.js";
+import {
   linuxHopperBinarySupported,
   linuxSharedLibrariesAvailable,
   readLinuxDistribution,
@@ -23,6 +27,7 @@ import {
 import {
   readInstalledSkillIdentity,
   type InstalledSkillIdentity,
+  type SkillPathIssue,
 } from "./SetupSkill.js";
 import { CATALOG_IDENTITY } from "../catalogIdentity.js";
 import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
@@ -52,6 +57,7 @@ export interface DoctorCheck {
     | "unsupported_host"
     | "unsupported_target"
     | "missing_analysis_engine"
+    | "unknown"
     | "config_drift";
   readonly detail?: string;
   readonly details?: Readonly<Record<string, JsonValue>>;
@@ -102,8 +108,9 @@ export interface DoctorHost {
   /** Validated provider settings preserved by setup, independent of readiness. */
   providerRegistrationEnvironment?(): Readonly<Record<string, string>>;
   installationPaths?(): Promise<readonly string[]>;
+  /** Undefined checks installed skill roots; explicit selections stay scoped. */
   installedSkillIdentity?(
-    clientIds: readonly string[],
+    clientIds: readonly string[] | undefined,
   ): Promise<InstalledSkillIdentity | undefined>;
   close?(): Promise<string | undefined>;
   clientRegistrations?(): Promise<readonly ClientRegistrationStatus[]>;
@@ -132,6 +139,13 @@ export interface DoctorScope {
 }
 
 /** Installed-package, skill, client, and runtime identity observations. */
+export type DoctorSkillState =
+  | "aligned"
+  | "stale"
+  | "missing"
+  | "unmanaged"
+  | "unknown";
+
 interface DoctorIdentity {
   readonly cli_package_version: string;
   readonly expected_skill_version: string;
@@ -148,7 +162,8 @@ interface DoctorIdentity {
   readonly skill: {
     readonly installed_version: string | null;
     readonly installed_tool_count: number | null;
-    readonly state: "aligned" | "stale" | "missing";
+    readonly state: DoctorSkillState;
+    readonly issues?: readonly SkillPathIssue[];
     readonly remediation: string | null;
   };
   readonly registrations: readonly ClientRegistrationStatus[];
@@ -278,9 +293,7 @@ const collectDoctorIdentity = async (
   const registrations = (await host.clientRegistrations?.()) ?? [];
   const skillClientIds =
     scope.skill_clients ??
-    (scope.mode === "audit-wide"
-      ? registrations.map(({ client }) => client)
-      : scope.clients);
+    (scope.clients.length > 0 ? scope.clients : undefined);
   const installedSkillIdentity =
     await host.installedSkillIdentity?.(skillClientIds);
   const skillAligned = skillIdentityAligned(installedSkillIdentity);
@@ -311,15 +324,13 @@ const collectDoctorIdentity = async (
       skill: {
         installed_version: installedSkillIdentity?.version ?? null,
         installed_tool_count: installedSkillIdentity?.toolCount ?? null,
-        state:
-          installedSkillIdentity === undefined
-            ? "missing"
-            : skillAligned
-              ? "aligned"
-              : "stale",
+        state: skillIdentityState(installedSkillIdentity),
+        ...(installedSkillIdentity?.issues === undefined
+          ? {}
+          : { issues: installedSkillIdentity.issues }),
         remediation: skillAligned
           ? null
-          : "Run rea setup to update the installed REA skill.",
+          : skillIdentityRemediation(installedSkillIdentity),
       },
       registrations,
     },
@@ -333,25 +344,52 @@ const skillIdentityAligned = (
   identity.toolCount === CATALOG_IDENTITY.counts.mcp_tools &&
   identity.canonical;
 
+const skillIdentityState = (
+  identity: InstalledSkillIdentity | undefined,
+): DoctorSkillState => {
+  if (identity?.issues?.some(({ kind }) => kind === "unreadable"))
+    return "unknown";
+  if ((identity?.issues?.length ?? 0) > 0) return "unmanaged";
+  return identity === undefined
+    ? "missing"
+    : skillIdentityAligned(identity)
+      ? "aligned"
+      : "stale";
+};
+
+const skillIdentityRemediation = (
+  identity: InstalledSkillIdentity | undefined,
+): string => {
+  const issues = identity?.issues;
+  if (issues !== undefined && issues.length > 0)
+    return `${issues.map(({ path, detail }) => `${detail} (${path})`).join(" ")} Verify the reported paths and use regular skill directories, or run rea setup with --skill=false to configure the client without installing the skill.`;
+  return "Run rea setup to update the installed REA skill.";
+};
+
 const skillIdentityCheck = (
   identity: InstalledSkillIdentity | undefined,
-): DoctorCheck => ({
-  name: "skill:identity",
-  ok: false,
-  classification: "config_drift",
-  detail:
-    identity === undefined
-      ? "Installed REA skill identity is missing."
-      : "Installed REA skill identity is stale.",
-  remediation: "Run rea setup to update the installed REA skill.",
-});
+): DoctorCheck => {
+  const issues = identity?.issues;
+  return {
+    name: "skill:identity",
+    ok: false,
+    classification: "config_drift",
+    detail:
+      issues !== undefined && issues.length > 0
+        ? `Selected skill identity is ${skillIdentityState(identity)}: ${issues.map(({ path }) => path).join(", ")}.`
+        : identity === undefined
+          ? "Installed REA skill identity is missing."
+          : "Installed REA skill identity is stale.",
+    remediation: skillIdentityRemediation(identity),
+  };
+};
 
 const registrationCheck = (
   registration: UnhealthyClientRegistrationStatus,
 ): DoctorCheck => ({
   name: `registration:${registration.client}`,
   ok: false,
-  classification: "config_drift",
+  classification: registration.state === "unknown" ? "unknown" : "config_drift",
   detail: registration.config_path,
   remediation: registration.remediation,
 });
@@ -587,19 +625,22 @@ const uncomposedLinuxDemoRuntimeCheck = (): Promise<DoctorCheck> =>
   });
 
 const manualHopperPaths = async (home: string): Promise<readonly string[]> => {
-  const paths: string[] = [];
-  for (const root of ["/Applications", join(home, "Applications")]) {
+  const roots = macHopperApplicationRoots(home);
+  const bundleNamesByRoot = new Map<string, readonly string[]>();
+  for (const root of roots) {
     try {
-      for (const entry of await readdir(root, { withFileTypes: true })) {
-        if (entry.isDirectory() && /^Hopper.*\.app$/i.test(entry.name))
-          paths.push(join(root, entry.name, "Contents/MacOS/hopper"));
-      }
+      bundleNamesByRoot.set(
+        root,
+        (await readdir(root, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map(({ name }) => name),
+      );
     } catch (cause: unknown) {
       // A missing or unreadable optional application directory is not fatal.
       void cause;
     }
   }
-  return paths;
+  return macHopperRenamedLauncherCandidates(home, bundleNamesByRoot);
 };
 
 const uniqueLines = (value: string): string[] => [

@@ -1,5 +1,6 @@
 import { deflateSync } from "node:zlib";
 import { expect, it } from "vitest";
+import { rustAuditableMetadataSchema } from "../domain/rust/rustBinary.js";
 import {
   RUST_SECTION_BYTES,
   readAuditableSection,
@@ -153,14 +154,54 @@ it("stops an inflate that exceeds the section ratio", () => {
   ).toThrow(/1 MiB/);
 });
 
-it.each([{ packages: [] }, { packages: [{ future_package_field: true }] }])(
-  "rejects an unknown format before interpreting its packages: %j",
-  ({ packages }) => {
-    expect(() => section({ format: 99, packages })).toThrow(
+it.each([0, 8])("reads documented cargo-auditable revision %i", (format) => {
+  const parsed = section({
+    format,
+    packages: [
+      { name: "sample", version: "0.1.0", source: "local", root: true },
+    ],
+  });
+  expect(parsed).toMatchObject({
+    format_version: format,
+    root_package_index: 0,
+  });
+  expect(rustAuditableMetadataSchema.parse(parsed)).toEqual(parsed);
+});
+
+it.each([{ source: 4 }, { source: 9 }, { source: 99 }])(
+  "preserves unknown revision $source for the documented preceding-revision interpretation",
+  ({ source }) => {
+    const parsed = section({
+      format: source,
+      packages: [
+        { name: "sample", version: "0.1.0", source: "local", root: true },
+      ],
+    });
+    expect(parsed).toMatchObject({
+      format_version: source,
+    });
+    expect(rustAuditableMetadataSchema.parse(parsed)).toEqual(parsed);
+  },
+);
+
+it("rejects unknown package fields even for a forward-compatible revision", () => {
+  expect(() =>
+    section({
+      format: 99,
+      packages: [
+        { name: "sample", version: "0.1.0", source: "local", future: true },
+      ],
+    }),
+  ).toThrow(/package schema/);
+});
+
+it.each([-1, 1.5, 0x1_0000_0000])(
+  "rejects invalid cargo-auditable format value %s",
+  (format) => {
+    expect(() => section({ format, packages: [] })).toThrow(
       expect.objectContaining({
         name: "RustAuditableFormatFailure",
-        kind: "unsupported",
-        message: "Unsupported cargo-auditable format version 99",
+        kind: "malformed",
       }),
     );
   },

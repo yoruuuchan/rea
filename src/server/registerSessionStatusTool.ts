@@ -18,6 +18,7 @@ import { mcpClientMetadata } from "./mcpClientMetadata.js";
 import type { AvailabilityPolicy } from "../application/CapabilityInventory.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import { err } from "../domain/result.js";
+import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 
 /** Inputs required to register the binary session status tool. */
 export interface SessionStatusToolOptions {
@@ -27,6 +28,12 @@ export interface SessionStatusToolOptions {
   readonly startedAt: string;
   readonly availabilityPolicy: () => AvailabilityPolicy;
   readonly androidAnalysisAvailability: (
+    signal: AbortSignal,
+  ) => Promise<ProviderAvailability>;
+  readonly adbAnalysisAvailability?: (
+    signal: AbortSignal,
+  ) => Promise<ProviderAvailability>;
+  readonly apktoolAnalysisAvailability?: (
     signal: AbortSignal,
   ) => Promise<ProviderAvailability>;
 }
@@ -42,6 +49,8 @@ export const registerSessionStatusTool = (
     startedAt,
     availabilityPolicy,
     androidAnalysisAvailability,
+    adbAnalysisAvailability,
+    apktoolAnalysisAvailability,
   } = options;
   server.registerTool(
     contract.name,
@@ -52,10 +61,17 @@ export const registerSessionStatusTool = (
         server.server,
       );
       let androidAvailability: ProviderAvailability;
+      let adbAvailability: ProviderAvailability | undefined;
+      let apktoolAvailability: ProviderAvailability | undefined;
       try {
-        androidAvailability = await androidAnalysisAvailability(
-          context.mcpReq.signal,
-        );
+        const [android, adb, apktool] = await Promise.all([
+          androidAnalysisAvailability(context.mcpReq.signal),
+          adbAnalysisAvailability?.(context.mcpReq.signal) ?? undefined,
+          apktoolAnalysisAvailability?.(context.mcpReq.signal) ?? undefined,
+        ] as const);
+        androidAvailability = android;
+        adbAvailability = adb;
+        apktoolAvailability = apktool;
       } catch (cause) {
         if (!context.mcpReq.signal.aborted) throw cause;
         return server.delivery.toCallToolResult(
@@ -70,11 +86,19 @@ export const registerSessionStatusTool = (
         {
           ...availabilityPolicy(),
           androidAnalysisAvailability: androidAvailability,
+          ...(adbAvailability === undefined
+            ? {}
+            : { adbAnalysisAvailability: adbAvailability }),
+          ...(apktoolAvailability === undefined
+            ? {}
+            : { apktoolAnalysisAvailability: apktoolAvailability }),
         },
         clientFeatures,
       );
       const serverIdentity = createServerIdentity({
         startedAt,
+        commandPath: CURRENT_ENTRYPOINT_PATH,
+        catalog: server.catalogIdentity,
         expected: {
           ...(input.expected_package_version === undefined
             ? {}

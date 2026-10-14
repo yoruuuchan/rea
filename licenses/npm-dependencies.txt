@@ -2905,11 +2905,11 @@ pure-rand@8.4.2 | development | MIT
   Package: https://www.npmjs.com/package/pure-rand/v/8.4.2
   Archive: https://registry.npmjs.org/pure-rand/-/pure-rand-8.4.2.tgz
   Integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==
-qs@6.15.1 | development | BSD-3-Clause
+qs@6.16.0 | development | BSD-3-Clause
   Lockfile path: node_modules/qs
-  Package: https://www.npmjs.com/package/qs/v/6.15.1
-  Archive: https://registry.npmjs.org/qs/-/qs-6.15.1.tgz
-  Integrity: sha512-6YHEFRL9mfgcAvql/XhwTvf5jKcOiiupt2FiJxHkiX1z4j7WL8J/jRHYLluORvc1XxB5rV20KoeK00gVJamspg==
+  Package: https://www.npmjs.com/package/qs/v/6.16.0
+  Archive: https://registry.npmjs.org/qs/-/qs-6.16.0.tgz
+  Integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==
 quick-format-unescaped@4.0.4 | runtime | MIT
   Lockfile path: node_modules/quick-format-unescaped
   Package: https://www.npmjs.com/package/quick-format-unescaped/v/4.0.4

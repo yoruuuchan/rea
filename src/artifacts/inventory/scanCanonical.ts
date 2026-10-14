@@ -23,7 +23,6 @@ import {
 import {
   createArtifactEdges,
   createRootNode,
-  indexOccurrencesByPath,
   materializeDirectoryNodes,
   rekeyOccurrences,
   rootOccurrenceFor,
@@ -100,6 +99,7 @@ export const scanCanonicalArtifactInventoryInScope = async (
       occurrences,
       pendingContradictions,
       caseCollisionLimitation,
+      unknownParentOccurrences,
       traversal,
     } = await scanReader(reader, ownedReaders, options.signal, integrity);
     outcome = {
@@ -117,6 +117,7 @@ export const scanCanonicalArtifactInventoryInScope = async (
         occurrences,
         pendingContradictions,
         caseCollisionLimitation,
+        unknownParentOccurrences,
         traversal,
       }),
     };
@@ -199,6 +200,7 @@ interface SnapshotBuildInput {
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
   readonly caseCollisionLimitation: string | undefined;
+  readonly unknownParentOccurrences: ReadonlySet<MutableOccurrence>;
   readonly traversal: ArtifactReaderTraversal;
 }
 
@@ -221,7 +223,10 @@ const buildInventorySnapshot = async (
     path,
   });
   for (const occurrence of input.occurrences)
-    if (occurrence.parent_occurrence_id === null)
+    if (
+      occurrence.parent_occurrence_id === null &&
+      !input.unknownParentOccurrences.has(occurrence)
+    )
       occurrence.parent_occurrence_id = rootOccurrence.occurrence_id;
   input.occurrences.unshift(rootOccurrence);
 
@@ -231,18 +236,17 @@ const buildInventorySnapshot = async (
       occurrence,
     ]),
   );
-  const occurrenceByPath = indexOccurrencesByPath(input.occurrences);
   const integrityContradictions = buildIntegrityContradictions(
     input.pendingContradictions,
-    occurrenceByPath,
     occurrenceById,
     rootNode,
   );
-  const edges = createArtifactEdges(
+  const edgeResult = createArtifactEdges(
     rootNode.artifact_id,
     input.occurrences,
     reader?.provenance()[0],
   );
+  const { edges } = edgeResult;
   const orderedNodes = sortNodes([...input.nodes.values()]);
   const orderedOccurrences = sortOccurrences(input.occurrences);
   const orderedEdges = sortEdges(edges).map((edge, ordinal) => ({
@@ -273,6 +277,10 @@ const buildInventorySnapshot = async (
     orderedEdges,
   });
   const traversal = inventoryCoverage(rootFormat, reader, input.traversal);
+  const coverage =
+    edgeResult.limitations.length === 0
+      ? traversal.coverage
+      : { ...traversal.coverage, status: "unknown" as const };
   return {
     manifest,
     nodes: orderedNodes,
@@ -280,11 +288,10 @@ const buildInventorySnapshot = async (
     edges: orderedEdges,
     provenance: reader?.provenance() ?? [],
     integrity_contradictions: integrityContradictions,
-    coverage: traversal.coverage,
-    coverage_status:
-      traversal.coverage.status === "complete" ? "complete" : "partial",
+    coverage,
+    coverage_status: coverage.status === "complete" ? "complete" : "partial",
     limitations: buildLimitations(
-      traversal.limitations,
+      [...traversal.limitations, ...edgeResult.limitations],
       integrityContradictions,
       input.caseCollisionLimitation,
     ),
@@ -293,17 +300,11 @@ const buildInventorySnapshot = async (
 
 const buildIntegrityContradictions = (
   pending: readonly PendingIntegrityContradiction[],
-  occurrenceByPath: ReadonlyMap<string, MutableOccurrence>,
   occurrenceById: ReadonlyMap<string, MutableOccurrence>,
   rootNode: ArtifactNode,
 ): IntegrityContradiction[] =>
   pending.map((contradiction): IntegrityContradiction => {
-    const occurrence = occurrenceByPath.get(contradiction.logicalPath);
-    if (occurrence === undefined)
-      throw new ArtifactReaderFailure(
-        "integrity",
-        "Integrity contradiction lost its graph occurrence",
-      );
+    const occurrence = contradiction.occurrence;
     const parent =
       occurrence.parent_occurrence_id === null
         ? undefined
@@ -312,13 +313,13 @@ const buildIntegrityContradictions = (
     return {
       contradiction_id: artifactContradictionId({
         rootArtifactId: rootNode.artifact_id,
-        logicalPath: contradiction.logicalPath,
+        logicalPath: occurrence.logical_path,
         declaredSha256: contradiction.declaredSha256,
         observedSha256: contradiction.observedSha256,
       }),
       occurrence_id: occurrence.occurrence_id,
       parent_artifact_id: parentArtifactId,
-      logical_path: contradiction.logicalPath,
+      logical_path: occurrence.logical_path,
       declared_sha256: contradiction.declaredSha256,
       observed_sha256: contradiction.observedSha256,
       entry_kind: contradiction.entryKind,

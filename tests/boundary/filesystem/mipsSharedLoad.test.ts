@@ -90,6 +90,7 @@ for (const little of [true, false]) {
       type: 3,
       flags: 0x74001005,
       abi_flags: null,
+      gnu_attributes: null,
       shared_load: {
         status: "complete",
         relocation_count: 2,

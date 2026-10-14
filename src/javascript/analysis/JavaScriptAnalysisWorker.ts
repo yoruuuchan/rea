@@ -278,7 +278,7 @@ export class JavaScriptAnalysisWorker {
               error: new AnalysisResourceConstraintError(
                 OPERATION,
                 response.resource ?? "memory",
-                `${file.path}: ${response.message}`,
+                response.message,
                 { ...this.#limits(), ...response.limits },
               ),
             });

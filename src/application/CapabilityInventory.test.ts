@@ -97,6 +97,53 @@ const entry = (
   return found;
 };
 
+describe("ADB and Apktool host availability", () => {
+  it("uses only their selected owner probes", () => {
+    const ready = {
+      status: "available" as const,
+      code: null,
+      reason: null,
+      diagnostics: {},
+    };
+    const configuredButInvalid = {
+      status: "unavailable" as const,
+      code: "not_configured" as const,
+      reason: "REA_ADB_PATH is invalid",
+      diagnostics: {},
+    };
+    const readyInventory = buildCapabilityInventory(status(), {
+      ...enabledPolicy,
+      adbAnalysisAvailability: ready,
+      apktoolAnalysisAvailability: ready,
+    });
+    expect(
+      readyInventory.find(({ name }) => name === "inspect_adb_client"),
+    ).toMatchObject({ available: true, reason: "available" });
+    expect(
+      readyInventory.find(({ name }) => name === "inspect_apktool_client"),
+    ).toMatchObject({ available: true, reason: "available" });
+
+    const unavailableInventory = buildCapabilityInventory(status(), {
+      ...enabledPolicy,
+      adbAnalysisAvailability: configuredButInvalid,
+      apktoolAnalysisAvailability: {
+        status: "unavailable",
+        code: "unsupported_version",
+        reason: "Apktool 2.6.3 is older than 2.7.0",
+        diagnostics: {},
+      },
+    });
+    expect(
+      unavailableInventory.find(({ name }) => name === "inspect_adb_client"),
+    ).toMatchObject({ available: false, reason: "provider_missing" });
+    expect(
+      unavailableInventory.find(
+        ({ name }) => name === "decode_android_resources",
+      ),
+    ).toMatchObject({ available: false, reason: "provider_unavailable" });
+  });
+});
+
 describe("capability failure reasons", () => {
   it("keeps an unavailable Android runtime distinct from a missing provider", () => {
     const inventory = buildCapabilityInventory(status(), {

@@ -33,7 +33,9 @@ describe("inert keyed archive decoding", () => {
           decodeKeyedArchiveBytes(bytes, { offset: 0, limit: 1 }),
         ).toThrow(
           expect.objectContaining({
-            code: "ERR_ENCODING_INVALID_ENCODED_DATA",
+            name: "XmlPlistTextDecodeError",
+            reason: "invalid-bytes",
+            cause: expect.any(TypeError),
           }),
         );
       }

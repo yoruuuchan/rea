@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { digestSchema, prefixedDigestSchema } from "../digests.js";
+import { compareUnicodeCodePoints as compare } from "../unicodeCodePointOrder.js";
 
 const pathSchema = z.string().min(1);
 
@@ -376,6 +377,3 @@ export const platformsOf = (bundles: readonly Bundle[]): ("ios" | "macos")[] =>
       }),
     ),
   ].sort(compare);
-
-const compare = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;

@@ -39,14 +39,14 @@ const writeTaskFixture = async (
   root: string,
   taskNames: string[],
   scripts: Record<string, string>,
+  imports?: Record<string, string>,
 ) => {
   const config = await readRootConfig();
   const tasks = Object.fromEntries(
     taskNames.map((name) => {
       const task = config.tasks[name];
       if (task === undefined) throw new Error(`Missing Turbo task ${name}`);
-      // These tests measure a task's own inputs. Drop dependency edges so the
-      // unrelated compile task cannot add fixture-specific inputs or outputs.
+      // Measure each task's own input ownership without dependency hashes.
       const { dependsOn: _dependsOn, ...definition } = task;
       return [name, definition];
     }),
@@ -73,8 +73,10 @@ const writeTaskFixture = async (
       name: "rea-static-task-cache-fixture",
       version: "1.0.0",
       private: true,
+      type: "module",
       packageManager: "npm@11.16.0",
       scripts,
+      ...(imports === undefined ? {} : { imports }),
     }),
   );
   await writeFile(
@@ -200,6 +202,184 @@ it("restores a real lint report across cold, warm, and fresh consumer checkouts"
     }),
   );
 });
+
+it.each([
+  {
+    label: "imported documentation helper",
+    path: "docs/.vitepress/helper.ts",
+    content: 'export const value: number = "invalid";\n',
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+  {
+    label: "documentation package scope",
+    path: "docs/package.json",
+    content: '{"type":"commonjs"}\n',
+    diagnostic: "CommonJS",
+    invalidatesCompile: false,
+  },
+  {
+    label: "source package scope",
+    path: "src/package.json",
+    content: '{"type":"commonjs"}\n',
+    diagnostic: "CommonJS",
+    invalidatesCompile: true,
+  },
+  {
+    label: "test package scope",
+    path: "tests/package.json",
+    content: '{"type":"commonjs"}\n',
+    diagnostic: "CommonJS",
+    invalidatesCompile: false,
+  },
+  {
+    label: "declaration package scope",
+    path: "scripts/package.json",
+    content: '{"imports":{"#compiler-scope":"./shadow-types.d.mts"}}\n',
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+  {
+    label: "source declaration",
+    path: "src/types.d.mts",
+    content: "export type SourceValue = 2;\n",
+    diagnostic: "TS2322",
+    invalidatesCompile: true,
+  },
+  {
+    label: "test declaration",
+    path: "tests/types.d.cts",
+    content: 'export type TestValue = "shadow";\n',
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+  {
+    label: "script declaration",
+    path: "scripts/value.d.cts",
+    content: 'export type ScriptValue = "shadow";\n',
+    diagnostic: "TS2322",
+    invalidatesCompile: false,
+  },
+])(
+  "rejects a changed $label after warming real compiler tasks",
+  async ({ path, content, diagnostic, invalidatesCompile }) => {
+    const root = await createTestTempDirectory("rea-compiler-cache-inputs-");
+    const cache = await createTestTempDirectory("rea-compiler-cache-store-");
+    await mkdir(join(root, "docs/.vitepress"), { recursive: true });
+    for (const directory of ["src", "tests", "scripts"])
+      await mkdir(join(root, directory));
+    await symlink(
+      join(repository, "node_modules"),
+      join(root, "node_modules"),
+      "junction",
+    );
+    await writeTaskFixture(
+      root,
+      ["compile", "typecheck"],
+      {
+        // Exercise the real compiler phase with the production task inputs.
+        compile: "tsc -p tsconfig.build.json",
+        typecheck: "tsc --noEmit",
+      },
+      { "#compiler-scope": "./scripts/root-types.d.mts" },
+    );
+    for (const name of [
+      "tsconfig.json",
+      "tsconfig.build.json",
+      ".nvmrc",
+      ".npmrc",
+    ])
+      await writeFile(join(root, name), await readFile(join(repository, name)));
+    await writeFile(
+      join(root, ".gitignore"),
+      "node_modules/\n.cache/\n.turbo/\ndist/\n",
+    );
+    await writeFile(
+      join(root, "src/main.ts"),
+      'import type { SourceValue } from "./types.mjs";\nexport const value: SourceValue = 1;\n',
+    );
+    await writeFile(
+      join(root, "src/types.d.mts"),
+      "export type SourceValue = 1;\n",
+    );
+    await writeFile(
+      join(root, "docs/.vitepress/helper.ts"),
+      "export const value: number = 1;\n",
+    );
+    await writeFile(
+      join(root, "docs/.vitepress/config.ts"),
+      'import { value } from "./helper.js";\nexport const configValue: number = value;\n',
+    );
+    await writeFile(
+      join(root, "scripts/root-types.d.mts"),
+      'export type Scope = "root";\n',
+    );
+    await writeFile(
+      join(root, "scripts/shadow-types.d.mts"),
+      'export type Scope = "shadow";\n',
+    );
+    await writeFile(
+      join(root, "scripts/api.d.mts"),
+      'import type { Scope } from "#compiler-scope";\nexport type ApiScope = Scope;\n',
+    );
+    await writeFile(
+      join(root, "tests/use-script.ts"),
+      'import type { ApiScope } from "../scripts/api.mjs";\nimport type { TestValue } from "./types.cjs";\nimport type { ScriptValue } from "../scripts/value.cjs";\nexport const scope: ApiScope = "root";\nexport const testValue: TestValue = "root";\nexport const scriptValue: ScriptValue = "root";\n',
+    );
+    await writeFile(
+      join(root, "tests/types.d.cts"),
+      'export type TestValue = "root";\n',
+    );
+    await writeFile(
+      join(root, "scripts/value.d.cts"),
+      'export type ScriptValue = "root";\n',
+    );
+    await workflowGit(root, ["init", "--initial-branch=main"]);
+    await workflowGit(root, ["add", "."]);
+    await workflowGit(root, ["commit", "-m", "test: seed compiler cache"]);
+    const tasks = ["compile", "typecheck"];
+    const hashes = new Map<string, string>();
+    for (const task of tasks) {
+      const cold = runTurbo(root, task, cache);
+      expect(cold.error).toBeUndefined();
+      expect(cold.status, cold.stdout + cold.stderr).toBe(0);
+      expect(cold.stdout).toMatch(/Cached:\s+0 cached/u);
+      hashes.set(task, taskHash(root, task, cache));
+    }
+    await writeFile(
+      join(root, "docs/guide.md"),
+      "# Documentation-only change\n",
+    );
+    for (const directory of ["cache", "dist"]) {
+      await mkdir(join(root, "docs/.vitepress", directory));
+      await writeFile(
+        join(root, "docs/.vitepress", directory, "generated.ts"),
+        "export const generated = 1;\n",
+      );
+    }
+    for (const task of tasks) {
+      expect(taskHash(root, task, cache)).toBe(hashes.get(task));
+      const warm = runTurbo(root, task, cache);
+      expect(warm.status, warm.stdout + warm.stderr).toBe(0);
+      expect(warm.stdout).toMatch(/Cached:\s+1 cached/u);
+    }
+    await writeFile(join(root, path), content);
+    for (const task of tasks) {
+      const invalidates = task === "typecheck" || invalidatesCompile;
+      const result = runTurbo(root, task, cache);
+      expect(result.error).toBeUndefined();
+      if (invalidates) {
+        expect(result.status, result.stdout + result.stderr).toBeGreaterThan(0);
+        expect(result.stdout + result.stderr).toContain(diagnostic);
+        expect(taskHash(root, task, cache)).not.toBe(hashes.get(task));
+      } else {
+        expect(result.status, result.stdout + result.stderr).toBe(0);
+        expect(result.stdout).toMatch(/Cached:\s+1 cached/u);
+        expect(taskHash(root, task, cache)).toBe(hashes.get(task));
+      }
+    }
+  },
+);
 
 it("invalidates checker task hashes for Node, ignore, and VitePress config changes", async () => {
   const root = await createTestTempDirectory("rea-static-cache-inputs-");

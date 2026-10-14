@@ -5,7 +5,7 @@ import {
 } from "../qlogCapture.js";
 import { err, ok, type Result } from "../result.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
-import { analysisViewInputError } from "./analysisView.js";
+import { analysisViewInputError } from "./analysisViewErrors.js";
 import { pageViewCoverage } from "./analysisViewCoverage.js";
 
 const traceSchema = qlogCaptureFactsSchema.shape.traces.element;

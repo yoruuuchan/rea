@@ -122,31 +122,79 @@ const objectKeys = (node: t.Node | undefined): readonly string[] =>
       })
     : [];
 
-const objectStringProperty = (
-  node: t.ObjectExpression,
-  key: string,
-): string | undefined => {
-  for (const property of node.properties)
-    if (
-      t.isObjectProperty(property) &&
-      semanticStaticPropertyKey(property.key, property.computed) === key &&
-      t.isStringLiteral(property.value)
-    )
-      return property.value.value;
-  return undefined;
-};
-
+/** Later properties own a key; an intervening dynamic write leaves it unknown. */
 const objectProperty = (
   node: t.ObjectExpression,
   key: string,
 ): t.Node | undefined => {
-  for (const property of node.properties)
-    if (
-      t.isObjectProperty(property) &&
-      semanticStaticPropertyKey(property.key, property.computed) === key
-    )
-      return property.value;
+  for (let index = node.properties.length - 1; index >= 0; index -= 1) {
+    const property = node.properties[index];
+    if (property === undefined || t.isSpreadElement(property)) return undefined;
+    const name = semanticStaticPropertyKey(property.key, property.computed);
+    if (name === null) return undefined;
+    if (name === key)
+      return t.isObjectProperty(property) ? property.value : undefined;
+  }
   return undefined;
+};
+
+const objectStringProperty = (
+  node: t.ObjectExpression,
+  key: string,
+): string | undefined => {
+  const value = objectProperty(node, key);
+  return t.isStringLiteral(value) ? value.value : undefined;
+};
+
+/**
+ * Find source-body string values owned by a GraphQL Source-shaped literal.
+ * A later duplicate or spread can make the effective `body` unknown, but the
+ * earlier strings still belong to this object and must not become standalone
+ * operation findings during the string scan.
+ */
+const graphqlSourceBodyLiterals = (
+  node: t.ObjectExpression,
+): readonly t.StringLiteral[] | undefined => {
+  const bodyStrings = (object: t.ObjectExpression) =>
+    object.properties.flatMap((property) =>
+      t.isObjectProperty(property) &&
+      semanticStaticPropertyKey(property.key, property.computed) === "body" &&
+      t.isStringLiteral(property.value)
+        ? [property.value]
+        : [],
+    );
+  const bodies = bodyStrings(node);
+  const hasLocationOffset = node.properties.some(
+    (property) =>
+      t.isObjectProperty(property) &&
+      semanticStaticPropertyKey(property.key, property.computed) ===
+        "locationOffset",
+  );
+  if (!hasLocationOffset) return undefined;
+
+  // Inline object spreads can own additional body values which the surrounding
+  // Source object may select. Include only body-key string literals from those
+  // spread values; ordinary strings elsewhere in the object remain scannable.
+  const visited = new WeakSet<t.ObjectExpression>();
+  visited.add(node);
+  const pending = node.properties.flatMap((property) => {
+    if (!t.isSpreadElement(property)) return [];
+    const spread = unwrapJavaScriptExpression(property.argument).node;
+    return t.isObjectExpression(spread) ? [spread] : [];
+  });
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined || visited.has(current)) continue;
+    visited.add(current);
+    bodies.push(...bodyStrings(current));
+    for (const property of current.properties) {
+      if (t.isSpreadElement(property)) {
+        const spread = unwrapJavaScriptExpression(property.argument).node;
+        if (t.isObjectExpression(spread)) pending.push(spread);
+      }
+    }
+  }
+  return bodies.length === 0 ? undefined : bodies;
 };
 
 const GRAPHQL_OPERATION_TYPES: ReadonlySet<string> = new Set([
@@ -284,9 +332,10 @@ export const createJavaScriptRpcScan = (
   let marker: boolean | undefined;
   const hasMarker = (): boolean =>
     (marker ??= TRPC_SOURCE_MARKERS.some((value) => source.includes(value)));
-  // graphql-tag documents retain their source text in loc.source.body; that
-  // text repeats the OperationDefinition already recovered from the object.
-  const documentSourceBodies = new WeakSet<t.Node>();
+  // graphql-tag documents retain source text in loc.source.body. Keep each
+  // direct body literal owned by a Source-shaped object out of the independent
+  // string scan, including duplicates that a later property or spread hides.
+  const graphqlDocumentSourceBodies = new WeakSet<t.Node>();
 
   const procedure = (
     node: t.CallExpression | t.OptionalCallExpression,
@@ -321,18 +370,15 @@ export const createJavaScriptRpcScan = (
       if (t.isCallExpression(node) || t.isOptionalCallExpression(node))
         return trpcLinkUrl(node) ?? procedure(node);
       if (t.isObjectExpression(node)) {
-        const body = objectProperty(node, "body");
-        if (
-          t.isStringLiteral(body) &&
-          objectProperty(node, "locationOffset") !== undefined
-        ) {
-          documentSourceBodies.add(body);
+        const bodies = graphqlSourceBodyLiterals(node);
+        if (bodies !== undefined) {
+          for (const body of bodies) graphqlDocumentSourceBodies.add(body);
           return undefined;
         }
         return graphqlOperationFromDocumentNode(node);
       }
       if (t.isStringLiteral(node))
-        return documentSourceBodies.has(node)
+        return graphqlDocumentSourceBodies.has(node)
           ? undefined
           : graphqlOperationFromText(node.value);
       if (t.isTemplateLiteral(node)) {

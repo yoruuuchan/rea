@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -122,6 +129,48 @@ const terminateFixtureProcess = async (pid: number): Promise<void> => {
   }
   await waitForProcessExit(pid);
 };
+
+itWithCaptureCapability(
+  "retains a deleted observed file when its parent becomes a regular file",
+  async () => {
+    const root = await createTestTempDirectory("rea-observed-parent-type-");
+    const payload = '{"result":42}\n';
+    await mkdir(join(root, "reports"));
+    await writeFile(join(root, "reports", "final.json"), payload);
+    const result = await captureProcessScenario(
+      parseProcessScenario({
+        executable: process.execPath,
+        arguments: [
+          "-e",
+          `const fs = require('node:fs');
+           fs.renameSync('reports', 'saved-reports');
+           fs.writeFileSync('reports', 'regular file'); console.log('finished');`,
+        ],
+        working_directory: root,
+        filesystem_observation_paths: [join(root, "reports", "final.json")],
+        timeout_ms: 5_000,
+        idle_timeout_ms: 5_000,
+        settle_ms: 100,
+      }),
+    );
+    if (!result.ok) throw result.error;
+    expect(result.value.exit).toMatchObject({ code: 0, reason: "exited" });
+    expect(result.value.filesystem_effects).toContainEqual(
+      expect.objectContaining({
+        path: "root_0:.",
+        status: "deleted",
+        before: expect.objectContaining({
+          type: "file",
+          sha256: createHash("sha256").update(payload).digest("hex"),
+        }),
+        after: null,
+      }),
+    );
+    expect(
+      await readFile(join(root, "saved-reports", "final.json"), "utf8"),
+    ).toBe(payload);
+  },
+);
 
 itWithCaptureCapability(
   "keeps the process deadline bounded when the wall clock moves backward",

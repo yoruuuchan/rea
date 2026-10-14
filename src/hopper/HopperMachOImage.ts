@@ -8,7 +8,10 @@ import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import {
   readFatSliceDeclarations,
   validateFatSlice,
+  type FatSliceDeclaration,
 } from "../domain/apple/machoContainer.js";
+import { machoCpuSubtypeBase } from "../domain/apple/machoCpuIdentity.js";
+import type { HeaderArchitecture } from "../domain/binaryTargetTypes.js";
 import {
   HopperCancelledError,
   HopperStartError,
@@ -17,7 +20,10 @@ import { err, ok, type Result } from "../domain/result.js";
 
 /** Stable source coordinates committed before preparing an owned thin image. */
 export const hopperMachOImageSchema = z.strictObject({
-  method: z.literal("fat64_thin_slice"),
+  method: z.union([
+    z.literal("fat32_thin_slice"),
+    z.literal("fat64_thin_slice"),
+  ]),
   architecture_count: z.number().int().min(1).max(128),
   container_table_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   source_offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -28,7 +34,7 @@ export const hopperMachOImageSchema = z.strictObject({
 
 export type HopperMachOImage = z.infer<typeof hopperMachOImageSchema>;
 
-/** Validate the selected FAT64 slice without depending on Apple's lipo tool. */
+/** Validate the selected FAT slice without depending on Apple's lipo tool. */
 export const resolveHopperMachOImage = async (
   target: BinaryTarget & { readonly kind: "executable" },
   signal?: AbortSignal,
@@ -45,14 +51,14 @@ export const resolveHopperMachOImage = async (
     );
   if (signal?.aborted) return err(new AnalysisCancelledError("open_binary"));
   if (target.format !== "mach-o" && target.format !== "mach-o-universal")
-    return invalid("Hopper FAT64 image preparation requires a Mach-O target");
+    return invalid("Hopper FAT image preparation requires a Mach-O target");
   let file: FileHandle;
   try {
     file = await open(target.path, "r");
   } catch (cause: unknown) {
     // Keep the OS error so a read-permission denial reports access_denied.
     return invalid(
-      `Cannot read FAT64 source for Hopper image preparation: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Cannot read FAT source for Hopper image preparation: ${cause instanceof Error ? cause.message : String(cause)}`,
       cause,
     );
   }
@@ -64,24 +70,29 @@ export const resolveHopperMachOImage = async (
     };
     const header = await read(0, 8);
     const magic = header.length === 8 ? header.readUInt32BE(0) : 0;
-    if (magic !== 0xcafebabf && magic !== 0xbfbafeca)
+    const isFatMagic = [
+      0xcafebabe, 0xcafebabf, 0xbebafeca, 0xbfbafeca,
+    ].includes(magic);
+    if (!isFatMagic)
       return invalid(
-        "FAT64 source header changed before Hopper image preparation",
+        "FAT source header changed before Hopper image preparation",
       );
-    const littleEndian = magic === 0xbfbafeca;
+    const wide = magic === 0xcafebabf || magic === 0xbfbafeca;
+    const littleEndian = magic === 0xbebafeca || magic === 0xbfbafeca;
+    const entrySize = wide ? 32 : 20;
     const count = littleEndian
       ? header.readUInt32LE(4)
       : header.readUInt32BE(4);
     const size = (await file.stat()).size;
-    const tableEnd = 8 + count * 32;
+    const tableEnd = 8 + count * entrySize;
     if (count === 0 || count > 128 || tableEnd > size)
       return invalid(
-        "FAT64 architecture table is truncated or exceeds the supported 128 entries",
+        "FAT architecture table is truncated or exceeds the supported 128 entries",
       );
-    const table = await read(8, count * 32);
+    const table = await read(8, count * entrySize);
     const parsed = readFatSliceDeclarations(table, {
       count,
-      wide: true,
+      wide,
       littleEndian,
     });
     if (parsed.status === "malformed") return invalid(parsed.reason);
@@ -93,24 +104,26 @@ export const resolveHopperMachOImage = async (
         return err(new AnalysisCancelledError("open_binary"));
       const rangeError = validateFatSlice(slice, size, tableEnd);
       if (rangeError !== null) return invalid(rangeError);
-      const reserved = littleEndian
-        ? table.readUInt32LE(slice.index * 32 + 28)
-        : table.readUInt32BE(slice.index * 32 + 28);
-      if (reserved !== 0)
-        return invalid(
-          `FAT64 architecture ${slice.index} has a nonzero reserved field`,
-        );
+      if (wide) {
+        const reserved = littleEndian
+          ? table.readUInt32LE(slice.index * 32 + 28)
+          : table.readUInt32BE(slice.index * 32 + 28);
+        if (reserved !== 0)
+          return invalid(
+            `FAT64 architecture ${slice.index} has a nonzero reserved field`,
+          );
+      }
       if (slice.size < 12)
         return invalid(
-          `FAT64 architecture ${slice.index} has a truncated Mach-O header`,
+          `FAT architecture ${slice.index} has a truncated Mach-O header`,
         );
       const embedded = await read(slice.offset, 12);
       if (embedded.length !== 12)
-        return invalid(`FAT64 architecture ${slice.index} became truncated`);
+        return invalid(`FAT architecture ${slice.index} became truncated`);
       const thinMagic = embedded.readUInt32BE(0);
       if (![0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe].includes(thinMagic))
         return invalid(
-          `FAT64 architecture ${slice.index} does not contain a Mach-O image`,
+          `FAT architecture ${slice.index} does not contain a Mach-O image`,
         );
       const little = thinMagic === 0xcefaedfe || thinMagic === 0xcffaedfe;
       const identity = {
@@ -133,15 +146,15 @@ export const resolveHopperMachOImage = async (
         current !== undefined &&
         current.offset < previous.offset + previous.size
       )
-        return invalid("FAT64 slices overlap");
+        return invalid("FAT slices overlap");
     }
-    const selected = matches.length === 1 ? matches[0] : undefined;
+    const selected = selectHopperSlice(matches, target.architecture);
     if (selected === undefined)
       return invalid(
-        `FAT64 selection for ${target.architecture} is ${matches.length === 0 ? "missing" : "ambiguous"}; extract the exact architecture into a thin image before opening it`,
+        `FAT selection for ${target.architecture} is ${matches.length === 0 ? "missing" : "ambiguous"}; extract the exact architecture into a thin image before opening it`,
       );
     return ok({
-      method: "fat64_thin_slice",
+      method: wide ? "fat64_thin_slice" : "fat32_thin_slice",
       architecture_count: count,
       container_table_sha256: createHash("sha256")
         .update(header)
@@ -154,11 +167,33 @@ export const resolveHopperMachOImage = async (
     });
   } catch (cause: unknown) {
     return invalid(
-      `Cannot validate FAT64 image: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Cannot validate FAT image: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
   } finally {
     await file.close();
   }
+};
+
+/**
+ * Plain arm64 (cpusubtype 0) and arm64e (cpusubtype 2) function-entry encodings
+ * decode under Hopper's --aarch64; Apple's arm64e.x1 variant (cpusubtype 12)
+ * does not, so it is selected only when it is the arm64 family's only candidate.
+ * Every other ambiguity stays fail-closed.
+ */
+const selectHopperSlice = (
+  matches: readonly FatSliceDeclaration[],
+  architecture: HeaderArchitecture,
+): FatSliceDeclaration | undefined => {
+  if (matches.length === 1) return matches[0];
+  if (architecture !== "arm64") return undefined;
+  for (const cpuSubtype of [0, 2]) {
+    const preferred = matches.filter(
+      (slice) => machoCpuSubtypeBase(slice.cpuSubtype) === cpuSubtype,
+    );
+    if (preferred.length === 1) return preferred[0];
+    if (preferred.length > 1) return undefined;
+  }
+  return undefined;
 };
 
 /** Copy a selected slice and verify the entire original source in the same pass. */
@@ -170,6 +205,7 @@ export const prepareHopperMachOImage = async (
   signal?: AbortSignal,
 ): Promise<Result<string, HopperStartError | HopperCancelledError>> => {
   if (signal?.aborted) return err(new HopperCancelledError());
+  const tableEntrySize = image.method === "fat64_thin_slice" ? 32 : 20;
   try {
     const source = await open(sourcePath, "r");
     try {
@@ -177,7 +213,7 @@ export const prepareHopperMachOImage = async (
       try {
         const hash = createHash("sha256");
         const tableHash = createHash("sha256");
-        const tableEnd = 8 + image.architecture_count * 32;
+        const tableEnd = 8 + image.architecture_count * tableEntrySize;
         const thinHeader: Buffer[] = [];
         let position = 0;
         let copied = 0;
@@ -223,13 +259,13 @@ export const prepareHopperMachOImage = async (
         )
           return err(
             new HopperStartError({
-              userMessage: `FAT64 source ${sourcePath} no longer agrees with its committed architecture table or selected Mach-O header. Open the stable source again.`,
+              userMessage: `FAT source ${sourcePath} no longer agrees with its committed architecture table or selected Mach-O header. Open the stable source again.`,
             }),
           );
         if (observed !== sourceSha256 || copied !== image.byte_length)
           return err(
             new HopperStartError({
-              userMessage: `FAT64 source ${sourcePath} changed before launch: expected SHA-256 ${sourceSha256}, observed ${observed}; copied ${copied} of ${image.byte_length} selected bytes. Open the stable source again.`,
+              userMessage: `FAT source ${sourcePath} changed before launch: expected SHA-256 ${sourceSha256}, observed ${observed}; copied ${copied} of ${image.byte_length} selected bytes. Open the stable source again.`,
             }),
           );
         return ok(destination);
@@ -245,7 +281,7 @@ export const prepareHopperMachOImage = async (
       : err(
           new HopperStartError({
             cause,
-            userMessage: `Cannot prepare the selected FAT64 image from ${sourcePath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+            userMessage: `Cannot prepare the selected FAT image from ${sourcePath}: ${cause instanceof Error ? cause.message : String(cause)}`,
           }),
         );
   }

@@ -1,5 +1,6 @@
 import { managedDecodeBudget } from "./ManagedDecodeBudget.js";
 import { memberDeclaringTypeRowLookup } from "./ManagedMemberOwnership.js";
+import type { TypeMemberListFacts } from "./ManagedTypeMemberLists.js";
 
 import type {
   ManagedArtifactInspection,
@@ -248,8 +249,14 @@ const declaringTypeForMethod = (
   layout: ManagedMetadataLayout,
   methodRow: number,
   heapExtent: number,
+  memberLists: TypeMemberListFacts,
 ): string | null => {
-  const owner = memberDeclaringTypeRowLookup(bytes, layout, 6)(methodRow);
+  const owner = memberDeclaringTypeRowLookup(
+    bytes,
+    layout,
+    6,
+    memberLists,
+  )(methodRow);
   if (owner === 0) return null;
   return readTypeName({ bytes, layout, table: 2, row: owner, heapExtent });
 };
@@ -259,11 +266,13 @@ const attributeTypeName = (
   layout: ManagedMetadataLayout,
   rawType: number,
   heapExtent: number,
+  memberLists: TypeMemberListFacts,
 ): string | null => {
   const tag = rawType & 7;
   const row = Math.floor(rawType / 8);
   if (row === 0) return null;
-  if (tag === 2) return declaringTypeForMethod(bytes, layout, row, heapExtent);
+  if (tag === 2)
+    return declaringTypeForMethod(bytes, layout, row, heapExtent, memberLists);
   if (tag !== 3) return null;
   const memberRefs = layout.table(10);
   if (memberRefs === undefined || row > memberRefs.rowCount) return null;
@@ -288,7 +297,13 @@ const attributeTypeName = (
       heapExtent,
     });
   if (parentTag === 3)
-    return declaringTypeForMethod(bytes, layout, parentRow, heapExtent);
+    return declaringTypeForMethod(
+      bytes,
+      layout,
+      parentRow,
+      heapExtent,
+      memberLists,
+    );
   return null;
 };
 
@@ -349,6 +364,7 @@ export const readCustomAttribute = (
   row: number,
   heapExtent: number,
   issues: ManagedParseIssue[],
+  memberLists: TypeMemberListFacts,
 ): CustomAttribute => {
   const cursor = metadataRowCursor(bytes, layout, 12, row);
   const parentRaw = cursor.readIndex(
@@ -411,7 +427,8 @@ export const readCustomAttribute = (
   if (constructor !== null)
     typeName =
       readManagedValue(
-        () => attributeTypeName(bytes, layout, typeRaw, heapExtent),
+        () =>
+          attributeTypeName(bytes, layout, typeRaw, heapExtent, memberLists),
         issues,
       ) ?? null;
   return {

@@ -287,15 +287,52 @@ mcp_servers:
 
   it("creates config.yaml when Hermes has no configuration yet", async () => {
     const { client } = await hermesClient();
+    const environment = { REA_MCP_OUTPUT_SCHEMA_PROFILE: "off" };
     expect(
-      (await configureClientConfiguration(client, {}, command)).status,
+      (await configureClientConfiguration(client, environment, command)).status,
     ).toBe("configured");
-    expect(parseYaml(await readFile(client.configPath, "utf8"))).toEqual({
+    expect(
+      parseYaml(await readFile(client.configPath, "utf8"), { version: "1.1" }),
+    ).toEqual({
       mcp_servers: {
-        rea: { command: command[0], args: command.slice(1), enabled: true },
+        rea: {
+          command: command[0],
+          args: command.slice(1),
+          env: environment,
+          enabled: true,
+        },
       },
     });
   });
+
+  it.each(["off", "2026-10-14", "12:34:56"])(
+    "refuses an environment value %s that Hermes parses as a non-string",
+    async (value) => {
+      const { home, client } = await hermesClient();
+      const original = `mcp_servers:\n  rea:\n    command: rea\n    args: [mcp]\n    env:\n      CUSTOM_SETTING: ${value}\n`;
+      await writeFile(client.configPath, original);
+      expect(
+        await inspectClientConfiguration(client, {}, command),
+      ).toMatchObject({
+        status: "invalid",
+        remediation: expect.stringContaining("CUSTOM_SETTING"),
+      });
+      expect(
+        await configureClientConfiguration(client, {}, command),
+      ).toMatchObject({ status: "failed" });
+      expect(
+        (
+          await readClientRegistrationStatuses(home, "rea", {
+            environment: {},
+          })
+        ).find(({ client: name }) => name === "hermes"),
+      ).toMatchObject({ state: "invalid" });
+      expect(await readFile(client.configPath, "utf8")).toBe(original);
+      await expect(
+        readFile(`${client.configPath}.rea.backup`, "utf8"),
+      ).rejects.toThrow();
+    },
+  );
 
   // Comments and a bare document marker parse to a null document, like an
   // empty file, and are kept ahead of the new registration.

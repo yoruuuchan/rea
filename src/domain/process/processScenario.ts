@@ -3,6 +3,10 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 const positiveBudget = z.number().int().safe().positive();
+/** Read the explicitly committed output budget without applying scenario defaults. */
+export const processScenarioOutputBudgetProjectionSchema = z
+  .object({ output_bytes: positiveBudget })
+  .passthrough();
 /**
  * Maximum xterm backing cells for one visible-plus-scrollback buffer. Each
  * xterm BufferLine stores three Uint32 words per cell (12 MB at this cap),

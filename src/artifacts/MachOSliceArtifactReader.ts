@@ -122,9 +122,16 @@ export class MachOSliceArtifactReader implements ArtifactReader {
         "integrity",
         `Mach-O structural slice index is malformed: ${structural.reason}`,
       );
-    if (structural.status === "unsupported")
+    // A valid universal binary can hold slices REA cannot index, such as
+    // big-endian PowerPC. lipo's own ranges still inventory every slice.
+    if (
+      structural.status === "unsupported" &&
+      architectures.some(
+        ({ file_offset, size }) => file_offset === null || size === null,
+      )
+    )
       throw new ArtifactReaderFailure(
-        "format",
+        "unavailable",
         `Mach-O structural slice index is unsupported: ${structural.reason}`,
       );
     const slices = structural.status === "parsed" ? structural.slices : null;
@@ -185,7 +192,11 @@ export class MachOSliceArtifactReader implements ArtifactReader {
             ? [
                 "Structural Mach-O facts were unavailable; slice range is based on lipo output.",
               ]
-            : []),
+            : structural.status === "unsupported"
+              ? [
+                  `Structural Mach-O facts were unsupported (${structural.reason}); slice range is based on lipo output.`,
+                ]
+              : []),
           ...(architecture.file_offset === null || architecture.size === null
             ? [
                 "Slice range was derived from structural Mach-O facts because lipo omitted it.",

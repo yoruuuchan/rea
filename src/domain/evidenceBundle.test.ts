@@ -5,6 +5,7 @@ import { ANALYSIS_SNAPSHOT_TARGET } from "./analysisSnapshot.fixture.js";
 import {
   createEvidenceBundle,
   createImmutableEvidenceBundle,
+  NonCanonicalEvidenceBundleError,
   describeEvidenceBundleFailure,
   evidenceBundleForTarget,
   parseEvidenceBundle,
@@ -20,6 +21,23 @@ const targetDigest = "a".repeat(64);
 const foreignDigest = "b".repeat(64);
 
 describe("evidence bundle failure classification", () => {
+  it("tags valid-shaped bundles that fail canonical ordering", () => {
+    const records = ["first", "second"].map((label) =>
+      createEvidence(undefined, provider, {
+        operation: "observe",
+        parameters: { label },
+        result: { label },
+      }),
+    );
+    const canonical = createEvidenceBundle(records);
+    expect(() =>
+      parseEvidenceBundle({
+        ...canonical,
+        records: [...canonical.records].reverse(),
+      }),
+    ).toThrow(NonCanonicalEvidenceBundleError);
+  });
+
   it("treats only authenticated standalone Evidence as the wrong input kind", () => {
     const record = createEvidence(undefined, provider, {
       operation: "observe",

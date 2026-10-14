@@ -46,6 +46,7 @@ const target = {
     byteOrder: "little",
     type: 2,
     flags: 0x10a23001,
+    gnuAttributes: null,
     abiFlags: pspAbiFlags,
   },
 } satisfies BinaryTarget;
@@ -312,6 +313,16 @@ describe.skipIf(process.platform === "win32")(
         expect(result.error._tag).toBe("AnalysisUnsupportedTargetError");
       },
     );
+
+    it("refuses a separately declared unsupported MSA argument ABI", async () => {
+      const { provider } = await installation();
+      const altered = {
+        ...target,
+        mips: { ...target.mips, gnuAttributes: { fpAbi: 2, msa: 1 } },
+      } as BinaryTarget;
+      expect(ghidraProcessorUnsupportedReason(altered)).toMatch(/MSA ABI/u);
+      expect(provider.inspectTargetSupport(altered).status).toBe("unsupported");
+    });
   },
 );
 
@@ -388,6 +399,7 @@ describe.skipIf(process.platform === "win32")(
             byteOrder: "little",
             type: 2,
             flags: 0x10a23001,
+            gnuAttributes: null,
             abiFlags: { ...pspAbiFlags, [field]: value },
           },
         };
@@ -416,6 +428,7 @@ describe.skipIf(process.platform === "win32")(
             byteOrder: "little",
             type: 2,
             flags: 0x10a23001,
+            gnuAttributes: null,
             ...(abiFlags === undefined ? {} : { abiFlags }),
           },
         };

@@ -445,8 +445,7 @@
               </p>
               <div class="code-block">
                 <div class="code-header">
-                  <span
-                    ><span translate="no">Node.js</span> · CSV formatter</span
+                  <span translate="no">macOS / Linux · Bash / Zsh</span
                   ><button
                     class="copy-button"
                     type="button"
@@ -461,11 +460,23 @@ const { toCsv } = require('./csv.js');
 process.stdout.write(toCsv([{ id: 1, title: 'Hello, "REA"' }]));
 JS</code></pre>
               </div>
-              <p class="caption">
-                This command uses a shell with here-document support, such as
-                Bash or Zsh. Your agent can run the same JavaScript in your
-                platform’s shell.
-              </p>
+              <div class="code-block">
+                <div class="code-header">
+                  <span translate="no">Windows · PowerShell</span>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy="first-check-powershell"
+                    aria-label="Copy formatter check command"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre><code id="first-check-powershell">@'
+const { toCsv } = require('./csv.js');
+process.stdout.write(toCsv([{ id: 1, title: 'Hello, "REA"' }]));
+'@ | node</code></pre>
+              </div>
             </details>
           </section>
           <section class="article-section" id="next">

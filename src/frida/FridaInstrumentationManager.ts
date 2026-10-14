@@ -275,9 +275,14 @@ export class FridaInstrumentationManager implements FridaInstrumentationPort {
       let pid: number;
       let target: string;
       if (input.mode === "attach") {
-        const process = await device.getProcessByPid(input.pid);
-        pid = process.pid;
-        target = `${process.name} (pid ${process.pid})`;
+        pid = input.pid;
+        target = `pid ${pid}`;
+        try {
+          const process = await device.getProcessByPid(pid);
+          target = `${process.name} (pid ${pid})`;
+        } catch {
+          // Frida can attach to processes absent from its enumeration snapshot.
+        }
       } else {
         pid = await device.spawn(
           input.program,
@@ -314,6 +319,10 @@ export class FridaInstrumentationManager implements FridaInstrumentationPort {
       session.detached.connect(() => {
         managed.state = "detached";
       });
+      // A target can exit while metadata lookup/attach is pending, before
+      // Frida installs this listener. Subscribe first, then reconcile the
+      // current provider state so an already-emitted detach is not lost.
+      if (session.isDetached()) managed.state = "detached";
       this.#sessions.set(id, managed);
       return ok(sessionObservation(managed));
     } catch (cause: unknown) {

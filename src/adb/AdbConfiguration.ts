@@ -67,7 +67,9 @@ export interface AdbClientIdentity {
  * `Version ` the build version (no colon), and `Installed as` the binary path.
  */
 export const parseAdbVersionOutput = (stdout: string): AdbClientIdentity => {
-  const build = /^Version\s+(\S.*)$/mu.exec(stdout);
+  const build = /^Version\s+(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*$/mu.exec(
+    stdout,
+  );
   const installed = /^Installed as\s+(.+)$/mu.exec(stdout);
   return {
     version: build === null ? null : build[1]!.trim(),
@@ -84,14 +86,34 @@ export const inspectAdbClient = async (
   signal?: AbortSignal,
 ): Promise<AdbClientIdentity> => {
   try {
-    const { stdout } = await execFileOutput(selection.binary, ["version"], {
-      timeout: VERSION_TIMEOUT_MS,
-      stopSignal: "SIGTERM",
-      maxBuffer: VERSION_MAX_OUTPUT_BYTES,
-      ...(signal === undefined ? {} : { signal }),
-    });
-    return parseAdbVersionOutput(stdout);
+    const { stdout, stderr } = await execFileOutput(
+      selection.binary,
+      ["version"],
+      {
+        timeout: VERSION_TIMEOUT_MS,
+        stopSignal: "SIGTERM",
+        maxBuffer: VERSION_MAX_OUTPUT_BYTES,
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
+    const identity = parseAdbVersionOutput(stdout);
+    const hasRecognizedProtocolVersion =
+      /^Android Debug Bridge version\s+\d+\.\d+\.\d+\s*$/mu.test(stdout);
+    if (identity.version === null && !hasRecognizedProtocolVersion)
+      throw new AdbConfigurationFailure(
+        "version_unresolved",
+        "The selected adb binary exited successfully but did not report a recognizable protocol or build version",
+        {
+          selected_binary: selection.binary,
+          path_source: selection.pathSource,
+          version_probe: "unrecognized_output",
+          stdout,
+          stderr,
+        },
+      );
+    return identity;
   } catch (cause) {
+    if (cause instanceof AdbConfigurationFailure) throw cause;
     const failure = execFileOutputFailure(cause);
     if (signal?.aborted || failure?.code === "ABORT_ERR")
       throw new AnalysisCancelledError("inspect_adb_client", { cause });

@@ -288,7 +288,7 @@ export const ADB_TOOL_CONTRACTS = [
     name: "install_adb_package",
     ...toolContractMetadata("install_adb_package"),
     description:
-      "Install one local APK on the device (`adb install [-r]`), recording the APK's host digest and byte size. A device-mutating tool: `replace` re-installs over an existing package while keeping its data; the device's own Success/Failure verdict is preserved with its reason.",
+      "Install one local APK on the device (`adb install [-r]`), recording the APK's host digest and byte size. A device-mutating tool: `replace_requested` records whether `-r` was selected; `replaced` is null because install success does not establish prior package state. The device's own Success/Failure verdict is preserved with its reason.",
     kind: "adb-provider",
     inputSchema: adbInputSchemas.install_adb_package,
     outputSchema: evidenceResultOf(adbResultSchemas.install_adb_package),
@@ -298,7 +298,7 @@ export const ADB_TOOL_CONTRACTS = [
         input: { serial: "emulator-5554", apk_path: "/tmp/app.apk" },
       },
       {
-        title: "Replace an existing install keeping data",
+        title: "Request reinstall mode to keep existing app data",
         input: {
           serial: "emulator-5554",
           apk_path: "/tmp/app.apk",

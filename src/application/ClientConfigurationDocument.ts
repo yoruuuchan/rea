@@ -1,5 +1,4 @@
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { stringify as stringifyYaml } from "yaml";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -11,6 +10,7 @@ import {
 import {
   editHermesConfigurationYaml,
   parseHermesConfigurationYaml,
+  stringifyHermesConfigurationYaml,
 } from "./HermesConfigurationYaml.js";
 import {
   applyEdits,
@@ -1419,7 +1419,7 @@ const serializeHermesConfiguration = (
     originalText === undefined ||
     isEmptyClientConfigurationText(originalText)
   )
-    return stringifyYaml(document);
+    return stringifyHermesConfigurationYaml(document);
   const serversKey = clientConfigurationServersKey("hermes");
   const servers = document[serversKey];
   const entry =

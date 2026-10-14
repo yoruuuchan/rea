@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { PACKET_ARTIFACTS } from "./packet-entry.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -33,6 +34,8 @@ const sameSettings = [
   "provider_environment_policy_sha256",
   "measure_source_sha256",
   "native_workflow_source_sha256",
+  "packet_workflow_source_sha256",
+  "packet_oracle_source_sha256",
   "package_lock_sha256",
   "node_version",
   "sdk_client_version",
@@ -76,6 +79,7 @@ for (const [side, answer] of [
 // coverage. Repeated equivalent deliveries must also match every observation
 // field except the receipt and parent IDs, which identify their own invocations.
 if (
+  Object.hasOwn(PACKET_ARTIFACTS, left.artifact) ||
   ["wireshark-http.cap", "wireshark-http_redirects.pcapng"].includes(
     left.artifact,
   )
@@ -94,7 +98,11 @@ if (
       path: ["delivery_observations"],
       value: answer.delivery_observations,
     });
-    if (left.delivery === right.delivery) {
+    if (
+      left.delivery === right.delivery &&
+      (!Object.hasOwn(PACKET_ARTIFACTS, left.artifact) ||
+        left.packet_selection === right.packet_selection)
+    ) {
       answer.delivery_observations = answer.delivery_observations.map(
         (observation) =>
           Object.fromEntries(

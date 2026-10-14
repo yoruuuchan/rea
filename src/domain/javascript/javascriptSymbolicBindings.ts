@@ -557,7 +557,7 @@ export class JavaScriptSymbolicBindings {
       this.unresolved = true;
       return symbolicUnknown("initializer not available at this read");
     }
-    if (this.state.conditionalInitializers.has(initializer.node))
+    if (this.state.conditionallySkippedExpressions.has(initializer.node))
       return symbolicUnknown("conditional initializer");
     let value = this.evaluate(initializer.node, env);
     for (const key of initializer.projection) {

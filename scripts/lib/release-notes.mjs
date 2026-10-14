@@ -98,9 +98,9 @@ export async function readReleaseHistory(run, base, target) {
   return { base: baseSha, target: targetSha, commits };
 }
 
-// REA history maps Anthropic and Cursor's agent trailers to ordinary User actors.
+// GitHub maps these coding-agent trailers to ordinary User actors.
 // Keep those source identities in the inventory while excluding automation credit.
-const AGENT_ACCOUNTS = new Set(["claude", "cursoragent"]);
+const AGENT_ACCOUNTS = new Set(["claude", "cursoragent", "codex"]);
 // REA's maintainer requested external-contributor thanks without self-credit.
 const MAINTAINER_ACCOUNTS = new Set(["morluto"]);
 const human = (value) =>

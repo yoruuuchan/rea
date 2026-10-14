@@ -72,6 +72,12 @@ checkpoint commits retain their original receipts; no history was rewritten.
 
 ## Optimization priorities and gradual migration
 
+The [larger/non-HTTP packet checkpoint](packet-field-workflows.md) records
+same-question SDK and actual Codex comparisons using existing input limits,
+field/filter selection, discovery and output windows. Lower delivered JSON did
+not establish stable total-token or speed gains; failed plans and negative
+controls remain visible.
+
 Agent token consumption and end-to-end task time are the primary objectives.
 Memory and CPU consumption are also measured and controlled. Correctness,
 Evidence provenance, caller choices and existing-user compatibility are

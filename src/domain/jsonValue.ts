@@ -118,7 +118,7 @@ const validatedJsonValue = z
   .superRefine((value, context) => {
     const issue = jsonValueValidationIssue(value);
     if (issue !== undefined)
-      context.addIssue({ code: "custom", message: issue });
+      context.addIssue({ code: "custom", message: issue, continue: false });
   })
   .transform((value) => value as JsonValue);
 // Keep both stages nonrecursive in public and Standard Schema projections.

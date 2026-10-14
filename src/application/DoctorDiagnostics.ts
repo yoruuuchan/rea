@@ -7,14 +7,15 @@ import {
   systemLinuxHopperLauncherCandidates,
   supportsReaHost,
 } from "./LinuxHopper.js";
+import {
+  MAC_HOPPER_SYSTEM_LAUNCHER,
+  macHopperCanonicalLauncherCandidates,
+} from "./MacHopperPaths.js";
 import type {
   DoctorCheck,
   DoctorHost,
   DoctorProviderInspection,
 } from "./Doctor.js";
-
-const DEFAULT_HOPPER =
-  "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper";
 
 /** Ordered environment diagnostics consumed by the Doctor report assembler. */
 export interface DoctorDiagnostics {
@@ -150,10 +151,17 @@ const findHopper = async (host: DoctorHost): Promise<string | undefined> => {
   const candidates =
     host.configuredHopperPath === undefined
       ? [
-          DEFAULT_HOPPER,
+          ...(host.platform === "darwin"
+            ? macHopperCanonicalLauncherCandidates(host.homeDirectory)
+            : [MAC_HOPPER_SYSTEM_LAUNCHER]),
           ...(host.platform === "linux"
             ? linuxHopperLauncherCandidates(host.homeDirectory)
             : [...systemLinuxHopperLauncherCandidates]),
+          ...(host.platform === "darwin"
+            ? []
+            : macHopperCanonicalLauncherCandidates(host.homeDirectory).slice(
+                1,
+              )),
           ...(await host.manualHopperPaths()),
         ]
       : [host.configuredHopperPath];

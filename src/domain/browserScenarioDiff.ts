@@ -425,7 +425,7 @@ const compareScenarioEvents = (
         after_state: afterState,
         before_sha256: beforeSha256,
         after_sha256: afterSha256,
-        reason: null,
+        reason: input.incomparableReason ?? null,
       },
     };
   if (

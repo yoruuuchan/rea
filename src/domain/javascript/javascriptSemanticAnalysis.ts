@@ -78,6 +78,7 @@ interface BindPatternInput {
   readonly scope: JavaScriptSemanticScopeState;
   readonly state: JavaScriptSemanticAnalysisState;
   readonly mutable: boolean;
+  readonly declarationKind?: "var" | "let" | "const" | "using" | "await using";
   readonly kind?: JavaScriptSemanticDefinition["kind"];
   readonly projection?: readonly (string | number | null)[];
   readonly referenceOnly?: boolean;
@@ -101,6 +102,7 @@ interface AddBindingInput {
   readonly name: string;
   readonly kind: JavaScriptSemanticDefinition["kind"];
   readonly mutable: boolean;
+  readonly declarationKind?: "var" | "let" | "const" | "using" | "await using";
   readonly definitionNode: t.Node;
   readonly initializer: t.Node | null;
   readonly directOrigin?: JavaScriptModuleOrigin;
@@ -685,7 +687,8 @@ const createState = (
     moduleLinks: [],
     linkedRequireCalls: new WeakSet(),
     moduleLinkBindings: new WeakMap(),
-    conditionalInitializers: new WeakSet(),
+    defaultExportExpressions: new WeakMap(),
+    conditionallySkippedExpressions: new WeakSet(),
     requiredModuleEffects: new Map(),
     ambientBindingWrites: new Map(),
     ambientWrites: new SemanticPropertyPathCoverage(),
@@ -704,6 +707,7 @@ function* collectDefinitionsSteps(
   const assignments: {
     readonly node: t.Node;
     readonly scope: JavaScriptSemanticScopeState;
+    readonly conditionallySkipped: boolean;
   }[] = [];
   const functionBodies: {
     readonly body: t.BlockStatement;
@@ -779,16 +783,23 @@ function* collectDefinitionsSteps(
         node.init != null &&
         parent !== null &&
         t.isVariableDeclaration(parent, { kind: "var" }) &&
-        hasConditionalInitializer(readAncestors())
+        writeMayBeSkipped(node, readAncestors())
       )
-        state.conditionalInitializers.add(node.init);
+        state.conditionallySkippedExpressions.add(node.init);
       if (
         t.isAssignmentExpression(node) ||
         t.isUpdateExpression(node) ||
         t.isForOfStatement(node) ||
         t.isForInStatement(node)
       )
-        assignments.push({ node, scope });
+        assignments.push({
+          node,
+          scope,
+          conditionallySkipped:
+            t.isForOfStatement(node) ||
+            t.isForInStatement(node) ||
+            writeMayBeSkipped(node, readAncestors()),
+        });
     },
     exit: (node) => {
       for (let count = openedScopes.get(node) ?? 0; count > 0; count--)
@@ -797,9 +808,12 @@ function* collectDefinitionsSteps(
   });
   // All declarations must exist before resolving writes, including hoisted
   // functions and local declarations that shadow an outer binding.
-  for (const [index, { node, scope }] of assignments.entries()) {
+  for (const [
+    index,
+    { node, scope, conditionallySkipped },
+  ] of assignments.entries()) {
     if (index % 64 === 0) yield;
-    bindAssignment(node, scope, state);
+    bindAssignment(node, scope, state, conditionallySkipped);
   }
   for (const [index, { body, scope, parameters }] of functionBodies.entries()) {
     if (index % 64 === 0) yield;
@@ -853,27 +867,70 @@ const copyParameterToBody = (input: {
   }
 };
 
-const hasConditionalInitializer = (ancestors: readonly t.Node[]): boolean => {
-  // A hoisted var can remain undefined when control flow skips its initializer.
-  // Conditions outside the owning callable/static block do not govern its body.
+const writeMayBeSkipped = (
+  node: t.Node,
+  ancestors: readonly t.Node[],
+): boolean => {
+  let child = node;
   for (let index = ancestors.length - 1; index >= 0; index -= 1) {
-    const node = ancestors[index];
-    if (t.isFunction(node) || t.isProgram(node) || t.isStaticBlock(node))
+    const parent = ancestors[index];
+    if (
+      parent === undefined ||
+      t.isFunction(parent) ||
+      t.isProgram(parent) ||
+      t.isStaticBlock(parent)
+    )
       return false;
-    if (t.isIfStatement(node) || t.isSwitchCase(node) || t.isTryStatement(node))
-      return true;
-    if (t.isLoop(node)) {
-      const bodyOrTest = ancestors[index + 1];
-      if (
-        (t.isForStatement(node) && bodyOrTest === node.init) ||
-        (t.isDoWhileStatement(node) &&
-          (bodyOrTest === node.body || bodyOrTest === node.test))
-      )
-        continue;
-      return true;
-    }
+    if (isSkippedBranch(parent, child)) return true;
+    child = parent;
   }
   return false;
+};
+
+const isSkippedBranch = (parent: t.Node, child: t.Node): boolean => {
+  if (t.isIfStatement(parent))
+    return child === parent.consequent || child === parent.alternate;
+  if (t.isSwitchCase(parent)) return true;
+  if (t.isTryStatement(parent))
+    return child === parent.block || child === parent.handler;
+  if (t.isForStatement(parent))
+    return child === parent.body || child === parent.update;
+  if (t.isWhileStatement(parent)) return child === parent.body;
+  if (t.isDoWhileStatement(parent)) return false;
+  if (t.isForInStatement(parent) || t.isForOfStatement(parent))
+    return child === parent.left || child === parent.body;
+  if (t.isLogicalExpression(parent)) return child === parent.right;
+  if (t.isConditionalExpression(parent))
+    return child === parent.consequent || child === parent.alternate;
+  if (t.isOptionalCallExpression(parent) || t.isCallExpression(parent))
+    return (
+      parent.arguments.includes(child as t.Expression) &&
+      optionalCallArgumentsMayBeSkipped(parent)
+    );
+  if (t.isOptionalMemberExpression(parent))
+    return parent.optional && parent.computed && child === parent.property;
+  return false;
+};
+
+const optionalCallArgumentsMayBeSkipped = (
+  call: t.CallExpression | t.OptionalCallExpression,
+): boolean => {
+  if (t.isOptionalCallExpression(call) && call.optional) return true;
+  let callee: t.Node = call.callee;
+  while (true) {
+    // Parentheses terminate optional-chain short-circuiting. In particular,
+    // `(foo?.bar)(arg)` evaluates arg before attempting the call.
+    if (callee.extra?.parenthesized === true) return false;
+    if (t.isOptionalMemberExpression(callee)) {
+      if (callee.optional) return true;
+      callee = callee.object;
+    } else if (t.isMemberExpression(callee)) callee = callee.object;
+    else if (t.isOptionalCallExpression(callee)) {
+      if (callee.optional) return true;
+      callee = callee.callee;
+    } else if (t.isCallExpression(callee)) callee = callee.callee;
+    else return false;
+  }
 };
 
 const bindOuterDeclaration = (
@@ -922,6 +979,9 @@ const bindInnerDeclaration = (
         parent !== null && t.isVariableDeclaration(parent)
           ? parent.kind !== "const"
           : true,
+      ...(parent !== null && t.isVariableDeclaration(parent)
+        ? { declarationKind: parent.kind }
+        : {}),
     });
   else if (t.isClassExpression(node) && t.isIdentifier(node.id))
     addBinding({
@@ -983,6 +1043,7 @@ const bindAssignment = (
   node: t.Node,
   scope: JavaScriptSemanticScopeState,
   state: JavaScriptSemanticAnalysisState,
+  conditionallySkipped: boolean,
 ): void => {
   if (t.isAssignmentExpression(node)) {
     const left = unwrapJavaScriptExpression(node.left).node;
@@ -996,21 +1057,23 @@ const bindAssignment = (
           : node,
         scope,
         state,
+        conditionallySkipped,
       );
     else
       for (const identifier of semanticWriteTargets(node.left))
         if (t.isIdentifier(identifier))
-          addAssignment(identifier, node, scope, state);
+          addAssignment(identifier, node, scope, state, conditionallySkipped);
   } else if (t.isUpdateExpression(node)) {
     const argument = unwrapJavaScriptExpression(node.argument).node;
-    if (t.isIdentifier(argument)) addAssignment(argument, node, scope, state);
+    if (t.isIdentifier(argument))
+      addAssignment(argument, node, scope, state, conditionallySkipped);
   } else if (t.isForOfStatement(node) || t.isForInStatement(node))
     for (const pattern of t.isVariableDeclaration(node.left)
       ? node.left.declarations.map(({ id }) => id)
       : [node.left]) {
       for (const identifier of semanticWriteTargets(pattern))
         if (t.isIdentifier(identifier))
-          addAssignment(identifier, node, scope, state);
+          addAssignment(identifier, node, scope, state, conditionallySkipped);
       if (t.isForOfStatement(node))
         // Keep the loop value unknown, but preserve references yielded into
         // each bound slot so writes/escapes can reach their iterable origins.
@@ -1201,6 +1264,7 @@ const bindPattern = (input: BindPatternInput): void => {
     scope,
     state,
     mutable,
+    declarationKind,
     kind = "variable",
     projection = [],
     referenceOnly = false,
@@ -1243,6 +1307,7 @@ const bindPattern = (input: BindPatternInput): void => {
       name: pattern.name,
       kind,
       mutable,
+      ...(declarationKind === undefined ? {} : { declarationKind }),
       definitionNode: pattern,
       initializer,
       projection,
@@ -1345,6 +1410,7 @@ const addBinding = (input: AddBindingInput): void => {
     name,
     kind,
     mutable,
+    declarationKind,
     definitionNode,
     initializer,
     directOrigin,
@@ -1359,6 +1425,8 @@ const addBinding = (input: AddBindingInput): void => {
     state.bindingsById.set(binding.bindingId, binding);
   }
   binding.mutable ||= mutable;
+  if (declarationKind !== undefined)
+    binding.declarationKinds.add(declarationKind);
   binding.definitions.push({ kind, location: range(definitionNode) });
   if (initializer !== null)
     binding.initializers.push({ node: initializer, projection });
@@ -1386,6 +1454,7 @@ const createBinding = (
   name,
   kind,
   mutable,
+  declarationKinds: new Set(),
   memberWrites: [],
   escapedPaths: [],
   definitions: [],
@@ -1400,6 +1469,7 @@ const addAssignment = (
   initializer: t.Node,
   scope: JavaScriptSemanticScopeState,
   state: JavaScriptSemanticAnalysisState,
+  conditionallySkipped: boolean,
 ): void => {
   const binding = resolveSemanticBindingFromScope(
     scope,
@@ -1417,4 +1487,6 @@ const addAssignment = (
   binding.mutable = true;
   binding.definitions.push({ kind: "assignment", location: range(identifier) });
   binding.initializers.push({ node: initializer, projection: [] });
+  if (conditionallySkipped)
+    state.conditionallySkippedExpressions.add(initializer);
 };

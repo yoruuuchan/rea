@@ -3,6 +3,7 @@
 // every workflow.
 export const SCOPES = {
   reverse_tools: [
+    ".github/workflows/mutation.yml",
     "src/application/reverse/**",
     "src/application/binary/BinarySession.ts",
     "src/cutter/**",
@@ -23,6 +24,7 @@ export const SCOPES = {
     "tests/composition/analysis-sessions/binarySession.test.ts",
     "tests/boundary/filesystem/directAnalysisSnapshotReplay.test.ts",
     "tests/boundary/filesystem/reverseToolsMutationConfig.test.ts",
+    "tests/boundary/filesystem/mutationWorkflow.test.ts",
     "src/server/registerRizinDebugTools.ts",
     "tests/boundary/providers/CutterBridge*.test.ts",
     "tests/boundary/providers/cutterBridgeProducer.test.ts",

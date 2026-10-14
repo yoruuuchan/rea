@@ -19,7 +19,8 @@ it.skipIf(process.platform === "win32")(
   "stops the session when the provider closes its stdin pipe",
   async () => {
     const provider = await makeProvider(
-      'printf "\\000"; exec 0<&-; while :; do :; done',
+      // Readiness must guarantee that the child's stdin is already closed.
+      'exec 0<&-; printf "\\000"; while :; do :; done',
       "#!/bin/sh",
     );
     const { manager, sessionId } = await start(provider, {

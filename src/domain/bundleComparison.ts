@@ -102,11 +102,7 @@ export const compareBundles = (
   ).length;
   return bundleComparisonResultSchema.parse({
     status:
-      leftDigest === rightDigest && changes.length === 0
-        ? "unchanged"
-        : unresolved > 0
-          ? "unknown"
-          : "changed",
+      unresolved > 0 ? "unknown" : changes.length > 0 ? "changed" : "unchanged",
     left_bundle_sha256: leftDigest,
     right_bundle_sha256: rightDigest,
     summary: {

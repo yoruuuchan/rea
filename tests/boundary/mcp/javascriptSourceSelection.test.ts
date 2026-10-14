@@ -10,7 +10,9 @@ import { z } from "zod";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { writeJavaScriptSourceSelectionFixture } from "../../fixtures/javascriptSourceSelection.js";
+import { createStrippedAsarAddon } from "../../fixtures/strippedAsarAddon.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { writeFixtureFiles } from "../../support/javascriptApplicationFixture.js";
 
 const createSelectionClient = () => {
   const client = new Client({
@@ -29,6 +31,79 @@ const createSelectionClient = () => {
   });
   return { client, transport };
 };
+
+it("resolves ESM whitespace specifiers through the public application tool", async () => {
+  const root = await createTestTempDirectory("rea-esm-whitespace-mcp-");
+  const rawSpecifier = "./feature\tname.js";
+  const encodedSpecifier = "./feature%09name.js";
+  await writeFixtureFiles(root, {
+    "main.mjs": `import ${JSON.stringify(rawSpecifier)};\nimport ${JSON.stringify(encodedSpecifier)};\n`,
+    "featurename.js": "export const plain = 1;\n",
+    "feature\tname.js": "export const value = 1;\n",
+  });
+  const { client, transport } = createSelectionClient();
+  try {
+    await client.connect(transport);
+    const output = await client.callTool({
+      name: "analyze_javascript_application",
+      arguments: { input_path: root },
+    });
+    expect(output.isError, JSON.stringify(output.content)).not.toBe(true);
+    const result = javascriptApplicationAnalysisResultSchema.parse(
+      parseEvidence(output.structuredContent).normalized_result,
+    );
+    expect(result.graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            specifier: rawSpecifier,
+            resolved_path: "featurename.js",
+          }),
+        }),
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            specifier: encodedSpecifier,
+            resolved_path: "feature\tname.js",
+          }),
+        }),
+      ]),
+    );
+  } finally {
+    await client.close();
+    await transport.close();
+  }
+}, 60_000);
+
+it("retains missing ASAR native-addon inventory through the public application tool", async () => {
+  const { archive, addon } = await createStrippedAsarAddon();
+  await rm(join(`${archive}.unpacked`, addon));
+  const { client, transport } = createSelectionClient();
+  try {
+    await client.connect(transport);
+    const output = await client.callTool({
+      name: "analyze_javascript_application",
+      arguments: { input_path: archive },
+    });
+    expect(output.isError, JSON.stringify(output.content)).not.toBe(true);
+    const result = javascriptApplicationAnalysisResultSchema.parse(
+      parseEvidence(output.structuredContent).normalized_result,
+    );
+    expect(result.graph.coverage.status).toBe("partial");
+    expect(
+      result.graph.nodes.some(
+        (node) =>
+          node.kind === "native-addon" &&
+          node.observations.some(
+            ({ label, properties }) =>
+              label === addon && properties.availability === "unavailable",
+          ),
+      ),
+    ).toBe(true);
+  } finally {
+    await client.close();
+    await transport.close();
+  }
+}, 60_000);
 
 it("advertises exact source selection and retains its scope through summary, Evidence retrieval and invalid-input recovery", async () => {
   const root = await createTestTempDirectory("rea-js-selected-mcp-");

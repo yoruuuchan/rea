@@ -12,6 +12,20 @@ import { browserScenarioSchema } from "../../dist/domain/browserScenario.js";
 import { runScenarioCli } from "./browser-scenario-verifier.mjs";
 import { verifyScenarioPolicySetup } from "./browser-scenario-service-worker-setup-e2e.mjs";
 
+const diagnosticError = (error) =>
+  error instanceof Error
+    ? {
+        name: error.name,
+        message: error.message.slice(0, 1_000),
+        reason: error.reason,
+        stack: error.stack?.slice(0, 2_000),
+        cause:
+          error.cause instanceof Error
+            ? error.cause.stack?.slice(0, 3_000)
+            : typeof error.cause,
+      }
+    : { kind: typeof error };
+
 const startSite = async () => {
   let otherOrigin;
   const server = createServer((request, response) => {
@@ -83,6 +97,7 @@ export async function verifyScenarioServiceWorkers(endpoint, targetId) {
   first.setOtherOrigin(second.origin);
   second.setOtherOrigin(first.origin);
   const observer = await chromium.connectOverCDP(endpoint);
+  console.log("Service-worker fixture browser:", observer.version());
   let provider = createBrowserScenarioProvider(process.env);
   let session;
   let failure;
@@ -154,7 +169,42 @@ export async function verifyScenarioServiceWorkers(endpoint, targetId) {
         state: "visible",
       },
     ]);
-    const cleanCapture = (await runScenarioCli(clean)).normalized_result;
+    let cleanCapture;
+    try {
+      cleanCapture = (await runScenarioCli(clean)).normalized_result;
+    } catch (cause) {
+      // Retain the original failure. One bounded replay navigates only this
+      // verifier-owned target and exposes causes the CLI does not serialize.
+      const state = await page
+        .locator("#state")
+        .evaluate(
+          (element) => ({
+            text: element.textContent?.slice(0, 100),
+            blocked: element.getAttribute("data-blocked"),
+            nativeRegister: navigator.serviceWorker.register
+              .toString()
+              .includes("[native code]"),
+          }),
+          undefined,
+          { timeout: 1_000 },
+        )
+        .catch((error) => ({ unavailable: String(error).slice(0, 500) }));
+      console.error("Service-worker CLI failure state:", {
+        url: page.url(),
+        state,
+      });
+      const replay = await provider
+        .captureScenario(clean, { signal: AbortSignal.timeout(5_000) })
+        .then((result) =>
+          result.ok ? { ok: true } : diagnosticError(result.error),
+        )
+        .catch(diagnosticError);
+      console.error(
+        "Service-worker diagnostic replay (original CLI failure retained):",
+        replay,
+      );
+      throw cause;
+    }
     assert.ok(cleanCapture.steps.every(({ status }) => status === "completed"));
     assert.equal(cleanCapture.browser.cleanup, "disconnected-external");
     await assertRestored();

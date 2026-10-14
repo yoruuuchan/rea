@@ -292,14 +292,20 @@ export const decodeObjcDispatchFacets = (input: {
           void cause;
           failures.push(`Unresolved ivar offset pointer ${hex(encodedOffset)}`);
         }
+        const alignment = read.u32(entry + 24n);
         result.objc_ivars.push({
           class_name: name,
           name: read.string(read.pointer(entry + 8n)),
           type_encoding: read.string(read.pointer(entry + 16n)),
           offset: value,
           size: read.u32(entry + 28n),
+          // objc4 ivar_t::alignment(): ~0 means word alignment (8 for 32-byte entries).
           alignment:
-            read.u32(entry + 24n) < 31 ? 2 ** read.u32(entry + 24n) : null,
+            alignment === 0xffffffff
+              ? 8
+              : alignment < 31
+                ? 2 ** alignment
+                : null,
           location: read.location(entry),
           decode:
             value === null

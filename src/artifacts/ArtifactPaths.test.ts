@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ArtifactPathRegistry,
   annotateEnglishUnicodeCaseCollisions,
   ENGLISH_UNICODE_CASE_INVENTORY_LIMITATION,
 } from "./ArtifactPaths.js";
@@ -26,6 +27,15 @@ const annotate = (paths: readonly string[]) => {
 };
 
 describe("English Unicode case collisions", () => {
+  it("retains repeated same-kind entries while rejecting file-directory aliasing", () => {
+    const registry = new ArtifactPathRegistry();
+    registry.add("duplicate", "file");
+    expect(() => registry.add("duplicate", "file")).not.toThrow();
+    expect(() => registry.add("duplicate", "directory")).toThrow(
+      "Artifact path collision",
+    );
+  });
+
   it("names the other spelling of a colliding file", () => {
     const { limitation, byPath } = annotate([".", "Main.js", "main.js", "x"]);
     expect(limitation).toBe(ENGLISH_UNICODE_CASE_INVENTORY_LIMITATION);

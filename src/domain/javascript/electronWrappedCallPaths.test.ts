@@ -140,6 +140,40 @@ it("preserves an observed empty contextBridge API object", () => {
   expect(result.parse_status).toBe("complete");
 });
 
+it.each([
+  [
+    "explicit nested paths after an unknown spread",
+    `{ ...extra, a: { b: 1 }, c: 2 }`,
+    ["a", "a.b", "c"],
+    1,
+    "dynamic",
+  ],
+  [
+    "a direct object literal",
+    `{ a: { b: 1 }, c: 2 }`,
+    ["a", "a.b", "c"],
+    0,
+    "object-literal",
+  ],
+  ["a dynamic API argument", "getApi()", [], 1, "dynamic"],
+] as const)(
+  "preserves directly observed nested bridge members for %s",
+  (_name, api, members, unknownMembers, apiStatus) => {
+    const result = analyzeJavaScriptStaticSource(`
+      const { contextBridge } = require("electron");
+      contextBridge.exposeInMainWorld("api", ${api});
+    `);
+    expect(result.electron.context_bridge_apis).toContainEqual(
+      expect.objectContaining({
+        api_key: "api",
+        api_status: apiStatus,
+        members,
+        unknown_members: unknownMembers,
+      }),
+    );
+  },
+);
+
 describe("wrapped contextBridge exposure methods", () => {
   it("retains the original expression for a dynamic isolated world id", () => {
     const result = analyzeJavaScriptStaticSource(

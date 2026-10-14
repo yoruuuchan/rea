@@ -284,7 +284,7 @@ export const registerAdbCommands = (
   });
   cli.command(CLI_COMMANDS.installAdbPackage, {
     description:
-      "Install one local APK; --replace re-installs keeping the app's data",
+      "Install one local APK; --replace requests reinstall mode to keep existing app data",
     args: z.object({
       serial,
       "apk-path": z.string().min(1).describe("Local APK file to install"),
@@ -293,7 +293,9 @@ export const registerAdbCommands = (
       replace: z
         .boolean()
         .default(false)
-        .describe("Replace an existing install and keep its data"),
+        .describe(
+          "Request reinstall mode and keep existing app data if present",
+        ),
     }),
     run: ({ args, options }) =>
       execute(CLI_COMMANDS.installAdbPackage, "install_adb_package", {

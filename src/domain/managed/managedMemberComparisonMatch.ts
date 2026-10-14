@@ -87,9 +87,10 @@ const keyMethod = (item: Method): Keyed<Method> => ({
           item.body.max_stack,
           item.body.init_locals,
           item.body.opcode_counts,
-          item.body.anchors.map(({ opcode, operand_kind }) => [
+          item.body.anchors.map(({ opcode, operand_kind, operand }) => [
             opcode,
             operand_kind,
+            operand_kind === "constant" ? operand : null,
           ]),
           item.body.exception_regions.map((region) => [
             region.flags,

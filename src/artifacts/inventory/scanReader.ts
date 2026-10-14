@@ -21,6 +21,7 @@ import {
   createArtifactNode,
   createOccurrence,
   noteUnreadContainerSuffix,
+  indexOccurrencesByPath,
   resolveOccurrenceParents,
   type MutableOccurrence,
 } from "./ArtifactGraphConstruction.js";
@@ -31,7 +32,7 @@ import {
 import { hashReadable } from "../ArtifactHash.js";
 
 export interface PendingIntegrityContradiction {
-  readonly logicalPath: string;
+  readonly occurrence: MutableOccurrence;
   readonly declaredSha256: string;
   readonly observedSha256: string;
   readonly entryKind: "file" | "slice";
@@ -54,7 +55,7 @@ interface ScanContext {
   readonly nodes: Map<string, ArtifactNode>;
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
-  readonly occurrenceByPath: Map<string, MutableOccurrence>;
+  readonly occurrenceCountByPath: Map<string, number>;
   readonly registry: ArtifactPathRegistry;
   readonly expandedContainerIds: Set<string>;
   readonly ownedReaders: ArtifactReader[];
@@ -71,6 +72,7 @@ export const scanReader = async (
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
   readonly caseCollisionLimitation: string | undefined;
+  readonly unknownParentOccurrences: ReadonlySet<MutableOccurrence>;
   readonly traversal: ArtifactReaderTraversal;
 }> => {
   const { nodes, occurrences, pendingContradictions } = emptyScan();
@@ -80,6 +82,7 @@ export const scanReader = async (
       occurrences,
       pendingContradictions,
       caseCollisionLimitation: undefined,
+      unknownParentOccurrences: new Set(),
       traversal: { status: "complete", limitations: [] },
     };
   const context: ScanContext = {
@@ -89,7 +92,7 @@ export const scanReader = async (
     nodes,
     occurrences,
     pendingContradictions,
-    occurrenceByPath: new Map<string, MutableOccurrence>(),
+    occurrenceCountByPath: new Map<string, number>(),
     registry: new ArtifactPathRegistry(),
     expandedContainerIds: new Set<string>(),
     ownedReaders,
@@ -98,25 +101,32 @@ export const scanReader = async (
   await visitArtifactEntries(context, reader, "");
   // Archive directories may appear after their children. Resolve containment
   // against the complete index before directory identities are materialized.
-  resolveOccurrenceParents(
+  const byPath = indexOccurrencesByPath(occurrences);
+  const parentResolution = resolveOccurrenceParents(
     occurrences,
-    context.occurrenceByPath,
+    byPath,
     context.expandedContainerIds,
   );
+  const structuralLimitations = [...parentResolution.limitations];
   return {
     nodes,
     occurrences,
     pendingContradictions,
     caseCollisionLimitation: annotateEnglishUnicodeCaseCollisions(occurrences),
+    unknownParentOccurrences: parentResolution.unknownParentOccurrences,
     traversal: {
-      status: context.omissions.length === 0 ? "complete" : "unknown",
+      status:
+        context.omissions.length === 0 && structuralLimitations.length === 0
+          ? "complete"
+          : "unknown",
       limitations: [
-        ...new Set(
-          context.omissions.map(
+        ...new Set([
+          ...context.omissions.map(
             ({ path, kind }) =>
               `Artifact traversal omitted ${kind} at ${JSON.stringify(path)}.`,
           ),
-        ),
+          ...structuralLimitations,
+        ]),
       ].sort(compareUnicodeCodePoints),
     },
   };
@@ -176,7 +186,15 @@ const visitArtifactEntries = async (
         logicalPath,
         expandableAsar ? "directory" : entry.kind,
       );
-      const occurrence = createOccurrence(entry, logicalPath, null);
+      const duplicateOrdinal =
+        context.occurrenceCountByPath.get(logicalPath) ?? 0;
+      context.occurrenceCountByPath.set(logicalPath, duplicateOrdinal + 1);
+      const occurrence = createOccurrence(
+        entry,
+        logicalPath,
+        null,
+        duplicateOrdinal,
+      );
       let digested:
         | {
             readonly node: ArtifactNode;
@@ -190,6 +208,7 @@ const visitArtifactEntries = async (
           frame.reader,
           entry,
           logicalPath,
+          occurrence,
         );
       } catch (cause: unknown) {
         if (!isUnavailableUnpackedEntry(cause, entry)) throw cause;
@@ -211,7 +230,6 @@ const visitArtifactEntries = async (
           );
       }
       context.occurrences.push(occurrence);
-      context.occurrenceByPath.set(logicalPath, occurrence);
       if (
         expandableAsar &&
         digested !== undefined &&
@@ -258,6 +276,7 @@ const digestArtifactEntry = async (
   currentReader: ArtifactReader,
   entry: ArtifactEntry,
   logicalPath: string,
+  occurrence: MutableOccurrence,
 ): Promise<
   | {
       readonly node: ArtifactNode;
@@ -288,7 +307,7 @@ const digestArtifactEntry = async (
         },
       );
     context.pendingContradictions.push({
-      logicalPath,
+      occurrence,
       declaredSha256: entry.declaredSha256,
       observedSha256: digest.sha256,
       entryKind: entry.kind,

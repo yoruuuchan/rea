@@ -57,13 +57,6 @@ function initializePercentDemo() {
   render();
 }
 
-function initializeExpertAssembly() {
-  const excerpt = document.querySelector("[data-expert-assembly]");
-  if (excerpt && window.matchMedia("(max-width: 640px)").matches) {
-    excerpt.open = false;
-  }
-}
-
 function initializeHomeNavigation() {
   const menu = document.querySelector("[data-home-nav]");
   if (menu === null) return;
@@ -137,6 +130,5 @@ function initializeHomeNavigation() {
   updateLayout();
 }
 
-initializeExpertAssembly();
 initializePercentDemo();
 initializeHomeNavigation();

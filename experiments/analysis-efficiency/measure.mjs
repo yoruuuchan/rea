@@ -12,6 +12,7 @@ import {
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { PACKET_ARTIFACTS, measurePacketEntry } from "./packet-entry.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const { values } = parseArgs({
@@ -29,6 +30,7 @@ const { values } = parseArgs({
     "managed-question": { type: "string", default: "inventory" },
     schemas: { type: "string", default: "default" },
     "sqlite-selection": { type: "string", default: "all" },
+    "packet-selection": { type: "string", default: "baseline" },
   },
 });
 if (
@@ -45,6 +47,15 @@ if (
   !["inventory", "selected"].includes(values["javascript-question"]) ||
   !["default", "selected"].includes(values.schemas) ||
   !["all", "columns"].includes(values["sqlite-selection"]) ||
+  !["baseline", "focused", "discovery", "pages"].includes(
+    values["packet-selection"],
+  ) ||
+  (!Object.hasOwn(PACKET_ARTIFACTS, values.artifact) &&
+    values["packet-selection"] !== "baseline") ||
+  (Object.hasOwn(PACKET_ARTIFACTS, values.artifact) &&
+    values.delivery !== "complete") ||
+  (values["packet-selection"] === "pages" &&
+    values.artifact !== "wireshark-pgsql-jdbc.pcap") ||
   (values.artifact !== "qgis-world-map.gpkg" &&
     values["sqlite-selection"] !== "all") ||
   (values.artifact === "qgis-world-map.gpkg" &&
@@ -141,6 +152,12 @@ const fingerprints = {
   measure_source_sha256: await fileSha(fileURLToPath(import.meta.url)),
   native_workflow_source_sha256: await fileSha(
     fileURLToPath(new URL("./native-entry.mjs", import.meta.url)),
+  ),
+  packet_workflow_source_sha256: await fileSha(
+    fileURLToPath(new URL("./packet-entry.mjs", import.meta.url)),
+  ),
+  packet_oracle_source_sha256: await fileSha(
+    fileURLToPath(new URL("./packet-oracle.py", import.meta.url)),
   ),
   runtime_files_sha256: sha(JSON.stringify(runtimeFiles)),
   runtime_dispatcher_sha256: await fileSha(
@@ -722,6 +739,12 @@ const inspectPcapTarget = async () => {
 };
 
 const workflows = {
+  ...Object.fromEntries(
+    Object.keys(PACKET_ARTIFACTS).map((artifact) => [
+      artifact,
+      () => measurePacketEntry({ values, call, inputSha, catalogDefinitions }),
+    ]),
+  ),
   "wireshark-http.cap": inspectPcapTarget,
   "wireshark-http_redirects.pcapng": inspectPcapTarget,
   "qgis-world-map.gpkg": async () => {
@@ -1160,6 +1183,9 @@ const report = {
     values.artifact === "qgis-world-map.gpkg"
       ? values["sqlite-selection"]
       : null,
+  packet_selection: Object.hasOwn(PACKET_ARTIFACTS, values.artifact)
+    ? values["packet-selection"]
+    : null,
   provider_settings_sha256: sha(JSON.stringify(selectedProviders)),
   provider_search_path_sha256: sha(
     selectedProviders.PATH ?? process.env.PATH ?? "",

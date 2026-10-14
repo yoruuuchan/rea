@@ -121,10 +121,6 @@ const validateInventoryPage = (inventory: ArtifactInventoryResult): void => {
     "occurrence ID",
   );
   assertUnique(
-    inventory.occurrences.map(({ logical_path: path }) => path),
-    "logical path",
-  );
-  assertUnique(
     inventory.edges.map(({ edge_id: id }) => id),
     "edge ID",
   );
@@ -149,7 +145,6 @@ const assembleInventoryResults = (
   );
   const nodes = new Map<string, ArtifactNode>();
   const occurrences = new Map<string, ArtifactOccurrence>();
-  const paths = new Map<string, ArtifactOccurrence>();
   const edges = new Map<string, ArtifactInventoryResult["edges"][number]>();
   for (const page of pages) {
     if (canonicalJson(page.manifest, "Artifact inventory") !== manifestJson)
@@ -182,7 +177,6 @@ const assembleInventoryResults = (
         occurrence,
         "occurrence",
       );
-      mergeExact(paths, occurrence.logical_path, occurrence, "logical path");
     }
     for (const edge of page.edges)
       mergeExact(edges, edge.edge_id, edge, "edge");
@@ -211,9 +205,9 @@ const orderedInventory = (
   const nodes = [...values.nodes.values()].sort((left, right) =>
     compareUnicodeCodePoints(left.artifact_id, right.artifact_id),
   );
-  const occurrences = [...values.occurrences.values()].sort((left, right) =>
-    compareUnicodeCodePoints(left.logical_path, right.logical_path),
-  );
+  const occurrences = orderOccurrences(first.manifest.root_artifact_id, [
+    ...values.occurrences.values(),
+  ]);
   const edges = [...values.edges.values()].sort((left, right) =>
     compareUnicodeCodePoints(left.edge_id, right.edge_id),
   );
@@ -233,6 +227,44 @@ const orderedInventory = (
       occurrences.length === first.manifest.occurrence_count &&
       edges.length === first.manifest.edge_count,
   };
+};
+
+const orderOccurrences = (
+  rootArtifactId: string,
+  occurrences: readonly ArtifactOccurrence[],
+): ArtifactOccurrence[] => {
+  const groups = new Map<string, ArtifactOccurrence[]>();
+  for (const occurrence of occurrences) {
+    const group = groups.get(occurrence.logical_path);
+    if (group === undefined) groups.set(occurrence.logical_path, [occurrence]);
+    else group.push(occurrence);
+  }
+  return [...groups]
+    .sort(([left], [right]) => compareUnicodeCodePoints(left, right))
+    .flatMap(([path, group]) => {
+      if (group.length < 2) return group;
+      const ordinalById = new Map<string, number>();
+      const first = group[0];
+      if (first === undefined)
+        throw new TypeError("Duplicate occurrence group is empty");
+      for (let ordinal = 0; ordinal < group.length; ordinal++) {
+        ordinalById.set(
+          occurrenceIdForLocation({
+            rootArtifactId,
+            logicalPath: path,
+            entryKind: first.entry_kind,
+            ...(ordinal === 0 ? {} : { duplicateOrdinal: ordinal }),
+          }),
+          ordinal,
+        );
+      }
+      return group.sort(
+        (left, right) =>
+          (ordinalById.get(left.occurrence_id) ?? Number.MAX_SAFE_INTEGER) -
+            (ordinalById.get(right.occurrence_id) ?? Number.MAX_SAFE_INTEGER) ||
+          compareUnicodeCodePoints(left.occurrence_id, right.occurrence_id),
+      );
+    });
 };
 
 // Normalize both retained coverage formats at this owning boundary.
@@ -312,8 +344,12 @@ const validateCompleteInventory = (inventory: InventorySet): void => {
     throw new TypeError(
       "Artifact root occurrence does not match its manifest representation",
     );
-  for (const occurrence of inventory.occurrences)
-    validateOccurrence(occurrence, inventory, nodeIds, occurrenceIds);
+  const duplicateOrdinalByPath = new Map<string, number>();
+  for (const occurrence of inventory.occurrences) {
+    const ordinal = duplicateOrdinalByPath.get(occurrence.logical_path) ?? 0;
+    duplicateOrdinalByPath.set(occurrence.logical_path, ordinal + 1);
+    validateOccurrence(occurrence, inventory, nodeIds, occurrenceIds, ordinal);
+  }
   const occurrencesById = new Map(
     inventory.occurrences.map((occurrence) => [
       occurrence.occurrence_id,
@@ -362,6 +398,7 @@ const validateOccurrence = (
   inventory: InventorySet,
   nodeIds: ReadonlySet<string>,
   occurrenceIds: ReadonlySet<string>,
+  duplicateOrdinal: number,
 ): void => {
   if (occurrence.artifact_id !== null && !nodeIds.has(occurrence.artifact_id))
     throw new TypeError("Artifact occurrence references a missing node");
@@ -374,6 +411,7 @@ const validateOccurrence = (
     rootArtifactId: inventory.manifest.root_artifact_id,
     logicalPath: occurrence.logical_path,
     entryKind: occurrence.entry_kind,
+    ...(duplicateOrdinal === 0 ? {} : { duplicateOrdinal }),
   });
   if (occurrence.occurrence_id !== expectedId)
     throw new TypeError("Artifact occurrence ID does not match its identity");

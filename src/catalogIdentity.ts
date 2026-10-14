@@ -4,11 +4,16 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
+import type { PromptContract } from "./contracts/promptContracts.js";
 import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
 import type { ToolContract } from "./contracts/toolContractTypes.js";
 import { CLI_COMMAND_NAMES } from "./cliCommandNames.js";
 import { compareUnicodeCodePoints } from "./domain/unicodeCodePointOrder.js";
 import { advertisedInputJsonSchema } from "./contracts/toolSchemaMetadata.js";
+import {
+  presentAdvertisedInputSchema,
+  type CompactInputSchemaPresentation,
+} from "./contracts/compactInputSchema.js";
 
 const sortByName = (
   contracts: readonly ToolContract[],
@@ -25,7 +30,10 @@ const sortedToolContracts = sortByName(TOOL_CONTRACTS);
  * that predates the untrusted-content framing must not digest equal to one
  * that emits `_meta.provenance`, or a stale process would report aligned.
  */
-const createToolCatalog = (contracts: readonly ToolContract[]) =>
+const createToolCatalog = (
+  contracts: readonly ToolContract[],
+  compactPresentation: CompactInputSchemaPresentation | undefined,
+) =>
   contracts.map((contract) => ({
     name: contract.name,
     title: contract.title,
@@ -34,7 +42,10 @@ const createToolCatalog = (contracts: readonly ToolContract[]) =>
     effects: { ...contract.effects },
     returns_target_content: contract.returnsTargetContent,
     annotations: contract.annotations,
-    input_schema: advertisedInputJsonSchema(contract),
+    input_schema: presentAdvertisedInputSchema(
+      advertisedInputJsonSchema(contract),
+      compactPresentation,
+    ),
     output_schema: {
       type: "object",
       ...z.toJSONSchema(contract.outputSchema, {
@@ -43,13 +54,19 @@ const createToolCatalog = (contracts: readonly ToolContract[]) =>
     },
   }));
 
-const promptCatalog = PROMPT_CONTRACTS.map((contract) => ({
-  name: contract.name,
-  title: contract.title,
-  description: contract.description,
-  arguments: contract.arguments,
-  steps: contract.steps,
-})).sort((left, right) => compareUnicodeCodePoints(left.name, right.name));
+const createPromptCatalog = (contracts: readonly PromptContract[]) =>
+  contracts
+    .map((contract) => ({
+      name: contract.name,
+      title: contract.title,
+      description: contract.description,
+      objective: contract.objective,
+      arguments: contract.arguments,
+      steps: contract.steps,
+    }))
+    .sort((left, right) => compareUnicodeCodePoints(left.name, right.name));
+
+const promptCatalog = createPromptCatalog(PROMPT_CONTRACTS);
 
 const digest = (value: unknown): string => {
   const encoded = canonicalize(value);
@@ -65,29 +82,45 @@ const digest = (value: unknown): string => {
  */
 export const createCatalogDigests = (
   contracts: readonly ToolContract[] = TOOL_CONTRACTS,
+  promptContracts: readonly PromptContract[] = PROMPT_CONTRACTS,
+  compactPresentation: CompactInputSchemaPresentation | undefined = undefined,
 ) => {
-  const tools = createToolCatalog(sortByName(contracts));
+  const tools = createToolCatalog(sortByName(contracts), compactPresentation);
+  const prompts = createPromptCatalog(promptContracts);
   return {
     tools_sha256: digest(tools),
-    prompts_sha256: digest(promptCatalog),
+    prompts_sha256: digest(prompts),
     combined_sha256: digest({
       cli: CLI_COMMAND_NAMES,
       tools,
-      prompts: promptCatalog,
+      prompts,
     }),
   } as const;
 };
 
-let catalogDigests: ReturnType<typeof createCatalogDigests> | undefined;
+export const createCatalogIdentity = (
+  compactPresentation: CompactInputSchemaPresentation | undefined = undefined,
+) => {
+  const selectedPresentation =
+    compactPresentation === undefined
+      ? undefined
+      : { budgetBytes: compactPresentation.budgetBytes };
+  let catalogDigests: ReturnType<typeof createCatalogDigests> | undefined;
+  return {
+    counts: {
+      cli_commands: CLI_COMMAND_NAMES.length,
+      mcp_tools: sortedToolContracts.length,
+      mcp_prompts: promptCatalog.length,
+    },
+    get digests() {
+      return (catalogDigests ??= createCatalogDigests(
+        TOOL_CONTRACTS,
+        PROMPT_CONTRACTS,
+        selectedPresentation,
+      ));
+    },
+  } as const;
+};
 
 /** Stable, schema-sensitive identity; schema digests are computed on first use. */
-export const CATALOG_IDENTITY = {
-  counts: {
-    cli_commands: CLI_COMMAND_NAMES.length,
-    mcp_tools: sortedToolContracts.length,
-    mcp_prompts: promptCatalog.length,
-  },
-  get digests() {
-    return (catalogDigests ??= createCatalogDigests());
-  },
-} as const;
+export const CATALOG_IDENTITY = createCatalogIdentity();

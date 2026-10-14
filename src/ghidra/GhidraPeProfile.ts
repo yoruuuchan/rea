@@ -10,9 +10,13 @@ import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
  */
 export const ghidraPeCodeViewLimitations = (
   target: BinaryTarget,
-  pdbLoaded = false,
+  pdbLoaded?: boolean | null,
 ): readonly string[] => {
-  if (target.format !== "pe" || target.codeView === undefined || pdbLoaded) {
+  if (
+    target.format !== "pe" ||
+    target.codeView === undefined ||
+    pdbLoaded !== false
+  ) {
     return [];
   }
   const { pdbFileName, guid, age } = target.codeView;

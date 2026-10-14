@@ -20,6 +20,17 @@ Inspect native SAZ or HAR 1.2 offline with REA, or connect Everywhere's separate
 - `observe_web_session` / `rea observe-web-session` arms an observation window of the requested duration for an external user action and records ordered reload, SPA navigation, redirect, failure, lifecycle, and target-termination metadata.
 - `discover_webmcp_tools` / `rea discover-webmcp-tools` uses the experimental CDP WebMCP domain to return every in-scope registration and its complete observed `input_schema` declaration and canonical `input_schema_sha256` digest inline. Declarations are untrusted JSON data, including declared types, required fields, enums, examples and reference URLs. REA does not resolve schema references. These fields replace `input_schema_shape`. Registrations with the same name and URL in distinct observed frames retain separate identities. `tool_key` includes the observed frame ID; it is not a stable identity across navigation or browser sessions. Same-frame registration updates replace that owner only, and removal leaves other owners intact. Declared `readOnly`, `untrustedContent`, `consequential`, and `autosubmit` annotation hints are reported per registration: `true`/`false` are declared values, `null` means the declaration did not provide the hint in that capture, and a missing `consequential` key means the hint was not recorded, either in a historical capture or because the observed annotation was invalid. Consult discovery completeness and exclusions to distinguish these cases. Malformed annotation values retain the registration with incomplete coverage and an `invalid_protocol_value` exclusion. Other malformed protocol payloads can fail discovery explicitly. REA never exposes `WebMCP.invokeTool`.
 - `compare_web_captures` / `rea compare-web-captures` compares passive captures or exact-step-aligned browser scenarios. Scenario results commit reproducible literal normalization and expose alignment failures plus artifact-level action, screenshot, DOM, accessibility, URL, history, storage, and event differences. Missing or truncated evidence is never treated as equivalence.
+
+Passive DOM comparison checks complete node inventories and complete frame
+parent/child structure independently. Frame IDs and sibling enumeration order
+are capture-local and do not establish a change; duplicate IDs, missing parents,
+and cyclic ancestry remain unknown. A complete frame difference can still prove
+change when DOM nodes are incomplete, and vice versa. Partial DOM or metadata
+collection digests do not prove modification: a missing node or link can result
+from a protocol omission. Rejected DOM facts also mark derived URL and agent-hint
+metadata incomplete, while valid facts from other nodes and documents remain
+available in the capture.
+
 - `capture_web_screenshot` / `rea capture-web-screenshot` returns a content-addressed visible-viewport PNG.
 - `compare_web_screenshots` / `rea compare-web-screenshots` performs bounded local PNG pixel comparison without OCR or external services.
 - The CLI comparison commands accept each capture, screenshot artifact or normalization policy as inline JSON or a JSON file path. Use files for screenshot artifacts and scenario captures, whose embedded PNG bytes can exceed the host's command-line length limit.
@@ -293,6 +304,18 @@ coverage. It reports excluded items and any values omitted or truncated by
 validation and resource bounds. Omitted script metadata makes its affected
 section explicitly truncated.
 Disallowed-origin entries are filtered before retention.
+
+Resource-tree inventories distinguish a valid empty `resources` array from a
+missing or malformed collection. Invalid resource entries are omitted with
+incomplete coverage, while valid resources from that frame and other frames
+remain available. Comparing an incomplete resource inventory cannot prove
+addition, removal, or equality; a complete empty inventory can prove removal.
+Resource records require a nonempty type and a string MIME type; absent or
+malformed required fields are recorded as omissions instead of invented defaults.
+An explicitly empty MIME type is valid. The optional content size may be absent;
+an invalid supplied size remains unknown with incomplete resource coverage while
+the resource's other facts are retained. Zero and nonnegative fractional sizes
+are preserved.
 
 CDP discovery, connection, and commands wait for the peer or caller cancellation;
 a stalled peer can leave an operation waiting. WebSocket messages remain subject

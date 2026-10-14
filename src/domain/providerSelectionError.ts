@@ -23,6 +23,7 @@ export interface ProviderSelectionRejection {
 /** Complete typed context for one failed deep-provider selection. */
 export interface ProviderSelectionErrorOptions {
   readonly capturedOutput?: AnalysisCapturedOutput;
+  readonly userMessage?: string;
   readonly operation?: string;
   readonly reason: ProviderSelectionFailureReason;
   readonly requestedProviderId: string;
@@ -56,7 +57,8 @@ export class ProviderSelectionError extends AnalysisError {
       ...rejection,
       diagnostics: structuredClone(rejection.diagnostics),
     }));
-    this.userMessage = providerSelectionUserMessage(options);
+    this.userMessage =
+      options.userMessage ?? providerSelectionUserMessage(options);
   }
 }
 

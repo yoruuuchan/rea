@@ -7,6 +7,7 @@ import {
   buildManagedPeFixture,
   managedPeFixtureTarget,
 } from "./ManagedPe.fixture.js";
+import { parseExceptionRegions } from "./ManagedMemberInstructionDecoder.js";
 
 const managedBodyWithSections = (...sections: Buffer[]) => {
   const header = Buffer.alloc(12);
@@ -666,6 +667,59 @@ describe("managed exception region flags and filters", () => {
 });
 
 describe("managed exception section decoding", () => {
+  it("reads legacy small EH DataSize without counting its header", () => {
+    const section = Buffer.alloc(16);
+    section[0] = 0x01;
+    section[1] = 12;
+
+    expect(managedBodyWithSections(section)).toMatchObject({
+      status: "present",
+      issue: null,
+      exception_regions: [expect.any(Object)],
+      normalized_il_sha256: expect.any(String),
+    });
+  });
+
+  it("advances a chained legacy section by its physical size", () => {
+    const legacy = Buffer.alloc(16);
+    legacy[0] = 0x81;
+    legacy[1] = 12;
+    const conformant = Buffer.alloc(16);
+    conformant[0] = 0x01;
+    conformant[1] = 16;
+
+    expect(managedBodyWithSections(legacy, conformant)).toMatchObject({
+      status: "present",
+      issue: null,
+      exception_regions: [expect.any(Object), expect.any(Object)],
+      normalized_il_sha256: expect.any(String),
+    });
+  });
+
+  it("rejects a legacy-sized clause whose physical bytes leave the artifact", () => {
+    const section = Buffer.alloc(12);
+    section[0] = 0x01;
+    section[1] = 12;
+
+    expect(parseExceptionRegions(section, 0, section.length)).toMatchObject({
+      status: "malformed",
+      regions: [],
+      issue: "Exception section size leaves artifact",
+    });
+  });
+
+  it("still rejects a small EH DataSize that matches neither layout", () => {
+    const section = Buffer.alloc(17);
+    section[0] = 0x01;
+    section[1] = 13;
+
+    expect(managedBodyWithSections(section)).toMatchObject({
+      status: "malformed",
+      exception_regions: [],
+      issue: "Exception section size does not contain whole clauses",
+    });
+  });
+
   it("marks an exception section with a partial clause as malformed", () => {
     const section = Buffer.alloc(17);
     section[0] = 0x01;
@@ -692,6 +746,19 @@ describe("managed exception section decoding", () => {
         { flags: 0, try_offset: 0, try_length: 0, handler_offset: 0 },
         { flags: 0, try_offset: 0, try_length: 0, handler_offset: 0 },
       ],
+    });
+  });
+
+  it("keeps small section reserved bytes invalid", () => {
+    const section = Buffer.alloc(16);
+    section[0] = 0x01;
+    section[1] = 16;
+    section[2] = 1;
+
+    expect(managedBodyWithSections(section)).toMatchObject({
+      status: "malformed",
+      exception_regions: [],
+      issue: "Small exception section reserved bytes are nonzero",
     });
   });
 

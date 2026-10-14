@@ -323,6 +323,19 @@ describe("Apple dispatch binary metadata", () => {
       });
     },
   );
+
+  it.each([
+    [0xffffffff, 8],
+    [3, 8],
+    [0xfffffffe, null],
+  ])("decodes ivar alignment raw value %i as %s", (raw, alignment) => {
+    const bytes = fixture();
+    bytes.writeUInt32LE(raw, 0x520);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    expect(result.objc_ivars).toMatchObject([
+      { name: "state", alignment, decode: { status: "decoded" } },
+    ]);
+  });
 });
 
 describe("Apple dispatch coverage ownership", () => {

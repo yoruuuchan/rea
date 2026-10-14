@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
@@ -9,7 +9,14 @@ import { configureClientConfiguration } from "../../../src/application/SetupClie
 import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
-import { isOwnedClientRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
+import {
+  classifyClientRegistrationCommand,
+  isOwnedClientRegistrationCommand,
+} from "../../../src/application/ClientRegistrationIdentity.js";
+import {
+  CURRENT_ENTRYPOINT_PATH,
+  normalizeEntrypointPath,
+} from "../../../src/process/CurrentEntrypointPath.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
   clearClientLocationEnvironment,
@@ -37,6 +44,39 @@ const getClients = (home: string) =>
   );
 
 describe("additional client configuration dialects", () => {
+  it("does not uninstall a Node registration whose relative script only matches this process cwd", async () => {
+    if (CURRENT_ENTRYPOINT_PATH === undefined)
+      throw new Error("test runner entrypoint is unavailable");
+    const home = await createTestTempDirectory("rea-relative-uninstall-");
+    const cursor = supportedClients(home).find(({ name }) => name === "cursor");
+    if (cursor === undefined) throw new Error("missing Cursor client");
+    await mkdir(cursor.markerPath ?? home, { recursive: true });
+    const relativeScript = relative(process.cwd(), CURRENT_ENTRYPOINT_PATH);
+    const registration = {
+      command: process.execPath,
+      args: [relativeScript, "mcp"],
+    };
+    await writeFile(
+      cursor.configPath,
+      JSON.stringify({ mcpServers: { rea: registration } }),
+    );
+
+    expect(
+      await readClientRegistrationStatuses(home, CURRENT_ENTRYPOINT_PATH),
+    ).toContainEqual(
+      expect.objectContaining({
+        client: "cursor",
+        command: [process.execPath, relativeScript, "mcp"],
+        state: "unknown",
+      }),
+    );
+    await systemUninstallHost(home).removeClient(cursor);
+    const after = parseJsonc(await readFile(cursor.configPath, "utf8")) as {
+      readonly mcpServers: Readonly<Record<string, unknown>>;
+    };
+    expect(after.mcpServers.rea).toEqual(registration);
+  });
+
   it("treats an empty XDG config home as unset for OpenCode setup", async () => {
     const home = await createTestTempDirectory("rea-opencode-empty-xdg-");
     const client = supportedClients(home, "linux", {
@@ -130,7 +170,9 @@ describe("additional client configuration dialects", () => {
       ],
     ).toBeUndefined();
   });
+});
 
+describe("OpenCode JSONC registration edits", () => {
   it("preserves OpenCode JSONC comments and sibling registrations during update and removal", async () => {
     const home = await createTestTempDirectory("rea-opencode-jsonc-");
     const client = getClients(home).find(({ name }) => name === "opencode");
@@ -489,28 +531,43 @@ describe("platform-aware client config paths", () => {
       ]),
     );
   });
+});
 
+describe("client registration command ownership", () => {
   it("recognizes prior exact REA releases while rejecting foreign package commands", () => {
+    expect(isOwnedClientRegistrationCommand(["rea", "mcp"], undefined)).toBe(
+      true,
+    );
+    const cwdMatchingEntry = resolve("./rea");
     expect(
-      isOwnedClientRegistrationCommand([
-        "npx",
-        "-y",
-        `${PRODUCT_IDENTITY.packageName}@3.2.0`,
-        "mcp",
-      ]),
-    ).toBe(true);
+      classifyClientRegistrationCommand(["./rea", "mcp"], cwdMatchingEntry),
+    ).toBe("unknown");
     expect(
-      isOwnedClientRegistrationCommand(["npx", "-y", "another-package", "mcp"]),
+      isOwnedClientRegistrationCommand(["./rea", "mcp"], cwdMatchingEntry),
     ).toBe(false);
     expect(
-      isOwnedClientRegistrationCommand([
-        "bunx",
-        `${PRODUCT_IDENTITY.packageName}@3.2.0`,
-        "mcp",
-      ]),
+      isOwnedClientRegistrationCommand(
+        ["npx", "-y", `${PRODUCT_IDENTITY.packageName}@3.2.0`, "mcp"],
+        undefined,
+      ),
     ).toBe(true);
     expect(
-      isOwnedClientRegistrationCommand(["bunx", "another-package", "mcp"]),
+      isOwnedClientRegistrationCommand(
+        ["npx", "-y", "another-package", "mcp"],
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      isOwnedClientRegistrationCommand(
+        ["bunx", `${PRODUCT_IDENTITY.packageName}@3.2.0`, "mcp"],
+        undefined,
+      ),
+    ).toBe(true);
+    expect(
+      isOwnedClientRegistrationCommand(
+        ["bunx", "another-package", "mcp"],
+        undefined,
+      ),
     ).toBe(false);
     expect(
       isOwnedClientRegistrationCommand(
@@ -518,6 +575,12 @@ describe("platform-aware client config paths", () => {
         "/packaged/rea.mjs",
       ),
     ).toBe(true);
+    expect(
+      isOwnedClientRegistrationCommand(
+        [process.execPath, resolve("unknown"), "mcp"],
+        normalizeEntrypointPath(""),
+      ),
+    ).toBe(false);
     expect(
       isOwnedClientRegistrationCommand(
         ["node", "/packaged/other-agent.mjs", "mcp"],

@@ -56,7 +56,7 @@ it.each([
       expect.objectContaining({ client: "claude_code", state: "stale" }),
     );
     const client = { name: "claude_code", configPath, format: "json" } as const;
-    const command = setupRegistrationCommand("win32", "npx");
+    const command = setupRegistrationCommand("win32", "npx", undefined);
     expect(
       await configureClientConfiguration(client, {}, command),
     ).toMatchObject({ status: "configured" });
@@ -93,7 +93,7 @@ it.each(["npx", "bunx"] as const)(
       '\uFEFF# Keep this explanation.\nnotify = ["a", "b"]\nliteral = \'C:\\demo\\path\'\ndisabled_mcp_servers = ["rea"]\n\n[mcp_servers.other]\ncommand = "another-server"\n';
     await writeFile(configPath, original);
     const client = { name: "codex", configPath, format: "toml" } as const;
-    const command = setupRegistrationCommand("win32", runner);
+    const command = setupRegistrationCommand("win32", runner, undefined);
     expect(
       await configureClientConfiguration(client, {}, command),
     ).toMatchObject({ status: "configured" });
@@ -160,7 +160,7 @@ it.skipIf(process.platform !== "win32").each([
       configPath,
       format: "json",
     } as const;
-    const command = setupRegistrationCommand("win32", runner);
+    const command = setupRegistrationCommand("win32", runner, undefined);
     // The default writer and npm-run setup must produce the same native launcher.
     expect(
       await (runner === "npx"

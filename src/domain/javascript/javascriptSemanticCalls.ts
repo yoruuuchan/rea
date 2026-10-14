@@ -9,10 +9,8 @@ import type {
   JavaScriptSemanticClosureCapture,
   JavaScriptSemanticFrontier,
 } from "./javascriptSemanticIr.js";
-import {
-  semanticCallableIdForNode,
-  semanticReferenceRole,
-} from "./javascriptSemanticProjection.js";
+import { semanticReferenceRole } from "./javascriptSemanticProjection.js";
+import { createSemanticCallableStack } from "./javascriptSemanticCallableStack.js";
 import { semanticStaticPropertyKey } from "./javascriptAstValues.js";
 import {
   resolveSemanticBindingState,
@@ -58,7 +56,6 @@ interface CallCollectionContext {
     readonly JavaScriptSemanticBindingState[]
   >;
   readonly ancestors: t.Node[];
-  readonly callableStack: JavaScriptSemanticCallable[];
 }
 
 /** Recover direct-call and lexical-capture candidates from inert syntax. */
@@ -78,7 +75,6 @@ export const collectJavaScriptSemanticCalls = (
   const callableById = new Map(
     callables.map((callable) => [callable.callableId, callable]),
   );
-  const callableStack: JavaScriptSemanticCallable[] = [];
   const context: CallCollectionContext = {
     state,
     callableById,
@@ -86,15 +82,14 @@ export const collectJavaScriptSemanticCalls = (
     bindingResolutionCache: new Map(),
     parameterBindingCache: new Map(),
     ancestors: [],
-    callableStack,
   };
+  const callableStack = createSemanticCallableStack((callableId) =>
+    callableById.get(callableId),
+  );
   traverseJavaScriptAst(program, {
     enter: (node, parent) => {
-      const callableId = semanticCallableIdForNode(node);
-      const callable =
-        callableId === null ? undefined : callableById.get(callableId);
-      if (callable !== undefined) callableStack.push(callable);
-      const owner = enclosingFunction(callableStack);
+      callableStack.enter(node, parent);
+      const owner = enclosingFunction(callableStack.callables);
       collectCapture(node, parent, owner, context);
       collectDynamicProperty(node, owner, state, output);
       collectDynamicScope(node, owner, state, output);
@@ -108,12 +103,7 @@ export const collectJavaScriptSemanticCalls = (
     },
     exit: (node) => {
       context.ancestors.pop();
-      const callableId = semanticCallableIdForNode(node);
-      if (
-        callableId !== null &&
-        callableStack.at(-1)?.callableId === callableId
-      )
-        callableStack.pop();
+      callableStack.exit(node);
     },
   });
   return {
@@ -318,47 +308,17 @@ const collectCapture = (
   )
     return;
   if (semanticReferenceRole(node, parent) === null) return;
-  const captureOwner = computedMethodKeyOwner(node, owner, context);
-  if (captureOwner === undefined || captureOwner.bodyScopeId === null) return;
   const binding = resolveSemanticBindingState(state, node, node.name);
   if (
     binding === undefined ||
-    bindingIsWithinCallable(binding, captureOwner.bodyScopeId, state)
+    bindingIsWithinCallable(binding, owner.bodyScopeId, state)
   )
     return;
   output.closureCaptures.push({
-    callableId: captureOwner.callableId,
+    callableId: owner.callableId,
     bindingId: binding.bindingId,
     referenceLocation: range(node),
   });
-};
-
-const computedMethodKeyOwner = (
-  node: t.Node,
-  owner: JavaScriptSemanticCallable,
-  context: CallCollectionContext,
-): JavaScriptSemanticCallable | undefined => {
-  const ownerNode = context.ancestors.findLast(
-    (candidate) => semanticCallableIdForNode(candidate) === owner.callableId,
-  );
-  if (
-    ownerNode === undefined ||
-    (!t.isObjectMethod(ownerNode) && !t.isClassMethod(ownerNode)) ||
-    !ownerNode.computed
-  )
-    return owner;
-  let child = node;
-  let parent = context.state.parentsByNode.get(child);
-  while (parent !== undefined && parent !== ownerNode) {
-    child = parent;
-    parent = context.state.parentsByNode.get(parent);
-  }
-  if (parent !== ownerNode || ownerNode.key !== child) return owner;
-  return enclosingFunction(
-    context.callableStack.filter(
-      ({ callableId }) => callableId !== owner.callableId,
-    ),
-  );
 };
 
 const collectDynamicProperty = (

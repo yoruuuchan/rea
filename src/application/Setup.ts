@@ -99,6 +99,12 @@ const runSetupWorkflow = async (
       [host, plannedActions, appliedActions, clients, clientStates],
       readinessScope,
     );
+  const failSkill = async (
+    error: SetupSkillInstallError,
+  ): Promise<SetupResult> => ({
+    ...(await fail(error.remediation)),
+    code: "skill_install_failed",
+  });
   const unsupported = await hostRemediation(host, false);
   if (unsupported !== undefined) return fail(unsupported);
   const initialState = await host.initialSetupState(options.readinessScope);
@@ -235,6 +241,12 @@ const runSetupWorkflow = async (
   );
 
   const manualRemediation = manualClientsRemediation(planned.selectedClients);
+  if (skillSelected) {
+    const admission = await host.validateSkillDirectories(
+      selectedSkillClientIds,
+    );
+    if (!admission.ok) return failSkill(admission.error);
+  }
   if (options.dryRun === true)
     return {
       status: "planned",
@@ -285,6 +297,13 @@ const runSetupWorkflow = async (
         : {}),
     };
 
+  // Approval may pause while a skill manager changes a selected directory.
+  if (planSelection.skillSelected) {
+    const admission = await host.validateSkillDirectories(
+      selectedSkillClientIds,
+    );
+    if (!admission.ok) return failSkill(admission.error);
+  }
   let selectedClients: readonly SetupClient[] =
     planSelection.clientsToConfigure;
   if (
@@ -325,10 +344,7 @@ const runSetupWorkflow = async (
       selectedSkillClientIds,
     );
     if (skillFailure !== undefined) {
-      return {
-        ...(await fail(skillFailure.remediation)),
-        code: "skill_install_failed",
-      };
+      return failSkill(skillFailure);
     }
   }
   const doctor = summarizeDoctor(await host.doctor(readinessScope));

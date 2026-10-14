@@ -20,10 +20,8 @@ import {
   readMetadataString,
   sha256Bytes,
 } from "./ManagedMetadataHeaps.js";
-import {
-  memberListIndexSize,
-  memberListTable,
-} from "./ManagedMemberPointers.js";
+import { memberListTable } from "./ManagedMemberPointers.js";
+import type { TypeMemberListFacts } from "./ManagedTypeMemberLists.js";
 
 export type ManagedType = ManagedMemberInspection["types"][number];
 export type ManagedExportedType = NonNullable<
@@ -47,10 +45,10 @@ export type ManagedExceptionRegion =
 export interface TypeRange {
   readonly token: string;
   readonly fullName: string | null;
-  readonly fieldStart: number;
-  readonly fieldEnd: number;
-  readonly methodStart: number;
-  readonly methodEnd: number;
+  readonly fieldStart: number | null;
+  readonly fieldEnd: number | null;
+  readonly methodStart: number | null;
+  readonly methodEnd: number | null;
 }
 
 /**
@@ -80,18 +78,23 @@ export interface ParsedInstruction {
 
 const rowRange = (
   table: MetadataTableLayout | undefined,
-  start: number,
-  nextStart: number,
+  start: number | null,
+  end: number | null,
 ): {
   readonly first: number | null;
   readonly last: number | null;
   readonly count: number;
 } => {
   const total = table?.rowCount ?? 0;
-  if (total === 0 || start === 0) return { first: null, last: null, count: 0 };
-  const end = Math.min(nextStart === 0 ? total + 1 : nextStart, total + 1);
-  if (start >= end) return { first: null, last: null, count: 0 };
-  return { first: start, last: end - 1, count: end - start };
+  if (start === null || end === null)
+    return { first: null, last: null, count: 0 };
+  const lastExclusive = Math.min(end, total + 1);
+  if (start >= lastExclusive) return { first: null, last: null, count: 0 };
+  return {
+    first: start,
+    last: lastExclusive - 1,
+    count: lastExclusive - start,
+  };
 };
 
 export const fullName = (namespace: string, name: string): string =>
@@ -102,9 +105,8 @@ const readTypeRange = (
   layout: ManagedMetadataLayout,
   row: number,
   issues: ManagedParseIssue[],
+  memberLists: TypeMemberListFacts,
 ): TypeRange => {
-  const methods = memberListTable(layout, 6);
-  const fields = memberListTable(layout, 4);
   const cursor = metadataRowCursor(bytes, layout, 2, row);
   cursor.readUInt32();
   const nameIndex = cursor.readIndex(layout.stringIndexSize);
@@ -124,27 +126,14 @@ const readTypeRange = (
       issues,
     ) ?? null;
   cursor.readIndex(layout.codedIndexSize("TypeDefOrRef"));
-  const fieldStart = cursor.readIndex(memberListIndexSize(layout, 4));
-  const methodStart = cursor.readIndex(memberListIndexSize(layout, 6));
-  let nextField = (fields?.rowCount ?? 0) + 1;
-  let nextMethod = (methods?.rowCount ?? 0) + 1;
-  const typeTable = layout.table(2);
-  if (typeTable !== undefined && row < typeTable.rowCount) {
-    const next = metadataRowCursor(bytes, layout, 2, row + 1);
-    next.readUInt32();
-    next.readIndex(layout.stringIndexSize);
-    next.readIndex(layout.stringIndexSize);
-    next.readIndex(layout.codedIndexSize("TypeDefOrRef"));
-    nextField = next.readIndex(memberListIndexSize(layout, 4));
-    nextMethod = next.readIndex(memberListIndexSize(layout, 6));
-  }
+  const current = memberLists.entries[row - 1];
   return {
     token: metadataToken(2, row),
     fullName: declaredName,
-    fieldStart,
-    fieldEnd: nextField,
-    methodStart,
-    methodEnd: nextMethod,
+    fieldStart: current?.field.start.value ?? null,
+    fieldEnd: current?.field.end ?? null,
+    methodStart: current?.method.start.value ?? null,
+    methodEnd: current?.method.end ?? null,
   };
 };
 
@@ -152,11 +141,13 @@ export const typeRanges = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   issues: ManagedParseIssue[],
+  memberLists: TypeMemberListFacts,
 ): readonly TypeRange[] => {
+  issues.push(...memberLists.issues);
   const typeTable = layout.table(2);
   const ranges: TypeRange[] = [];
   for (let row = 1; row <= (typeTable?.rowCount ?? 0); row += 1)
-    ranges.push(readTypeRange(bytes, layout, row, issues));
+    ranges.push(readTypeRange(bytes, layout, row, issues, memberLists));
   return ranges;
 };
 
@@ -193,18 +184,16 @@ export const parseTypes = (
       const extendsRaw = cursor.readIndex(
         layout.codedIndexSize("TypeDefOrRef"),
       );
-      const fieldStart = cursor.readIndex(memberListIndexSize(layout, 4));
-      const methodStart = cursor.readIndex(memberListIndexSize(layout, 6));
-      const nextRange = ranges[row] ?? null;
+      const currentRange = ranges[row - 1] ?? null;
       const fieldRange = rowRange(
         fields,
-        fieldStart,
-        nextRange?.fieldStart ?? 0,
+        currentRange?.fieldStart ?? null,
+        currentRange?.fieldEnd ?? null,
       );
       const methodRange = rowRange(
         methods,
-        methodStart,
-        nextRange?.methodStart ?? 0,
+        currentRange?.methodStart ?? null,
+        currentRange?.methodEnd ?? null,
       );
       const extendsReason = metadataCodedTokenInvalidReason(
         extendsRaw,

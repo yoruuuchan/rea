@@ -63,6 +63,26 @@ export type ToolResultEncoding =
       readonly constraint: "receive-buffer" | "string-length";
     };
 
+/** Measure an already-formed MCP result object without allocating its JSON text. */
+export const measureMcpResultWithinBudget = (
+  value: unknown,
+  budgetBytes: number,
+):
+  | { readonly ok: true; readonly bytes: number }
+  | {
+      readonly ok: false;
+      readonly bytesAtLeast: number;
+      readonly constraint: "receive-buffer";
+    } => {
+  let bytes = 0;
+  for (const part of bufferedJsonParts(jsonParts(value))) {
+    bytes += Buffer.byteLength(part);
+    if (bytes > budgetBytes)
+      return { ok: false, bytesAtLeast: bytes, constraint: "receive-buffer" };
+  }
+  return { ok: true, bytes };
+};
+
 /** Account for the delivered JSON representations before allocating the complete text. */
 export const encodeToolResult = (
   value: JsonValue,

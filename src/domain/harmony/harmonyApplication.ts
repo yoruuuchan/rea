@@ -10,7 +10,6 @@ import { nativeRuntimeConvention } from "../nativeConvention.js";
 import {
   applicationInventoryProjectionInputSchema,
   bridgeCandidateCoverageSchema,
-  compareProjectionStrings,
   projectCartesianCandidates,
   projectedBridgeCandidateSchema,
   projectedComponentSchema,
@@ -21,6 +20,7 @@ import {
   unavailableComponentSchema,
   unavailableComponents,
 } from "../mobileApplicationGraphProjection.js";
+import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 
 const evidenceIdSchema = projectionEvidenceIdSchema;
 const componentSchema = projectedComponentSchema;
@@ -124,7 +124,7 @@ export const projectHarmonyApplication = (
     root_format: rootFormat,
     source_evidence_ids: evidence
       .map(({ evidence_id: id }) => id)
-      .sort(compareProjectionStrings),
+      .sort(compareUnicodeCodePoints),
     packaging_model: packagingModel(classified.manifests),
     components: classified,
     unavailable_components: unavailable,
@@ -206,7 +206,7 @@ const runtimeFamilies = (all: readonly Component[]) => {
     const convention = nativeRuntimeConvention(path);
     if (convention !== null) families.add(convention);
   }
-  return [...families].sort(compareProjectionStrings);
+  return [...families].sort(compareUnicodeCodePoints);
 };
 
 const bridgeCandidates = (

@@ -233,7 +233,8 @@ const results: Readonly<Record<string, unknown>> = {
     apk_path: "/tmp/app.apk",
     bytes: 2048,
     sha256: "a".repeat(64),
-    replaced: false,
+    replace_requested: false,
+    replaced: null,
   },
   uninstall_adb_package: {
     client: clientIdentity,

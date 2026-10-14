@@ -137,6 +137,7 @@ class FakeDevice implements Device {
   readonly process = { pid: 512, name: "fixture" } satisfies Process;
   readonly session = new FakeSession();
   resumed: number[] = [];
+  attachedTargets: Array<number | string> = [];
   resumeFailureCount = 0;
   readonly spawned: string[] = [];
 
@@ -161,7 +162,8 @@ class FakeDevice implements Device {
     this.resumed.push(pid);
   }
 
-  async attach(): Promise<Session> {
+  async attach(target: number | string): Promise<Session> {
+    this.attachedTargets.push(target);
     return this.session;
   }
 }
@@ -207,6 +209,110 @@ const startLocalAttachedSession = async (
 
 // eslint-disable-next-line max-lines-per-function -- related manager lifecycle cases share the same focused fake provider.
 describe("FridaInstrumentationManager", () => {
+  it("attaches by PID when Frida omits the target from process lookup", async () => {
+    const bindings = new FakeDeviceManager();
+    bindings.device.getProcessByPid = async () => {
+      throw new Error("Process not found");
+    };
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const started = await manager.startSession({
+      mode: "attach",
+      deviceId: "local",
+      pid: 512,
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.value.pid).toBe(512);
+    expect(bindings.device.attachedTargets).toEqual([512]);
+    expect(started.value.target).toBe("pid 512");
+    expect(bindings.device.session.isDetached()).toBe(false);
+    await manager.closeAll();
+    expect(bindings.device.session.isDetached()).toBe(true);
+  });
+
+  it("keeps the caller PID when Frida resolves a different process", async () => {
+    const bindings = new FakeDeviceManager();
+    bindings.device.getProcessByPid = async () => ({
+      ...bindings.device.process,
+      pid: 513,
+    });
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const started = await manager.startSession({
+      mode: "attach",
+      deviceId: "local",
+      pid: 512,
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.value.pid).toBe(512);
+    expect(started.value.target).toBe("fixture (pid 512)");
+    expect(bindings.device.attachedTargets).toEqual([512]);
+    await manager.closeSession(started.value.sessionId);
+  });
+
+  it("records a session already detached during process metadata lookup", async () => {
+    const bindings = new FakeDeviceManager();
+    let lookupStarted!: () => void;
+    const lookupEntered = new Promise<void>((resolve) => {
+      lookupStarted = resolve;
+    });
+    let finishLookup!: () => void;
+    const lookupGate = new Promise<void>((resolve) => {
+      finishLookup = resolve;
+    });
+    bindings.device.getProcessByPid = async () => {
+      lookupStarted();
+      await lookupGate;
+      return bindings.device.process;
+    };
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const starting = manager.startSession({
+      mode: "attach",
+      deviceId: "local",
+      pid: 512,
+    });
+    await lookupEntered;
+    bindings.device.session.markDetached();
+    finishLookup();
+
+    const started = await starting;
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.value.pid).toBe(512);
+    expect(bindings.device.attachedTargets).toEqual([512]);
+    expect(started.value.state).toBe("detached");
+    expect(manager.status(started.value.sessionId)?.state).toBe("detached");
+    await manager.closeSession(started.value.sessionId);
+  });
+
+  it("still reports a real attach failure when process lookup is unavailable", async () => {
+    const bindings = new FakeDeviceManager();
+    bindings.device.getProcessByPid = async () => {
+      throw new Error("Process not found");
+    };
+    bindings.device.attach = async () => {
+      throw new Error("attach denied");
+    };
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const started = await manager.startSession({
+      mode: "attach",
+      deviceId: "local",
+      pid: 512,
+    });
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(JSON.stringify(started.error)).toContain("attach denied");
+    await manager.closeAll();
+  });
+
   it("retains a failed startup's spawn and remote lease until cleanup succeeds", async () => {
     const bindings = new FakeDeviceManager();
     bindings.device.attach = async () => {

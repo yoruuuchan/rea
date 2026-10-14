@@ -2,6 +2,50 @@ import { expect, it } from "vitest";
 import { CaptureFormatError } from "./CaptureFormatError.js";
 import { decodeSazMetadata } from "./SazMetadata.js";
 
+it.each([
+  ["UTF-8", Buffer.from('<?xml version="1.0" encoding="UTF-8"?><Session/>')],
+  [
+    "BOM-marked UTF-16LE",
+    Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from(
+        '<?xml version="1.0" encoding="UTF-16"?><Session/>',
+        "utf16le",
+      ),
+    ]),
+  ],
+] as const)("accepts matching %s XML declarations", (_label, bytes) => {
+  expect(() => decodeSazMetadata(bytes)).not.toThrow();
+});
+
+it.each([
+  [
+    "UTF-16 declaration on UTF-8 bytes",
+    Buffer.from('<?xml version="1.0" encoding="UTF-16"?><Session/>'),
+    "format",
+  ],
+  [
+    "UTF-8 declaration on UTF-16 bytes",
+    Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from(
+        '<?xml version="1.0" encoding="UTF-8"?><Session/>',
+        "utf16le",
+      ),
+    ]),
+    "format",
+  ],
+  [
+    "unsupported declared encoding",
+    Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?><Session/>'),
+    "unsupported",
+  ],
+] as const)("rejects %s", (_label, bytes, reason) => {
+  expect(() => decodeSazMetadata(bytes)).toThrow(
+    expect.objectContaining({ reason }),
+  );
+});
+
 it("retains U+FFFD in well-formed metadata as an ordinary XML character", () => {
   const decoded = JSON.stringify(
     decodeSazMetadata(

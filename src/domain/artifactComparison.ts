@@ -131,6 +131,20 @@ export const compareArtifacts = (
       (rootCoverageComplete &&
         left.inventory.manifest.occurrence_count === 1 &&
         right.inventory.manifest.occurrence_count === 1));
+  const leftOccurrencesByPath = occurrencesByPath(left.inventory.occurrences);
+  const rightOccurrencesByPath = occurrencesByPath(right.inventory.occurrences);
+  const comparison = compareOccurrences(
+    left.inventory,
+    right.inventory,
+    leftOccurrencesByPath,
+    rightOccurrencesByPath,
+    [
+      ...left.evidence.map(({ evidence_id: id }) => id),
+      ...right.evidence.map(({ evidence_id: id }) => id),
+    ],
+    { root: rootCoverageComplete, entries: entryCoverageComplete },
+  );
+  const changes = comparison.changes;
   const limitations = [
     ...left.inventory.limitations.map((item) => `Left: ${item}`),
     ...right.inventory.limitations.map((item) => `Right: ${item}`),
@@ -149,16 +163,12 @@ export const compareArtifacts = (
     ...(right.inventory.coverage.status === "complete"
       ? []
       : ["Right artifact inventory traversal coverage is unknown."]),
+    ...(comparison.hasAmbiguousDuplicatePaths
+      ? [
+          "Duplicate logical paths cannot be paired across inventories; comparisons for those paths are unknown.",
+        ]
+      : []),
   ];
-  const changes = compareOccurrences(
-    left.inventory,
-    right.inventory,
-    [
-      ...left.evidence.map(({ evidence_id: id }) => id),
-      ...right.evidence.map(({ evidence_id: id }) => id),
-    ],
-    { root: rootCoverageComplete, entries: entryCoverageComplete },
-  );
   applyRootHashChange(left.inventory, right.inventory, changes, [
     ...left.evidence.map(({ evidence_id: id }) => id),
     ...right.evidence.map(({ evidence_id: id }) => id),
@@ -195,15 +205,14 @@ export const compareArtifacts = (
 const compareOccurrences = (
   left: InventorySet,
   right: InventorySet,
+  leftByPath: ReadonlyMap<string, ArtifactOccurrence[]>,
+  rightByPath: ReadonlyMap<string, ArtifactOccurrence[]>,
   evidenceLinks: readonly string[],
   coverage: { readonly root: boolean; readonly entries: boolean },
-): ArtifactChange[] => {
-  const leftByPath = new Map(
-    left.occurrences.map((item) => [item.logical_path, item]),
-  );
-  const rightByPath = new Map(
-    right.occurrences.map((item) => [item.logical_path, item]),
-  );
+): {
+  readonly changes: ArtifactChange[];
+  readonly hasAmbiguousDuplicatePaths: boolean;
+} => {
   const leftNodes = new Map(left.nodes.map((item) => [item.artifact_id, item]));
   const rightNodes = new Map(
     right.nodes.map((item) => [item.artifact_id, item]),
@@ -214,9 +223,26 @@ const compareOccurrences = (
     ...new Set([...leftByPath.keys(), ...rightByPath.keys()]),
   ].sort(compareUnicodeCodePoints);
   const output: ArtifactChange[] = [];
+  let hasAmbiguousDuplicatePaths = false;
   for (const path of paths) {
-    const leftOccurrence = leftByPath.get(path);
-    const rightOccurrence = rightByPath.get(path);
+    const leftMatches = leftByPath.get(path) ?? [];
+    const rightMatches = rightByPath.get(path) ?? [];
+    if (leftMatches.length > 1 || rightMatches.length > 1) {
+      hasAmbiguousDuplicatePaths = true;
+      output.push({
+        logical_path: path,
+        classification: "unknown",
+        dimensions: ["availability"],
+        left_occurrence_id: null,
+        right_occurrence_id: null,
+        left_artifact_id: null,
+        right_artifact_id: null,
+        evidence_links: [...evidenceLinks],
+      });
+      continue;
+    }
+    const leftOccurrence = leftMatches[0];
+    const rightOccurrence = rightMatches[0];
     const change = classifyPath({
       path,
       leftOccurrence,
@@ -230,6 +256,19 @@ const compareOccurrences = (
       evidenceLinks,
     });
     if (change !== null) output.push(change);
+  }
+  return { changes: output, hasAmbiguousDuplicatePaths };
+};
+
+const occurrencesByPath = (
+  occurrences: readonly ArtifactOccurrence[],
+): ReadonlyMap<string, ArtifactOccurrence[]> => {
+  const output = new Map<string, ArtifactOccurrence[]>();
+  for (const occurrence of occurrences) {
+    const matches = output.get(occurrence.logical_path);
+    if (matches === undefined)
+      output.set(occurrence.logical_path, [occurrence]);
+    else matches.push(occurrence);
   }
   return output;
 };

@@ -3,7 +3,11 @@ import { expect, it, onTestFinished } from "vitest";
 import { SqliteDatabaseProvider } from "../../../src/sqlite/SqliteDatabaseProvider.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
-import { ProviderProcessSupervisor } from "../../../src/process/ProviderProcess.js";
+import {
+  ProviderProcessSupervisor,
+  spawnOwnedProviderProcess,
+} from "../../../src/process/ProviderProcess.js";
+import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
 import {
   spawnProviderProcessFixture,
   stopProviderProcessFixture,
@@ -272,4 +276,49 @@ it("retains the snapshot until a failed worker cleanup owner can be stopped", as
   await provider.close();
   expect(workerAttempts).toBe(4);
   await expect(access(root.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("keeps a retained worker owner when the worker fails and its cleanup is unresolved", async () => {
+  const workspace = await createTestWorkspace("rea-sqlite-retained-worker-");
+  const database = createSqliteDatabaseFixture(workspace.root);
+  database.close();
+  let mayClean = false;
+  let launches = 0;
+  // runOwnedCommand retains the incomplete cleanup and then rethrows the
+  // worker failure without an owner of its own.
+  const provider = new SqliteDatabaseProvider({}, async (spawn) => {
+    launches += 1;
+    const launched = await spawnOwnedProviderProcess({
+      ...spawn,
+      command: process.execPath,
+      arguments: ["-e", "process.exit(3)"],
+    });
+    const cleanupOwned =
+      launched.cleanup ?? (() => cleanupOwnedProcessGroup(launched.ownership));
+    return {
+      ...launched,
+      cleanup: async () => {
+        const cleaned = await cleanupOwned();
+        if (!mayClean) throw new Error("injected retained cleanup failure");
+        return cleaned;
+      },
+    };
+  });
+  onTestFinished(async () => {
+    mayClean = true;
+    await provider.close();
+    await removeTestWorkspace(workspace.root);
+  });
+  expect(await provider.inspect({ path: database.path })).toMatchObject({
+    ok: false,
+    error: { cleanupIncomplete: true },
+  });
+  // The retained owner blocks a new worker until its cleanup succeeds.
+  expect(await provider.inspect({ path: database.path })).toMatchObject({
+    ok: false,
+    error: { cleanupIncomplete: true },
+  });
+  expect(launches).toBe(1);
+  mayClean = true;
+  await provider.close();
 });

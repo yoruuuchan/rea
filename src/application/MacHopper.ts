@@ -17,6 +17,7 @@ import { z } from "zod";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { HOPPER_PUBLISHER } from "../domain/hopperPublisher.js";
 import { macDeveloperIdRequirement } from "../process/MacCodeSignature.js";
+import { macHopperUserApplicationPath } from "./MacHopperPaths.js";
 import {
   downloadHopperPackage,
   HOPPER_DOWNLOAD_BYTES,
@@ -320,8 +321,7 @@ export const systemMacHopperInstallHost = (
       }
       return failure;
     },
-    destination: () =>
-      join(homeDirectory, "Applications/Hopper Disassembler.app"),
+    destination: () => macHopperUserApplicationPath(homeDirectory),
   };
 };
 

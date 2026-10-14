@@ -119,12 +119,6 @@ export const unavailableComponents = (
 
 export { bridgeCandidateCoverageSchema, projectCartesianCandidates };
 
-/** Unicode code point ordering so projection arrays sort deterministically. */
-export const compareProjectionStrings = (
-  left: string,
-  right: string,
-): number => (left < right ? -1 : left > right ? 1 : 0);
-
 /** Digest a canonical JSON projection payload for its stable identifier. */
 export const projectionDigest = (value: unknown, label: string): string => {
   const encoded = canonicalize(value);

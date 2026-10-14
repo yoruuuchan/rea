@@ -165,7 +165,6 @@ describe("feature seed selection controls", () => {
     { kind: "module", nodeKind: "javascript-module", field: "original_source" },
     { kind: "native-export", nodeKind: "native-export", field: "label" },
     { kind: "native-export", nodeKind: "native-export", field: "key" },
-    { kind: "route", nodeKind: "endpoint", field: "label" },
     { kind: "route", nodeKind: "endpoint", field: "value" },
     { kind: "route", nodeKind: "endpoint", field: "path" },
     { kind: "channel", nodeKind: "ipc-channel", field: "label" },
@@ -191,6 +190,30 @@ describe("feature seed selection controls", () => {
       ]);
     },
   );
+
+  it("excludes route labels while preserving generic scalar and array matching", () => {
+    const scalar = memberNode("endpoint", {
+      endpoint_kind: "route",
+      label: "route endpoint",
+    });
+    const array = memberNode("endpoint", {
+      endpoint_kind: "route",
+      label: ["route endpoint"],
+    });
+
+    expect(
+      findApplicationFeatureSeeds([scalar], seed("route", "route endpoint")),
+    ).toEqual([]);
+    expect(
+      findApplicationFeatureSeeds([array], seed("route", "route endpoint")),
+    ).toEqual([]);
+    expect(
+      findApplicationFeatureSeeds([scalar], seed("string", "route endpoint")),
+    ).toEqual([propertyMatch(scalar, "label")]);
+    expect(
+      findApplicationFeatureSeeds([array], seed("string", "route endpoint")),
+    ).toEqual([propertyMatch(array, "label[0]")]);
+  });
 
   it("keeps generic matching and scalar label and identity selection", () => {
     const node = memberNode("context-bridge-api", { members: ["openProject"] });

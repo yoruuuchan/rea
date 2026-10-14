@@ -94,4 +94,46 @@ describe("Swift alias ambiguity", () => {
       ],
     });
   });
+
+  it("retains manglings whose prefix the demangler accepts", () => {
+    const names = [
+      "$e4main7ServiceCMa",
+      "_$e4main7ServiceCMa",
+      "@__swiftmacro_4main7ServiceCMa",
+    ];
+    const result = categorizeSwiftTypes(
+      names.map((name, index) => ({ address: `0x${String(index)}`, name })),
+    );
+    expect(result.categories.other?.items.map((item) => item.name)).toEqual(
+      names,
+    );
+    expect(result.unclassified.map((item) => item.name)).toEqual(names);
+  });
+
+  it("keeps legacy names with an optional leading underscore", () => {
+    expect(
+      categorizeSwiftTypes([{ address: "0x1", name: "__T04main4PairVMa" }], {
+        category: "structs",
+      }),
+    ).toMatchObject({
+      total: 1,
+      categories: { structs: { count: 1 } },
+      unclassified: [],
+    });
+  });
+
+  it("does not let a demangler-only alias erase a decoded category", () => {
+    const result = categorizeSwiftTypes(
+      [{ address: "0x1", name: "$s4main7ServiceCMa" }],
+      {},
+      [{ address: "0x1", name: "$e4main7ServiceCMa" }],
+    );
+    expect(result.categories.classes?.items).toMatchObject([
+      {
+        name: "$s4main7ServiceCMa",
+        mangled_names: ["$s4main7ServiceCMa", "$e4main7ServiceCMa"],
+      },
+    ]);
+    expect(result.categories.other?.items).toEqual([]);
+  });
 });

@@ -39,6 +39,7 @@ it("completes an empty ZIP extraction with an empty identity", async () => {
 });
 
 const legacyControlNames = [
+  ["unflagged UTF-8-looking legacy bytes", Buffer.from("café"), false, "caf├⌐"],
   ["legacy ASCII control", Buffer.from("Icon\r"), false, "Icon\r"],
   [
     "legacy CP437 control",
@@ -311,10 +312,13 @@ it("retains duplicate ZIP members without replacing their source identities", as
   const target = await parseBinaryTarget(path);
   if (!target.ok) throw target.error;
   await withArtifactClient(target.value, async (client) => {
-    expect(await client.execute("inventory_artifact", {})).toMatchObject({
-      ok: false,
-      error: { _tag: "ArtifactOperationError", reason: "path" },
-    });
+    const result = await client.execute("inventory_artifact", {});
+    if (!result.ok) throw result.error;
+    expect(
+      artifactInventoryResultSchema
+        .parse(result.value.result)
+        .occurrences.filter(({ logical_path }) => logical_path === "x.txt"),
+    ).toHaveLength(2);
   });
 });
 

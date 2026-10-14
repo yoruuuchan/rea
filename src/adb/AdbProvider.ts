@@ -755,6 +755,7 @@ export class AdbProvider {
         if (!ran.ok) return ran;
         const { devices, unparsedLines, daemonStarted } = parseAdbDevicesOutput(
           ran.value.stdout,
+          ran.value.stderr,
         );
         if (unparsedLines.length > 0)
           return err(
@@ -1883,12 +1884,14 @@ export class AdbProvider {
           apk_path: apkPath,
           bytes: digest.bytes,
           sha256: digest.sha256,
-          replaced: input.replace,
+          replace_requested: input.replace,
+          replaced: null,
         },
         provider,
         {
           limitations: [
             "Install changes device state; the installed APK's digest is the host file's digest",
+            "Whether an existing package was replaced is unknown; replace_requested records only the adb install mode",
           ],
         },
       ),

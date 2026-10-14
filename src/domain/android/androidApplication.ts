@@ -10,7 +10,6 @@ import { nativeRuntimeConvention } from "../nativeConvention.js";
 import {
   applicationInventoryProjectionInputSchema,
   bridgeCandidateCoverageSchema,
-  compareProjectionStrings,
   projectCartesianCandidates,
   projectedBridgeCandidateSchema,
   projectedComponentSchema,
@@ -21,6 +20,7 @@ import {
   unavailableComponentSchema,
   unavailableComponents,
 } from "../mobileApplicationGraphProjection.js";
+import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 
 const evidenceIdSchema = projectionEvidenceIdSchema;
 const componentSchema = projectedComponentSchema;
@@ -133,7 +133,7 @@ export const projectAndroidApplication = (
     root_format: "apk" as const,
     source_evidence_ids: evidence
       .map(({ evidence_id: id }) => id)
-      .sort(compareProjectionStrings),
+      .sort(compareUnicodeCodePoints),
     components,
     unavailable_components: unavailable,
     runtime_families: runtimeFamilies(all),
@@ -184,7 +184,7 @@ const runtimeFamilies = (all: readonly Component[]) => {
     const convention = nativeRuntimeConvention(path);
     if (convention !== null) families.add(convention);
   }
-  return [...families].sort(compareProjectionStrings);
+  return [...families].sort(compareUnicodeCodePoints);
 };
 
 const bridgeCandidates = (

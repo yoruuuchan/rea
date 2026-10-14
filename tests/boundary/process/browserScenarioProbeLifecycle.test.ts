@@ -59,3 +59,44 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     await session.close();
   }
 });
+
+it("closes optional providers when MCP server startup throws", async () => {
+  const session = createTestBinarySession(() => {
+    throw new Error("Unexpected deep provider");
+  });
+  const close = vi.fn(async () => undefined);
+  const browserScenarioCapture: BrowserScenarioCapturePort = {
+    identity: () => ({
+      id: "fake-browser",
+      name: "Fake browser",
+      version: "1",
+    }),
+    captureScenario: async () => {
+      throw new Error("Unexpected scenario capture");
+    },
+    close,
+  };
+  const runtime: RuntimeDependencies = {
+    env: {},
+    serve: () => {
+      throw new Error("Server startup failed");
+    },
+    writeStderr: () => undefined,
+    setExitCode: () => undefined,
+    registerShutdown: () => () => undefined,
+  };
+  try {
+    const transport = await startMcpTransport(runtime, session, {
+      logger: silentLogger,
+      serverLogger: silentLogger,
+      environment: runtime.env,
+      delivery: new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE),
+      loadOptionalProviders: async () => ({ browserScenarioCapture }),
+    });
+
+    expect(transport).toEqual({ ok: false });
+    expect(close).toHaveBeenCalledTimes(1);
+  } finally {
+    await session.close();
+  }
+});

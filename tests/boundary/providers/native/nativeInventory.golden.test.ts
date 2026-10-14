@@ -552,3 +552,91 @@ it("retains annotation parsing without nm name evidence", () => {
     },
   ]);
 });
+
+/** Replay fixtures, answering nm by whether its dyld-info pass is disabled. */
+const symbolTableRunner = (
+  outputs: Readonly<Record<string, string>>,
+  nm: { readonly symbolTable: string; readonly withDyldInfo: string },
+) => {
+  const nmArguments: (readonly string[])[] = [];
+  const replay = (output: string) =>
+    new FixtureRunner({ ...outputs, nm: output });
+  const runner: NativeCommandRunner = {
+    run: (tool, arguments_) => {
+      if (tool !== "nm") return replay("").run(tool, arguments_);
+      nmArguments.push(arguments_);
+      return replay(
+        arguments_.includes("--no-dyldinfo") ? nm.symbolTable : nm.withDyldInfo,
+      ).run(tool, arguments_);
+    },
+  };
+  return { runner, nmArguments };
+};
+
+/** nm arguments in provenance, which records the artifact operand as a placeholder. */
+const nmCommands = (result: unknown) =>
+  (result as { provenance: { tool: string; command: string[] }[] }).provenance
+    .filter(({ tool }) => tool === "nm")
+    .map(({ command }) => [...command.slice(1, -1), "/private/fixture"]);
+
+it("reads exports from the symbol table without llvm-nm's dyld-info pass", async () => {
+  const names = await fixture("dyld-inventory/nm.txt");
+  const { runner, nmArguments } = symbolTableRunner(
+    { "dyld_info:-exports": await fixture("dyld-inventory/exports.txt") },
+    { symbolTable: names, withDyldInfo: names },
+  );
+  const execution = await new NativeMacOSProvider({}, runner, "darwin")
+    .createClient(machoTarget("/private/fixture"))
+    .execute("inspect_macho", {});
+  if (!execution.ok) throw execution.error;
+  expect(nmArguments).toEqual([
+    ["-gjU", "--no-dyldinfo", "-arch", "arm64", "/private/fixture"],
+  ]);
+  expect(nmCommands(execution.value.result)).toEqual(nmArguments);
+});
+
+it("reruns nm with its dyld-info pass when a stripped symbol table omits trie exports", async () => {
+  const trieNames = await fixture("dyld-inventory/stripped-swift-nm.txt");
+  const { runner, nmArguments } = symbolTableRunner(
+    {
+      "dyld_info:-exports": await fixture(
+        "dyld-inventory/stripped-swift-exports.txt",
+      ),
+    },
+    { symbolTable: "", withDyldInfo: trieNames },
+  );
+  const execution = await new NativeMacOSProvider({}, runner, "darwin")
+    .createClient(machoTarget("/private/fixture"))
+    .execute("inspect_macho", {});
+  if (!execution.ok) throw execution.error;
+  const rerun = ["-gjU", "-arch", "arm64", "/private/fixture"];
+  expect(nmArguments).toEqual([
+    ["-gjU", "--no-dyldinfo", "-arch", "arm64", "/private/fixture"],
+    rerun,
+  ]);
+  // Provenance names the nm run whose output the exports came from.
+  expect(nmCommands(execution.value.result)).toEqual([rerun]);
+  const exported = (
+    execution.value.result as { exports: { items: { name: string }[] } }
+  ).exports.items.map(({ name }) => name);
+  expect(exported).toEqual(trieNames.trim().split("\n").sort());
+});
+
+it("reruns nm with its dyld-info pass when a dyld_info export row is unreadable", async () => {
+  const names = await fixture("dyld-inventory/nm.txt");
+  const exportsOutput = await fixture("dyld-inventory/exports.txt");
+  const { runner, nmArguments } = symbolTableRunner(
+    {
+      "dyld_info:-exports": `${exportsOutput.trimEnd()}\n        <unrecognized export row>\n`,
+    },
+    { symbolTable: names, withDyldInfo: names },
+  );
+  const execution = await new NativeMacOSProvider({}, runner, "darwin")
+    .createClient(machoTarget("/private/fixture"))
+    .execute("inspect_macho", {});
+  if (!execution.ok) throw execution.error;
+  expect(nmArguments.map((arguments_) => arguments_.slice(0, 2))).toEqual([
+    ["-gjU", "--no-dyldinfo"],
+    ["-gjU", "-arch"],
+  ]);
+});

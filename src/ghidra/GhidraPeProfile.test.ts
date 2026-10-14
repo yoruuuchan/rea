@@ -33,6 +33,7 @@ describe("ghidraPeCodeViewLimitations", () => {
       },
     };
     expect(ghidraPeCodeViewLimitations(peTarget, true)).toEqual([]);
+    expect(ghidraPeCodeViewLimitations(peTarget, undefined)).toEqual([]);
   });
 
   it("returns empty limitations for PE target without codeView", () => {
@@ -66,7 +67,7 @@ describe("ghidraPeCodeViewLimitations", () => {
         age: 1,
       },
     };
-    expect(ghidraPeCodeViewLimitations(peTarget)).toEqual([
+    expect(ghidraPeCodeViewLimitations(peTarget, false)).toEqual([
       'The target references debug symbols "app.pdb" (GUID 01234567-89ab-cdef-0123-456789abcdef, age 1) that were not applied; procedure names are analysis-generated.',
     ]);
   });
@@ -88,7 +89,7 @@ describe("ghidraPeCodeViewLimitations", () => {
         age: 2,
       },
     };
-    expect(ghidraPeCodeViewLimitations(peTarget)).toEqual([
+    expect(ghidraPeCodeViewLimitations(peTarget, false)).toEqual([
       'The target references debug symbols "legacy.pdb" (age 2) that were not applied; procedure names are analysis-generated.',
     ]);
   });

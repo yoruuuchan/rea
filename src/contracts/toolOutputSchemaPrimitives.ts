@@ -505,7 +505,7 @@ export const sessionProvider = z
         name: z.string(),
         version: z.string(),
         started_at: z.string(),
-        command_path: z.string(),
+        command_path: z.string().nullable(),
       }),
       sdk: z.object({
         server: z.string(),

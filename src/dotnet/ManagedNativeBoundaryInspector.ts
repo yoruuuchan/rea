@@ -13,6 +13,7 @@ import {
   readManagedMetadataLayout,
   type ManagedMetadataLayout,
 } from "./ManagedMetadataLayout.js";
+import { readTypeMemberListFacts } from "./ManagedTypeMemberLists.js";
 import {
   readManagedPeLayout,
   type ManagedPeLayout,
@@ -108,10 +109,12 @@ const readBoundaryInventory = (
     metadataOffset,
     cli.metadata.size,
   );
+  const memberLists = readTypeMemberListFacts(bytes, layout);
   const inventory = readManagedMetadataInventory(
     bytes,
     layout,
     readManagedResourceDirectory(pe, issues),
+    memberLists,
   );
   return { layout, inventory };
 };

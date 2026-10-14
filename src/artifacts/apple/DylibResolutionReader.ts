@@ -17,10 +17,13 @@ import {
 import { projectInputIssues } from "../../domain/inputIssueProjection.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
+import { consumeWithOrderedReads } from "../OrderedReads.js";
 import { hasMachoMagic, readMachoImage } from "./MachoLoadCommandReader.js";
 
 const OPERATION = "trace_dylib_resolution";
 const HASH_CHUNK_BYTES = 1024 * 1024;
+/** Concurrent four-byte magic reads while enumerating bundle roots. */
+const MAGIC_READ_CONCURRENCY = 8;
 
 /** Device, inode, size and change times of the file whose bytes were parsed. */
 type FileIdentity = string;
@@ -184,21 +187,27 @@ const executableRoots = async (
 ): Promise<{ readonly roots: string[]; readonly unclassified: string[] }> => {
   const roots: string[] = [];
   const unclassified: string[] = [];
-  for await (const entry of new DirectoryArtifactReader(root).entries(signal)) {
-    if (
-      entry.kind !== "file" ||
-      !(await startsWithMachoMagic(entry.adapterKey))
-    )
-      continue;
-    const facts = await view.image(entry.path);
-    if (facts.status === "malformed" || facts.status === "unsupported")
-      unclassified.push(entry.path);
-    else if (
-      facts.status === "parsed" &&
-      facts.slices.some(({ file_type: type }) => type === "execute")
-    )
-      roots.push(entry.path);
-  }
+  // Bundles hold tens of thousands of files and few Mach-O images, so the
+  // magic reads overlap the walk while results are classified in walk order.
+  await consumeWithOrderedReads(
+    new DirectoryArtifactReader(root).entries(signal),
+    MAGIC_READ_CONCURRENCY,
+    (entry) =>
+      entry.kind === "file"
+        ? startsWithMachoMagic(entry.adapterKey)
+        : undefined,
+    async (entry, macho) => {
+      if (!macho) return;
+      const facts = await view.image(entry.path);
+      if (facts.status === "malformed" || facts.status === "unsupported")
+        unclassified.push(entry.path);
+      else if (
+        facts.status === "parsed" &&
+        facts.slices.some(({ file_type: type }) => type === "execute")
+      )
+        roots.push(entry.path);
+    },
+  );
   return {
     roots: roots.sort(compare),
     unclassified: unclassified.sort(compare),

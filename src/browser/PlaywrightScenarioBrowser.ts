@@ -51,10 +51,7 @@ export class PlaywrightScenarioBrowserCleanupOwner {
     return this.#browserClosed;
   }
 
-  close(
-    finishEvents?: () => Promise<void>,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  close(finishEvents?: () => Promise<void>): Promise<void> {
     const cleanup = this.#closePromise ?? this.#closeResources(finishEvents);
     if (this.#closePromise === undefined) {
       this.#closePromise = cleanup;
@@ -66,18 +63,14 @@ export class PlaywrightScenarioBrowserCleanupOwner {
         },
       );
     }
-    return this.#awaitCleanup(cleanup, signal);
+    return this.#awaitCleanup(cleanup);
   }
 
-  async #awaitCleanup(
-    cleanup: Promise<void>,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  async #awaitCleanup(cleanup: Promise<void>): Promise<void> {
     try {
       await withPlaywrightExecutionBoundary(
         () => cleanup,
         CLEANUP_CONFIRMATION_TIMEOUT_MS,
-        signal,
       );
     } catch (cause: unknown) {
       throw new BrowserObservationError(OPERATION, "cleanup_failed", {

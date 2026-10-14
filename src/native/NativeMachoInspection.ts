@@ -41,9 +41,15 @@ interface NativeMachoInspectionContext {
 
 const DISCOVERY_COMMANDS = [["lipo", ["-detailed_info"]]] as const;
 
+// llvm-nm's default dyld-info pass fakes up symbols the symbol table lacks
+// from dyld metadata. It takes seconds on large apps (Keynote arm64: 5.8 s
+// versus 0.01 s without it), and under -gU it can only add export-trie names.
+const SYMBOL_TABLE_EXPORTS = ["nm", ["-gjU", "--no-dyldinfo"]] as const;
+const DYLD_INFO_EXPORTS = ["nm", ["-gjU"]] as const;
+
 const REQUIRED_SLICE_COMMANDS = [
   ["otool", ["-h", "-l"]],
-  ["nm", ["-gjU"]],
+  SYMBOL_TABLE_EXPORTS,
   ["dyld_info", ["-imports"]],
   ["dyld_info", ["-exports"]],
   ["dwarfdump", ["--uuid"]],
@@ -111,6 +117,18 @@ export const inspectNativeMacho = async (
   else if (optional.error._tag === "AnalysisCapabilityUnavailableError")
     limitations.push(VTOOL_UNAVAILABLE_LIMITATION);
   else return err(optional.error);
+  const nmIndex = captures.findIndex(({ tool }) => tool === "nm");
+  const dyldExports = captures.filter(({ tool }) => tool === "dyld_info")[1];
+  if (nmIndex < 0 || dyldExports === undefined)
+    throw new TypeError("Missing nm or dyld_info export capture");
+  // A stripped symbol table (strip -T) can omit names the export trie keeps.
+  // Only then does llvm-nm's dyld-info pass add names, and its exact names
+  // disambiguate dyld_info rows, so rerun it rather than lose them.
+  if (!namesEveryExport(captures[nmIndex]!.stdout, dyldExports)) {
+    const withDyldInfo = await runSliceCommand(DYLD_INFO_EXPORTS);
+    if (!withDyldInfo.ok) return err(withDyldInfo.error);
+    captures[nmIndex] = withDyldInfo.value;
+  }
   const otool = captures.find(({ tool }) => tool === "otool");
   if (otool === undefined) throw new TypeError("Missing otool capture");
   let load: ReturnType<typeof parseOtoolLoadCommands>;
@@ -292,6 +310,34 @@ const captureLookup =
     if (capture === undefined) throw new TypeError(`Missing ${tool} capture`);
     return capture;
   };
+
+/**
+ * Whether every dyld_info export row names a symbol-table export. A row this
+ * parser cannot read counts as uncovered, so an unfamiliar format falls back.
+ */
+const namesEveryExport = (
+  nmOutput: string,
+  dyldExports: NativeCommandCapture,
+): boolean => {
+  const names = new Set(parseNmExports(nmOutput).map(({ name }) => name));
+  return sliceOutput(dyldExports)
+    .split(/\r?\n/u)
+    .every((rawLine, index) => {
+      const line = rawLine.trim();
+      if (
+        line.length === 0 ||
+        (index === 0 && line.endsWith(":")) ||
+        /^-?exports:$/u.test(line) ||
+        /^offset\s+symbol$/u.test(line)
+      )
+        return true;
+      const rows = parseDyldSymbols(line, "exports", null, names);
+      // The parser withholds a row only when nm names both of its readings.
+      if (rows.length === 0)
+        return names.has(/^0x[\da-f]+\s+(.+)$/iu.exec(line)?.[1] ?? "");
+      return rows.length === 1 && names.has(rows[0]!.name);
+    });
+};
 
 const parseNmExports = (output: string) =>
   output

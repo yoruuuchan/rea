@@ -14,7 +14,8 @@
         "scripts/clean-build-output.mjs",
         "scripts/bundle-runtime.mjs",
         "scripts/generate-package-metadata.mjs",
-        "src/**/*.ts",
+        "src/**/*.{cts,mts,ts,tsx}",
+        "src/**/package.json",
         "!src/**/*.test.ts",
         "!src/**/*.fixture.ts",
         "tsconfig.json",
@@ -26,13 +27,19 @@
       "inputs": [
         "package.json",
         "package-lock.json",
-        "src/**/*.ts",
-        "tests/**/*.ts",
+        "src/**/*.{cts,mts,ts,tsx}",
+        "src/**/package.json",
+        "tests/**/*.{cts,mts,ts,tsx}",
+        "tests/**/package.json",
         "tsconfig.json",
         "tsconfig.build.json",
         "vitest.config.ts",
-        "scripts/**/*.d.mts",
-        "docs/.vitepress/config.ts"
+        "scripts/**/*.d.{cts,mts,ts}",
+        "scripts/**/package.json",
+        "docs/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "docs/**/package.json",
+        "!docs/.vitepress/cache/**",
+        "!docs/.vitepress/dist/**"
       ],
       "outputs": []
     },

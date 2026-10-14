@@ -8,6 +8,7 @@ const byteRetentionSchema = z.strictObject({
   retained_bytes: z.number().int().nonnegative(),
   observed_frames: z.number().int().nonnegative(),
   retained_frames: z.number().int().nonnegative(),
+  unknown_size_frames: z.number().int().nonnegative().optional(),
 });
 
 /** Filesystem enumeration and whole-file digest coverage for one checkpoint. */
@@ -54,8 +55,18 @@ export const processCaptureTruncationDetailsSchema = z.strictObject({
     "UTF-8 bytes of original PTY chunks; whole chunks are retained or omitted.",
   ),
   rendered_terminal: byteRetentionSchema.describe(
-    "Cumulative UTF-8 bytes of serialized state plus visible lines, evaluated from retained PTY input; whole frames are retained or omitted.",
+    "Cumulative UTF-8 bytes of serialized state plus visible lines, evaluated from retained PTY input; whole frames are retained or omitted. When normalization exceeds a bound before the frame size is known, observed_bytes contains the exact total for size-known frames and unknown_size_frames counts the other omissions.",
   ),
+  normalized_terminal: z
+    .strictObject({
+      budget_bytes: z.number().int().nonnegative(),
+      retained_bytes: z.number().int().nonnegative(),
+      omitted_frames: z.number().int().nonnegative(),
+    })
+    .optional()
+    .describe(
+      "UTF-8 bytes of normalized raw-chunk text retained under output_bytes; omitted frames can have unknown final size when normalization exceeded an intermediate bound.",
+    ),
   filesystem_before: filesystemCoverageSchema,
   filesystem_after: filesystemCoverageSchema,
   process: z.strictObject({
@@ -72,6 +83,9 @@ export type ProcessCaptureTruncationDetails = z.infer<
   typeof processCaptureTruncationDetailsSchema
 >;
 export type TerminalRetention = ProcessCaptureTruncationDetails["raw_terminal"];
+export type NormalizedTerminalRetention = NonNullable<
+  ProcessCaptureTruncationDetails["normalized_terminal"]
+>;
 export type ProcessSamplingCoverage =
   ProcessCaptureTruncationDetails["process"];
 
@@ -88,6 +102,8 @@ export const hasCaptureTruncation = (
 ): boolean =>
   omitted(details.raw_terminal) ||
   omitted(details.rendered_terminal) ||
+  (details.normalized_terminal?.omitted_frames ?? 0) > 0 ||
+  (details.rendered_terminal.unknown_size_frames ?? 0) > 0 ||
   filesystemTruncated(details.filesystem_before) ||
   filesystemTruncated(details.filesystem_after) ||
   details.process.sampling_partial;

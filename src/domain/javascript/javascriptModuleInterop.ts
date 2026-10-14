@@ -554,7 +554,7 @@ export const createSemanticModuleInterop = (
       converted === undefined ||
       initial.projection.length !== 0 ||
       converted.projection.length !== 0 ||
-      state.conditionalInitializers.has(initial.node)
+      state.conditionallySkippedExpressions.has(initial.node)
     )
       return undefined;
     const call = converted.node;

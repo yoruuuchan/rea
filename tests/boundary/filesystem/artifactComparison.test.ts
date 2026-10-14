@@ -445,6 +445,179 @@ describe("artifact comparison completeness", () => {
   }, 15_000);
 });
 
+describe("artifact source-map relationship coverage", () => {
+  it("preserves unknown source-map relationships for duplicate ZIP paths", async () => {
+    const root = await createTestTempDirectory("rea-duplicate-source-map-");
+    const path = join(root, "duplicate-source-map.zip");
+    const writer = new ZipWriter(new Uint8ArrayWriter());
+    await writer.add("main.js", new TextReader("first();"), { level: 0 });
+    await writer.add("your.js", new TextReader("second();"), { level: 0 });
+    await writer.add("main.js.map", new TextReader("{}"), { level: 0 });
+    const bytes = Buffer.from(await writer.close());
+    for (const [signature, headerSize] of [
+      [Buffer.from([0x50, 0x4b, 0x03, 0x04]), 30],
+      [Buffer.from([0x50, 0x4b, 0x01, 0x02]), 46],
+    ] as const) {
+      const first = bytes.indexOf(signature);
+      const second = bytes.indexOf(signature, first + 4);
+      if (first < 0 || second <= first)
+        throw new Error("Expected both source ZIP member headers");
+      expect(
+        bytes.subarray(second + headerSize, second + headerSize + 7).toString(),
+      ).toBe("your.js");
+      bytes.write("main.js", second + headerSize);
+    }
+    await writeFile(path, bytes);
+
+    const evidence = await observe(path);
+    const parsed = parseArtifactInventoryEvidence(evidence);
+    const { inventory } = parsed;
+    const map = inventory.occurrences.find(
+      ({ logical_path }) => logical_path === "main.js.map",
+    );
+    if (map === undefined) throw new Error("Expected source-map occurrence");
+    const mapEdge = inventory.edges.find(
+      ({ occurrence_id }) => occurrence_id === map.occurrence_id,
+    );
+
+    expect(inventory.coverage?.status).toBe("unknown");
+    expect(map.limitations).toContain(
+      'Source-map target is unknown because multiple occurrences share "main.js".',
+    );
+    expect(mapEdge).toMatchObject({ relation: "contains" });
+    expect(mapEdge?.relation).not.toBe("maps-source");
+    expect(inventory.integrityContradictions).toEqual([]);
+    expect(
+      inventory.limitations.some((limitation) =>
+        limitation.toLowerCase().includes("integrity"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("duplicate archive occurrence ownership", () => {
+  it("keeps directory ancestry unknown when ZIP directory paths repeat", async () => {
+    const root = await createTestTempDirectory(
+      "rea-artifact-duplicate-directory-",
+    );
+    const path = join(root, "duplicate-directories.zip");
+    const writer = new ZipWriter(new Uint8ArrayWriter());
+    await writer.add("x/", new TextReader(""));
+    await writer.add("y/", new TextReader(""));
+    await writer.add("x/file.txt", new TextReader("member"));
+    const bytes = Buffer.from(await writer.close());
+    for (const [signature, headerSize] of [
+      [Buffer.from([0x50, 0x4b, 0x03, 0x04]), 30],
+      [Buffer.from([0x50, 0x4b, 0x01, 0x02]), 46],
+    ] as const) {
+      const first = bytes.indexOf(signature);
+      const second = bytes.indexOf(signature, first + 4);
+      if (first < 0 || second <= first)
+        throw new Error("Expected both ZIP directory headers");
+      expect(
+        bytes.subarray(second + headerSize, second + headerSize + 2).toString(),
+      ).toBe("y/");
+      bytes.write("x/", second + headerSize);
+    }
+    await writeFile(path, bytes);
+
+    const evidence = await observe(path);
+    const inventory = parseArtifactInventoryEvidence(evidence).inventory;
+    const directory = inventory.occurrences.filter(
+      ({ logical_path }) => logical_path === "x",
+    );
+    const child = inventory.occurrences.find(
+      ({ logical_path }) => logical_path === "x/file.txt",
+    );
+    expect(directory).toHaveLength(2);
+    expect(directory.every(({ artifact_id }) => artifact_id === null)).toBe(
+      true,
+    );
+    expect(child?.parent_occurrence_id).toBeNull();
+    expect(child?.limitations).toContain(
+      'The parent occurrence for "x/file.txt" is unknown because multiple observed directory or container occurrences share "x".',
+    );
+    expect(inventory.coverage.status).toBe("unknown");
+  });
+
+  it("retains duplicate path occurrences across pages and leaves pairing unknown", async () => {
+    const root = await createTestTempDirectory("rea-artifact-duplicate-pages-");
+    const archives = [join(root, "left.zip"), join(root, "right.zip")] as const;
+    for (const [index, path] of archives.entries()) {
+      const writer = new ZipWriter(new Uint8ArrayWriter());
+      await writer.add("x.txt", new TextReader("first"));
+      await writer.add(
+        "y.txt",
+        new TextReader(index === 0 ? "second-left" : "second-right"),
+      );
+      await writer.add("neighbor.txt", new TextReader("neighbor"));
+      const bytes = Buffer.from(await writer.close());
+      // Produce a duplicate path the same way as real malformed/ambiguous ZIP
+      // inputs: retain each member record and rewrite only the equal-length name.
+      for (const [signature, headerSize] of [
+        [Buffer.from([0x50, 0x4b, 0x03, 0x04]), 30],
+        [Buffer.from([0x50, 0x4b, 0x01, 0x02]), 46],
+      ] as const) {
+        const first = bytes.indexOf(signature);
+        const second = bytes.indexOf(signature, first + 4);
+        if (first < 0 || second <= first)
+          throw new Error("Expected both ZIP member headers");
+        expect(
+          bytes
+            .subarray(second + headerSize, second + headerSize + 5)
+            .toString(),
+        ).toBe("y.txt");
+        bytes.write("x.txt", second + headerSize);
+      }
+      await writeFile(path, bytes);
+    }
+
+    const [left, right] = await Promise.all([
+      observe(archives[0]),
+      observe(archives[1]),
+    ]);
+    const parsed = parseArtifactInventoryEvidence(left);
+    const repeated = parsed.inventory.occurrences.filter(
+      ({ logical_path }) => logical_path === "x.txt",
+    );
+    expect(repeated).toHaveLength(2);
+    expect(
+      new Set(repeated.map(({ occurrence_id }) => occurrence_id)).size,
+    ).toBe(2);
+
+    const leftPages = fragmentInventoryEvidence(left, 2);
+    const parsedPages = parseArtifactInventoryEvidence(leftPages);
+    expect(
+      parsedPages.inventory.occurrences.filter(
+        ({ logical_path }) => logical_path === "x.txt",
+      ),
+    ).toHaveLength(2);
+
+    const comparison = compareArtifacts(
+      leftPages,
+      fragmentInventoryEvidence(right, 2),
+    );
+    expect(comparison).toMatchObject({
+      status: "unknown",
+      summary: { unknown: expect.any(Number) },
+      changes: expect.arrayContaining([
+        expect.objectContaining({
+          logical_path: "x.txt",
+          classification: "unknown",
+          dimensions: ["availability"],
+          left_occurrence_id: null,
+          right_occurrence_id: null,
+          left_artifact_id: null,
+          right_artifact_id: null,
+        }),
+      ]),
+    });
+    expect(comparison.limitations).toContain(
+      "Duplicate logical paths cannot be paired across inventories; comparisons for those paths are unknown.",
+    );
+  });
+});
+
 describe("artifact comparison fragment integrity", () => {
   it("assembles real inventory fragments and retains every citation", async () => {
     const parent = await createTestTempDirectory("rea-artifact-fragments-");

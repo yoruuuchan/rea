@@ -101,7 +101,11 @@ exit 0
 };
 
 const providerWith = async (
-  options: { failCapinfos?: boolean; launcher?: PcapCommandLauncher } = {},
+  options: {
+    failCapinfos?: boolean;
+    launcher?: PcapCommandLauncher;
+    beforeClose?: () => void;
+  } = {},
 ) => {
   const root = await createTestTempDirectory("rea-pcap-");
   const { tshark, capinfos } = await writeStubTools(root, options);
@@ -109,7 +113,10 @@ const providerWith = async (
     environment: { REA_TSHARK_COMMAND: tshark, REA_CAPINFOS_COMMAND: capinfos },
     ...(options.launcher === undefined ? {} : { launcher: options.launcher }),
   });
-  onTestFinished(() => provider.close());
+  onTestFinished(async () => {
+    options.beforeClose?.();
+    await provider.close();
+  });
   return {
     provider,
     root,
@@ -203,7 +210,12 @@ it.each(["capinfos", "tshark"] as const)(
         },
       };
     };
-    const { provider, root } = await providerWith({ launcher });
+    const { provider, root } = await providerWith({
+      launcher,
+      beforeClose: () => {
+        mayClean = true;
+      },
+    });
     const path = await captureFixture(root);
     const result = await provider.execute({
       operation: "inspect_pcap_capture",
@@ -215,7 +227,7 @@ it.each(["capinfos", "tshark"] as const)(
       reason: "injected retained cleanup failure",
       previous_error: null,
       captured_output: {
-        stdout: stage === "capinfos" ? CAPINFOS_OUTPUT : TSHARK_JSON,
+        stdout: stage === "capinfos" ? CAPINFOS_OUTPUT + "\n" : TSHARK_JSON,
         truncated: false,
       },
     });

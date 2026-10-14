@@ -9,9 +9,10 @@ import {
   linuxHopperLauncherCandidates,
   REA_MANAGED_LINUX_HOPPER_LAUNCHER,
 } from "../application/LinuxHopper.js";
-
-const DEFAULT_HOPPER_LAUNCHER_PATH =
-  "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper";
+import {
+  MAC_HOPPER_SYSTEM_LAUNCHER,
+  macHopperLauncherCandidates,
+} from "../application/MacHopperPaths.js";
 const executableAvailable = (path: string): boolean => {
   try {
     accessSync(path, constants.X_OK);
@@ -26,7 +27,12 @@ export const defaultHopperLauncherPath = (
   homeDirectory: string,
   executable: (path: string) => boolean = executableAvailable,
 ): string => {
-  if (platform !== "linux") return DEFAULT_HOPPER_LAUNCHER_PATH;
+  if (platform === "darwin") {
+    for (const candidate of macHopperLauncherCandidates(homeDirectory))
+      if (executable(candidate)) return candidate;
+    return MAC_HOPPER_SYSTEM_LAUNCHER;
+  }
+  if (platform !== "linux") return MAC_HOPPER_SYSTEM_LAUNCHER;
   return (
     linuxHopperLauncherCandidates(homeDirectory).find(executable) ??
     REA_MANAGED_LINUX_HOPPER_LAUNCHER

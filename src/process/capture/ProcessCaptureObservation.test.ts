@@ -66,7 +66,12 @@ it("returns detached terminal observations", async () => {
     rows: 12,
     scrollback: 100,
     maxBytes: 100_000,
-    normalize: (value) => value,
+    normalize: (value, maxBytes) => {
+      const utf8Bytes = Buffer.byteLength(value);
+      return utf8Bytes <= maxBytes
+        ? { state: "normalized", value, utf8Bytes }
+        : { state: "over_budget" };
+    },
     recordEvent: (collection, index) =>
       observed.push(`${collection}:${String(index)}`),
   });

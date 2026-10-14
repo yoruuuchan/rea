@@ -5,7 +5,7 @@ import type {
   JavaScriptSemanticChildProcessInteraction,
   JavaScriptSemanticChildProcessSpawn,
 } from "./javascriptSemanticIr.js";
-import { semanticCallableIdForNode } from "./javascriptSemanticProjection.js";
+import { createSemanticCallableIdStack } from "./javascriptSemanticCallableStack.js";
 import {
   semanticStaticPropertyName,
   unwrapJavaScriptExpression,
@@ -84,13 +84,11 @@ const collectSpawns = (
   const admittedCallables = new Set(
     callables.map(({ callableId }) => callableId),
   );
-  const callableStack: string[] = [];
+  const callableStack = createSemanticCallableIdStack(admittedCallables);
   const ancestors: t.Node[] = [];
   traverseJavaScriptAst(program, {
-    enter: (node) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && admittedCallables.has(callableId))
-        callableStack.push(callableId);
+    enter: (node, parent) => {
+      callableStack.enter(node, parent);
       if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
         const method = childProcessMethod(node.callee, state);
         if (method !== null) {
@@ -102,7 +100,7 @@ const collectSpawns = (
           output.push({
             node,
             method,
-            ownerCallableId: callableStack.at(-1) ?? null,
+            ownerCallableId: callableStack.callables.at(-1) ?? null,
             resultBindingId: scalarAssignedResultBinding(
               projectedResultBindings,
             ),
@@ -118,7 +116,7 @@ const collectSpawns = (
     },
     exit: (node) => {
       ancestors.pop();
-      popCallable(node, callableStack);
+      callableStack.exit(node);
     },
   });
   return output;
@@ -152,7 +150,7 @@ const collectInteractions = (
 ): JavaScriptSemanticChildProcessInteraction[] => {
   const output: JavaScriptSemanticChildProcessInteraction[] = [];
   const callableIds = new Set(callables.map(({ callableId }) => callableId));
-  const callableStack: string[] = [];
+  const callableStack = createSemanticCallableIdStack(callableIds);
   const spawnByNode = new WeakMap<t.Node, SpawnCandidate>();
   const spawnsByBinding = new Map<string, SpawnCandidate[]>();
   for (const spawn of spawns) {
@@ -173,21 +171,19 @@ const collectInteractions = (
     spawnsByBinding,
   };
   traverseJavaScriptAst(program, {
-    enter: (node) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && callableIds.has(callableId))
-        callableStack.push(callableId);
+    enter: (node, parent) => {
+      callableStack.enter(node, parent);
       if (!t.isCallExpression(node) && !t.isOptionalCallExpression(node))
         return;
       const interaction = childInteraction(
         node,
-        callableStack.at(-1) ?? null,
+        callableStack.callables.at(-1) ?? null,
         context,
       );
       if (interaction === null) return;
       output.push(interaction);
     },
-    exit: (node) => popCallable(node, callableStack),
+    exit: (node) => callableStack.exit(node),
   });
   return output;
 };
@@ -358,11 +354,6 @@ const objectBinding = (
   t.isIdentifier(node)
     ? resolveSemanticBindingState(state, node, node.name)
     : undefined;
-
-const popCallable = (node: t.Node, stack: string[]): void => {
-  const callableId = semanticCallableIdForNode(node);
-  if (callableId !== null && stack.at(-1) === callableId) stack.pop();
-};
 
 const spawnId = (candidate: SpawnCandidate): string =>
   `child:spawn:${String(candidate.node.start ?? -1)}:${String(candidate.node.end ?? -1)}`;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
+import { analysisViewInputError } from "./analysisViewErrors.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
 import {
   interfaceBuilderAnalysisSchema,
@@ -12,11 +13,10 @@ import {
 } from "../native/nativeInvestigationGraph.js";
 import { err, ok, type Result } from "../result.js";
 import { parseAnalysisViewResult } from "./analysisViewParent.js";
-import {
-  analysisViewInputError,
-  type AnalysisViewParent,
-  type AnalysisViewRequest,
-  type UnsignedAnalysisView,
+import type {
+  AnalysisViewParent,
+  AnalysisViewRequest,
+  UnsignedAnalysisView,
 } from "./analysisView.js";
 import {
   completeWithinViewCoverage,

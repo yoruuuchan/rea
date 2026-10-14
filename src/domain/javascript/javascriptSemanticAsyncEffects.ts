@@ -5,7 +5,7 @@ import type {
   JavaScriptSemanticEventOperation,
   JavaScriptSemanticTimerOperation,
 } from "./javascriptSemanticIr.js";
-import { semanticCallableIdForNode } from "./javascriptSemanticProjection.js";
+import { createSemanticCallableIdStack } from "./javascriptSemanticCallableStack.js";
 import { semanticStaticPropertyName } from "./javascriptAstValues.js";
 import {
   resolveSemanticBindingState,
@@ -94,15 +94,13 @@ export const collectJavaScriptSemanticAsyncEffects = (
   const events: JavaScriptSemanticEventOperation[] = [];
   const timers: TimerCandidate[] = [];
   const callableIds = new Set(callables.map(({ callableId }) => callableId));
-  const callableStack: string[] = [];
+  const callableStack = createSemanticCallableIdStack(callableIds);
   const ancestors: t.Node[] = [];
   traverseJavaScriptAst(program, {
-    enter: (node) => {
-      const callableId = semanticCallableIdForNode(node);
-      if (callableId !== null && callableIds.has(callableId))
-        callableStack.push(callableId);
+    enter: (node, parent) => {
+      callableStack.enter(node, parent);
       if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
-        const ownerCallableId = callableStack.at(-1) ?? null;
+        const ownerCallableId = callableStack.callables.at(-1) ?? null;
         collectEvent(node, ownerCallableId, state, events);
         collectTimer({
           node,
@@ -115,10 +113,8 @@ export const collectJavaScriptSemanticAsyncEffects = (
       ancestors.push(node);
     },
     exit: (node) => {
-      const callableId = semanticCallableIdForNode(node);
       ancestors.pop();
-      if (callableId !== null && callableStack.at(-1) === callableId)
-        callableStack.pop();
+      callableStack.exit(node);
     },
   });
   return {

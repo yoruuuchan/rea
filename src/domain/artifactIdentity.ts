@@ -38,6 +38,7 @@ export const occurrenceIdForLocation = (input: {
   readonly rootArtifactId: string;
   readonly logicalPath: string;
   readonly entryKind: ArtifactOccurrence["entry_kind"];
+  readonly duplicateOrdinal?: number;
 }): string =>
   input.logicalPath === "."
     ? `occ_${digestCanonicalValue({ root: input.rootArtifactId }, "Artifact")}`
@@ -46,6 +47,9 @@ export const occurrenceIdForLocation = (input: {
           root_artifact_id: input.rootArtifactId,
           logical_path: input.logicalPath,
           entry_kind: input.entryKind,
+          ...(input.duplicateOrdinal === undefined
+            ? {}
+            : { duplicate_ordinal: input.duplicateOrdinal }),
         },
         "Artifact",
       )}`;

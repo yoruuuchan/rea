@@ -21,7 +21,11 @@ import {
 } from "@modelcontextprotocol/server";
 
 import { analysisErrorProjectionSchema } from "../contracts/errorSchemas.js";
-import { compactAdvertisedInputSchema } from "../contracts/compactInputSchema.js";
+import {
+  presentAdvertisedInputSchema,
+  type CompactInputSchemaPresentation,
+} from "../contracts/compactInputSchema.js";
+import { CATALOG_IDENTITY, createCatalogIdentity } from "../catalogIdentity.js";
 import { transformAdvertisedInputJsonSchema } from "../contracts/toolSchemaMetadata.js";
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
 import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
@@ -33,13 +37,11 @@ import { toolReturnsTargetContent } from "../contracts/toolEffects.js";
 import {
   carriesTargetContentMarker,
   encodeToolResult,
+  measureMcpResultWithinBudget,
   TARGET_CONTENT_RESULT_META,
 } from "./toolResultEncoding.js";
 
-/** Compact advertised input schemas within this per-schema byte budget. */
-export interface CompactInputSchemaPresentation {
-  readonly budgetBytes: number;
-}
+export type { CompactInputSchemaPresentation } from "../contracts/compactInputSchema.js";
 
 const currentRequestSignal = new AsyncLocalStorage<AbortSignal>();
 
@@ -103,6 +105,11 @@ export const forgetPendingMcpRequest = (
 
 /** Bind oversized MCP error recovery to this server's Evidence ledger. */
 export class EvidenceMcpServer extends McpServer {
+  readonly catalogIdentity: ReturnType<typeof createCatalogIdentity>;
+  private readonly compactPresentation:
+    | CompactInputSchemaPresentation
+    | undefined;
+
   constructor(
     info: Implementation,
     options: McpServerOptions,
@@ -110,12 +117,18 @@ export class EvidenceMcpServer extends McpServer {
       | EvidenceWriter["recordEvidence"]
       | undefined,
     readonly delivery: ToolResultDelivery,
-    private readonly compactPresentation:
-      | CompactInputSchemaPresentation
-      | undefined = undefined,
+    compactPresentation: CompactInputSchemaPresentation | undefined = undefined,
     private readonly omitOutputSchemas = false,
   ) {
     super(info, options);
+    this.compactPresentation =
+      compactPresentation === undefined
+        ? undefined
+        : { budgetBytes: compactPresentation.budgetBytes };
+    this.catalogIdentity =
+      this.compactPresentation === undefined
+        ? CATALOG_IDENTITY
+        : createCatalogIdentity(this.compactPresentation);
   }
 
   /**
@@ -152,7 +165,7 @@ export class EvidenceMcpServer extends McpServer {
               typeof transformAdvertisedInputJsonSchema
             >[0],
             (projected) =>
-              compactAdvertisedInputSchema(projected, budget).schema,
+              presentAdvertisedInputSchema(projected, { budgetBytes: budget }),
           )
         : undefined;
     const registeredConfig =
@@ -334,38 +347,65 @@ class ErrorEvidenceTransport implements Transport {
     if (
       !isJSONRPCResultResponse(message) ||
       !isCallToolResult(message.result) ||
-      message.result.isError !== true ||
-      message.result.structuredContent === undefined
+      message.result.isError !== true
     )
       return message;
-    const structured = jsonObjectSchema.parse(message.result.structuredContent);
     const budget = this.delivery.resultBudgetBytes;
     // Count the provenance marker exactly as the projected error did, and keep
     // it on the replacement: the retained original may hold target content.
-    const targetContent = carriesTargetContentMarker(message.result);
-    // The delivered error omits structuredContent, so its text and error flag count.
-    const encoded = encodeToolResult(
-      structured,
-      budget,
-      "error-text",
-      targetContent,
-    );
+    const targetContent =
+      carriesTargetContentMarker(message.result) ||
+      (tool !== undefined && toolReturnsTargetContent(tool));
+    // SDK validation failures have no structured carrier. Size their existing
+    // text-only result without serializing the complete JSON-RPC message.
+    const isStructured = message.result.structuredContent !== undefined;
+    const structured = isStructured
+      ? jsonObjectSchema.parse(message.result.structuredContent)
+      : undefined;
+    const sdkResultWithMarker =
+      !isStructured &&
+      targetContent &&
+      !carriesTargetContentMarker(message.result)
+        ? {
+            ...message.result,
+            _meta: {
+              ...message.result._meta,
+              ...TARGET_CONTENT_RESULT_META,
+            },
+          }
+        : message.result;
+    const encoded =
+      structured !== undefined
+        ? encodeToolResult(structured, budget, "error-text", targetContent)
+        : measureMcpResultWithinBudget(sdkResultWithMarker, budget);
     if (encoded.ok) return message;
     const operation = tool ?? "mcp_tool_error";
-    const originalError = analysisErrorProjectionSchema.safeParse(
-      structured["error"],
-    );
-    // Retain the already projected diagnostic. Transport authentication and raw
-    // request arguments are deliberately excluded: the application owns their
-    // explicit sensitivity policy, and its error projection is authoritative.
+    const originalResult = jsonObjectSchema.parse(message.result);
+    const sdkDiagnostic = !isStructured
+      ? message.result.content.find((item) => item.type === "text")?.text
+      : undefined;
+    const retainedResult = structured ?? originalResult;
+    const originalError = isStructured
+      ? analysisErrorProjectionSchema.safeParse(structured?.["error"])
+      : undefined;
+    // Retain the complete original response, including SDK validation text.
+    // The SDK error contains its rendered issue, not a separate argument bag;
+    // transport authentication and caller arguments are never added here.
     const evidence = createEvidence(
       undefined,
       { id: "rea-mcp", name: "REA MCP delivery", version: "1" },
       {
         operation: "mcp_tool_error",
         parameters: { tool_name: operation },
-        result: structured,
-        rawResult: jsonObjectSchema.parse(message.result),
+        result:
+          sdkDiagnostic === undefined
+            ? retainedResult
+            : {
+                boundary: "sdk-input-validation",
+                diagnostic_preview: sdkDiagnostic.slice(0, 256),
+                diagnostic_truncated: sdkDiagnostic.length > 256,
+              },
+        rawResult: originalResult,
       },
     );
     const recorded = this.recordEvidence?.(evidence);
@@ -376,12 +416,18 @@ class ErrorEvidenceTransport implements Transport {
       "The tool failed, but its complete error response exceeds the MCP response budget.",
       {
         boundary: "mcp-response",
-        ...(originalError.success
+        ...(originalError?.success
           ? { original_error_code: originalError.data.code }
           : {}),
         result_budget_bytes: budget,
         response_bytes_at_least: encoded.bytesAtLeast,
         constraint: encoded.constraint,
+        ...(sdkDiagnostic === undefined
+          ? {}
+          : {
+              diagnostic_preview: sdkDiagnostic.slice(0, 256),
+              diagnostic_truncated: sdkDiagnostic.length > 256,
+            }),
         ...(retained
           ? {
               evidence_reference: {

@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
-import { access, rm } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  access,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { spawn } from "@lydell/node-pty";
@@ -74,48 +83,53 @@ const clientStates = [
 
 const agentActions = actions.filter(({ kind }) => kind !== "install_hopper");
 
+const runSetupDryRunInTty = async (
+  home: string,
+  arguments_: readonly string[],
+): Promise<{ readonly exitCode: number; readonly output: string }> => {
+  const terminal = spawn(
+    process.execPath,
+    ["scripts/rea.mjs", "setup", "--dry-run", ...arguments_],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        XDG_CONFIG_HOME: join(home, ".config"),
+        REA_LOG_LEVEL: "silent",
+        NO_COLOR: "1",
+      },
+      name: "xterm-256color",
+      cols: 120,
+      rows: 40,
+    },
+  );
+  let output = "";
+  terminal.onData((data) => {
+    output += data;
+  });
+  const exitCode = await new Promise<number>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      terminal.kill();
+      reject(new Error(`TTY dry run timed out after output:\n${output}`));
+    }, 15_000);
+    terminal.onExit(({ exitCode: code }) => {
+      clearTimeout(timeout);
+      resolvePromise(code);
+    });
+  });
+  return { exitCode, output };
+};
+
 describe("TTY setup dry run", () => {
   it("prints the plan and no-mutation notice for a TTY dry run", async () => {
     const home = await createTestTempDirectory("rea-cli-setup-dry-run-");
-    const terminal = spawn(
-      process.execPath,
-      [
-        "scripts/rea.mjs",
-        "setup",
-        "--dry-run",
-        "--client",
-        "codex",
-        "--skill=false",
-      ],
-      {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          HOME: home,
-          USERPROFILE: home,
-          XDG_CONFIG_HOME: join(home, ".config"),
-          REA_LOG_LEVEL: "silent",
-          NO_COLOR: "1",
-        },
-        name: "xterm-256color",
-        cols: 120,
-        rows: 40,
-      },
-    );
-    let output = "";
-    terminal.onData((data) => {
-      output += data;
-    });
-    const exitCode = await new Promise<number>((resolvePromise, reject) => {
-      const timeout = setTimeout(() => {
-        terminal.kill();
-        reject(new Error(`TTY dry run timed out after output:\n${output}`));
-      }, 15_000);
-      terminal.onExit(({ exitCode: code }) => {
-        clearTimeout(timeout);
-        resolvePromise(code);
-      });
-    });
+    const { exitCode, output } = await runSetupDryRunInTty(home, [
+      "--client",
+      "codex",
+      "--skill=false",
+    ]);
 
     expect(exitCode, output).toBe(0);
     expect(output).toContain("CREATE  Codex");
@@ -124,6 +138,39 @@ describe("TTY setup dry run", () => {
     await expect(
       access(join(home, ".codex/config.toml")),
     ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("shows the refusal instead of a blocked skill plan for a TTY dry run", async () => {
+    const home = await createTestTempDirectory("rea-cli-setup-linked-dry-run-");
+    const managed = join(home, "managed-skill");
+    const linked = join(home, ".claude/skills/reverse-engineer-anything");
+    const original = "user-managed skill bytes\n";
+    await mkdir(managed);
+    await writeFile(join(managed, "SKILL.md"), original);
+    await mkdir(dirname(linked), { recursive: true });
+    await symlink(
+      managed,
+      linked,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const { exitCode, output } = await runSetupDryRunInTty(home, [
+      "--client",
+      "claude_code",
+    ]);
+
+    expect(exitCode, output).toBe(1);
+    expect(output).toContain("Skill directory is a symbolic link.");
+    expect(output).toContain(linked);
+    expect(output).toContain("--skill=false");
+    expect(output).not.toContain("REA setup plan");
+    expect(output).not.toContain("Install or update the REA skill");
+    expect((await lstat(linked)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(managed, "SKILL.md"), "utf8")).toBe(original);
+    expect(await readdir(managed)).toEqual(["SKILL.md"]);
+    await expect(access(join(home, ".claude.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });

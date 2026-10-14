@@ -30,11 +30,17 @@ type Fixture = {
     delivery: Delivery;
     provider_search_path_sha256: string;
     calls: unknown[];
+    packet_selection?: string;
   };
   answer: {
     capture: { coverage: string; capture_start: null };
     http_request_uris_first2: string[];
     delivery_observations: Observation[];
+    facts?: {
+      kind: string;
+      matching_packets: number;
+      rows: { frame: number }[];
+    };
   };
 };
 const reportSchema = z.object({
@@ -121,6 +127,39 @@ function compare(left: Fixture, right: Fixture) {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+for (const artifact of [
+  "wireshark-pgsql-jdbc.pcap",
+  "wireshark-dns.cap",
+  "wireshark-dhcp.pcap",
+]) {
+  test(`${artifact}: compare requested facts across packet plans and preserve observations`, () => {
+    const left = fixture("complete", artifact);
+    left.summary.packet_selection = "baseline";
+    left.answer.facts = {
+      kind: "packet",
+      matching_packets: 1337,
+      rows: [{ frame: 9 }],
+    };
+    const right = structuredClone(left);
+    right.summary.packet_selection = "focused";
+    right.answer.delivery_observations[0]!.evidence_id = "ev_focused";
+    right.answer.delivery_observations[0]!.coverage =
+      "up-to-input-packet-limit";
+    const equivalent = compare(left, right);
+    assert.equal(equivalent.status, 0);
+    assert.equal(equivalent.report.facts_match, true);
+    assert.deepEqual(
+      equivalent.report.preserved_run_specific_values.map((row) => row.value),
+      [left.answer.delivery_observations, right.answer.delivery_observations],
+    );
+    right.answer.facts!.matching_packets++;
+    assert.equal(compare(left, right).report.facts_match, false);
+    right.answer.facts!.matching_packets--;
+    right.summary.packet_selection = "baseline";
+    assert.equal(compare(left, right).report.facts_match, false);
+  });
 }
 
 for (const artifact of [

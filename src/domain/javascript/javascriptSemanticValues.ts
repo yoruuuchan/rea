@@ -360,6 +360,11 @@ const evaluateBinding = (
   const initializer = binding.initializers[0];
   if (initializer === undefined)
     return { status: "unknown", reason: "Missing binding initializer." };
+  if (context.state.conditionallySkippedExpressions.has(initializer.node))
+    return {
+      status: "unknown",
+      reason: `Binding ${binding.name} may remain uninitialized.`,
+    };
   const position = context.bindings.size;
   const callerDependence = context.dependence.lowest;
   context.dependence.lowest = CALLER_INDEPENDENT;
@@ -817,7 +822,7 @@ const provenanceForBindingUncached = (
     ({ kind }) => kind === "assignment",
   );
   const conditionallyInitialized = binding.initializers.some(({ node }) =>
-    context.state.conditionalInitializers.has(node),
+    context.state.conditionallySkippedExpressions.has(node),
   );
   if (
     provenance.status !== "module" ||
@@ -828,7 +833,7 @@ const provenanceForBindingUncached = (
     provenance.origins,
     assigned
       ? `Binding ${binding.name} may be reassigned.`
-      : `Binding ${binding.name} is conditionally initialized.`,
+      : `Binding ${binding.name} may remain uninitialized.`,
   );
 };
 

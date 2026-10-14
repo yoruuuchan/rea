@@ -9,7 +9,7 @@ import { thinMach } from "../../../src/domain/binaryTarget.fixture.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { mcpTest } from "../../support/mcp/mcpFixture.js";
-import { openProductionTarget } from "../../support/mcp/productionSession.js";
+import { openArtifactTarget } from "../../support/mcp/artifactSession.js";
 
 const evidenceOf = <Schema extends z.ZodType>(schema: Schema) =>
   z.object({
@@ -65,7 +65,7 @@ mcpTest(
   "retains complete Interface Builder Evidence and pages one document's rows",
   async ({ mcp, onTestFinished }) => {
     const app = await fixtureApp();
-    const client = await openProductionTarget(mcp, onTestFinished, app);
+    const client = await openArtifactTarget(mcp, onTestFinished, app);
 
     // Summary first: its own retained parent must serve every later page.
     const summarized = await client.callTool({

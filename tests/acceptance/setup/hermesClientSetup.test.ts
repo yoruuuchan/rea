@@ -7,6 +7,76 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 
 cliTest(
+  "Hermes setup preserves string environment values under the client's YAML 1.1 schema",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-hermes-yaml-strings-");
+    const profile = join(home, "hermes");
+    const config = join(profile, "config.yaml");
+    const environment = {
+      REA_MCP_OUTPUT_SCHEMA_PROFILE: "off",
+      ON: "on",
+      YES: "yes",
+      NO: "no",
+      SHORT_TRUE: "y",
+      SHORT_FALSE: "n",
+      DATE: "2026-10-14",
+      TIME: "12:34:56",
+      FLOAT: "1.0e-7",
+      OCTAL: "0600",
+      NULL_WORD: "NULL",
+      NULL_MARKER: "~",
+    };
+    const settings =
+      "# User settings\nnotifications: on\ndate: 2026-10-14\n" +
+      "timestamp: 2026-10-14T00:00:00.123456+08:00\n";
+    const original =
+      settings +
+      "mcp_servers:\n  rea:\n    command: rea-old\n    args: [mcp]\n    env:\n" +
+      Object.entries(environment)
+        .map(
+          ([key, value]) =>
+            `      ${JSON.stringify(key)}: ${JSON.stringify(value)}\n`,
+        )
+        .join("");
+    await mkdir(profile);
+    await writeFile(config, original);
+    const run = (arguments_: readonly string[]) =>
+      cli.run({
+        arguments: arguments_,
+        cwd: home,
+        environment: { USERPROFILE: home, HERMES_HOME: profile },
+        timeoutMs: 20_000,
+      });
+    const setup = [
+      "setup",
+      "--client",
+      "hermes",
+      "--skill=false",
+      "--yes",
+      "--json",
+    ];
+    expect((await run(setup)).json).toMatchObject({ status: "ready" });
+    const configured = await readFile(config, "utf8");
+    expect(parse(configured, { version: "1.1" })).toMatchObject({
+      mcp_servers: { rea: { env: environment, enabled: true } },
+    });
+    expect(configured.startsWith(settings)).toBe(true);
+    expect(await readFile(`${config}.rea.backup`, "utf8")).toBe(original);
+    expect(
+      (await run(["doctor", "--client", "hermes", "--json"])).json,
+    ).toMatchObject({
+      healthy: true,
+      identity: { registrations: [{ client: "hermes", state: "aligned" }] },
+    });
+    expect((await run(setup)).json).toMatchObject({
+      status: "ready",
+      appliedActions: [],
+    });
+    expect(await readFile(config, "utf8")).toBe(configured);
+  },
+);
+
+cliTest(
   "Hermes setup, doctor and uninstall use the expanded profile and its personal skill",
   async ({ cli }) => {
     const home = await createTestTempDirectory("rea-hermes-cli-");

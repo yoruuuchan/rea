@@ -11,6 +11,7 @@ import {
   type ManagedMetadataLayout,
 } from "./ManagedMetadataLayout.js";
 import { readManagedPeLayout } from "./ManagedPeReader.js";
+import { memberListIndexSize } from "./ManagedMemberPointers.js";
 import { edges } from "./ManagedMemberRows.js";
 import { parseUserStrings } from "./ManagedUserStrings.js";
 import { signature, type ManagedMethod } from "./ManagedMemberInspectorCore.js";
@@ -1224,7 +1225,173 @@ describe("managed derived caller names", () => {
   });
 });
 
-describe("managed member reference bounds", () => {
+describe("managed TypeDef list ownership bounds", () => {
+  it("retains rows but leaves ownership unknown for zero TypeDef list starts", () => {
+    const bytes = buildManagedPeFixture();
+    const pe = readManagedPeLayout(bytes);
+    if (pe.cli === null) throw new Error("fixture has no CLI header");
+    const { rva, size } = pe.cli.metadata;
+    const layout = readManagedMetadataLayout(
+      bytes,
+      pe.rvaToOffset(rva, size, "cli.metadata"),
+      size,
+    );
+    const listOffset =
+      metadataRowOffset(layout, 2, 1) +
+      4 +
+      2 * layout.stringIndexSize +
+      layout.codedIndexSize("TypeDefOrRef");
+    const listIndexWidth = Math.max(
+      layout.tableIndexSize(3),
+      layout.tableIndexSize(4),
+      layout.tableIndexSize(5),
+      layout.tableIndexSize(6),
+    );
+    const writeIndex = (offset: number) =>
+      listIndexWidth === 2
+        ? bytes.writeUInt16LE(0, offset)
+        : bytes.writeUInt32LE(0, offset);
+    writeIndex(listOffset);
+    writeIndex(listOffset + listIndexWidth);
+
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.types[0]).toMatchObject({
+      field_list: { first_row: null, last_row: null, count: 0 },
+      method_list: { first_row: null, last_row: null, count: 0 },
+    });
+    expect(result.fields[0]).toMatchObject({
+      token: "0x04000001",
+      name: "counter",
+      declaring_type: null,
+    });
+    expect(result.methods[0]).toMatchObject({
+      token: "0x06000001",
+      name: "Main",
+      declaring_type: null,
+    });
+    expect(result.coverage).toMatchObject({
+      state: "partial",
+      issues: [
+        expect.objectContaining({
+          code: "invalid-row",
+          detail: expect.stringContaining("TypeDef FieldList start 0"),
+        }),
+        expect.objectContaining({
+          code: "invalid-row",
+          detail: expect.stringContaining("TypeDef MethodList start 0"),
+        }),
+      ],
+    });
+  });
+
+  it("does not infer an earlier owner from an invalid next list endpoint", () => {
+    const bytes = buildManagedPeFixture({ additionalEmptyTypes: 1 });
+    const pe = readManagedPeLayout(bytes);
+    if (pe.cli === null) throw new Error("fixture has no CLI header");
+    const { rva, size } = pe.cli.metadata;
+    const layout = readManagedMetadataLayout(
+      bytes,
+      pe.rvaToOffset(rva, size, "cli.metadata"),
+      size,
+    );
+    const methodStartOffset =
+      metadataRowOffset(layout, 2, 2) +
+      4 +
+      2 * layout.stringIndexSize +
+      layout.codedIndexSize("TypeDefOrRef") +
+      memberListIndexSize(layout, 4);
+    if (memberListIndexSize(layout, 6) === 2)
+      bytes.writeUInt16LE(0, methodStartOffset);
+    else bytes.writeUInt32LE(0, methodStartOffset);
+
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.methods[0]).toMatchObject({
+      token: "0x06000001",
+      declaring_type: null,
+    });
+    expect(result.types[0]?.method_list).toMatchObject({
+      first_row: null,
+      last_row: null,
+      count: 0,
+    });
+    expect(result.coverage.state).toBe("partial");
+  });
+});
+
+describe("managed TypeDef list ordering", () => {
+  it("leaves adjacent ownership unknown when valid list starts decrease", () => {
+    const bytes = buildManagedPeFixture({
+      additionalEmptyTypes: 1,
+      methodRowCount: 2,
+    });
+    const pe = readManagedPeLayout(bytes);
+    if (pe.cli === null) throw new Error("fixture has no CLI header");
+    const { rva, size } = pe.cli.metadata;
+    const layout = readManagedMetadataLayout(
+      bytes,
+      pe.rvaToOffset(rva, size, "cli.metadata"),
+      size,
+    );
+    const methodOffset =
+      4 +
+      2 * layout.stringIndexSize +
+      layout.codedIndexSize("TypeDefOrRef") +
+      memberListIndexSize(layout, 4);
+    const writeMethodStart = (row: number, value: number): void => {
+      const offset = metadataRowOffset(layout, 2, row) + methodOffset;
+      if (memberListIndexSize(layout, 6) === 2)
+        bytes.writeUInt16LE(value, offset);
+      else bytes.writeUInt32LE(value, offset);
+    };
+    writeMethodStart(1, 2);
+    writeMethodStart(2, 1);
+
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.methods.map(({ declaring_type }) => declaring_type)).toEqual([
+      null,
+      null,
+    ]);
+    expect(result.coverage).toMatchObject({
+      state: "partial",
+      issues: [
+        expect.objectContaining({
+          code: "invalid-row",
+          detail: expect.stringContaining(
+            "MethodList start 1 decreases from preceding start 2",
+          ),
+        }),
+      ],
+    });
+  });
+
+  it("accepts the one-based start for an empty ordinary member table", () => {
+    const bytes = buildManagedPeFixture({ methodRowCount: 0 });
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+    expect(result.types[0]?.method_list).toEqual({
+      first_row: null,
+      last_row: null,
+      count: 0,
+    });
+    expect(result.coverage).toMatchObject({ state: "complete", issues: [] });
+  });
+});
+
+describe("managed metadata reference bounds", () => {
   it("retains members and reports an out-of-range TypeDef coded index as partial", () => {
     const bytes = buildManagedPeFixture({ extendsRaw: 12 });
     const result = inspectManagedMembersBytes(

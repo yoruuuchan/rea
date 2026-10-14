@@ -29,6 +29,7 @@ it.each([
     const client = { name, format, configPath };
     const custom = {
       REA_MCP_INPUT_SCHEMA_PROFILE: "compact",
+      REA_MCP_OUTPUT_SCHEMA_PROFILE: "off",
       REA_MCP_MAX_RESPONSE_BYTES: "33554432",
       REA_BROWSER_EXECUTABLE: join(root, "custom-browser"),
       GHIDRA_INSTALL_DIR: join(root, "old-ghidra"),
@@ -142,6 +143,16 @@ it.each([
     "invalid profile",
     { REA_MCP_INPUT_SCHEMA_PROFILE: "bogus" },
     "REA_MCP_INPUT_SCHEMA_PROFILE",
+  ],
+  [
+    "empty output profile",
+    { REA_MCP_OUTPUT_SCHEMA_PROFILE: "" },
+    "REA_MCP_OUTPUT_SCHEMA_PROFILE",
+  ],
+  [
+    "invalid output profile",
+    { REA_MCP_OUTPUT_SCHEMA_PROFILE: "bogus" },
+    "REA_MCP_OUTPUT_SCHEMA_PROFILE",
   ],
   [
     "invalid response budget",

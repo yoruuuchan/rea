@@ -265,6 +265,7 @@ export const pwntoolsUnavailable = (
 ): ProviderSelectionError =>
   new ProviderSelectionError({
     ...(capturedOutput === undefined ? {} : { capturedOutput }),
+    userMessage: reason,
     operation: context.operation,
     reason: "provider_unavailable",
     requestedProviderId: context.providerId,

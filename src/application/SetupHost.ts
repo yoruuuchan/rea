@@ -31,6 +31,7 @@ import {
   skillDestinations,
   canonicalSkillNeedsInstall,
   installCanonicalSkill,
+  validateCanonicalSkillDirectories,
 } from "./SetupSkill.js";
 import {
   clientConfigurationAligned,
@@ -55,21 +56,21 @@ import type {
   SetupProviderEnvironment,
 } from "./SetupTypes.js";
 import type { DoctorScope } from "./Doctor.js";
+import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 
 /** Resolve the executable and arguments used in a managed MCP registration. */
 export const setupRegistrationCommand = (
   platform: NodeJS.Platform,
   packageRunner: PackageRunner | undefined,
-): readonly string[] =>
-  packageRunner !== undefined
-    ? packageRunnerRegistrationCommand(packageRunner, platform)
-    : platform === "win32"
-      ? [
-          process.execPath,
-          resolve(process.argv[1] ?? PRODUCT_IDENTITY.cliBinary),
-          "mcp",
-        ]
-      : [resolve(process.argv[1] ?? PRODUCT_IDENTITY.cliBinary), "mcp"];
+  entrypointPath: string | undefined,
+): readonly string[] => {
+  if (packageRunner !== undefined)
+    return packageRunnerRegistrationCommand(packageRunner, platform);
+  if (entrypointPath === undefined || entrypointPath.length === 0) return [];
+  return platform === "win32"
+    ? [process.execPath, entrypointPath, "mcp"]
+    : [entrypointPath, "mcp"];
+};
 
 /**
  * The launcher setup registers, and why it must not be registered when it
@@ -83,14 +84,17 @@ const setupRegistration = (
   const registrationCommand = setupRegistrationCommand(
     platform,
     invokingPackageRunner(environment, platform),
+    CURRENT_ENTRYPOINT_PATH,
   );
   const registrationCommandBlocker =
-    platform === "win32"
-      ? packagePrivateLauncherBlocker(
-          registrationCommand,
-          msixPackagesDirectory(homeDirectory, environment),
-        )
-      : undefined;
+    registrationCommand.length === 0
+      ? "REA could not determine the current executable entrypoint. Run setup through the installed REA CLI or a supported package runner before configuring clients."
+      : platform === "win32"
+        ? packagePrivateLauncherBlocker(
+            registrationCommand,
+            msixPackagesDirectory(homeDirectory, environment),
+          )
+        : undefined;
   return registrationCommandBlocker === undefined
     ? { registrationCommand }
     : { registrationCommand, registrationCommandBlocker };
@@ -223,6 +227,13 @@ export const systemSetupHost = (
         environment,
         platform,
         resources,
+      ),
+    validateSkillDirectories: (clientIds) =>
+      validateCanonicalSkillDirectories(
+        homeDirectory,
+        clientIds,
+        environment,
+        platform,
       ),
     installSkill: (clientIds) =>
       installCanonicalSkill(

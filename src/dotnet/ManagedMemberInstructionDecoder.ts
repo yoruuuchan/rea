@@ -543,9 +543,34 @@ export const parseExceptionRegions = (
         "Exception section size leaves artifact",
         regions,
       );
-    if ((size - 4) % clauseSize !== 0)
+    let count: number;
+    let sectionSize = size;
+    if (fat) {
+      if ((size - 4) % clauseSize !== 0)
+        return malformedExceptionRegions(
+          "Exception section size does not contain whole clauses",
+          regions,
+        );
+      count = (size - 4) / clauseSize;
+    } else if ((size - 4) % clauseSize === 0) {
+      count = (size - 4) / clauseSize;
+    } else if (size >= clauseSize && size % clauseSize === 0) {
+      // CoreCLR accommodates legacy VB/MC++ sections whose DataSize omits the
+      // four-byte section header. DataSize is still not the physical extent.
+      count = size / clauseSize;
+      sectionSize = 4 + count * clauseSize;
+    } else {
       return malformedExceptionRegions(
         "Exception section size does not contain whole clauses",
+        regions,
+      );
+    }
+    if (
+      sectionOffset > methodEnd - sectionSize ||
+      sectionOffset > bytes.length - sectionSize
+    )
+      return malformedExceptionRegions(
+        "Exception section size leaves artifact",
         regions,
       );
     if (
@@ -557,7 +582,6 @@ export const parseExceptionRegions = (
         regions,
       );
 
-    const count = (size - 4) / clauseSize;
     // Accumulates with the method IL bound; the body reserves what it retains.
     budget?.admitTransient(count * 256, sectionOffset);
     for (const region of readExceptionClauses(
@@ -569,7 +593,7 @@ export const parseExceptionRegions = (
       regions.push(region);
 
     hasMoreSections = (kind & 0x80) !== 0;
-    sectionOffset += size;
+    sectionOffset += sectionSize;
   }
   return { status: "complete", regions };
 };

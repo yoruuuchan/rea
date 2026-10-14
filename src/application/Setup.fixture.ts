@@ -8,7 +8,7 @@ import type {
 } from "./SetupTypes.js";
 import type { SetupClient } from "./SupportedClients.js";
 import type { SetupHopperInstallResult } from "./SetupInstallFailure.js";
-import { err, ok } from "../domain/result.js";
+import { err, ok, type Result } from "../domain/result.js";
 import { SetupSkillInstallError } from "./SetupSkill.js";
 import type { DoctorCheck, DoctorReport, DoctorScope } from "./Doctor.js";
 import type { LinuxDistribution } from "./LinuxHopper.js";
@@ -16,6 +16,7 @@ import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
 import { CATALOG_IDENTITY } from "../catalogIdentity.js";
 import type { ClientRegistrationStatus } from "./ClientRegistrationStatus.js";
 import { setupRegistrationCommand } from "./SetupHost.js";
+import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 
 /** Recording setup host for service-level planning and recovery tests. */
 export class FakeSetupHost implements SetupHost {
@@ -24,7 +25,7 @@ export class FakeSetupHost implements SetupHost {
   skillDestinations(clientIds: readonly string[]) {
     return skillDestinations(this.homeDirectory, clientIds);
   }
-  readonly registrationCommand: readonly string[];
+  registrationCommand: readonly string[];
   registrationCommandBlocker?: string;
   nodeVersion = "24.18.0";
   version: string | undefined = "14.5";
@@ -43,6 +44,7 @@ export class FakeSetupHost implements SetupHost {
   hopperReplaceRequests: boolean[] = [];
   configurations = 0;
   skillInstalls = 0;
+  skillDirectoryValidations: Array<readonly string[]> = [];
   doctorCalls = 0;
   doctorScopes: Array<DoctorScope | undefined> = [];
   checkedHopperPaths: Array<string | undefined> = [];
@@ -56,7 +58,11 @@ export class FakeSetupHost implements SetupHost {
 
   constructor(platform: NodeJS.Platform = "darwin") {
     this.platform = platform;
-    this.registrationCommand = setupRegistrationCommand(platform, undefined);
+    this.registrationCommand = setupRegistrationCommand(
+      platform,
+      undefined,
+      CURRENT_ENTRYPOINT_PATH,
+    );
   }
 
   macosVersion = (): Promise<string | undefined> =>
@@ -129,6 +135,12 @@ export class FakeSetupHost implements SetupHost {
     );
   skillNeedsInstall = (): Promise<boolean> =>
     Promise.resolve(this.skill !== "unchanged");
+  validateSkillDirectories = (
+    clientIds: readonly string[],
+  ): Promise<Result<void, SetupSkillInstallError>> => {
+    this.skillDirectoryValidations.push(clientIds);
+    return Promise.resolve(ok(undefined));
+  };
   installSkill = () => {
     this.skillInstalls += 1;
     return Promise.resolve(

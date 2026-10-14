@@ -178,7 +178,7 @@ describe("Kimi Code package launchers", () => {
     "keeps the %s launcher aligned on %s",
     async (runner, platform) => {
       const { home, client } = await kimiClient();
-      const launcher = setupRegistrationCommand(platform, runner);
+      const launcher = setupRegistrationCommand(platform, runner, undefined);
       expect(
         (await configureClientConfiguration(client, {}, launcher)).status,
       ).toBe("configured");

@@ -462,6 +462,48 @@ describe("stable exported function bindings through stdio MCP", () => {
     const fixture = await analyzeVersions(source, "default");
     expectCountChange(await compareThroughMcp(fixture.input));
   });
+
+  it.each([
+    {
+      name: "a local callable captured by an identifier default export",
+      source: (count: number) =>
+        `const run = () => ({ kind: "result", count: ${String(count)} });\nexport default run;`,
+      runtimeValue: (count: number) => ({ kind: "result", count }),
+      expected: "known",
+    },
+    {
+      name: "the latest callable assigned before the default export",
+      source: (count: number) =>
+        `let run = () => ({ count: 0 });\nrun = () => ({ kind: "result", count: ${String(count)} });\nexport default run;`,
+      runtimeValue: (count: number) => ({ kind: "result", count }),
+      expected: "known",
+    },
+    {
+      name: "a callable assigned only after the default export capture",
+      source: (count: number) =>
+        `var run;\nexport default run;\nrun = () => ({ kind: "result", count: ${String(count)} });`,
+      runtimeValue: () => undefined,
+      expected: "unknown",
+    },
+    {
+      name: "a reassignment after the default export capture",
+      source: (count: number) =>
+        `let run = () => ({ kind: "result", count: ${String(count)} });\nexport default run;\nrun = () => ({ count: 99 });`,
+      runtimeValue: (count: number) => ({ kind: "result", count }),
+      expected: "known",
+    },
+  ] as const)(
+    "uses the value at $name",
+    async ({ source, runtimeValue, expected }) => {
+      const fixture = await analyzeVersions(source, "default");
+      await expectRuntimeExports(fixture, runtimeValue);
+      const mcp = await compareThroughMcp(fixture.input);
+      const cli = await compareThroughCli(fixture);
+      expect(cli).toEqual(mcp);
+      if (expected === "known") expectCountChange(mcp);
+      else expectUncertainComparison(mcp);
+    },
+  );
 });
 
 describe("export bindings with loop and assignment-only writes", () => {

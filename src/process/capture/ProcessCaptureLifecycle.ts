@@ -38,11 +38,13 @@ import { assertNotCancelled } from "./ProcessScenarioRuntimeValidation.js";
 import {
   normalizeProcessElapsedTime,
   normalizeProcessSamples,
+  type BoundedProcessTextNormalization,
 } from "./ProcessNormalization.js";
 import { PROCESS_PROVIDER } from "../../domain/process/processEvidenceProvider.js";
 import { TerminalRenderer } from "./TerminalRenderer.js";
 import {
   hasCaptureTruncation,
+  type NormalizedTerminalRetention,
   type TerminalRetention,
   type ProcessCaptureTruncationDetails,
 } from "../../domain/process/processCaptureCoverage.js";
@@ -408,7 +410,9 @@ const captureCoverageUnknowns = (
     unknowns.push({
       scope: "terminal",
       reason:
-        "Raw PTY chunks exceeded output_bytes and were omitted; rendered states also lack those inputs. See truncation_details.raw_terminal.",
+        (details.normalized_terminal?.omitted_frames ?? 0) > 0
+          ? "Raw PTY chunks were omitted because original input exceeded output_bytes or an ordered normalization stage exceeded its remaining bound; final normalized sizes for the latter omissions are unknown. Rendered states also lack those inputs. See raw_terminal and normalized_terminal retention details, including the normalized omission count."
+          : "Raw PTY chunks exceeded output_bytes and were omitted; rendered states also lack those inputs. See truncation_details.raw_terminal.",
     });
   if (
     details.rendered_terminal.observed_frames >
@@ -417,7 +421,9 @@ const captureCoverageUnknowns = (
     unknowns.push({
       scope: "terminal",
       reason:
-        "Cumulative rendered state and visible-line bytes exceeded output_bytes; whole rendered frames were omitted. Raw PTY coverage is reported separately. See truncation_details.rendered_terminal.",
+        (details.rendered_terminal.unknown_size_frames ?? 0) > 0
+          ? "Rendered frames were omitted because a normalization stage exceeded the remaining output_bytes budget; final rendered byte totals are unknown for those frames. See truncation_details.rendered_terminal."
+          : "Cumulative rendered state and visible-line bytes exceeded output_bytes; whole rendered frames were omitted. Raw PTY coverage is reported separately. See truncation_details.rendered_terminal.",
     });
   for (const [name, coverage] of [
     ["before", details.filesystem_before],
@@ -1303,44 +1309,67 @@ export const captureTerminalFrames = (options: {
   readonly started: number;
   readonly onOutput: () => void;
   readonly renderer: TerminalRenderer;
-  readonly normalizeText: (value: string) => string;
+  readonly normalizeText: (
+    value: string,
+    maxBytes: number,
+  ) => BoundedProcessTextNormalization;
   readonly recordEvent: RecordProcessCaptureEvent;
-}): (() => TerminalRetention) => {
-  let outputBytes = 0;
+}): (() => TerminalCaptureRetention) => {
+  let rawBytes = 0;
+  let normalizedBytes = 0;
   let observedBytes = 0;
   let observedFrames = 0;
+  let normalizedOmittedFrames = 0;
   options.terminal.onData((data) => {
     options.onOutput();
     const bytes = Buffer.byteLength(data);
     observedBytes += bytes;
     observedFrames += 1;
-    if (outputBytes + bytes > options.scenario.limits.output_bytes) {
+    const budget = options.scenario.limits.output_bytes;
+    if (bytes > budget - rawBytes) {
       return;
     }
-    outputBytes += bytes;
+    const normalized = options.normalizeText(data, budget - normalizedBytes);
+    if (normalized.state === "over_budget") {
+      normalizedOmittedFrames += 1;
+      return;
+    }
+    rawBytes += bytes;
+    normalizedBytes += normalized.utf8Bytes;
     const atMs = normalizeProcessElapsedTime(
       monotonicProcessCaptureClock() - options.started,
       options.scenario.normalization.time_bucket_ms,
     );
-    const normalized = options.normalizeText(data);
     const sequence = options.frames.length;
     options.frames.push({
       sequence,
       at_ms: atMs,
-      data: normalized,
-      ...(normalized === data ? {} : { raw_data: data }),
+      data: normalized.value,
+      ...(normalized.value === data ? {} : { raw_data: data }),
     });
     options.renderer.write(data, atMs);
     options.recordEvent("frames", sequence);
   });
   return () => ({
-    budget_bytes: options.scenario.limits.output_bytes,
-    observed_bytes: observedBytes,
-    retained_bytes: outputBytes,
-    observed_frames: observedFrames,
-    retained_frames: options.frames.length,
+    raw_terminal: {
+      budget_bytes: options.scenario.limits.output_bytes,
+      observed_bytes: observedBytes,
+      retained_bytes: rawBytes,
+      observed_frames: observedFrames,
+      retained_frames: options.frames.length,
+    },
+    normalized_terminal: {
+      budget_bytes: options.scenario.limits.output_bytes,
+      retained_bytes: normalizedBytes,
+      omitted_frames: normalizedOmittedFrames,
+    },
   });
 };
+
+export interface TerminalCaptureRetention {
+  readonly raw_terminal: TerminalRetention;
+  readonly normalized_terminal: NormalizedTerminalRetention;
+}
 
 export const resolveProcessResult = (
   capture: PendingProcessCapture | ProcessCapture | undefined,
