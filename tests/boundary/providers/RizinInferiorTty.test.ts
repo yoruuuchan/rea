@@ -215,7 +215,10 @@ process.stdin.on("data", (chunk) => {
     );
     execFileSync(process.execPath, ["--check", provider]);
     await chmod(provider, 0o700);
-    manager = new RizinDebugSessionManager({ REA_RIZIN_COMMAND: provider });
+    manager = new RizinDebugSessionManager({
+      ...process.env,
+      REA_RIZIN_COMMAND: provider,
+    });
     const started = await manager.start({
       path: "/tmp/fake-target",
       inferior_tty: tty,
@@ -576,7 +579,7 @@ process.stdin.on("data", (chunk) => {
   await chmod(provider, 0o700);
   let providerStderr = "";
   manager = new RizinDebugSessionManager(
-    { REA_RIZIN_COMMAND: provider },
+    { ...process.env, REA_RIZIN_COMMAND: provider },
     {
       spawnProcess: async (spawnOptions) => {
         const launched = await spawnOwnedProviderProcess(spawnOptions);

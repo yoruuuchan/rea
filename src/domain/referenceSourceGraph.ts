@@ -111,6 +111,10 @@ const sourceEntrySchema = z.union([
   sourceFileSchema,
   sourceDirectorySchema,
   sourceSymlinkSchema,
+  z.strictObject({
+    ...entryBaseShape,
+    kind: z.literal("unknown"),
+  }),
 ]);
 
 const sourceRelationshipSchema = z.strictObject({
@@ -361,7 +365,8 @@ const checkCompleteInventory = (
       entry.limitations.length > 0 ||
       (entry.kind === "file" && entry.content_state !== "hashed") ||
       (entry.kind === "directory" && entry.tree_state !== "enumerated") ||
-      (entry.kind === "symlink" && entry.target_state !== "internal"),
+      (entry.kind === "symlink" && entry.target_state !== "internal") ||
+      entry.kind === "unknown",
   );
   const partialRelationship = graph.relationships.some(
     ({ parse_state, resolution }) =>
@@ -477,6 +482,11 @@ const rootCommitment = (
           path: entry.path,
           target: entry.target,
           target_state: entry.target_state,
+        };
+      case "unknown":
+        return {
+          kind: entry.kind,
+          path: entry.path,
         };
     }
   }),

@@ -55,6 +55,8 @@ const host: GhidraInstallationHost = {
   readText: () => "application.version=12.1.3\napplication.java.min=21\n",
   executable: () => true,
   probeJava: () => ({
+    osArch: "amd64",
+    osName: "Linux",
     version: "21.0.12",
     major: 21,
     home: "/jdk-21",

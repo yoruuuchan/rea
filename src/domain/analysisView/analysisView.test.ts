@@ -961,7 +961,7 @@ it("does not impose a message-count cutoff below the byte budget", () => {
   );
   expect(
     boundedViewMessages(messages, `ev_${"a".repeat(64)}`, "limitations"),
-  ).toEqual(messages);
+  ).toEqual(messages.toSorted());
 });
 
 it("bounds repeated view messages even when fewer than 64 source strings are huge", () => {

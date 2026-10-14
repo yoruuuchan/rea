@@ -1,6 +1,6 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -132,4 +132,67 @@ describe("literal CommonJS paths in application graphs", () => {
       });
     },
   );
+});
+
+describe("literal CommonJS percent bytes in application graphs", () => {
+  it("agrees with Node for requests whose literal names contain %2e or %2F", async () => {
+    const root = await createTestTempDirectory("rea-literal-percent-require-");
+    const files = {
+      "app/lit%2eb.js": "module.exports = 'lit%2eb.js';",
+      "app/x%2Fy.js": "module.exports = 'x%2Fy.js';",
+      "app/sub/%2e%2e/x.js": "module.exports = 'sub/%2e%2e/x.js';",
+      "app/x.js": "module.exports = 'decoy for a decoded parent';",
+      "app/pkg/package.json": JSON.stringify({ main: "lit%2eb" }),
+      "app/pkg/lit%2eb.js": "module.exports = 'pkg/lit%2eb.js';",
+      "app/node_modules/dep/package.json": JSON.stringify({ name: "dep" }),
+      "app/node_modules/dep/lit%2eb.js": "module.exports = 'dep/lit%2eb.js';",
+      "escape.js": "module.exports = 'decoy outside the request directory';",
+    };
+    const specifiers = [
+      "./lit%2eb",
+      "./x%2Fy",
+      "./sub/%2e%2e/x",
+      "./pkg",
+      "dep/lit%2eb",
+    ];
+    // CommonJS reads %2e%2e as a directory name, never as a parent segment.
+    const literalSegment = "./%2e%2e/escape";
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), text);
+    }
+    const main = join(root, "app", "main.cjs");
+    await writeFile(
+      main,
+      [...specifiers, literalSegment]
+        .map((specifier) => `require(${JSON.stringify(specifier)});`)
+        .join("\n"),
+    );
+    const nodeRequire = createRequire(main);
+    const nodePath = (specifier: string) =>
+      relative(root, nodeRequire.resolve(specifier)).split(sep).join("/");
+    expect(() => nodeRequire.resolve(literalSegment)).toThrow(
+      /Cannot find module/u,
+    );
+
+    const { graph } = await analyze(root);
+    const requests = (specifier: string) =>
+      graph.edges.filter(
+        (edge) =>
+          edge.relation === "imports" &&
+          edge.properties.specifier === specifier,
+      );
+    for (const specifier of specifiers) {
+      const edges = requests(specifier);
+      expect(edges.length, specifier).toBeGreaterThan(0);
+      for (const edge of edges)
+        expect(edge.properties.resolved_path, specifier).toBe(
+          nodePath(specifier),
+        );
+    }
+    const unresolved = requests(literalSegment);
+    expect(unresolved.length).toBeGreaterThan(0);
+    for (const edge of unresolved)
+      expect(edge.properties.resolved_path).toBeNull();
+  });
 });

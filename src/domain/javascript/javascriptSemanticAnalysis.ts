@@ -18,6 +18,7 @@ import {
 } from "./javascriptSemanticProjection.js";
 import {
   semanticObjectPatternKeys,
+  runtimeFunctionParameters,
   semanticStaticPropertyKey,
   semanticWriteTargets,
 } from "./javascriptAstValues.js";
@@ -717,7 +718,7 @@ function* collectDefinitionsSteps(
           functionBodies.push({
             body: node,
             scope: nested,
-            parameters: parent.params,
+            parameters: runtimeFunctionParameters(parent),
           });
       }
       const scope = currentSemanticScope(stack);
@@ -1076,7 +1077,7 @@ const scopeKind = (
 };
 
 const functionParametersHaveExpressions = (node: t.Function): boolean => {
-  const pending: t.Node[] = [...node.params];
+  const pending: t.Node[] = [...runtimeFunctionParameters(node)];
   while (pending.length > 0) {
     const parameter = pending.pop();
     if (t.isAssignmentPattern(parameter)) return true;
@@ -1133,7 +1134,7 @@ const bindFunctionLocals = (
   scope: JavaScriptSemanticScopeState,
   state: JavaScriptSemanticAnalysisState,
 ): void => {
-  for (const parameter of node.params)
+  for (const parameter of runtimeFunctionParameters(node))
     bindPattern({
       pattern: t.isTSParameterProperty(parameter)
         ? parameter.parameter

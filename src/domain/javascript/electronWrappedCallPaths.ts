@@ -1,4 +1,5 @@
 import * as t from "@babel/types";
+import { runtimeFunctionParameters } from "./javascriptAstValues.js";
 import { JavaScriptSymbolicBindings } from "./javascriptSymbolicBindings.js";
 import {
   symbolicVariants,
@@ -447,7 +448,9 @@ export const collectElectronWrappedCallPaths = (
       const entry = `${key.value}.${name}`;
       functionBody(
         fn,
-        fn.node.params.map(() => symbolicUnknown("public API argument")),
+        runtimeFunctionParameters(fn.node).map(() =>
+          symbolicUnknown("public API argument"),
+        ),
         {
           ...memberContext,
           entryNode: node,

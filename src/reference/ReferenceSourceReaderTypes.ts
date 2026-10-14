@@ -10,11 +10,17 @@ export type ReferenceSourceEntryKind =
   | "symlink"
   | "other";
 
+/**
+ * Kind offered to exclusion predicates. `unknown` marks an entry whose
+ * metadata could not be read, so its concrete kind cannot be claimed.
+ */
+export type ReferenceSourceExclusionKind = ReferenceSourceEntryKind | "unknown";
+
 export interface ReferenceSourceReaderOptions {
   readonly signal?: AbortSignal;
   readonly shouldExclude?: (
     path: string,
-    kind: ReferenceSourceEntryKind,
+    kind: ReferenceSourceExclusionKind,
   ) => boolean;
 }
 
@@ -84,7 +90,7 @@ export type TraversalState = {
   readonly signal?: AbortSignal;
   readonly shouldExclude?: (
     path: string,
-    kind: ReferenceSourceEntryKind,
+    kind: ReferenceSourceExclusionKind,
   ) => boolean;
   readonly entries: ReferenceSourceEntry[];
   readonly pending: PendingDirectory[];

@@ -279,26 +279,44 @@ it("preserves bounded instruction coverage separately from using-node coverage",
   });
 });
 
-it("rejects malformed method descriptors at the Android adapter boundary", async () => {
-  const invalidSummary = {
-    ...summary,
-    methods: summary.methods.map((method) => ({
-      ...method,
-      dex_descriptor: "not-a-dex-descriptor",
-    })),
-  };
-  await expect(
-    analyzeJadxRequest(
-      {
-        json: () => Promise.resolve(invalidSummary),
-        text: () => Promise.reject(new Error("unexpected text call")),
+it.each([
+  "not-a-dex-descriptor",
+  "(Lbad(name;)V",
+  "(Lbad)name;)V",
+  "()Lbad(name;",
+  "()Lbad)name;",
+])(
+  "rejects malformed DEX prototype %s at the adapter boundary",
+  async (descriptor) => {
+    const invalidSummary = {
+      ...summary,
+      methods: summary.methods.map((method) => ({
+        ...method,
+        dex_descriptor: descriptor,
+      })),
+    };
+    await expect(
+      analyzeJadxRequest(
+        {
+          json: () => Promise.resolve(invalidSummary),
+          text: () => Promise.reject(new Error("unexpected text call")),
+        },
+        {
+          operation: "inspect_android_class",
+          input: { path: "/fixture.apk", class_name: "fixture.Target" },
+        },
+        {} as never,
+        engine,
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AnalysisOutputError",
+      cause: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            path: ["methods", 0, "dex_descriptor"],
+          }),
+        ]),
       },
-      {
-        operation: "inspect_android_class",
-        input: { path: "/fixture.apk", class_name: "fixture.Target" },
-      },
-      {} as never,
-      engine,
-    ),
-  ).rejects.toThrow();
-});
+    });
+  },
+);

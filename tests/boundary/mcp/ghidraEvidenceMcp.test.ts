@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EnhancedTools } from "../../../src/application/EnhancedTools.js";
 import { connectGhidraMcp, sessionEvidence } from "./ghidraMcpHarness.js";
 import { functionDossierSchema } from "../../../src/domain/hopperValues.js";
+import { functionComparisonResultSchema } from "../../../src/domain/functionComparisonSchemas.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
 import {
   jsonValueSchema,
@@ -13,6 +14,107 @@ import {
   isGhidraFunctionOperation,
   type GhidraFunctionOperation,
 } from "../../../src/ghidra/GhidraFunctionValues.js";
+
+it.each([
+  { pseudocodeAvailable: true, reportsCoverage: true },
+  { pseudocodeAvailable: false, reportsCoverage: true },
+  { pseudocodeAvailable: true, reportsCoverage: false },
+  { pseudocodeAvailable: false, reportsCoverage: false },
+])(
+  "compares observed empty Ghidra facets with pseudocode=$pseudocodeAvailable and coverage=$reportsCoverage",
+  async ({ pseudocodeAvailable, reportsCoverage }) => {
+    const coverage = reportsCoverage
+      ? { status: "complete" as const }
+      : undefined;
+    const dossier = functionDossierSchema.parse(ghidraFunctionDossier());
+    Object.assign(dossier, {
+      comments: [],
+      callers: [],
+      callees: [],
+      incoming_references: [],
+      outgoing_references: [],
+      referenced_strings: [],
+      referenced_names: [],
+      pseudocode: pseudocodeAvailable ? dossier.pseudocode : "",
+      facet_availability: {
+        pseudocode: pseudocodeAvailable
+          ? { available: true }
+          : { available: false, reason: "Ghidra did not supply pseudocode." },
+        assembly: { available: true },
+        comments: { available: true },
+        callers: { available: true },
+        callees: { available: true },
+        references: { available: true },
+        strings_names: { available: true },
+        cfg: { available: true },
+      },
+    });
+    const harness = await connectGhidraMcp(
+      "ghidra-empty-dossier-coverage",
+      (operation) => {
+        if (operation !== "analyze_function")
+          throw new Error(`Unexpected operation: ${operation}`);
+        return Promise.resolve(
+          ok({
+            value: jsonValueSchema.parse(dossier),
+            limitations: [],
+            ...(coverage === undefined
+              ? {}
+              : { relationship_coverage: coverage }),
+          }),
+        );
+      },
+    );
+    try {
+      const analyzed = await harness.mcp.callTool({
+        name: "analyze_function",
+        arguments: { procedure: dossier.procedure.address },
+      });
+      expect(analyzed.isError).not.toBe(true);
+      const evidence = sessionEvidence(
+        harness.session,
+        analyzed.structuredContent,
+      );
+      expect(evidence.relationship_coverage).toEqual(coverage ?? null);
+      expect(evidence.normalized_result).toEqual(dossier);
+      const reply = await harness.mcp.callTool({
+        name: "compare_functions",
+        arguments: { left: evidence, right: evidence },
+      });
+      expect(reply.isError).not.toBe(true);
+      const comparison = functionComparisonResultSchema.parse(
+        sessionEvidence(harness.session, reply.structuredContent)
+          .normalized_result,
+      );
+      expect(
+        Object.fromEntries(
+          comparison.dimensions.map(({ dimension, status }) => [
+            dimension,
+            status,
+          ]),
+        ),
+      ).toEqual({
+        identity: "unchanged",
+        pseudocode: pseudocodeAvailable ? "unchanged" : "unknown",
+        assembly: "unchanged",
+        comments: "unchanged",
+        calls: reportsCoverage ? "unchanged" : "unknown",
+        references: "unchanged",
+        strings_names: "unchanged",
+        cfg: "unchanged",
+      });
+      const replay = await harness.session.execute(
+        "analyze_function",
+        evidence.parameters,
+      );
+      if (!replay.ok) throw replay.error;
+      expect(replay.value.relationshipCoverage).toEqual(coverage);
+      expect(harness.calls).toEqual(["analyze_function"]);
+    } finally {
+      await harness.close();
+    }
+  },
+);
 
 it("retains terminal-call qualifications across function views and snapshot replay", async () => {
   const limitation =

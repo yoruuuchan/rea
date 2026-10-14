@@ -106,6 +106,8 @@ describe("Hopper analysis profiles", () => {
         value: {
           profile: {
             parameters: {
+              function_dossier_coverage:
+                "observed-facets-and-call-relationships-v1",
               loader: {
                 source: scenario.source,
                 arguments: scenario.arguments,

@@ -263,6 +263,91 @@ cliTest(
 );
 
 cliTest(
+  "Gemini matches allowlist spellings independently of their policy order",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-gemini-case-");
+    const system = join(home, "system.json");
+    const defaults = join(home, "defaults.json");
+    await writeFile(system, JSON.stringify({ mcp: { allowed: ["REA"] } }));
+    const environment = {
+      HOME: home,
+      USERPROFILE: home,
+      GEMINI_CLI_SYSTEM_SETTINGS_PATH: system,
+      GEMINI_CLI_SYSTEM_DEFAULTS_PATH: defaults,
+    };
+    const run = () =>
+      cli.run({
+        arguments: ["setup", "--client", "gemini_cli", "--yes", "--json"],
+        cwd: home,
+        environment,
+      });
+    // The intersection compares names case-insensitively, so the spelling that
+    // survives must not decide the outcome: the same pair of policies in
+    // either arrangement has to consolidate to the same decision.
+    for (const [systemSpelling, defaultSpelling] of [
+      ["REA", "rea"],
+      ["rea", "REA"],
+    ]) {
+      await writeFile(
+        system,
+        JSON.stringify({ mcp: { allowed: [systemSpelling] } }),
+      );
+      await writeFile(
+        defaults,
+        JSON.stringify({ mcp: { allowed: [defaultSpelling] } }),
+      );
+      const result = await run();
+      expect(result.exitCode, `${systemSpelling}+${defaultSpelling}`).toBe(0);
+      expect(result.json, `${systemSpelling}+${defaultSpelling}`).toMatchObject(
+        {
+          status: "ready",
+        },
+      );
+    }
+  },
+);
+
+cliTest(
+  "Gemini compares exclusions and padded allowlist entries through one normalization",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-gemini-normalized-");
+    const system = join(home, "system.json");
+    const defaults = join(home, "defaults.json");
+    const environment = {
+      HOME: home,
+      USERPROFILE: home,
+      GEMINI_CLI_SYSTEM_SETTINGS_PATH: system,
+      GEMINI_CLI_SYSTEM_DEFAULTS_PATH: defaults,
+    };
+    const run = () =>
+      cli.run({
+        arguments: ["setup", "--client", "gemini_cli", "--yes", "--json"],
+        cwd: home,
+        environment,
+      });
+    await writeFile(defaults, JSON.stringify({ mcp: {} }));
+    // An exclusion is a membership test over the same names the intersection
+    // compares, so a differently spelled and padded entry blocks setup rather
+    // than slipping past the raw comparison.
+    await writeFile(system, JSON.stringify({ mcp: { excluded: [" REA "] } }));
+    const blocked = await run();
+    expect(blocked.exitCode).toBe(1);
+    expect(blocked.json).toMatchObject({
+      status: "needs_human",
+      plannedActions: [],
+      appliedActions: [],
+      remediation: expect.stringContaining("mcp.excluded"),
+    });
+    // Padding is presentation, not identity: a padded allowlist entry permits
+    // the same server its exact spelling permits.
+    await writeFile(system, JSON.stringify({ mcp: { allowed: [" REA "] } }));
+    const allowed = await run();
+    expect(allowed.exitCode).toBe(0);
+    expect(allowed.json).toMatchObject({ status: "ready" });
+  },
+);
+
+cliTest(
   "OpenCode doctor sees a global registration when the custom directory is absent",
   async ({ cli }) => {
     const home = await createTestTempDirectory("rea-opencode-absent-custom-");

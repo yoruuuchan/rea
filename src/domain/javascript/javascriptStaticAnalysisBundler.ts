@@ -1,4 +1,5 @@
 import * as t from "@babel/types";
+import { runtimeFunctionParameters } from "./javascriptAstValues.js";
 import { javascriptBootstrapAt } from "./javascriptBootstrap.js";
 import {
   resolveSemanticBindingState,
@@ -304,7 +305,7 @@ const runtimeMetadata = (node: t.Node | null | undefined): RuntimeMetadata => {
       asyncChunkKeys: [],
       unknownAsyncChunkKeys: 0,
     };
-  const parameter = node.params[0];
+  const parameter = runtimeFunctionParameters(node)[0];
   const requireName = t.isIdentifier(parameter) ? parameter.name : null;
   if (requireName === null)
     return {

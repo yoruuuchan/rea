@@ -167,6 +167,19 @@ describe("Hopper API facade", () => {
       },
       native_api: null,
       native_value_flow: null,
+      facet_availability: {
+        pseudocode: {
+          available: false,
+          reason: "Hopper did not supply pseudocode.",
+        },
+        assembly: { available: true },
+        comments: { available: true },
+        callers: { available: true },
+        callees: { available: true },
+        references: { available: true },
+        strings_names: { available: true },
+        cfg: { available: true },
+      },
     });
     expect(result.provider_faults.map((reply) => reply.error.message)).toEqual([
       "TypeError: Hopper bridge operation failed",

@@ -456,7 +456,8 @@ const commandString = (
       `load command ${index} has an unterminated string`,
     );
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(
+    // lc_str contains name/path data, so a leading U+FEFF is part of its identity.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
       body.subarray(offset, end),
     );
   } catch {

@@ -13,7 +13,7 @@ import { hopperLoaderArgsForTarget } from "../hopper/HopperAnalysisProfile.js";
 import { IdaProvider } from "../ida/IdaProvider.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
-import type { GhidraInstallationHost } from "./GhidraInstallation.js";
+import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import {
   ghidraPinnedLanguage,
   ghidraProfileLanguageOverride,
@@ -49,20 +49,6 @@ const RISCV_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
 </language_definitions>
 `;
 
-// Fake installation inspection tests admission/profile contracts, not Ghidra.
-const host: GhidraInstallationHost = {
-  platform: "linux",
-  architecture: "x64",
-  readText: () => "application.version=12.1.4\napplication.java.min=21\n",
-  executable: () => true,
-  probeJava: () => ({
-    version: "21.0.11",
-    major: 21,
-    home: "/jdk-21",
-    bits: 64,
-    runtime: "jdk",
-  }),
-};
 const configOf = (
   installDir: string,
   environment: Record<string, string> = {},

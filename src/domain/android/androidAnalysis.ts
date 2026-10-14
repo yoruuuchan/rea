@@ -98,7 +98,7 @@ const textCoverage = z.strictObject({
   text: z.string(),
   reported_total_bytes: z.number().int().nonnegative().nullable(),
 });
-/** A DEX prototype: parameter descriptors followed by the return descriptor. */
+/** A DEX prototype; hex parentheses also keep the advertised class valid in v mode. */
 export const dexDescriptorSchema = z
   .string()
   .regex(

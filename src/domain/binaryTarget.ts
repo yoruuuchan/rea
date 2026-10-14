@@ -5,6 +5,7 @@ import type {
   MipsElfMetadata,
   PeCodeViewRecord,
   RiscvElfMetadata,
+  PowerPcElfMetadata,
   UniversalMachOSlice,
 } from "./binaryTargetTypes.js";
 import { err, ok, type Result } from "./result.js";
@@ -29,6 +30,12 @@ export type ExecutableMetadata =
       readonly architecture: "riscv";
       readonly availableArchitectures: readonly "riscv"[];
       readonly riscv: RiscvElfMetadata;
+    }
+  | {
+      readonly format: "elf";
+      readonly architecture: "powerpc";
+      readonly availableArchitectures: readonly "powerpc"[];
+      readonly powerpc: PowerPcElfMetadata;
     }
   | {
       readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
@@ -201,7 +208,11 @@ const parseElf = (
   const machine = little ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18);
   const architecture = elfArchitecture(machine);
   if (architecture === undefined) return err("unsupported ELF architecture");
-  if (architecture === "mips" || architecture === "riscv") {
+  if (
+    architecture === "mips" ||
+    architecture === "riscv" ||
+    architecture === "powerpc"
+  ) {
     const flagsOffset = elfClass === 32 ? 36 : 48;
     const metadata: ElfFamilyMetadata = {
       elfClass,
@@ -211,6 +222,13 @@ const parseElf = (
         ? bytes.readUInt32LE(flagsOffset)
         : bytes.readUInt32BE(flagsOffset),
     };
+    if (architecture === "powerpc")
+      return ok({
+        format: "elf",
+        architecture,
+        availableArchitectures: [architecture],
+        powerpc: metadata,
+      });
     return architecture === "mips"
       ? ok({
           format: "elf",
@@ -532,6 +550,8 @@ const elfArchitecture = (
       return "x86_64";
     case 8: // EM_MIPS: ISA, ABI and byte order remain separate ELF facts.
       return "mips";
+    case 20: // EM_PPC; byte order and processor variant remain ELF declarations.
+      return "powerpc";
     case 40:
       return "arm";
     case 183:

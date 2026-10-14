@@ -15,10 +15,13 @@ import { projectGhidraDoctorInspection } from "./GhidraDoctor.js";
 const INSTALL = "/opt/ghidra_12.1.4_PUBLIC";
 const installationHost = (
   overrides: Partial<GhidraInstallationHost> = {},
+  platform: NodeJS.Platform = "linux",
 ): GhidraInstallationHost => ({
   readText: () => "application.version=12.1.4\napplication.java.min=21\n",
   executable: () => true,
   probeJava: () => ({
+    osArch: "amd64",
+    osName: platform === "win32" ? "Windows 11" : "Linux",
     version: "21.0.11",
     major: 21,
     home: "/usr/lib/jvm/jdk-21",
@@ -45,7 +48,7 @@ const inspection = (
         ? {}
         : { installDir: options.installDir }),
     },
-    installationHost(overrides),
+    installationHost(overrides, options.platform ?? "linux"),
   );
 
 const doctorHost = (
@@ -129,6 +132,8 @@ describe("Ghidra doctor integration", () => {
         { installDir: INSTALL },
         {
           probeJava: () => ({
+            osArch: "amd64",
+            osName: "Linux",
             version: "17.0.12",
             major: 17,
             home: "/usr/lib/jvm/jdk-17",

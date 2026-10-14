@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { TraceMap, eachMapping } from "@jridgewell/trace-mapping";
 import { CdpBrowserProvider } from "../../dist/browser/CdpBrowserProvider.js";
+import { listBrowserTargetsInputSchema } from "../../dist/domain/browserObservation.js";
 import { CdpConnection } from "../../dist/browser/CdpConnection.js";
 import { parseEvidence } from "../../dist/domain/evidence.js";
 import { traceSourceMap } from "../../dist/javascript/sourceMaps/TraceSourceMap.js";
@@ -89,10 +90,12 @@ async function verifyCase(executable, entrypoint, scenario) {
     fixture = await startRuntimeFixtureBrowser(executable, site.origin);
     const endpoint = `http://127.0.0.1:${fixture.port}`;
     const provider = new CdpBrowserProvider();
-    const targets = await provider.listTargets({
-      cdp_endpoint: endpoint,
-      allowed_origins: [site.origin],
-    });
+    const targets = await provider.listTargets(
+      listBrowserTargetsInputSchema.parse({
+        cdp_endpoint: endpoint,
+        allowed_origins: [site.origin],
+      }),
+    );
     if (!targets.ok) throw targets.error;
     const target = targets.value.targets[0];
     assert.ok(target, "Owned fixture target missing");

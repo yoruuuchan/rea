@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { CdpBrowserProvider } from "../../dist/browser/CdpBrowserProvider.js";
+import { listBrowserTargetsInputSchema } from "../../dist/domain/browserObservation.js";
 import { CdpConnection } from "../../dist/browser/CdpConnection.js";
 import { parseEvidence } from "../../dist/domain/evidence.js";
 import { webExecutionSchema } from "../../dist/domain/webExecution.js";
@@ -45,10 +46,12 @@ export async function verifyBrowserRuntime(
   try {
     fixture = await startRuntimeFixtureBrowser(executable, site.origin);
     const endpoint = `http://127.0.0.1:${fixture.port}`;
-    const targets = await new CdpBrowserProvider().listTargets({
-      cdp_endpoint: endpoint,
-      allowed_origins: [site.origin],
-    });
+    const targets = await new CdpBrowserProvider().listTargets(
+      listBrowserTargetsInputSchema.parse({
+        cdp_endpoint: endpoint,
+        allowed_origins: [site.origin],
+      }),
+    );
     if (!targets.ok) throw targets.error;
     const target = targets.value.targets[0];
     assert.ok(target, "owned fixture page target missing");

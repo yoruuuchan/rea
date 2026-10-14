@@ -11,6 +11,7 @@ import { isUrlLikeModuleSpecifier } from "../domain/webBundleAnalyzerAst.js";
 import { analyzeParsedJavaScriptReferences } from "../domain/javascript/javascriptSemanticAnalysis.js";
 import { traverseJavaScriptAst } from "../domain/javascript/javascriptSemanticTraversal.js";
 import { parseJavaScriptSource } from "../domain/javascript/javascriptSourceParser.js";
+import { stringValue } from "../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import type {
   AnalyzeWebBundleInput,
   WebSourceMapItem,
@@ -1049,18 +1050,21 @@ const originalDependency = (
     return node.source === null || node.source === undefined
       ? null
       : { kind: "static_import", specifier: node.source.value };
-  if (t.isImportExpression(node) && t.isStringLiteral(node.source))
-    return { kind: "dynamic_import", specifier: node.source.value };
+  if (t.isImportExpression(node)) {
+    const specifier = stringValue(node.source);
+    return specifier === undefined
+      ? null
+      : { kind: "dynamic_import", specifier };
+  }
   if (
     (t.isCallExpression(node) || t.isOptionalCallExpression(node)) &&
-    t.isIdentifier(node.callee, { name: "require" }) &&
-    t.isStringLiteral(node.arguments[0])
-  )
-    return {
-      kind: "require",
-      specifier: node.arguments[0].value,
-      requireCallee: node.callee,
-    };
+    t.isIdentifier(node.callee, { name: "require" })
+  ) {
+    const specifier = stringValue(node.arguments[0]);
+    return specifier === undefined
+      ? null
+      : { kind: "require", specifier, requireCallee: node.callee };
+  }
   // `import x = require("m")` is only legal at module top level and always
   // refers to the host loader, so it needs no unbound-`require` check. The
   // `moduleReference` is an entity name for a local alias instead, which

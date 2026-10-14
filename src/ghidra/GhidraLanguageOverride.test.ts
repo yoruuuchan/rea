@@ -11,7 +11,7 @@ import {
   ghidraProfileLanguageOverride,
   sameGhidraLanguageOverride,
 } from "./GhidraAnalysisProfile.js";
-import type { GhidraInstallationHost } from "./GhidraInstallation.js";
+import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import {
   admitGhidraLanguageOverride,
   parseGhidraLanguageDefinitions,
@@ -38,21 +38,6 @@ const X86_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
   </language>
 </language_definitions>
 `;
-
-// Fake installation inspection; the language catalog is a real directory.
-const host: GhidraInstallationHost = {
-  platform: "linux",
-  architecture: "x64",
-  readText: () => "application.version=12.1.4\napplication.java.min=21\n",
-  executable: () => true,
-  probeJava: () => ({
-    version: "21.0.11",
-    major: 21,
-    home: "/jdk-21",
-    bits: 64,
-    runtime: "jdk",
-  }),
-};
 
 const pe: BinaryTarget = {
   path: "/fixture.exe",

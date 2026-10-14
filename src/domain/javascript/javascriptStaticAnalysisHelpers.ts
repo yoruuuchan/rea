@@ -13,6 +13,7 @@ import type {
 } from "./javascriptStaticAnalysisTypes.js";
 import {
   readExactJavaScriptLiteral,
+  runtimeFunctionParameters,
   semanticStaticPropertyKey,
   semanticStaticPropertyName,
   unwrapJavaScriptExpression,
@@ -147,7 +148,7 @@ export const modulePropertyName = (
 export const factoryRequireName = (
   factory: t.FunctionExpression | t.ArrowFunctionExpression | t.ObjectMethod,
 ): string | null => {
-  const parameter = factory.params[2];
+  const parameter = runtimeFunctionParameters(factory)[2];
   return t.isIdentifier(parameter) ? parameter.name : null;
 };
 
@@ -553,7 +554,13 @@ export const endpointArgument = (
   receiverFact?: JavaScriptOpenReceiverFact,
 ): string | undefined => {
   if (receiverFact === "window") return undefined;
-  if (name === "fetch" || name.endsWith(".fetch") || name === "WebSocket")
+  if (
+    name === "fetch" ||
+    name.endsWith(".fetch") ||
+    name === "WebSocket" ||
+    name === "EventSource" ||
+    name.endsWith(".EventSource")
+  )
     return stringValue(args[0]);
   if (name.endsWith(".open"))
     return xhrOpenUrl(name, args[0], args[1], receiverFact);
@@ -573,6 +580,9 @@ export const endpointArgument = (
       ? undefined
       : value;
   }
+  // navigator.sendBeacon(url, data) queues a POST to its first argument.
+  if (name === "sendBeacon" || name.endsWith(".sendBeacon"))
+    return stringValue(args[0]);
   if (name.endsWith("loadURL")) return stringValue(args[0]);
   return undefined;
 };

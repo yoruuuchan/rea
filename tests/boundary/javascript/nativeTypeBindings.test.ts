@@ -1,27 +1,16 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { afterEach, expect, it } from "vitest";
+import { expect, it } from "vitest";
 
-import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
-import type { JavaScriptApplicationAnalysisResult } from "../../domain/javascript/javascriptApplicationAnalysis.js";
-import { buildJavaScriptNativeHandoffs } from "../../domain/javascript/javascriptNativeHandoff.js";
-import { analyzeJavaScriptApplication } from "./JavaScriptApplicationService.js";
-
-const fixtures: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    fixtures
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
-  );
-});
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
+import type { JavaScriptApplicationAnalysisResult } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
+import { buildJavaScriptNativeHandoffs } from "../../../src/domain/javascript/javascriptNativeHandoff.js";
+import { analyzeJavaScriptApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const analyzeFixture = async (source: string) => {
-  const fixture = await mkdtemp(join(tmpdir(), "rea-native-types-"));
-  fixtures.push(fixture);
+  const fixture = await createTestTempDirectory("rea-native-types-");
   const scope = new ArtifactResourceScope();
   try {
     await writeFile(join(fixture, "main.ts"), `${source}\n`);

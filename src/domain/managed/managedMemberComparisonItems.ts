@@ -5,6 +5,7 @@ import type { ManagedMemberComparisonResult } from "./managedMemberComparison.js
 import {
   type ManagedFieldMatches,
   type ManagedMethodMatches,
+  identityOf,
   sha256,
 } from "./managedMemberComparisonMatch.js";
 
@@ -211,33 +212,36 @@ const absenceLimitations = (
         `signature-not-decoded: The member's ${member.signature.parse_status} signature was compared only by exact declared type, name, and raw bytes, so a changed or renamed counterpart could not be sought.`,
       ]),
   ...(member.signature.parse_status === "decoded" &&
-  opposite.oppositeUndecodedNames.has(declaredName(member))
+  opposite.oppositeUndecodedNames.size > 0 &&
+  opposite.oppositeUndecodedNames.has(identityOf(member))
     ? [
         `counterpart-signature-not-decoded: The ${opposite.opposite} ${opposite.inventory} inventory has an unpaired member with the same declared type and name whose signature was not decoded, so it may be this member with a changed signature.`,
       ]
     : []),
 ];
 
-const declaredName = (member: Method | Field): string =>
-  JSON.stringify([member.declaring_type, member.name]);
-
 /**
  * Declared names of unpaired members whose signature was not decoded: one-sided
  * members and candidates of ambiguous groups, which also remain unpaired.
  */
+interface Unpaired {
+  readonly item: Method | Field;
+  readonly identity: string;
+}
+
 const undecodedOneSidedNames = (members: {
-  readonly leftOnly: readonly { readonly item: Method | Field }[];
-  readonly rightOnly: readonly { readonly item: Method | Field }[];
+  readonly leftOnly: readonly Unpaired[];
+  readonly rightOnly: readonly Unpaired[];
   readonly ambiguous: readonly {
-    readonly left: readonly { readonly item: Method | Field }[];
-    readonly right: readonly { readonly item: Method | Field }[];
+    readonly left: readonly Unpaired[];
+    readonly right: readonly Unpaired[];
   }[];
 }): UndecodedOneSidedNames => {
-  const names = (side: readonly { readonly item: Method | Field }[]) =>
+  const names = (side: readonly Unpaired[]) =>
     new Set(
       side
         .filter(({ item }) => item.signature.parse_status !== "decoded")
-        .map(({ item }) => declaredName(item)),
+        .map(({ identity }) => identity),
     );
   return {
     left: names([
@@ -300,18 +304,20 @@ const fieldOnlyItem = (
 };
 
 /**
- * Name the identity key an ambiguous group shares. The exact-signature key
- * already includes the declared type and name, so names cannot separate it.
+ * Name only evidence shared by the whole group. Exact-signature ambiguities
+ * include both declared-identity collisions and unresolved raw-signature choices.
  */
 const ambiguityLimitation = (
   members: "methods" | "fields",
   basis: MethodItem["match"]["basis"],
 ): string =>
   basis === "exact-signature"
-    ? `Multiple managed ${members} share the same declared type, name, and raw signature; REA did not guess a token remap.`
-    : members === "methods"
-      ? "Multiple managed methods share the same non-name identity key; REA did not guess a token remap."
-      : "Multiple managed fields share the same signature; REA did not guess a token remap from names.";
+    ? `Multiple managed ${members} share the same raw signature; REA did not guess declared ownership or a token remap.`
+    : basis === "exact-il-signature"
+      ? "Multiple managed methods share the same CIL and signature; REA did not guess a token remap."
+      : members === "methods"
+        ? "Multiple managed methods share the same structural shape; REA did not guess a token remap."
+        : "Multiple managed fields share the same signature; REA did not guess a token remap.";
 
 export const buildMethodItems = (
   matches: ManagedMethodMatches,

@@ -662,6 +662,28 @@ describe("web metadata key semantics", () => {
   });
 });
 
+it("reads expression-free template dynamic imports as chunk edges", () => {
+  const result = analyzeCapturedWebBundle(
+    inspection(`
+        import(\`./lazy.js\`);
+        import("./quoted.js");
+        import(\`./\${name}.js\`);
+      `),
+  );
+
+  expect(result.observations.chunks.edges).toEqual([
+    expect.objectContaining({
+      kind: "dynamic_import",
+      specifier: "./lazy.js",
+      resolved_url: `${origin}/assets/lazy.js`,
+    }),
+    expect.objectContaining({
+      kind: "dynamic_import",
+      specifier: "./quoted.js",
+    }),
+  ]);
+});
+
 it("does not infer call names from dynamic computed identifiers", () => {
   const result = analyzeCapturedWebBundle(
     inspection(`

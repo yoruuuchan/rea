@@ -390,6 +390,9 @@ cliTest(
         ]),
       ),
       "dynamic-base.mjs": 'new Worker(new URL("./worker.js", base));',
+      "empty-worker-url.mjs": 'new Worker("");',
+      "query-only-worker-url.mjs": 'new Worker("?cache=1");',
+      "fragment-only-worker-url.mjs": 'new Worker("#worker");',
       "shadowed.mjs":
         'function start(URL) { return new Worker(new URL("./worker.js", import.meta.url)); }',
       "typed-shadowed.ts":
@@ -428,6 +431,9 @@ cliTest(
       "directory-dot.mjs": "./worker.js/.",
       "directory-parent.mjs": "./worker.js/child/..",
       "empty-segment.mjs": "./child//../worker.js",
+      "empty-worker-url.mjs": "",
+      "query-only-worker-url.mjs": "?cache=1",
+      "fragment-only-worker-url.mjs": "#worker",
       "package.mjs": "./package-worker",
       "external.mjs": "https://example.test/worker.js",
     };

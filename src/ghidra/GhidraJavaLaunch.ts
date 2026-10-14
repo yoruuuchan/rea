@@ -2,11 +2,43 @@ import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { dirname, join } from "node:path";
 import { execFileOutput } from "../process/ExecFileOutput.js";
 
+/** JVM option environments remove quotes, including quotes inside an option. */
+const jvmEnvironmentArguments = (value: string): readonly string[] => {
+  const arguments_: string[] = [];
+  let argument = "";
+  let quote: "'" | '"' | undefined;
+  for (const character of value) {
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      else argument += character;
+    } else if (character === "'" || character === '"') quote = character;
+    else if (/\s/u.test(character)) {
+      if (argument !== "") arguments_.push(argument);
+      argument = "";
+    } else argument += character;
+  }
+  if (quote !== undefined)
+    throw new Error(
+      "Invalid quoted Ghidra LaunchSupport JVM environment option",
+    );
+  if (argument !== "") arguments_.push(argument);
+  return arguments_;
+};
+
+const rejectJvmPlatformOverrides = (arguments_: readonly string[]): void => {
+  if (
+    arguments_.some((argument) => /^-Dos\.(?:arch|name)(?:=|$)/u.test(argument))
+  )
+    throw new Error(
+      "Ghidra LaunchSupport may not override os.arch or os.name; the native decompiler was validated for the inspected JVM platform.",
+    );
+};
+
 /** Launch coordinates obtained from Ghidra's own release configuration helper. */
 export const ghidraJavaLaunch = async (options: {
   readonly platform: NodeJS.Platform;
   readonly analyzeHeadlessPath: string;
-  readonly javaHome: string;
+  readonly javaHome?: string;
   readonly javaVmName?: string;
   readonly homeRoot: string;
   readonly tempRoot: string;
@@ -21,7 +53,17 @@ export const ghidraJavaLaunch = async (options: {
 }> => {
   const supportRoot = dirname(options.analyzeHeadlessPath);
   const installRoot = dirname(supportRoot);
-  const command = join(options.javaHome, "bin", "java");
+  const selectedJavaHome = options.javaHome ?? options.environment.JAVA_HOME;
+  const command =
+    selectedJavaHome === undefined
+      ? options.platform === "win32"
+        ? "java.exe"
+        : "java"
+      : join(
+          selectedJavaHome,
+          "bin",
+          options.platform === "win32" ? "java.exe" : "java",
+        );
   const isolatedProperties = [
     `-Duser.home=${options.homeRoot}`,
     `-Djava.io.tmpdir=${options.tempRoot}`,
@@ -48,6 +90,9 @@ export const ghidraJavaLaunch = async (options: {
     [...supportArguments, "-envvars"],
     {
       env: environment,
+      // Wait for the helper's exit on abort so a cancelled or timed-out
+      // startup never leaves the probe running without an owning process.
+      stopSignal: "SIGTERM",
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
   );
@@ -65,11 +110,25 @@ export const ghidraJavaLaunch = async (options: {
     if ((environment[key] ?? "") === "")
       environment[key] = line.slice(separator + 1);
   }
+  // The merged environment becomes the analysis JVM's environment, and the
+  // JVM applies these options variables automatically. An injected
+  // -Dos.arch/-Dos.name there selects an unvalidated native directory without
+  // appearing in vmArguments, so reject the effective values as well.
+  for (const key of [
+    "JAVA_TOOL_OPTIONS",
+    "_JAVA_OPTIONS",
+    "JDK_JAVA_OPTIONS",
+  ] as const) {
+    rejectJvmPlatformOverrides(jvmEnvironmentArguments(environment[key] ?? ""));
+  }
   const configuredArguments = await execFileOutput(
     command,
     [...supportArguments, "-vmargs"],
     {
       env: environment,
+      // Wait for the helper's exit on abort so a cancelled or timed-out
+      // startup never leaves the probe running without an owning process.
+      stopSignal: "SIGTERM",
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
   );
@@ -83,6 +142,7 @@ export const ghidraJavaLaunch = async (options: {
     )
   )
     throw new Error("Invalid Ghidra LaunchSupport JVM argument");
+  rejectJvmPlatformOverrides(vmArguments);
   return {
     command,
     environment,

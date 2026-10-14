@@ -34,6 +34,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { EvidenceLocation } from "../domain/evidence.js";
+import type { RelationshipCoverage } from "../domain/relationshipCoverage.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -86,7 +87,6 @@ import {
   healthLimitations,
   windowsP0Limitations,
   limitationsFor,
-  relationshipCoverageFor,
 } from "./GhidraProviderCapabilities.js";
 import type { GhidraSessionError } from "./GhidraSessionError.js";
 import {
@@ -733,8 +733,8 @@ export const createGhidraProviderClient = (input: {
     rawResult: JsonValue,
     observationLimitations: readonly string[] = [],
     locations: readonly EvidenceLocation[] = [],
+    relationshipCoverage?: RelationshipCoverage,
   ) => {
-    const relationshipCoverage = relationshipCoverageFor(operation);
     return createAnalysisExecution(normalized, committedProfile.provider, {
       rawResult,
       locations,
@@ -838,12 +838,14 @@ export const createGhidraProviderClient = (input: {
       let normalized: JsonValue;
       let observationLimitations: readonly string[] = [];
       let observationLocations: readonly EvidenceLocation[] = [];
+      let relationshipCoverage: RelationshipCoverage | undefined;
       if (isGhidraFunctionOperation(operation)) {
         const result = parseGhidraFunctionResult(operation, called.value);
         if (!result.ok) return result;
         normalized = result.value.value;
         observationLimitations = result.value.limitations;
         observationLocations = result.value.locations ?? [];
+        relationshipCoverage = result.value.relationshipCoverage;
       } else {
         const result = parseGhidraInventoryResult(operation, called.value);
         if (!result.ok) return result;
@@ -939,6 +941,7 @@ export const createGhidraProviderClient = (input: {
           called.value,
           observationLimitations,
           observationLocations,
+          relationshipCoverage,
         ),
       );
     },

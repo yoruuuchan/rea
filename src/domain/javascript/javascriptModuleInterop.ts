@@ -26,6 +26,7 @@ import {
 import { SemanticPropertyPathCoverage } from "./javascriptSemanticPropertyPaths.js";
 import {
   readExactJavaScriptLiteral,
+  runtimeFunctionParameters,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 
@@ -662,10 +663,10 @@ const identityFunction = (
     !t.isFunction(node) ||
     node.async ||
     node.generator ||
-    node.params.length !== 1
+    runtimeFunctionParameters(node).length !== 1
   )
     return false;
-  const parameter = node.params[0];
+  const parameter = runtimeFunctionParameters(node)[0];
   const result = t.isBlockStatement(node.body)
     ? node.body.body.length === 1 && t.isReturnStatement(node.body.body[0])
       ? node.body.body[0].argument

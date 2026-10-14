@@ -106,6 +106,8 @@ export const ghidraInstallationHost = (): GhidraInstallationHost => ({
   readText: () => "application.version=12.1.4\napplication.java.min=21\n",
   executable: () => true,
   probeJava: () => ({
+    osArch: "amd64",
+    osName: "Linux",
     version: "21.0.11",
     major: 21,
     home: "/usr/lib/jvm/jdk-21",
@@ -246,10 +248,7 @@ const resultBuilders = new Map<GhidraOperation, GhidraResultBuilder>([
     }),
   ],
   ["xrefs", () => ["0x401001"]],
-  [
-    "analyze_function",
-    (input) => ghidraFunctionDossier(input.include_assembly === true),
-  ],
+  ["analyze_function", () => ghidraFunctionDossier()],
 ]);
 
 const resultFor = (

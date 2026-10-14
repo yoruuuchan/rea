@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeWorkflowRun } from "./workflow-run.mjs";
 
 const ARTIFACT_NAME = "test-timings";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -68,8 +69,8 @@ function findTimingRun({ repository, branch, repositoryId, now = Date.now() }) {
     .slice(0, MAX_CANDIDATES);
 
   for (const artifact of candidates) {
-    const run = api(
-      `repos/${repository}/actions/runs/${artifact.workflow_run.id}`,
+    const run = normalizeWorkflowRun(
+      api(`repos/${repository}/actions/runs/${artifact.workflow_run.id}`),
     );
     const runAge = now - Date.parse(run?.created_at);
     if (
@@ -80,7 +81,7 @@ function findTimingRun({ repository, branch, repositoryId, now = Date.now() }) {
       run.id === artifact.workflow_run.id &&
       run.status === "completed" &&
       run.conclusion === "success" &&
-      run.path === ".github/workflows/ci.yml" &&
+      run.workflowPath?.file === ".github/workflows/ci.yml" &&
       ["schedule", "workflow_dispatch"].includes(run.event) &&
       run.head_branch === branch &&
       run.head_repository?.full_name === repository

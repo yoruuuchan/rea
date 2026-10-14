@@ -327,14 +327,57 @@ export const analyzeFixtureProcedure = async (
   options,
   procedure,
   normalizedResult,
-) =>
-  normalizedResult(
+) => {
+  const reply = await client.callTool(
+    {
+      name: "analyze_function",
+      arguments: { procedure: procedure.address },
+    },
+    options,
+  );
+  const dossier = normalizedResult(reply, "analyze_function");
+  assert.deepEqual(reply.structuredContent.relationship_coverage, {
+    status: "complete",
+  });
+  for (const facet of [
+    "pseudocode",
+    "assembly",
+    "comments",
+    "callers",
+    "callees",
+    "references",
+    "strings_names",
+    "cfg",
+  ])
+    assert.deepEqual(dossier.facet_availability[facet], { available: true });
+  const comparison = normalizedResult(
     await client.callTool(
       {
-        name: "analyze_function",
-        arguments: { procedure: procedure.address },
+        name: "compare_functions",
+        arguments: {
+          left: reply.structuredContent,
+          right: reply.structuredContent,
+        },
       },
       options,
     ),
-    "analyze_function",
+    "compare_functions",
   );
+  assert.deepEqual(
+    Object.fromEntries(
+      comparison.dimensions.map(({ dimension, status }) => [dimension, status]),
+    ),
+    {
+      identity: "unchanged",
+      pseudocode: "unchanged",
+      assembly: "unchanged",
+      comments: "unchanged",
+      calls: "unchanged",
+      references: "unknown",
+      strings_names: "unchanged",
+      cfg: "unchanged",
+    },
+    JSON.stringify(comparison.dimensions),
+  );
+  return dossier;
+};

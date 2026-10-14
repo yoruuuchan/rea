@@ -213,7 +213,7 @@ const verifyCurrentTarget = async (client, options) => {
   );
   return {
     procedure: dossier.procedure,
-    procedureCount: procedures.total,
+    procedureCount: procedures.length,
     boundedPseudocodeChars: boundedPseudocode.length,
     analyzedPseudocodeChars: [...dossier.pseudocode].length,
     callerCount: relationships.procedure_callers.length,

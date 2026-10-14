@@ -41,9 +41,20 @@ const files = report.files.map(({ name, durationMs, state }) => {
     throw new Error(`Test report path is outside the checkout: ${name}`);
   return { name: path.split(sep).join("/"), durationMs, state };
 });
-const complete = process.env.SHARD_RESULT === "success";
+// Keep group outcomes intact: an unavailable group is not a completed failure.
+const groupResults = [
+  process.env.SHARD_RESULT,
+  ...(process.env.SOURCE_REQUIRED === "true"
+    ? [process.env.SOURCE_RESULT]
+    : []),
+];
+const groupsCompleted = groupResults.every((state) =>
+  ["success", "failure"].includes(state),
+);
 const passed =
-  complete && process.env.MERGE_RESULT === "success" && report.success;
+  groupResults.every((state) => state === "success") &&
+  process.env.MERGE_RESULT === "success" &&
+  report.success;
 // Successful shards and merged reports must account for the complete portable
 // inventory. Coverage thresholds alone cannot prove that every file ran.
 const verifyInventory = process.env.CI_VERIFY_TEST_INVENTORY === "true";
@@ -69,7 +80,7 @@ if (process.env.CI_TEST_SELECTION) {
       comparison.complete &&
       report.unhandledErrors === 0 &&
       ["passed", "failed"].includes(report.reason) &&
-      ["success", "failure"].includes(process.env.SHARD_RESULT) &&
+      groupsCompleted &&
       ["success", "failure"].includes(process.env.MERGE_RESULT),
     executionSha: process.env.GITHUB_SHA ?? null,
     prHeadSha: process.env.CI_PR_HEAD_SHA ?? null,
@@ -91,7 +102,9 @@ if (passed && verifyInventory) {
     );
 }
 const summary = [
-  complete ? "## Merged test diagnostics" : "## Partial test diagnostics",
+  groupsCompleted
+    ? "## Merged test diagnostics"
+    : "## Partial test diagnostics",
   "",
   ...(selection
     ? [
@@ -99,11 +112,14 @@ const summary = [
         "",
         `Plan: ${selection.plan.mode}. Proposed files: ${selection.selected.length}; omitted: ${selection.omitted.length}.`,
         `Full-run comparison: ${selection.complete ? "complete" : "incomplete"}; failures outside proposed selection: ${selection.missedFailures.length}.`,
-        "The complete suite still ran. This report cannot enable omissions or qualify a revision. Skipped, missing, and interrupted observations do not establish parity.",
+        "This observational report cannot enable omissions or qualify a revision. Skipped, missing, and interrupted observations do not establish parity.",
         "",
       ]
     : []),
   `Shard result: ${process.env.SHARD_RESULT ?? "unknown"}; merge result: ${process.env.MERGE_RESULT ?? "unknown"}.`,
+  ...(process.env.SOURCE_REQUIRED === "true"
+    ? [`Source result: ${process.env.SOURCE_RESULT ?? "unknown"}.`]
+    : []),
   passed
     ? "Successful timing history is available."
     : "This report is diagnostic only and is not a successful timing baseline.",

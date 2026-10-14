@@ -25,7 +25,7 @@ import {
 import type {
   PendingDirectory,
   ReferenceSourceEntry,
-  ReferenceSourceEntryKind,
+  ReferenceSourceExclusionKind,
   ReferenceSourceResult,
   TraversalState,
 } from "./ReferenceSourceReaderTypes.js";
@@ -201,6 +201,13 @@ const processEntry = async (
   const metadata = await readMetadata(absolute);
   if (isAborted(state.signal)) return { ok: false, error: cancelled() };
   if (!metadata.ok) {
+    const excluded = applyExclusion(state.shouldExclude, path, "unknown");
+    if (!excluded.ok)
+      return {
+        ok: false,
+        error: failure("io", "Reference source exclusion check failed"),
+      };
+    if (excluded.value) return { ok: true, value: undefined };
     state.entries.push(entryFailure(path, "unknown", "io", metadata.message));
     return { ok: true, value: undefined };
   }
@@ -371,10 +378,10 @@ const readSymlinkTarget = async (
 
 const applyExclusion = (
   shouldExclude:
-    | ((path: string, kind: ReferenceSourceEntryKind) => boolean)
+    | ((path: string, kind: ReferenceSourceExclusionKind) => boolean)
     | undefined,
   path: string,
-  kind: ReferenceSourceEntryKind,
+  kind: ReferenceSourceExclusionKind,
 ): { readonly ok: true; readonly value: boolean } | { readonly ok: false } => {
   try {
     return { ok: true, value: shouldExclude?.(path, kind) === true };

@@ -12,7 +12,7 @@ import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.j
 import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js";
 import { readReferenceSource } from "../reference/ReferenceSourceReader.js";
 import type {
-  ReferenceSourceEntryKind,
+  ReferenceSourceExclusionKind,
   ReferenceSourceRead,
   ReferenceSourceReaderError,
 } from "../reference/ReferenceSourceReaderTypes.js";
@@ -111,7 +111,8 @@ const deriveInventoryState = (
       entry.limitations.length > 0 ||
       (entry.kind === "file" && entry.content_state !== "hashed") ||
       (entry.kind === "directory" && entry.tree_state !== "enumerated") ||
-      (entry.kind === "symlink" && entry.target_state !== "internal"),
+      (entry.kind === "symlink" && entry.target_state !== "internal") ||
+      entry.kind === "unknown",
   );
   if (partialEntry) return "partial";
   const partialRelationship = input.relationships.some(
@@ -142,11 +143,24 @@ const createShouldExclude =
     exclusions: HistoricalSourceGraphInput["exclusions"],
     secrets: PreparedReferenceSourceImport["secrets"],
     ignored: PreparedReferenceSourceImport["ignored"],
-  ): ((path: string, kind: ReferenceSourceEntryKind) => boolean) =>
+  ): ((path: string, kind: ReferenceSourceExclusionKind) => boolean) =>
   (path, kind) => {
-    const patternPath = kind === "directory" ? `${path}/` : path;
-    const secretMatch = secrets.test(patternPath);
-    if (secretMatch.ignored) {
+    // An entry of unknown kind may be a directory, so directory-only rules
+    // must still exclude it; this fails closed for caller-marked secrets.
+    const patternPaths =
+      kind === "directory"
+        ? [`${path}/`]
+        : kind === "unknown"
+          ? [path, `${path}/`]
+          : [path];
+    const firstMatch = (matcher: typeof secrets) => {
+      const results = patternPaths.map((patternPath) =>
+        matcher.test(patternPath),
+      );
+      return results.find(({ ignored }) => ignored) ?? results[0];
+    };
+    const secretMatch = firstMatch(secrets);
+    if (secretMatch?.ignored === true) {
       if (!secretMatch.rule)
         throw new Error(`Ignored secret path has no matching rule: ${path}`);
       exclusions.push({
@@ -156,8 +170,8 @@ const createShouldExclude =
       });
       return true;
     }
-    const match = ignored.test(patternPath);
-    if (!match.ignored) return false;
+    const match = firstMatch(ignored);
+    if (match?.ignored !== true) return false;
     if (!match.rule)
       throw new Error(`Ignored path has no matching rule: ${path}`);
     const reason = match.rule.mark;

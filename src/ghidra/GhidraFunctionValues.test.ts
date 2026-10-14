@@ -43,7 +43,120 @@ const parseFunctionValueFixture = (
   return parsed.ok ? { ok: true as const, value: parsed.value.value } : parsed;
 };
 
+describe("Ghidra unresolved call locations", () => {
+  it("rejects a noncanonical unresolved call site rather than retaining unverifiable location evidence", () => {
+    expect(
+      parseGhidraFunctionResult("analyze_function", {
+        value: {
+          ...functionDossierSchema.parse(ghidraFunctionDossier()),
+          unresolved_calls: [
+            { address: "not-an-address", reason: "No call destination." },
+          ],
+        },
+        limitations: [],
+        relationship_coverage: {
+          status: "partial",
+          limitations: ["An unresolved call remains."],
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
+  });
+});
+
 describe("Ghidra function-analysis result values", () => {
+  it("retains unavailable pseudocode instead of treating its empty representation as observed source", () => {
+    const availability = {
+      pseudocode: {
+        available: false,
+        reason: "Ghidra does not decompile external functions.",
+      },
+      comments: { available: true },
+    };
+    const parsed = parseGhidraFunctionResult("analyze_function", {
+      value: {
+        ...functionDossierSchema.parse(ghidraFunctionDossier()),
+        pseudocode: "",
+        facet_availability: availability,
+      },
+      limitations: [],
+    });
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { value: { pseudocode: "", facet_availability: availability } },
+    });
+  });
+  it.each([
+    { status: "complete", diagnostics: ["Resolved static references only."] },
+    {
+      status: "partial",
+      limitations: ["Only the first instruction range was examined."],
+    },
+    { status: "unknown", reason: "Relationship inventory was unavailable." },
+    {
+      status: "partial",
+      limitations: ["Missing callers."],
+      limited_directions: ["callers"],
+    },
+    {
+      status: "unknown",
+      reason: "Missing callees.",
+      limited_directions: ["callees"],
+    },
+  ])("preserves observed $status relationship coverage", (coverage) => {
+    const parsed = parseGhidraFunctionResult("analyze_function", {
+      value: ghidraFunctionDossier(),
+      limitations: [],
+      relationship_coverage: coverage,
+    });
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { relationshipCoverage: coverage },
+    });
+  });
+
+  it("preserves omitted relationship coverage for legacy observations", () => {
+    const parsed = parseGhidraFunctionResult("analyze_function", {
+      value: ghidraFunctionDossier(),
+      limitations: [],
+    });
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value).not.toHaveProperty("relationshipCoverage");
+  });
+});
+
+describe("Ghidra relationship metadata validation", () => {
+  it.each([
+    { status: "partial", limitations: [] },
+    { status: "unknown", reason: "" },
+    { status: "complete", limitations: ["Truncated."] },
+    { status: "partial", limitations: ["Truncated."], limited_directions: [] },
+    {
+      status: "partial",
+      limitations: ["Truncated."],
+      limited_directions: ["callers", "callers"],
+    },
+    { status: "unknown", reason: "Missing.", limited_directions: ["incoming"] },
+    { status: "complete", limited_directions: ["callers"] },
+  ])("rejects malformed relationship coverage %j", (coverage) => {
+    expect(
+      parseGhidraFunctionResult("analyze_function", {
+        value: ghidraFunctionDossier(),
+        limitations: [],
+        relationship_coverage: coverage,
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
+  });
+
+  it("rejects relationship metadata on unrelated function operations", () => {
+    expect(
+      parseGhidraFunctionResult("procedure_assembly", {
+        value: "ret",
+        limitations: [],
+        relationship_coverage: { status: "complete" },
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
+  });
+
   it("preserves file-offset resolution in Evidence locations and rejects inexact offsets", () => {
     const selection = {
       file_offset: 0x210,

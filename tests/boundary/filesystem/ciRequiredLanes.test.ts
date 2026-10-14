@@ -121,7 +121,11 @@ it("exports every canonical scope with read authority for admission and keeps te
     );
   expect(timings.on.workflow_run).toBeUndefined();
   expect(timings.on.schedule).toHaveLength(1);
-  expect(timings.permissions).toEqual({ contents: "read", actions: "read" });
+  expect(timings.permissions).toEqual({
+    contents: "read",
+    actions: "read",
+    "pull-requests": "read",
+  });
   const checkout = timings.jobs.report.steps.find((step) =>
     step.uses?.startsWith("actions/checkout@"),
   );
@@ -154,6 +158,7 @@ it("holds native and provider fan-out behind static validation while portable fe
     "static",
     "build",
     "test-shard",
+    "test-source",
     "test",
     "docs",
     "required",
@@ -369,7 +374,7 @@ it("keeps fast feedback separate from complete qualification and release proof",
   // release their concurrency slot without waiting for another runner.
   expect(ci.jobs.required?.if).toBe("${{ !cancelled() }}");
   const shards = ci.jobs["test-shard"]?.steps ?? [];
-  const fast = shards.find((step) => step.run?.includes("npm run test:run"));
+  const fast = shards.find((step) => step.run?.includes("npm run test:built"));
   const full = shards.find((step) => step.run?.includes("test:ci:shard:run"));
   expect(fast?.if).toBe("needs.changes.outputs.tier == 'fast'");
   expect(fast?.run).toContain("--reporter=blob");

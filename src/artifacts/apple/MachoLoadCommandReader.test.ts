@@ -229,6 +229,27 @@ it("selects matching arm64e subtype slices when tracing a mixed FAT image", asyn
 });
 
 describe("Mach-O load command reader: decodes thin-image load commands", () => {
+  it("preserves leading U+FEFF in load-command strings", async () => {
+    const image = machoImage({
+      commands: [
+        dylibCommand(LC.ID_DYLIB, "\uFEFF@rpath/libself.dylib"),
+        dylibCommand(LC.LOAD_DYLIB, "\uFEFF@rpath/libother.dylib"),
+        rpathCommand("\uFEFF@loader_path/Frameworks"),
+        dyldEnvironmentCommand("\uFEFFDYLD_LIBRARY_PATH=/example"),
+      ],
+    });
+    expect(await read(image)).toMatchObject({
+      status: "parsed",
+      slices: [
+        {
+          install_name: "\uFEFF@rpath/libself.dylib",
+          dependencies: [{ install_name: "\uFEFF@rpath/libother.dylib" }],
+          rpaths: ["\uFEFF@loader_path/Frameworks"],
+          dyld_environment: ["\uFEFFDYLD_LIBRARY_PATH=/example"],
+        },
+      ],
+    });
+  });
   it("decodes dylib loading commands of a thin image", async () => {
     const image = machoImage({
       fileType: FILE_TYPE.dylib,

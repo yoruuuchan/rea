@@ -47,7 +47,7 @@ describe("managed member comparison", () => {
       }),
     ]);
     expect(result.limitations).toContain(
-      "Methods pair by exact CIL/signature, then declared type, name, and signature, then structural shape; names alone are never a matching basis.",
+      "Methods pair within one declared type and name by exact CIL/signature, then signature, then structural shape; only then may exact CIL/signature or structural shape alone remap across declared types or names, never taking a member whose own declared type and name remain unpaired on the other side or whose declaring type is unresolved. Names alone are never a matching basis.",
     );
     expect(
       managedMemberComparisonResultSchema.safeParse({
@@ -339,10 +339,12 @@ describe("managed member comparison uncertainty", () => {
     const rightField = right.result.fields[0];
     expect(rightField).toBeDefined();
     if (rightField === undefined) return;
+    // Both right fields are renamed, so neither left field keeps its declared
+    // identity and only the shared signature links them.
     const duplicatedRight = {
       ...right.result,
       fields: [
-        rightField,
+        { ...rightField, name: "moved" },
         {
           ...rightField,
           token: "0x04000002",
@@ -365,6 +367,9 @@ describe("managed member comparison uncertainty", () => {
           candidate_left_tokens: ["0x04000001", "0x04000002"],
           candidate_right_tokens: ["0x04000001", "0x04000002"],
         }),
+        limitations: [
+          "Multiple managed fields share the same signature; REA did not guess a token remap.",
+        ],
       }),
     ]);
   });
@@ -582,7 +587,7 @@ describe("managed member comparison of ambiguous undecoded signatures", () => {
             basis: "exact-il-signature",
           }),
           limitations: [
-            "Multiple managed methods share the same non-name identity key; REA did not guess a token remap.",
+            "Multiple managed methods share the same CIL and signature; REA did not guess a token remap.",
           ],
         }),
         expect.objectContaining({
@@ -669,6 +674,891 @@ describe("managed member comparison of selected types", () => {
     );
   });
 });
+
+describe("managed member comparison of one signature in several types", () => {
+  it("pairs a file with itself when two types hold identical members", () => {
+    const inspected = withTwin(
+      inspect(buildManagedPeFixture(), "/tmp/twin.dll"),
+    );
+    const result = compareManagedMembers(inspected, inspected);
+
+    expect(result.matching.ambiguous).toBe(0);
+    expect(result.summary).toMatchObject({
+      unchanged: 4,
+      changed: 0,
+      added: 0,
+      removed: 0,
+      unknown: 0,
+    });
+    for (const item of [...result.methods, ...result.fields])
+      expect(item.right?.token).toBe(item.left?.token);
+  });
+
+  it.each([1, 2])(
+    "keeps a member with its own changed counterpart beside %i identical members of other types",
+    (twins) => {
+      const left = inspect(buildManagedPeFixture(), "/tmp/own-before.dll");
+      const changed = withTwin(
+        inspect(
+          buildManagedPeFixture({
+            ilBody: Buffer.from([
+              0x32, 0x02, 0x7b, 0x02, 0x00, 0x00, 0x04, 0x28, 0x02, 0x00, 0x00,
+              0x0a, 0x2a,
+            ]),
+          }),
+          "/tmp/own-after.dll",
+        ),
+        left,
+        twins,
+      );
+      const result = compareManagedMembers(left, changed);
+
+      expect(result.methods).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: "changed",
+            left: expect.objectContaining({
+              declaring_type: "Fixture.Program",
+            }),
+            right: expect.objectContaining({
+              declaring_type: "Fixture.Program",
+            }),
+            match: expect.objectContaining({ basis: "exact-signature" }),
+            dimensions: expect.arrayContaining(["cil"]),
+          }),
+          expect.objectContaining({
+            status: "added",
+            right: expect.objectContaining({ declaring_type: "Other.Twin" }),
+          }),
+        ]),
+      );
+      expect(result.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: "unchanged",
+            left: expect.objectContaining({
+              declaring_type: "Fixture.Program",
+            }),
+            right: expect.objectContaining({
+              declaring_type: "Fixture.Program",
+            }),
+          }),
+          expect.objectContaining({
+            status: "added",
+            right: expect.objectContaining({ declaring_type: "Other.Twin" }),
+          }),
+        ]),
+      );
+      expect(result.summary).toMatchObject({ unknown: 0, removed: 0 });
+    },
+  );
+
+  it("does not remap a member whose own identity remains on the other side", () => {
+    const left = inspect(buildManagedPeFixture(), "/tmp/sig-before.dll");
+    const changed = withTwin(
+      inspect(
+        buildManagedPeFixture({
+          methodSignature: Buffer.from([0x00, 0x00, 0x08]),
+          fieldSignature: Buffer.from([0x06, 0x0a]),
+        }),
+        "/tmp/sig-after.dll",
+      ),
+      left,
+    );
+    // Either side may hold the member whose own identity is left behind.
+    const forward = compareManagedMembers(left, changed);
+    const backward = compareManagedMembers(changed, left);
+
+    for (const item of [
+      ...forward.methods,
+      ...forward.fields,
+      ...backward.methods,
+      ...backward.fields,
+    ])
+      expect(item.match.status).not.toBe("matched");
+    expect(forward.summary).toMatchObject({ removed: 2, added: 4 });
+    expect(backward.summary).toMatchObject({ removed: 4, added: 2 });
+  });
+
+  it("does not remap by structural shape a method whose own identity remains on the other side", () => {
+    const left = inspect(buildManagedPeFixture(), "/tmp/shape-before.dll");
+    const changed = withTwin(
+      inspect(
+        buildManagedPeFixture({
+          methodSignature: Buffer.from([0x00, 0x00, 0x08]),
+        }),
+        "/tmp/shape-after.dll",
+      ),
+      left,
+    );
+    const [own, twin] = changed.result.methods;
+    if (own === undefined || twin === undefined)
+      throw new Error("Expected two methods");
+    // Same body shape, different CIL digest: only the structural round links
+    // the left method to the twin.
+    const result = compareManagedMembers(left, {
+      ...changed,
+      result: {
+        ...changed.result,
+        methods: [
+          own,
+          {
+            ...twin,
+            body: { ...twin.body, normalized_il_sha256: "0".repeat(64) },
+          },
+        ],
+      },
+    });
+
+    for (const item of result.methods)
+      expect(item.match.status).not.toBe("matched");
+  });
+});
+
+describe("managed member comparison remaps around kept identities", () => {
+  it("does not hide a member whose own identity remains in an ambiguous remap group", () => {
+    const left = inspect(buildManagedPeFixture(), "/tmp/group-before.dll");
+    const changed = withTwin(
+      inspect(
+        buildManagedPeFixture({
+          methodSignature: Buffer.from([0x00, 0x00, 0x08]),
+          fieldSignature: Buffer.from([0x06, 0x0a]),
+        }),
+        "/tmp/group-after.dll",
+      ),
+      left,
+      2,
+    );
+    const result = compareManagedMembers(left, changed);
+
+    expect(result.matching.ambiguous).toBe(0);
+    expect(result.summary).toMatchObject({ removed: 2, added: 6 });
+  });
+
+  it("remaps to the one candidate whose own identity is not kept elsewhere", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/kept-base.dll");
+    const changedSignature = inspect(
+      buildManagedPeFixture({
+        methodSignature: Buffer.from([0x00, 0x00, 0x08]),
+      }),
+      "/tmp/kept-signature.dll",
+    );
+    // Left: Fixture.Program.Main, plus Other.Twin.Main with another signature.
+    const left = withTwin(base, changedSignature);
+    // Right: Other.Twin.Main and Other.Twin3.Main, both identical to the
+    // left Fixture.Program.Main, which the right no longer has.
+    const twins = withTwin(base, base, 2);
+    const right = {
+      ...twins,
+      result: { ...twins.result, methods: twins.result.methods.slice(1) },
+    };
+    const result = compareManagedMembers(left, right);
+
+    expect(result.methods).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          left: expect.objectContaining({ declaring_type: "Fixture.Program" }),
+          right: expect.objectContaining({ declaring_type: "Other.Twin3" }),
+          match: expect.objectContaining({
+            status: "matched",
+            basis: "exact-il-signature",
+          }),
+        }),
+      ]),
+    );
+    expect(
+      result.methods.filter(({ match }) => match.status === "ambiguous"),
+    ).toEqual([]);
+  });
+
+  it("names the shared structural shape of an ambiguous remap group", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/shape-group.dll");
+    const twins = withTwin(base, base, 2);
+    // Two right methods share the left method's shape but not its CIL digest,
+    // and the right no longer declares the left method's identity.
+    const right = {
+      ...twins,
+      result: {
+        ...twins.result,
+        methods: twins.result.methods.slice(1).map((method) => ({
+          ...method,
+          body: { ...method.body, normalized_il_sha256: "0".repeat(64) },
+        })),
+        fields: [],
+      },
+    };
+    const left = { ...base, result: { ...base.result, fields: [] } };
+    const result = compareManagedMembers(left, right);
+
+    expect(result.methods).toEqual([
+      expect.objectContaining({
+        match: expect.objectContaining({
+          status: "ambiguous",
+          basis: "structural-method-shape",
+        }),
+        limitations: [
+          "Multiple managed methods share the same structural shape; REA did not guess a token remap.",
+        ],
+      }),
+    ]);
+  });
+});
+
+describe("managed member comparison of unresolved and held identities", () => {
+  it("does not remap past an unresolved member that may be the counterpart", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/orphan-copy.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const left = { ...base, result: { ...base.result, fields: [] } };
+    // The right keeps Main with an unresolved owner, and an identical copy
+    // in another type; either could be the left Main.
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          { ...method, declaring_type: null, declaring_type_token: null },
+          {
+            ...method,
+            declaring_type: "Other.Twin",
+            declaring_type_token: "0x02000003",
+            name: "Copy",
+            token: "0x06000002",
+          },
+        ],
+        fields: [],
+      },
+    };
+
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ]) {
+      expect(
+        result.methods.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+      expect(result.summary).toMatchObject({ added: 0, removed: 0 });
+    }
+  });
+});
+
+describe("managed member comparison of raw-signature contention", () => {
+  it("contests same-signature methods even when their bodies differ", () => {
+    const base = inspect(
+      buildManagedPeFixture(),
+      "/tmp/ownerless-signatures.dll",
+    );
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const changedBody = (hash: string, stack: number) => ({
+      ...method.body,
+      normalized_il_sha256: hash.repeat(64),
+      max_stack: stack,
+    });
+    const withOwnerless = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [
+          { ...method, body: changedBody("a", 1) },
+          {
+            ...method,
+            token: "0x06000002",
+            declaring_type: null,
+            declaring_type_token: null,
+            body: changedBody("b", 2),
+          },
+        ],
+      },
+    };
+    const resolvedOnly = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [{ ...method, body: changedBody("c", 3) }],
+      },
+    };
+    for (const result of [
+      compareManagedMembers(withOwnerless, resolvedOnly),
+      compareManagedMembers(resolvedOnly, withOwnerless),
+    ]) {
+      expect(result.methods).toHaveLength(1);
+      const [item] = result.methods;
+      if (item === undefined)
+        throw new Error("Expected uncertain signature group");
+      expect(item).toMatchObject({
+        status: "unknown",
+        match: { status: "ambiguous", basis: "exact-signature" },
+      });
+      expect(result.summary).toMatchObject({
+        added: 0,
+        removed: 0,
+        unknown: 1,
+      });
+      expect(
+        item.match.candidate_left_tokens.length +
+          item.match.candidate_right_tokens.length,
+      ).toBe(3);
+    }
+  });
+
+  it("contests ownerless undecoded fields by raw signature", () => {
+    const base = inspect(
+      buildManagedPeFixture({ fieldSignature: Buffer.from([0x06, 0x7f]) }),
+      "/tmp/ownerless-field-signatures.dll",
+    );
+    const [field] = base.result.fields;
+    if (field === undefined) throw new Error("Expected a fixture field");
+    expect(field.signature.parse_status).toBe("unsupported");
+    const withOwnerless = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [],
+        fields: [
+          field,
+          {
+            ...field,
+            token: "0x04000002",
+            declaring_type: null,
+            declaring_type_token: null,
+          },
+        ],
+      },
+    };
+    const resolvedOnly = {
+      ...base,
+      result: { ...base.result, methods: [], fields: [field] },
+    };
+    for (const result of [
+      compareManagedMembers(withOwnerless, resolvedOnly),
+      compareManagedMembers(resolvedOnly, withOwnerless),
+    ])
+      expect(
+        result.fields.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+  });
+});
+
+describe("managed member comparison of consumed ownerless ambiguity", () => {
+  it("keeps a consumed ownerless ambiguity from authorizing a later remap", () => {
+    const base = inspect(
+      buildManagedPeFixture(),
+      "/tmp/consumed-ownerless.dll",
+    );
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const candidate = (
+      raw: string,
+      token: string,
+      owner: string | null,
+      name: string,
+      stack: number,
+    ) => ({
+      ...method,
+      token,
+      declaring_type: owner,
+      declaring_type_token: owner === null ? null : method.declaring_type_token,
+      name,
+      signature: { ...method.signature, raw_sha256: raw.repeat(64) },
+      body: {
+        ...method.body,
+        normalized_il_sha256: raw.repeat(64),
+        max_stack: stack,
+      },
+    });
+    const left = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [
+          candidate("a", "0x06000001", "T", "M", 1),
+          candidate("b", "0x06000002", null, "M", 1),
+          candidate("b", "0x06000003", "D", "D", 2),
+        ],
+      },
+    };
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [
+          candidate("c", "0x06000001", "U", "N", 1),
+          candidate("b", "0x06000002", null, "M", 1),
+          candidate("d", "0x06000003", "T", "M", 3),
+        ],
+      },
+    };
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ]) {
+      expect(result.matching.ambiguous).toBeGreaterThan(0);
+      expect(
+        result.methods.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+    }
+  });
+});
+
+describe("managed member comparison of retained ownership contention", () => {
+  it("keeps changed counterparts unknown after an ownerless candidate is held", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/held-ownerless.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const body = (hash: string, stack: number) => ({
+      ...method.body,
+      il_sha256: hash.repeat(64),
+      normalized_il_sha256: hash.repeat(64),
+      max_stack: stack,
+    });
+    const ownerless = {
+      ...method,
+      token: "0x06000002",
+      declaring_type: null,
+      declaring_type_token: null,
+      body: body("b", 2),
+    };
+    const left = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [{ ...method, body: body("a", 1) }, ownerless],
+      },
+    };
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        fields: [],
+        methods: [
+          { ...method, body: body("c", 3) },
+          {
+            ...method,
+            token: "0x06000002",
+            declaring_type: "Other.Twin",
+            name: "Copy",
+            body: ownerless.body,
+          },
+        ],
+      },
+    };
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ]) {
+      expect(result.summary).toEqual({
+        unchanged: 0,
+        changed: 0,
+        added: 0,
+        removed: 0,
+        unknown: 2,
+      });
+      expect(result.methods).toEqual([
+        expect.objectContaining({
+          status: "unknown",
+          match: {
+            status: "ambiguous",
+            basis: "exact-il-signature",
+            confidence: "unknown",
+            candidate_left_tokens: ["0x06000002"],
+            candidate_right_tokens: ["0x06000002"],
+          },
+        }),
+        expect.objectContaining({
+          status: "unknown",
+          match: {
+            status: "ambiguous",
+            basis: "exact-signature",
+            confidence: "unknown",
+            candidate_left_tokens: ["0x06000001"],
+            candidate_right_tokens: ["0x06000001"],
+          },
+        }),
+      ]);
+    }
+  });
+});
+
+describe("managed member comparison of ownerless structural competitors", () => {
+  it("keeps structural competitors of an ownerless method ambiguous in both directions", () => {
+    const base = inspect(
+      buildManagedPeFixture(),
+      "/tmp/ownerless-shape-competitors.dll",
+    );
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const withSignature = (raw: string, token: string) => ({
+      ...method,
+      token,
+      signature: { ...method.signature, raw_sha256: raw.repeat(64) },
+    });
+    const withOwnerless = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          withSignature("a", "0x06000001"),
+          {
+            ...withSignature("b", "0x06000002"),
+            declaring_type: null,
+            declaring_type_token: null,
+          },
+        ],
+        fields: [],
+      },
+    };
+    const resolvedOnly = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [withSignature("c", "0x06000001")],
+        fields: [],
+      },
+    };
+    for (const result of [
+      compareManagedMembers(withOwnerless, resolvedOnly),
+      compareManagedMembers(resolvedOnly, withOwnerless),
+    ]) {
+      expect(result.matching.ambiguous).toBe(1);
+      expect(
+        result.methods.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+      expect(result.summary).toMatchObject({ added: 0, removed: 0 });
+    }
+  });
+});
+
+describe("managed member comparison of ownerless members", () => {
+  it("keeps an ownerless member ambiguous beside a resolved copy, as main does", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/ownerless-copy.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const ownerless = {
+      ...method,
+      declaring_type: null,
+      declaring_type_token: null,
+    };
+    const left = {
+      ...base,
+      result: { ...base.result, methods: [ownerless], fields: [] },
+    };
+    // The right keeps the ownerless Foo and a resolved copy with the same
+    // CIL and signature; the left Foo's owner may be either one.
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [ownerless, { ...method, token: "0x06000002" }],
+        fields: [],
+      },
+    };
+
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ]) {
+      expect(result.matching.ambiguous).toBe(1);
+      expect(
+        result.methods.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+      expect(result.summary).toMatchObject({ added: 0, removed: 0 });
+    }
+  });
+
+  it("still pairs a lone ownerless member with its lone counterpart", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/ownerless-lone.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const ownerless = {
+      ...method,
+      declaring_type: null,
+      declaring_type_token: null,
+    };
+    const side = {
+      ...base,
+      result: { ...base.result, methods: [ownerless], fields: [] },
+    };
+
+    const result = compareManagedMembers(side, side);
+
+    expect(result.matching.ambiguous).toBe(0);
+    expect(
+      result.methods.filter(({ match }) => match.status === "matched"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps a resolved copy out of the declared round when an ownerless competitor is on the left, as main does", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/ownerless-left.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const ownerless = {
+      ...method,
+      declaring_type: null,
+      declaring_type_token: null,
+    };
+    // The left holds the resolved Foo and an ownerless Foo with the same CIL
+    // and signature; the right holds only the resolved Foo. The ownerless
+    // Foo's owner may be the resolved one, so the three stay ambiguous.
+    const withOwnerless = {
+      ...base,
+      result: { ...base.result, methods: [method, ownerless], fields: [] },
+    };
+    const resolvedOnly = {
+      ...base,
+      result: { ...base.result, methods: [method], fields: [] },
+    };
+
+    const result = compareManagedMembers(withOwnerless, resolvedOnly);
+
+    expect(result.matching.ambiguous).toBe(1);
+    expect(
+      result.methods.filter(({ match }) => match.status === "matched"),
+    ).toEqual([]);
+    expect(result.summary).toMatchObject({ added: 0, removed: 0 });
+  });
+
+  it("keeps a resolved copy out of the declared round when an ownerless competitor is on the right, as main does", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/ownerless-right.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const ownerless = {
+      ...method,
+      declaring_type: null,
+      declaring_type_token: null,
+    };
+    const withOwnerless = {
+      ...base,
+      result: { ...base.result, methods: [method, ownerless], fields: [] },
+    };
+    const resolvedOnly = {
+      ...base,
+      result: { ...base.result, methods: [method], fields: [] },
+    };
+
+    const result = compareManagedMembers(resolvedOnly, withOwnerless);
+
+    expect(result.matching.ambiguous).toBe(1);
+    expect(
+      result.methods.filter(({ match }) => match.status === "matched"),
+    ).toEqual([]);
+    expect(result.summary).toMatchObject({ added: 0, removed: 0 });
+  });
+
+  it("keeps an ownerless method ambiguous beside a resolved method of the same shape", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/ownerless-shape.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const ownerless = {
+      ...method,
+      declaring_type: null,
+      declaring_type_token: null,
+    };
+    // Raw signature digests differ, so only the decoded shape links them.
+    const reshaped = (raw: string, token: string) => ({
+      signature: { ...method.signature, raw_sha256: raw.repeat(64) },
+      token,
+    });
+    const left = {
+      ...base,
+      result: { ...base.result, methods: [ownerless], fields: [] },
+    };
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          { ...ownerless, ...reshaped("e", "0x06000001") },
+          { ...method, name: "Bar", ...reshaped("d", "0x06000002") },
+        ],
+        fields: [],
+      },
+    };
+    const result = compareManagedMembers(left, right);
+
+    expect(result.matching.ambiguous).toBe(1);
+    expect(
+      result.methods.filter(({ match }) => match.status === "matched"),
+    ).toEqual([]);
+  });
+});
+
+describe("managed member comparison of unresolved owners", () => {
+  it("does not pair members of unresolved types under different names", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/orphan-names.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const orphan = { declaring_type: null, declaring_type_token: null };
+    const side = (name: string) => ({
+      ...base,
+      result: {
+        ...base.result,
+        methods: [{ ...method, ...orphan, name }],
+        fields: [],
+      },
+    });
+    const result = compareManagedMembers(side("Main"), side("Renamed"));
+
+    for (const item of result.methods)
+      expect(item.match.status).not.toBe("matched");
+  });
+
+  it("keeps ownerless members that share a body ambiguous, as main does", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/orphan-self.dll");
+    const [method] = base.result.methods;
+    const [field] = base.result.fields;
+    if (method === undefined || field === undefined)
+      throw new Error("Expected a fixture method and field");
+    const orphan = { declaring_type: null, declaring_type_token: null };
+    const inspected = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          { ...method, ...orphan, name: "p" },
+          { ...method, ...orphan, name: "q", token: "0x06000002" },
+        ],
+        fields: [
+          { ...field, ...orphan, name: "a" },
+          { ...field, ...orphan, name: "b", token: "0x04000002" },
+        ],
+      },
+    };
+    const result = compareManagedMembers(inspected, inspected);
+
+    // Their owners are unknown, so `p` may be `q`; names alone cannot tell.
+    expect(result.matching.ambiguous).toBe(2);
+    expect(
+      [...result.methods, ...result.fields].filter(
+        ({ match }) => match.status === "matched",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not remap a member whose own identity is in an ambiguous group", () => {
+    const undecoded = { methodSignature: Buffer.from([0x00, 0x00, 0x7f]) };
+    const decoded = inspect(buildManagedPeFixture(), "/tmp/held-decoded.dll");
+    const held = inspect(buildManagedPeFixture(undecoded), "/tmp/held.dll");
+    const [undecodedMethod] = held.result.methods;
+    const [decodedMethod] = decoded.result.methods;
+    if (undecodedMethod === undefined || decodedMethod === undefined)
+      throw new Error("Expected fixture methods");
+    // The right keeps two identical undecoded Fixture.Program.Main, which
+    // stay ambiguous, and a copy of the decoded Main in another type.
+    const left = {
+      ...held,
+      result: {
+        ...held.result,
+        methods: [{ ...undecodedMethod, token: "0x06000002" }, decodedMethod],
+      },
+    };
+    const right = {
+      ...held,
+      result: {
+        ...held.result,
+        methods: [
+          undecodedMethod,
+          { ...undecodedMethod, token: "0x06000002" },
+          {
+            ...decodedMethod,
+            declaring_type: "Other.Twin",
+            declaring_type_token: "0x02000003",
+            token: "0x06000003",
+          },
+        ],
+      },
+    };
+
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ])
+      expect(
+        result.methods.filter(({ match }) => match.status === "matched"),
+      ).toEqual([]);
+  });
+
+  it("does not remap a member whose declaring type is unresolved", () => {
+    const base = inspect(buildManagedPeFixture(), "/tmp/orphan.dll");
+    const [method] = base.result.methods;
+    if (method === undefined) throw new Error("Expected a fixture method");
+    const left = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          { ...method, declaring_type: null, declaring_type_token: null },
+        ],
+        fields: [],
+      },
+    };
+    const right = {
+      ...base,
+      result: {
+        ...base.result,
+        methods: [
+          { ...method, declaring_type: "Other.Twin", token: "0x06000002" },
+        ],
+        fields: [],
+      },
+    };
+
+    for (const result of [
+      compareManagedMembers(left, right),
+      compareManagedMembers(right, left),
+    ])
+      for (const item of result.methods)
+        expect(item.match.status).not.toBe("matched");
+  });
+});
+
+/**
+ * Add copies of the fixture's method and field, each pair declared by another
+ * type, to an inspection. The copies come from `source`, so they can carry
+ * the bytes of a different build than the inspection they join.
+ */
+const withTwin = (
+  inspected: ReturnType<typeof inspect>,
+  source: ReturnType<typeof inspect> = inspected,
+  count = 1,
+): ReturnType<typeof inspect> => {
+  const [method] = source.result.methods;
+  const [field] = source.result.fields;
+  if (method === undefined || field === undefined)
+    throw new Error("Expected a fixture method and field");
+  const rows = Array.from({ length: count }, (_, index) => index + 2);
+  const twin = (row: number) => ({
+    declaring_type: row === 2 ? "Other.Twin" : `Other.Twin${String(row)}`,
+    declaring_type_token: `0x0200000${String(row + 1)}`,
+  });
+  return {
+    ...inspected,
+    result: {
+      ...inspected.result,
+      methods: [
+        ...inspected.result.methods,
+        ...rows.map((row) => ({
+          ...method,
+          ...twin(row),
+          token: `0x0600000${String(row)}`,
+        })),
+      ],
+      fields: [
+        ...inspected.result.fields,
+        ...rows.map((row) => ({
+          ...field,
+          ...twin(row),
+          token: `0x0400000${String(row)}`,
+        })),
+      ],
+    },
+  };
+};
 
 const inspect = (bytes: Buffer, path: string, typeNames?: string[]) => {
   const target = managedPeFixtureTarget(bytes, path);

@@ -35,7 +35,7 @@ function run(id: number, overrides: Record<string, unknown> = {}) {
     id,
     status: "completed",
     conclusion: "success",
-    path: ".github/workflows/ci.yml",
+    path: ".github/workflows/ci.yml@main",
     event: "schedule",
     created_at: new Date(now - 120_000).toISOString(),
     head_branch: "main",

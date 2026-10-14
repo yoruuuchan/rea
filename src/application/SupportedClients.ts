@@ -47,6 +47,7 @@ export interface SetupClient {
     | "pi"
     | "kimi"
     | "hermes"
+    | "zcode_fallback"
     | "zcode"
     | "dsh"
     | "unsupported";
@@ -604,6 +605,14 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     configPath: (context: ClientPathContext) =>
       join(traeUserDirectory(context), "mcp.json"),
     markerPath: traeUserDirectory,
+    format: "json",
+  },
+  {
+    name: "workbuddy",
+    displayName: "WorkBuddy",
+    skillPath: [".workbuddy", "skills"],
+    configPath: [".workbuddy", "mcp.json"],
+    markerPath: [".workbuddy"],
     format: "json",
   },
   {

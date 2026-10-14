@@ -1,4 +1,4 @@
-import { HOPPER_PUBLISHER } from "./MacHopper.js";
+import { HOPPER_PUBLISHER } from "../domain/hopperPublisher.js";
 
 export type SetupFailureCode =
   | "unsupported_host"

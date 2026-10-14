@@ -1,6 +1,14 @@
 import * as t from "@babel/types";
 import type { JavaScriptSemanticPrimitive } from "./javascriptSemanticValueTypes.js";
 
+/** TypeScript receiver annotations occupy no positional runtime parameter slot. */
+export const runtimeFunctionParameters = (
+  node: t.Function,
+): t.Function["params"] =>
+  t.isIdentifier(node.params[0], { name: "this" })
+    ? node.params.slice(1)
+    : node.params;
+
 /**
  * Remove wrappers that affect TypeScript or Flow checking but not runtime
  * expression identity. The returned depth lets bounded evaluators account for

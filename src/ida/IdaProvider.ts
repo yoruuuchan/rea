@@ -113,7 +113,11 @@ export class IdaProvider implements AnalysisProviderCandidate {
         status: "unsupported",
         code: "architecture_unsupported",
         reason: `REA's IDA adapter has no verified ${
-          target.architecture === "mips" ? "MIPS" : "RISC-V"
+          target.architecture === "mips"
+            ? "MIPS"
+            : target.architecture === "riscv"
+              ? "RISC-V"
+              : "PowerPC"
         } lane. Select a supported Ghidra profile instead.`,
         diagnostics,
       };

@@ -45,6 +45,8 @@ const entryRecoveryGuidance = (
     return "This directory could not be read. Check its permissions, then try again.";
   if (entry.kind === "symlink")
     return "This symbolic link could not be read safely. Check the link and its permissions, then try again.";
+  if (entry.kind === "unknown")
+    return "This entry's type could not be determined. Check the parent directory and try again.";
   return "This file could not be read. Check its permissions, then try again.";
 };
 
@@ -71,6 +73,13 @@ const failedEntry = (
       target: null,
       target_state: "unreadable",
       classifications,
+      limitations: [limitation],
+    };
+  if (entry.kind === "unknown")
+    return {
+      path: entry.path,
+      kind: "unknown",
+      classifications: ["unknown"],
       limitations: [limitation],
     };
   return {

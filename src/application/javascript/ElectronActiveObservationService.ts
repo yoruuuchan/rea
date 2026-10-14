@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
-import { realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, realpath, stat } from "node:fs/promises";
 
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type {
@@ -43,11 +44,35 @@ const resolveInputPath = async (
   }
 };
 
+/** Resolve the executable and require a launchable regular file before any spawn. */
+const resolveExecutablePath = async (
+  selected: string,
+): ReturnType<typeof resolveInputPath> => {
+  const resolved = await resolveInputPath("executable_path", selected);
+  if (!resolved.ok) return resolved;
+  try {
+    if (!(await stat(resolved.value)).isFile())
+      throw new Error("not a regular file");
+    if (process.platform !== "win32")
+      await access(resolved.value, constants.X_OK);
+    return resolved;
+  } catch (cause: unknown) {
+    return err({
+      issue: {
+        path: ["executable_path"],
+        reason: "invalid_value",
+        message: `executable_path ${selected} is not an executable file: ${cause instanceof Error ? cause.message : String(cause)}`,
+      },
+      cause,
+    });
+  }
+};
+
 const canonicalizeInput = async (
   input: ElectronActiveObservationInput,
 ): Promise<Result<CanonicalElectronActiveObservationInput, AnalysisError>> => {
   const [executable, application, root] = await Promise.all([
-    resolveInputPath("executable_path", input.executable_path),
+    resolveExecutablePath(input.executable_path),
     resolveInputPath("application_path", input.application_path),
     input.application_root === undefined
       ? Promise.resolve(ok(undefined))

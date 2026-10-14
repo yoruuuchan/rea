@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import * as t from "@babel/types";
+import { runtimeFunctionParameters } from "./javascriptAstValues.js";
 
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import type { JavaScriptSemanticCallAnalysis } from "./javascriptSemanticCalls.js";
@@ -279,7 +280,7 @@ const relationShape = (
 ];
 
 const callableParameterArity = (node: t.Node): number =>
-  t.isFunction(node) ? node.params.length : 0;
+  t.isFunction(node) ? runtimeFunctionParameters(node).length : 0;
 
 const isAsyncCallable = (node: t.Node): boolean =>
   t.isFunction(node) && node.async;

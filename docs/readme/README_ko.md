@@ -20,7 +20,7 @@
 
 **[웹사이트](https://rea.tools/ko/) · [가이드](https://rea.tools/ko/guides/) · [사례](https://rea.tools/ko/showcase/)**
 
-[빠른 시작](#빠른-시작) · [REA의 작동 방식](#rea의-작동-방식) · [분석할 수 있는 대상](#분석할-수-있는-대상) · [사례](#사례) · [자주 묻는 질문](#자주-묻는-질문) · [GNU objdump 및 Rizin 도구](../reverse-engineering-tools.md) · [문서](#문서)
+[빠른 시작](#빠른-시작) · [REA의 작동 방식](#rea의-작동-방식) · [분석할 수 있는 대상](#분석할-수-있는-대상) · [사례](#사례) · [자주 묻는 질문](#자주-묻는-질문) · [문서](#문서)
 
 <code>npx rea-agents setup</code>
 
@@ -56,7 +56,7 @@
 
 REA는 에이전트를 분석 도구에 연결해 네이티브 바이너리, JavaScript와 Electron 앱, .NET 어셈블리, 웹사이트를 검사할 수 있게 합니다. 터미널에서도 같은 도구를 사용할 수 있습니다. 분석은 로컬에서 실행되며, 결과에는 각 결론의 근거와 한계가 포함됩니다.
 
-설정 과정은 에이전트에 REA를 등록하고 해당 버전에 맞는 워크플로 지침을 설치합니다. 네이티브 분석에는 기존 Hopper 또는 Ghidra 설치를 사용할 수 있습니다. 승인하면 설정 과정에서 Hopper를 설치할 수도 있습니다. 정적 JavaScript 분석에는 두 엔진 모두 필요하지 않습니다.
+설정 과정은 에이전트에 REA를 등록하고 해당 버전에 맞는 워크플로 지침을 설치합니다. 네이티브 분석에는 기존 Hopper, Ghidra 또는 IDA 설치를 사용할 수 있습니다. 승인하면 설정 과정에서 Hopper를 설치할 수도 있습니다. 정적 JavaScript 분석에는 네이티브 분석 엔진이 필요하지 않습니다.
 
 > **[REA 웹사이트](https://rea.tools/ko/)**에서 설정 방법, 그림으로 설명한 가이드, 실제 사례를 확인하세요.
 
@@ -105,11 +105,13 @@ rea --help
 
 REA는 빠르게 바뀌며 새 릴리스에는 버그 수정이 자주 포함됩니다. 설치된 버전을 최신으로 유지하세요.
 
-npm으로 설치한 CLI에서는 다음 명령을 사용합니다.
+`npm install --global` 또는 `bun add --global`로 설치한 CLI에서는 다음 명령을 사용합니다.
 
 ```bash
 rea update
 ```
+
+Bun 전역 업데이트에는 Bun 1.2.17 이상이 필요합니다. 이전 버전의 Bun을 사용한다면 `rea update`를 실행하기 전에 Bun을 직접 업그레이드하세요.
 
 에이전트 등록과 스킬을 갱신하려면 업데이트 과정에서 출력된 설정 명령을 실행하세요.
 
@@ -119,7 +121,7 @@ rea update
 npx rea-agents@latest setup
 ```
 
-설정 변경 사항을 검토하고 에이전트를 다시 시작하세요. 일회성 CLI 작업에는 `npx rea-agents@latest` 뒤에 필요한 명령을 붙여 실행하세요.
+설정 변경 사항을 검토하고 에이전트를 다시 시작하세요. 일회성 CLI 작업에는 `npx rea-agents@latest` 뒤에 필요한 명령을 붙여 실행하세요. Bun을 사용한다면 위 명령의 `npx rea-agents@latest`를 `bunx rea-agents@latest`로 바꿔 실행하세요.
 
 ## REA의 작동 방식
 
@@ -139,14 +141,16 @@ REA에는 Node.js 22.x(>=22.19), 24.x(>=24.11) 또는 26+와 npm이 필요합니
 | --------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | 네이티브 바이너리     | 의사 코드, 어셈블리, 문자열, 심볼, 호출, 참조                                 | Hopper, Ghidra 또는 IDA; [네이티브 분석](https://rea.tools/ko/guides/native/)                                                     |
 | 오프라인 ELF 레이아웃 | 섹션, 세그먼트, 원본 심볼/재배치 정보, 정적 분석으로 얻은 보안 완화 기법 후보 | Linux x64에서 호출자가 제공하는 pwntools; [바이너리 진단](../binary-diagnostics.md)                                               |
+| Go 바이너리           | 내장된 컴파일러 버전, 모듈, `replace` 지시어, 빌드 설정                       | REA 내장 ELF/PE/thin Mach-O 정적 검사; Go 설치 불필요                                                                             |
+| Rust 바이너리         | cargo-auditable이 내장한 크레이트 이름, 버전, 소스, 의존성 관계               | REA 내장 ELF/PE/thin Mach-O 정적 검사; [Rust 바이너리](../rust-binaries.md)                                                       |
+| WASM 아티팩트         | 유효성 검사, 섹션, import/export의 정확한 WAT 형식, 디코딩된 WAT              | 호출자 제공 WABT 1.0.42; `inspect_wasm_artifact`                                                                                  |
 | EVM 바이트코드        | 디스패치 선택자, 바이트 오프셋, 추론한 인자와 상태 변경 가능 여부             | Linux x64의 로컬 원시 바이트/16진수 입력 파일; [오프라인 EVM 가이드](../evm-bytecode.md)                                          |
-| Rust binaries         | Embedded cargo-auditable dependency list                                      | [Rust binaries](../rust-binaries.md)                                                                                              |
+| SQLite 데이터베이스   | 테이블, 열, 인덱스, 뷰, 트리거, 선택한 일반 테이블의 행                       | 로컬 데이터베이스/WAL 스냅샷; Node.js 24.15 이상의 24.x 또는 26 이상(네이티브 SQLite 한도 적용)                                   |
 | 기록된 Linux 크래시   | 원시 note 레코드, 기록된 모든 스레드의 레지스터/시그널, 선택적 매핑 후보      | Linux x64에서 호출자가 제공하는 pwntools; GDB/pwndbg는 선택 사항; [기록된 크래시](../recorded-crashes.md)                         |
 | JavaScript / Electron | 모듈, 임포트, 소스 맵, 라우트, IPC, 네이티브 애드온 관계                      | Node.js와 npm; [애플리케이션 분석](https://rea.tools/ko/guides/javascript/)                                                       |
 | 웹사이트              | 페이지 구조, 스크립트, 네트워크 관찰 결과, 요청한 스크린샷                    | Chrome 계열 브라우저; [브라우저 분석](https://rea.tools/ko/guides/browser/)                                                       |
-| 저장된 네트워크 캡처  | 요청, 응답, 접근 가능한 페이로드, 소스 위치                                   | HAR; mitmproxy 네이티브 캡처에는 Linux의 mitmdump; [캡처 가이드](../web-network-captures.md)                                      |
-| 패킷 캡처             | 엔드포인트, DNS, TLS SNI, 프로토콜 분포, HTTP 요청                            | 호출자 제공 tshark 및 capinfos; [pcap 가이드](../pcap-analysis.md)                                                                |
-| .NET 어셈블리         | 메타데이터, CIL 명령, 선언된 네이티브 의존성, 빌드 비교                       | 정적 검사; [관리 코드 가이드](../managed-code-analysis.md)                                                                        |
+| 저장된 네트워크 캡처  | 요청, 응답, 접근 가능한 페이로드, 소스 위치                                   | HAR 또는 Fiddler Everywhere SAZ; mitmproxy 네이티브 캡처에는 Linux의 mitmdump; [캡처 가이드](../web-network-captures.md)          |
+| .NET 어셈블리         | 메타데이터, CIL 명령, 선언된 네이티브 의존성, 빌드 비교                       | 별도 도구 불필요(정적 검사만); [관리 코드 가이드](../managed-code-analysis.md)                                                    |
 | Android APK           | 매니페스트 선언, 클래스, 디컴파일된 메서드, 참조                              | Linux/macOS/Windows x64의 헤드리스 JADX와 전체 JDK; [Android 가이드](../android-analysis.md)                                      |
 | Android 기기          | 기기, 패키지, 프로세스, 로그, 덤프, 화면 캡처, APK/파일 전송                  | 호출자 제공 adb(에뮬레이터 또는 실제 기기); [ADB 가이드](../adb-device-analysis.md)                                               |
 | JEB 프로젝트          | 엔진 기반 프로젝트 유닛, 아티팩트 해시, 타입/메서드 의사코드                  | 호출자가 시작하고 MCP를 제공하는 JEB 클라이언트(REA_JEB_MCP_URL로 선택); [JEB 가이드](../jeb-analysis.md)                         |
@@ -154,15 +158,18 @@ REA에는 Node.js 22.x(>=22.19), 24.x(>=24.11) 또는 26+와 npm이 필요합니
 | Flutter 앱            | Dart 스냅샷 해시, ABI별 라이브러리 해시, 엔진 빌드 출처                       | 없음 (정적 APK 파싱); [Flutter 가이드](../flutter-analysis.md)                                                                    |
 | 펌웨어                | 영역, 추출 결과, 네이티브 분석으로 전달할 정보                                | Linux의 Binwalk / Unblob; [펌웨어 가이드](../firmware-analysis.md)                                                                |
 | 기록된 패킷           | 선택 필드, 반복 값, 필터 및 디코딩 규칙                                       | Linux: TShark 4.x + prlimit; [캡처 가이드](../packet-captures.md)                                                                 |
+| 패킷 요약             | 엔드포인트, DNS, TLS SNI, 프로토콜 분포, HTTP 요청                            | 호출자 제공 tshark 및 capinfos(Linux에서 검증됨); [pcap 가이드](../pcap-analysis.md)                                              |
 | 기록된 논리 신호      | 디코더 주석, 샘플 범위, 진단 정보                                             | Linux: sigrok-cli 0.7.2 + prlimit; [신호 기록 가이드](../signal-recordings.md)                                                    |
 | 패키지 및 리소스      | 파일 목록, 다이제스트, plist, Apple 번들 구조, 추출한 리소스                  | [아티팩트 및 JavaScript 가이드](../javascript-artifact-reconstruction.md), [Apple 애플리케이션](../apple-application-analysis.md) |
 | 프로세스 동작         | 터미널 출력, 상호작용, 종료 및 파일 시스템 관찰 결과, 실행 비교               | 네이티브 PTY를 지원하는 Linux/macOS; [프로세스 캡처](../process-capture.md)                                                       |
 
 정적 JavaScript 및 .NET 검사는 제공된 파일을 읽으며 애플리케이션을 실행하지 않습니다. 런타임 캡처는 사용자의 권한으로 선택한 대상을 실행하거나 대상과 상호작용합니다. 각 런타임 가이드에서 그 영향을 설명합니다.
 
+오프라인 네이티브 바이너리 검사에는 호출자가 제공하는 GNU objdump와 Rizin도 사용할 수 있습니다. 제공자 설정, CLI 명령, Evidence의 한계는 [리버스 엔지니어링 도구 가이드](../reverse-engineering-tools.md)를 참고하세요. REA는 objdump와 Rizin을 설치하거나 업데이트하지 않습니다.
+
 <a id="choosing-a-deep-analysis-provider"></a>
 
-지원하는 네이티브 형식과 호스트는 제공자마다 다릅니다. [Hopper 및 Ghidra 설정](../installation.md#hopper), [IDA 가이드](../ida-provider.md), [실험적 Windows Ghidra 지원](../windows-ghidra-p0.md)을 참고하세요. Ghidra는 [16비트 DOS 분석](../ghidra-dos.md)도 지원합니다. 제공자 선택은 [CLI 가이드](../cli.md#choose-a-provider)를 참고하세요. 최신 npm 릴리스 이후 추가된 기능은 [릴리스에서의 사용 가능 여부](../installation.md#released-package-and-main)를 확인하세요.
+지원하는 네이티브 형식과 호스트는 제공자마다 다릅니다. [Hopper 및 Ghidra 설정](../installation.md#hopper), [IDA 가이드](../ida-provider.md)(선택 사항인 네이티브 MCP 브리지 포함), [실험적 Windows Ghidra 지원](../windows-ghidra-p0.md)을 참고하세요. Ghidra는 [16비트 DOS 분석](../ghidra-dos.md)도 지원합니다. 큰 바이너리를 분석할 때는 `REA_GHIDRA_STARTUP_TIMEOUT_MS` 또는 `REA_HOPPER_STARTUP_TIMEOUT_MS`로 제공자의 시작 제한 시간을 늘리세요. 제공자 선택은 [CLI 가이드](../cli.md#choose-a-provider)를 참고하세요. 최신 npm 릴리스 이후 추가된 기능은 [릴리스에서의 사용 가능 여부](../installation.md#released-package-and-main)를 확인하세요.
 
 ## 사례
 
@@ -209,7 +216,7 @@ REA로 흥미로운 대상을 분석했다면 알려 주세요. [issue](https://
 <details>
 <summary><strong>Hopper를 먼저 실행해야 하나요?</strong></summary>
 
-REA는 작업에 필요할 때 Hopper를 실행합니다. macOS에서는 처음 실행할 때 데모 모드를 선택하거나 라이선스를 활성화하라는 대화 상자가 나타날 수 있습니다. [Hopper 실행 및 문제 해결](../installation.md#launcher-paths-and-troubleshooting)을 참고하세요.
+REA는 작업에 필요할 때 Hopper를 실행합니다. macOS에서는 처음 실행할 때 데모 모드를 선택하거나 라이선스를 활성화하라는 대화 상자가 나타날 수 있습니다. 첫 CLI/MCP 작업이나 무인 작업을 실행하기 전에 같은 사용자 세션에서 이 대화 상자를 완료하세요. 필요하면 Hopper를 직접 여세요. [Hopper 실행 및 문제 해결](../installation.md#launcher-paths-and-troubleshooting)을 참고하세요.
 
 </details>
 
@@ -239,7 +246,7 @@ REA는 대상을 로컬에서 분석합니다. 에이전트는 도구 결과를 
 
 먼저 업데이트하세요. 최근 릴리스에서 이미 수정되었을 수 있습니다.
 
-npm으로 설치한 CLI에서는 다음 명령을 사용합니다.
+`npm install --global` 또는 `bun add --global`로 설치한 CLI에서는 다음 명령을 사용합니다.
 
 ```bash
 rea update
@@ -286,11 +293,9 @@ REA를 사용하고, 버그를 보고하고, 기능을 요청하고, 빌드를 �
 
 책임 있는 사용에 관한 안내는 [DISCLAIMER.md](../../DISCLAIMER.md)를 참고하세요.
 
-REA는 법을 준수하는 연구, 교육, 상호운용성 확보, 소프트웨어 보존, 그리고 본인이 소유하거나 조사 권한을 가진 소프트웨어의 분석을 위한 도구입니다.
+불법적이거나 허가되지 않은 사용에 대한 프로젝트의 입장은 모든 REA 버전, 배포 채널, 플랫폼에 적용되며, 각 사본에는 해당 라이선스가 그대로 유지됩니다.
 
-The project's position on illegal or unauthorized use covers all REA
-versions, distribution channels, and platforms; each copy retains its
-applicable licenses.
+REA는 법을 준수하는 연구, 교육, 상호운용성 확보, 소프트웨어 보존, 그리고 본인이 소유하거나 조사 권한을 가진 소프트웨어의 분석을 위한 도구입니다.
 
 ## 기여
 
@@ -302,14 +307,6 @@ REA에 도움을 보태 주세요! [issue를 등록](https://github.com/morluto/
 
 [MIT](../../LICENSE)
 
-REA-authored code is licensed under MIT. Third-party material retains its own
-licenses and copyright notices; see [Third-party notices](../../THIRD_PARTY_NOTICES.md)
-for the dependency inventory, preserved license texts, and external-tool terms.
+REA가 작성한 코드는 MIT 라이선스를 따릅니다. 제3자 자료에는 각자의 라이선스와 저작권 고지가 그대로 유지됩니다. 의존성 목록, 보존된 라이선스 원문, 외부 도구 약관은 [제3자 고지](../../THIRD_PARTY_NOTICES.md)를 참고하세요.
 
-**You must legally obtain and be authorized to use commercial tools**, including
-IDA Pro / Hex-Rays decompilers, Hopper, and JEB, under their applicable licenses.
-REA grants no tool license, key, or activation entitlement. Trials and demos
-remain subject to vendor terms, including user, feature, automation, and output
-sharing restrictions. Cracked copies, stolen keys, unauthorized key sharing,
-and bypassing license restrictions are not authorized. This guidance does not
-amend MIT or third-party licenses.
+IDA Pro / Hex-Rays 디컴파일러, Hopper, JEB 등 상용 도구는 해당 라이선스에 따라 **합법적으로 취득하고 사용 권한을 갖춰야 합니다.** REA는 어떤 도구의 라이선스, 키, 활성화 권한도 부여하지 않습니다. 체험판과 데모는 사용자, 기능, 자동화, 출력 공유 제한을 포함한 공급업체 약관을 따릅니다. 크랙 버전, 도난 키, 무단 키 공유, 라이선스 제한 우회는 허용되지 않습니다. 이 안내는 MIT 라이선스나 제3자 라이선스를 변경하지 않습니다.

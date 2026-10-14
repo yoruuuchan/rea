@@ -23,7 +23,7 @@ import {
   type GhidraSeedCommitment,
   type GhidraSeedReport,
 } from "./GhidraAnalysisSeeds.js";
-import type { GhidraInstallationHost } from "./GhidraInstallation.js";
+import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
 const directories: string[] = [];
@@ -193,19 +193,6 @@ describe("Ghidra seed session verification", () => {
 });
 
 describe("Ghidra seed profile", () => {
-  const host: GhidraInstallationHost = {
-    platform: "linux",
-    architecture: "x64",
-    readText: () => "application.version=12.1.4\napplication.java.min=21\n",
-    executable: () => true,
-    probeJava: () => ({
-      version: "21.0.11",
-      major: 21,
-      home: "/jdk-21",
-      bits: 64,
-      runtime: "jdk",
-    }),
-  };
   const pe: BinaryTarget = {
     path: "/fixture.exe",
     sha256: "a".repeat(64),

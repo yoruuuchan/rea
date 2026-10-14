@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { HOPPER_PUBLISHER } from "./MacHopper.js";
+import { HOPPER_PUBLISHER } from "../domain/hopperPublisher.js";
 import { setupInstallFailure } from "./SetupInstallFailure.js";
 
 describe("macOS Hopper setup failure projection", () => {

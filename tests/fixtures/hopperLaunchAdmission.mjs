@@ -19,6 +19,13 @@ if (mode === "denied" || mode === "denied-after-handoff") {
       process.exit(2);
     },
   );
+} else if (mode === "not-found") {
+  // A custom wrapper can forward the native diagnostic after a handoff.
+  await writeFile(`${receiptPath}.document-created`, "unconfirmed");
+  process.stderr.write(
+    "Hopper has not been found.\nPlease make sure that Spotlight is active in order for this tool to find Hopper's executable.\n",
+    () => process.exit(3),
+  );
 } else if (mode === "handoff") {
   process.exit(0);
 } else if (mode === "bridge") {

@@ -15,6 +15,8 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
+import { HOPPER_PUBLISHER } from "../domain/hopperPublisher.js";
+import { macDeveloperIdRequirement } from "../process/MacCodeSignature.js";
 import {
   downloadHopperPackage,
   HOPPER_DOWNLOAD_BYTES,
@@ -24,29 +26,10 @@ const execFileAsync = promisify(execFile);
 const RELEASES_URL =
   "https://www.hopperapp.com/include/files-api.php?request=releases&public=true";
 const DOWNLOAD_PREFIX = "https://www.hopperapp.com:443/downloader/public/";
-
-/**
- * Apple publisher identity pinned for the official Hopper macOS bundle. The
- * team identifier was captured from `Hopper-6.6.0-demo.dmg` at
- * `https://www.hopperapp.com:443/downloader/public/Hopper-6.6.0-demo.dmg`
- * (34846271 bytes, SHA-1 0be530f038249742590992199c7b042ea20ca955) with
- * `codesign -dvvv`, which reported
- * `Authority=Developer ID Application: Cryptic Apps (2AMA2753NF)`.
- */
-export const HOPPER_PUBLISHER = Object.freeze({
-  bundleIdentifier: "com.cryptic-apps.hopper-web-4",
-  teamIdentifier: "2AMA2753NF",
-});
-
-/**
- * Code requirement enforcing the bundle identifier and signing team together.
- * The identifier is read from the sealed CodeDirectory, so it cannot be changed
- * by editing `Info.plist` the way the previous string comparison could.
- */
-const HOPPER_PUBLISHER_REQUIREMENT =
-  `= identifier "${HOPPER_PUBLISHER.bundleIdentifier}"` +
-  ` and anchor apple generic` +
-  ` and certificate leaf[subject.OU] = "${HOPPER_PUBLISHER.teamIdentifier}"`;
+const HOPPER_PUBLISHER_REQUIREMENT = macDeveloperIdRequirement(
+  HOPPER_PUBLISHER.bundleIdentifier,
+  HOPPER_PUBLISHER.teamIdentifier,
+);
 
 /** Outcome of reading a mounted bundle's signature and publisher identity. */
 export type MacHopperBundleVerification =

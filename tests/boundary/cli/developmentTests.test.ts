@@ -45,6 +45,7 @@ const fixture = async () => {
   for (const path of [
     "scripts/run-development-tests.mjs",
     "scripts/lib/development-tests.mjs",
+    "scripts/lib/test-projects.mjs",
   ])
     await copyFile(join(process.cwd(), path), join(root, path));
   await symlink(

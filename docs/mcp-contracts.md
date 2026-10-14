@@ -58,7 +58,13 @@ side declares a required facet unavailable. An empty legacy facet without a
 coverage declaration is also unknown. A producer that actually observed an
 empty facet can declare it available so observed absence remains comparable.
 Call comparison additionally retains the Evidence relationship coverage
-checks. IDA declares the facets its selected adapter cannot provide; an empty
+checks. Ghidra and Hopper declare their observed dossier facets and complete
+provider-observed caller/callee sets, including empty sets. Missing decompiler
+output remains unavailable; complete call coverage does not claim every runtime
+target. Hopper's unavailable reference-kind metadata and reported unresolved
+calls still prevent equality conclusions for those dimensions. Analysis profiles
+version these declarations so older snapshots are not reused as current results.
+IDA declares the facets its selected adapter cannot provide; an empty
 unsupported array does not prove observed absence.
 Evidence and bundle imports reject unsupported fields in their envelopes,
 identities, manifests and other fixed metadata before authentication. Imports

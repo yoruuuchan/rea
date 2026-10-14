@@ -1,17 +1,4 @@
-const sourceProjects = [
-  "domain",
-  "services",
-  "adapters",
-  "composition",
-  "conformance",
-  "evaluation",
-];
-
-const sourceTest = (path) =>
-  path.startsWith("src/") ||
-  ["composition", "conformance", "evaluation"].some((project) =>
-    path.startsWith(`tests/${project}/`),
-  );
+import { SOURCE_TEST_PROJECTS, projectForTest } from "./test-projects.mjs";
 
 /** Parse explicit test paths and an optional branch-comparison base. */
 export const parseDevelopmentTestRequest = (mode, arguments_) => {
@@ -35,10 +22,9 @@ export const parseDevelopmentTestRequest = (mode, arguments_) => {
         path.split("/").some((part) => part === ".." || part === ".")
       )
         throw new Error(`Expected an exact repository test path: ${argument}`);
-      if (mode !== "focused" && !sourceTest(path))
-        throw new Error(
-          `Use test:focused for compiled boundary tests: ${path}`,
-        );
+      const project = projectForTest(path);
+      if (mode !== "focused" && project.group !== "source")
+        throw new Error(`Use test:focused for built test projects: ${path}`);
       paths.push(path);
     }
   }
@@ -72,9 +58,14 @@ export const developmentTestPlan = (request, baseCommit) => {
     !/^[a-f0-9]{40,64}$/u.test(baseCommit ?? "")
   )
     throw new Error("Changed tests require a resolved Git merge base");
-  const projects = request.mode === "focused" ? [] : sourceProjects;
+  const projects =
+    request.mode === "focused"
+      ? []
+      : SOURCE_TEST_PROJECTS.map(({ name }) => name);
   return {
-    needsBuild: request.paths.some((path) => !sourceTest(path)),
+    needsBuild: request.paths.some(
+      (path) => projectForTest(path).group === "built",
+    ),
     artifactTasks: Object.entries(artifactConsumers).flatMap(
       ([task, consumers]) =>
         request.paths.some((path) => consumers.includes(path)) ? [task] : [],

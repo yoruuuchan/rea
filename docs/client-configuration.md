@@ -265,6 +265,21 @@ The user-level MCP paths follow the editor's VS Code layout. Trae's official
 documentation describes the raw JSON editor without specifying those paths;
 loading this registration in Trae remains unverified.
 
+## WorkBuddy
+
+For [WorkBuddy](https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide), setup writes `mcpServers.rea` into the
+global `~/.workbuddy/mcp.json` (a standard `mcpServers` JSON file at the user
+home root on every platform). Entries carry `command`, `args`, and `env`;
+stdio is the default transport. WorkBuddy discovers personal skills from
+`~/.workbuddy/skills` (`%userprofile%\.workbuddy\skills` on Windows), so
+setup installs its skill copy there.
+
+The global MCP path is a plain JSON file; setup preserves every other server
+and top-level key when it upserts `rea`. WorkBuddy also reads a project-level
+`<project>/.workbuddy/mcp.json`, which setup does not touch: it registers the
+user-level file only. Loading this registration and real REA tool calls
+through WorkBuddy are verified.
+
 ## ZCode
 
 For [ZCode](https://zcode.z.ai/en/docs/mcp-services), setup registers `rea` in the nested `mcp.servers` table of the
@@ -279,7 +294,11 @@ the first native server into an empty table, it copies the fallback's
 `mcpServers` entries into the native table so they keep loading, and leaves
 the fallback file untouched. Existing REA environment overrides are preserved
 when refreshing its command. A malformed or unreadable fallback file fails setup instead of
-being silently suppressed; repair or remove it and rerun. ZCode disables a
+being silently suppressed; repair or remove it and rerun. Uninstall removes an
+REA-owned `rea` entry from both the native table and the fallback, backing up
+each changed file, so an emptied native table cannot load a leftover fallback
+registration; other fallback servers, settings and a foreign `rea` entry are
+kept. ZCode disables a
 server with `enable: false` on its entry; doctor reports such a registration
 as stale, and rerunning setup removes the flag to repair it. Native configuration
 uses strict JSON; setup refuses comments, trailing commas and a BOM rather than

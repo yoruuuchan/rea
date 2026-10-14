@@ -2,6 +2,7 @@ import * as t from "@babel/types";
 
 import {
   semanticObjectPatternKeys,
+  runtimeFunctionParameters,
   semanticStaticPropertyKey,
 } from "./javascriptAstValues.js";
 import {
@@ -212,7 +213,8 @@ export const semanticIterationSources = (
   else if (t.isYieldExpression(node) && node.delegate && node.argument != null)
     add(sources, { node: node.argument, projection: [] }, node, {});
   else if (t.isFunction(node))
-    for (const parameter of node.params) visit(context, parameter, undefined);
+    for (const parameter of runtimeFunctionParameters(node))
+      visit(context, parameter, undefined);
 
   return sources;
 };

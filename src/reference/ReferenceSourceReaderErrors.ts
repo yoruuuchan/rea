@@ -29,6 +29,9 @@ const FILESYSTEM_ERROR_CODES = new Set([
   "EISDIR",
   "ELOOP",
   "EMFILE",
+  // A traversed child can exceed the platform's absolute path limit even
+  // though the selected root and every component are valid.
+  "ENAMETOOLONG",
   "ENFILE",
   "ENOENT",
   "ENOTDIR",
@@ -44,6 +47,8 @@ export const filesystemFailureDetail = (
 ): string | undefined => {
   if (!(cause instanceof Error)) return undefined;
   const code: unknown = Reflect.get(cause, "code");
+  if (code === "ENAMETOOLONG")
+    return `${operation}: ENAMETOOLONG (entry path exceeds the operating system path limit)`;
   return typeof code === "string" && FILESYSTEM_ERROR_CODES.has(code)
     ? `${operation}: ${cause.message}`
     : undefined;

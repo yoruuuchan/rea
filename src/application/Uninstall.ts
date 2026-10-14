@@ -231,12 +231,21 @@ export const systemUninstallHost = (
       const clients = supportedClients(home, platform, environment);
       redirection = appDataRedirection(clients);
       return Promise.resolve(
-        clients.flatMap((client) =>
-          uninstallConfigPaths(client).map((configPath) => ({
+        clients.flatMap((client) => [
+          ...uninstallConfigPaths(client).map((configPath) => ({
             ...client,
             configPath,
           })),
-        ),
+          ...(client.zcodeFallbackPath === undefined
+            ? []
+            : [
+                {
+                  ...client,
+                  configPath: client.zcodeFallbackPath,
+                  format: "zcode_fallback" as const,
+                },
+              ]),
+        ]),
       );
     },
     inspectClient: async (client) => {

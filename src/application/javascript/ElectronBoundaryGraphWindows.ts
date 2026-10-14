@@ -23,7 +23,10 @@ import {
   electronFindingSourceNode,
   electronRangeKey,
 } from "./ElectronBoundaryGraphContext.js";
-import { resolveArtifactPathByContext } from "./JavaScriptArtifactPathResolution.js";
+import {
+  artifactPathResolutionProperties,
+  resolveArtifactPathByContext,
+} from "./JavaScriptArtifactPathResolution.js";
 
 interface FindingInput<Value> {
   readonly context: JavaScriptArtifactGraphContext;
@@ -137,6 +140,7 @@ const addWindowPreload = (
     sourcePath: input.file.path,
     context: resolutionContext,
     files: input.context.filesByPath,
+    runtimePathKind: "exact-file",
   });
   const role = createElectronRoleNode(input.context, {
     kind: "electron-preload",
@@ -160,6 +164,7 @@ const addWindowPreload = (
       resolved_path: resolution.resolved_path,
       resolution_status: resolution.resolution_status,
       limitations: resolution.limitations,
+      ...artifactPathResolutionProperties(resolution),
     },
   });
   linkElectronRoleToAsset(input.context, {
@@ -253,6 +258,16 @@ const addUtilityProcess = (
       },
     ],
   });
+  const resolution =
+    value.module_path === null
+      ? undefined
+      : resolveArtifactPathByContext({
+          declaredPath: value.module_path,
+          sourcePath: file.path,
+          context: value.module_resolution_context,
+          files: context.filesByPath,
+          runtimePathKind: "node-entrypoint",
+        });
   addElectronInferenceEdge(context, {
     source: input.source,
     target: utility,
@@ -264,15 +279,19 @@ const addUtilityProcess = (
     properties: {
       declared_path: value.module_path,
       expression: value.module_expression,
+      ...(resolution === undefined
+        ? {}
+        : {
+            resolution_context: resolution.resolution_context,
+            resolved_path: resolution.resolved_path,
+            resolution_status: resolution.resolution_status,
+            limitations: resolution.limitations,
+            ...artifactPathResolutionProperties(resolution),
+          }),
     },
   });
   if (value.module_path === null) return;
-  const resolution = resolveArtifactPathByContext({
-    declaredPath: value.module_path,
-    sourcePath: file.path,
-    context: value.module_resolution_context,
-    files: context.filesByPath,
-  });
+  if (resolution === undefined) return;
   const resolved = resolution.resolved_path;
   const target =
     resolved === null

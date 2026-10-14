@@ -7,6 +7,7 @@ import { traverseJavaScriptAst } from "./javascriptSemanticTraversal.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import {
   propertyName,
+  runtimeFunctionParameters,
   semanticStaticPropertyKey,
 } from "./javascriptAstValues.js";
 import { stringValue } from "./javascriptStaticAnalysisHelpers.js";
@@ -38,15 +39,13 @@ export const collectJavaScriptExports = (
   bindings?: JavaScriptSemanticAnalysisState,
 ): StaticExports => {
   const exports = new Set<string>();
+  const parameter = t.isFunction(node)
+    ? runtimeFunctionParameters(node)[1]
+    : undefined;
   const factoryExports =
-    bindings !== undefined &&
-    t.isFunction(node) &&
-    t.isIdentifier(node.params[1])
-      ? resolveSemanticBindingState(
-          bindings,
-          node.params[1],
-          node.params[1].name,
-        )?.bindingId
+    bindings !== undefined && t.isFunction(node) && t.isIdentifier(parameter)
+      ? resolveSemanticBindingState(bindings, parameter, parameter.name)
+          ?.bindingId
       : undefined;
   const isExportsAlias = (reference: t.Node | null): boolean => {
     if (!t.isIdentifier(reference)) return false;

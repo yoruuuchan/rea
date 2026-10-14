@@ -78,6 +78,8 @@ export interface ResolveArtifactPathInput {
   readonly htmlBaseHref?: string | null;
   /** Import/require semantics; runtime resource paths omit this provenance. */
   readonly moduleKind?: JavaScriptModuleResolutionMode;
+  /** Runtime paths retain their loader owner independently of source imports. */
+  readonly runtimePathKind?: "exact-file" | "node-entrypoint" | "url-resource";
 }
 
 /** Preserve an explicitly retained loader mode on graph relationships. */
@@ -189,6 +191,8 @@ const conditionalResolution = (
 });
 
 const resolvePath = (input: ResolveArtifactPathInput): CandidateResolution => {
+  if (input.runtimePathKind === "node-entrypoint")
+    return resolveNodeRuntimeEntrypoint(input);
   if (input.moduleKind === "compiler-dependent") {
     const imported = resolvePath({ ...input, moduleKind: "import" });
     const required = resolvePath({ ...input, moduleKind: "require" });
@@ -222,6 +226,10 @@ const resolvePath = (input: ResolveArtifactPathInput): CandidateResolution => {
           ],
         };
   }
+  if (input.runtimePathKind === "url-resource")
+    return resolveExactUrlResource(input);
+  if (input.runtimePathKind === "exact-file" && isRuntimePathDeclaration(input))
+    return resolveRuntimeEntrypoint(input);
   // Package import keys are literal lookup identities, not artifact paths.
   // The selected target is admitted separately by resolveExportTarget.
   if (
@@ -260,6 +268,82 @@ const resolvePath = (input: ResolveArtifactPathInput): CandidateResolution => {
   return resolveCandidate(input, confined, new Set(), emittedSourceCandidates);
 };
 
+const resolveExactUrlResource = (
+  input: ResolveArtifactPathInput,
+): CandidateResolution => {
+  // Electron loadURL requires a protocol. A scheme-less string is not relative
+  // to the calling script; filesystem paths belong to loadFile.
+  if (!hasScheme(input.declaredPath))
+    return unresolvedCandidate("unavailable", [
+      "Electron loadURL requires a URL protocol; relative filesystem paths belong to loadFile.",
+    ]);
+  if (!/^file:/iu.test(input.declaredPath))
+    return unresolvedCandidate("external", [
+      "Only file URLs can be mapped to selected local application artifacts.",
+    ]);
+  const urlContextCandidate = contextualCandidate(input);
+  if (typeof urlContextCandidate !== "string") return urlContextCandidate;
+  const confined = confineCandidate(urlContextCandidate);
+  if (typeof confined !== "string") return confined;
+  return (
+    resolveFileCandidates(input, [confined]) ?? {
+      resolvedPath: null,
+      status: "not-found",
+      candidatePath: confined,
+      limitations: [
+        `The exact URL resource ${confined} was not found among the selected application files.`,
+      ],
+    }
+  );
+};
+
+const isRuntimePathDeclaration = (input: ResolveArtifactPathInput): boolean =>
+  input.context === "filesystem-expression" ||
+  (input.context === "module-specifier" &&
+    (isRelativeJavaScriptModuleSpecifier(input.declaredPath) ||
+      input.declaredPath.startsWith("/") ||
+      fileUrlPath(input.declaredPath) !== undefined));
+
+const resolveNodeRuntimeEntrypoint = (
+  input: ResolveArtifactPathInput,
+): CandidateResolution => {
+  const { runtimePathKind: _runtimePathKind, ...sourceInput } = input;
+  const runtimeInput = { ...sourceInput, moduleKind: "require" as const };
+  if (!isRuntimePathDeclaration(runtimeInput)) return resolvePath(runtimeInput);
+  const candidate = contextualCandidate(runtimeInput);
+  if (typeof candidate !== "string") return candidate;
+  const confined = confineCandidate(candidate);
+  if (typeof confined !== "string") return confined;
+  // Node entrypoints use runtime file/directory probes. They do not originate
+  // in emitted TypeScript import syntax and cannot select a source substitute.
+  return resolveCandidate(runtimeInput, confined, new Set());
+};
+
+const resolveRuntimeEntrypoint = (
+  input: ResolveArtifactPathInput,
+): CandidateResolution => {
+  const rejected = rejectDeclaration(input.declaredPath);
+  if (rejected !== null) return rejected;
+  if (hasScheme(input.declaredPath) || looksExternal(input.declaredPath))
+    return unresolvedCandidate("external", [
+      "Electron runtime entrypoints must identify local paths, not external URLs.",
+    ]);
+  const candidate = confineCandidate(
+    relativeCandidate(input.sourcePath, input.declaredPath),
+  );
+  if (typeof candidate !== "string") return candidate;
+  return (
+    resolveFileCandidates(input, [candidate]) ?? {
+      resolvedPath: null,
+      status: "not-found",
+      candidatePath: candidate,
+      limitations: [
+        `The declared Electron runtime entrypoint ${candidate} was not found as an exact file among the selected application files; extension and directory fallback were not attempted.`,
+      ],
+    }
+  );
+};
+
 const resolveRuntimeSourceCandidates = (
   input: ResolveArtifactPathInput,
   exactPath: string,
@@ -292,30 +376,53 @@ const resolveRuntimeSourceCandidates = (
   return null;
 };
 
-const rejectDeclaration = (declared: string): CandidateResolution | null => {
-  if (declared.length === 0)
+const rejectDeclaration = (
+  declared: string,
+  literalPercent = false,
+  allowEmptyPath = false,
+): CandidateResolution | null => {
+  if (declared.length === 0 && !allowEmptyPath)
     return unresolvedCandidate("rejected", ["The declared path is empty."]);
   if (declared.includes("\0") || declared.includes("\\"))
     return unresolvedCandidate("rejected", [
       "NUL and backslash path syntax are not admitted for canonical artifact paths.",
     ]);
-  if (!admitsCanonicalPathSyntax(declared))
+  if (!literalPercent && !admitsCanonicalPathSyntax(declared))
     return unresolvedCandidate("rejected", [
       "Encoded dot or separator bytes are rejected before artifact path resolution.",
     ]);
   return null;
 };
 
+/**
+ * Node's CommonJS loader never percent-decodes a request or a legacy package
+ * main, so `%2e` and `%2f` there are literal filename bytes, not encoded dots
+ * or separators. Root confinement still applies to the joined candidate.
+ */
+const declaresLiteralPercent = (input: ResolveArtifactPathInput): boolean =>
+  input.moduleKind === "require" &&
+  (input.context === "module-specifier" ||
+    input.context === "package-entrypoint");
+
 const contextualCandidate = (
   input: ResolveArtifactPathInput,
 ): string | CandidateResolution => {
   const { context } = input;
+  if (context === "html-reference") return htmlCandidate(input);
   // URL suffixes are evidence, not pathname bytes. Admit only the path while
   // retaining the complete declaration on the resolution result.
   let declared =
     context === "url-reference"
       ? stripQueryAndFragment(input.declaredPath)
       : input.declaredPath;
+  if (context === "url-reference" && declared.length === 0)
+    return input.runtimePathKind === "url-resource"
+      ? unresolvedCandidate("unavailable", [
+          "A suffix-only runtime URL requires the window's current document URL; the calling script does not establish that base.",
+        ])
+      : unresolvedCandidate("rejected", [
+          "The URL reference contains no pathname, and its base document is not established by this analysis.",
+        ]);
   if (context === "module-specifier" && /^file:/iu.test(declared)) {
     const fileUrl = fileUrlPath(declared);
     if (fileUrl === null)
@@ -332,9 +439,8 @@ const contextualCandidate = (
       "File URL authorities or invalid file URL forms cannot be mapped to artifact-local paths.",
     ]);
   }
-  const rejected = rejectDeclaration(declared);
+  const rejected = rejectDeclaration(declared, declaresLiteralPercent(input));
   if (rejected !== null) return rejected;
-  if (context === "html-reference") return htmlCandidate(input);
   if (context === "module-specifier") {
     if (hasScheme(declared))
       return unresolvedCandidate("external", [
@@ -736,7 +842,8 @@ const resolveExportTarget = (
   const encodedPath = target.url.pathname.slice(
     PACKAGE_ARTIFACT_ROOT_URL.pathname.length,
   );
-  const rejected = rejectDeclaration(encodedPath);
+  // Package targets are URLs for both loaders, so their percent bytes encode.
+  const rejected = rejectDeclaration(encodedPath, false);
   if (rejected !== null) return withTargetSource(rejected);
   const decoded = decodeModuleUrlPath(encodedPath);
   if (typeof decoded !== "string") return withTargetSource(decoded);
@@ -815,6 +922,15 @@ const htmlCandidate = (
   input: ResolveArtifactPathInput,
 ): string | CandidateResolution => {
   const declared = stripQueryAndFragment(htmlUrlText(input.declaredPath));
+  // HTML owns URL-text normalization and pathname admission. A nonempty URL
+  // reference may have no pathname; suffix bytes remain declaration evidence.
+  // HTML references are URL text, so percent bytes still encode.
+  const rejected = rejectDeclaration(
+    declared,
+    false,
+    input.declaredPath !== "",
+  );
+  if (rejected !== null) return rejected;
   if (looksExternal(declared))
     return unresolvedCandidate("external", [
       "External HTML references are not mapped to local artifact assets.",
@@ -827,12 +943,6 @@ const htmlCandidate = (
   if (base !== undefined && base !== null && looksExternal(base))
     return unresolvedCandidate("external", [
       "The document base href is external, so its script reference is not a local artifact path.",
-    ]);
-  // Removing URL tabs and newlines can join an encoded dot or separator that
-  // the raw declaration split, so admit the parsed URL text again.
-  if (!admitsCanonicalPathSyntax(declared))
-    return unresolvedCandidate("rejected", [
-      "Encoded dot or separator bytes are rejected before artifact path resolution.",
     ]);
   const declaredPath = percentDecodeUrlPath(declared);
   if (declaredPath === null)

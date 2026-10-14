@@ -6,7 +6,10 @@ import type {
 } from "./javascriptSemanticIr.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import { semanticCallableIdForNode } from "./javascriptSemanticProjection.js";
-import { unwrapJavaScriptExpression } from "./javascriptAstValues.js";
+import {
+  unwrapJavaScriptExpression,
+  runtimeFunctionParameters,
+} from "./javascriptAstValues.js";
 import {
   resolveSemanticBindingState,
   type JavaScriptSemanticAnalysisState,
@@ -194,14 +197,15 @@ const parameterAcceptsArgument = (
 ): boolean => {
   const node = state.callableNodesById.get(callable.callableId);
   if (!t.isFunction(node)) return false;
-  const parameterIndex = node.params.findIndex((parameter) =>
+  const parameters = runtimeFunctionParameters(node);
+  const parameterIndex = parameters.findIndex((parameter) =>
     rangeContains(range(parameter), location),
   );
   if (parameterIndex === argumentIndex) return true;
   return (
     parameterIndex >= 0 &&
     parameterIndex < argumentIndex &&
-    t.isRestElement(node.params[parameterIndex])
+    t.isRestElement(parameters[parameterIndex])
   );
 };
 

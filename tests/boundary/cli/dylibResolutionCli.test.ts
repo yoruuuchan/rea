@@ -106,6 +106,57 @@ const withBrokenHelper = async (app: string): Promise<void> => {
   await writeFiles(app, { "Contents/Helpers/broken": broken });
 };
 
+cliTest(
+  "does not turn U+FEFF-prefixed strings into dyld path tokens",
+  async ({ cli }) => {
+    const app = await fixtureApp();
+    await writeFiles(app, {
+      "Contents/MacOS/App": machoImage({
+        commands: [
+          buildVersionCommand(1),
+          rpathCommand("@executable_path/../Frameworks"),
+          dylibCommand(LC.LOAD_DYLIB, "@rpath/libcore.dylib"),
+          dylibCommand(LC.LOAD_DYLIB, "\uFEFF@rpath/libcore.dylib"),
+        ],
+      }),
+      "Contents/Helpers/tool": machoImage({
+        commands: [
+          buildVersionCommand(1),
+          rpathCommand("\uFEFF@loader_path/../Frameworks"),
+          dylibCommand(LC.LOAD_DYLIB, "@rpath/libcore.dylib"),
+        ],
+      }),
+    });
+    const output = await cli.run({
+      arguments: ["trace-dylib-resolution", app, "--json"],
+      environment: ENVIRONMENT,
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const trace = dylibResolutionResultSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    const ordinary = trace.edges.find(
+      ({ loader, install_name }) =>
+        loader === "Contents/MacOS/App" &&
+        install_name === "@rpath/libcore.dylib",
+    );
+    expect(ordinary?.resolution).toMatchObject({
+      status: "resolved",
+      image: "Contents/Frameworks/libcore.dylib",
+    });
+    const marked = trace.edges.find(
+      ({ install_name }) => install_name === "\uFEFF@rpath/libcore.dylib",
+    );
+    expect(marked).toBeDefined();
+    expect(marked?.resolution.image).toBeNull();
+    const helper = trace.edges.find(
+      ({ loader }) => loader === "Contents/Helpers/tool",
+    );
+    expect(helper).toBeDefined();
+    expect(helper?.resolution.image).toBeNull();
+  },
+);
+
 describe("trace-dylib-resolution CLI", () => {
   cliTest("traces every executable root of an app bundle", async ({ cli }) => {
     const app = await fixtureApp();

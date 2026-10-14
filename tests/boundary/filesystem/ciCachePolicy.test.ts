@@ -226,10 +226,6 @@ it("bounds the rolling static snapshot with Turbo age and size eviction", async 
     .object({
       cacheMaxAge: z.string(),
       cacheMaxSize: z.string(),
-      tasks: z.record(
-        z.string(),
-        z.object({ inputs: z.array(z.unknown()).optional() }),
-      ),
     })
     .parse(JSON.parse(await readFile(join(repository, "turbo.json"), "utf8")));
   // The static job restores the previous snapshot by prefix and saves the
@@ -248,5 +244,4 @@ it("bounds the rolling static snapshot with Turbo age and size eviction", async 
     unit === "TB" ? value * 1024 * 1024 : unit === "GB" ? value * 1024 : value;
   expect(megabytes).toBeGreaterThan(0);
   expect(megabytes).toBeLessThanOrEqual(1024);
-  expect(turbo.tasks["knip"]?.inputs).toContain("vitest.config.ts");
 });

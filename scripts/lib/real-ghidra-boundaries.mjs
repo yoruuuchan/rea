@@ -131,6 +131,25 @@ export async function verifyGhidraBoundaries(
   const externalDossier = await call("analyze_function", {
     procedure: external.address,
   });
+  assert.equal(externalDossier.pseudocode, "");
+  assert.deepEqual(externalDossier.assembly, []);
+  assert.deepEqual(externalDossier.callees, []);
+  assert.deepEqual(externalDossier.facet_availability.pseudocode, {
+    available: false,
+    reason: "Ghidra does not decompile external functions.",
+  });
+  for (const facet of [
+    "assembly",
+    "comments",
+    "callers",
+    "callees",
+    "references",
+    "strings_names",
+    "cfg",
+  ])
+    assert.deepEqual(externalDossier.facet_availability[facet], {
+      available: true,
+    });
   const externalEntry = await call("resolve_containing_procedure", {
     address: external.address,
   });

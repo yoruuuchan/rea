@@ -259,6 +259,30 @@ describe("historical source graph", () => {
 });
 
 describe("partial historical source graphs", () => {
+  it("keeps unknown-entry diagnostics outside the root commitment", () => {
+    const base = graphInput();
+    base.inventory_state = "partial";
+    base.entries[2] = {
+      path: "src/package.json",
+      kind: "unknown",
+      classifications: ["unknown"],
+      limitations: ["Permission denied at /private/first"],
+    };
+    const graph = createHistoricalSourceGraph(base);
+    const changedMessage = structuredClone(base);
+    changedMessage.entries[2] = {
+      path: "src/package.json",
+      kind: "unknown",
+      classifications: ["unknown"],
+      limitations: ["Permission denied at /private/second"],
+    };
+    const revised = createHistoricalSourceGraph(changedMessage);
+    expect(revised.root_sha256).toBe(graph.root_sha256);
+    expect(computeHistoricalSourceGraphSha256(revised)).not.toBe(
+      computeHistoricalSourceGraphSha256(graph),
+    );
+  });
+
   it("keeps an unreadable symlink target unknown and out of root identity", () => {
     const base = graphInput();
     base.inventory_state = "partial";

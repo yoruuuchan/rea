@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
+  access,
   copyFile,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -52,7 +55,7 @@ try {
     join(workspace, "dist", "windows", "WindowsNativeLoader.js"),
   ).href;
   const source = `import assert from 'node:assert/strict';
-import {readdirSync,renameSync,statSync} from 'node:fs';
+import {existsSync,mkdirSync,readFileSync,readdirSync,renameSync,statSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {systemWindowsNativeAuthority} from ${JSON.stringify(loader)};
 const temp=process.env.TEMP;
@@ -62,33 +65,61 @@ assert.equal(first.retryable,true);
 assert.match(first.reason,/Delete owned object by handle failed.*Win32 5/s);
 const [name,...extra]=readdirSync(temp);assert.ok(name);assert.equal(extra.length,0);
 const path=join(temp,name);const identity=statSync(path,{bigint:true});
-assert.throws(()=>renameSync(path,path+'-replacement'));
-assert.equal(statSync(path,{bigint:true}).ino,identity.ino);
+// Delete sharing permits rename; ownership follows the retained NTFS handle.
+writeFileSync(join(path,'owned-child.txt'),'owned child');
+const renamed=path+'-renamed';renameSync(path,renamed);
+const moved=statSync(renamed,{bigint:true});
+assert.equal(moved.dev,identity.dev);assert.equal(moved.ino,identity.ino);
+mkdirSync(path);const replacement=statSync(path,{bigint:true});
+assert.notEqual(replacement.ino,identity.ino);
+const sentinel=join(path,'unrelated.txt');writeFileSync(sentinel,'unrelated replacement');
 if(process.argv[2]!=='teardown'){
  const second=systemWindowsNativeAuthority();assert.equal(second.available,true);
- assert.equal(readdirSync(temp).length,0);
+ assert.equal(existsSync(renamed),false);
+ assert.deepEqual(readdirSync(temp),[name]);
+ assert.equal(readFileSync(sentinel,'utf8'),'unrelated replacement');
+ assert.equal(statSync(path,{bigint:true}).ino,replacement.ino);
  assert.equal(systemWindowsNativeAuthority(),second);
 }
-console.log(JSON.stringify({mode:process.argv[2],firstFailed:true,retainedOwner:true,inode:identity.ino.toString()}));
+console.log(JSON.stringify({mode:process.argv[2],firstFailed:true,retainedOwner:true,name,renamed,device:identity.dev.toString(),inode:identity.ino.toString(),replacementInode:replacement.ino.toString()}));
 `;
   const fixture = join(workspace, "probe.mjs");
   await writeFile(fixture, source);
   for (const mode of ["retry", "teardown"]) {
     const temp = join(workspace, mode);
     await mkdir(temp);
-    const observed = JSON.parse(
-      execFileSync(process.execPath, [fixture, mode], {
-        encoding: "utf8",
-        timeout: 20_000,
-        windowsHide: true,
-        env: { ...process.env, TEMP: temp, TMP: temp },
-      }),
+    const child = spawnSync(process.execPath, [fixture, mode], {
+      encoding: "utf8",
+      timeout: 20_000,
+      windowsHide: true,
+      env: { ...process.env, TEMP: temp, TMP: temp },
+    });
+    if (child.error !== undefined) throw child.error;
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(
+      child.stderr,
+      "",
+      "Native environment teardown reported a cleanup failure",
     );
+    const observed = JSON.parse(child.stdout);
+    assert.equal(observed.mode, mode);
+    assert.equal(observed.firstFailed, true);
     assert.equal(observed.retainedOwner, true);
-    assert.deepEqual(await readdir(temp), []);
+    await assert.rejects(access(observed.renamed), { code: "ENOENT" });
+    assert.deepEqual(await readdir(temp), [observed.name]);
+    const replacement = join(temp, observed.name);
+    const identity = await stat(replacement, { bigint: true });
+    assert.equal(identity.dev.toString(), observed.device);
+    assert.equal(identity.ino.toString(), observed.replacementInode);
+    assert.notEqual(identity.ino.toString(), observed.inode);
+    assert.deepEqual(await readdir(replacement), ["unrelated.txt"]);
+    assert.equal(
+      await readFile(join(replacement, "unrelated.txt"), "utf8"),
+      "unrelated replacement",
+    );
   }
   process.stdout.write(
-    `${JSON.stringify({ ok: true, controlledDispositionFailure: true, retainedOwner: true, retryRecovers: true, successfulAdmissionCached: true, environmentTeardownCleansProbe: true, issue1701HostCauseReproduced: false })}\n`,
+    `${JSON.stringify({ ok: true, controlledDispositionFailure: true, retainedOwner: true, renamedOwnerCleansChildren: true, unrelatedReplacementPreserved: true, retryRecovers: true, successfulAdmissionCached: true, environmentTeardownCleansProbe: true, issue1701HostCauseReproduced: false })}\n`,
   );
 } finally {
   await rm(workspace, { recursive: true, force: true });

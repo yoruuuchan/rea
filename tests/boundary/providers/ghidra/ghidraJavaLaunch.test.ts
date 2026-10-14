@@ -50,9 +50,16 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
   process.stderr.write("failed " + probe + "\\n");
   process.exitCode = 3;
 } else if (probe === "-envvars") {
-  process.stdout.write(mode === "env-malformed" ? "invalid environment\\n" : "GHIDRA_MAXMEM=1G\\n");
+  process.stdout.write(mode === "env-malformed" ? "invalid environment\\n" : mode.startsWith("env-injection:") ? mode.slice("env-injection:".length) + "\\n" : "GHIDRA_MAXMEM=1G\\n");
 } else {
-  process.stdout.write(mode === "vm-malformed" ? "invalid JVM argument\\n" : "-Dfile.encoding=UTF8\\n");
+  const vmArguments = mode === "vm-malformed"
+    ? "invalid JVM argument\\n"
+    : mode === "os-arch-override"
+      ? "-Dos.arch=x86_64\\n"
+      : mode === "os-name-override"
+        ? "-Dos.name=Windows\\n"
+        : "-Dfile.encoding=UTF8\\n";
+  process.stdout.write(vmArguments);
 }
 `,
     { mode: 0o755 },
@@ -215,6 +222,57 @@ describe.skipIf(process.platform === "win32")(
       },
     );
 
+    it.each(["os-arch-override", "os-name-override"])(
+      "rejects LaunchSupport %s before starting analysis",
+      async (mode) => {
+        const { session, launcher, analysisArguments } = await fixture(mode);
+        const launched = await launcher.launch(session);
+        expect(launched.ok).toBe(false);
+        expect(analysisArguments).toEqual([]);
+        if (launched.ok)
+          throw new Error("Expected a JVM platform override failure");
+        expect(launched.error.cause).toMatchObject({
+          message: expect.stringContaining(
+            "may not override os.arch or os.name",
+          ),
+        });
+      },
+    );
+
+    it.each([
+      ["JAVA_TOOL_OPTIONS", "-Dos.arch=x86_64"],
+      ["JAVA_TOOL_OPTIONS", '"-Dos.arch=x86_64"'],
+      ["_JAVA_OPTIONS", "'-Dos.name=Windows'"],
+      ["JDK_JAVA_OPTIONS", '-D"os.name"=Windows'],
+      ["JDK_JAVA_OPTIONS", "-D'os.arch'=x86_64"],
+    ])(
+      "rejects helper-environment platform injection from %s=%s before analysis",
+      async (key, value) => {
+        const { session, launcher, analysisArguments } = await fixture(
+          `env-injection:${key}=${value}`,
+        );
+        const launched = await launcher.launch(session);
+        expect(launched.ok).toBe(false);
+        expect(analysisArguments).toEqual([]);
+        if (launched.ok)
+          throw new Error("Expected a JVM platform override failure");
+        expect(launched.error.cause).toMatchObject({
+          message: expect.stringContaining(
+            "may not override os.arch or os.name",
+          ),
+        });
+      },
+    );
+
+    it("admits a quoted non-platform option without mistaking its value for a platform argument", async () => {
+      const { session, launcher, analysisArguments } = await fixture(
+        'env-injection:JAVA_TOOL_OPTIONS=-Ddescription="text -Dos.arch=x86_64"',
+      );
+      const launched = await launcher.launch(session);
+      if (!launched.ok) throw launched.error;
+      expect(analysisArguments).toHaveLength(1);
+    });
+
     it("bounds retained UTF-8 warnings and reports original byte counts", async () => {
       const { session, launcher } = await fixture("large");
       const launched = await launcher.launch(session);
@@ -290,6 +348,13 @@ describe.skipIf(process.platform === "win32")(
               "application.version=12.1.4\napplication.java.min=21\n",
             executable: () => true,
             probeJava: () => ({
+              osArch: process.arch === "arm64" ? "aarch64" : "amd64",
+              osName:
+                process.platform === "darwin"
+                  ? "Mac OS X"
+                  : process.platform === "win32"
+                    ? "Windows 11"
+                    : "Linux",
               version: "21.0.12",
               major: 21,
               home: "/fixture/jdk",

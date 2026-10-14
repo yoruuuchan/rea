@@ -203,6 +203,17 @@ interface GhidraInstallationObservation {
   readonly javaCommand: string;
   /** Observed java.vm.name; omitted when the probe cannot establish VM identity. */
   readonly javaVmName?: string;
+  /**
+   * Observed JVM os.arch; omitted when the probe cannot establish it. Ghidra
+   * selects its native decompiler directory from this value.
+   */
+  readonly javaOsArch?: string;
+  /**
+   * Observed JVM os.name; omitted when the probe cannot establish it. Ghidra
+   * selects its native decompiler OS directory from the JVM OS/architecture
+   * pair, so a non-host value selects an unvalidated directory.
+   */
+  readonly javaOsName?: string;
   readonly checks: readonly GhidraInstallationCheck[];
 }
 
@@ -244,6 +255,17 @@ export interface GhidraJavaObservation {
   readonly bits: number;
   readonly runtime: "jdk" | "jre";
   readonly vmName?: string;
+  /**
+   * Observed JVM os.arch property, which Ghidra uses to select its native
+   * decompiler directory. Omitted when the probe cannot establish it.
+   */
+  readonly osArch?: string;
+  /**
+   * Observed JVM os.name property, which Ghidra uses with os.arch to select
+   * its native decompiler OS directory. Omitted when the probe cannot
+   * establish it.
+   */
+  readonly osName?: string;
 }
 
 /** A bounded executable-header probe: a small prefix plus the whole file size. */
@@ -324,6 +346,12 @@ export const inspectGhidraInstallation = (
     ...(coordinates.java?.vmName === undefined
       ? {}
       : { javaVmName: coordinates.java.vmName }),
+    ...(coordinates.java?.osArch === undefined
+      ? {}
+      : { javaOsArch: coordinates.java.osArch }),
+    ...(coordinates.java?.osName === undefined
+      ? {}
+      : { javaOsName: coordinates.java.osName }),
     checks,
   };
   if (failed !== undefined)
@@ -555,6 +583,8 @@ export const ghidraInstallationDiagnostics = (
   java_home: inspection.javaHome,
   java_version: inspection.javaVersion,
   java_vm_name: inspection.javaVmName ?? null,
+  java_os_arch: inspection.javaOsArch ?? null,
+  java_os_name: inspection.javaOsName ?? null,
   platform: inspection.platform,
   architecture: inspection.architecture,
   checks: inspection.checks.map((check) => ({
@@ -632,6 +662,61 @@ const nativeDecompilerCheck = ({
           architecture,
           host.executableHeader?.(path),
         );
+  // Ghidra resolves its native decompiler directory from the JVM's os.arch,
+  // not the host process architecture. A JDK running under emulation (for
+  // example x86_64 under Rosetta on Apple silicon) selects a directory that
+  // was never validated, so every analysis fails after a passing doctor.
+  // Ghidra resolves the OS directory from the JVM os.name/os.arch pair, so a
+  // JVM reporting a non-host os.name (for example through -Dos.name=Windows)
+  // selects a different OS directory even when os.arch matches.
+  const osArch = coordinates.java?.osArch;
+  const osName = coordinates.java?.osName;
+  const selectedDirectory = jvmOsArchNativeDirectory(platform, osArch);
+  const validatedDirectory = NATIVE_PLATFORMS[platform]?.[architecture];
+  // Without a JVM observation the java check reports the missing runtime;
+  // the decompiler directory cannot be selected, so this check defers to it.
+  if (coordinates.java !== undefined) {
+    if (selectedDirectory === undefined)
+      return installationCheck({
+        name: "native_decompiler",
+        passed: false,
+        code: "executable_missing",
+        detail:
+          osArch === undefined
+            ? "The Java probe did not report os.arch; the JVM-selected native decompiler directory is unknown and cannot be matched to the validated host directory"
+            : `JVM reports unrecognized os.arch=${osArch}; its selected native decompiler directory is unknown and cannot be matched to the validated host directory`,
+        remediation: `Point JAVA_HOME at a JDK whose reported architecture maps to the validated Ghidra decompiler (${validatedDirectory ?? "unsupported host"}). REA does not build or install native tools.`,
+      });
+    if (
+      validatedDirectory !== undefined &&
+      selectedDirectory !== validatedDirectory &&
+      path !== null
+    )
+      return installationCheck({
+        name: "native_decompiler",
+        passed: false,
+        code: "executable_missing",
+        detail: `JVM reports os.arch=${osArch}, so Ghidra selects its native decompiler from os/${selectedDirectory}, but the validated decompiler targets ${validatedDirectory} (host ${platform}/${architecture})`,
+        remediation: `Point JAVA_HOME at a JDK whose architecture matches the built decompiler (${validatedDirectory}). REA does not build or install native tools.`,
+      });
+    if (osName === undefined)
+      return installationCheck({
+        name: "native_decompiler",
+        passed: false,
+        code: "executable_missing",
+        detail:
+          "The Java probe did not report os.name; the JVM-selected native decompiler OS directory is unknown and cannot be matched to the validated host platform",
+        remediation: `Point JAVA_HOME at a JDK whose reported operating system matches the host platform (${platform}). REA does not build or install native tools.`,
+      });
+    if (!jvmOsNameMatchesPlatform(platform, osName) && path !== null)
+      return installationCheck({
+        name: "native_decompiler",
+        passed: false,
+        code: "executable_missing",
+        detail: `JVM reports os.name=${osName}, which does not match the validated host platform ${platform} (host ${platform}/${architecture})`,
+        remediation: `Point JAVA_HOME at a JDK whose reported operating system matches the host platform (${platform}). REA does not build or install native tools.`,
+      });
+  }
   return installationCheck({
     name: "native_decompiler",
     passed: path !== null && compatibility?.status !== "incompatible",
@@ -644,6 +729,43 @@ const nativeDecompilerCheck = ({
         ? compatibility.remediation
         : `Provide an executable Ghidra/Features/Decompiler/os/${NATIVE_PLATFORMS[platform]?.[architecture] ?? "<platform>"}/${platform === "win32" ? "decompile.exe" : "decompile"}, or its build/os equivalent. REA does not build or install native tools.`,
   });
+};
+
+/**
+ * Whether a JVM os.name value selects the host platform's native OS directory.
+ * Unknown values never align with the validated host directory; admission
+ * must not treat them as matching.
+ */
+const jvmOsNameMatchesPlatform = (
+  platform: NodeJS.Platform,
+  osName: string,
+): boolean => {
+  const normalized = osName.toLowerCase();
+  if (platform === "win32") return normalized.startsWith("windows");
+  if (platform === "darwin")
+    return normalized.startsWith("mac") || normalized.startsWith("darwin");
+  if (platform === "linux") return normalized.startsWith("linux");
+  return false;
+};
+
+/**
+ * Map a JVM os.arch value to the Ghidra native directory that JVM selects.
+ * Unknown values stay unknown; admission must not treat them as aligned with
+ * the validated host directory.
+ */
+const jvmOsArchNativeDirectory = (
+  platform: NodeJS.Platform,
+  osArch: string | undefined,
+): string | undefined => {
+  if (osArch === undefined) return undefined;
+  const normalized = osArch.toLowerCase();
+  const node: NodeJS.Architecture | undefined =
+    normalized === "x86_64" || normalized === "amd64" || normalized === "x64"
+      ? "x64"
+      : normalized === "aarch64" || normalized === "arm64"
+        ? "arm64"
+        : undefined;
+  return node === undefined ? undefined : NATIVE_PLATFORMS[platform]?.[node];
 };
 
 const versionCheck = (
@@ -781,6 +903,8 @@ const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
     const version = javaProperty(output, "java.version");
     const home = javaProperty(output, "java.home");
     const vmName = javaProperty(output, "java.vm.name");
+    const osArch = javaProperty(output, "os.arch");
+    const osName = javaProperty(output, "os.name");
     const bits = Number.parseInt(
       javaProperty(output, "sun.arch.data.model") ?? "0",
       10,
@@ -791,6 +915,8 @@ const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
       major: javaMajor(version),
       home,
       ...(vmName === null ? {} : { vmName }),
+      ...(osArch === null ? {} : { osArch }),
+      ...(osName === null ? {} : { osName }),
       bits,
       runtime: executablePath(
         (process.platform === "win32" ? win32 : posix).join(

@@ -154,7 +154,9 @@ node scripts/verify-windows-native-inspection.mjs
 This artifact injects one access-denied disposition result while using a real
 NTFS directory. The verifier checks retained ownership, recovery on a later
 query, cached successful admission, and cleanup on environment teardown. It
-does not reproduce or identify the host-dependent cause reported in #1701.
+renames the retained probe and recreates its old path, checking that cleanup
+removes the owned inode while preserving the replacement directory.
+It does not reproduce or identify the host-dependent cause reported in #1701.
 The fixture is stored under `.cache/` and is excluded from the shipped addon.
 
 The native lane checks DACL readback independently, source write/replacement

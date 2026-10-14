@@ -49,7 +49,7 @@ const lintDiagnostics = async (root: string) =>
       ),
     ).diagnostics;
 
-it("includes every actually linted file in both cached lint task inputs", () => {
+it("covers the lint inventory and root tool configs in resolved cache inputs", () => {
   const scan = spawnSync(
     process.execPath,
     [join(repository, "node_modules/oxlint/bin/oxlint"), "--debug=files"],
@@ -69,6 +69,7 @@ it("includes every actually linted file in both cached lint task inputs", () => 
       "run",
       "lint",
       "lint:built",
+      "knip",
       "--dry=json",
     ],
     {
@@ -99,6 +100,14 @@ it("includes every actually linted file in both cached lint task inputs", () => 
       files.filter((file) => !Object.hasOwn(task.inputs, file)),
       `${task.task} omits actual checker inputs`,
     ).toEqual([]);
+  const knip = tasks.find(({ task }) => task === "knip");
+  expect(knip).toBeDefined();
+  expect(
+    files.filter(
+      (file) => !file.includes("/") && !Object.hasOwn(knip!.inputs, file),
+    ),
+    "knip omits root tool configuration inputs",
+  ).toEqual([]);
 });
 
 it("summarizes warnings without losing their complete diagnostic records", async () => {
