@@ -1,5 +1,4 @@
 import { z } from "incur";
-import { resolve } from "node:path";
 import { createRustBinaryService } from "../composition/rust.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { logCliCommand } from "../cliLogging.js";
@@ -7,6 +6,7 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** Resolve caller paths and inspect embedded Rust dependencies through the shared workflow. */
 export const registerRustCommands = (
@@ -24,7 +24,7 @@ export const registerRustCommands = (
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectRustBinary, async () => {
           const result = await service.inspect(
-            { path: resolve(args.path) },
+            { path: absoluteCallerPath(args.path) },
             { signal },
           );
           return result.ok ? result.value : projectAnalysisError(result.error);

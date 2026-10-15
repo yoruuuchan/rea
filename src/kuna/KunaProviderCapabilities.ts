@@ -19,13 +19,26 @@ export const KUNA_OPERATIONS = Object.freeze([
   "list_documents",
   "list_procedures",
   "search_procedures",
+  "list_strings",
+  "search_strings",
   "procedure_address",
   "address_name",
   "procedure_pseudo_code",
   "procedure_assembly",
   "analyze_function",
+  "procedure_callers",
+  "procedure_callees",
+  "xrefs",
 ] as const satisfies readonly Exclude<AnalysisOperation, "health">[]);
 export type KunaOperation = (typeof KUNA_OPERATIONS)[number];
+
+export const KUNA_RELATIONSHIP_LIMITATION =
+  "Kuna reports call-kind edges between its discovered function nodes. Jump/data edges are excluded; unresolved indirect calls and targets outside that inventory remain unknown.";
+export const KUNA_STRING_LIMITATION =
+  "Kuna scans its mapped sections or segments for printable runs of at least five characters, including unterminated fragments. Encodings are ASCII, UTF-8 and Latin-range UTF-16LE; other text can remain undiscovered. String scanning skips references; an empty search is not proof of absence.";
+
+export const KUNA_XREF_LIMITATION =
+  "Kuna's static reference walk unifies forwarding aliases and omits references internal to that alias class. REA keeps only exact-address incoming edges; an empty result does not prove no reference exists.";
 
 /** Whether an operation is one Kuna answers. */
 export const isKunaOperation = (
@@ -53,6 +66,14 @@ export const kunaLimitations = (
   switch (operation) {
     case "list_documents":
       return [];
+    case "list_strings":
+      return [KUNA_PROVENANCE, KUNA_STRING_LIMITATION];
+    case "search_strings":
+      return [
+        KUNA_PROVENANCE,
+        KUNA_STRING_LIMITATION,
+        REGEX_MATCHING_LIMITATION,
+      ];
     case "list_procedures":
     case "procedure_address":
     case "address_name":
@@ -63,6 +84,11 @@ export const kunaLimitations = (
         KUNA_ENTRY_LIMITATION,
         REGEX_MATCHING_LIMITATION,
       ];
+    case "procedure_callers":
+    case "procedure_callees":
+      return [KUNA_PROVENANCE, KUNA_RELATIONSHIP_LIMITATION];
+    case "xrefs":
+      return [KUNA_PROVENANCE, KUNA_XREF_LIMITATION];
     case "procedure_pseudo_code":
     case "procedure_assembly":
     case "analyze_function":
@@ -98,9 +124,8 @@ export const kunaCapabilities = (
           reason: availability.reason,
           availabilityCode: availability.code,
         } as const)),
-    // A cold answer can come from the single-function path and differ from the
-    // export's later answer, so results are re-read rather than replayed. The
-    // project cache already serves warm reads in milliseconds.
+    // Text can change when the export finishes. References own bounded session
+    // reuse; generic snapshot replay must not bypass that lifecycle.
     cachePolicy: "live",
     effects: {
       mutatesArtifact: false,

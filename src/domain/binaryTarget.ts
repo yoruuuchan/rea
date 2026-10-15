@@ -51,6 +51,8 @@ export type ExecutableMetadata =
     }
   | {
       readonly format: "pe";
+      /** Original unsigned COFF machine, before CPU-family normalization. */
+      readonly peMachine: number;
       readonly architecture: HeaderArchitecture;
       readonly availableArchitectures: readonly HeaderArchitecture[];
       readonly executableRole:
@@ -318,6 +320,7 @@ export const parsePeRecord = (
   const characteristics = record.readUInt16LE(22);
   return ok({
     format: "pe",
+    peMachine: machineType,
     architecture,
     availableArchitectures: [architecture],
     executableRole:

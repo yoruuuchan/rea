@@ -254,10 +254,20 @@ export class CdpConnection {
     if (pending === undefined) return;
     const hasResult = "result" in message;
     const hasError = "error" in message;
+    // Chromium cannot route a rejection through a flat session after that
+    // session disappears. Its browser-level reply omits sessionId, but the
+    // connection-global command id still binds this exact terminal error.
+    const detachedSessionError =
+      pending.sessionId !== undefined &&
+      !("sessionId" in message) &&
+      hasError &&
+      isRecord(message.error) &&
+      message.error.code === -32_001 &&
+      message.error.message === "Session with given id not found.";
     if (
       (pending.sessionId === undefined
         ? "sessionId" in message
-        : message.sessionId !== pending.sessionId) ||
+        : message.sessionId !== pending.sessionId && !detachedSessionError) ||
       hasResult === hasError
     ) {
       this.#failPending("protocol_error");

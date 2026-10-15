@@ -7,7 +7,7 @@ import {
   stat,
   type FileHandle,
 } from "node:fs/promises";
-import { extname, isAbsolute, resolve } from "node:path";
+import { extname } from "node:path";
 
 import { BinaryTargetError } from "../domain/configurationErrors.js";
 import {
@@ -52,6 +52,7 @@ import {
   type ExecutableMetadata,
 } from "../domain/binaryTarget.js";
 import type { PeCodeViewRecord } from "../domain/binaryTargetTypes.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 const XML_PLIST_PROBE_CHUNK_BYTES = 64 * 1024;
 
@@ -80,7 +81,7 @@ export const parseBinaryTarget = async (
   const cwd = options.cwd ?? process.cwd();
   const hostArchitecture = options.hostArchitecture ?? process.arch;
   const { targetKind, formatHint, signal, architecture, entryPoint } = options;
-  const candidate = isAbsolute(input) ? input : resolve(cwd, input);
+  const candidate = absoluteCallerPath(input, { cwd });
   try {
     throwIfTargetResolutionCancelled(signal);
     await access(candidate, constants.R_OK);

@@ -115,13 +115,13 @@ export const categorizeSwiftTypes = (
       ![entry.name, ...mangledNames].some((name) => name.includes(pattern))
     )
       continue;
-    // Only decoded names vote. Unresolved aliases remain evidence without
-    // erasing category evidence from a name the decoder did recognize.
-    const kinds = new Set(
-      mangledNames
-        .filter((name) => classifySwiftSymbol(name) !== undefined)
-        .map((name) => classifySwiftSymbol(name)?.category ?? null),
-    );
+    // Only decoded categories vote. A Swift-looking alias whose category is
+    // not decoded remains evidence without erasing a decoded category.
+    const kinds = new Set<SwiftTypeCategory>();
+    for (const name of mangledNames) {
+      const decoded = classifySwiftSymbol(name)?.category;
+      if (decoded !== undefined && decoded !== null) kinds.add(decoded);
+    }
     const category = kinds.size === 1 ? ([...kinds][0] ?? null) : null;
     const item = {
       address: entry.address,
@@ -133,9 +133,7 @@ export const categorizeSwiftTypes = (
       unclassified.push({
         ...item,
         reason:
-          kinds.size > 1 && !kinds.has(null)
-            ? "conflicting_categories"
-            : "category_not_decoded",
+          kinds.size > 1 ? "conflicting_categories" : "category_not_decoded",
       });
     }
     const bucket = category ?? "other";

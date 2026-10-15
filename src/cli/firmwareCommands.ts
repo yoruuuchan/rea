@@ -1,5 +1,4 @@
 import { z } from "incur";
-import { resolve } from "node:path";
 import { FirmwareAnalysisService } from "../application/firmware/FirmwareAnalysisService.js";
 import { createFirmwareAnalysisProvider } from "../composition/firmware.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
@@ -11,6 +10,7 @@ import type { FirmwareOperation } from "../domain/firmware/firmwareAnalysis.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** One-shot firmware CLI commands backed by the same workflows as MCP. */
 export const registerFirmwareCommands = (
@@ -50,7 +50,7 @@ export const registerFirmwareCommands = (
         CLI_COMMANDS.inspectFirmwareRegions,
         "inspect_firmware_regions",
         // CLI paths are operator-relative; resolve before shared validation.
-        { path: resolve(args.path) },
+        { path: absoluteCallerPath(args.path) },
       ),
   });
   cli.command(CLI_COMMANDS.extractFirmware, {
@@ -75,8 +75,8 @@ export const registerFirmwareCommands = (
     }),
     run: ({ args, options }) =>
       execute(CLI_COMMANDS.extractFirmware, "extract_firmware", {
-        path: resolve(args.path),
-        output_directory: resolve(args.outputDirectory),
+        path: absoluteCallerPath(args.path),
+        output_directory: absoluteCallerPath(args.outputDirectory),
         ...(options.offset === undefined && options.length === undefined
           ? {}
           : { range: { offset: options.offset, length: options.length } }),

@@ -1,3 +1,4 @@
+import { KUNA_STRING_MIN_LENGTH } from "./KunaLimits.js";
 import { accessSync, constants, statSync } from "node:fs";
 
 import type {
@@ -30,6 +31,7 @@ import {
   kunaCapabilities,
 } from "./KunaProviderCapabilities.js";
 import { KUNA_COMMAND_REMEDIATION, KUNA_PROVIDER_ID } from "./KunaRelease.js";
+import { KunaRunSlots } from "./KunaRunSlots.js";
 import { KunaSessionClient } from "./KunaSessionClient.js";
 
 /** Architectures REA verified Kuna on: x86-64 and AArch64 ELF and Mach-O, plus ARM Thumb. */
@@ -47,18 +49,23 @@ export class KunaProvider implements AnalysisProviderCandidate {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #platform: NodeJS.Platform;
   readonly #launcher: KunaProcessLauncher | undefined;
+  readonly #singleFunctionRuns: number | undefined;
   #cache: KunaProjectCache | undefined;
+  #runSlots: KunaRunSlots | undefined;
 
   constructor(
     environment: Readonly<NodeJS.ProcessEnv>,
     options: {
       readonly platform?: NodeJS.Platform;
       readonly launcher?: KunaProcessLauncher;
+      /** Test seam for foreground native runs; production derives it from the host. */
+      readonly singleFunctionRuns?: number;
     } = {},
   ) {
     this.#platform = options.platform ?? process.platform;
     this.#environment = snapshotEnvironment(environment, this.#platform);
     this.#launcher = options.launcher;
+    this.#singleFunctionRuns = options.singleFunctionRuns;
   }
 
   identity() {
@@ -180,6 +187,20 @@ export class KunaProvider implements AnalysisProviderCandidate {
           verified_release: value.verified,
           jobs: value.configuration.jobs,
           export: "decompile-project",
+          reference_graph: {
+            command: "decompile-graph",
+            schema_version: 4,
+            bodies: false,
+            edge_kind: "call",
+          },
+          xrefs: { command: "xrefs", direction: "to", exact_address: true },
+          strings: {
+            command: "strings",
+            encoding: "all",
+            min_length: KUNA_STRING_MIN_LENGTH,
+            termination: "any",
+            xrefs: false,
+          },
           cache_policy: "live",
         },
       ),
@@ -208,6 +229,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
       };
     return new KunaSessionClient(target, profile, {
       cache: this.#projectCache(configuration.value),
+      runSlots: this.#foregroundSlots(configuration.value),
       environment: this.#environment,
       ...(this.#launcher === undefined ? {} : { launcher: this.#launcher }),
     });
@@ -220,5 +242,14 @@ export class KunaProvider implements AnalysisProviderCandidate {
       ...(this.#launcher === undefined ? {} : { launcher: this.#launcher }),
     });
     return this.#cache;
+  }
+
+  /** One admission pool per provider, so concurrent sessions share the host's cores. */
+  #foregroundSlots(configuration: KunaConfiguration): KunaRunSlots {
+    this.#runSlots ??=
+      this.#singleFunctionRuns === undefined
+        ? KunaRunSlots.forHost(configuration.jobs)
+        : new KunaRunSlots(this.#singleFunctionRuns);
+    return this.#runSlots;
   }
 }

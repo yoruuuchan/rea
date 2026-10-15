@@ -136,4 +136,34 @@ describe("Swift alias ambiguity", () => {
     ]);
     expect(result.categories.other?.items).toEqual([]);
   });
+
+  it.each([undefined, "classes"] as const)(
+    "keeps a decoded alias category beside an undecoded Swift alias (filter %s)",
+    (category) => {
+      const result = categorizeSwiftTypes(
+        [{ address: "0x1", name: "main::Service::init" }],
+        category === undefined ? {} : { category },
+        [
+          { address: "0x1", name: "_$s4main7ServiceCMa" },
+          { address: "0x1", name: "_$s4main04PairVMa" },
+        ],
+      );
+      expect(result).toMatchObject({
+        total: 1,
+        categories: {
+          classes: {
+            count: 1,
+            items: [
+              {
+                name: "main::Service::init",
+                mangled_names: ["_$s4main7ServiceCMa", "_$s4main04PairVMa"],
+              },
+            ],
+          },
+          other: { count: 0 },
+        },
+        unclassified: [],
+      });
+    },
+  );
 });

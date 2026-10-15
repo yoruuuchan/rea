@@ -195,6 +195,8 @@ export type BinaryTarget =
     })
   | (ExecutableTarget & {
       readonly format: "pe";
+      /** Original COFF machine; undefined means this header fact is unavailable. */
+      readonly peMachine?: number;
       /** Provider-neutral PE image role observed from COFF characteristics. */
       readonly executableRole:
         | "application"

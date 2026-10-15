@@ -52,6 +52,7 @@ import {
   CAPABILITIES,
   windowsP0Capabilities,
   GHIDRA_PROVIDER_IDENTITY,
+  WINDOWS_P0_NATIVE_PE_ARCHITECTURES,
 } from "./GhidraProviderCapabilities.js";
 import {
   createGhidraProviderClient,
@@ -360,11 +361,12 @@ const inspectWindowsP0TargetSupport = (
         "Windows Ghidra P0 accepts native PE and explicitly selected raw 6502 targets only.",
       diagnostics,
     };
-  if (target.architecture !== "x86" && target.architecture !== "x86_64")
+  if (!WINDOWS_P0_NATIVE_PE_ARCHITECTURES.includes(target.architecture))
     return {
       status: "unsupported",
       code: "architecture_unsupported",
-      reason: "Windows Ghidra P0 accepts x86 and x86-64 PE targets only.",
+      reason:
+        "Windows Ghidra P0 accepts x86, x86-64, ARM and ARM64 PE targets only.",
       diagnostics,
     };
   if (
@@ -385,6 +387,17 @@ const inspectWindowsP0TargetSupport = (
       reason:
         "Windows Ghidra P0 accepts native PE applications and DLLs; managed or unclassified PE targets are unsupported.",
       diagnostics,
+    };
+  if (
+    (target.architecture === "arm" && target.peMachine !== 0x01c4) ||
+    (target.architecture === "arm64" && target.peMachine !== 0xaa64)
+  )
+    return {
+      status: "unsupported",
+      code: "architecture_unsupported",
+      reason:
+        "Windows Ghidra P0 ARM PE targets require observed ARMNT (0x01c4) or ARM64 (0xaa64) COFF machines; legacy ARM/Thumb and unknown machines are unsupported.",
+      diagnostics: { ...diagnostics, pe_machine: target.peMachine ?? null },
     };
   return {
     status: "supported",

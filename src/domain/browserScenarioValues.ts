@@ -107,7 +107,10 @@ export const browserScenarioEnvironmentSchema = z
       .string()
       .min(2)
       .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u)
-      .default("en-US"),
+      .default("en-US")
+      .describe(
+        "Formatting locale. Launch also sets navigator.language(s) and Accept-Language; connect retains the caller's page and request languages and reports this limitation.",
+      ),
     timezone: z
       .string()
       .min(1)

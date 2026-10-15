@@ -1,6 +1,5 @@
 import { z } from "incur";
 import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
 
 import { resolveCliAnalysisSelector } from "./analysisSelector.js";
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
@@ -16,6 +15,7 @@ import { runCliJavaScriptApplicationAnalysis } from "./javascriptApplicationAnal
 import { withCommandCancellation } from "./commandCancellation.js";
 import { javascriptApplicationOptions } from "../cliObservationOptions.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** Register provider-neutral binary overview and procedure CLI commands. */
 export const registerCoreBinaryCommands = (
@@ -84,7 +84,7 @@ const registerOverviewCommands = (
           logCliCommand(logger, "analyze", () =>
             runCliJavaScriptApplicationAnalysis(
               {
-                input_path: resolve(args.path),
+                input_path: absoluteCallerPath(args.path),
                 integrity_policy:
                   options.integrityPolicy ?? defaultIntegrityPolicy,
                 ...(options.sourcePath === undefined

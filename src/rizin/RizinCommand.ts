@@ -1,6 +1,5 @@
-import { resolve } from "node:path";
-
 import type { RizinInput } from "../domain/reverseEngineering.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 export const RIZIN_PROVIDER_IDENTITY = {
   id: "rizin",
@@ -14,5 +13,5 @@ export const rizinCommand = (input: RizinInput): readonly string[] => [
   "-q",
   "-c",
   input.command,
-  resolve(input.path),
+  absoluteCallerPath(input.path),
 ];

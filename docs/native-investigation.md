@@ -270,7 +270,9 @@ Mach-O image. Architecture
 `file_offset` values are container-relative. Entrypoint, segment and section
 `file_offset` values retain their source meaning and are relative to the
 selected Mach-O slice. Raw load-command fields retain their original values.
-Evidence locations map the LC_MAIN entrypoint and nonempty file-backed segment
+A field otool prints more than once, such as each `LC_BUILD_VERSION` tool, is
+keyed `name #n` in print order. Each `LC_LINKER_OPTION` string is keyed
+`string #n` and checked against the declared `count`. Evidence locations map the LC_MAIN entrypoint and nonempty file-backed segment
 ranges to container offsets by adding the observed slice offset. Zero-fill
 segments do not produce file ranges. When the selected slice's container offset
 is unknown, those mapped locations are omitted with an explicit limitation;
@@ -495,7 +497,7 @@ is present. A denied trace reports the `debugger-attach-denied` reason.
 Install a Ghidra 12.1.x release and the 64-bit full JDK it declares, then configure REA to
 use them. Ghidra analysis supports Linux x64/arm64 and macOS x64/arm64; each installation requires
 the matching native decompiler. Experimental Windows x64 P0 admits native
-x86 and x86-64 PE applications and DLLs, plus explicitly selected
+x86, x86-64, ARMNT (Thumb-2) and ARM64 PE applications and DLLs, plus explicitly selected
 [raw NMOS 6502 images](raw-binary.md#nmos-6502) with a caller-supplied load address,
 on fixed local NTFS volumes. Other raw CPU families remain unsupported on Windows.
 The boundary uses bundled Job Object ownership, protected runtime DACLs, and

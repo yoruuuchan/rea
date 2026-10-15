@@ -1,5 +1,4 @@
 import { z } from "incur";
-import { resolve } from "node:path";
 import { createSqliteDatabaseService } from "../composition/sqlite.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { logCliCommand } from "../cliLogging.js";
@@ -9,6 +8,7 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** Resolve an operator-selected SQLite snapshot through the shared inspection workflow. */
 export const registerSqliteCommands = (
@@ -55,7 +55,7 @@ export const registerSqliteCommands = (
           const inspection = await service
             .inspect(
               {
-                path: resolve(args.path),
+                path: absoluteCallerPath(args.path),
                 ...(options.table === undefined
                   ? {}
                   : { table: options.table }),

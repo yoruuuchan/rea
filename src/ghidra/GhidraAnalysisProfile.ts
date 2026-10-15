@@ -227,6 +227,17 @@ export const resolveGhidraAnalysisProfile = async (
         ...(target.format === "pe"
           ? { pdb_observations: "program-info-v5" }
           : {}),
+        ...(installation.platform === "win32" &&
+        target.format === "pe" &&
+        (target.architecture === "arm" || target.architecture === "arm64")
+          ? {
+              windows_arm_pe_import:
+                selectedLanguage === undefined
+                  ? "loader-selected-language-v1"
+                  : "explicit-language-v1",
+              windows_arm_pe_machine: target.peMachine ?? null,
+            }
+          : {}),
         annotation_policy: "atomic-function-entry-metadata-v1",
         load_image_observations: "source-mappings-entry-context-v2",
         function_body_evidence: "complete-inclusive-ranges-v1",

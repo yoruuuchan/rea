@@ -52,8 +52,22 @@ export const decodeObjcCategories = (input: {
         const name = read.string(read.pointer(category));
         const external = boundClassName(read, category + 8n);
         const local = read.pointer(category + 8n);
-        const className =
-          external ?? (local === 0n ? null : input.localClassName(local));
+        let className = external ?? null;
+        if (external === undefined && local !== 0n)
+          try {
+            className = input.localClassName(local);
+          } catch (cause: unknown) {
+            // The category's own name and methods do not depend on its owner;
+            // keep them and report the unreadable class reference.
+            input.issues.push(
+              issue(
+                "objc_properties_categories",
+                "category_class_unresolved",
+                `Category ${name} class reference 0x${local.toString(16)}: ${cause instanceof Error ? cause.message : String(cause)}`,
+                `0x${(category + 8n).toString(16)}`,
+              ),
+            );
+          }
         const owner = className ?? `(${name})`;
         result.objc_categories.push({
           name,

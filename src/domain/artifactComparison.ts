@@ -483,16 +483,19 @@ const summarize = (
     contradiction: 0,
   };
   for (const change of changes) counts[change.classification] += 1;
+  // Change rows are keyed by logical path, and one unknown row for a duplicate
+  // path stands for every left occurrence on it. Only occurrences on paths
+  // without a left-side change are affirmatively unchanged.
+  const changedPaths = new Set(
+    changes
+      .filter(({ classification }) => classification !== "added")
+      .map(({ logical_path: path }) => path),
+  );
   return {
     unchanged: covered
-      ? Math.max(
-          0,
-          left.occurrences.length -
-            counts.removed -
-            counts.changed -
-            counts.contradiction -
-            counts.unknown,
-        )
+      ? left.occurrences.filter(
+          ({ logical_path: path }) => !changedPaths.has(path),
+        ).length
       : 0,
     ...counts,
     unknown: covered

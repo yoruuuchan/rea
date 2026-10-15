@@ -821,7 +821,10 @@ The initial Linux x64 IDA Free 9.4 run used native MCP 1.1.2 with a local naviga
 
 `npm run verify:kuna` requires a caller-supplied `kuna` in `REA_KUNA_COMMAND`
 and a host C compiler (`REA_CC`, default `cc`) with `strip` and `nm`. It builds a
-source-owned fixture with symbols and stripped, then verifies through MCP that
+source-owned fixture with non-inlined calls, with symbols and stripped, then verifies through MCP that
+callers, callees and exact incoming xrefs agree with those calls, graph/path
+composition reaches the callee, reference-only queries leave project/staging
+entries unchanged, repeated relationships reuse the graph, and
 the first cold pseudocode answer comes from a single-function run or an export
 that already finished, assembly waits for and serves from that export, and
 pseudocode and both dossier facets match their recorded file spans and digests,
@@ -834,7 +837,8 @@ caller-built functions through Ghidra (it refuses to run without `--targets` and
 `--functions`, an empty matrix, or names missing from every supplied target) and
 reports latency, sampled process-tree CPU and peak memory, UTF-8 response size,
 and goto and warning-marker counts. Those counts are not a correctness judgement,
-and model tokens are not measured. `--report PATH` writes the JSON report.
+and model tokens are not measured. Reference timings and response sizes are
+reported separately; reference caches expire when the server closes. `--report PATH` writes the JSON report.
 
 The first matrix run used Kuna 1.833 and Ghidra 12.1.4 with JDK 21 on macOS
 arm64. It covered zlib 1.3.2 `minigzip`, coreutils 9.9 `sort` and the sqlite

@@ -25,6 +25,7 @@ import { writeElectronBoundaryFixture } from "../../fixtures/electronBoundaryApp
 import { createElectronActiveObservationFixtureResult } from "../../../src/domain/javascript/electronActiveObservation.fixture.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { AsarArtifactReader } from "../../../src/artifacts/AsarArtifactReader.js";
+import { toolAvailabilityInventory } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 
 const browsers: FakeCdpBrowser[] = [];
 const resources: Array<{ close(): Promise<unknown> }> = [];
@@ -136,6 +137,47 @@ it("lets MCP JavaScript analysis continue only with recorded untrusted ASAR byte
       graph: { coverage: { status: "partial" } },
     },
   });
+});
+
+it("advertises owned JavaScript analysis effects without foreign target execution", async () => {
+  const session = createTestBinarySession(() => ({
+    execute: () => Promise.resolve(observed(null)),
+    close: () => Promise.resolve(resultOk(null)),
+  }));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({
+    name: "javascript-analysis-effects",
+    version: "1",
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  resources.push(client, server, session);
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  const status = await client.callTool({
+    name: "binary_session",
+    arguments: {},
+  });
+  expect(status.isError).not.toBe(true);
+  const { result } = z
+    .object({
+      result: z.object({ tool_availability: toolAvailabilityInventory }),
+    })
+    .parse(status.structuredContent);
+  const analysisAvailability = result.tool_availability.groups.find(
+    ({ names }) => names.includes("analyze_javascript_application"),
+  );
+  expect(analysisAvailability?.effects.toSorted()).toEqual([
+    "idempotent",
+    "launchesProcess",
+    "mutatesSession",
+    "writesFilesystem",
+  ]);
+  expect(analysisAvailability?.annotations.toSorted()).toEqual([
+    "idempotent",
+    "open_world",
+  ]);
 });
 
 it("exposes endpoint-scoped Electron discovery and inspection as Evidence", async () => {

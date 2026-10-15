@@ -14,6 +14,29 @@ import {
 
 const digest = (character: string): string => character.repeat(64);
 
+it("preserves duplicate coverage owners instead of overwriting them in shared indexes", () => {
+  const workspace = completeReconstructionCoverageData();
+  const owner = workspace.owners[0];
+  if (owner === undefined) throw new Error("Expected fixture owner");
+  const result = evaluateReconstructionClosure(
+    {
+      ...workspace,
+      owners: [owner, owner],
+    },
+    "replacement.cli",
+    RECONSTRUCTION_COVERAGE_NOW,
+  );
+  expect(result).toMatchObject({
+    status: "partial",
+    reasons: expect.arrayContaining([
+      expect.objectContaining({
+        code: "owner-duplicate",
+        subject_id: "cli.help",
+      }),
+    ]),
+  });
+});
+
 describe("reconstruction coverage closure", () => {
   it("returns ready only when ownership, verification, package, and authority closure pass", () => {
     const workspace = completeReconstructionCoverageData();

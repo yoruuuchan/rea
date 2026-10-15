@@ -8,7 +8,7 @@ import {
   readlink,
   realpath,
 } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
@@ -17,6 +17,7 @@ import {
   AnalysisOutputError,
 } from "../domain/analysisErrorCore.js";
 import type { FirmwareRequest } from "../domain/firmware/firmwareAnalysis.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
@@ -63,7 +64,7 @@ export const snapshotFirmware = async (
   root: string,
   signal: AbortSignal,
 ) => {
-  const sourcePath = resolve(request.input.path);
+  const sourcePath = absoluteCallerPath(request.input.path);
   const source = await realpath(sourcePath);
   const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
   const fullPath = join(root, "firmware.bin");

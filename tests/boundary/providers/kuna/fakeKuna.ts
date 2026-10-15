@@ -8,6 +8,13 @@ export interface FakeKunaFunction {
   readonly error?: string;
 }
 
+export interface FakeKunaString {
+  readonly address: number;
+  readonly text: string;
+  readonly encoding?: "ascii" | "utf8" | "utf16";
+  readonly terminated?: boolean;
+}
+
 /** Scripted behavior of the fake `kuna` executable for one test. */
 export interface FakeKunaBehavior {
   /** Text printed by `--version`; `exit` fails the probe instead. */
@@ -16,23 +23,44 @@ export interface FakeKunaBehavior {
     | { readonly exit: number }
     | { readonly ignoreTerm: true };
   readonly inventory?: "ok" | "not-json" | "hang";
+  readonly inventoryImports?: boolean;
   readonly project?:
     | "ok"
     | "exit-failure"
     | "hang"
     | "miscounted"
     | "silent"
-    | "block-manifest";
+    | "block-manifest"
+    /** Writes more than REA's 8 MiB export output buffer before its summary. */
+    | "noisy";
   readonly functions?: readonly FakeKunaFunction[];
   /** Extra `.asm` bytes, for capacity tests. */
   readonly asmPadding?: number;
   /** Extra C comment bytes inside each exported body, for buffered-read capacity. */
   readonly cPadding?: number;
   readonly decompile?: "ok" | "hang";
+  /** Milliseconds one `decompile --addr` run takes before printing. */
+  readonly decompileDelayMs?: number;
   /** Milliseconds `functions --json` takes before printing. */
   readonly inventoryDelayMs?: number;
   /** Milliseconds the export takes before writing its files. */
   readonly delayMs?: number;
+  /** `oversized` writes more graph output than REA buffers (32 MiB). */
+  readonly graph?:
+    | "ok"
+    | "hang"
+    | "not-json"
+    | "miscounted"
+    | "with-bodies"
+    | "oversized";
+  readonly graphIndirectCalls?: boolean;
+  readonly xrefs?: "ok" | "hang" | "not-json";
+  readonly referenceDelayMs?: number;
+  readonly referencePadding?: number;
+  readonly strings?: "ok" | "hang" | "not-json" | "miscounted" | "exit-failure";
+  readonly stringRows?: readonly FakeKunaString[];
+  readonly stringDelayMs?: number;
+  readonly stringPadding?: number;
 }
 
 /**
@@ -45,7 +73,7 @@ const SCRIPT = String.raw`
 const fs = require("node:fs");
 const path = require("node:path");
 const behavior = JSON.parse(fs.readFileSync(__filename + ".json", "utf8"));
-fs.appendFileSync(__filename + ".calls", JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), home: process.env.HOME, xdg: process.env.XDG_CACHE_HOME, path: process.env.PATH ?? null }) + "\n");
+fs.appendFileSync(__filename + ".calls", JSON.stringify({ pid: process.pid, at: Date.now(), argv: process.argv.slice(2), home: process.env.HOME, xdg: process.env.XDG_CACHE_HOME, path: process.env.PATH ?? null }) + "\n");
 const args = process.argv.slice(2);
 const functions = behavior.functions ?? [{ name: "main", addr: "0x1000" }, { name: "helper", addr: "0x1040" }];
 const hang = () => setInterval(() => {}, 1000);
@@ -59,8 +87,43 @@ if (args[0] === "--version") {
   if (mode === "hang") hang();
   else if (mode === "not-json") process.stdout.write("functions: 2\n");
   else {
-    const listed = [...functions, { name: "puts", addr: "0x2000" }].map((fn) => ({ name: fn.name, address: parseInt(fn.addr, 16), address_hex: fn.addr, aliases: [], object_location: null, size: fn.name === "puts" ? 0 : 16 }));
+    const listed = [...functions, ...(behavior.inventoryImports === false ? [] : [{ name: "puts", addr: "0x2000" }])].map((fn) => ({ name: fn.name, address: parseInt(fn.addr, 16), address_hex: fn.addr, aliases: [], object_location: null, size: fn.name === "puts" ? 0 : 16 }));
     setTimeout(() => process.stdout.write(JSON.stringify({ binary: args[1], count: listed.length, total: listed.length, error: null, functions: listed }, null, 2) + "\n"), behavior.inventoryDelayMs ?? 0);
+  }
+} else if (args[0] === "strings") {
+  if (behavior.strings === "exit-failure") { process.stderr.write("fixture string scan failed\n"); process.exit(7); }
+  else if (behavior.strings === "hang") hang();
+  else if (behavior.strings === "not-json") process.stdout.write("not string JSON");
+  else {
+    if (!args.includes("--no-xrefs") || args[args.indexOf("--encoding") + 1] !== "all") throw new Error("strings must skip reference analysis and include all supported encodings");
+    const rows = (behavior.stringRows ?? [{ address: 12288, text: "REA fixture prompt" }, { address: 12320, text: "Δelta", encoding: "utf8", terminated: false }]).map((item) => ({ address: item.address, address_hex: "0x" + item.address.toString(16), text: item.text, length: [...item.text].length, byte_length: Buffer.byteLength(item.text, item.encoding === "utf16" ? "utf16le" : "utf8") + (item.terminated === false ? 0 : item.encoding === "utf16" ? 2 : 1), nul_terminated: item.terminated !== false, encoding: item.encoding ?? "ascii", section: ".rodata", xrefs_count: 0, functions: [] }));
+    const document = { binary: args[1], encoding: "all", min_length: 5, filter: null, section: null, termination: "any", scanned: "sections", xrefs: false, count: rows.length + (behavior.strings === "miscounted" ? 1 : 0), strings: rows, padding: "x".repeat(behavior.stringPadding ?? 0) };
+    setTimeout(() => process.stdout.write(JSON.stringify(document)), behavior.stringDelayMs ?? 0);
+  }
+} else if (args[0] === "decompile-graph") {
+  if (behavior.graph === "hang") hang();
+  else if (behavior.graph === "not-json") process.stdout.write("not graph JSON");
+  else if (behavior.graph === "oversized") process.stdout.write(Buffer.alloc(33 * 1024 * 1024, 0x20));
+  else {
+    if (args[args.indexOf("--functions") + 1] !== "") throw new Error("graph must request no bodies");
+    const nodes = [...functions, { name: "puts", addr: "0x2000" }].map((fn) => ({ address: parseInt(fn.addr, 16), name: fn.name, kind: "normal", hasIndirectCalls: behavior.graphIndirectCalls !== false && fn === functions[0], forwardsTo: null, codeC: behavior.graph === "with-bodies" ? "unrequested code" : null, assembly: null, error: null }));
+    const edges = [];
+    if (functions[1]) edges.push({ callerAddress: nodes[0].address, calleeAddress: nodes[1].address, kind: "call", calleeOrder: 0 });
+    if (functions[2]) edges.push({ callerAddress: nodes[0].address, calleeAddress: nodes[2].address, kind: functions[2].error ? "jump" : "call", calleeOrder: 1 });
+    if (functions[1]?.name === "parse") edges.push({ callerAddress: nodes[1].address, calleeAddress: 8192, kind: "call", calleeOrder: 0 });
+    setTimeout(() => process.stdout.write(JSON.stringify({ schemaVersion: 4, binary: { sourcePath: args[1], functionCount: nodes.length + (behavior.graph === "miscounted" ? 1 : 0), edgeCount: edges.length }, functions: nodes, edges })), behavior.referenceDelayMs ?? 0);
+  }
+} else if (args[0] === "xrefs") {
+  if (behavior.xrefs === "hang") hang();
+  else if (behavior.xrefs === "not-json") process.stdout.write("not xref JSON");
+  else {
+    const target = args[args.indexOf("--to") + 1];
+    const identity = (name, value) => ({ name, address: value, address_hex: "0x" + value.toString(16) });
+    const aliases = target === "0x2000" ? [identity("puts.slot", 12288)] : [];
+    const row = (from, to, kind) => ({ address: from, address_hex: "0x" + from.toString(16), from_address: from, from_address_hex: "0x" + from.toString(16), to_address: to, to_address_hex: "0x" + to.toString(16), kind, from_function: identity("main", 4096), to_function: null, instruction: "fixture reference" + "x".repeat(behavior.referencePadding ?? 0) });
+    const rows = [row(4100, parseInt(target, 16), "call")];
+    if (aliases.length) rows.push(row(4164, 12288, "call"));
+    setTimeout(() => process.stdout.write(JSON.stringify({ binary: args[1], direction: "to", count: rows.length, target: { ...identity(null, parseInt(target, 16)), aliases }, xrefs: rows })), behavior.referenceDelayMs ?? 0);
   }
 } else if (args[0] === "decompile-project") {
   const input = args[1];
@@ -88,6 +151,7 @@ if (args[0] === "--version") {
     if (mode === "block-manifest") fs.mkdirSync(path.join(output, "..", "manifest.json"));
     const failed = functions.filter((fn) => fn.error !== undefined).length;
     const reported = mode === "miscounted" ? functions.length + 1 : functions.length - failed;
+    if (mode === "noisy") process.stdout.write(Buffer.alloc(9 * 1024 * 1024, 0x20));
     if (mode !== "silent") process.stdout.write("wrote " + output + ": " + stem + ".c (" + c.length + " bytes); functions: " + reported + " ok, " + failed + " failed\n");
   }, behavior.delayMs ?? 0);
 } else if (args[0] === "decompile") {
@@ -95,7 +159,10 @@ if (args[0] === "--version") {
   const fn = functions.find((candidate) => candidate.addr === args[2]);
   if (behavior.decompile === "hang") hang();
   else if (fn === undefined) { process.stderr.write("error: no function at " + args[2] + "\n"); process.exit(1); }
-  else process.stdout.write("int " + fn.name + "(void) // single-function\n{\n  return 0;\n}\n");
+  else setTimeout(() => {
+    process.stdout.write("int " + fn.name + "(void) // single-function\n{\n  return 0;\n}\n");
+    fs.appendFileSync(__filename + ".exits", JSON.stringify({ pid: process.pid, at: Date.now() }) + "\n");
+  }, behavior.decompileDelayMs ?? 0);
 } else {
   process.stderr.write("unexpected command\n");
   process.exit(2);
@@ -125,6 +192,8 @@ export const fakeKunaCalls = async (
 ): Promise<
   readonly {
     readonly pid: number;
+    /** Epoch milliseconds when the invocation started. */
+    readonly at: number;
     readonly argv: readonly string[];
     readonly home: string;
     readonly xdg: string;
@@ -136,4 +205,20 @@ export const fakeKunaCalls = async (
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as never);
+};
+
+/** When each completed single-function run finished, by process id. */
+export const fakeKunaExits = async (
+  path: string,
+): Promise<ReadonlyMap<number, number>> => {
+  const text = await readFile(`${path}.exits`, "utf8").catch(() => "");
+  return new Map(
+    text
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const { pid, at } = JSON.parse(line) as { pid: number; at: number };
+        return [pid, at];
+      }),
+  );
 };

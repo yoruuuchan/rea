@@ -6,6 +6,8 @@ import type { BinaryTarget } from "../../../../src/domain/binaryTargetTypes.js";
 import type { JsonValue } from "../../../../src/domain/jsonValue.js";
 import type { KunaProcessLauncher } from "../../../../src/kuna/KunaCommand.js";
 import { KunaProvider } from "../../../../src/kuna/KunaProvider.js";
+import { cleanupOwnedProcessGroup } from "../../../../src/process/ProcessOwnership.js";
+import { spawnOwnedProviderProcess } from "../../../../src/process/ProviderProcess.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import {
   fakeKunaCalls,
@@ -28,6 +30,7 @@ export const session = async (
   behavior: FakeKunaBehavior = {},
   environment: Readonly<Record<string, string>> = {},
   launcher?: KunaProcessLauncher,
+  singleFunctionRuns?: number,
 ) => {
   const root = await createTestTempDirectory(prefix);
   const kuna = await writeFakeKuna(root, { functions: FUNCTIONS, ...behavior });
@@ -47,6 +50,7 @@ export const session = async (
     {
       platform: process.platform,
       ...(launcher === undefined ? {} : { launcher }),
+      ...(singleFunctionRuns === undefined ? {} : { singleFunctionRuns }),
     },
   );
   const profile = await provider.resolveAnalysisProfile(target);
@@ -76,3 +80,25 @@ export const exportsOf = async (kuna: string) =>
   (await fakeKunaCalls(kuna)).filter(
     ({ argv }) => argv[0] === "decompile-project",
   );
+
+/**
+ * Launch for real, but have cleanup of the selected subcommand report an
+ * unproven stop until `release` is called, as a lost ownership proof would.
+ */
+export const unprovenCleanupLauncher = (subcommand: string) => {
+  let proven = false;
+  const launcher: KunaProcessLauncher = async (options) => {
+    const spawned = await spawnOwnedProviderProcess(options);
+    if (options.arguments[0] !== subcommand) return spawned;
+    return {
+      ...spawned,
+      cleanup: async () => {
+        const cleaned = await cleanupOwnedProcessGroup(spawned.ownership);
+        return proven
+          ? cleaned
+          : { cleaned: false, reason: `${subcommand} stop unproven` };
+      },
+    };
+  };
+  return { launcher, release: () => (proven = true) };
+};

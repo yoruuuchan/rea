@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import {
+  WINDOWS_GHIDRA_FIXTURE_FLAGS,
+  windowsGhidraFixtureOptions,
+} from "./lib/ghidra-windows-fixture-options.mjs";
 
 import assert from "node:assert/strict";
 import {
@@ -33,11 +37,11 @@ const exec = promisify(execFile);
 const arguments_ = process.argv.slice(2);
 const internalWorkspace = arguments_[0] === "--internal-workspace";
 const fixtureArguments = internalWorkspace ? arguments_.slice(2) : arguments_;
-const x86Fixture = fixtureArguments.includes("--x86");
-const dllFixture = fixtureArguments.includes("--dll");
+const fixture = windowsGhidraFixtureOptions(fixtureArguments);
+const dllFixture = fixture.dll;
 const [packageRootArgument, targetArgument, reportArgument] =
   fixtureArguments.filter(
-    (argument) => argument !== "--x86" && argument !== "--dll",
+    (argument) => !WINDOWS_GHIDRA_FIXTURE_FLAGS.includes(argument),
   );
 // Windows locks the loaded package-owned addon until the verifier exits.
 // Keep installation cleanup in a parent that never loads that addon.
@@ -125,10 +129,7 @@ if (packageRootArgument === undefined) {
     });
   }
 }
-const target = resolve(
-  targetArgument ??
-    `build/fixtures/rea-ghidra-windows${x86Fixture ? "-x86" : ""}.${dllFixture ? "dll" : "exe"}`,
-);
+const target = resolve(targetArgument ?? `build/fixtures/${fixture.filename}`);
 let TOOL_CONTRACTS, native, token, sha256;
 let parsedTarget;
 try {
@@ -160,10 +161,7 @@ try {
   assert.equal(parsedTarget.value.format, "pe");
   assert.equal(parsedTarget.value.managed, false);
   if (targetArgument === undefined) {
-    assert.equal(
-      parsedTarget.value.architecture,
-      x86Fixture ? "x86" : "x86_64",
-    );
+    assert.equal(parsedTarget.value.architecture, fixture.architecture);
     assert.equal(
       parsedTarget.value.executableRole,
       dllFixture ? "shared-library" : "application",
@@ -321,13 +319,13 @@ try {
     const procedures = await call("list_procedures", {});
     assert.ok(procedures.length > 0);
     if (targetArgument === undefined) {
-      const calleeAddress = x86Fixture ? "0x401010" : "0x140001010";
+      const calleeAddress = fixture.calleeAddress;
       const calleeCode = await call("procedure_pseudo_code", {
         procedure: calleeAddress,
       });
       assert.match(calleeCode, /\b(?:42|0x2a)\b/iu);
       if (dllFixture) {
-        const callerAddress = x86Fixture ? "0x401000" : "0x140001000";
+        const callerAddress = fixture.callerAddress;
         assert.ok(
           (
             await call("procedure_callees", { procedure: callerAddress })
@@ -379,7 +377,7 @@ try {
     report.byteSearch = await verifyWindowsGhidraByteSearch({
       invoke: call,
       sourceBytes,
-      architecture: parsedTarget.value.architecture,
+      imageBase: fixture.imageBase,
       sourceOwnedFixture: targetArgument === undefined,
       fallbackAddress: procedure.address,
       fallbackFileOffset: mapping.file_offset,

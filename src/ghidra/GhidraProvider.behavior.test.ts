@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 // Fake-backed provider coverage; real Ghidra verification lives in
 // `npm run verify:ghidra` and its focused variants.
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -376,6 +376,82 @@ describe("Ghidra Mach-O slice support", () => {
 });
 
 describe("Ghidra platform support", () => {
+  it.each([
+    { architecture: "arm", languageId: "ARM:LE:32:v7" },
+    { architecture: "arm64", languageId: "AARCH64:LE:64:v8A" },
+  ] as const)(
+    "records explicit Windows $architecture processor selection without claiming loader selection",
+    async ({ architecture, languageId }) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "rea-arm-profile-language-"),
+      );
+      onTestFinished(() => rm(directory, { recursive: true, force: true }));
+      const languages = join(
+        directory,
+        "Ghidra/Processors/fixture/data/languages",
+      );
+      await mkdir(languages, { recursive: true });
+      await writeFile(
+        join(languages, "fixture.ldefs"),
+        `<language_definitions><language processor="${architecture === "arm" ? "ARM" : "AARCH64"}" endian="little" size="${architecture === "arm" ? 32 : 64}" variant="fixture" id="${languageId}"><compiler name="Visual Studio" spec="fixture.cspec" id="windows"/></language></language_definitions>`,
+      );
+      const config = parseConfig({
+        GHIDRA_INSTALL_DIR: directory,
+        REA_GHIDRA_LANGUAGE_ID: languageId,
+        REA_GHIDRA_COMPILER_SPEC_ID: "windows",
+      });
+      if (!config.ok) throw config.error;
+      const ghidra = new GhidraProvider(
+        config.value,
+        silentLogger,
+        {},
+        installationHost("win32"),
+      );
+      const resolved = await ghidra.resolveAnalysisProfile(
+        peTarget(architecture),
+      );
+      if (!resolved.ok) throw resolved.error;
+      expect(resolved.value.profile?.parameters).toMatchObject({
+        windows_arm_pe_import: "explicit-language-v1",
+        windows_arm_pe_machine: peTarget(architecture).peMachine,
+        language_id: languageId,
+        compiler_spec_id: "windows",
+      });
+    },
+  );
+
+  it("versions the Windows ARM PE import without changing other profile lanes", async () => {
+    for (const platform of ["win32", "linux"] as const) {
+      const ghidra = provider(installationHost(platform));
+      for (const architecture of ["x86", "x86_64", "arm", "arm64"] as const) {
+        const resolved = await ghidra.resolveAnalysisProfile(
+          peTarget(architecture),
+        );
+        if (!resolved.ok) throw resolved.error;
+        if (resolved.value.profile === null)
+          throw new Error("Expected a PE analysis profile");
+        const parameters = resolved.value.profile.parameters;
+        if (
+          platform === "win32" &&
+          (architecture === "arm" || architecture === "arm64")
+        )
+          expect(parameters).toHaveProperty(
+            "windows_arm_pe_import",
+            "loader-selected-language-v1",
+          );
+        else expect(parameters).not.toHaveProperty("windows_arm_pe_import");
+        if (
+          platform === "win32" &&
+          (architecture === "arm" || architecture === "arm64")
+        )
+          expect(parameters.windows_arm_pe_machine).toBe(
+            peTarget(architecture).peMachine,
+          );
+        else expect(parameters).not.toHaveProperty("windows_arm_pe_machine");
+      }
+    }
+  });
+
   it("commits the PE role and managed classification to profile identity", async () => {
     const ghidra = provider(installationHost("win32"));
     const application = peTarget("x86_64");
@@ -520,12 +596,13 @@ describe("Ghidra Windows platform support", () => {
       status: "unsupported",
       code: "target_format_unsupported",
     });
+    // ARM64 PE is admitted on Windows P0 (bounded; see docs/windows-ghidra-p0.md).
     expect(
-      ghidra.inspectTargetSupport(executableTarget("pe", "arm64")),
-    ).toMatchObject({
-      status: "unsupported",
-      code: "architecture_unsupported",
-    });
+      ghidra.inspectTargetSupport(executableTarget("pe", "arm64")).status,
+    ).toBe("supported");
+    expect(
+      ghidra.inspectTargetSupport(executableTarget("pe", "arm")).status,
+    ).toBe("supported");
   });
 });
 
@@ -625,12 +702,6 @@ describe("Windows Ghidra native failure diagnostics", () => {
         status: "unsupported",
         code: "target_format_unsupported",
       });
-      expect(
-        ghidra.inspectTargetSupport(executableTarget("pe", "arm64")),
-      ).toMatchObject({
-        status: "unsupported",
-        code: "architecture_unsupported",
-      });
       const client = ghidra.createClient(nativeApplication);
       const health = await client.execute("health", {});
       if (health.ok)
@@ -649,18 +720,34 @@ describe("Windows Ghidra native failure diagnostics", () => {
 });
 
 describe("Ghidra Windows PE fixture admission", () => {
+  it.each(["arm", "arm64"] as const)(
+    "does not infer a COFF machine from an unobserved %s family",
+    (architecture) => {
+      const { peMachine, ...unobserved } = peTarget(architecture);
+      expect(peMachine).toBeDefined();
+      expect(
+        provider(installationHost("win32")).inspectTargetSupport(unobserved),
+      ).toMatchObject({
+        status: "unsupported",
+        code: "architecture_unsupported",
+        diagnostics: { pe_machine: null },
+      });
+    },
+  );
+
   it("admits generated PE32 and PE32+ DLLs and applications while preserving native-only Windows admission", async () => {
     const root = fileURLToPath(new URL("../../", import.meta.url));
     await promisify(execFile)(process.execPath, [
       join(root, "scripts/create-ghidra-windows-fixture.mjs"),
     ]);
     const ghidra = provider(installationHost("win32"));
-    for (const architecture of ["x86", "x86_64"] as const) {
+    for (const architecture of ["x86", "x86_64", "arm", "arm64"] as const) {
       for (const dll of [false, true]) {
+        const suffix = architecture === "x86_64" ? "" : `-${architecture}`;
         const path = join(
           root,
           "build/fixtures",
-          `rea-ghidra-windows${architecture === "x86" ? "-x86" : ""}.${dll ? "dll" : "exe"}`,
+          `rea-ghidra-windows${suffix}.${dll ? "dll" : "exe"}`,
         );
         const bytes = await readFile(path);
         const metadata = parseExecutableHeader(bytes, "x64");
@@ -684,13 +771,34 @@ describe("Ghidra Windows PE fixture admission", () => {
           ...metadata.value,
         };
         expect(ghidra.inspectTargetSupport(target).status).toBe("supported");
+        if (architecture === "arm") {
+          for (const peMachine of [0x01c0, 0x01c2]) {
+            const legacy = Buffer.from(bytes);
+            legacy.writeUInt16LE(peMachine, legacy.readUInt32LE(0x3c) + 4);
+            const parsed = parseExecutableHeader(legacy, "x64");
+            if (!parsed.ok) throw new Error(parsed.error);
+            if (parsed.value.format !== "pe")
+              throw new Error("Expected a PE fixture");
+            expect(parsed.value).toMatchObject({ architecture, peMachine });
+            expect(
+              ghidra.inspectTargetSupport({
+                ...target,
+                ...parsed.value,
+                sha256: createHash("sha256").update(legacy).digest("hex"),
+              }),
+            ).toMatchObject({
+              status: "unsupported",
+              code: "architecture_unsupported",
+              diagnostics: { pe_machine: peMachine },
+            });
+          }
+        }
         for (const [candidate, code] of [
           [
             { ...target, executableRole: "non-executable" },
             "target_role_unsupported",
           ],
           [{ ...target, managed: true }, "managed_target_unsupported"],
-          [{ ...target, architecture: "arm64" }, "architecture_unsupported"],
         ] as const) {
           expect(ghidra.inspectTargetSupport(candidate)).toMatchObject({
             status: "unsupported",
@@ -1300,8 +1408,34 @@ describe("Ghidra measured DOS load-image projection", () => {
   );
 });
 
+const unavailableNativeAotDatabaseType = (address: string | null) => ({
+  status: "unavailable",
+  reason:
+    "No exact database type or defined typed data exists at the selected identity",
+  id: null,
+  name: null,
+  kind: "unavailable",
+  source: "analysis-database",
+  source_archive: null,
+  address,
+  size_bytes: null,
+  alignment_bytes: null,
+  packing_enabled: null,
+  referenced_type: null,
+  array_count: null,
+  array_stride_bytes: null,
+  fields: [],
+  members: [],
+  total_fields: 0,
+  truncated: false,
+  limitations: [],
+});
+
 it("returns read-only NativeAOT metadata inline and drills down by derived MethodTable address", async () => {
   const bytes = nativeAotPeFixture();
+  const readSnapshot = vi.fn(async () =>
+    ok({ kind: "captured" as const, bytes }),
+  );
   const observations = fixtureDosLoadImage().observation;
   observations.image_base = "0x140000000";
   const factory: GhidraProviderClientFactory = () => ({
@@ -1318,31 +1452,11 @@ it("returns read-only NativeAOT metadata inline and drills down by derived Metho
           jsonValueSchema.parse(
             operation === "inspect_native_load_image"
               ? observations
-              : {
-                  status: "unavailable",
-                  reason: "No Ghidra DataType is defined at this address.",
-                  id: null,
-                  name: null,
-                  kind: "unavailable",
-                  source: "analysis-database",
-                  source_archive: null,
-                  address: null,
-                  size_bytes: null,
-                  alignment_bytes: null,
-                  packing_enabled: null,
-                  referenced_type: null,
-                  array_count: null,
-                  array_stride_bytes: null,
-                  fields: [],
-                  members: [],
-                  total_fields: 0,
-                  truncated: false,
-                  limitations: [],
-                },
+              : unavailableNativeAotDatabaseType("0x140002280"),
           ),
         ),
       ),
-    readTargetSnapshot: () => Promise.resolve(ok({ kind: "captured", bytes })),
+    readTargetSnapshot: readSnapshot,
     close: () => Promise.resolve(ok(null)),
   });
   const ghidra = provider(installationHost(), factory);
@@ -1371,67 +1485,155 @@ it("returns read-only NativeAOT metadata inline and drills down by derived Metho
       rawResult: observations,
     },
   });
-  const detail = await client.execute("inspect_native_data_type", {
-    address: "0x140002280",
-  });
-  expect(detail).toMatchObject({
-    ok: true,
-    value: {
-      result: {
-        status: "unavailable",
-        source: "analysis-database",
-        metadata_recovery: {
-          source: "read-only-derived-overlay",
-          method_table_address: "0x140002280",
-          related_type: { address: "0x140002200", type: null },
+  for (const address of [
+    "0x140002280",
+    "140002280",
+    "ram:0x140002280",
+    "%72am:0x140002280",
+    "0X0140002280",
+  ]) {
+    const detail = await client.execute("inspect_native_data_type", {
+      address,
+    });
+    expect(detail).toMatchObject({
+      ok: true,
+      value: {
+        result: {
+          status: "unavailable",
+          source: "analysis-database",
+          metadata_recovery: {
+            source: "read-only-derived-overlay",
+            method_table_address: "0x140002280",
+            related_type: { address: "0x140002200", type: null },
+          },
         },
       },
-    },
-  });
+    });
+  }
+  expect(readSnapshot).toHaveBeenCalledOnce();
   await client.close();
 });
 
-it("derives PE metadata for a direct type-address query without a load-image call", async () => {
-  const bytes = nativeAotPeFixture();
-  const operations: string[] = [];
-  const factory: GhidraProviderClientFactory = () => ({
-    start: () =>
-      Promise.resolve(
-        ok({
-          ...sessionInfo(),
-          target: { ...sessionInfo().target, image_base: "0x140000000" },
-        }),
-      ),
-    callTool: (operation) => {
-      operations.push(operation);
-      return Promise.resolve(
-        ok(
-          jsonValueSchema.parse({
-            status: "unavailable",
-            reason: "No Ghidra DataType is defined at this address.",
-            id: null,
-            name: null,
-            kind: "unavailable",
-            source: "analysis-database",
-            source_archive: null,
-            address: null,
-            size_bytes: null,
-            alignment_bytes: null,
-            packing_enabled: null,
-            referenced_type: null,
-            array_count: null,
-            array_stride_bytes: null,
-            fields: [],
-            members: [],
-            total_fields: 0,
-            truncated: false,
-            limitations: [],
+it.each([
+  ["0x140002280", "0x140002280", "0x140002280"],
+  ["140002280", "0x140002280", "0x140002280"],
+  ["ram:0x140002280", "0x140002280", "0x140002280"],
+  ["%72am:0x140002280", "0x140002280", "0x140002280"],
+  ["0X0140002280", "0x140002280", "0x140002280"],
+  ["0x140002280", "0x140002200", "0x140002200"],
+  ["0x140002280", null, null],
+  ["0x140002280", "register:0x140002280", null],
+  ["0x140002280", "overlay%3Aspace:0x140002280", null],
+  ["0x140002280", "0x140002288", null],
+  ["register:0x140002280", "register:0x140002280", null],
+] as const)(
+  "looks up NativeAOT type %s using resolved identity %s",
+  async (address, resolvedAddress, expectedTable) => {
+    const bytes = nativeAotPeFixture();
+    const operations: string[] = [];
+    const callerAddresses: unknown[] = [];
+    const readSnapshot = vi.fn(async () =>
+      ok({ kind: "captured" as const, bytes }),
+    );
+    const factory: GhidraProviderClientFactory = () => ({
+      start: () =>
+        Promise.resolve(
+          ok({
+            ...sessionInfo(),
+            target: { ...sessionInfo().target, image_base: "0x140000000" },
           }),
         ),
-      );
-    },
-    readTargetSnapshot: () => Promise.resolve(ok({ kind: "captured", bytes })),
-    close: () => Promise.resolve(ok(null)),
+      callTool: (operation, parameters) => {
+        operations.push(operation);
+        callerAddresses.push(parameters.address);
+        return Promise.resolve(
+          ok(
+            jsonValueSchema.parse(
+              unavailableNativeAotDatabaseType(resolvedAddress),
+            ),
+          ),
+        );
+      },
+      readTargetSnapshot: readSnapshot,
+      close: () => Promise.resolve(ok(null)),
+    });
+    const ghidra = provider(installationHost(), factory);
+    const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("Expected admitted PE profile");
+    const client = ghidra.createClient(target, profile.value.profile);
+    const detail = await client.execute("inspect_native_data_type", {
+      address,
+    });
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) throw detail.error;
+    expect(detail.value.result).toMatchObject({ address: resolvedAddress });
+    if (expectedTable === null) {
+      expect(detail.value.result).not.toHaveProperty("metadata_recovery");
+    } else {
+      expect(detail.value.result).toMatchObject({
+        metadata_recovery: {
+          source: "read-only-derived-overlay",
+          method_table_address: expectedTable,
+        },
+      });
+    }
+    expect(callerAddresses).toEqual([address]);
+    expect(readSnapshot).toHaveBeenCalledTimes(
+      resolvedAddress === null ? 0 : 1,
+    );
+    expect(operations).toEqual(["inspect_native_data_type"]);
+    await client.close();
+  },
+);
+
+it("retains engine-provided NativeAOT metadata without deriving another snapshot", async () => {
+  const bytes = nativeAotPeFixture();
+  const metadata = {
+    format: "dotnet-nativeaot",
+    source: "analysis-database",
+    status: "partial",
+    header_address: "0x140002000",
+    format_major: 9,
+    format_minor: 1,
+    method_table_address: "0x140002280",
+    name_origin: "generated",
+    original_name: null,
+    base_size_bytes: 32,
+    related_type: null,
+    interfaces: [],
+    virtual_slots: [],
+    derived_memory: null,
+    diagnostics: ["Engine-provided fixture metadata"],
+    limitations: ["Fixture has no original managed names"],
+  };
+  const readSnapshot = vi.fn(async () => {
+    throw new Error("Unexpected source snapshot read");
+  });
+  const factory: GhidraProviderClientFactory = () => ({
+    start: async () =>
+      ok({
+        ...sessionInfo(),
+        target: { ...sessionInfo().target, image_base: "0x140000000" },
+      }),
+    callTool: async () =>
+      ok(
+        jsonValueSchema.parse({
+          ...unavailableNativeAotDatabaseType("0x140002280"),
+          status: "available",
+          reason: null,
+          id: "/NativeAOT/Example_MT",
+          name: "Example_MT",
+          kind: "struct",
+          size_bytes: 32,
+          alignment_bytes: 8,
+          packing_enabled: false,
+          metadata_recovery: metadata,
+        }),
+      ),
+    readTargetSnapshot: readSnapshot,
+    close: async () => ok(null),
   });
   const ghidra = provider(installationHost(), factory);
   const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
@@ -1444,17 +1646,9 @@ it("derives PE metadata for a direct type-address query without a load-image cal
   });
   expect(detail).toMatchObject({
     ok: true,
-    value: {
-      result: {
-        metadata_recovery: {
-          source: "read-only-derived-overlay",
-          method_table_address: "0x140002280",
-          related_type: { address: "0x140002200", type: null },
-        },
-      },
-    },
+    value: { result: { status: "available", metadata_recovery: metadata } },
   });
-  expect(operations).toEqual(["inspect_native_data_type"]);
+  expect(readSnapshot).not.toHaveBeenCalled();
   await client.close();
 });
 
@@ -1492,27 +1686,7 @@ it("shares one session snapshot across callers while isolating cancellation and 
           jsonValueSchema.parse(
             operation === "inspect_native_load_image"
               ? observation
-              : {
-                  status: "unavailable",
-                  reason: "No Ghidra DataType is defined at this address.",
-                  id: null,
-                  name: null,
-                  kind: "unavailable",
-                  source: "analysis-database",
-                  source_archive: null,
-                  address: null,
-                  size_bytes: null,
-                  alignment_bytes: null,
-                  packing_enabled: null,
-                  referenced_type: null,
-                  array_count: null,
-                  array_stride_bytes: null,
-                  fields: [],
-                  members: [],
-                  total_fields: 0,
-                  truncated: false,
-                  limitations: [],
-                },
+              : unavailableNativeAotDatabaseType("0x140002280"),
           ),
         ),
       );
@@ -1947,6 +2121,9 @@ const peTarget = (
   sha256: "a".repeat(64),
   kind: "executable",
   format: "pe",
+  peMachine: { x86: 0x014c, x86_64: 0x8664, arm: 0x01c4, arm64: 0xaa64 }[
+    architecture
+  ],
   architecture,
   availableArchitectures: [architecture],
   executableRole: "application",

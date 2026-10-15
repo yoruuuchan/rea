@@ -464,14 +464,8 @@ Load command 1
         { index: 1, kind: "LC_UUID" },
       ],
     );
-    expect(parsed.dependencies).toEqual([
-      {
-        path: installName,
-        kind: "LC_ID_DYLIB",
-        current_version: "3.2.1",
-        compatibility_version: "1.0.0",
-      },
-    ]);
+    expect(parsed.commands[0]?.fields.name).toBe(`${installName} (offset 24)`);
+    expect(parsed.dependencies).toEqual([]);
     expect(parsed.uuid).toBe("01234567-89AB-CDEF-0123-456789ABCDEF");
   },
 );

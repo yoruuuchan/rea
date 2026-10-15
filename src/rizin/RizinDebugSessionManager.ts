@@ -3,7 +3,6 @@ import { isUtf8 } from "node:buffer";
 import { open, readFile, readlink, realpath, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { isatty } from "node:tty";
-import { resolve } from "node:path";
 
 import {
   AnalysisCancelledError,
@@ -30,6 +29,7 @@ import {
   type OwnedInferiorIdentity,
   type OwnedDebuggerDetachResult,
 } from "../process/ownedDebuggerSession.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 const MAX_SESSIONS = 8;
 const MAX_PENDING_COMMANDS = 16;
@@ -378,7 +378,7 @@ export class RizinDebugSessionManager {
     if (signal?.aborted)
       return err(new AnalysisCancelledError("start_rizin_debug_session"));
     const id = randomUUID();
-    const resolvedPath = resolve(input.path);
+    const resolvedPath = absoluteCallerPath(input.path);
     const launchProvenance: RizinLaunchProvenance = {
       caller_selected_path: input.path,
       resolved_path: resolvedPath,

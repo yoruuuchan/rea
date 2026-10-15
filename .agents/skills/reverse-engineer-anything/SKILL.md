@@ -217,7 +217,12 @@ facets remain unknown; live IDA results are not replayed from snapshots.
 
 With `REA_KUNA_COMMAND` configured, `provider_id: "kuna"` answers procedure
 lists, lookups, pseudocode, assembly and `analyze_function` from Kuna's cached
-whole-program export; it has no cross-references, callers or CFG. A cold first
+whole-program export. Callers/callees use a separate body-free graph shared by
+the session; `xrefs` returns exact-address incoming sites and filters forwarding
+aliases. These queries and inventory lookups do not trigger a C export. Indirect
+targets remain unknown and can make relationship coverage partial. Reference
+caches expire on close; a fresh CLI process repeats the native reference walk.
+Typed references, CFG, raw-memory tools and annotations remain unsupported. A cold first
 answer can come from a single-function run (its limitations say so); assembly
 waits for the export. For pseudocode and assembly, `raw_result.source` names the
 cached `.c`/`.asm` file and byte span, which you may search directly instead of

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { parseWabtOutput } from "./WabtOutput.js";
 import { parseWabtWat } from "./WabtWat.js";
 import { associateWasmGlue } from "./WasmGlueAdapter.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 const golden = () =>
   readFile(
     new URL("../../tests/fixtures/wasm/objdump.txt", import.meta.url),
@@ -281,4 +282,23 @@ it("keeps exact local, ambiguous URL, computed and unparseable glue distinct", (
     parse_status: "failed",
     references: [],
   });
+});
+
+it("matches a CLI-selected ./ module exactly against its glue reference", () => {
+  // The CLI makes `./module.wasm` absolute from /app with absoluteCallerPath.
+  const selected = absoluteCallerPath("./module.wasm", {
+    cwd: "/app",
+    platform: "linux",
+  });
+  expect(
+    associateWasmGlue('fetch("./module.wasm");', "/app/glue.js", [
+      selected,
+      "/other/module.wasm",
+    ]).references,
+  ).toMatchObject([
+    {
+      association: "local-path-candidate",
+      candidate_paths: ["/app/module.wasm"],
+    },
+  ]);
 });

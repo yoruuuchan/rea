@@ -6,7 +6,7 @@ are `inspect_analysis_view`, `trace_application_feature`,
 `trace_javascript_semantics`, `compare_application_versions`,
 `compare_source_to_bundle`, and `compare_javascript_export_shapes`; their CLI
 equivalents use the same names with hyphens. `inspect_analysis_view` projects a
-summary, module page, or one module from already completed application
+summary, module page, typed module references, or one module from already completed application
 Evidence; it does not walk relationships.
 
 `inspect_analysis_view` also projects retained `inspect_binary_layout`
@@ -39,6 +39,46 @@ reading fields such as `evidence.authority` must look up the context by ID and
 combine its fields with the fact's location. Semantic trace results include the
 canonical context subset referenced by their returned facts, so those facts
 remain self-contained in the response.
+
+## Retained module facts
+
+For canonical identities and retained source-range counts, query the existing
+`inspect_analysis_view` tool with a typed module-reference projection:
+
+```json
+{
+  "source": {
+    "kind": "retained-evidence",
+    "evidence_id": "ev_ACTUAL_PARENT_ID"
+  },
+  "view": {
+    "kind": "javascript",
+    "collection": "modules",
+    "projection": "references",
+    "where": { "path": "main.js", "kind": "javascript-module" },
+    "offset": 0,
+    "limit": 16
+  }
+}
+```
+
+Replace the parent ID with the actual analysis summary's `parent_evidence_id`.
+Filters match exact retained paths and kinds. Omission includes all values;
+`path: null` selects an unavailable path and `path: ""` selects a recorded empty
+path. Multiple identities can share a path. The default offset is 0 and limit
+is 64; follow `coverage.next_offset` for later matching rows in retained order.
+
+Each row contains its `node_id`, kind, path, canonical identity, retained
+source-range observation count, and distinct supporting authority/state/confidence
+combinations in `basis`. These counts do not prove unique reference sites or
+runtime loading. Use the existing module item view with the row's `node_id` for
+exact source ranges and complete observations. The result retains parent/query
+Evidence identity, artifact identity, limitations and unknowns. `source_coverage`
+keeps selected/unselected sources, graph coverage and unknown counts separate
+from page exhaustion; an exhausted or empty page cannot prove absence from an
+incompletely analyzed application. CLI `inspect-analysis-view` reads the same
+request from a JSON file; portable input uses `source.kind: "inline"` with the
+complete parent Evidence.
 
 ## Feature tracing
 

@@ -497,7 +497,10 @@ declared by their tools. Artifact extraction materializes the selected regular
 files into a fresh REA-chosen temporary directory and reports its path.
 
 `analyze_javascript_application` reads the supplied local directory or ASAR path
-and returns its result and Evidence inline.
+and returns its result and Evidence inline. Its owned analysis worker and private
+temporary source files are declared as `launchesProcess` and `writesFilesystem`,
+including for a single JavaScript source. This internal analysis does not execute
+the supplied application code.
 
 ## Ghidra first-query deadlines and recovery
 

@@ -1,0 +1,138 @@
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { err, type Result } from "../domain/result.js";
+import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
+import { matchRegexValues } from "../process/RegexMatcher.js";
+import { KunaRunSlots } from "./KunaRunSlots.js";
+import type {
+  KunaTargetCommands,
+  KunaTargetCommandRequest,
+  KunaTargetCommandSnapshot,
+} from "./KunaTargetCommands.js";
+
+/** One shared producer; individual callers own only their wait. */
+export interface KunaPendingQuery<T> {
+  readonly promise: Promise<Result<T, AnalysisError>>;
+  readonly controller: AbortController;
+  waiters: number;
+  settled: boolean;
+}
+
+type RegexQuery = Omit<Parameters<typeof matchRegexValues>[0], "values"> & {
+  readonly values: () => readonly string[];
+};
+
+/** Shared admission, cancellation and cleanup for session metadata queries. */
+export class KunaQueryWork {
+  readonly #nativeSlots = new KunaRunSlots(1);
+  readonly #regexSlots = new KunaRunSlots(1);
+
+  constructor(
+    private readonly commands: KunaTargetCommands,
+    private readonly lifetime: {
+      readonly signal: AbortSignal;
+      readonly own: <T>(work: Promise<T>) => Promise<T>;
+      readonly runSlots: KunaRunSlots;
+    },
+  ) {}
+
+  /** Unproven process cleanup retains both leases in the native command owner. */
+  async run(
+    request: Omit<KunaTargetCommandRequest, "releaseRun">,
+  ): Promise<Result<KunaTargetCommandSnapshot, AnalysisError>> {
+    const local = await this.#nativeSlots.acquire(request.signal);
+    if (local === undefined)
+      return err(new AnalysisCancelledError(request.operation));
+    let release: (() => void) | undefined;
+    try {
+      const foreground = await this.lifetime.runSlots.acquire(request.signal);
+      if (foreground === undefined) {
+        local();
+        return err(new AnalysisCancelledError(request.operation));
+      }
+      release = () => {
+        foreground();
+        local();
+      };
+      return await this.commands.run({ ...request, releaseRun: release });
+    } catch (cause: unknown) {
+      if (release === undefined) local();
+      else release();
+      throw cause;
+    }
+  }
+
+  /** Bound inventory copies and regex workers; close cancels and drains both. */
+  match(input: RegexQuery): ReturnType<typeof matchRegexValues> {
+    const signal = AbortSignal.any([
+      this.lifetime.signal,
+      ...(input.signal === undefined ? [] : [input.signal]),
+    ]);
+    return this.lifetime.own(this.#match(input, signal));
+  }
+
+  async #match(
+    input: RegexQuery,
+    signal: AbortSignal,
+  ): ReturnType<typeof matchRegexValues> {
+    const release = await this.#regexSlots.acquire(signal);
+    if (release === undefined)
+      return err(new AnalysisCancelledError(input.operation));
+    try {
+      return await matchRegexValues({
+        ...input,
+        values: input.values(),
+        signal,
+      });
+    } finally {
+      release();
+    }
+  }
+
+  start<T>(
+    load: (signal: AbortSignal) => Promise<Result<T, AnalysisError>>,
+    accept: (value: T) => void,
+  ): KunaPendingQuery<T> {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([this.lifetime.signal, controller.signal]);
+    const pending: KunaPendingQuery<T> = {
+      promise: this.lifetime.own(load(signal)),
+      controller,
+      settled: false,
+      waiters: 0,
+    };
+    void pending.promise.then(
+      (result) => {
+        pending.settled = true;
+        if (result.ok && !signal.aborted) accept(result.value);
+      },
+      () => {
+        pending.settled = true;
+      },
+    );
+    return pending;
+  }
+
+  async wait<T>(
+    pending: KunaPendingQuery<T>,
+    signal: AbortSignal | undefined,
+    operation: string,
+  ): Promise<Result<T, AnalysisError>> {
+    pending.waiters += 1;
+    try {
+      const result = await waitForAbortable(pending.promise, signal);
+      if (result === ABORTED && pending.waiters === 1 && !pending.settled) {
+        pending.controller.abort();
+        const stopped = await pending.promise;
+        if (!stopped.ok && !(stopped.error instanceof AnalysisCancelledError))
+          return stopped;
+      }
+      return result === ABORTED
+        ? err(new AnalysisCancelledError(operation))
+        : result;
+    } finally {
+      pending.waiters -= 1;
+      if (pending.waiters === 0 && !pending.settled) pending.controller.abort();
+    }
+  }
+}

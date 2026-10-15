@@ -70,6 +70,66 @@ const connect = async (
   return { client, session };
 };
 
+it("advertises typed module references and preserves portable/retained Evidence parity", async () => {
+  const { client, session } = await connect();
+  const parent = analysisViewJavaScriptEvidence(
+    analysisViewJavaScriptAnalysisWithSource(),
+  );
+  const recorded = session.recordEvidence(parent);
+  if (!recorded.ok) throw recorded.error;
+  const { ajv, inputSchema, outputSchema } = await advertisedMcpToolSchemas(
+    client,
+    "inspect_analysis_view",
+  );
+  const view = {
+    kind: "javascript",
+    collection: "modules",
+    projection: "references",
+    where: { path: "renderer.js" },
+    limit: 1,
+  };
+  const outputs = [];
+  for (const source of [
+    { kind: "inline", evidence: parent },
+    { kind: "retained-evidence", evidence_id: parent.evidence_id },
+  ]) {
+    expect(ajv.validate(inputSchema, { source, view })).toBe(true);
+    expect(
+      ajv.validate(inputSchema, {
+        source,
+        view: { ...view, where: { glob: "*" } },
+      }),
+    ).toBe(false);
+    const response = await client.callTool({
+      name: "inspect_analysis_view",
+      arguments: { source, view },
+    });
+    expect(response.isError).not.toBe(true);
+    expect(
+      ajv.validate(outputSchema, response.structuredContent),
+      JSON.stringify(ajv.errors),
+    ).toBe(true);
+    const evidence = parseEvidence(response.structuredContent);
+    expect(evidence).toMatchObject({
+      evidence_links: [parent.evidence_id],
+      normalized_result: {
+        kind: "javascript",
+        rows: [
+          {
+            path: "renderer.js",
+            identity: expect.any(Object),
+            basis: expect.any(Array),
+          },
+        ],
+        coverage: { exhausted: true },
+      },
+    });
+    expect(session.evidenceById(evidence.evidence_id)).toEqual(evidence);
+    outputs.push(evidence.normalized_result);
+  }
+  expect(outputs[0]).toEqual(outputs[1]);
+});
+
 it("projects opted-in query names identically from retained and portable MCP Evidence", async () => {
   const { client, session } = await connect();
   const capture = analysisViewCaptureFixture();

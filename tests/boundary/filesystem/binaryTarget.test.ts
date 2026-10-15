@@ -31,6 +31,26 @@ import { parseExecutableHeader } from "../../../src/domain/binaryTarget.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
+it.each([0x01c0, 0x01c2, 0x01c4, 0xaa64])(
+  "retains original PE COFF machine %i through file-backed target resolution",
+  async (peMachine) => {
+    const directory = await createTestTempDirectory("rea-pe-machine-");
+    const path = join(directory, "image.exe");
+    const bytes = pe(peMachine === 0xaa64 ? 0xaa64 : 0x01c0);
+    bytes.writeUInt16LE(peMachine, bytes.readUInt32LE(0x3c) + 4);
+    await writeFile(path, bytes);
+    const target = await parseBinaryTarget(path);
+    expect(target).toMatchObject({
+      ok: true,
+      value: {
+        format: "pe",
+        architecture: peMachine === 0xaa64 ? "arm64" : "arm",
+        peMachine,
+      },
+    });
+  },
+);
+
 it.each([{ cpus: [0x0100000c] }, { cpus: [0x01000007, 0x0100000c] }])(
   "preserves a FAT container's format in the resolved target and Evidence ($cpus)",
   async ({ cpus }) => {

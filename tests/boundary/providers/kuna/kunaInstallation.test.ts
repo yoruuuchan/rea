@@ -40,6 +40,7 @@ it("identifies a caller-selected kuna by version and digest", async () => {
   expect(await fakeKunaCalls(kuna)).toEqual([
     {
       pid: expect.any(Number),
+      at: expect.any(Number),
       argv: ["--version"],
       home: join(root, "cache", "home"),
       xdg: join(root, "cache", "home", ".cache"),

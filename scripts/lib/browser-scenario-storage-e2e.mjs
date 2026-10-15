@@ -626,6 +626,7 @@ const verifyCancelledStorage = async (
   const pending = provider.captureScenario(cancelledScenario, {
     signal: controller.signal,
   });
+  let failure;
   try {
     await waitForNewDocument(
       observer,
@@ -645,19 +646,23 @@ const verifyCancelledStorage = async (
     });
     controller.abort(new Error("cancel storage seed scenario"));
     const result = await pending;
-    assert.ok(
-      !result.ok ||
+    if (result.ok)
+      assert.ok(
         result.value.steps.some(({ status }) => status === "cancelled"),
-      "Cancellation unexpectedly completed every scenario step",
-    );
+        "Cancellation unexpectedly completed every scenario step",
+      );
+    else assert.equal(result.error._tag, "AnalysisCancelledError");
     const targets = await (await fetch(`${endpoint}/json/list`)).json();
     assert.ok(
       targets.some(({ id }) => id === targetId),
       "Cancelled connect-mode storage cleanup closed the external target",
     );
+  } catch (cause) {
+    failure = cause;
+    throw cause;
   } finally {
-    controller.abort();
-    await provider.close();
+    controller.abort(new Error("cancel failed storage verification"));
+    await closeVerifierResources([() => provider.close()], failure);
   }
 };
 

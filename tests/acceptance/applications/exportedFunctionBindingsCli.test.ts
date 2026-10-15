@@ -7,12 +7,19 @@ import { promisify } from "node:util";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { closeVerifierResources } from "../../../scripts/lib/verifier-cleanup.mjs";
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { javaScriptExportShapeComparisonResultSchema } from "../../../src/domain/javascript/javascriptExportShapeComparisonSchemas.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { cliCompileCacheEnvironment } from "../../support/cli/cliFixture.js";
+import {
+  createTestWorkspace,
+  removeTestWorkspace,
+  type TestWorkspace,
+} from "../../support/workspace/workspaceFixture.js";
 
 const execute = promisify(execFile);
 const requireFixture = createRequire(import.meta.url);
@@ -22,6 +29,12 @@ const comparisonEnvelope = z.object({
 const applicationEnvelope = z.object({
   normalized_result: javascriptApplicationAnalysisResultSchema,
 });
+let cliCacheWorkspace: TestWorkspace | undefined;
+
+beforeAll(async () => {
+  cliCacheWorkspace = await createTestWorkspace("rea-export-bindings-cache-");
+});
+
 // Source semantics use the real stdio workflow throughout the matrix. The
 // missing-export and count-change cases also check compiled CLI adapter parity.
 let mcpConnection:
@@ -33,17 +46,25 @@ let mcpConnection:
   | undefined;
 
 afterAll(async () => {
-  if (mcpConnection === undefined) return;
-  try {
-    await mcpConnection.ready;
-  } catch {
-    // Keep the failed connection owned until both resources are closed below.
+  if (mcpConnection !== undefined) {
+    try {
+      await mcpConnection.ready;
+    } catch {
+      // Keep the failed connection owned until both resources are closed below.
+    }
   }
-  try {
-    await mcpConnection.client.close();
-  } finally {
-    await mcpConnection.transport.close();
-  }
+  await closeVerifierResources([
+    async () => {
+      await mcpConnection?.client.close();
+    },
+    async () => {
+      await mcpConnection?.transport.close();
+    },
+    async () => {
+      if (cliCacheWorkspace !== undefined)
+        await removeTestWorkspace(cliCacheWorkspace.root);
+    },
+  ]);
 });
 
 describe("exported function binding resolution through stdio MCP and CLI", () => {
@@ -1192,12 +1213,17 @@ const expectCountChange = (
 };
 
 const runCli = async (args: readonly string[]): Promise<unknown> => {
+  if (cliCacheWorkspace === undefined)
+    throw new Error("CLI compile-cache workspace was not initialized");
   const { stdout } = await execute(
     process.execPath,
     [resolve("scripts/rea.mjs"), ...args],
     {
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, REA_LOG_LEVEL: "silent" },
+      env: cliCompileCacheEnvironment(
+        { ...process.env, REA_LOG_LEVEL: "silent" },
+        cliCacheWorkspace.path("node-compile"),
+      ),
     },
   );
   return JSON.parse(stdout);

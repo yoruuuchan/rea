@@ -206,8 +206,13 @@ const commandFailure = (
     snapshot === null
       ? undefined
       : {
-          // Output can be evidence-sized, not diagnostic-sized; keep only its tail.
-          stdout: snapshot.stdout.text.slice(-4096),
+          // Output can be evidence-sized, not diagnostic-sized; keep only its
+          // tail. Output that overflowed its buffer is a cut-off document
+          // whose tail explains nothing, so none of it is kept.
+          stdout:
+            cause.reason === "output-limit"
+              ? ""
+              : snapshot.stdout.text.slice(-4096),
           stderr: snapshot.stderr.text,
           truncated:
             snapshot.diagnosticTruncated === true ||
@@ -245,15 +250,20 @@ const commandFailure = (
         details,
       ),
     };
+  // The same target and executable always produce the same output, so a
+  // fixed buffer it overflows is a memory bound, not a busy admission queue.
   if (cause.reason === "output-limit")
     return {
       kind: "failed",
       error: new AnalysisResourceConstraintError(
         operation,
-        "capacity",
+        "memory",
         `kuna ${subcommand} wrote more than ${String(request.outputBytes)} bytes of output.`,
         { output_limit_bytes: request.outputBytes },
-        details,
+        {
+          ...details,
+          remediationAction: `REA buffers at most ${String(request.outputBytes)} bytes of kuna ${subcommand} output, so repeating this request for this target fails the same way. Use another provider for it.`,
+        },
       ),
     };
   const exitCode = capturedOutput?.exit_code;

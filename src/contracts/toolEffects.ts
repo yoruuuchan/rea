@@ -647,7 +647,11 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   }),
   list_javascript_runtime_targets: browserEvidence,
   observe_javascript_runtime: browserEvidence,
-  analyze_javascript_application: evidence,
+  analyze_javascript_application: effects({
+    mutatesSession: true,
+    writesFilesystem: true,
+    launchesProcess: true,
+  }),
   inspect_electron_fuses: evidence,
   export_web_scripts: effects({
     mutatesSession: true,

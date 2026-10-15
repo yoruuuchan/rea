@@ -99,6 +99,40 @@ it("preserves OpenStep dictionary and array autodetection", () => {
   });
 });
 
+it("counts OpenStep __proto__ keys the decoder silently drops", () => {
+  // Unquoted, quoted, escape-spelled, and object-valued keys all decode to
+  // __proto__; values, other keys, and `\137` (decoded as "137") do not.
+  const result = parseXmlPropertyList(
+    '{ __proto__ = a; "__proto__" = b; "\\_\\_proto__" = c; ' +
+      'nested = { "__proto__" = { polluted = yes; }; }; ' +
+      'kept = __proto__; list = (__proto__); "\\137_proto__" = d; }',
+  );
+  expect(result).toEqual({
+    value: {
+      nested: {},
+      kept: "__proto__",
+      list: ["__proto__"],
+      "137_proto__": "d",
+    },
+    omittedPrototypeKeys: 4,
+  });
+  const nested = (result.value as { nested: object }).nested;
+  expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
+});
+
+it("counts OpenStep compound keys that coerce to __proto__", () => {
+  // `obj[key]` coerces an array key to its comma-joined string.
+  expect(
+    parseXmlPropertyList(
+      '{ (__proto__) = a; (("__proto__")) = b; ("__pro", "to__") = c; ' +
+        "list = (__proto__); }",
+    ),
+  ).toEqual({
+    value: { "__pro,to__": "c", list: ["__proto__"] },
+    omittedPrototypeKeys: 2,
+  });
+});
+
 /** The single-member chain of a nested dictionary, down to its deepest value. */
 const deepestValue = (value: unknown): unknown => {
   let cursor = value;

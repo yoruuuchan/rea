@@ -129,6 +129,12 @@ function expectKnownAuthorityHints(tools: readonly ToolSchemas[]): void {
       idempotentHint: false,
       openWorldHint: false,
     },
+    analyze_javascript_application: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     capture_process_scenario: {
       readOnlyHint: false,
       destructiveHint: true,

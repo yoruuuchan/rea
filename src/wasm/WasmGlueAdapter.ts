@@ -1,7 +1,8 @@
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname } from "node:path";
 import * as t from "@babel/types";
 import { parseJavaScriptSource } from "../domain/javascript/javascriptSourceParser.js";
 import { traverseJavaScriptAst } from "../domain/javascript/javascriptSemanticTraversal.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 /** Associate visible literals with selected candidates without asserting data flow or URL identity. */
 export const associateWasmGlue = (
   source: string,
@@ -41,11 +42,17 @@ export const associateWasmGlue = (
         !/^[a-z][a-z\d+.-]*:|^\/\//iu.test(value) &&
         !value.startsWith("/") &&
         !/[?#]/u.test(value);
-      const exact = local
-        ? candidates.filter(
-            (candidate) => candidate === resolve(dirname(path), value),
-          )
-        : [];
+      // Compare through the caller-path owner so `.` spellings match and a
+      // symlink followed by `..` is never collapsed onto a sibling.
+      const target = local
+        ? absoluteCallerPath(value, { cwd: dirname(path) })
+        : undefined;
+      const exact =
+        target === undefined
+          ? []
+          : candidates.filter(
+              (candidate) => absoluteCallerPath(candidate) === target,
+            );
       const matches =
         exact.length > 0
           ? exact

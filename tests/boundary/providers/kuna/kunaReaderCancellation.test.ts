@@ -37,16 +37,30 @@ afterEach(() => {
 const ready = async () => {
   const { cacheRoot, open } = await session("rea-kuna-reader-cancel-");
   const client = open();
-  await expect
-    .poll(
-      async () =>
-        (await run(client, "procedure_pseudo_code", { procedure: "main" }))
-          .rawResult,
-    )
-    .toMatchObject({ source: { kind: "project-export" } });
-  const [key] = await readdir(join(cacheRoot, "projects"));
-  held.path = join(cacheRoot, "projects", key ?? "", "project", "program.asm");
-  return { client, bytes: await readFile(held.path) };
+  try {
+    // Export warm-up is independent of the cancellation deadline below and
+    // may take longer when the complete test process family has a CPU quota.
+    await expect
+      .poll(
+        async () =>
+          (await run(client, "procedure_pseudo_code", { procedure: "main" }))
+            .rawResult,
+        { timeout: 5000 },
+      )
+      .toMatchObject({ source: { kind: "project-export" } });
+    const [key] = await readdir(join(cacheRoot, "projects"));
+    held.path = join(
+      cacheRoot,
+      "projects",
+      key ?? "",
+      "project",
+      "program.asm",
+    );
+    return { client, bytes: await readFile(held.path) };
+  } catch (cause: unknown) {
+    await client.close();
+    throw cause;
+  }
 };
 
 const it = test.skipIf(process.platform === "win32");

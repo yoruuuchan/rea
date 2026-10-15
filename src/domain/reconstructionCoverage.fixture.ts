@@ -16,6 +16,11 @@ const EVIDENCE_RECORDS = ["1", "2", "3", "4", "5"].map((character) =>
       operation: `fixture-${character}`,
       parameters: {},
       result: { character },
+      confidence: "observed",
+      authority:
+        character === "3" || character === "4"
+          ? "controlled-replay"
+          : "shipped-artifact",
     },
   ),
 );

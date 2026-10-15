@@ -4,7 +4,7 @@ import {
   type Document,
   type Node,
 } from "@xmldom/xmldom";
-import { parse } from "plist";
+import { parse, parseOpenStep } from "plist";
 
 import { MAX_PLIST_DEPTH } from "./apple/plistValue.js";
 
@@ -95,8 +95,14 @@ export const parseXmlPropertyList = (
   // by app Info.plist resolution. Only XML needs the key-element substitution.
   const first = text.trimStart()[0];
   if (first === "{" || first === "(") {
-    assertOpenStepDepthWithinLimit(text);
-    return omitPrototypeKeys(parse(text));
+    // The pinned decoder assigns a `__proto__` key to the object prototype, so
+    // the entry is gone before the decoded value can be counted. Count keys in
+    // the source instead; the rebuild still drops any prototype it replaced.
+    const prototypeKeys = scanOpenStep(text);
+    return {
+      value: omitPrototypeKeys(parse(text)).value,
+      omittedPrototypeKeys: prototypeKeys,
+    };
   }
   // Normalize only the literal line endings the pinned decoder normalizes.
   // Preserve character references in the source: serializing a DOM would turn
@@ -117,6 +123,8 @@ export const parseXmlPropertyList = (
 interface OpenStepContainer {
   end: string;
   next: "key" | "equals" | "value" | "separator" | "after-value";
+  /** Source offset of a container that is itself a dictionary key. */
+  keyStart?: number;
 }
 
 /** Consume only the punctuation expected between the pinned decoder's values. */
@@ -143,8 +151,12 @@ const admitsOpenStepCloser = (
   parent.next !== "equals" &&
   !(parent.end === "}" && parent.next === "value");
 
-/** Bound OpenStep value nesting before the pinned decoder recursively reads it. */
-const assertOpenStepDepthWithinLimit = (text: string): void => {
+/**
+ * Bound OpenStep value nesting before the pinned decoder recursively reads it,
+ * and count the dictionary keys that decode to `__proto__`.
+ */
+const scanOpenStep = (text: string): number => {
+  let prototypeKeys = 0;
   const containers: OpenStepContainer[] = [];
   const completeValue = (): void => {
     const parent = containers.at(-1);
@@ -174,16 +186,21 @@ const assertOpenStepDepthWithinLimit = (text: string): void => {
     // Stop at the first impossible token: only the pinned decoder owns syntax
     // diagnostics. A later deep suffix cannot change that failure into a limit.
     if (character === "}" || character === ")") {
-      if (!admitsOpenStepCloser(parent, character)) return;
-      containers.pop();
+      if (!admitsOpenStepCloser(parent, character)) return prototypeKeys;
+      const closed = containers.pop();
+      if (
+        closed?.keyStart !== undefined &&
+        isOpenStepPrototypeKey(text.slice(closed.keyStart, cursor + 1))
+      )
+        prototypeKeys += 1;
       // parseOpenStep returns the first root value without reading trailing text.
-      if (containers.length === 0) return;
+      if (containers.length === 0) return prototypeKeys;
       completeValue();
       cursor += 1;
       continue;
     }
     const separator = consumeOpenStepSeparator(parent, character);
-    if (separator === "invalid") return;
+    if (separator === "invalid") return prototypeKeys;
     if (separator === "consumed") {
       cursor += 1;
       continue;
@@ -193,15 +210,38 @@ const assertOpenStepDepthWithinLimit = (text: string): void => {
       containers.push({
         end: character === "{" ? "}" : ")",
         next: character === "{" ? "key" : "value",
+        // A compound key is coerced to a string, e.g. `(__proto__)`.
+        ...(parent?.next === "key" ? { keyStart: cursor } : {}),
       });
       cursor += 1;
       continue;
     }
     const end = skipOpenStepScalar(text, cursor);
-    if (end === cursor) return;
-    if (parent?.next !== "key") assertDepth();
+    if (end === cursor) return prototypeKeys;
+    if (parent?.next === "key") {
+      if (isOpenStepPrototypeKey(text.slice(cursor, end))) prototypeKeys += 1;
+    } else assertDepth();
     cursor = end;
     completeValue();
+  }
+  return prototypeKeys;
+};
+
+/**
+ * Whether one OpenStep key, scalar or compound, becomes the property name
+ * `__proto__` when the decoder assigns `obj[key]`. Plain strings compare
+ * directly; any other key is decoded by the pinned decoder itself and
+ * coerced to a property name the same way that assignment does.
+ */
+const isOpenStepPrototypeKey = (token: string): boolean => {
+  if (!/^["({<]/u.test(token)) return token === PROTOTYPE_KEY;
+  if (token.startsWith('"') && !token.includes("\\"))
+    return token === `"${PROTOTYPE_KEY}"`;
+  try {
+    return String(parseOpenStep(token)) === PROTOTYPE_KEY;
+  } catch {
+    // An unterminated token is the decoder's syntax error to report.
+    return false;
   }
 };
 

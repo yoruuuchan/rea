@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
@@ -10,6 +10,7 @@ import { z } from "zod";
 import { AnalysisCapabilityUnavailableError } from "../../../src/domain/analysisErrorCore.js";
 import { thinMach } from "../../../src/domain/binaryTarget.fixture.js";
 import { evidenceSchema } from "../../../src/domain/evidence.js";
+import { absoluteCallerPath } from "../../../src/filesystem/callerPath.js";
 import { err, ok } from "../../../src/domain/result.js";
 import {
   createRizinTestManager,
@@ -92,7 +93,7 @@ process.stdin.on("data", (chunk) => {
       const evidence = evidenceSchema.parse(command.structuredContent);
       expect(evidence.parameters.launch_provenance).toEqual({
         caller_selected_path: callerPath,
-        resolved_path: resolve(callerPath),
+        resolved_path: absoluteCallerPath(callerPath),
       });
       expect(evidence.normalized_result).toMatchObject({
         output_invalid_utf8: true,

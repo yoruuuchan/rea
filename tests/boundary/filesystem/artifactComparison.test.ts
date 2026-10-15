@@ -740,6 +740,13 @@ describe("duplicate archive occurrence ownership", () => {
     expect(comparison.limitations).toContain(
       "Duplicate logical paths cannot be paired across inventories; comparisons for those paths are unknown.",
     );
+    // Occurrences on the unknown duplicate path are never counted unchanged.
+    // The archives differ, so the root changes and only neighbor.txt remains.
+    expect(comparison.summary).toMatchObject({ unchanged: 1, unknown: 1 });
+    expect(compareArtifacts(left, left).summary).toMatchObject({
+      unchanged: 2,
+      unknown: 1,
+    });
   });
 });
 

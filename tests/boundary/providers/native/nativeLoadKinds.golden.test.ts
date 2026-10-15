@@ -112,7 +112,7 @@ it.each(["vmaddr", "vmsize", "uuid", "entryoff"])(
   },
 );
 
-it("retains the unnamed segment of a Mach-O object file", () => {
+it("retains the empty segment name of a Mach-O object file", () => {
   // Captured from `otool -l` on a clang `-c` object: MH_OBJECT sections live
   // in one segment whose segname is empty, printed as a bare label.
   const objectSegment = [
@@ -143,17 +143,19 @@ it("retains the unnamed segment of a Mach-O object file", () => {
     "",
   ].join("\n");
   const load = parseOtoolLoadCommands(withOtoolMachHeader(objectSegment));
+  // The empty name is the observed source value, as in the raw command.
+  expect(load.commands[0]?.fields.segname).toBe("");
   expect(load.segments).toMatchObject([
-    { name: "unknown", sections: [{ segment: "__TEXT", name: "__text" }] },
+    { name: "", sections: [{ segment: "__TEXT", name: "__text" }] },
   ]);
-  // An all-NUL section name is printed the same way and stays "unknown".
+  // An all-NUL section name is printed the same way and stays empty.
   expect(
     parseOtoolLoadCommands(
       withOtoolMachHeader(
         objectSegment.replace("  sectname __text", "  sectname "),
       ),
     ).segments,
-  ).toMatchObject([{ sections: [{ segment: "__TEXT", name: "unknown" }] }]);
+  ).toMatchObject([{ sections: [{ segment: "__TEXT", name: "" }] }]);
   expect(() =>
     parseOtoolLoadCommands(
       withOtoolMachHeader(
@@ -282,7 +284,67 @@ it("names numeric build-version platforms and tools", () => {
       tools: [{ name: "SWIFT", version: "5.9" }],
     },
   ]);
-  expect(load.commands[0]?.fields.platform).toBe(1);
+  expect(load.commands[0]?.fields).toEqual({
+    cmd: "LC_BUILD_VERSION",
+    cmdsize: 48,
+    platform: 1,
+    minos: "11.0",
+    sdk: "26.5",
+    ntools: 2,
+    "tool #1": 3,
+    "version #1": "1267.0",
+    "tool #2": 1029,
+    "version #2": "1.0",
+  });
+  expect(load.commands[2]?.fields).toMatchObject({
+    tool: "SWIFT",
+    version: "5.9",
+  });
+});
+
+// Captured from `otool -l` on a clang `-c` object declaring
+// `.linker_option "-framework", "Foundation"`.
+const linkerOption = (strings: readonly string[], count = strings.length) =>
+  withOtoolMachHeader(
+    [
+      "Load command 0",
+      "     cmd LC_LINKER_OPTION",
+      " cmdsize 40",
+      `   count ${String(count)}`,
+      ...strings.map((line) => `  string ${line}`),
+      "",
+    ].join("\n"),
+  );
+
+it("retains every linker-option string exactly and in order", () => {
+  expect(
+    parseOtoolLoadCommands(
+      linkerOption(["#1 -framework", "#2 Foundation", "#3  -lx ", "#4 1"]),
+    ).commands[0]?.fields,
+  ).toEqual({
+    cmd: "LC_LINKER_OPTION",
+    cmdsize: 40,
+    count: 4,
+    "string #1": "-framework",
+    "string #2": "Foundation",
+    "string #3": " -lx ",
+    "string #4": "1",
+  });
+});
+
+it.each([
+  ["fewer strings than count", linkerOption(["#1 -framework"], 2)],
+  ["more strings than count", linkerOption(["#1 -lz", "#2 -lm"], 1)],
+  ["an out-of-order ordinal", linkerOption(["#2 Foundation", "#1 -lz"])],
+  ["a repeated ordinal", linkerOption(["#1 -lz", "#1 -lm"])],
+  [
+    "an unlabeled row",
+    linkerOption(["#1 -lz", "#2 -lm"]).replace("string #2", "string"),
+  ],
+])("rejects linker options with %s", (_name, raw) => {
+  expect(() => parseOtoolLoadCommands(raw)).toThrow(
+    "otool linker-option strings do not match count",
+  );
 });
 
 it("does not classify LC_LOAD_DYLINKER as a dylib dependency", async () => {

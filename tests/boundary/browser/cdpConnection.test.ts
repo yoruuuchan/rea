@@ -21,6 +21,14 @@ const INVALID_REPLIES = [
     }),
   ],
   [
+    "detached-session error and result",
+    (id: number) => ({
+      id,
+      result: {},
+      error: { code: -32_001, message: "Session with given id not found." },
+    }),
+  ],
+  [
     "malformed error",
     (id: number) => ({
       id,
@@ -33,6 +41,28 @@ const INVALID_REPLIES = [
   [
     "foreign session id",
     (id: number) => ({ id, result: {}, sessionId: "foreign-session" }),
+  ],
+  [
+    "detached-session error with a foreign session id",
+    (id: number) => ({
+      id,
+      error: { code: -32_001, message: "Session with given id not found." },
+      sessionId: "foreign-session",
+    }),
+  ],
+  [
+    "unrouted detached-session message with another code",
+    (id: number) => ({
+      id,
+      error: { code: -32_000, message: "Session with given id not found." },
+    }),
+  ],
+  [
+    "unrouted detached-session code with another message",
+    (id: number) => ({
+      id,
+      error: { code: -32_001, message: "No session with given id" },
+    }),
   ],
 ] as const;
 
@@ -145,6 +175,40 @@ describe("CDP connection", () => {
       }
     },
   );
+
+  it("preserves Chromium's unrouted rejection for a detached flat session", async () => {
+    const browser = await startFakeCdpBrowser({ hangOnMethod: "Page.enable" });
+    browsers.push(browser);
+    const connection = await CdpConnection.connect(
+      browser.browserWebSocketUrl,
+      "capture_browser_scenario",
+    );
+    try {
+      const pending = connection.send("Page.enable", {}, "detached-session");
+      const rejection = expect(pending).rejects.toMatchObject({
+        command: "Page.enable",
+        code: -32_001,
+        reportedMessage: "Session with given id not found.",
+      });
+      await vi.waitFor(() => expect(browser.commands).toHaveLength(1));
+      const command = browser.commands[0];
+      if (command === undefined)
+        throw new Error("Fake browser received no command");
+      browser.emitRawMessage(
+        JSON.stringify({
+          id: command.id,
+          error: {
+            code: -32_001,
+            message: "Session with given id not found.",
+          },
+        }),
+      );
+      await rejection;
+      await expect(connection.send("Runtime.enable")).resolves.toEqual({});
+    } finally {
+      await connection.close();
+    }
+  });
 });
 
 describe("CDP connection payload budgets", () => {
