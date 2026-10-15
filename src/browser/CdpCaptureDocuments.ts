@@ -99,51 +99,62 @@ export const captureResources = (
     return { items: [] };
   }
   const items: CapturedResource[] = [];
-  for (const tree of walkFrameTrees(root, (omittedCount) =>
-    completeness?.exclude("resources", "invalid_protocol_value", omittedCount),
+  for (const resource of frameTreeResources(root, (count) =>
+    completeness?.exclude("resources", "invalid_protocol_value", count),
   )) {
+    const url = allowedSanitizedUrl(resource.url, allowedOrigins);
+    if (url === undefined || url.origin === null) {
+      completeness?.exclude(
+        "resources",
+        exclusionReasonForUrl(cdpStringValue(resource.url)),
+      );
+      continue;
+    }
+    const type = cdpStringValue(resource.type);
+    const mimeType = cdpStringValue(resource.mimeType);
+    if (type === undefined || type.length === 0 || mimeType === undefined) {
+      completeness?.exclude("resources", "invalid_protocol_value");
+      continue;
+    }
+    const rawContentSize = numberValue(resource.contentSize);
+    const contentSize =
+      rawContentSize !== undefined && rawContentSize >= 0
+        ? rawContentSize
+        : null;
+    if (resource.contentSize !== undefined && contentSize === null)
+      completeness?.exclude("resources", "invalid_protocol_value");
+    items.push({
+      rawUrl: cdpStringValue(resource.url) ?? "",
+      url: url.url,
+      origin: url.origin,
+      type,
+      mime_type: mimeType,
+      content_size: contentSize,
+    });
+  }
+  return { items };
+};
+
+/**
+ * Yield resource records from every frame of a resource tree. A missing or
+ * non-array `resources` list, or a non-record entry, is reported as invalid
+ * rather than read as an empty frame.
+ */
+export const frameTreeResources = function* (
+  root: UnknownRecord,
+  onInvalid: (count: number | null) => void,
+): Generator<UnknownRecord> {
+  for (const tree of walkFrameTrees(root, onInvalid)) {
     if (!Array.isArray(tree.resources)) {
-      completeness?.exclude("resources", "invalid_protocol_value", null);
+      onInvalid(null);
       continue;
     }
     for (const entry of tree.resources) {
       const resource = recordValue(entry);
-      if (resource === undefined) {
-        completeness?.exclude("resources", "invalid_protocol_value");
-        continue;
-      }
-      const url = allowedSanitizedUrl(resource.url, allowedOrigins);
-      if (url === undefined || url.origin === null) {
-        completeness?.exclude(
-          "resources",
-          exclusionReasonForUrl(cdpStringValue(resource.url)),
-        );
-        continue;
-      }
-      const type = cdpStringValue(resource.type);
-      const mimeType = cdpStringValue(resource.mimeType);
-      if (type === undefined || type.length === 0 || mimeType === undefined) {
-        completeness?.exclude("resources", "invalid_protocol_value");
-        continue;
-      }
-      const rawContentSize = numberValue(resource.contentSize);
-      const contentSize =
-        rawContentSize !== undefined && rawContentSize >= 0
-          ? rawContentSize
-          : null;
-      if (resource.contentSize !== undefined && contentSize === null)
-        completeness?.exclude("resources", "invalid_protocol_value");
-      items.push({
-        rawUrl: cdpStringValue(resource.url) ?? "",
-        url: url.url,
-        origin: url.origin,
-        type,
-        mime_type: mimeType,
-        content_size: contentSize,
-      });
+      if (resource === undefined) onInvalid(1);
+      else yield resource;
     }
   }
-  return { items };
 };
 
 export const walkFrameTrees = function* (
@@ -217,7 +228,9 @@ export function* captureDom(
   let unresolvedSvgNodes = 0;
   if (!Array.isArray(root.strings))
     excludeDocumentEvidence(completeness, "invalid_protocol_value", null);
-  for (const document of snapshotDocuments(root.documents, completeness)) {
+  for (const document of snapshotDocuments(root.documents, (count) =>
+    excludeDocumentEvidence(completeness, "invalid_protocol_value", count),
+  )) {
     const documentUrl = cdpSnapshotString(strings, document.documentURL);
     if (documentUrl === undefined) {
       excludeDocumentEvidence(completeness, "invalid_protocol_value");
@@ -236,40 +249,25 @@ export function* captureDom(
       continue;
     }
     const baseUrl = baseUrlValue || documentUrl;
-    const documentNodes = recordValue(document.nodes);
+    const documentNodes = snapshotDocumentNodes(document.nodes);
     if (documentNodes === undefined) {
       excludeDocumentEvidence(completeness, "invalid_protocol_value");
       continue;
     }
-    const rawNodeTypes = numberArray(documentNodes.nodeType);
-    const rawNodeNames = numberArray(documentNodes.nodeName);
-    const rawNodeValues = numberArray(documentNodes.nodeValue);
-    const rawParents = numberArray(documentNodes.parentIndex);
-    const rawAttributes = Array.isArray(documentNodes.attributes)
-      ? documentNodes.attributes
-      : undefined;
-    if (
-      rawNodeTypes === undefined ||
-      rawNodeNames === undefined ||
-      rawNodeValues === undefined ||
-      rawParents === undefined ||
-      rawAttributes === undefined ||
-      rawNodeNames.length !== rawNodeTypes.length ||
-      rawNodeValues.length !== rawNodeTypes.length ||
-      rawParents.length !== rawNodeTypes.length
-    ) {
-      excludeDocumentEvidence(completeness, "invalid_protocol_value");
-      continue;
-    }
-    if (rawAttributes.length > rawNodeTypes.length)
+    const {
+      nodeTypes: rawNodeTypes,
+      nodeNames: rawNodeNames,
+      nodeValues: rawNodeValues,
+      parents: rawParents,
+      attributes: rawAttributes,
+      backendNodeIds,
+    } = documentNodes;
+    if (documentNodes.excessAttributes > 0)
       excludeDocumentEvidence(
         completeness,
         "invalid_protocol_value",
-        rawAttributes.length - rawNodeTypes.length,
+        documentNodes.excessAttributes,
       );
-    const backendNodeIds = Array.isArray(documentNodes.backendNodeId)
-      ? documentNodes.backendNodeId
-      : [];
     const baseIndex = total;
     total += rawNodeTypes.length;
     const ancestry = createDocumentSvgAncestry({
@@ -389,20 +387,72 @@ const excludeDocumentEvidence = (
   completeness?.exclude("metadata", reason, count);
 };
 
-const snapshotDocuments = (
+/**
+ * Read DOMSnapshot documents. A snapshot always describes at least one
+ * document, so a missing or empty list is invalid rather than an empty DOM.
+ */
+export const snapshotDocuments = (
   value: unknown,
-  completeness: CdpCaptureCompleteness | undefined,
+  onInvalid: (count: number | null) => void,
 ): readonly UnknownRecord[] => {
   if (!Array.isArray(value) || value.length === 0) {
-    excludeDocumentEvidence(completeness, "invalid_protocol_value", null);
+    onInvalid(null);
     return [];
   }
   return value.flatMap((item) => {
     const document = recordValue(item);
-    if (document === undefined)
-      excludeDocumentEvidence(completeness, "invalid_protocol_value");
+    if (document === undefined) onInvalid(1);
     return document === undefined ? [] : [document];
   });
+};
+
+/** One snapshot document's parallel node arrays, validated for every consumer. */
+export interface SnapshotDocumentNodes {
+  readonly nodeTypes: readonly (number | undefined)[];
+  readonly nodeNames: readonly (number | undefined)[];
+  readonly nodeValues: readonly (number | undefined)[];
+  readonly parents: readonly (number | undefined)[];
+  readonly attributes: readonly unknown[];
+  readonly backendNodeIds: readonly unknown[];
+  /** Attribute rows beyond the node count describe no node. */
+  readonly excessAttributes: number;
+}
+
+/** Missing or misaligned node arrays make the document's nodes unknown. */
+export const snapshotDocumentNodes = (
+  value: unknown,
+): SnapshotDocumentNodes | undefined => {
+  const nodes = recordValue(value);
+  if (nodes === undefined) return undefined;
+  const nodeTypes = numberArray(nodes.nodeType);
+  const nodeNames = numberArray(nodes.nodeName);
+  const nodeValues = numberArray(nodes.nodeValue);
+  const parents = numberArray(nodes.parentIndex);
+  const attributes = Array.isArray(nodes.attributes)
+    ? nodes.attributes
+    : undefined;
+  if (
+    nodeTypes === undefined ||
+    nodeNames === undefined ||
+    nodeValues === undefined ||
+    parents === undefined ||
+    attributes === undefined ||
+    nodeNames.length !== nodeTypes.length ||
+    nodeValues.length !== nodeTypes.length ||
+    parents.length !== nodeTypes.length
+  )
+    return undefined;
+  return {
+    nodeTypes,
+    nodeNames,
+    nodeValues,
+    parents,
+    attributes,
+    backendNodeIds: Array.isArray(nodes.backendNodeId)
+      ? nodes.backendNodeId
+      : [],
+    excessAttributes: Math.max(0, attributes.length - nodeTypes.length),
+  };
 };
 
 function* captureDomMetadata(

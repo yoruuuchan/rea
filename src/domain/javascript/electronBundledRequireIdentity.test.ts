@@ -48,6 +48,38 @@ describe("Electron identity through Webpack externals", () => {
     expect(electronOf(source).browser_windows).toEqual([]);
   });
 
+  const GETTER_CONSUMER = "const s=n.n(n(45840));new (s().BrowserWindow)({});";
+  it.each([
+    ["Reflect.set", 'Reflect.set(n,"n",e=>()=>({BrowserWindow:class{}}));'],
+    [
+      "Reflect.defineProperty",
+      'Reflect.defineProperty(n,"n",{value:e=>()=>0});',
+    ],
+    ["delete", "delete n.n;"],
+    ["a destructuring write", "({g:n.n}={g:e=>()=>0});"],
+    ["an unknown key", "n[key]=e=>()=>0;"],
+  ])(
+    "does not infer Electron after a getter write through %s",
+    (_name, write) => {
+      expect(
+        electronOf(bootstrap(EXTERNAL, GETTER_CONSUMER, `${write}n(100);`))
+          .browser_windows,
+      ).toEqual([]);
+    },
+  );
+
+  it("keeps the getter after a reflective write to another loader key", () => {
+    expect(
+      electronOf(
+        bootstrap(
+          EXTERNAL,
+          GETTER_CONSUMER,
+          'Object.defineProperty(n,"d",{value:1});n(100);',
+        ),
+      ).browser_windows,
+    ).toHaveLength(1);
+  });
+
   it("follows the loader passed to a module factory", () => {
     const electron = electronOf(bootstrap(EXTERNAL, CONSUMER));
     expect(electron.browser_windows).toMatchObject([

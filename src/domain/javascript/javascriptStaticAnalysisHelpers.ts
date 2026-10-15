@@ -693,11 +693,8 @@ export const calleeName = (node: t.Node): string => {
 const memberPropertyName = (
   node: t.MemberExpression | t.OptionalMemberExpression,
 ): string =>
-  node.computed &&
-  !t.isStringLiteral(node.property) &&
-  !t.isNumericLiteral(node.property)
-    ? `[computed@${String(node.property.start ?? -1)}]`
-    : semanticStaticPropertyName(node.property, node.computed);
+  semanticStaticPropertyKey(node.property, node.computed) ??
+  (node.computed ? `[computed@${String(node.property.start ?? -1)}]` : "");
 
 /**
  * Return a string literal value without evaluating an expression. A template

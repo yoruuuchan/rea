@@ -739,6 +739,75 @@ const getterResultReferences = (
   return references;
 };
 
+type ObjectLiteralMember = t.ObjectExpression["properties"][number];
+
+/** Property positions grouped by whether an exact key can reach them. */
+interface ObjectPropertyIndex {
+  /** Spreads, computed keys and `__proto__` data entries reach every key. */
+  readonly keyIndependent: readonly number[];
+  readonly byName: ReadonlyMap<string, readonly number[]>;
+}
+
+// Mutation tracking resolves one key of the same literal per write, so the
+// index removes the per-write scan of every property.
+const propertyIndexes = new WeakMap<t.ObjectExpression, ObjectPropertyIndex>();
+
+const objectPropertyIndex = (node: t.ObjectExpression): ObjectPropertyIndex => {
+  const cached = propertyIndexes.get(node);
+  if (cached !== undefined) return cached;
+  const keyIndependent: number[] = [];
+  const byName = new Map<string, number[]>();
+  node.properties.forEach((property, index) => {
+    const name = t.isSpreadElement(property)
+      ? null
+      : semanticStaticPropertyKey(property.key, property.computed);
+    if (
+      name === null ||
+      (t.isObjectProperty(property) &&
+        !property.computed &&
+        !property.shorthand &&
+        name === "__proto__")
+    ) {
+      keyIndependent.push(index);
+      return;
+    }
+    const positions = byName.get(name);
+    if (positions === undefined) byName.set(name, [index]);
+    else positions.push(index);
+  });
+  const index = { keyIndependent, byName };
+  propertyIndexes.set(node, index);
+  return index;
+};
+
+/**
+ * Properties in reverse source order that can affect `key`. For an exact key,
+ * another static name only updates bookkeeping for that other name, which
+ * this key never reads, so only same-name and key-independent entries remain.
+ */
+const relevantPropertiesInReverse = (
+  node: t.ObjectExpression,
+  key: PropertyPath[number] | undefined,
+): readonly ObjectLiteralMember[] => {
+  if (typeof key !== "string" && typeof key !== "number")
+    return [...node.properties].reverse();
+  const { keyIndependent, byName } = objectPropertyIndex(node);
+  const named = byName.get(String(key)) ?? [];
+  const relevant: ObjectLiteralMember[] = [];
+  let left = keyIndependent.length - 1;
+  let right = named.length - 1;
+  while (left >= 0 || right >= 0) {
+    const fromLeft =
+      right < 0 ||
+      (left >= 0 && (keyIndependent[left] ?? -1) > (named[right] ?? -1));
+    const position = fromLeft ? keyIndependent[left--] : named[right--];
+    const property =
+      position === undefined ? undefined : node.properties[position];
+    if (property !== undefined) relevant.push(property);
+  }
+  return relevant;
+};
+
 export const semanticObjectPropertyReferences = (
   node: t.ObjectExpression,
   path: PropertyPath,
@@ -751,7 +820,7 @@ export const semanticObjectPropertyReferences = (
   const accessorNames = new Set<string>();
   const getterNames = new Set<string>();
   const setterNames = new Set<string>();
-  for (const property of [...node.properties].reverse()) {
+  for (const property of relevantPropertiesInReverse(node, key)) {
     if (t.isSpreadElement(property)) {
       const selected = key ?? null;
       if (typeof selected !== "object" && overwritten.has(String(selected)))

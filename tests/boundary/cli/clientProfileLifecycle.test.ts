@@ -163,31 +163,33 @@ for (const group of groups) {
           environment,
           timeoutMs: 20_000,
         });
-      for (const { client, config, skillDirectory } of profiles) {
-        const planned = await run([
-          "setup",
-          "--client",
-          client,
-          "--dry-run",
-          "--json",
-        ]);
-        expect(planned.exitCode, client).toBe(0);
-        expect(planned.json, client).toMatchObject({
-          status: "planned",
-          plannedActions: expect.arrayContaining([
+      const planned = await run([
+        "setup",
+        ...clientArguments,
+        "--dry-run",
+        "--json",
+      ]);
+      expect(planned.exitCode, planned.stderr).toBe(0);
+      expect(planned.json).toMatchObject({
+        status: "planned",
+        plannedActions: expect.arrayContaining([
+          ...profiles.map(({ client, config }) =>
             expect.objectContaining({
               id: `configure_client:${client}`,
               target: config,
             }),
-            expect.objectContaining({ target: skillDirectory }),
-          ]),
-        });
+          ),
+          ...[
+            ...new Set(profiles.map(({ skillDirectory }) => skillDirectory)),
+          ].map((target) => expect.objectContaining({ target })),
+        ]),
+      });
+      for (const { config, skillDirectory } of profiles) {
+        await expect(access(config)).rejects.toMatchObject({ code: "ENOENT" });
         await expect(access(skillDirectory)).rejects.toMatchObject({
           code: "ENOENT",
         });
       }
-      for (const { config } of profiles)
-        await expect(access(config)).rejects.toMatchObject({ code: "ENOENT" });
       const setup = await run(["setup", ...clientArguments, "--yes", "--json"]);
       expect(setup.exitCode).toBe(0);
       expect(setup.json).toMatchObject({ status: "ready" });

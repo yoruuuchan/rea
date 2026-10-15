@@ -481,6 +481,45 @@ describe("target-free MCP workflow", () => {
   }, 10_000);
 });
 
+describe("MCP snapshot open ordering", () => {
+  it("keeps a snapshot open ahead of later reads and closes on the same connection", async () => {
+    directory = await createTestTempDirectory("rea-mcp-snapshot-open-order-");
+    const { mcp, first, second } = await createSessionMcpHarness(
+      directory,
+      provider,
+      resources,
+    );
+    const snapshotPath = join(directory, "analysis.json");
+    await mcp.callTool({ name: "open_binary", arguments: { path: second } });
+    expect(
+      (
+        await mcp.callTool({
+          name: "close_binary",
+          arguments: { snapshot_path: snapshotPath },
+        })
+      ).isError,
+    ).not.toBe(true);
+    await mcp.callTool({ name: "open_binary", arguments: { path: first } });
+
+    // Dispatched without awaiting, like a client issuing one turn's calls.
+    const opening = mcp.callTool({
+      name: "open_binary",
+      arguments: { path: second, snapshot_path: snapshotPath },
+    });
+    const reading = mcp.callTool({ name: "current_document", arguments: {} });
+    const closing = mcp.callTool({ name: "close_binary", arguments: {} });
+
+    expect((await opening).isError, JSON.stringify(await opening)).not.toBe(
+      true,
+    );
+    expect(text(await reading)).toContain("second.hop");
+    expect((await closing).isError).not.toBe(true);
+    expect(
+      text(await mcp.callTool({ name: "binary_session", arguments: {} })),
+    ).toContain('"open":false');
+  }, 10_000);
+});
+
 describe("session filesystem path boundaries over MCP", () => {
   it("rejects relative snapshot and export paths with an absolute-path error", async () => {
     directory = await createTestTempDirectory("rea-mcp-path-boundary-");

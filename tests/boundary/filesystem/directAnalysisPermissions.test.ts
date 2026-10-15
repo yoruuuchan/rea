@@ -50,7 +50,7 @@ describe("direct analysis snapshot files", () => {
       details: {
         selection_reason: "unknown_provider",
         requested_provider_id: "request-provider",
-        candidate_ids: ["ghidra", "hopper", "ida"],
+        candidate_ids: ["ghidra", "hopper", "ida", "kuna"],
       },
     });
   });

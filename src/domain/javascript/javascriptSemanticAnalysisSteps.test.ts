@@ -5,14 +5,46 @@ import {
   analyzeParsedJavaScriptSemanticsSteps,
   classifyParsedJavaScriptElectronBindings,
   classifyParsedJavaScriptElectronBindingsSteps,
-  classifyParsedJavaScriptReceivers,
-  classifyParsedJavaScriptReceiversSteps,
+  indexJavaScriptBindingsWithReceiversSteps,
 } from "./javascriptSemanticAnalysis.js";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
+import { createJavaScriptGraphqlScan } from "./javascriptGraphqlOperations.js";
 import {
+  completeSemanticSteps,
   traverseJavaScriptAst,
   traverseJavaScriptAstSteps,
 } from "./javascriptSemanticTraversal.js";
+
+it.each([false, true])(
+  "checkpoints suppressed GraphQL sources, including alias proof (aliases: %s)",
+  (aliased) => {
+    const count = 1100;
+    const source = Array.from({ length: count }, (_, index) => {
+      const value = `{body:"query Q${index} { id }",locationOffset:{line:1,column:1}}`;
+      const declaration = aliased ? `const source${index}=${value};` : "";
+      return `${declaration}const doc${index}={kind:"OperationDefinition",operation:"query",name:{kind:"Name",value:"Q${index}"},loc:{source:${aliased ? `source${index}` : value}}};`;
+    }).join("\n");
+    const parsed = parseJavaScriptSource(source, "sources.mjs");
+    if (parsed === null) throw new Error("Expected parsed source");
+    const index = completeSemanticSteps(
+      indexJavaScriptBindingsWithReceiversSteps(parsed.program),
+    );
+    const scan = createJavaScriptGraphqlScan(index);
+    let operations = 0;
+    traverseJavaScriptAst(parsed.program, {
+      enter: (node) => {
+        if (scan.inspect(node) !== undefined) operations += 1;
+      },
+    });
+    expect(operations).toBe(count);
+    let checkpoints = 0;
+    for (const finding of scan.finish()) {
+      expect(finding).toBeUndefined();
+      checkpoints += 1;
+    }
+    expect(checkpoints).toBeGreaterThanOrEqual(count);
+  },
+);
 
 const source = `
 import { readFile } from "node:fs";
@@ -110,15 +142,14 @@ new NativeWindow();
 `;
   const parsed = parseJavaScriptSource(text, "receivers.js");
   if (parsed === null) throw new Error("Expected parsed source");
-  const openSteps = classifyParsedJavaScriptReceiversSteps(parsed);
+  const openSteps = indexJavaScriptBindingsWithReceiversSteps(parsed.program);
   let openStep = openSteps.next();
   expect(openStep.done).toBe(false);
   while (openStep.done !== true) openStep = openSteps.next();
-  expect([...openStep.value.openReceivers]).toEqual([
+  expect([...openStep.value.receivers.openReceivers]).toEqual([
     [text.indexOf('ambient.open("/local")'), "local"],
     [text.indexOf('ambient.open("/global")'), "window"],
   ]);
-  expect(openStep.value).toEqual(classifyParsedJavaScriptReceivers(parsed));
 
   const electronSteps = classifyParsedJavaScriptElectronBindingsSteps(parsed);
   let electronStep = electronSteps.next();

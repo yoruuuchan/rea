@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { parse } from "yaml";
@@ -348,7 +349,7 @@ it("binds npm and MCP publication to the same immutable release SHA", async () =
       import.meta.url,
     );
     const result = await execFileAsync(process.execPath, [
-      helper.pathname,
+      fileURLToPath(helper),
       version,
     ]);
     expect(result.stdout).toBe(tag);

@@ -1,6 +1,7 @@
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
   ghidraMipsGnuAttributesUnsupportedReason,
+  ghidraMipsIncompleteDeclarationsReason,
   ghidraMipsUnsupportedReason,
 } from "./GhidraMipsProfile.js";
 import { ghidraPowerPcUnsupportedReason } from "./GhidraPowerPcProfile.js";
@@ -33,6 +34,8 @@ export const ghidraProcessorUnsupportedReason = (
   const gnuAttributesReason =
     ghidraMipsGnuAttributesUnsupportedReason(metadata);
   if (gnuAttributesReason !== null) return gnuAttributesReason;
+  const incomplete = ghidraMipsIncompleteDeclarationsReason(metadata);
+  if (incomplete !== null) return incomplete;
   if (metadata.elfClass !== 32 || metadata.byteOrder !== "little")
     return "The PSP Allegrex profile requires little-endian ELF32.";
   if (metadata.type !== 2)

@@ -8,6 +8,20 @@ import { createWebTextArtifact } from "./webContentArtifact.js";
 
 const origin = "https://app.example.test";
 
+it("retains standalone GraphQL Source operations in captured scripts", () => {
+  const result = analyzeCapturedWebBundle(
+    inspection(`
+    const source = {
+      body: "query GetUser { user { id } }",
+      locationOffset: { line: 1, column: 1 },
+    };
+  `),
+  );
+  expect(result.observations.endpoints).toEqual([
+    expect.objectContaining({ value: "GetUser", mechanism: "graphql:query" }),
+  ]);
+});
+
 it.each([
   {
     kind: "recovered",

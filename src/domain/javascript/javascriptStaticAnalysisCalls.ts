@@ -454,6 +454,16 @@ export const inspectRpcNode = (node: t.Node, context: FindingContext): void => {
     addEndpoint(context, { node, kind: "network", ...rpc });
 };
 
+/** Resolve deferred Source bodies after their document owners have been seen. */
+export function* finishRpcScanSteps(
+  context: FindingContext,
+): Generator<void, void> {
+  for (const rpc of context.rpcScan.finish()) {
+    if (rpc !== undefined) addEndpoint(context, { kind: "network", ...rpc });
+    yield;
+  }
+}
+
 export const inspectRouteProperty = (
   node: t.ObjectProperty,
   context: FindingContext,

@@ -216,12 +216,12 @@ export class BinarySession
     options: BinarySessionOpenOptions = {},
   ): Promise<Result<BinaryTarget, AnalysisError>> {
     return this.#open(
-      () =>
+      (admitted) =>
         resolveSessionOpen({
           router: this.#providerRouter,
           current: this.#active,
           path,
-          options,
+          options: admitted,
           stagedSnapshotMatches: (target, profile) =>
             this.matchesSnapshot(target, profile),
         }),
@@ -250,12 +250,33 @@ export class BinarySession
   }
 
   #open(
-    resolve: () => Promise<Result<ResolvedSessionOpen, AnalysisError>>,
-    options: Pick<BinarySessionOpenOptions, "signal" | "snapshot">,
+    resolve: (
+      admitted: BinarySessionOpenOptions,
+    ) => Promise<Result<ResolvedSessionOpen, AnalysisError>>,
+    options: BinarySessionOpenOptions,
   ): Promise<Result<BinaryTarget, AnalysisError>> {
-    return this.#serialize((admittedThrough) =>
-      this.#openWithinTransition(admittedThrough, resolve, options),
-    );
+    return this.#serialize(async (admittedThrough) => {
+      const admitted = await this.#withLoadedSnapshot(options);
+      if (!admitted.ok) return admitted;
+      return this.#openWithinTransition(
+        admittedThrough,
+        () => resolve(admitted.value),
+        admitted.value,
+      );
+    });
+  }
+
+  /** Read the staged snapshot only after earlier lifecycle transitions have settled. */
+  async #withLoadedSnapshot(
+    options: BinarySessionOpenOptions,
+  ): Promise<Result<BinarySessionOpenOptions, AnalysisError>> {
+    if (options.loadSnapshot === undefined) return ok(options);
+    if (isAborted(options.signal))
+      return err(new AnalysisCancelledError("open_binary"));
+    const loaded = await options.loadSnapshot();
+    if (!loaded.ok) return loaded;
+    const { loadSnapshot: _loaded, ...rest } = options;
+    return ok({ ...rest, snapshot: loaded.value });
   }
 
   async #openWithinTransition(

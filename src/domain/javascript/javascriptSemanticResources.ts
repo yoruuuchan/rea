@@ -8,7 +8,11 @@ import type {
   JavaScriptSemanticCallable,
   JavaScriptSemanticResourceOperation,
 } from "./javascriptSemanticIr.js";
-import { semanticStaticPropertyName } from "./javascriptAstValues.js";
+import {
+  semanticStaticPropertyName,
+  unwrapJavaScriptExpression,
+} from "./javascriptAstValues.js";
+import { isUnmodifiedGlobalReference } from "./javascriptSemanticAmbientWrites.js";
 import {
   resolveSemanticBindingState,
   type JavaScriptSemanticAnalysisState,
@@ -100,20 +104,57 @@ const collectReleases = (
     );
     const linked =
       binding === undefined ? [] : (byBinding.get(binding.bindingId) ?? []);
-    if (linked.length === 0) return;
+    if (binding === undefined || linked.length === 0) return;
     output.push({
       resourceId: `resource:release:${String(node.start ?? -1)}:${String(node.end ?? -1)}`,
       kind: "release",
       method,
       location: range(node),
       ownerCallableId: context.callableStack.at(-1) ?? null,
-      resultBindingId: binding?.bindingId ?? null,
+      resultBindingId: binding.bindingId,
       linkedResourceIds: linked.map(resourceCandidateId).sort(),
-      resolution: linked.length === 1 ? "complete" : "partial",
+      resolution:
+        linked.length === 1 &&
+        holdsOnlyAcquisitions(binding, linked, context.state)
+          ? "complete"
+          : "partial",
     });
   });
   return output;
 };
+
+/**
+ * A lexical handle identifies its acquisition only while every value written
+ * to the binding is that acquisition itself. Any replacement, even a
+ * conditional or later one, leaves the released resource a candidate. A
+ * nullish placeholder, as in `let h = null; try { h = open() } finally {
+ * h?.close() }`, releases nothing else: the call is skipped or throws.
+ */
+const holdsOnlyAcquisitions = (
+  binding: JavaScriptSemanticBindingState,
+  linked: readonly ResourceCandidate[],
+  state: JavaScriptSemanticAnalysisState,
+): boolean =>
+  [...binding.initializers, ...binding.referenceInitializers].every(
+    ({ node, projection }) => {
+      if (projection.length > 0) return false;
+      let value = unwrapJavaScriptExpression(node).node;
+      if (t.isAwaitExpression(value))
+        value = unwrapJavaScriptExpression(value.argument).node;
+      return (
+        isNullishPlaceholder(value, state) ||
+        linked.some((acquisition) => acquisition.node === value)
+      );
+    },
+  );
+
+const isNullishPlaceholder = (
+  value: t.Node,
+  state: JavaScriptSemanticAnalysisState,
+): boolean =>
+  t.isNullLiteral(value) ||
+  t.isUnaryExpression(value, { operator: "void" }) ||
+  isUnmodifiedGlobalReference(value, state, "undefined");
 
 const immutableAcquisition = (
   candidate: ResourceCandidate,

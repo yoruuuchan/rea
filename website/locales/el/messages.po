@@ -180,7 +180,7 @@ msgstr "Του N0zoM1z0 · 10 Οκτωβρίου 2026"
 #: website/public/blog/index.html:240
 #: website/public/blog/reverse-engineering-models/index.html:879
 #: website/public/blog/touhou-reconstruction/index.html:1076
-#: website/public/contributors/index.html:1119
+#: website/public/contributors/index.html:1127
 #: website/public/examples/dino-lab/index.html:471
 #: website/public/faq/index.html:569
 #: website/public/first-investigation/index.html:530
@@ -202,7 +202,7 @@ msgstr "Πηγαίος κώδικας"
 #: website/public/blog/index.html:241
 #: website/public/blog/reverse-engineering-models/index.html:880
 #: website/public/blog/touhou-reconstruction/index.html:1077
-#: website/public/contributors/index.html:1120
+#: website/public/contributors/index.html:1128
 #: website/public/examples/dino-lab/index.html:472
 #: website/public/faq/index.html:570
 #: website/public/first-investigation/index.html:531
@@ -224,7 +224,7 @@ msgstr "Άδεια MIT"
 #: website/public/blog/index.html:242
 #: website/public/blog/reverse-engineering-models/index.html:881
 #: website/public/blog/touhou-reconstruction/index.html:1078
-#: website/public/contributors/index.html:1121
+#: website/public/contributors/index.html:1129
 #: website/public/examples/dino-lab/index.html:473
 #: website/public/faq/index.html:571
 #: website/public/first-investigation/index.html:532
@@ -246,7 +246,7 @@ msgstr "Ελάτε στην κοινότητα"
 #: website/public/blog/index.html:243
 #: website/public/blog/reverse-engineering-models/index.html:882
 #: website/public/blog/touhou-reconstruction/index.html:1079
-#: website/public/contributors/index.html:1122
+#: website/public/contributors/index.html:1130
 #: website/public/examples/dino-lab/index.html:474
 #: website/public/faq/index.html:572
 #: website/public/first-investigation/index.html:533
@@ -270,7 +270,7 @@ msgstr "Ακολουθήστε μας στο X"
 #: website/public/blog/index.html:248
 #: website/public/blog/reverse-engineering-models/index.html:887
 #: website/public/blog/touhou-reconstruction/index.html:1084
-#: website/public/contributors/index.html:1127
+#: website/public/contributors/index.html:1135
 #: website/public/examples/dino-lab/index.html:479
 #: website/public/faq/index.html:577
 #: website/public/first-investigation/index.html:538
@@ -15312,7 +15312,7 @@ msgstr ""
 #: website/public/blog/touhou-reconstruction/index.html:120
 #: website/public/blog/touhou-reconstruction/index.html:1075
 #: website/public/contributors/index.html:121
-#: website/public/contributors/index.html:1118
+#: website/public/contributors/index.html:1126
 #: website/public/examples/dino-lab/index.html:121
 #: website/public/examples/dino-lab/index.html:470
 #: website/public/faq/index.html:120 website/public/faq/index.html:568
@@ -15397,14 +15397,14 @@ msgstr "Βρείτε έναν συνεισφέροντα"
 
 #. {ph0}: <a href="https://github.com/morluto/rea/graphs/contributors">
 #. {ph1}: </a>
-#. {ph2}: <time datetime="2026-10-14" translate="no">2026-10-14</time>
-#: website/public/contributors/index.html:1102
+#. {ph2}: <time datetime="2026-10-15" translate="no">2026-10-15</time>
+#: website/public/contributors/index.html:1110
 #, python-brace-format
 msgctxt "page:contributors/index.html"
 msgid "From {ph0}GitHub’s contributor list{ph1} · Updated {ph2}."
 msgstr "Από τη {ph0}λίστα συνεισφερόντων του GitHub{ph1} · Ενημερώθηκε {ph2}."
 
-#: website/public/contributors/index.html:1107
+#: website/public/contributors/index.html:1115
 msgctxt "page:contributors/index.html"
 msgid "No matching contributors. Try another username."
 msgstr ""
@@ -15428,7 +15428,7 @@ msgctxt "page:contributors/index.html"
 msgid "GitHub username"
 msgstr "Όνομα χρήστη GitHub"
 
-#: website/public/contributors/index.html:1127
+#: website/public/contributors/index.html:1135
 msgctxt "page:contributors/index.html"
 msgid "Back to top"
 msgstr "Επιστροφή στην κορυφή"

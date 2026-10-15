@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { machoWithPropertyAttributes } from "../../tests/fixtures/objcPropertyMacho.js";
 import { decodeAppleDispatchMetadata } from "./AppleDispatchMetadata.js";
 
 const base = 0x100000000n;
@@ -421,6 +422,38 @@ describe("Apple dispatch coverage ownership", () => {
       reason: expect.stringContaining("category_decode_failed"),
     });
   });
+});
+
+describe("malformed Objective-C property records", () => {
+  it.each([
+    ["an unmapped name", { secondNameOffset: 0x2000 }, "first", "0x100000518"],
+    ["an empty name", { firstName: "" }, "second", "0x100000508"],
+  ] as const)(
+    "retains the valid sibling of a property with %s",
+    (_, layout, kept, location) => {
+      const result = decodeAppleDispatchMetadata(
+        machoWithPropertyAttributes("Tq,N", layout),
+        100,
+        provenance,
+      );
+      expect(
+        result.objc_classes.map(({ name, properties }) => ({
+          name,
+          properties: properties.map((property) => property.name),
+        })),
+      ).toEqual([{ name: "Fixture", properties: [kept] }]);
+      expect(
+        result.coverage.find(
+          ({ facet }) => facet === "objc_properties_categories",
+        ),
+      ).toMatchObject({
+        status: "partial",
+        reason: expect.stringContaining(
+          `property_decode_failed at ${location}: Fixture: property`,
+        ),
+      });
+    },
+  );
 });
 
 describe("malformed Apple dispatch metadata", () => {

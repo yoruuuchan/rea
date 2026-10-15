@@ -95,8 +95,9 @@ dependency edges, and the section's file range. A missing `.dep-v0` section is
 null metadata, not proof that the binary has no dependencies. See
 [Rust binaries](rust-binaries.md).
 
-Configure [Hopper or Ghidra](installation.md#hopper), or the
-[IDA adapter](ida-provider.md), before analyzing a native target. Substitute
+Configure [Hopper or Ghidra](installation.md#hopper), the
+[IDA adapter](ida-provider.md), or [Kuna](kuna-provider.md) before analyzing a
+native target. Substitute
 your target, search text and function name or address in these examples:
 
 ```bash

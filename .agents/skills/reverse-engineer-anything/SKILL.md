@@ -59,7 +59,7 @@ availability have different remedies; avoid repeating setup for all of them.
    absent, inspect the client's MCP launch error rather than repeating setup.
 
 REA setup never installs or upgrades Node.js, npm, Homebrew, Java, Ghidra, IDA,
-JADX, Binwalk, or Unblob. Use existing prerequisites; do not install unrelated
+JADX, Kuna, Binwalk, or Unblob. Use existing prerequisites; do not install unrelated
 software to repair
 MCP registration. For an unsupported client, use manual stdio registration
 with a version-pinned `rea-agents` package or continue through the CLI.
@@ -79,7 +79,7 @@ is within the authorized scope, use `npx -y rea-agents@latest` in its place.
 Configuration repair starts with a read-only setup plan; show paths, backups and
 skill replacement before applying authorized changes. Preserve existing approval
 and target-execution boundaries. REA setup never installs or upgrades unrelated
-software, including Node.js, npm, Homebrew, Java, Ghidra, IDA, JADX, Binwalk or Unblob.
+software, including Node.js, npm, Homebrew, Java, Ghidra, IDA, JADX, Kuna, Binwalk or Unblob.
 
 ## Route the target first
 
@@ -214,6 +214,15 @@ Proceed directly to `analyze_function`, pseudocode, or function/string searches
 after opening; IDA does not supply `binary_overview`. Consult session availability
 when composing broader workflows. Modern direct callers and unsupported dossier
 facets remain unknown; live IDA results are not replayed from snapshots.
+
+With `REA_KUNA_COMMAND` configured, `provider_id: "kuna"` answers procedure
+lists, lookups, pseudocode, assembly and `analyze_function` from Kuna's cached
+whole-program export; it has no cross-references, callers or CFG. A cold first
+answer can come from a single-function run (its limitations say so); assembly
+waits for the export. For pseudocode and assembly, `raw_result.source` names the
+cached `.c`/`.asm` file and byte span, which you may search directly instead of
+calling per function. See the
+[Kuna provider guide](https://github.com/morluto/rea/blob/main/docs/kuna-provider.md).
 
 If the user says only "my app" without a name, path, or target already selected
 for this task, ask which app before searching for artifacts. Paths in unrelated

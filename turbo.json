@@ -13,6 +13,7 @@
         "scripts/check-dependency-install.mjs",
         "scripts/clean-build-output.mjs",
         "scripts/bundle-runtime.mjs",
+        "scripts/record-catalog-digests.mjs",
         "scripts/generate-package-metadata.mjs",
         "src/**/*.{cts,mts,ts,tsx}",
         "src/**/package.json",

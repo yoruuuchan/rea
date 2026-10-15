@@ -235,7 +235,8 @@ const routesToJavaScriptAnalysis = async (
 const isJavaScriptApplicationPath = async (path: string): Promise<boolean> => {
   const lower = path.toLowerCase();
   if (lower.endsWith(".asar")) return true;
-  if (lower.endsWith(".app")) return false;
+  // `A.app/` and `A.app/.` name the same bundle as `A.app`.
+  if (lower.replace(/(?:\/\.?)+$/u, "").endsWith(".app")) return false;
   try {
     return (await stat(path)).isDirectory();
   } catch (cause: unknown) {

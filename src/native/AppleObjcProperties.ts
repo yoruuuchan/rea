@@ -91,36 +91,62 @@ const splitAttributes = (
   };
 };
 
-/** Decode `property_list_t { entsize_and_flags, count, property_t[] }`. */
+/** One property-level decode problem, relative to the list's owner. */
+interface PropertyListIssue {
+  readonly code: "property_decode_failed" | "property_attributes_incomplete";
+  readonly message: string;
+  readonly location: string;
+}
+
+/**
+ * Decode `property_list_t { entsize_and_flags, count, property_t[] }`. Each
+ * entry is decoded on its own, so one malformed entry is reported without
+ * discarding the properties decoded before or after it.
+ */
 export const readObjcPropertyList = (
   read: ObjcPropertyReaders,
   list: bigint,
   admit: () => boolean,
 ): {
   readonly properties: ObjcProperty[];
-  /** Names of properties whose attribute string is incomplete. */
-  readonly incomplete: string[];
+  readonly issues: PropertyListIssue[];
 } => {
-  const incomplete: string[] = [];
-  if (list === 0n) return { properties: [], incomplete };
+  const properties: ObjcProperty[] = [];
+  const issues: PropertyListIssue[] = [];
+  if (list === 0n) return { properties, issues };
   const entrySize = read.u32(list) & ~3;
   const count = read.u32(list + 4n);
   if (entrySize !== 16)
     throw new TypeError(
       `Unsupported Objective-C property entry size ${entrySize}`,
     );
-  const properties: ObjcProperty[] = [];
   for (let index = 0; index < count; index++) {
     if (!admit()) break;
     const entry = list + 8n + BigInt(index * entrySize);
-    const decoded = decodePropertyAttributes(
-      read.string(read.pointer(entry)),
-      read.string(read.pointer(entry + 8n)),
-    );
-    properties.push(decoded.property);
-    if (!decoded.complete) incomplete.push(decoded.property.name);
+    const location = `0x${entry.toString(16)}`;
+    try {
+      const name = read.string(read.pointer(entry));
+      if (name.length === 0) throw new TypeError("the property name is empty");
+      const decoded = decodePropertyAttributes(
+        name,
+        read.string(read.pointer(entry + 8n)),
+      );
+      properties.push(decoded.property);
+      if (!decoded.complete)
+        issues.push({
+          code: "property_attributes_incomplete",
+          message: `property ${name} has an unterminated quoted class name in its type attribute, so atomicity and unestablished read-only state are unknown`,
+          location,
+        });
+    } catch (cause: unknown) {
+      issues.push({
+        code: "property_decode_failed",
+        message: `property ${String(index)} could not be decoded: ${cause instanceof Error ? cause.message : String(cause)}`,
+        location,
+      });
+    }
   }
-  return { properties, incomplete };
+  return { properties, issues };
 };
 
 /** Decode a property list, recording a failure for `owner` instead of throwing. */
@@ -135,18 +161,18 @@ export const readObjcPropertiesOf = (
   },
 ): ObjcProperty[] => {
   try {
-    const { properties, incomplete } = readObjcPropertyList(
+    const { properties, issues } = readObjcPropertyList(
       read,
       list,
       context.admit,
     );
-    for (const name of incomplete)
+    for (const item of issues)
       context.issues.push(
         issue(
           "objc_properties_categories",
-          "property_attributes_incomplete",
-          `${context.owner}.${name}: the type attribute has an unterminated quoted class name, so atomicity and unestablished read-only state are unknown`,
-          context.location,
+          item.code,
+          `${context.owner}: ${item.message}`,
+          item.location,
         ),
       );
     return properties;

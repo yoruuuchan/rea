@@ -12,7 +12,6 @@ import { captureProcessScenario } from "../process/capture/ProcessHarness.js";
 import { ProcessCaptureResourceScope } from "../process/capture/ProcessCaptureLifecycle.js";
 import { ProcessCaptureError } from "../process/capture/ProcessCaptureError.js";
 import { toolContract } from "../contracts/toolContracts.js";
-import type { AnalysisSnapshot } from "../domain/analysisSnapshot.js";
 import { binaryTargetSummary } from "../application/binary/BinaryTargetSummary.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -178,17 +177,7 @@ const registerOpenLifecycleTool = (
     openContract.name,
     toolRegistrationOptions(openContract),
     async (input, context) => {
-      let snapshot: AnalysisSnapshot | undefined;
-      if (input.snapshot_path !== undefined) {
-        const loaded = await readAnalysisSnapshot(
-          input.snapshot_path,
-          context.mcpReq.signal,
-          artifactResources,
-        );
-        if (!loaded.ok)
-          return server.delivery.toCallToolResult(loaded, openContract);
-        snapshot = loaded.value;
-      }
+      const snapshotPath = input.snapshot_path;
       const opened = await logToolExecution(logger, openContract.name, () =>
         session.open(input.path, {
           signal: context.mcpReq.signal,
@@ -202,7 +191,18 @@ const registerOpenLifecycleTool = (
           ...(input.provider_id === undefined
             ? {}
             : { providerId: input.provider_id }),
-          ...(snapshot === undefined ? {} : { snapshot }),
+          ...(snapshotPath === undefined
+            ? {}
+            : {
+                // Read inside the open's turn: calls issued after it must not
+                // overtake a file read that precedes its place in the order.
+                loadSnapshot: () =>
+                  readAnalysisSnapshot(
+                    snapshotPath,
+                    context.mcpReq.signal,
+                    artifactResources,
+                  ),
+              }),
         }),
       );
       return opened.ok

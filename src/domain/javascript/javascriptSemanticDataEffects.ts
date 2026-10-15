@@ -270,6 +270,18 @@ const collectResponseConsumers = (
         ? []
         : (requestsByBinding.get(binding.bindingId) ?? []);
     if (linked.length === 0) return;
+    // A consumer of exactly one request through its own result binding
+    // reads that request's response, so it keeps the request's endpoint.
+    const uniqueRequest =
+      linked.length === 1 &&
+      !linked[0]?.operation.projectedResultBindings.some(
+        ({ bindingId }) => bindingId === binding?.bindingId,
+      )
+        ? linked[0]
+        : undefined;
+    // Any other write (assignment, update, loop or destructuring target) can
+    // replace the response before this read, so its endpoint stays unknown.
+    const soleWrite = binding?.initializers.length === 1;
     output.push({
       requestId: `response:${String(node.start ?? -1)}:${String(node.end ?? -1)}`,
       kind: "response-consumer",
@@ -287,15 +299,9 @@ const collectResponseConsumers = (
       linkedRequestIds: linked
         .map(({ operation }) => operation.requestId)
         .sort(compareUnicodeCodePoints),
-      endpoint: null,
+      endpoint: soleWrite ? (uniqueRequest?.operation.endpoint ?? null) : null,
       fields: [],
-      resolution:
-        linked.length === 1 &&
-        !linked[0]?.operation.projectedResultBindings.some(
-          ({ bindingId }) => bindingId === binding?.bindingId,
-        )
-          ? "complete"
-          : "partial",
+      resolution: uniqueRequest === undefined ? "partial" : "complete",
     });
   });
   return output;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readElfSymbols, readSnapshotHeader } from "./DartElf.js";
 import {
   REFERENCE_HASH,
+  buildElf32Image,
   buildElf64Image,
   buildStrippedElf64Image,
   snapshotSection,
@@ -298,6 +299,106 @@ describe("ELF symbol-table ownership", () => {
     expect((await readElfSymbols(image, names)).symbols).toEqual([]);
   });
 });
+
+/** Section-header field positions for each ELF class. */
+const ELF_CLASSES = {
+  elf64: {
+    build: buildElf64Image,
+    word: {
+      read: (image: Buffer, at: number) => Number(image.readBigUInt64LE(at)),
+      write: (image: Buffer, value: number, at: number) =>
+        image.writeBigUInt64LE(BigInt(value), at),
+    },
+    shoff: 0x28,
+    shent: 64,
+    flags: 8,
+    address: 0x10,
+    offset: 0x18,
+  },
+  elf32: {
+    build: buildElf32Image,
+    word: {
+      read: (image: Buffer, at: number) => image.readUInt32LE(at),
+      write: (image: Buffer, value: number, at: number) =>
+        image.writeUInt32LE(value, at),
+    },
+    shoff: 0x20,
+    shent: 40,
+    flags: 8,
+    address: 0x0c,
+    offset: 0x10,
+  },
+} as const;
+
+describe.each(Object.entries(ELF_CLASSES))(
+  "allocated %s symbol tables",
+  (_, layout) => {
+    const { word } = layout;
+    /** Snapshot sections, with dynamic tables allocated at their offsets. */
+    const allocatedTables = (): {
+      image: Buffer;
+      headers: number[];
+      tables: number[];
+    } => {
+      const elf = layout.build([
+        { name: "_kDartVmSnapshotData", value: 0x400, size: 52 },
+      ]);
+      const section = snapshotSection(GALLERY_HASH);
+      const image = Buffer.concat([
+        elf,
+        Buffer.alloc(0x400 - elf.length),
+        section,
+      ]);
+      const shoff = word.read(image, layout.shoff);
+      const headers = [shoff + layout.shent, shoff + 2 * layout.shent];
+      const tables = headers.map((header) => {
+        const offset = word.read(image, header + layout.offset);
+        word.write(image, 2, header + layout.flags);
+        word.write(image, offset, header + layout.address);
+        return offset;
+      });
+      return { image, headers, tables };
+    };
+
+    it("accepts tables whose mapping matches their sections", async () => {
+      const { image } = allocatedTables();
+      expect(await readElfSymbols(image, ["_kDartVmSnapshotData"])).toEqual({
+        symbols: [{ name: "_kDartVmSnapshotData", offset: 0x400, size: 52 }],
+        failures: [],
+      });
+    });
+
+    it.each([
+      [0, "Dynamic symbol table has conflicting PT_LOAD mappings"],
+      [1, "Dynamic symbol string table has conflicting PT_LOAD mappings"],
+    ])(
+      "refuses table %i under a conflicting PT_LOAD interpretation",
+      async (table, reason) => {
+        const { image, tables } = allocatedTables();
+        const conflict = appendElfRanges(image, "program", [
+          { type: 1, address: tables[table]!, offset: 0x300, size: 4 },
+        ]);
+        expect(
+          await readElfSymbols(conflict, ["_kDartVmSnapshotData"]),
+        ).toEqual({ symbols: [], failures: [{ reason }] });
+      },
+    );
+
+    it("refuses a table whose section offset disagrees with its mapping", async () => {
+      const { image, headers } = allocatedTables();
+      word.write(image, 0x300, headers[0]! + layout.address);
+      expect(await readElfSymbols(image, ["_kDartVmSnapshotData"])).toEqual({
+        symbols: [],
+        failures: [
+          {
+            reason:
+              "Dynamic symbol table section offset disagrees with its PT_LOAD mapping",
+          },
+        ],
+      });
+    });
+  },
+);
 
 describe("readSnapshotHeader", () => {
   it("reads a synthesized data header", async () => {

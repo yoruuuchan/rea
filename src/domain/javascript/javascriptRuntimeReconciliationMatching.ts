@@ -78,60 +78,13 @@ const reconcileEntity = (
       candidates: [],
     });
   const locations = candidatesWithLocation(entity, index, layers);
-  if (entity.sourceSha256 !== null) {
-    const content =
-      index.byCategoryDigest.get(
-        categoryDigestKey(entity.staticKind, entity.sourceSha256),
-      ) ?? [];
-    const locatedKeys = new Set(
-      locations.map(({ candidate }) => candidateKey(candidate)),
+  if (entity.sourceSha256 !== null)
+    return reconcileCapturedSource(
+      entity,
+      entity.sourceSha256,
+      locations,
+      index,
     );
-    const combined = content.filter((candidate) =>
-      locatedKeys.has(candidateKey(candidate)),
-    );
-    const combinedCandidate = combined.at(0);
-    if (combined.length === 1 && combinedCandidate !== undefined)
-      return matched(entity, combinedCandidate, {
-        basis: "content-and-location",
-        confidence: "high",
-        reason: "content-and-location-match",
-      });
-    const contentCandidate = content.at(0);
-    if (content.length === 1 && contentCandidate !== undefined) {
-      const candidate = contentCandidate;
-      const digestBasis = candidate.digests.find(
-        ({ sha256 }) => sha256 === entity.sourceSha256,
-      )?.basis;
-      return matched(entity, candidate, {
-        basis: digestBasis ?? "content-sha256",
-        confidence: "high",
-        reason: "unique-content-match",
-      });
-    }
-    if (content.length > 1)
-      return unresolved(entity, {
-        status: "ambiguous",
-        basis: "none",
-        confidence: "unknown",
-        reason: "ambiguous-static-candidates",
-        candidates: content,
-      });
-    if (locations.length > 0)
-      return unresolved(entity, {
-        status: "unmatched",
-        basis: strongestLocationBasis(locations),
-        confidence: "high",
-        reason: "captured-content-disagrees-with-static-location",
-        candidates: locations.map(({ candidate }) => candidate),
-      });
-    return unresolved(entity, {
-      status: "unmatched",
-      basis: "none",
-      confidence: "high",
-      reason: "no-static-content-match",
-      candidates: [],
-    });
-  }
 
   const location = locations.at(0);
   if (locations.length === 1 && location !== undefined) {
@@ -168,6 +121,69 @@ interface LocatedCandidate {
   readonly candidate: StaticRuntimeCandidate;
   readonly mapping: MappedRuntimePath;
 }
+
+const reconcileCapturedSource = (
+  entity: RuntimeReconciliationEntity,
+  sourceSha256: string,
+  locations: readonly LocatedCandidate[],
+  index: CandidateIndex,
+): EvaluatedMatch => {
+  // A known mapped candidate owns the comparison. Unrelated equal bytes cannot
+  // repair a disagreement or establish the content of a candidate without a digest.
+  const content =
+    locations.length > 0
+      ? locations
+          .map(({ candidate }) => candidate)
+          .filter(({ digests }) =>
+            digests.some(({ sha256 }) => sha256 === sourceSha256),
+          )
+      : (index.byCategoryDigest.get(
+          categoryDigestKey(entity.staticKind, sourceSha256),
+        ) ?? []);
+  const candidate = content.at(0);
+  if (content.length === 1 && candidate !== undefined)
+    return matched(entity, candidate, {
+      basis:
+        locations.length > 0
+          ? "content-and-location"
+          : (candidate.digests.find(({ sha256 }) => sha256 === sourceSha256)
+              ?.basis ?? "content-sha256"),
+      confidence: "high",
+      reason:
+        locations.length > 0
+          ? "content-and-location-match"
+          : "unique-content-match",
+    });
+  if (content.length > 1)
+    return unresolved(entity, {
+      status: "ambiguous",
+      basis: locations.length > 0 ? "content-and-location" : "none",
+      confidence: "unknown",
+      reason: "ambiguous-static-candidates",
+      candidates: content,
+    });
+  if (locations.length > 0) {
+    const digestUnavailable = locations.some(
+      ({ candidate: { digests } }) => digests.length === 0,
+    );
+    return unresolved(entity, {
+      status: digestUnavailable ? "unknown" : "unmatched",
+      basis: strongestLocationBasis(locations),
+      confidence: digestUnavailable ? "unknown" : "high",
+      reason: digestUnavailable
+        ? "static-or-runtime-coverage-incomplete"
+        : "captured-content-disagrees-with-static-location",
+      candidates: locations.map(({ candidate: located }) => located),
+    });
+  }
+  return unresolved(entity, {
+    status: "unmatched",
+    basis: "none",
+    confidence: "high",
+    reason: "no-static-content-match",
+    candidates: [],
+  });
+};
 
 const candidatesWithLocation = (
   entity: RuntimeReconciliationEntity,

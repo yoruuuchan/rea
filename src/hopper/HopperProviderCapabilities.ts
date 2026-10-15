@@ -1,3 +1,4 @@
+import { REGEX_MATCHING_LIMITATION } from "../process/RegexMatcher.js";
 import type {
   CapabilityDescriptor,
   ProviderIdentity,
@@ -90,7 +91,7 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = Object.freeze(
           : []),
         ...(operation === "search_strings" || operation === "search_procedures"
           ? [
-              "Regex mode uses ECMAScript Unicode semantics in a supervised worker with a five-second matching deadline. Cancellation or deadline failure stops matching without blocking Hopper; literal mode retains native casefold semantics.",
+              `${REGEX_MATCHING_LIMITATION} Literal mode retains native casefold semantics.`,
             ]
           : []),
         ...(operation === "list_strings" ||

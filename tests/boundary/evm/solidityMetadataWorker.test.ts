@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { solidityMetadataSchema } from "../../../src/domain/evm/solidityMetadata.js";
@@ -38,8 +39,12 @@ it.each([
       [
         "--max-old-space-size=256",
         "--disable-wasm-trap-handler",
-        new URL("../../../dist/evm/EvmoleInterfaceWorker.js", import.meta.url)
-          .pathname,
+        fileURLToPath(
+          new URL(
+            "../../../dist/evm/EvmoleInterfaceWorker.js",
+            import.meta.url,
+          ),
+        ),
         request,
       ],
       { timeout: 30_000, maxBuffer: 1024 * 1024 },

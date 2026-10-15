@@ -348,6 +348,63 @@ describe("CdpElectronProvider malformed source replies", () => {
   );
 });
 
+describe("CdpElectronProvider malformed inventory replies", () => {
+  const inspectWith = async (
+    method: string,
+    reply: (fileUrl: string) => Readonly<Record<string, unknown>>,
+  ) => {
+    const root = await electronFixture();
+    const fileUrl = pathToFileURL(join(root, "index.html")).href;
+    const browser = await startFakeCdpBrowser({
+      electronFileUrl: fileUrl,
+      commandResult: (command) =>
+        command.method === method ? reply(fileUrl) : undefined,
+    });
+    browsers.push(browser);
+    const result = await new CdpElectronProvider().inspectPage(
+      inspectElectronPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        target_id: "electron-page",
+        observation_ms: 0,
+      }),
+    );
+    if (!result.ok) throw result.error;
+    return result.value;
+  };
+
+  it.each([
+    ["dom", "DOMSnapshot.captureSnapshot", () => ({ strings: [] })],
+    [
+      "dom",
+      "DOMSnapshot.captureSnapshot",
+      (fileUrl: string) => ({
+        strings: [fileUrl],
+        documents: [{ documentURL: 0, nodes: { nodeType: null } }],
+      }),
+    ],
+    [
+      "resources",
+      "Page.getResourceTree",
+      (fileUrl: string) => ({
+        frameTree: { frame: { id: "main", url: fileUrl }, resources: null },
+      }),
+    ],
+    ["workers", "Target.getTargets", () => ({ targetInfos: null })],
+  ] as const)(
+    "keeps a malformed %s inventory incomplete (%s)",
+    async (section, method, reply) => {
+      const inspected = await inspectWith(method, reply);
+      expect(inspected.completeness.status).not.toBe("complete_within_window");
+      expect(inspected.completeness.excluded).toContainEqual(
+        expect.objectContaining({
+          section,
+          reason: "invalid_protocol_value",
+        }),
+      );
+    },
+  );
+});
+
 describe("CdpElectronProvider script source capture", () => {
   it("retains an explicitly empty Electron producer script", async () => {
     const root = await electronFixture();

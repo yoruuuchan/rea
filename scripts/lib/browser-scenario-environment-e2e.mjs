@@ -4,11 +4,14 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
+import { CdpCommandRejection } from "../../dist/browser/CdpCommandRejection.js";
 import { CdpConnection } from "../../dist/browser/CdpConnection.js";
 import { createBrowserScenarioProvider } from "../../dist/composition/browserScenario.js";
 import { browserScenarioSchema } from "../../dist/domain/browserScenario.js";
+import { AnalysisCancelledError } from "../../dist/domain/analysisErrorCore.js";
 import { runScenarioCli } from "./browser-scenario-verifier.mjs";
 import { requireMcpEvidenceResult } from "./mcp-verifier-results.mjs";
+import { closeVerifierResources } from "./verifier-cleanup.mjs";
 
 const expected = {
   timezone: "Pacific/Honolulu",
@@ -24,11 +27,23 @@ const alternate = {
   width: 700,
   height: 500,
 };
-const expression = `JSON.stringify({
+const environmentExpression = `{
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   locale: Intl.DateTimeFormat().resolvedOptions().locale,
   dpr: devicePixelRatio, width: innerWidth, height: innerHeight
+}`;
+const expression = `JSON.stringify(${environmentExpression})`;
+const scenarioSnapshotExpression = `JSON.stringify({
+  timeOrigin: performance.timeOrigin,
+  environment: ${environmentExpression},
+  run: document.body?.dataset.run ?? null
 })`;
+
+const isNavigationTransitionRejection = (cause) =>
+  cause instanceof CdpCommandRejection &&
+  cause.command === "Runtime.evaluate" &&
+  cause.code === -32_000 &&
+  cause.reportedMessage === "Inspected target navigated or closed";
 
 const environmentScenario = ({ endpoint, targetId, origin, values, run }) =>
   browserScenarioSchema.parse({
@@ -99,19 +114,21 @@ export async function verifyScenarioEnvironment(endpoint, targetId, origin) {
     assert.equal(value.result.type, "string");
     return JSON.parse(value.result.value);
   };
-  const baseline = await readEnvironment();
-  const scenario = environmentScenario({
-    endpoint,
-    targetId,
-    origin,
-    values: expected,
-  });
-  const assertRestored = async () => {
-    assert.deepEqual(await readEnvironment(), baseline);
-    const remaining = await (await fetch(`${endpoint}/json/list`)).json();
-    assert.ok(remaining.some(({ id }) => id === targetId));
-  };
+  const provider = createBrowserScenarioProvider(process.env);
+  let verificationError;
   try {
+    const baseline = await readEnvironment();
+    const scenario = environmentScenario({
+      endpoint,
+      targetId,
+      origin,
+      values: expected,
+    });
+    const assertRestored = async () => {
+      assert.deepEqual(await readEnvironment(), baseline);
+      const remaining = await (await fetch(`${endpoint}/json/list`)).json();
+      assert.ok(remaining.some(({ id }) => id === targetId));
+    };
     assertCapture((await runScenarioCli(scenario)).normalized_result);
     await assertRestored();
     const transport = new StdioClientTransport({
@@ -146,7 +163,6 @@ export async function verifyScenarioEnvironment(endpoint, targetId, origin) {
         endpoint,
         targetId,
         origin,
-        readEnvironment,
         assertRestored,
       });
     } finally {
@@ -154,7 +170,6 @@ export async function verifyScenarioEnvironment(endpoint, targetId, origin) {
       await transport.close();
     }
     await assertRestored();
-    const provider = createBrowserScenarioProvider(process.env);
     const initializationFailure = await provider.captureScenario({
       ...scenario,
       environment: { ...scenario.environment, timezone: "REA/Invalid" },
@@ -178,12 +193,7 @@ export async function verifyScenarioEnvironment(endpoint, targetId, origin) {
     assertCapture(actionFailure.value);
     assert.equal(actionFailure.value.steps.at(-1).status, "failed");
     await assertRestored();
-    await verifyCancelledEnvironment(
-      provider,
-      connection,
-      waiting,
-      readEnvironment,
-    );
+    await verifyCancelledEnvironment(provider, connection, waiting);
     await assertRestored();
     return {
       mocked: false,
@@ -196,8 +206,14 @@ export async function verifyScenarioEnvironment(endpoint, targetId, origin) {
       cancellation_cleanup: true,
       external_target_preserved: true,
     };
+  } catch (cause) {
+    verificationError = cause;
+    throw cause;
   } finally {
-    await connection.close();
+    await closeVerifierResources(
+      [() => provider.close(), () => connection.close()],
+      verificationError,
+    );
   }
 }
 
@@ -208,7 +224,6 @@ const verifyConcurrentMcpCapture = async ({
   endpoint,
   targetId,
   origin,
-  readEnvironment,
   assertRestored,
 }) => {
   const firstScenario = environmentScenario({
@@ -241,12 +256,13 @@ const verifyConcurrentMcpCapture = async ({
 
   try {
     const first = callTool(firstScenario, firstCancellation.signal);
-    await waitForEnvironment(readEnvironment, connection, expected, "A");
+    await waitForEnvironment(connection, expected, "A");
 
     const second = callTool(secondScenario, secondCancellation.signal);
     await client.ping();
-    assert.deepEqual(await readEnvironment(), expected);
-    assert.equal(await readScenarioRun(connection), "A");
+    const firstSnapshot = await readScenarioSnapshot(connection);
+    assert.deepEqual(firstSnapshot.environment, expected);
+    assert.equal(firstSnapshot.run, "A");
 
     const cancelled = callTool(
       environmentScenario({
@@ -261,8 +277,9 @@ const verifyConcurrentMcpCapture = async ({
     await client.ping();
     cancellation.abort(new Error("cancel queued browser scenario"));
     await assert.rejects(cancelled, /cancel queued browser scenario/u);
-    assert.deepEqual(await readEnvironment(), expected);
-    assert.equal(await readScenarioRun(connection), "A");
+    const queuedSnapshot = await readScenarioSnapshot(connection);
+    assert.deepEqual(queuedSnapshot.environment, expected);
+    assert.equal(queuedSnapshot.run, "A");
 
     await releaseScenario(connection);
     assertCapture(
@@ -270,7 +287,7 @@ const verifyConcurrentMcpCapture = async ({
       expected,
     );
 
-    await waitForEnvironment(readEnvironment, connection, alternate, "B");
+    await waitForEnvironment(connection, alternate, "B");
     await releaseScenario(connection);
     assertCapture(
       requireMcpEvidenceResult(await second, "capture_browser_scenario"),
@@ -287,31 +304,57 @@ const verifyConcurrentMcpCapture = async ({
   }
 };
 
-const waitForEnvironment = async (
-  readEnvironment,
-  connection,
-  expectedValues,
-  run,
-) => {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (
-      JSON.stringify(await readEnvironment()) ===
-        JSON.stringify(expectedValues) &&
-      (await readScenarioRun(connection)) === run
-    )
-      return;
-    await delay(25);
-  }
-  throw new Error(`Scenario ${run} never reached its page-controlled gate`);
+const waitForEnvironment = async (connection, expectedValues, run) => {
+  await waitForScenarioSnapshot(
+    connection,
+    (snapshot) =>
+      JSON.stringify(snapshot.environment) === JSON.stringify(expectedValues) &&
+      snapshot.run === run,
+    `Scenario ${run} never reached its page-controlled gate`,
+  );
 };
 
-const readScenarioRun = async (connection) => {
-  const value = await connection.send("Runtime.evaluate", {
-    expression: "document.body.dataset.run ?? null",
-    returnByValue: true,
-  });
-  return value.result.value;
+const waitForScenarioSnapshot = async (connection, accept, message) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  let lastTransitionRejection;
+  try {
+    while (!controller.signal.aborted) {
+      try {
+        const snapshot = await readScenarioSnapshot(
+          connection,
+          controller.signal,
+        );
+        if (controller.signal.aborted) break;
+        if (accept(snapshot)) return;
+      } catch (cause) {
+        if (
+          controller.signal.aborted &&
+          cause instanceof AnalysisCancelledError
+        )
+          break;
+        if (!isNavigationTransitionRejection(cause)) throw cause;
+        lastTransitionRejection = cause;
+      }
+      await delay(25);
+    }
+    throw new Error(message, {
+      cause: lastTransitionRejection ?? controller.signal.reason,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const readScenarioSnapshot = async (connection, signal) => {
+  const value = await connection.send(
+    "Runtime.evaluate",
+    { expression: scenarioSnapshotExpression, returnByValue: true },
+    undefined,
+    signal,
+  );
+  assert.equal(value.result.type, "string");
+  return JSON.parse(value.result.value);
 };
 
 const releaseScenario = async (connection) => {
@@ -321,44 +364,41 @@ const releaseScenario = async (connection) => {
   });
 };
 
-async function verifyCancelledEnvironment(
+export async function verifyCancelledEnvironment(
   provider,
   connection,
   scenario,
-  readEnvironment,
 ) {
   const controller = new AbortController();
-  const priorNavigation = await connection.send("Runtime.evaluate", {
-    expression: "performance.timeOrigin",
-    returnByValue: true,
-  });
+  const priorSnapshot = await readScenarioSnapshot(connection);
   const pending = provider.captureScenario(
     { ...scenario, actions: [{ ...scenario.actions[0], timeout_ms: 30_000 }] },
     { signal: controller.signal },
   );
+  const settlement = Promise.allSettled([pending]);
   try {
-    const deadline = Date.now() + 10_000;
-    while (true) {
-      const navigation = await connection.send("Runtime.evaluate", {
-        expression: "performance.timeOrigin",
-        returnByValue: true,
-      });
-      if (
-        navigation.result.value !== priorNavigation.result.value &&
-        JSON.stringify(await readEnvironment()) === JSON.stringify(expected)
-      )
-        break;
-      assert.ok(Date.now() < deadline, "Scenario never applied emulation");
-      await delay(25);
-    }
+    await waitForScenarioSnapshot(
+      connection,
+      (snapshot) =>
+        snapshot.timeOrigin !== priorSnapshot.timeOrigin &&
+        JSON.stringify(snapshot.environment) === JSON.stringify(expected),
+      "Scenario never applied emulation",
+    );
     await delay(100);
   } finally {
     controller.abort();
+    await settlement;
   }
   const cancelled = await pending;
-  assert.ok(
-    !cancelled.ok ||
+  if (!cancelled.ok) {
+    if (!(cancelled.error instanceof AnalysisCancelledError))
+      throw cancelled.error;
+    assert.equal(cancelled.error.cleanupIncomplete, false);
+  } else {
+    assert.ok(
       cancelled.value.steps.some(({ status }) => status === "cancelled"),
-    "Cancellation unexpectedly completed every action",
-  );
+      "Cancellation unexpectedly completed every action",
+    );
+    assert.equal(cancelled.value.browser.cleanup, "disconnected-external");
+  }
 }

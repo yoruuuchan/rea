@@ -59,6 +59,7 @@ export interface ElfParseFailure {
 }
 
 const SHT_DYNSYM = 11;
+const SHF_ALLOC = 2;
 const PT_LOAD = 1;
 const PT_DYNAMIC = 2;
 /** Position-independent executable images carry PT_DYNAMIC. */
@@ -225,6 +226,28 @@ export const readElfSymbols = async (
     stringOffset: number;
     stringSize: number;
   }[] = [];
+  /**
+   * The loader reads an allocated section through PT_LOAD, so its section
+   * offset must be the single file interpretation of its address range.
+   */
+  const sectionMappingFailure = (
+    header: number,
+    offset: number,
+    size: number,
+  ): string | undefined => {
+    const flags = is64 ? reader.u64(header + 8) : reader.u32(header + 8);
+    const address = is64
+      ? reader.u64(header + 0x10)
+      : reader.u32(header + 0x0c);
+    if (flags === null || address === null)
+      return "has an unrepresentable section header";
+    if ((flags & SHF_ALLOC) === 0) return undefined;
+    const mapped = toOffset(address, size);
+    if (!mapped.ok) return mapped.error.reason;
+    return mapped.value === offset
+      ? undefined
+      : "section offset disagrees with its PT_LOAD mapping";
+  };
   if (!dynamicFallback) {
     for (let index = 0; index < e_shnum; index += 1) {
       if (index % 4096 === 0) {
@@ -269,6 +292,16 @@ export const readElfSymbols = async (
         return failure(
           "Dynamic symbol strings are out of bounds or not a string table",
         );
+      const symbolMapping = sectionMappingFailure(header, offset, size);
+      if (symbolMapping !== undefined)
+        return failure(`Dynamic symbol table ${symbolMapping}`);
+      const stringMapping = sectionMappingFailure(
+        stringHeader,
+        stringOffset,
+        stringSize,
+      );
+      if (stringMapping !== undefined)
+        return failure(`Dynamic symbol string table ${stringMapping}`);
       tables.push({
         offset,
         count: size / entrySize,

@@ -112,3 +112,137 @@ describe("Electron option evidence", () => {
     );
   });
 });
+
+describe("Electron empty option keys", () => {
+  describe.each([
+    ["plain empty string", '[""]'],
+    ["empty template", "[``]"],
+    ["wrapped empty string", '["" as const]'],
+  ])("unrelated %s option keys", (_label, key) => {
+    it("retains an earlier explicit webPreferences object", () => {
+      const analysis = analyzeJavaScriptStaticSource(`
+        const { BrowserWindow } = require("electron");
+        new BrowserWindow({
+          webPreferences: { preload: "./kept.js", sandbox: true },
+          ${key}: true
+        });
+      `);
+
+      expect(analysis.parse_error_count).toBe(0);
+      expect(analysis.parse_status).toBe("complete");
+      expect(analysis.electron.browser_windows).toMatchObject([
+        {
+          web_preferences_status: "object-literal",
+          preload_path: "./kept.js",
+          preload_resolution_context: "module-specifier",
+          web_preferences: [
+            {
+              name: "preload",
+              value: { status: "literal", value: "./kept.js" },
+            },
+            { name: "sandbox", value: { status: "literal", value: true } },
+          ],
+        },
+      ]);
+    });
+
+    it("retains an earlier explicit preload within webPreferences", () => {
+      const analysis = analyzeJavaScriptStaticSource(`
+        const { BrowserWindow } = require("electron");
+        new BrowserWindow({ webPreferences: {
+          preload: "./kept.js", sandbox: true, ${key}: false
+        } });
+      `);
+
+      expect(analysis.parse_error_count).toBe(0);
+      expect(analysis.parse_status).toBe("complete");
+      expect(analysis.electron.browser_windows).toMatchObject([
+        {
+          web_preferences_status: "object-literal",
+          preload_path: "./kept.js",
+          preload_resolution_context: "module-specifier",
+          web_preferences: [
+            { name: "", value: { status: "literal", value: false } },
+            {
+              name: "preload",
+              value: { status: "literal", value: "./kept.js" },
+            },
+            { name: "sandbox", value: { status: "literal", value: true } },
+          ],
+        },
+      ]);
+    });
+
+    it("retains an earlier explicit utility-process service name", () => {
+      const analysis = analyzeJavaScriptStaticSource(`
+        const { utilityProcess } = require("electron");
+        utilityProcess.fork("./worker.js", [], {
+          serviceName: "kept", ${key}: true
+        });
+      `);
+
+      expect(analysis.parse_error_count).toBe(0);
+      expect(analysis.parse_status).toBe("complete");
+      expect(analysis.electron.utility_processes).toMatchObject([
+        { module_path: "./worker.js", service_name: "kept" },
+      ]);
+    });
+  });
+
+  it.each([
+    ["dynamic key", "[key]: null"],
+    ["spread", "...options"],
+  ])(
+    "keeps a preceding %s override unknown after an unrelated empty template key",
+    (_label, override) => {
+      const analysis = analyzeJavaScriptStaticSource(`
+        const { BrowserWindow, utilityProcess } = require("electron");
+        new BrowserWindow({
+          webPreferences: { preload: "./maybe.js" },
+          ${override}, [\`\`]: true
+        });
+        new BrowserWindow({ webPreferences: {
+          preload: "./maybe.js", ${override}, [\`\`]: true
+        } });
+        utilityProcess.fork("./worker.js", [], {
+          serviceName: "maybe", ${override}, [\`\`]: true
+        });
+      `);
+
+      expect(analysis.parse_error_count).toBe(0);
+      expect(analysis.parse_status).toBe("partial");
+      expect(analysis.electron.browser_windows).toMatchObject([
+        {
+          web_preferences_status: "dynamic",
+          web_preferences: [],
+          preload_path: null,
+          preload_resolution_context: null,
+        },
+        {
+          web_preferences_status: "object-literal",
+          preload_path: null,
+          preload_resolution_context: null,
+        },
+      ]);
+      expect(analysis.electron.browser_windows[1]?.web_preferences).toEqual(
+        expect.arrayContaining([
+          {
+            name: "",
+            value: { status: "literal", value: true, expression: null },
+          },
+          {
+            name: "preload",
+            value: { status: "literal", value: "./maybe.js", expression: null },
+          },
+          expect.objectContaining({
+            name: expect.stringMatching(/^\[(?:dynamic|spread)@/u),
+            value: expect.objectContaining({ status: "dynamic", value: null }),
+          }),
+        ]),
+      );
+      expect(analysis.electron.utility_processes).toMatchObject([
+        { module_path: "./worker.js", service_name: null },
+      ]);
+    },
+  );
+});

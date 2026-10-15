@@ -1,5 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { dirname } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
+import {
+  OBSIDIAN_FUSE_BYTES,
+  thinFuseImage,
+} from "../../tests/fixtures/electron/fuseImage.js";
 
 import * as processOwnership from "../process/ProcessOwnership.js";
 import * as electronActions from "./PlaywrightElectronActiveActions.js";
@@ -251,5 +258,36 @@ it("retains the initial snapshot when the final state read fails", async () => {
         expect.stringContaining("initial pre-action snapshot"),
       ]),
     },
+  });
+});
+
+it("rejects active capture before launch when EnableNodeCliInspectArguments fuse is disabled", async () => {
+  const root = await createTestTempDirectory("rea-active-provider-fuse-");
+  const disabledBinary = join(root, "disabled-electron");
+  await writeFile(disabledBinary, thinFuseImage(OBSIDIAN_FUSE_BYTES).bytes);
+
+  const launchSpy = vi.fn(async () => {
+    throw new Error("launch should not be called when fuse is disabled");
+  });
+
+  const provider = new PlaywrightElectronActiveProvider({}, launchSpy);
+
+  const result = await provider.capture({
+    ...electronActiveObservationInputSchema.parse({
+      executable_path: disabledBinary,
+      application_path: disabledBinary,
+    }),
+    application_root: root,
+  });
+
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected capture to fail");
+  expect(launchSpy).not.toHaveBeenCalled();
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisUnsupportedTargetError",
+    operation: "capture_electron_scenario",
+    path: disabledBinary,
+    message: expect.stringContaining("EnableNodeCliInspectArguments"),
+    remediationAction: expect.stringContaining("inspect_electron_page"),
   });
 });

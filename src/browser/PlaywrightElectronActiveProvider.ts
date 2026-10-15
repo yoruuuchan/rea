@@ -37,6 +37,8 @@ import {
   runWithExecutionLimits,
 } from "./PlaywrightElectronActiveActions.js";
 import { projectElectronActiveCapture } from "./PlaywrightElectronActiveProjection.js";
+import { readElectronFuseImage } from "../electron/ElectronFuseReader.js";
+import { assertNodeCliInspectArgumentsSupported } from "./PlaywrightElectronActiveFuses.js";
 
 const OPERATION = "capture_electron_scenario" as const;
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -61,6 +63,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
     // Load Playwright only when a capture launches; MCP startup stays off its module graph.
     private readonly launch: typeof electron.launch = async (options) =>
       (await import("playwright-core"))._electron.launch(options),
+    private readonly readFuseImage: typeof readElectronFuseImage = readElectronFuseImage,
   ) {}
 
   identity(): ProviderIdentity {
@@ -92,6 +95,14 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         application: input.application_path,
         root: input.application_root,
       };
+      await runWithExecutionLimits(
+        assertNodeCliInspectArgumentsSupported(paths.executable, {
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          readFuseImage: this.readFuseImage,
+        }),
+        options.signal,
+        startupDeadline,
+      );
       const captureBaseline =
         await systemProcessOwnershipHost.captureBaseline?.(options.signal);
       if (options.signal?.aborted)

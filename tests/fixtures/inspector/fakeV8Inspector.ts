@@ -28,6 +28,7 @@ interface FakeV8InspectorOptions {
   readonly additionalTargetUrl?: string;
   readonly additionalTargetCount?: number;
   readonly closeOnMethod?: string;
+  readonly hangOnMethod?: string;
 }
 
 export interface FakeV8Inspector {
@@ -147,6 +148,7 @@ const registerInspectorSocket = (
       socket.close();
       return;
     }
+    if (options.hangOnMethod === command.method) return;
     respondToInspectorCommand(socket, command, options);
     socket.send(JSON.stringify({ id: command.id, result: {} }));
   });

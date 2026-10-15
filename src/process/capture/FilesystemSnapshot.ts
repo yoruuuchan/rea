@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, opendir, readlink } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import type { FileHandle } from "node:fs/promises";
 import type { ProcessScenario } from "../../domain/process/processScenario.js";
 import type { FilesystemCoverage } from "../../domain/process/processCaptureCoverage.js";
@@ -224,7 +224,8 @@ export const snapshotRoots = async (
     if (stats === undefined) return true;
     const relativePath = relative(root, path) || ".";
     if (stats.isSymbolicLink()) {
-      const target = resolve(dirname(path), await readlink(path));
+      // Keep the target as stored: lexical resolution can merge distinct targets.
+      const target = await readlink(path);
       const afterRead = await lstat(path);
       if (!hasSameIdentity(stats, afterRead, "symlink")) {
         truncated = true;

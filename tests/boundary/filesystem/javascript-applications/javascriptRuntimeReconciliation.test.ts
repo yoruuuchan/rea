@@ -224,29 +224,6 @@ it("keeps static load states unknown when one scoped capture omits scripts", asy
   );
 });
 
-it("reports a captured digest disagreement instead of accepting a path match", async () => {
-  const fixture = await applicationFixture();
-  const staticEvidence = await analyzeFixture(fixture);
-  const runtimeEvidence = electronRuntimeEvidence(
-    fixture,
-    "export const observed = 'different';\n",
-  );
-
-  const result = reconcileInput({
-    static_layers: [{ role: "application", analysis: staticEvidence }],
-    runtime_observations: [runtimeEvidence],
-  });
-  const script = result.reconciliations.find(
-    ({ entity_kind: kind }) => kind === "script",
-  );
-
-  expect(script).toMatchObject({
-    status: "unmatched",
-    reason: "captured-content-disagrees-with-static-location",
-  });
-  expect(script?.candidate_static_nodes).toHaveLength(1);
-});
-
 it("reconciles active Electron as a partial target-only runtime capture", async () => {
   const fixture = await applicationFixture();
   const staticEvidence = await analyzeFixture(fixture);

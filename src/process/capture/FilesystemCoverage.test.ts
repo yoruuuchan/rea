@@ -339,6 +339,38 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
+it.skipIf(process.platform === "win32")(
+  "keeps the observed symlink target when dot segments resolve to the same path",
+  async () => {
+    const root = await createTestTempDirectory("rea-fs-symlink-spelling-");
+    await mkdir(join(root, "aaa"));
+    await writeFile(join(root, "target"), "content");
+    // Equal length, so only the target spelling distinguishes the links;
+    // "bbb" does not exist, so the replacement link is broken.
+    await symlink("aaa/../target", join(root, "link"));
+    const scenario = parseProcessScenario({
+      executable: process.execPath,
+      working_directory: root,
+      filesystem_observation_paths: [root],
+      limits: { file_bytes: 1 },
+    });
+    const before = await snapshotRoots(scenario);
+    await rm(join(root, "link"));
+    await symlink("bbb/../target", join(root, "link"));
+    const after = await snapshotRoots(scenario);
+
+    const link = (snapshot: typeof before) =>
+      snapshot.files.find(({ path }) => path === "root_0:link");
+    expect(link(before)?.symlink_target).toBe("aaa/../target");
+    expect(link(after)?.symlink_target).toBe("bbb/../target");
+    expect(
+      classifyFilesystemEffects(before, after).find(
+        ({ path }) => path === "root_0:link",
+      )?.status,
+    ).toBe("modified");
+  },
+);
+
 it("preserves creation when the selected root was observed missing before capture", async () => {
   const root = await createTestTempDirectory("rea-fs-missing-root-");
   const file = join(root, "created.txt");

@@ -343,8 +343,10 @@ an invalid supplied size remains unknown with incomplete resource coverage while
 the resource's other facts are retained. Zero and nonnegative fractional sizes
 are preserved.
 
-CDP discovery, connection, and commands wait for the peer or caller cancellation;
-a stalled peer can leave an operation waiting. WebSocket messages remain subject
+CDP discovery has a 10-second deadline. Each WebSocket handshake and command
+response has its own 20-second deadline, separate from the caller-selected
+observation window. A stalled handshake or command reports `provider_timeout`;
+caller cancellation still reports cancellation. WebSocket messages remain subject
 to the [64 MiB limit](#request-boundary). REA does not impose a message-count or
 pending-command quota. On cancellation, it closes only its own WebSocket,
 waiting up to one second before terminating it. Malformed unsolicited events

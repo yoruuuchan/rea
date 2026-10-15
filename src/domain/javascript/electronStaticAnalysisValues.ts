@@ -65,9 +65,8 @@ export const objectProperty = (
   if (!t.isObjectExpression(object)) return { status: "dynamic" };
   for (const property of object.properties.toReversed()) {
     if (t.isSpreadElement(property)) return { status: "dynamic" };
-    const key = semanticStaticPropertyName(property.key, property.computed);
-    if (key === "" && !t.isStringLiteral(property.key))
-      return { status: "dynamic" };
+    const key = semanticStaticPropertyKey(property.key, property.computed);
+    if (key === null) return { status: "dynamic" };
     if (key !== name) continue;
     return t.isObjectProperty(property)
       ? { status: "explicit", property }
