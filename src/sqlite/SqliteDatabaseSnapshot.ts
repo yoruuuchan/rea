@@ -3,7 +3,12 @@ import { constants, type BigIntStats } from "node:fs";
 import { join } from "node:path";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCapabilityUnavailableError,
+  AnalysisInputError,
+  AnalysisResourceConstraintError,
+} from "../domain/analysisErrorCore.js";
+import { SQLITE_PROVIDER_IDENTITY } from "../domain/sqlite/sqliteDatabase.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import {
   readStableArtifact,
@@ -14,6 +19,49 @@ import { SQLITE_DATABASE_LIMITS } from "./SqliteDatabaseLimits.js";
 const fileSystem: StableArtifactFileSystem = {
   lstat: (path) => lstat(path, { bigint: true }),
   open,
+};
+
+/** Probe a generated sibling only after the caller-selected database is observed. */
+const optionalSidecarStat = async (
+  path: string,
+  databasePath: string,
+  observedDatabase: BigIntStats,
+  member: "WAL" | "rollback journal",
+  selectedFileSystem: StableArtifactFileSystem,
+): Promise<BigIntStats | null> => {
+  let observedSidecar: BigIntStats | null;
+  try {
+    observedSidecar = await optionalStat(path, selectedFileSystem);
+  } catch (cause: unknown) {
+    if (
+      cause instanceof Error &&
+      "code" in cause &&
+      cause.code === "ENAMETOOLONG"
+    ) {
+      const currentDatabase = await duringAcquisition(databasePath, () =>
+        optionalStat(databasePath, selectedFileSystem),
+      );
+      if (!sameState(observedDatabase, currentDatabase))
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `SQLite snapshot file set changed before sidecar inspection: ${databasePath}`,
+          { cause },
+        );
+      const remedy =
+        "Use the application's supported consistent offline export or copy workflow to move the complete known database file set to a shorter path. Do not rename a live database or omit its WAL or journal.";
+      throw new AnalysisCapabilityUnavailableError(
+        SQLITE_PROVIDER_IDENTITY.id,
+        "inspect_sqlite_database",
+        `Cannot safely address the derived SQLite ${member} path (${String(cause.code)}): ${path}`,
+        {
+          cause,
+          userMessage: `The derived SQLite ${member} path is too long to inspect safely (ENAMETOOLONG). ${remedy}`,
+        },
+      );
+    }
+    throw cause;
+  }
+  return observedSidecar;
 };
 const optionalStat = async (
   path: string,
@@ -50,13 +98,35 @@ const duringAcquisition = async <T>(
     if (
       cause instanceof Error &&
       "code" in cause &&
-      ["ENOENT", "ENOTDIR", "ELOOP"].includes(String(cause.code))
+      ["ENOENT", "ENOTDIR", "ELOOP", "ENAMETOOLONG"].includes(
+        String(cause.code),
+      )
     )
       throw new ArtifactReaderFailure(
         "integrity",
         `SQLite snapshot file set changed during acquisition: ${path}`,
         { cause },
       );
+    if (cause instanceof ArtifactReaderFailure && cause.reason === "limit") {
+      const changed = new ArtifactReaderFailure(
+        "integrity",
+        `SQLite snapshot file set exceeded its observed size during acquisition: ${path}`,
+        {
+          cause,
+          ...(cause.partialObservation === undefined
+            ? {}
+            : { partialObservation: cause.partialObservation }),
+        },
+        cause.details,
+      );
+      if (cause.cleanup !== undefined)
+        throw ArtifactReaderFailure.withCleanup(
+          changed,
+          cause.cleanup,
+          cause.partialObservation,
+        );
+      throw changed;
+    }
     throw cause;
   }
 };
@@ -186,29 +256,49 @@ export const captureSqliteDatabaseSnapshot = async (
   selectedFileSystem: StableArtifactFileSystem = fileSystem,
 ) => {
   signal?.throwIfAborted();
-  const paths = [path, `${path}-wal`, `${path}-journal`];
-  const before = await Promise.all(
-    paths.map((path) => optionalStat(path, selectedFileSystem)),
-  );
-  const database = before[0];
-  const wal = before[1];
-  if (database === undefined || wal === undefined || before[2] === undefined)
-    throw new Error("Incomplete database file-set observation");
+  const walPath = `${path}-wal`;
+  const journalPath = `${path}-journal`;
+  const paths = [path, walPath, journalPath] as const;
+  const database = await optionalStat(path, selectedFileSystem);
   if (database === null) throw missingDatabase(path);
-  if (before[2] !== null)
+  const wal = await optionalSidecarStat(
+    walPath,
+    path,
+    database,
+    "WAL",
+    selectedFileSystem,
+  );
+  const journal = await optionalSidecarStat(
+    journalPath,
+    path,
+    database,
+    "rollback journal",
+    selectedFileSystem,
+  );
+  const before = [database, wal, journal] as const;
+  const selectedSize = database.size + (wal?.size ?? 0n);
+  if (selectedSize > BigInt(SQLITE_DATABASE_LIMITS.inputBytes))
+    throw new AnalysisResourceConstraintError(
+      "inspect_sqlite_database",
+      "file-size",
+      `Selected SQLite database and WAL total ${selectedSize.toString()} bytes, exceeding the combined ${String(SQLITE_DATABASE_LIMITS.inputBytes)}-byte offline snapshot budget: ${path}`,
+      {
+        sqlite_snapshot_input_bytes: SQLITE_DATABASE_LIMITS.inputBytes,
+        observed_sqlite_snapshot_input_bytes: selectedSize.toString(),
+      },
+      {
+        remediationAction:
+          "Use the application's supported export workflow to create a consistent, smaller offline SQLite snapshot containing only the relevant data, then inspect that snapshot. REA will not truncate or modify the selected source.",
+      },
+    );
+  if (journal !== null)
     await verifyInactiveJournal(
       `${path}-journal`,
-      before[2],
+      journal,
       selectedFileSystem,
       resourceScope,
       "initial",
       signal,
-    );
-  const selectedSize = database.size + (wal?.size ?? 0n);
-  if (selectedSize > BigInt(SQLITE_DATABASE_LIMITS.inputBytes))
-    throw new ArtifactReaderFailure(
-      "limit",
-      `Selected SQLite database and WAL exceed the combined ${String(SQLITE_DATABASE_LIMITS.inputBytes)}-byte snapshot budget: ${path}`,
     );
   const snapshotPath = join(root, "database.snapshot");
   const captured = await readObservedArtifact(
@@ -252,10 +342,10 @@ export const captureSqliteDatabaseSnapshot = async (
   }
   // Identity alone does not establish an inactive journal when timestamps are
   // coarse. Re-read the header after copying, using the same validity owner.
-  if (before[2] !== null)
+  if (journal !== null)
     await verifyInactiveJournal(
       `${path}-journal`,
-      before[2],
+      journal,
       selectedFileSystem,
       resourceScope,
       "after-copy",

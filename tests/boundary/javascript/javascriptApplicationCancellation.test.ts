@@ -134,6 +134,104 @@ it("preserves imported manifest status when cancelled before visiting manifests"
     });
 });
 
+it("keeps cancellation before native metadata out of AST scopes and semantic modules", async () => {
+  const root = await createTestTempDirectory("rea-js-cancel-file-kinds-");
+  await Promise.all(
+    (
+      [
+        ["a.js", "export const observed = 7;\n"],
+        ["b.node", Buffer.from([0, 1, 2, 3])],
+        ["c.json", '{"observed":7}'],
+        ["d.html", '<script src="./a.js"></script>'],
+        ["package.json", '{"name":"cancellation-control","main":"a.js"}'],
+        [
+          "z.js.map",
+          JSON.stringify({ version: 3, sources: [], names: [], mappings: "" }),
+        ],
+        ["zz.js", "export const unvisited = true;\n"],
+      ] as const
+    ).map(([path, content]) => writeFile(join(root, path), content)),
+  );
+  const controller = new AbortController();
+  let reachedNativeMetadata = false;
+  const result = await analyzeJavaScriptApplication(
+    { input_path: root, format: "directory" },
+    {
+      signal: controller.signal,
+      progress: {
+        async report(event) {
+          if (
+            event.phase === "process_javascript_artifact_metadata" &&
+            event.message.includes("b.node")
+          ) {
+            reachedNativeMetadata = true;
+            controller.abort();
+          }
+        },
+      },
+    },
+  );
+  expect(reachedNativeMetadata).toBe(true);
+  if (result.ok) throw new Error("Cancelled analysis must return a failure");
+  const partial = z
+    .object({
+      code: z.literal("cancelled"),
+      details: z.object({
+        partial_observation: z.object({
+          normalized_result: javascriptApplicationAnalysisResultSchema,
+        }),
+      }),
+    })
+    .parse(projectAnalysisError(result.error)).details
+    .partial_observation.normalized_result;
+  expect(partial.statistics.parsed_javascript_files).toBe(1);
+  expect(partial.graph.nodes.some(({ kind }) => kind === "native-addon")).toBe(
+    true,
+  );
+  const scopes = (path: string) =>
+    partial.graph.nodes.flatMap((node) =>
+      node.kind !== "unknown"
+        ? []
+        : node.observations.filter(
+            ({ properties }) =>
+              properties.path === path &&
+              properties.analysis_failure !== undefined,
+          ),
+    );
+  expect({
+    native_ast_scopes: scopes("b.node").map(({ properties, evidence }) => ({
+      operation: properties.operation,
+      authority: evidence.authority,
+    })),
+    native_semantic_modules: partial.semantic_graph.nodes
+      .filter(({ identity }) => identity.module_path === "b.node")
+      .map(({ kind, label }) => ({ kind, label })),
+  }).toEqual({ native_ast_scopes: [], native_semantic_modules: [] });
+  for (const [path, operation] of [
+    ["c.json", "parse-json-module"],
+    ["d.html", "parse-html-script-references"],
+    ["package.json", "parse-package-json"],
+    ["z.js.map", "parse-local-source-map"],
+    ["zz.js", "analyze-javascript-source"],
+  ] as const) {
+    expect(scopes(path)).toHaveLength(1);
+    expect(scopes(path)[0]).toMatchObject({
+      properties: { operation, analysis_status: "not-started" },
+      evidence: {
+        authority: path === "zz.js" ? "ast-static-analysis" : "artifact-bytes",
+        state: "unavailable",
+        confidence: "unknown",
+      },
+    });
+  }
+  expect(
+    partial.semantic_graph.nodes.some(
+      ({ kind, identity }) =>
+        kind === "module" && identity.module_path === "zz.js",
+    ),
+  ).toBe(true);
+});
+
 it("interrupts semantic graph commitment before result validation", async () => {
   const root = await createTestTempDirectory("rea-js-cancel-semantic-");
   await writeFile(

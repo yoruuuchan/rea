@@ -4,7 +4,7 @@ import {
   type JavaScriptSemanticAnalysisState,
 } from "./javascriptSemanticState.js";
 import { semanticCallableResultExpressions } from "./javascriptSemanticCallableResults.js";
-import { semanticReadInitializers } from "./javascriptSemanticMutationInitializers.js";
+import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
 import { semanticReferenceSourcesInactive } from "./javascriptSemanticReferenceSources.js";
 import {
   semanticStaticPropertyKey,
@@ -589,7 +589,8 @@ const getterResultReferences = (
           pathLength: remaining.length,
           parent: current.aliases,
         };
-        const origins = semanticReadInitializers(
+        // Unknown read ordering retains possible aliases for effect reachability.
+        const { binding: origins } = semanticBindingAtRead(
           binding,
           expression,
           state.parentsByNode,

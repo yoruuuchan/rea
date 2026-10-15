@@ -121,6 +121,50 @@ it.runIf(process.platform !== "win32").each([
   },
 );
 
+it.each(["ELOOP", "ENAMETOOLONG"] as const)(
+  "treats %s during file acquisition as changed evidence, not an invalid input path",
+  async (code) => {
+    const { database, capture } = await fixture();
+    const fileSystem: StableArtifactFileSystem = {
+      lstat: (path) => lstat(path, { bigint: true }),
+      open: async (path, flags) => {
+        if (path === database.path)
+          throw Object.assign(
+            new Error(`${code}: path changed after observation`),
+            { code },
+          );
+        return open(path, flags);
+      },
+    };
+
+    await expect(capture(fileSystem)).rejects.toMatchObject({
+      reason: "integrity",
+      message: expect.stringContaining(database.path),
+    });
+  },
+);
+
+it("retains changed-evidence semantics when a sidecar path failure follows database removal", async () => {
+  const { database, capture } = await fixture();
+  const fileSystem: StableArtifactFileSystem = {
+    lstat: async (path) => {
+      if (path === database.walPath) {
+        await unlink(database.path);
+        throw Object.assign(new Error("derived sidecar path is too long"), {
+          code: "ENAMETOOLONG",
+        });
+      }
+      return lstat(path, { bigint: true });
+    },
+    open,
+  };
+
+  await expect(capture(fileSystem)).rejects.toMatchObject({
+    reason: "integrity",
+    message: expect.stringContaining(database.path),
+  });
+});
+
 it("refuses an active journal even before SQLite writes its magic header", async () => {
   const { database, capture } = await fixture();
   const writer = new DatabaseSync(database.path);

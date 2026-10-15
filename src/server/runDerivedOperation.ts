@@ -70,5 +70,7 @@ export const runDerivedOperation = async <Value>(
     message: `Completed ${operation}`,
     terminal: true,
   });
+  if (context.mcpReq.signal.aborted)
+    return err(new AnalysisCancelledError(operation));
   return ok(value);
 };

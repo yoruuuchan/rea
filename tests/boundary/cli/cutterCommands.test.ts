@@ -169,7 +169,7 @@ describe("Cutter CLI command output flags", () => {
     );
 
     const result = await serveCli(
-      ["cutter-command", SESSION_ID, "0", "pdi", "--json-output"],
+      ["cutter-command", SESSION_ID, "000", "pdi", "--json-output"],
       { REA_CUTTER_BRIDGE_DIR: directory },
     );
 

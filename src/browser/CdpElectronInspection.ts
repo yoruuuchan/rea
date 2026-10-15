@@ -192,7 +192,6 @@ const captureElectronContent = async (
     ...(context.signal === undefined ? {} : { signal: context.signal }),
     request: context.input,
     scripts: state.scripts,
-    executionContextFrames: state.executionContextFrames,
     frameIds,
     completeness: state.completeness,
   });
@@ -328,10 +327,13 @@ const captureDom = async (
   );
   const invalid = (count: number | null) =>
     completeness.exclude("dom", "invalid_protocol_value", count);
-  if (!Array.isArray(result.strings)) invalid(null);
-  const strings = Array.isArray(result.strings)
-    ? result.strings.map((value) => (typeof value === "string" ? value : ""))
-    : [];
+  if (!Array.isArray(result.strings)) {
+    invalid(null);
+    return { total_nodes: 0, nodes: [] };
+  }
+  const strings = result.strings.map((value) =>
+    typeof value === "string" ? value : "",
+  );
   const nodes: ElectronPageInspection["dom"]["nodes"] = [];
   let total = 0;
   for (const document of snapshotDocuments(result.documents, invalid)) {

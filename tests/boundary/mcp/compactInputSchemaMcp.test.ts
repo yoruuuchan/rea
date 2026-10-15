@@ -21,7 +21,10 @@ import { processScenarioSchema } from "../../../src/domain/process/processScenar
 import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
 import { ToolResultDelivery } from "../../../src/server/toolResult.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
-import { arrayItemSchemaError } from "../../fixtures/mcpClientSchemaConstraints.js";
+import {
+  arrayItemSchemaError,
+  booleanLiteralSchemaError,
+} from "../../fixtures/mcpClientSchemaConstraints.js";
 
 interface AdvertisedTool {
   readonly name: string;
@@ -225,6 +228,9 @@ describe("MCP compact schema constraints", () => {
     );
     for (const tool of tools) {
       expect(arrayItemSchemaError(tool.inputSchema, tool.name)).toBeUndefined();
+      expect(
+        booleanLiteralSchemaError(tool.inputSchema, tool.name),
+      ).toBeUndefined();
       expect(
         ajv.validateSchema(tool.inputSchema),
         `${tool.name}: ${ajv.errorsText(ajv.errors)}`,

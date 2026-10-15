@@ -102,11 +102,18 @@ export const preflightPropertyListDecode = (
   bytes: Buffer,
   maxBytes: number,
   xmlText?: string,
+  options: Pick<BinaryPlistExpansionOptions, "numberProjection"> = {},
 ): PlistDecodePreflight => {
+  const { numberProjection = false } = options;
   const expansion = hasBinaryPlistSignature(bytes)
-    ? estimateBinaryPlistExpansion(bytes, maxBytes)
+    ? estimateBinaryPlistExpansion(bytes, maxBytes, { numberProjection })
     : {
-        estimatedBytes: estimateXmlPlistExpansion(bytes, maxBytes, xmlText),
+        estimatedBytes: estimateXmlPlistExpansion(
+          bytes,
+          maxBytes,
+          xmlText,
+          numberProjection,
+        ),
         binaryPrototypeKeyObserved: false,
       };
   if (expansion.estimatedBytes > maxBytes)
@@ -121,10 +128,13 @@ const estimateXmlPlistExpansion = (
   bytes: Buffer,
   maxBytes: number,
   xmlText?: string,
+  numberProjection = false,
 ): number => {
   const xml = xmlText ?? decodeXmlPlistText(bytes);
   const decodedSourceBytes = xml.length * 2;
   let elementCount = 0;
+  // Reserve room for numeric source metadata and the projected attribute copy.
+  const elementBytes = numberProjection ? 256 : 128;
   // Value nesting is bounded by the shared plist parser, which counts plist
   // value depth; raw element depth would also count the envelope and keys.
   for (const token of xmlPreflightTokens(xml)) {
@@ -139,10 +149,10 @@ const estimateXmlPlistExpansion = (
       continue;
     }
     elementCount += 1;
-    if (decodedSourceBytes * 2 + elementCount * 128 > maxBytes)
+    if (decodedSourceBytes * 2 + elementCount * elementBytes > maxBytes)
       return maxBytes + 1;
   }
-  return decodedSourceBytes * 2 + elementCount * 128;
+  return decodedSourceBytes * 2 + elementCount * elementBytes;
 };
 
 /** Consume each XML span once; malformed tokens cannot restart suffix scans. */
@@ -197,6 +207,8 @@ const interfaceBuilderBudgetFailure = (
 
 /** How a caller names and reports binary plist expansion failures. */
 export interface BinaryPlistExpansionOptions {
+  /** Include original number metadata and exact-integer attribute projection. */
+  readonly numberProjection?: boolean;
   /** Budget named in failure messages. */
   readonly budget?: string;
   /** Error for budget, depth, and reference-cycle failures. */
@@ -229,6 +241,7 @@ export const estimateBinaryPlistExpansion = (
     budget = "the aggregate Interface Builder decode budget",
     fail = interfaceBuilderBudgetFailure,
     bounds = "strict",
+    numberProjection = false,
   }: BinaryPlistExpansionOptions = {},
 ): PlistDecodePreflight => {
   if (bytes.length < 40)
@@ -261,7 +274,10 @@ export const estimateBinaryPlistExpansion = (
     offsetTable + objectCount * offsetSize > tableEnd
   )
     throw new TypeError("binary plist trailer or object table is invalid");
-  let estimate = bytes.length * 2 + objectCount * 16;
+  // Metadata covers the full object table; projected values may repeat through references.
+  const objectBytes = numberProjection ? 144 : 16;
+  const expandedNodeBytes = numberProjection ? 224 : 96;
+  let estimate = bytes.length * 2 + objectCount * objectBytes;
   let binaryPrototypeKeyObserved = false;
   if (estimate > maxBytes)
     throw fail("expansion", `binary plist object table exceeds ${budget}`);
@@ -286,7 +302,7 @@ export const estimateBinaryPlistExpansion = (
       throw fail("depth", `binary plist nesting exceeds ${budget}`);
     if (active.has(entry.object))
       throw fail("cycle", `binary plist reference cycle exceeds ${budget}`);
-    estimate += 96;
+    estimate += expandedNodeBytes;
     if (estimate > maxBytes)
       throw fail(
         "expansion",
@@ -352,7 +368,9 @@ export const estimateBinaryPlistExpansion = (
     const refsEnd = cursor + childCount * referenceSize;
     if (!Number.isSafeInteger(refsEnd) || refsEnd > objectsEnd)
       throw new TypeError("binary plist reference table is truncated");
-    const availableNodes = Math.floor((maxBytes - estimate) / 96);
+    const availableNodes = Math.floor(
+      (maxBytes - estimate) / expandedNodeBytes,
+    );
     if (childCount > availableNodes - pendingObjectCount)
       throw fail(
         "expansion",

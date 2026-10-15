@@ -37,6 +37,11 @@ import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js"
 
 import { decodeXmlPlistText } from "../../domain/propertyListXmlText.js";
 import {
+  binaryPlistNumberLiterals,
+  xmlPlistNumberLiterals,
+} from "./PlistNumberLiterals.js";
+import type { PlistNumberLiterals } from "../../domain/apple/plistNumbers.js";
+import {
   hasBinaryPlistSignature,
   hasNibArchiveSignature,
 } from "../../domain/apple/appleArchiveFormat.js";
@@ -129,6 +134,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
             bytes,
             decodeBudget.remainingBytes,
             xmlText,
+            { numberProjection: true },
           );
           decodeBudget.reserve(
             decodedReservation.estimatedBytes,
@@ -142,9 +148,15 @@ export const analyzeInterfaceBuilderBundle = async (input: {
           value: raw,
           omittedPrototypeKeys,
           unknownDateCount,
+          numberLiterals,
         } = nib === null
           ? decodePlist(bytes, xmlText, binaryPrototypeKeyObserved)
-          : { value: nib.raw, omittedPrototypeKeys: 0, unknownDateCount: 0 };
+          : {
+              value: nib.raw,
+              omittedPrototypeKeys: 0,
+              unknownDateCount: 0,
+              numberLiterals: undefined,
+            };
         if (nib !== null && nib.omitted > 0)
           incompleteHierarchies.set(entry.path, nib.omitted);
         if (nib !== null && nib.unresolvedConnections > 0)
@@ -161,6 +173,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
             ? "storyboard_scene"
             : "nib",
           raw,
+          ...(numberLiterals === undefined ? {} : { numberLiterals }),
           ...(nib === null || nib.omitted === 0
             ? {}
             : { omittedSerializedHierarchyReferences: nib.omitted }),
@@ -733,6 +746,7 @@ const decodePlist = (
   readonly value: JsonValue;
   readonly omittedPrototypeKeys: number | null;
   readonly unknownDateCount: number;
+  readonly numberLiterals: PlistNumberLiterals;
 } => {
   const binary = hasBinaryPlistSignature(bytes);
   const { value, omittedPrototypeKeys } = binary
@@ -746,5 +760,8 @@ const decodePlist = (
     value: projected.value,
     omittedPrototypeKeys,
     unknownDateCount: projected.unknownDateCount,
+    numberLiterals: binary
+      ? binaryPlistNumberLiterals(bytes)
+      : xmlPlistNumberLiterals(xmlText ?? decodeXmlPlistText(bytes)),
   };
 };

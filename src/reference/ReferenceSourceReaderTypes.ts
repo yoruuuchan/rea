@@ -93,6 +93,10 @@ export type TraversalState = {
     kind: ReferenceSourceExclusionKind,
   ) => boolean;
   readonly entries: ReferenceSourceEntry[];
+  readonly exclusions: Array<{
+    readonly path: string;
+    readonly kind: ReferenceSourceExclusionKind;
+  }>;
   readonly pending: PendingDirectory[];
   bytesRead: number;
 };

@@ -880,6 +880,42 @@ exit 1`,
   });
 });
 
+it("binds a push digest to the bytes adb consumes after caller-path replacement", async () => {
+  const { binary, root } = await writeAdbStub(
+    (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "test" ]; then exit 1; fi
+if [ "$1" = "-s" ] && [ "$3" = "push" ]; then
+  printf 'replacement-payload' > "${stubRoot}/payload.bin"
+  cat "$4" > "${stubRoot}/consumed.bin" || exit 1
+  exit 0
+fi
+if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then exit 1; fi
+exit 1`,
+  );
+  const localFile = join(root, "payload.bin");
+  await writeFile(localFile, "original-payload");
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "push_adb_file",
+    input: {
+      serial: "emulator-5554",
+      local_path: localFile,
+      device_path: "/data/local/tmp/payload.bin",
+      overwrite: false,
+    },
+  });
+  const consumedDigest = createHash("sha256")
+    .update(await readFile(join(root, "consumed.bin")))
+    .digest("hex");
+  expect(result).toMatchObject({
+    local_path: localFile,
+    sha256: consumedDigest,
+  });
+  expect(await readFile(localFile, "utf8")).toBe("replacement-payload");
+  expect(await readFile(join(root, "consumed.bin"), "utf8")).toBe(
+    "original-payload",
+  );
+});
+
 it("reports a digest mismatch after push as a changed artifact", async () => {
   const { binary, root } = await writeAdbStub(
     () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
@@ -1277,6 +1313,33 @@ exit 1`,
   });
   expect(projected).toMatchObject({ code: "unsupported_target" });
   expect(projected.message).toContain("INSTALL_FAILED_ALREADY_EXISTS");
+});
+
+it("binds an install digest to the bytes adb consumes after caller-path replacement", async () => {
+  const { binary, root } = await writeAdbStub(
+    (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$3" = "install" ]; then
+  printf 'replacement-apk' > "${stubRoot}/app.apk"
+  cat "$4" > "${stubRoot}/consumed.bin" || exit 1
+  printf 'Success\\n'
+  exit 0
+fi
+exit 1`,
+  );
+  const apk = join(root, "app.apk");
+  await writeFile(apk, "original-apk");
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "install_adb_package",
+    input: { serial: "emulator-5554", apk_path: apk, replace: false },
+  });
+  const consumedDigest = createHash("sha256")
+    .update(await readFile(join(root, "consumed.bin")))
+    .digest("hex");
+  expect(result).toMatchObject({ apk_path: apk, sha256: consumedDigest });
+  expect(await readFile(apk, "utf8")).toBe("replacement-apk");
+  expect(await readFile(join(root, "consumed.bin"), "utf8")).toBe(
+    "original-apk",
+  );
 });
 
 it("uninstalls a package and reports the device's refusal for absent ones", async () => {

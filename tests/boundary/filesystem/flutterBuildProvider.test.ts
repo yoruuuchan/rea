@@ -14,7 +14,10 @@ import {
 } from "../../../src/flutter/FlutterBuild.fixture.js";
 import { snapshotSection } from "../../../src/flutter/FlutterBuild.fixture.js";
 import { FlutterBuildProvider } from "../../../src/flutter/FlutterBuildProvider.js";
+import { FlutterBuildAnalysisService } from "../../../src/application/flutter/FlutterBuildAnalysisService.js";
+import { finishAnalysisCommand } from "../../../src/cli/finishAnalysisCommand.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 import {
   AnalysisCancelledError,
   AnalysisResourceConstraintError,
@@ -617,24 +620,49 @@ it("retains failed snapshot cleanup and retries it on close", async () => {
       bytes: libapp(REFERENCE_HASH),
     },
   ]);
-  const spaces: string[] = [];
+  const roots: string[] = [];
   let failing = true;
   const provider = new FlutterBuildProvider({
     removeRoot: async (path) => {
+      roots.push(path);
       if (failing) throw new Error("cleanup refused");
-      spaces.push(path);
       await rm(path, { recursive: true, force: true });
     },
   });
-  const result = await provider.execute({
-    operation: "identify_flutter_build",
-    input: { path: apk },
+  onTestFinished(async () => {
+    failing = false;
+    await provider.close();
   });
-  expect(result.ok).toBe(true);
-  await expect(provider.close()).rejects.toThrow(/snapshot cleanup failed/u);
+  const service = new FlutterBuildAnalysisService(provider);
+  const result = await finishAnalysisCommand(
+    () =>
+      service.execute("identify_flutter_build", {
+        path: apk,
+      }),
+    { close: () => provider.close() },
+    "flutter",
+    "identify_flutter_build",
+  );
+  expect(result).toMatchObject({
+    code: "cleanup_incomplete",
+    details: {
+      resources: [expect.stringContaining("rea-flutter-")],
+      partial_observation: {
+        operation: "identify_flutter_build",
+        subject: { local_path: apk },
+        normalized_result: { flutter_detected: true },
+      },
+    },
+  });
+  expect(result).toMatchObject({
+    details: { resources: [roots[0]] },
+  });
+  expect(roots).toHaveLength(2);
+  expect(roots[1]).toBe(roots[0]);
   failing = false;
   await provider.close();
-  expect(spaces.length).toBeGreaterThanOrEqual(1);
+  expect(roots).toHaveLength(3);
+  expect(roots[2]).toBe(roots[0]);
 });
 
 it("cancels before creating any snapshot root", async () => {
@@ -1032,7 +1060,28 @@ it.each(["identify_flutter_build", "inspect_dart_aot"] as const)(
     const result = await provider.execute({ operation, input: { path } });
     if (!result.ok) throw result.error;
     expect(removeRoot).not.toHaveBeenCalled();
-    await expect(provider.close()).rejects.toThrow("snapshot cleanup failed");
+    let cleanupFailure: unknown;
+    try {
+      await provider.close();
+    } catch (cause) {
+      cleanupFailure = cause;
+    }
+    expect(cleanupFailure).toBeInstanceOf(ProviderCleanupError);
+    expect(cleanupFailure).toMatchObject({
+      operation: "close_flutter_build",
+      cleanupResources: [expect.stringContaining("rea-flutter-")],
+      diagnostics: {
+        reason: expect.stringContaining("file handle close refused"),
+        retained_roots: [
+          {
+            path: expect.stringContaining("rea-flutter-"),
+            failures: [
+              { message: expect.stringContaining("file handle close refused") },
+            ],
+          },
+        ],
+      },
+    });
     expect(removeRoot).not.toHaveBeenCalled();
     failClose = false;
     await provider.close();
@@ -1104,7 +1153,7 @@ it.each([0, 1, 2, 3])(
     });
     expect(result.ok).toBe(false);
     expect(removeRoot).not.toHaveBeenCalled();
-    await expect(provider.close()).rejects.toThrow("snapshot cleanup failed");
+    await expect(provider.close()).rejects.toBeInstanceOf(ProviderCleanupError);
     failing = false;
     await provider.close();
     expect(removeRoot).toHaveBeenCalledTimes(1);

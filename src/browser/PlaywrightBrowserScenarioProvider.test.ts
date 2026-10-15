@@ -78,6 +78,10 @@ const scenario = (
     },
   });
 
+const connectedPlatformEmulationLimitation = expect.stringContaining(
+  "Detaching a CDP page session may clear caller-owned navigator.platform emulation",
+);
+
 type SnapshotKind = BrowserScenario["capture"]["after_each_step"][number];
 
 interface FakeSessionFailures {
@@ -355,7 +359,9 @@ describe("PlaywrightBrowserScenarioProvider", () => {
     expect(session.closeCalls).toBe(1);
     expect(result.value.completeness.equality_eligible).toBe(false);
   });
+});
 
+describe("connected browser scenario captures", () => {
   it("disconnects external CDP sessions and marks pre-attach events missing", async () => {
     const session = new FakeSession("connect");
     const provider = new PlaywrightBrowserScenarioProvider(() =>
@@ -374,7 +380,36 @@ describe("PlaywrightBrowserScenarioProvider", () => {
       equality_eligible: false,
       missing_sections: ["events"],
     });
+    expect(result.value.limitations).toEqual(
+      expect.arrayContaining([connectedPlatformEmulationLimitation]),
+    );
     expect(session.closeCalls).toBe(1);
+  });
+
+  it("retains the attached platform-emulation limitation in partial observations", async () => {
+    const session = new FakeSession("connect", {
+      capture: { call: 1, error: new Error("fixture capture failure") },
+    });
+    const provider = new PlaywrightBrowserScenarioProvider(() =>
+      Promise.resolve(session),
+    );
+    const result = await provider.captureScenario(
+      scenario({ mode: "connect" }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      details: {
+        partial_observation: {
+          capture: {
+            limitations: expect.arrayContaining([
+              connectedPlatformEmulationLimitation,
+            ]),
+          },
+        },
+      },
+    });
   });
 });
 

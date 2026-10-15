@@ -128,10 +128,10 @@ export const projectKeyedArchive = (
       ? top
       : { [selection.root]: top[selection.root] ?? null };
   const references: z.infer<typeof linkSchema>[] = [];
-  const scan = (source: number | null, initial: JsonValue) => {
-    const pending: { value: JsonValue; path: (string | number)[] }[] = [
-      { value: initial, path: [] },
-    ];
+  type Pending = { value: JsonValue; path: (string | number)[] };
+  // `initial` is popped from the end, so callers list it in reverse order.
+  const scan = (source: number | null, initial: Pending[]) => {
+    const pending = initial;
     let visited = 0;
     while (pending.length > 0) {
       const item = pending.pop();
@@ -177,9 +177,22 @@ export const projectKeyedArchive = (
         throw new RangeError("Archive exceeds 200000 reference edges");
     }
   };
-  scan(null, roots);
+  // Root names belong to the `$top` map, not to the encoded value. Scanning
+  // that wrapper makes a sole scalar root named `UID` look like a UID marker.
+  // Seed one scan with each value under its key to preserve paths and share
+  // the existing aggregate visit budget across every root.
+  scan(
+    null,
+    Object.keys(roots)
+      .sort()
+      .reverse()
+      .flatMap((key) => {
+        const value = roots[key];
+        return value === undefined ? [] : [{ value, path: [key] }];
+      }),
+  );
   const objects = table.map((value, id) => {
-    scan(id, value);
+    scan(id, [{ value, path: [] }]);
     const fields = record(value);
     const classUid = uid(fields?.$class);
     const classId =

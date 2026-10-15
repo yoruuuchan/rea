@@ -259,6 +259,13 @@ Direct return expressions, including expression-bodied arrows, are evaluated
 through an execution-free value lattice. Literal object fields and direct
 return sites are represented in the result. Calls, dynamic spreads, computed
 keys, and parser recovery remain partial or unknown.
+Rebound values are evaluated at their read position: saving an incoming parameter
+before a later assignment preserves caller-dependent uncertainty, while a proven
+preceding assignment can supply a constant. Unresolved ordering remains unknown.
+Supported reads within object and array literals follow left-to-right evaluation;
+an unproved relative order remains unknown. A later write in a separate conditional
+block can still leave an earlier capture unknown because ordering across those
+blocks is not proven.
 Objects and arrays passed to calls, constructors, or tagged templates, used
 as method receivers, or stored through property targets are not assumed
 unchanged afterward. Property stores conservatively retain reference escape

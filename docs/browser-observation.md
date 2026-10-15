@@ -66,14 +66,25 @@ Electron `file://` pages use a separate provider and target boundary; see [elect
 
 ## Provider authorities
 
-CDP page capture, V8 Inspector observation, and Playwright scenarios stay
-separate providers because their authorities differ: CDP and V8 attach to an
-already-running target and never launch, drive, evaluate, or mutate it, while
-Playwright providers own and drive the runtime (launch browsers, run actions,
-capture step snapshots). Merging them would mix attach-only and owned-process
-lifecycles in one contract. What they share instead is one exclusion
-vocabulary (`BrowserExclusionReason`): every denial reason in every stack maps
-onto it, even where a wire schema keeps a narrower historical bucket.
+CDP page capture and V8 Inspector observation attach to an already-running
+target without launching it, driving actions, or evaluating target code.
+Playwright scenarios drive actions and capture step snapshots in either a
+provider-owned browser or a caller-selected external browser. Separate providers
+preserve these authority and lifecycle differences. They share one exclusion
+vocabulary (`BrowserExclusionReason`): every denial reason maps onto it, even
+where a wire schema keeps a narrower historical bucket.
+
+CDP attachment is not a guarantee that the browser preserves all state.
+Chromium can clear another client's `navigator.platform` emulation when REA's
+page session disconnects, even if that session sent no emulation commands.
+This affects page inspection, bundle capture, session observation, screenshots,
+WebMCP discovery, and Electron page inspection; target listing alone does not
+attach a page session. REA cannot read the other client's complete
+user-agent/client-hint configuration and does not replay guessed settings.
+Use a disposable browser when preserving externally configured emulation is
+required, or have the owning client reapply its complete configuration afterward.
+See [the reproduction and Chromium ownership limitation](https://github.com/morluto/rea/issues/4089).
+
 Existing static application Evidence and passive web/Electron captures can be
 combined later through
 [JavaScript static/runtime reconciliation](javascript-runtime-reconciliation.md).

@@ -4,7 +4,7 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { artifactComparisonResultSchema } from "./artifactComparison.js";
-import { artifactInventoryResultSchema } from "./artifactGraph.js";
+import { parseArtifactInventoryEvidence } from "./artifactInventoryEvidence.js";
 import { uniqueSorted } from "./canonicalOrdering.js";
 import { compareUnicodeCodePoints } from "./unicodeCodePointOrder.js";
 import {
@@ -20,11 +20,7 @@ import {
 } from "./process/processEvidenceProvider.js";
 import { functionDossierSchema } from "./hopperValues.js";
 import { assessFunctionCallCoverage } from "./functionCallCoverage.js";
-import {
-  deriveProcessComparisonStatus,
-  PROCESS_COMPARISON_DIMENSIONS,
-  processCaptureComparisonSchema,
-} from "./process/processComparison.js";
+import { processCaptureComparisonSchema } from "./process/processComparison.js";
 import { parseProcessCapture } from "./process/processCaptureParsing.js";
 import {
   reconstructionClaimResultSchema,
@@ -195,19 +191,24 @@ const readValidatedSourceFacts = (
   claim: Claim,
   sources: readonly Evidence[],
 ): readonly FunctionSourceFacts[] => {
-  const expected =
-    claim.kind === "behavioral"
-      ? ["capture_process_scenario", "rea.process-capture"]
-      : claim.kind === "structural-function"
-        ? ["analyze_function", "rea.analysis"]
-        : ["inventory_artifact", "rea.analysis"];
-  if (
-    sources.some(
-      (source) =>
-        source.operation !== expected[0] ||
-        source.predicate_type !== expected[1],
-    )
-  )
+  const isExpectedType = (source: Evidence): boolean => {
+    if (claim.kind === "behavioral")
+      return (
+        source.operation === "capture_process_scenario" &&
+        source.predicate_type === "rea.process-capture"
+      );
+    if (claim.kind === "structural-function")
+      return (
+        source.operation === "analyze_function" &&
+        source.predicate_type === "rea.analysis"
+      );
+    return (
+      (source.operation === "inventory_artifact" ||
+        source.operation === "inspect_artifact") &&
+      source.predicate_type === "rea.analysis"
+    );
+  };
+  if (sources.some((source) => !isExpectedType(source)))
     throw new TypeError(
       "Comparison source Evidence has an unexpected observation type",
     );
@@ -226,7 +227,7 @@ const readValidatedSourceFacts = (
         callCoverageBlockers: callCoverage.blockers,
         callCoverageDiagnostics: callCoverage.diagnostics,
       });
-    } else artifactInventoryResultSchema.parse(source.normalized_result);
+    } else parseArtifactInventoryEvidence(source);
   }
   return functionSources;
 };
@@ -261,10 +262,18 @@ const comparisonObservation = (
     const result = processCaptureComparisonSchema.parse(
       evidence.normalized_result,
     );
-    validateProcessStatus(result);
+    if (claim.dimension !== "overall")
+      return { status: result[claim.dimension], limitations: [] };
+    if (
+      result.status === "unchanged" &&
+      result.first_divergence.status === "unknown"
+    )
+      return {
+        status: "unknown",
+        limitations: [result.first_divergence.reason],
+      };
     return {
-      status:
-        claim.dimension === "overall" ? result.status : result[claim.dimension],
+      status: result.status,
       limitations: [],
     };
   }
@@ -309,16 +318,6 @@ const comparisonObservation = (
     result.changes.flatMap(({ evidence_links }) => evidence_links),
   );
   return { status: result.status, limitations: [] };
-};
-
-const validateProcessStatus = (
-  result: z.infer<typeof processCaptureComparisonSchema>,
-): void => {
-  const expected = deriveProcessComparisonStatus(
-    PROCESS_COMPARISON_DIMENSIONS.map((dimension) => result[dimension]),
-  );
-  if (result.status !== expected)
-    throw new TypeError("Process comparison status contradicts its dimensions");
 };
 
 const authorityLimitations = (

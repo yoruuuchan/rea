@@ -79,7 +79,7 @@ export const sqliteDatabaseFailure = (
     return new AnalysisInputError(operation, { cause }, [
       {
         path: ["path"],
-        reason: cause.reason === "limit" ? "out_of_range" : "invalid_format",
+        reason: "invalid_format",
         message: cause.message,
       },
     ]);
@@ -110,7 +110,12 @@ export const sqliteDatabaseFailure = (
             "The selected SQLite database is held open by another process without read sharing. Close that application or inspect a copy, then retry.",
         },
       );
-    if (cause.code === "ENOENT" || cause.code === "ENOTDIR")
+    if (
+      cause.code === "ENOENT" ||
+      cause.code === "ENOTDIR" ||
+      cause.code === "ELOOP" ||
+      cause.code === "ENAMETOOLONG"
+    )
       return new AnalysisInputError(operation, { cause }, [
         {
           path: ["path"],

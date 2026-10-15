@@ -25,11 +25,18 @@ export const associateWasmGlue = (
   if (file === null) return { parse_status: "failed" as const, references };
   traverseJavaScriptAst(file, {
     enter(node) {
+      // Babel retains the source spelling in DirectiveLiteral.value, while
+      // extra.expressionValue is the same cooked value used by StringLiteral.
+      const directiveValue = t.isDirectiveLiteral(node)
+        ? node.extra?.expressionValue
+        : undefined;
       const value = t.isStringLiteral(node)
         ? node.value
-        : t.isTemplateLiteral(node) && node.expressions.length === 0
-          ? node.quasis[0]?.value.cooked
-          : undefined;
+        : typeof directiveValue === "string"
+          ? directiveValue
+          : t.isTemplateLiteral(node) && node.expressions.length === 0
+            ? node.quasis[0]?.value.cooked
+            : undefined;
       if (
         value === undefined ||
         value === null ||

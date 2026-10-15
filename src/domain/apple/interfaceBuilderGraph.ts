@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  createPlistNumberProjection,
+  type PlistNumberLiterals,
+} from "./plistNumbers.js";
 
 import {
   firstString,
@@ -35,6 +39,8 @@ export interface InterfaceBuilderDocumentInput {
   readonly archiveSha256: string;
   readonly documentKind: "nib" | "storyboard_scene";
   readonly raw: unknown;
+  /** Original plist number types, observed before lossy JavaScript decoding. */
+  readonly numberLiterals?: PlistNumberLiterals;
   /** Serialized hierarchy links omitted before normalized graph projection. */
   readonly omittedSerializedHierarchyReferences?: number;
 }
@@ -59,6 +65,7 @@ export const buildInterfaceBuilderAnalysis = (input: {
     omitted: number;
   }>;
   const summaries: Array<z.infer<typeof interfaceBuilderDocumentSchema>> = [];
+  const numberLimitations: string[] = [];
   let truncated = false;
   let omittedObjects = 0;
   let omittedConnections = 0;
@@ -66,6 +73,10 @@ export const buildInterfaceBuilderAnalysis = (input: {
   let omittedHierarchyReferences = 0;
   for (const document of input.documents.slice(0, input.limits.max_documents)) {
     const parsed = parseInterfaceBuilderRecords(document.raw);
+    const numbers =
+      document.numberLiterals === undefined
+        ? undefined
+        : createPlistNumberProjection(document.numberLiterals);
     const prefix = `ib:${JSON.stringify(document.relativePath)}:`;
     const graphId = (kind: string, parts: readonly unknown[] = []): string =>
       `${prefix}${kind}:${JSON.stringify(parts)}`;
@@ -89,7 +100,22 @@ export const buildInterfaceBuilderAnalysis = (input: {
         omittedGraphNodes += 1;
         return false;
       }
-      nodes.set(node.id, node);
+      // Resolve graph structure first; exact integer representation affects only
+      // serialized attributes, never object identity or UID-derived links.
+      nodes.set(
+        node.id,
+        numbers === undefined
+          ? node
+          : {
+              ...node,
+              attributes: Object.fromEntries(
+                Object.entries(node.attributes).map(([key, value]) => [
+                  key,
+                  numbers.project(value),
+                ]),
+              ),
+            },
+      );
       return true;
     };
     const rootNode = {
@@ -443,6 +469,11 @@ export const buildInterfaceBuilderAnalysis = (input: {
           : hierarchyTruncated
             ? "partial"
             : "complete";
+    numberLimitations.push(
+      ...(numbers?.limitations() ?? []).map(
+        (note) => `${document.relativePath}: ${note}`,
+      ),
+    );
     summaries.push({
       relative_path: document.relativePath,
       archive_sha256: document.archiveSha256,
@@ -562,6 +593,7 @@ export const buildInterfaceBuilderAnalysis = (input: {
         omittedHierarchyReferences > 0,
     },
     limitations: [
+      ...numberLimitations,
       "The graph reflects recognized Interface Builder archive fields and connections; omitted private or unrecognized archive fields remain unknown.",
       "A target-action selector is an Interface Builder observation and does not prove that the binary contains a matching implementation.",
       "Decoded constraints, runtime visibility, dynamic UI creation, and pixel geometry are not inferred from these archives.",

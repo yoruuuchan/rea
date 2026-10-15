@@ -94,10 +94,21 @@ export const readPeResourceLayout = (bytes: Buffer) => {
   }
   const map = (rva: number, size: number): number => {
     if (rva + size > 0x100000000) peFailure("Resource RVA range overflows.");
-    const candidates = sections.filter(
+    const containing = sections.filter(
       (section) =>
         rva >= section.rva && rva - section.rva < virtualExtent(section),
     );
+    // An empty interval reads no bytes, so the Windows resource loader also
+    // resolves it exactly at a section's virtual end. A section starting at
+    // that RVA still owns it.
+    const candidates =
+      size === 0 && containing.length === 0
+        ? sections.filter(
+            (section) =>
+              virtualExtent(section) > 0 &&
+              rva - section.rva === virtualExtent(section),
+          )
+        : containing;
     if (rva < headerSize) {
       if (
         sections.some(

@@ -68,6 +68,26 @@ describe("parseCapinfosOutput", () => {
     });
   });
 
+  it("retains timestamps from the older capinfos labels", () => {
+    const output = REAL_CAPINFOS.replace(
+      "Earliest packet time",
+      "First packet time",
+    ).replace("Latest packet time", "Last packet time");
+    const metadata = parseCapinfosOutput(output);
+    expect(metadata.captureStart).toBe("2026-10-11 14:13:40.608505");
+    expect(metadata.captureEnd).toBe("2026-10-11 14:13:40.981978");
+  });
+
+  it("keeps missing capture timestamps unknown", () => {
+    const output = REAL_CAPINFOS.split("\n")
+      .filter((line) => !line.includes("packet time:"))
+      .join("\n");
+    expect(parseCapinfosOutput(output)).toMatchObject({
+      captureStart: null,
+      captureEnd: null,
+    });
+  });
+
   it("rejects empty metadata rather than reporting complete unknown facts", () => {
     expect(() => parseCapinfosOutput("")).toThrow(/machine-readable/u);
   });

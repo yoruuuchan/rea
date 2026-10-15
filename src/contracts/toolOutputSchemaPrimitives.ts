@@ -463,6 +463,7 @@ export const expandToolAvailability = (
 
 export const sessionProvider = z
   .object({
+    cleanup_pending: z.boolean(),
     capabilities: z.array(providerCapabilitySet),
     analysis_run: analysisRun,
     analysis_activity: analysisActivity,

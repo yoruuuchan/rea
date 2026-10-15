@@ -17,6 +17,10 @@ import {
   runOwnedCommand,
 } from "../../../dist/process/OwnedCommand.js";
 import { closeVerifierResources } from "../../lib/verifier-cleanup.mjs";
+import {
+  matchesStructuredScopeExpectation,
+  structuredScopeExpectationsSchema,
+} from "../../lib/javascript-file-scope-oracle.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -24,6 +28,11 @@ const { values } = parseArgs({
     "addon-path": { type: "string" },
     "native-sha256": { type: "string" },
     "source-path": { type: "string", multiple: true },
+    "structured-path": { type: "string", multiple: true },
+    "structured-expectations": { type: "string" },
+    "validate-structured-from-export": { type: "boolean", default: false },
+    "analysis-timeout-ms": { type: "string" },
+    "expect-timeout": { type: "boolean", default: false },
     rounds: { type: "string", default: "3" },
     "cli-parity": { type: "boolean", default: false },
     "tokenizer-python": { type: "string" },
@@ -50,6 +59,30 @@ assert.match(
 );
 const rounds = Number(values.rounds);
 assert.ok(Number.isSafeInteger(rounds) && rounds > 0);
+const analysisTimeoutMs =
+  values["analysis-timeout-ms"] === undefined
+    ? undefined
+    : Number(values["analysis-timeout-ms"]);
+assert.ok(
+  analysisTimeoutMs === undefined ||
+    (Number.isSafeInteger(analysisTimeoutMs) && analysisTimeoutMs > 0),
+);
+assert.ok(!values["expect-timeout"] || analysisTimeoutMs !== undefined);
+assert.ok(!values["validate-structured-from-export"] || values["cli-parity"]);
+const structuredExpectations = structuredScopeExpectationsSchema.parse(
+  JSON.parse(values["structured-expectations"] ?? "{}"),
+);
+for (const path of Object.keys(structuredExpectations))
+  assert.ok(
+    values["structured-path"]?.includes(path),
+    `Expected structured path was not selected for verification: ${path}`,
+  );
+if (values["expect-timeout"])
+  for (const path of values["structured-path"] ?? [])
+    assert.ok(
+      Object.hasOwn(structuredExpectations, path),
+      `--structured-expectations must name the expected operation/status for ${path}`,
+    );
 const environment = {
   PATH: process.env.PATH ?? "/usr/bin:/bin",
   REA_LOG_LEVEL: "silent",
@@ -139,30 +172,55 @@ try {
     ),
   );
   assert.equal(selected.length, 2);
-  const call = async (name, arguments_) => {
+  const call = async (name, arguments_, allowTimeout = false) => {
     const response = await client.callTool(
       { name, arguments: arguments_ },
       { timeout: 360_000 },
     );
-    assert.notEqual(response.isError, true, serialize(response));
-    assert.ok(response.structuredContent?.evidence_id);
+    let projection = response.structuredContent;
+    if (response.isError === true) {
+      assert.ok(
+        allowTimeout,
+        serialize({ name, arguments: arguments_, response }),
+      );
+      const text = response.content.find(({ type }) => type === "text");
+      assert.ok(text?.type === "text");
+      projection = JSON.parse(text.text);
+      assert.equal(projection.error.code, "provider_timeout");
+      assert.equal(
+        projection.error.details.partial_observation.kind,
+        "retained-evidence",
+      );
+    } else assert.ok(projection?.evidence_id);
     return {
       request: { name, arguments: arguments_ },
-      response: response.structuredContent,
+      response: projection,
       wire_response: response,
     };
   };
   const prepStart = performance.now();
-  const preparation = await call("analyze_javascript_application", {
-    input_path: values.artifact,
-    detail: "summary",
-    ...(values["source-path"] === undefined
-      ? {}
-      : { source_paths: values["source-path"] }),
-  });
+  const preparation = await call(
+    "analyze_javascript_application",
+    {
+      input_path: values.artifact,
+      detail: "summary",
+      ...(analysisTimeoutMs === undefined
+        ? {}
+        : { analysis_timeout_ms: analysisTimeoutMs }),
+      ...(values["source-path"] === undefined
+        ? {}
+        : { source_paths: values["source-path"] }),
+    },
+    values["expect-timeout"],
+  );
   const preparationMs = performance.now() - prepStart;
-  assert.equal(preparation.response.subject.digest.sha256, archiveSha256);
-  const sourceId = preparation.response.normalized_result.parent_evidence_id;
+  const timedOut = preparation.wire_response.isError === true;
+  assert.equal(timedOut, values["expect-timeout"]);
+  if (!timedOut)
+    assert.equal(preparation.response.subject.digest.sha256, archiveSha256);
+  const sourceId = timedOut
+    ? preparation.response.error.details.partial_observation.evidence_id
+    : preparation.response.normalized_result.parent_evidence_id;
   assert.match(sourceId, /^ev_[a-f0-9]{64}$/);
   const query = {
     application: { kind: "retained-evidence", evidence_id: sourceId },
@@ -221,6 +279,38 @@ try {
         trace.native_handoffs[0].status === "evidence-linked" &&
         serialize(trace.native_handoffs[0].evidence_ids) ===
           serialize([native.evidence_id]));
+  const analysisScopes = (result, path) =>
+    result.graph.nodes.flatMap((node) =>
+      node.kind !== "unknown"
+        ? []
+        : node.observations.flatMap((observation) =>
+            observation.properties.path === path &&
+            observation.properties.analysis_failure !== undefined
+              ? [{ node_id: node.node_id, ...observation }]
+              : [],
+          ),
+    );
+  const nativeScopes = analysisScopes(trace, values["addon-path"]);
+  const structuredQueries = [];
+  const structuredScopes = [];
+  for (const path of values["validate-structured-from-export"]
+    ? []
+    : (values["structured-path"] ?? [])) {
+    const result = await call("trace_application_feature", {
+      ...query,
+      native_observations: [],
+      seed: { ...query.seed, value: path },
+    });
+    structuredQueries.push(result);
+    structuredScopes.push({
+      source: "retained-feature-trace",
+      path,
+      scopes: analysisScopes(result.response.normalized_result, path),
+      evidence_id: result.response.evidence_id,
+      source_coverage: result.response.normalized_result.coverage,
+      graph_coverage: result.response.normalized_result.graph.coverage,
+    });
+  }
   let cliParity = null;
   if (values["cli-parity"]) {
     temporary = await PrivateRuntimeRoot.create({
@@ -237,6 +327,25 @@ try {
       ({ evidence_id }) => evidence_id === sourceId,
     );
     assert.ok(parent, "Export omitted the retained parent");
+    assert.equal(parent.normalized_result.root_artifact_sha256, archiveSha256);
+    if (values["validate-structured-from-export"])
+      for (const path of values["structured-path"] ?? []) {
+        const retained = parent.normalized_result;
+        const matchingNodes = retained.graph.nodes.filter((node) =>
+          node.observations.some(({ properties }) => properties.path === path),
+        );
+        assert.ok(matchingNodes.length > 0, `Missing retained path: ${path}`);
+        // Diagnostic validation of the complete backend record is distinct
+        // from the inline native analyst task used by this control's tokens.
+        structuredScopes.push({
+          source: "exported-parent-validation",
+          path,
+          scopes: analysisScopes(retained, path),
+          source_evidence_id: parent.evidence_id,
+          retained_matching_nodes: matchingNodes.length,
+          graph_coverage: retained.graph.coverage,
+        });
+      }
     const request = join(temporary.path, "trace.json");
     // The CLI's portable file contract takes complete Evidence; MCP resolves a
     // same-session reference into the same shared application workflow.
@@ -259,6 +368,16 @@ try {
       evidence_id: evidence.evidence_id,
     };
   }
+  const safeApplicability =
+    nativeScopes.length === 0 &&
+    structuredScopes.every(({ path, scopes }) =>
+      timedOut
+        ? matchesStructuredScopeExpectation(
+            scopes,
+            structuredExpectations[path],
+          )
+        : scopes.length === 0,
+    );
   let tokenCosts = null;
   if (values["tokenizer-python"]) {
     temporary ??= await PrivateRuntimeRoot.create({
@@ -267,7 +386,12 @@ try {
     const input = join(temporary.path, "token-input.json");
     await writeFile(
       input,
-      serialize({ catalog, selected, preparation, query: first }),
+      serialize({
+        catalog,
+        selected,
+        preparation,
+        queries: [first, ...structuredQueries],
+      }),
     );
     const result = await ownedCommand(values["tokenizer-python"], [
       "-c",
@@ -275,9 +399,9 @@ try {
 with open(sys.argv[1],encoding='utf-8') as f:d=json.load(f)
 enc=tiktoken.get_encoding('cl100k_base')
 def n(v):return len(enc.encode(json.dumps(v,ensure_ascii=False,separators=(',',':')),disallowed_special=()))
-requests=n(d['preparation']['request'])+n(d['query']['request'])
-structured=n(d['preparation']['response'])+n(d['query']['response'])
-full_reply=n(d['preparation']['wire_response'])+n(d['query']['wire_response'])
+requests=n(d['preparation']['request'])+sum(n(q['request']) for q in d['queries'])
+structured=n(d['preparation']['response'])+sum(n(q['response']) for q in d['queries'])
+full_reply=n(d['preparation']['wire_response'])+sum(n(q['wire_response']) for q in d['queries'])
 s=n(d['selected']);a=n(d['catalog'])
 print(json.dumps(dict(tokenizer='cl100k_base',tiktoken_version=tiktoken.__version__,selected_catalog=s,full_catalog=a,requests=requests,structured_replies=structured,full_tool_replies=full_reply,selected_catalog_structured_task=s+requests+structured,full_catalog_structured_task=a+requests+structured,selected_catalog_full_reply_task=s+requests+full_reply,full_catalog_full_reply_task=a+requests+full_reply)))`,
       input,
@@ -292,11 +416,19 @@ print(json.dumps(dict(tokenizer='cl100k_base',tiktoken_version=tiktoken.__versio
     companion_sha256_observed: companionSha256,
     prior_native_sha256_supplied: values["native-sha256"],
     source_paths: values["source-path"] ?? null,
+    preparation_outcome: timedOut ? "provider_timeout" : "completed",
+    analysis_timeout_ms: analysisTimeoutMs ?? null,
     parent_evidence_id: sourceId,
     trace_evidence_id: first.response.evidence_id,
+    trace_subject: first.response.subject,
     preparation_ms: preparationMs,
     samples,
     safe_identity: safeIdentity,
+    safe_applicability: safeApplicability,
+    native_analysis_scopes: nativeScopes,
+    structured_scopes: structuredScopes,
+    structured_expectations: structuredExpectations,
+    modeled_structured_trace_count: structuredQueries.length,
     node: {
       node_id: addon.node_id,
       identity: addon.identity,
@@ -322,10 +454,12 @@ print(json.dumps(dict(tokenizer='cl100k_base',tiktoken_version=tiktoken.__versio
     cli_parity: cliParity,
     token_costs: tokenCosts,
     conditions:
-      "Fresh MCP session, one selected analysis followed by repeated identical retained traces. Filesystem/build caches uncontrolled. Task token counts include one analysis summary and one trace with name/description/inputSchema catalog projections; structured and complete-tool-reply projections are alternatives, not billing. Repeated rounds, export, CLI parity and tokenizer are validation overhead outside that one-task token count but inside total resource receipts. A wrong-identity baseline is not a successful equivalent task or efficiency credit.",
+      "Fresh MCP session, selected analysis followed by retained traces. Task token counts include one analysis summary or parsed timeout error, one native trace and each requested structured-path trace, with name/description/inputSchema catalog projections. Structured Evidence/parsed error and complete-tool-reply projections are alternatives, not billing. Repeated native rounds, export, CLI parity and tokenizer are validation overhead outside task tokens but inside total resource receipts. Filesystem/build caches uncontrolled. Incorrect identity/applicability is not a successful equivalent task or efficiency credit.",
   };
-  if (values["require-safe"])
+  if (values["require-safe"]) {
     assert.ok(safeIdentity, "Native identity/linkage oracle failed");
+    assert.ok(safeApplicability, "File analysis applicability oracle failed");
+  }
 } catch (cause) {
   primaryError = cause;
   throw cause;

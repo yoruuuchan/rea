@@ -1,7 +1,7 @@
 import type { ElectronStaticFindings } from "./electronStaticAnalysisTypes.js";
 
 /** Token semantics shared by bundle producers and worker admission. */
-export const JAVASCRIPT_AST_FINGERPRINT_ALGORITHM = "babel-ast-v2";
+export const JAVASCRIPT_AST_FINGERPRINT_ALGORITHM = "babel-ast-v3";
 
 /** Static syntax context retained for later artifact path resolution. */
 export type JavaScriptStaticPathContext =

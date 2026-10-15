@@ -451,6 +451,11 @@ The run ends when the process exits, `max_events` entries are recorded,
 Bounded termination reports partial coverage. REA checks process termination
 using a launch-time OS start identity; if ownership or cleanup cannot be
 verified, the result or error preserves that uncertainty. The result reports:
+Launch errors keep the fact that LLDB created a process separate from whether
+it remains alive. An exited `SBProcess` is reported as exited only after LLDB
+confirms that state; unresolved ownership remains retained for cleanup retry.
+Cancellation observed while output and Evidence are finalized returns partial
+cancellation Evidence, even if the target has already exited.
 
 - the outcome, exit status and captured stdout/stderr (1 MiB kept per stream
   while excess bytes are drained and counted without growing capture files).
@@ -481,6 +486,11 @@ with partial coverage. Available output prefixes remain inline; their byte
 counts are observed lower bounds when final drain counters are unavailable.
 The original failure classification and cleanup uncertainty remain separate.
 An interrupted journal row is ignored with an explicit limitation.
+If the trace completed before cancellation or runtime-directory cleanup failed,
+the retained observation also keeps its exit status, termination proof, launch
+identity, breakpoint results and final stream counters. Those fields remain
+absent when the interrupted producer did not report them; partial coverage alone
+does not mean that every retained fact is incomplete.
 
 Only entries are observed: return values, floating-point and stack arguments,
 and inlined or `objc_direct` calls are not. The target runs with the current
@@ -576,6 +586,18 @@ Value projection preserves serialized node kinds, IDs, references and pagination
 Exact and ambiguous value counts describe emitted root/object value instances;
 a root and an object may contain the same value. Archive digests identify the
 original bytes.
+
+Interface Builder's XML and binary plist archives use the same number metadata
+and exact-decimal representation for emitted node attributes. Projection follows
+object and connection classification, so archive IDs, UID links and graph counts
+keep their meaning. Precision limitations name the source document. Unsafe
+integer-literal counts cover the archive, including fields not emitted as node
+attributes; exact and ambiguous projection counts cover emitted attribute values.
+Integral reals stay numbers, and ambiguous or incompletely observed values retain
+explicit precision limitations. Before plist decoding, the existing aggregate
+decode budget reserves estimated room for number metadata and attribute
+projection; these estimates are not a hard process-memory bound. Native
+NIBArchive decoding is unchanged by this plist-specific representation.
 
 Dates are reported as `{ "$plist_type": "date", "iso8601": "<timestamp>" }`. A
 date the decoder cannot represent, such as an XML date with a year beyond 9999

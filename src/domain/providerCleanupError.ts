@@ -17,6 +17,7 @@ export class ProviderCleanupError extends ProviderAdapterError {
     options?: ErrorOptions & {
       readonly operation?: string;
       readonly partialObservation?: AnalysisPartialObservation;
+      readonly remediationAction?: string;
     },
   ) {
     const {

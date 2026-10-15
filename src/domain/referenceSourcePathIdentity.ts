@@ -1,6 +1,8 @@
 import { posix } from "node:path";
 
 export interface ReferenceSourcePathLookup {
+  /** Whether an exact or canonical identity exists, including ambiguous ones. */
+  readonly has: (path: string) => boolean;
   readonly resolve: (path: string) => string | undefined;
   readonly resolveCandidates: (paths: readonly string[]) => string | undefined;
   /** Resolve a path to the closest recorded parent identity. */
@@ -22,9 +24,12 @@ export const createReferenceSourcePathLookup = (
   }
   const equivalent = (path: string): string | undefined =>
     canonical.get(path.normalize("NFC")) ?? undefined;
+  const has = (path: string): boolean =>
+    exact.has(path) || canonical.has(path.normalize("NFC"));
   const resolve = (path: string): string | undefined =>
     exact.has(path) ? path : equivalent(path);
   return {
+    has,
     resolve,
     resolveCandidates: (candidates) =>
       candidates.find((path) => exact.has(path)) ??

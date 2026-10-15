@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { expandToolAvailability } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import { ProviderAdapterError } from "../../../src/domain/providerAdapterError.js";
+import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 import { err, ok } from "../../../src/domain/result.js";
 import { silentLogger } from "../../../src/logger.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -147,6 +148,105 @@ it("restores MCP tool availability after cancelling a target switch", async () =
   } finally {
     controller.abort();
     release.resolve();
+    await client.close();
+    await server.close();
+    await session.close();
+  }
+});
+
+it("keeps a retired run and its lineage visible over MCP until cleanup succeeds", async () => {
+  const [path] = await createBinarySessionTargets();
+  let allowed = false;
+  const provider = createCacheProvider([]);
+  provider.createClient = (_target, _profile, context) => {
+    if (context === undefined) throw new Error("missing analysis run context");
+    return {
+      execute: () => Promise.resolve(observed("fixture-name")),
+      runtimeLineageSnapshots: () => [
+        {
+          provider: provider.identity(),
+          observation: {
+            status: "unavailable" as const,
+            observedAt: "2026-10-16T00:00:00Z",
+            runId: context.runId,
+            launcherPid: 123,
+            processGroupId: 123,
+            reason: "fixture identity could not be revalidated",
+          },
+        },
+      ],
+      close: () =>
+        Promise.resolve(
+          allowed
+            ? ok(null)
+            : err(
+                new ProviderCleanupError("fixture", ["owned-runtime"], {
+                  reason: "fixture cleanup denied",
+                }),
+              ),
+        ),
+    };
+  };
+  const session = createTestBinarySession(provider);
+  const server = createServer(
+    { kind: "session", session },
+    { environment: {}, logger: silentLogger },
+  );
+  const client = new Client({ name: "retained-run", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const readStatus = async () => {
+    const reply = await client.callTool({
+      name: "binary_session",
+      arguments: {},
+    });
+    return toolContract("binary_session").outputSchema.parse(
+      reply.structuredContent,
+    ).result;
+  };
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    expect((await readStatus()).analysis_run).toBeNull();
+    expect(
+      (await client.callTool({ name: "open_binary", arguments: { path } }))
+        .isError,
+    ).not.toBe(true);
+    expect(
+      (
+        await client.callTool({
+          name: "address_name",
+          arguments: { address: "0x1000", document: "fixture" },
+        })
+      ).isError,
+    ).not.toBe(true);
+    const before = await readStatus();
+    expect(before.analysis_run).toMatchObject({
+      run_id: expect.any(String),
+      process_lineage: { status: "snapshots" },
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(
+        (await client.callTool({ name: "close_binary", arguments: {} }))
+          .isError,
+      ).toBe(true);
+      expect(await readStatus()).toMatchObject({
+        open: false,
+        cleanup_pending: true,
+        analysis_run: before.analysis_run,
+      });
+    }
+    allowed = true;
+    expect(
+      (await client.callTool({ name: "close_binary", arguments: {} })).isError,
+    ).not.toBe(true);
+    expect(await readStatus()).toMatchObject({
+      open: false,
+      cleanup_pending: false,
+      analysis_run: null,
+    });
+  } finally {
+    allowed = true;
     await client.close();
     await server.close();
     await session.close();

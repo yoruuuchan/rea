@@ -21,6 +21,7 @@ import {
 } from "../../../../src/artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
 import { DirectoryArtifactReader } from "../../../../src/artifacts/DirectoryArtifactReader.js";
+import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
 import {
   NativeDmgArtifactReader,
   type NativeDmgHost,
@@ -1344,6 +1345,194 @@ describe("native DMG verification resource availability", () => {
   });
 });
 
+// Captured from hdiutil with AppleLanguages set to es-419.
+const localizedImageRefusal = (path: string, reason: string) => ({
+  stdout: "",
+  stderr: `hdiutil: verify: unable to recognize ${JSON.stringify(path)} as a disk image. (${reason})\nhdiutil: verify failed - ${reason}\n`,
+  exitCode: 1,
+});
+
+describe("native DMG localized verification diagnostics", () => {
+  it("classifies a localized checksum mismatch from the untranslated status line", async () => {
+    const run = vi.fn(async () => ({
+      stdout: "",
+      stderr:
+        'Calculando suma de disco entero (partición desconocida: 0)…\ndisco entero (partición desconocida:: calculado CRC32 $3816B077, esperado   CRC32 $A738EA1C\nhdiutil: verify: checksum of "/tmp/image.dmg" is INVALID\nhdiutil: verify failed - suma no válida\n',
+      exitCode: 1,
+    }));
+    await expect(
+      createAttachedReader("/tmp/image.dmg", process.env, undefined, { run }),
+    ).rejects.toMatchObject({
+      reason: "integrity",
+      message: expect.stringContaining("suma no válida"),
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a malformed image", "imagen no reconocida"],
+    ["a transiently busy image", "Recurso no disponible temporalmente"],
+  ])(
+    "keeps a localized refusal of a readable target unknown and retries it like %s could be",
+    async (_target, reason) => {
+      const root = await createTestTempDirectory("rea-localized-dmg-readable-");
+      const path = join(root, "image.dmg");
+      await writeFile(path, "This may or may not be a disk image.\n");
+      const run = vi.fn(async () => localizedImageRefusal(path, reason));
+      const delay = vi.fn(async () => {});
+      const reader = new NativeDmgArtifactReader(path, process.env, {
+        run,
+        delay,
+      });
+      await expect(entryPaths(reader)).rejects.toMatchObject({
+        reason: "unavailable",
+        message: expect.stringContaining(reason),
+      });
+      await reader.close();
+      expect(run.mock.calls).toHaveLength(3);
+      expect(delay.mock.calls).toEqual([[250], [500]]);
+      expect(reader.provenance().map(({ exit_code }) => exit_code)).toEqual([
+        1, 1, 1,
+      ]);
+    },
+  );
+
+  it("attaches after a localized transient refusal clears", async () => {
+    const { host, state } = createOmittedInventoryHost();
+    state.inventoryMode = "listed";
+    state.detachAttempts = 4;
+    const root = await createTestTempDirectory("rea-localized-dmg-transient-");
+    const path = join(root, "image.dmg");
+    await writeFile(path, "A disk image that is briefly busy.\n");
+    let attempts = 0;
+    const reader = await createAttachedReader(path, process.env, undefined, {
+      ...host,
+      delay: async () => {},
+      async run(arguments_, signal, options) {
+        if (arguments_[0] === "verify") {
+          attempts += 1;
+          if (attempts === 1)
+            return localizedImageRefusal(
+              path,
+              "Recurso no disponible temporalmente",
+            );
+        }
+        return host.run(arguments_, signal, options);
+      },
+    });
+    onTestFinished(() => reader.close());
+    expect(attempts).toBe(2);
+    await reader.close();
+    expect(state.attached).toBe(false);
+  });
+
+  it("classifies a localized refusal of a missing target as an I/O failure", async () => {
+    const root = await createTestTempDirectory("rea-localized-dmg-io-");
+    const path = join(root, "missing.dmg");
+    const run = vi.fn(async () =>
+      localizedImageRefusal(path, "No existe este archivo o directorio"),
+    );
+    const delay = vi.fn(async () => {});
+    await expect(
+      createAttachedReader(path, process.env, undefined, { run, delay }),
+    ).rejects.toMatchObject({
+      reason: "io",
+      message: expect.stringContaining("No existe este archivo o directorio"),
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "does not block on a target replaced by a named pipe",
+    async () => {
+      const root = await createTestTempDirectory("rea-localized-dmg-fifo-");
+      const path = join(root, "image.dmg");
+      await execFileOutput("mkfifo", [path]);
+      const run = vi.fn(async () =>
+        localizedImageRefusal(path, "imagen no reconocida"),
+      );
+      await expect(
+        createAttachedReader(path, process.env, undefined, {
+          run,
+          delay: async () => {},
+        }),
+      ).rejects.toMatchObject({ reason: "unavailable" });
+      expect(run).toHaveBeenCalledTimes(3);
+    },
+    10_000,
+  );
+
+  it("keeps a localized failure without an untranslated status line unavailable", async () => {
+    const run = vi.fn(async () => ({
+      stdout: "",
+      stderr: "hdiutil: verify failed - error desconocido\n",
+      exitCode: 1,
+    }));
+    await expect(
+      createAttachedReader("/tmp/image.dmg", process.env, undefined, { run }),
+    ).rejects.toMatchObject({ reason: "unavailable" });
+  });
+});
+
+describe("native DMG localized verification cleanup", () => {
+  it("preserves cancellation that arrives before the localized target probe", async () => {
+    const root = await createTestTempDirectory("rea-localized-dmg-cancel-");
+    const path = join(root, "image.dmg");
+    await writeFile(
+      path,
+      "Readable target; hdiutil refusal remains ambiguous.\n",
+    );
+    const controller = new AbortController();
+    const run = vi.fn(async () => {
+      controller.abort(new Error("cancel localized verification"));
+      return localizedImageRefusal(path, "Recurso no disponible temporalmente");
+    });
+    const delay = vi.fn(async () => {});
+    await expect(
+      createAttachedReader(path, process.env, controller.signal, {
+        run,
+        delay,
+      }),
+    ).rejects.toMatchObject({ reason: "cancelled" });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
+
+  it("retains a failed verification-probe close for reader cleanup", async () => {
+    const root = await createTestTempDirectory("rea-localized-dmg-close-");
+    const path = join(root, "image.dmg");
+    await writeFile(
+      path,
+      "Readable target; hdiutil refusal remains ambiguous.\n",
+    );
+    const close = vi
+      .spyOn(OwnedFileHandle.prototype, "close")
+      .mockImplementationOnce(() =>
+        Promise.reject(new Error("injected probe descriptor close failure")),
+      );
+    try {
+      const reader = new NativeDmgArtifactReader(path, process.env, {
+        run: async () => localizedImageRefusal(path, "imagen no reconocida"),
+        delay: async () => {},
+      });
+      await expect(entryPaths(reader)).rejects.toMatchObject({
+        reason: "unavailable",
+        message: expect.stringContaining("imagen no reconocida"),
+        cleanup: {
+          resources: expect.arrayContaining([
+            `DMG verification target descriptor ${path}`,
+          ]),
+        },
+      });
+      await reader.close();
+      expect(close).toHaveBeenCalledTimes(2);
+    } finally {
+      close.mockRestore();
+    }
+  });
+});
+
 describe("native DMG real verification diagnostics", () => {
   it.skipIf(process.platform !== "darwin")(
     "classifies a real hdiutil verify refusal as a format failure with captured output",
@@ -1356,7 +1545,13 @@ describe("native DMG real verification diagnostics", () => {
       );
       expect(failure).toBeInstanceOf(ArtifactReaderFailure);
       if (!(failure instanceof ArtifactReaderFailure)) return;
-      expect(failure.reason).toBe("format");
+      // Only English output establishes the cause; a localized reason for a
+      // readable target stays unknown (see the localized diagnostics suite).
+      expect(failure.reason).toBe(
+        /verify failed - image not recogni[sz]ed/u.test(failure.message)
+          ? "format"
+          : "unavailable",
+      );
       expect(failure.message).toContain('"command":"/usr/bin/hdiutil"');
       expect(failure.message).toContain('"arguments":["verify"');
       expect(failure.message).toContain('"exitCode":1');
@@ -1374,10 +1569,9 @@ describe("native DMG real verification diagnostics", () => {
       await writeFile(unreadablePath, "not a disk image\n");
       await chmod(unreadablePath, 0);
       try {
-        for (const [path, expectedDiagnostic] of [
-          [missingPath, "No such file or directory"],
-          [unreadablePath, "Permission denied"],
-        ] as const) {
+        for (const path of [missingPath, unreadablePath]) {
+          // hdiutil localizes the errno text, but not its own status line.
+          const expectedDiagnostic = `hdiutil: verify: unable to recognize ${JSON.stringify(path)} as a disk image.`;
           const failure = await createAttachedReader(path, process.env).catch(
             (cause: unknown) => cause,
           );
@@ -1388,7 +1582,7 @@ describe("native DMG real verification diagnostics", () => {
           expect(failure.message).toContain('"arguments":["verify"');
           expect(failure.message).toContain('"exitCode":1');
           expect(failure.message).toContain('"stdout":""');
-          expect(failure.message).toContain(expectedDiagnostic);
+          expect(failure.message).toContain("unable to recognize");
           expect(failure.cause).toBeInstanceOf(Error);
           if (!(failure.cause instanceof Error)) continue;
           expect(Reflect.get(failure.cause, "code")).toBe(1);
@@ -1459,9 +1653,9 @@ describe("native DMG real verification diagnostics", () => {
       expect(failure.message).toContain('"command":"/usr/bin/hdiutil"');
       expect(failure.message).toContain('"arguments":["verify"');
       expect(failure.message).toContain('"exitCode":1');
-      expect(failure.message).toContain("calculated CRC32");
-      expect(failure.message).toContain("expected   CRC32");
-      expect(failure.message).toContain("verify failed - invalid checksum");
+      // hdiutil localizes the CRC labels and failure reason, but not this status line.
+      expect(failure.message).toContain("CRC32");
+      expect(failure.message).toContain("is INVALID");
       expect(failure.cause).toBeInstanceOf(Error);
       if (!(failure.cause instanceof Error)) return;
       expect(Reflect.get(failure.cause, "code")).toBe(1);

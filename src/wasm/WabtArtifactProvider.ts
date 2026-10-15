@@ -448,21 +448,40 @@ export class WabtArtifactProvider implements WasmArtifactPort {
         resource: root.path,
         root,
       });
+      let partialObservation = result.ok
+        ? undefined
+        : result.error.partialObservation;
+      if (
+        result.ok &&
+        (options?.signal?.aborted || cleanup.kind === "failed")
+      ) {
+        partialObservation = createEvidence(
+          result.value.subject ?? undefined,
+          result.value.provider,
+          {
+            operation: OPERATION,
+            parameters: input,
+            result: result.value.result,
+            confidence: "observed",
+            locations: result.value.locations,
+            limitations: result.value.limitations,
+          },
+        );
+      }
+      if (result.ok && options?.signal?.aborted) {
+        result = err(
+          new AnalysisCancelledError(
+            OPERATION,
+            partialObservation === undefined
+              ? undefined
+              : { partialObservation },
+          ),
+        );
+      }
       if (cleanup.kind === "failed") {
         const cause = cleanup.cause;
-        const partialObservation = result.ok
-          ? createEvidence(
-              result.value.subject ?? undefined,
-              result.value.provider,
-              {
-                operation: OPERATION,
-                parameters: input,
-                result: result.value.result,
-                confidence: "observed",
-                locations: result.value.locations,
-                limitations: result.value.limitations,
-              },
-            )
+        const retainedObservation = result.ok
+          ? partialObservation
           : result.error.partialObservation;
         result = err(
           new ProviderCleanupError(
@@ -477,9 +496,9 @@ export class WabtArtifactProvider implements WasmArtifactPort {
             {
               operation: OPERATION,
               cause,
-              ...(partialObservation === undefined
+              ...(retainedObservation === undefined
                 ? {}
-                : { partialObservation }),
+                : { partialObservation: retainedObservation }),
             },
           ),
         );

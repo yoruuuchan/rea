@@ -68,6 +68,7 @@ it("keeps malformed JavaScript, package metadata, and source maps as explicit un
   await Promise.all([
     writeFile(join(root, "package.json"), "{"),
     writeFile(join(root, "broken.js"), "function broken( {"),
+    writeFile(join(root, "data.json"), "{"),
     writeFile(join(root, "renderer", "renderer.js.map"), "{"),
   ]);
 
@@ -90,9 +91,33 @@ it("keeps malformed JavaScript, package metadata, and source maps as explicit un
     expect.arrayContaining([
       "parse-javascript",
       "parse-package-json",
+      "parse-json-module",
       "parse-local-source-map",
     ]),
   );
+  const gaps = result.graph.nodes
+    .filter(({ kind }) => kind === "unknown")
+    .flatMap(({ observations }) => observations);
+  for (const operation of [
+    "parse-javascript",
+    "parse-package-json",
+    "parse-json-module",
+    "parse-local-source-map",
+  ]) {
+    const applicable = gaps.filter(
+      ({ properties }) => properties.operation === operation,
+    );
+    expect(applicable.length).toBeGreaterThan(0);
+    for (const gap of applicable)
+      expect(gap.evidence).toMatchObject({
+        authority:
+          operation === "parse-javascript"
+            ? "ast-static-analysis"
+            : "artifact-bytes",
+        state: "unavailable",
+        confidence: "unknown",
+      });
+  }
 });
 
 it("retains every source declared by every included local source map", async () => {

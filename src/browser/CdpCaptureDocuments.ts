@@ -2,6 +2,7 @@ import type { InspectWebPageInput } from "../domain/browserObservation.js";
 import type { WebPageInspection } from "../domain/browserObservationSchemas.js";
 import {
   allowedSanitizedUrl,
+  admitRecords,
   numberValue,
   recordValue,
   recordsValue,
@@ -505,16 +506,63 @@ export const captureAccessibility = (
   options: {
     readonly includeText: boolean;
     readonly unavailable?: boolean;
+    readonly completeness?: CdpCaptureCompleteness;
   },
 ): {
   readonly total: number;
   readonly nodes: WebPageInspection["accessibility"]["nodes"];
   readonly textCapture: WebPageInspection["accessibility"]["text_capture"];
-  readonly treeIncomplete: boolean;
+  readonly hasUnobservedChildren: boolean;
 } => {
-  const all = results.flatMap((result) =>
-    recordsValue(requiredRecord(result).nodes),
-  );
+  const all = results.flatMap((result) => {
+    const inventory = admitRecords(requiredRecord(result).nodes);
+    if (inventory === undefined) {
+      options.completeness?.exclude(
+        "accessibility",
+        "invalid_protocol_value",
+        null,
+      );
+      return [];
+    }
+    const nodes: UnknownRecord[] = [];
+    let malformedCount = 0;
+    for (const entry of inventory) {
+      const node = recordValue(entry);
+      if (
+        node === undefined ||
+        cdpStringValue(node.nodeId) === undefined ||
+        cdpStringValue(node.nodeId)?.length === 0 ||
+        typeof node.ignored !== "boolean"
+      ) {
+        malformedCount += 1;
+        continue;
+      }
+      const parentId = cdpStringValue(node.parentId);
+      if (
+        node.parentId !== undefined &&
+        (parentId === undefined || parentId.length === 0)
+      )
+        malformedCount += 1;
+      if (
+        node.childIds !== undefined &&
+        (!Array.isArray(node.childIds) ||
+          node.childIds.some(
+            (childId) =>
+              cdpStringValue(childId) === undefined ||
+              cdpStringValue(childId)?.length === 0,
+          ))
+      )
+        malformedCount += 1;
+      nodes.push(node);
+    }
+    if (malformedCount > 0)
+      options.completeness?.exclude(
+        "accessibility",
+        "invalid_protocol_value",
+        malformedCount,
+      );
+    return nodes;
+  });
   const nodeIds = new Set(
     all.flatMap((node) => {
       const nodeId = cdpStringValue(node.nodeId);
@@ -545,7 +593,7 @@ export const captureAccessibility = (
   return {
     total: all.length,
     nodes,
-    treeIncomplete: all.some(
+    hasUnobservedChildren: all.some(
       (node) =>
         Array.isArray(node.childIds) &&
         node.childIds.some((childId) => {

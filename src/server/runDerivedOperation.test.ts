@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { runDerivedOperation } from "./runDerivedOperation.js";
+import {
+  runDerivedOperation,
+  type DerivedOperationContext,
+} from "./runDerivedOperation.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 
 const context = (
@@ -52,6 +55,34 @@ describe("derived MCP operation boundary", () => {
     expect(result).toMatchObject({
       ok: false,
       error: { _tag: "AnalysisCancelledError" },
+    });
+  });
+
+  it("lets cancellation win while terminal progress delivery is pending", async () => {
+    const controller = new AbortController();
+    let terminalReached = false;
+    const notifications: DerivedOperationContext = {
+      mcpReq: {
+        ...context(controller).mcpReq,
+        notify: async (notification) => {
+          if (notification.params?.message === "complete: Completed compare") {
+            terminalReached = true;
+            await Promise.resolve();
+            controller.abort();
+          }
+        },
+      },
+    };
+    const result = await runDerivedOperation(
+      notifications,
+      "compare",
+      () => "must-not-publish",
+    );
+
+    expect(terminalReached).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError", operation: "compare" },
     });
   });
 

@@ -159,6 +159,32 @@ it("reports an absent named root with the archive's available roots", async () =
   });
 });
 
+it.each(["UID", "CF$UID"])(
+  "keeps a sole scalar %s root free of false references through the file reader",
+  async (rootName) => {
+    const root = await bundle();
+    await writeFile(
+      join(root, "Contents", "Resources", "Scalar.plist"),
+      Buffer.from(
+        build({
+          $archiver: "NSKeyedArchiver",
+          $version: 100000,
+          $objects: ["$null"],
+          $top: { [rootName]: 1 },
+        }),
+      ),
+    );
+
+    const result = await inspect(root, {
+      path: "Contents/Resources/Scalar.plist",
+    });
+
+    expect(result.roots).toEqual({ [rootName]: 1 });
+    expect(result.references).toEqual([]);
+    expect(result.total_references).toBe(0);
+  },
+);
+
 it.each([
   [
     "plain plist",

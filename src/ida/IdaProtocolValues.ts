@@ -135,9 +135,10 @@ export const legacyStringSchema = z.object({
   string: z.string(),
   length: z.number().int().nonnegative(),
 });
-export const modernStringsSchema = z.object({
+export const idaStringsPageSchema = z.object({
   matches: z.array(z.object({ addr: idaAddressSchema, string: z.string() })),
   cursor: cursorSchema,
+  error: z.string().nullish(),
 });
 export const legacyXrefsSchema = z.array(
   z.object({

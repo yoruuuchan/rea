@@ -4,6 +4,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { expect, it } from "vitest";
 
 import {
+  createDeferred,
   createBinarySessionTargets,
   createTestBinarySession,
 } from "../../fixtures/binarySession.js";
@@ -117,6 +118,88 @@ it("builds exact-address paths with qualified callees and dossier citations", as
     await close(session, server, client);
   }
 });
+
+it("keeps call-path publication ahead of close_binary record draining", async () => {
+  const session = createTestBinarySession(() => ({
+    health: () => Promise.resolve(),
+    execute: () => Promise.resolve(observed(null)),
+    close: () => Promise.resolve(resultOk(null)),
+  }));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "investigation-close-race", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const preparationReached = createDeferred<void>();
+  const closeReached = createDeferred<void>();
+  const releasePreparation = createDeferred<void>();
+  const send = serverTransport.send.bind(serverTransport);
+  serverTransport.send = async (message, options) => {
+    await send(message, options);
+    if (
+      "method" in message &&
+      message.method === "notifications/progress" &&
+      "params" in message &&
+      typeof message.params === "object" &&
+      message.params !== null &&
+      "message" in message.params
+    ) {
+      if (message.params.message === "prepare: Preparing build_call_path") {
+        preparationReached.resolve();
+        await releasePreparation.promise;
+      } else if (message.params.message === "close_binary: started") {
+        closeReached.resolve();
+      }
+    }
+  };
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const settlementOrder: string[] = [];
+  try {
+    const input = INVESTIGATION_EXAMPLES.build_call_path;
+    for (const evidence of input.functions)
+      expect(session.recordEvidence(evidence).ok).toBe(true);
+
+    const request = client
+      .callTool(
+        { name: "build_call_path", arguments: input },
+        { onprogress: () => undefined },
+      )
+      .then((response) => {
+        settlementOrder.push("build_call_path");
+        return response;
+      });
+    await preparationReached.promise;
+
+    let closeSettled = false;
+    const closing = client
+      .callTool(
+        { name: "close_binary", arguments: {} },
+        { onprogress: () => undefined },
+      )
+      .then((response) => {
+        closeSettled = true;
+        settlementOrder.push("close_binary");
+        return response;
+      });
+    await closeReached.promise;
+    expect(closeSettled).toBe(false);
+
+    releasePreparation.resolve();
+    const [response, closed] = await Promise.all([request, closing]);
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    expect(closed.isError, JSON.stringify(closed)).not.toBe(true);
+    expect(settlementOrder).toEqual(["build_call_path", "close_binary"]);
+    const evidence = inlineEvidence(response.structuredContent);
+    expect(evidence).toMatchObject({
+      provider: { id: "rea-call-path" },
+      evidence_links: input.functions.map(({ evidence_id }) => evidence_id),
+    });
+    expect(session.exportEvidenceBundle().records).toHaveLength(0);
+  } finally {
+    releasePreparation.resolve();
+    await close(session, server, client);
+  }
+}, 10_000);
 
 const dossierWithCallees = (addresses: readonly string[]) => {
   const base = FUNCTION_COMPARISON_EXAMPLE.left;

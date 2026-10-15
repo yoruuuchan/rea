@@ -17,7 +17,10 @@ export async function verifyPackagePack({ root, workspace }) {
       })
     ).stdout.trim(),
   );
-  const packedFiles = (await exec("tar", ["-tf", tarball])).stdout.split("\n");
+  const listing = (await exec("tar", ["-tf", tarball])).stdout;
+  // A bare LF identifies LF output; preceding CRs then belong to filenames.
+  const lineEnding = /(^|[^\r])\n/u.test(listing) ? "\n" : "\r\n";
+  const packedFiles = listing.split(lineEnding);
   const packedManifest = JSON.parse(
     (await exec("tar", ["-xOf", tarball, "package/package.json"])).stdout,
   );

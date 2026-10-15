@@ -182,6 +182,18 @@ partial Evidence. Cancellation after source analysis begins can also retain
 completed facts, including when interrupted during cleanup, graph construction,
 or Evidence sealing. Unexamined relationships remain unknown.
 
+Per-file gaps identify the applicable processing phase: JavaScript source analysis
+uses AST authority, while package/JSON, HTML-reference and source-map processing
+use artifact-byte authority. File-analysis interruption gaps carry `analysis_status`:
+`interrupted` means the phase was entered (including source-worker startup),
+and `not-started` means interruption prevented that phase from beginning.
+Neither state establishes that parsing completed. Remaining parsers are not run
+after interruption just to populate a result.
+
+Native add-ons remain metadata-only and acquire no JavaScript parse or analysis
+gap. This also applies when their paths are outside `source_paths`; their inventory
+and caller selection remain available without implying applicable AST work.
+
 MCP returns a `partial_observation` retained reference after recording succeeds;
 open it with `inspect_analysis_view` on the same connection. If the SDK stopped
 waiting before receiving the reply, follow [MCP cancellation recovery](mcp-contracts.md#progress-and-cancellation)
@@ -299,13 +311,25 @@ suffix. Utility calls such as `useUtils().invoice.list.fetch()`, `useQueries`,
 and links whose callee was renamed by a minifier are not recognized.
 
 Each recovered bundle module retains the exact factory-source digest. A complete
-bounded AST also receives a `babel-ast-v2` structural fingerprint that ignores
-ordinary identifier names while retaining syntax, literals, operators, object
-keys, and member properties. Computed member identifiers retain their access
-syntax without treating a local variable's spelling as a fixed property; template
-literal contents remain part of the fingerprint. Version comparison keeps the
-algorithm in its matching key, so retained `babel-ast-v1` fingerprints cannot match
-these new fingerprints. Re-analyze both snapshots to compare their new structure.
+bounded AST also receives a `babel-ast-v3` structural fingerprint. It ignores
+ordinary identifier spellings while retaining literal and directive values,
+operators, fixed property names, and selected syntax flags such as computed
+keys, declaration kind, function async/generator state, update-expression
+prefix, method kind, and class static state. Local names used in computed keys
+remain rename-resistant; private member names are also ignored while their
+method kind and static state remain represented.
+
+This fingerprint is structural evidence for candidate matching, not proof that
+two modules behave equivalently. Its scope follows the AST facts listed above;
+unrepresented syntax can still collide. The exact source digest remains
+available to show byte-level change, and comparison reports content changes even
+when structural matching succeeds.
+
+Version comparison includes the algorithm in its structural matching key.
+Retained `babel-ast-v1` results can still match other v1 results, and v2 results
+can still match v2 results, but v1/v2 results cannot structurally match v3
+results. Other matching tiers remain available across algorithm versions.
+Re-analyze both snapshots to compare using the v3 rules.
 If fingerprint construction reaches its structural
 bound, the fingerprint is unavailable and its status is `truncated`; a bounded
 prefix is never presented as a complete stable fingerprint.

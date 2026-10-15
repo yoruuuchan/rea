@@ -19,6 +19,7 @@ export const analysisErrorWithCleanupFailure = (
         { cause: primary },
       ),
       userMessage: projectAnalysisError(primary).message,
+      remediationAction: projected.remediation.action,
       ...(primary.capturedOutput === undefined
         ? {}
         : { capturedOutput: primary.capturedOutput }),

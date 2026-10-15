@@ -404,8 +404,8 @@ describe("semantic primitive allocation and binding reuse", () => {
     });
     expect(
       ir.callables.find(({ name }) => name === "readsMutation")?.returnSites[0]
-        ?.value.status,
-    ).toBe("ambiguous");
+        ?.value,
+    ).toEqual({ status: "literal", value: "after" });
   });
 
   it("retains a large derived string while its aggregate JSON estimate fits", () => {

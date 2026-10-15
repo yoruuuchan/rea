@@ -635,6 +635,11 @@ bridge readiness. For large targets, set `REA_HOPPER_STARTUP_TIMEOUT_MS` to a
 decimal integer from 1 to 2,147,483,647 milliseconds in the environment that
 starts REA. CLI and MCP use the same setting; invalid values fail configuration
 validation. An MCP client's own request timeout must also allow enough time.
+`open_binary` validates and selects a target without waiting for native provider
+readiness. During Hopper startup, `binary_session.provider_operation_health`
+reports `busy` at stage `launch`; `analysis_activity` describes bridge requests
+and can remain idle until the socket is ready. Cleanup work reports `busy` at
+stage `connection`.
 
 If macOS denies Apple Events, allow the application that starts REA under
 **System Settings → Privacy & Security → Automation**, then retry. REA releases
@@ -644,9 +649,12 @@ Arguments containing quotes, backslashes, or line breaks remain unchanged but
 cannot establish that a failed handoff opened no document. Other failed handoffs
 retain ownership until document closure is confirmed. If a timed-out bridge
 becomes ready later, `close_binary` connects to that run, authenticates its
-identity, and requests document shutdown. After a connection drops, the bridge
-allows 30 seconds for an authenticated cleanup reconnect, then releases Hopper's
-Python execution thread. Expiry does not establish document closure, so REA
+identity, and requests document shutdown. Once its listener is ready, the bridge
+allows 30 seconds for the first connection and capability validation. After a
+connection drops, it allows the same grace period for an authenticated cleanup
+reconnect, then releases Hopper's Python execution thread. Initial analysis is
+outside this listener grace period, and authenticated native work is not bounded
+by it. Expiry does not establish document closure, so REA
 retains unconfirmed ownership. Retry close while the bridge remains available.
 
 If a Linux launcher exists but cannot start, inspect its shared libraries:
@@ -736,9 +744,17 @@ Once document and process closure are confirmed, the lease can be released even
 if temporary-file cleanup fails. Another client can then launch, but the owning
 client must finish its retained cleanup before starting again.
 An unconfirmed external document can be retried while its authenticated bridge
-remains connected. If that bridge has disconnected, another close cannot confirm
-the document: inspect and close the reported document in Hopper before ending
-the owning REA connection.
+remains available. The same authentication and process-identity capture apply
+when the first successful handshake occurs during cleanup after a startup
+timeout. REA can confirm closure if that exact authenticated process exits,
+including while a shutdown request is in flight. A helper exit alone is
+insufficient, and an application that never authenticated has no verified
+process identity. If no matching bridge becomes available, inspect and close
+the reported document in Hopper before ending the owning REA connection.
+Export the Evidence bundle before `close_binary` clears session records.
+`binary_session.cleanup_pending` remains true while provider cleanup is retained,
+and provider health remains visible even with `open: false`; that flag alone
+does not establish successful cleanup.
 
 ### Hopper in CI
 

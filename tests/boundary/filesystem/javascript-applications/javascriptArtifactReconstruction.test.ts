@@ -51,6 +51,76 @@ import {
 import { parseJavaScriptSemanticGraph } from "../../../../src/domain/javascript/javascriptSemanticGraphSerialization.js";
 import { writeJavaScriptArtifactFixture } from "../../../fixtures/javascriptArtifactApplication.js";
 
+it("keeps excluded non-JavaScript files out of both semantic construction paths", async () => {
+  const root = await createTestTempDirectory("rea-js-semantic-applicability-");
+  await Promise.all(
+    (
+      [
+        ["a.js", "export const observed = 7;"],
+        ["b.js", "export const excluded = true;"],
+        ["native.node", Buffer.from([0, 1, 2, 3])],
+        ["data.json", '{"observed":7}'],
+        ["index.html", '<script src="./a.js"></script>'],
+        ["package.json", '{"name":"applicability","main":"a.js"}'],
+        [
+          "a.js.map",
+          JSON.stringify({ version: 3, sources: [], names: [], mappings: "" }),
+        ],
+      ] as const
+    ).map(([path, content]) => writeFile(join(root, path), content)),
+  );
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(
+      reader,
+      snapshot,
+      undefined,
+      ["a.js"],
+    );
+    expect(
+      files.files.filter(({ text }) => !text.included).map(({ path }) => path),
+    ).toEqual([
+      "a.js.map",
+      "b.js",
+      "data.json",
+      "index.html",
+      "native.node",
+      "package.json",
+    ]);
+    const analysis = analyzeJavaScriptArtifactFiles(files);
+    const applicationGraph = buildJavaScriptArtifactGraph(
+      snapshot,
+      files,
+      analysis,
+    );
+    const full = buildJavaScriptSemanticGraph({
+      rootArtifactSha256: snapshot.manifest.root_sha256,
+      applicationGraph,
+      analysis,
+    });
+    const incremental = await reconstructJavaScriptArtifact({
+      input_path: root,
+      source_paths: ["a.js"],
+    });
+    for (const graph of [full, incremental.semantic_graph]) {
+      expect(
+        graph.nodes
+          .filter(({ kind }) => kind === "module")
+          .map(({ identity }) => identity.module_path)
+          .sort(),
+      ).toEqual(["a.js", "b.js"]);
+      expect(graph.coverage.status).toBe("partial");
+      expect(graph.unknowns.length).toBeGreaterThan(0);
+      expect(
+        new Set(graph.nodes.map(({ identity }) => identity.module_path)),
+      ).toEqual(new Set(["a.js", "b.js"]));
+    }
+  } finally {
+    await reader.close();
+  }
+});
+
 it("reports file progress and honors cancellation before the next source", async () => {
   const root = await fixtureDirectory();
   const controller = new AbortController();
@@ -361,7 +431,7 @@ it("reconstructs package, Electron roles, Webpack/Rspack modules, and cross-laye
           expect.objectContaining({
             properties: expect.objectContaining({
               module_key: "1",
-              structural_fingerprint_algorithm: "babel-ast-v2",
+              structural_fingerprint_algorithm: "babel-ast-v3",
             }),
           }),
         ]),

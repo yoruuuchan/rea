@@ -2,6 +2,12 @@
 
 REA can attach to an Electron/Chromium CDP endpoint and inspect existing `file://` renderer pages without evaluating JavaScript or invoking Electron APIs. The request supplies the endpoint directly; REA accepts only literal-port loopback HTTP endpoints. Selecting an endpoint exposes every Electron target it serves, including local file paths and page metadata.
 
+Disconnecting the inspection's page session can clear caller-owned
+`navigator.platform` emulation inside Chromium. REA cannot restore another
+client's complete user-agent/client-hint configuration. Use a disposable target
+or let the owning client reapply its configuration; see the shared
+[CDP state limitation](browser-observation.md#provider-authorities).
+
 This passive runtime surface is distinct from the target-free static
 [`analyze_javascript_application`](javascript-artifact-reconstruction.md)
 workflow. Static analysis reads a local ASAR or extracted directory without

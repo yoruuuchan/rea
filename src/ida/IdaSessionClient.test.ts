@@ -9,6 +9,7 @@ import {
 import { IdaSessionClient } from "./IdaSessionClient.js";
 import { functionDossierSchema } from "../domain/hopperValues.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
+import { AnalysisProtocolError } from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { WindowsPrivateRuntime } from "../windows/WindowsPrivateRuntime.js";
@@ -150,6 +151,76 @@ describe("headless IDA producer pagination", () => {
       native_value_flow: null,
     });
     await client.close();
+  });
+});
+
+describe("headless IDA modern string search failures", () => {
+  it("rejects a producer error before returning page matches and retains both replies as partial evidence", async () => {
+    const { producer, client } = await fixture("headless");
+    producer.overrideCall = (name, args) => {
+      if (name !== "find_regex") return undefined;
+      if (args.offset === 0)
+        return {
+          matches: [{ addr: "0x3000", string: "complete page" }],
+          cursor: { next: 1 },
+          error: null,
+        };
+      return {
+        matches: [{ addr: "0x3001", string: "untrusted partial page" }],
+        cursor: { done: true },
+        error: "Search fixture failed",
+      };
+    };
+    try {
+      const failed = await client.execute("search_strings", {
+        pattern: "needle",
+      });
+      expect(failed.ok).toBe(false);
+      if (!failed.ok) {
+        expect(failed.error).toBeInstanceOf(AnalysisProtocolError);
+        expect(failed.error.message).toContain("Search fixture failed");
+        expect(failed.error.partialObservation).toMatchObject({
+          normalized_result: {
+            status: "partial",
+            failed_operation: "search_strings",
+            observations: expect.arrayContaining([
+              expect.objectContaining({
+                tool: "find_regex",
+                result: expect.objectContaining({
+                  matches: [{ addr: "0x3000", string: "complete page" }],
+                  error: null,
+                }),
+              }),
+              expect.objectContaining({
+                tool: "find_regex",
+                result: expect.objectContaining({
+                  matches: [
+                    { addr: "0x3001", string: "untrusted partial page" },
+                  ],
+                  error: "Search fixture failed",
+                }),
+              }),
+            ]),
+          },
+        });
+      }
+      expect(
+        producer.calls
+          .filter(({ name }) => name === "find_regex")
+          .map(({ args }) => args.offset),
+      ).toEqual([0, 1]);
+
+      producer.overrideCall = (name) =>
+        name === "find_regex"
+          ? { matches: [], cursor: { done: true }, error: null }
+          : undefined;
+      const empty = await client.execute("search_strings", {
+        pattern: "needle",
+      });
+      expect(empty.ok && empty.value.result).toEqual([]);
+    } finally {
+      expect((await client.close()).ok).toBe(true);
+    }
   });
 });
 

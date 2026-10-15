@@ -168,6 +168,12 @@ be verified. See [MCP contracts](mcp-contracts.md) for session lifecycle and
 [Ghidra first-query deadlines](mcp-contracts.md#ghidra-first-query-deadlines-and-recovery)
 for import, client timeouts and recovery.
 
+If one-shot analysis fails and closing its session also fails, the original
+error details remain inline and `details.cleanup_error` describes the later
+close failure. Each diagnostic retains its own reported resources; the later
+failure does not establish whether an earlier resource was released. Captured
+output and partial observations remain in the original details.
+
 ## Save and reuse analysis snapshots
 
 A snapshot retains successful analysis results for later queries. REA reuses

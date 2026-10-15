@@ -27,6 +27,7 @@ import {
   HopperTimeoutError,
 } from "./hopperErrors.js";
 import { ProviderSelectionError } from "./providerSelectionError.js";
+import { ProviderAdapterError } from "./providerAdapterError.js";
 import { UnknownRegistryError } from "./unknownRegistryError.js";
 import { providerRetryAction } from "./providerOperationHealth.js";
 import type { AnalysisError, AnalysisErrorTag } from "./analysisErrorBase.js";
@@ -35,6 +36,11 @@ import type { AnalysisErrorProjection } from "./analysisErrorProjection.js";
 export const analysisErrorRemediationAction = (
   error: AnalysisError,
 ): string => {
+  if (
+    error instanceof ProviderAdapterError &&
+    error.remediationAction !== undefined
+  )
+    return error.remediationAction;
   if (
     error instanceof BrowserObservationError &&
     error.reason === "service_worker_blocked"
@@ -66,7 +72,7 @@ export const analysisErrorRemediationAction = (
     );
   if (error instanceof HopperTimeoutError)
     return error.operation === undefined
-      ? "Inspect Hopper for a loader or license dialog and review details.launcher. Correct the loader configuration or complete Hopper setup, then open the target again."
+      ? "Review details.launcher and inspect Hopper for ongoing initial analysis or a pending loader, demo, or license dialog. For a large target, increase REA_HOPPER_STARTUP_TIMEOUT_MS in the environment that starts REA and allow at least that long in the MCP client. Resolve retained cleanup before reopening."
       : error.providerState === "busy"
         ? "Check binary_session.analysis_activity, wait for the active Hopper request to finish, then retry."
         : "Check binary_session for Hopper health, then retry the operation.";
@@ -287,7 +293,7 @@ export const analysisErrorUserMessage = (error: AnalysisError): string => {
 const hopperErrorUserMessage = (error: AnalysisError): string | undefined => {
   if (error instanceof HopperTimeoutError) {
     if (error.operation === undefined)
-      return "REA timed out waiting for Hopper bridge readiness. Hopper may be waiting for a loader or license dialog; inspect its window and the captured launcher outcome before retrying.";
+      return "REA timed out waiting for Hopper bridge readiness, which includes initial analysis. Hopper may still be analyzing the target or waiting for a loader, demo, or license dialog. Review the captured launcher outcome and resolve retained cleanup before retrying.";
     const request = error.operation;
     return error.providerState === "busy"
       ? `Hopper timed out during ${request} while the provider remained busy. Check binary_session.analysis_activity, wait for the active request to finish, then retry.`

@@ -21,6 +21,7 @@ import {
 } from "./composition/optionalObservationProviders.js";
 import { createToolResultDelivery } from "./server/toolResult.js";
 import { createShutdown } from "./main/shutdown.js";
+import { registerProcessShutdown } from "./main/processShutdown.js";
 
 const runtimeDependencies = (): RuntimeDependencies => ({
   env: process.env,
@@ -29,18 +30,7 @@ const runtimeDependencies = (): RuntimeDependencies => ({
   setExitCode: (code) => {
     process.exitCode = code;
   },
-  registerShutdown: (handler) => {
-    process.once("SIGINT", handler);
-    process.once("SIGTERM", handler);
-    process.stdin.once("end", handler);
-    process.stdin.once("close", handler);
-    return () => {
-      process.off("SIGINT", handler);
-      process.off("SIGTERM", handler);
-      process.stdin.off("end", handler);
-      process.stdin.off("close", handler);
-    };
-  },
+  registerShutdown: registerProcessShutdown,
 });
 
 /**

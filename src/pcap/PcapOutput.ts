@@ -66,8 +66,12 @@ export const parseCapinfosOutput = (stdout: string): CapinfosMetadata => {
     fileType,
     encapsulation,
     packetCount,
-    captureStart: lines.get("Earliest packet time") ?? null,
-    captureEnd: lines.get("Latest packet time") ?? null,
+    captureStart:
+      lines.get("Earliest packet time") ??
+      lines.get("First packet time") ??
+      null,
+    captureEnd:
+      lines.get("Latest packet time") ?? lines.get("Last packet time") ?? null,
     captureDurationSeconds: duration === null ? null : Number(duration[1]),
     snapshotLength:
       snapshotLength !== null &&

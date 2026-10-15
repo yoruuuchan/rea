@@ -2,6 +2,7 @@
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { PrivateRuntimeRoot } from "../dist/process/PrivateRuntimeRoot.js";
+import { closeVerifierResources } from "./lib/verifier-cleanup.mjs";
 import { exec, execNpm } from "./lib/verify-package-core.mjs";
 import { WABT_WORKFLOW_TIMEOUT_MS } from "./lib/wabt-verifier-timeouts.mjs";
 import { verifyPackagePack } from "./verify-package-pack.mjs";
@@ -9,6 +10,7 @@ import { verifyPackagePack } from "./verify-package-pack.mjs";
 const root = await PrivateRuntimeRoot.create({
   prefix: "rea-wabt-package-verifier-",
 });
+let primaryError;
 try {
   const { tarball } = await verifyPackagePack({
     root: process.cwd(),
@@ -56,6 +58,9 @@ try {
     },
   );
   process.stdout.write(verified.stdout);
+} catch (cause) {
+  primaryError = cause;
+  throw cause;
 } finally {
-  await root.close();
+  await closeVerifierResources([() => root.close()], primaryError);
 }

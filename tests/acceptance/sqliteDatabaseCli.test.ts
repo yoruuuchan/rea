@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  rename,
+  stat,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, onTestFinished } from "vitest";
@@ -19,6 +27,165 @@ import { cliTest } from "../support/cli/cliFixture.js";
 
 const digest = (bytes: Buffer): string =>
   createHash("sha256").update(bytes).digest("hex");
+
+for (const expectedErrno of ["ELOOP", "ENAMETOOLONG"] as const) {
+  cliTest.skipIf(expectedErrno === "ELOOP" && process.platform === "win32")(
+    `reports an initial ${expectedErrno} path failure through CLI and MCP`,
+    async ({ cli }) => {
+      const root = await createTestTempDirectory("rea-sqlite-path-failure-");
+      const path =
+        expectedErrno === "ELOOP"
+          ? join(root, "cycle-a", "selected.db")
+          : join(root, "a".repeat(300), "selected.db");
+      if (expectedErrno === "ELOOP") {
+        await symlink("cycle-b", join(root, "cycle-a"));
+        await symlink("cycle-a", join(root, "cycle-b"));
+      }
+      const result = await cli.run({
+        arguments: ["inspect-sqlite-database", path, "--json"],
+        environment: { REA_LOG_LEVEL: "silent" },
+      });
+      expect(result.exitCode).toBe(1);
+      const expectedError = {
+        code: "invalid_request",
+        details: {
+          issues: [
+            {
+              path: ["path"],
+              reason: "invalid_value",
+              message: expect.stringContaining(expectedErrno),
+            },
+          ],
+        },
+      };
+      expect(result.json).toMatchObject(expectedError);
+      const { call } = await connectLocalToolsMcp();
+      const response = await call("inspect_sqlite_database", { path });
+      expect(parseMcpToolError(response).error).toMatchObject(expectedError);
+    },
+  );
+}
+
+cliTest(
+  "reports the combined database and WAL byte budget through CLI and MCP",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-sqlite-size-budget-");
+    const path = join(root, "selected.db");
+    const walPath = `${path}-wal`;
+    const maximum = 256 * 1024 * 1024;
+    const databaseBytes = maximum / 2;
+    const walBytes = databaseBytes + 1;
+    await writeFile(path, "");
+    await writeFile(walPath, "");
+    await truncate(path, databaseBytes);
+    await truncate(walPath, walBytes);
+    const before = await Promise.all(
+      [path, walPath].map(async (filePath) => ({
+        path: filePath,
+        state: await lstat(filePath, { bigint: true }),
+      })),
+    );
+    const cliResult = await cli.run({
+      arguments: ["inspect-sqlite-database", path, "--json"],
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+    const { call } = await connectLocalToolsMcp();
+    const mcpResponse = await call("inspect_sqlite_database", { path });
+    const mcpError = parseMcpToolError(mcpResponse).error;
+    const expectedError = {
+      code: "resource_constraint",
+      category: "resource_constraint",
+      retryable: false,
+      details: {
+        reported_limits: {
+          sqlite_snapshot_input_bytes: maximum,
+          observed_sqlite_snapshot_input_bytes: String(maximum + 1),
+        },
+      },
+      remediation: {
+        action: expect.stringContaining("supported export workflow"),
+      },
+    };
+    expect(cliResult.exitCode).toBe(1);
+    expect(cliResult.json).toMatchObject(expectedError);
+    expect(mcpError).toMatchObject(expectedError);
+    const after = await Promise.all(
+      before.map(async ({ path: filePath }) => ({
+        path: filePath,
+        state: await lstat(filePath, { bigint: true }),
+      })),
+    );
+    for (const [index, original] of before.entries()) {
+      const current = after[index];
+      expect(current?.state).toMatchObject({
+        dev: original.state.dev,
+        ino: original.state.ino,
+        mode: original.state.mode,
+        size: original.state.size,
+        mtimeNs: original.state.mtimeNs,
+        ctimeNs: original.state.ctimeNs,
+      });
+    }
+  },
+);
+
+cliTest.skipIf(process.platform === "win32" || !SQLITE_NATIVE_LIMITS_AVAILABLE)(
+  "reports an unavailable capability when a closed database sidecar path is too long",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-sqlite-long-basename-");
+    const path = join(root, "x".repeat(255));
+    const originalPath = join(root, "selected.db");
+    const database = new DatabaseSync(originalPath);
+    try {
+      database.exec(
+        "CREATE TABLE selected(value TEXT); INSERT INTO selected VALUES ('retained');",
+      );
+    } finally {
+      database.close();
+    }
+    await rename(originalPath, path);
+    const selectedBefore = await lstat(path, { bigint: true });
+    await expect(lstat(`${path}-wal`)).rejects.toMatchObject({
+      code: "ENAMETOOLONG",
+    });
+    await expect(lstat(`${path}-journal`)).rejects.toMatchObject({
+      code: "ENAMETOOLONG",
+    });
+
+    const cliResult = await cli.run({
+      arguments: ["inspect-sqlite-database", path, "--json"],
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+    const { call } = await connectLocalToolsMcp();
+    const mcpResult = await call("inspect_sqlite_database", { path });
+    const expectedError = {
+      code: "capability_unavailable",
+      category: "unsupported_provider",
+      retryable: false,
+      message: expect.stringContaining("supported consistent offline export"),
+      details: {
+        provider_id: "sqlite",
+        operation: "inspect_sqlite_database",
+        reason: expect.stringContaining("ENAMETOOLONG"),
+      },
+      remediation: {
+        action: expect.stringContaining("supported consistent offline export"),
+      },
+    };
+    expect(cliResult.exitCode).toBe(1);
+    expect(cliResult.json).toMatchObject(expectedError);
+    expect(parseMcpToolError(mcpResult).error).toMatchObject(expectedError);
+    const selectedAfter = await lstat(path, { bigint: true });
+    expect(selectedAfter).toMatchObject({
+      dev: selectedBefore.dev,
+      ino: selectedBefore.ino,
+      mode: selectedBefore.mode,
+      size: selectedBefore.size,
+      mtimeNs: selectedBefore.mtimeNs,
+      ctimeNs: selectedBefore.ctimeNs,
+    });
+  },
+);
 
 cliTest.runIf(SQLITE_NATIVE_LIMITS_AVAILABLE)(
   "bounds default context and projects exact columns without evaluating unrelated cells",

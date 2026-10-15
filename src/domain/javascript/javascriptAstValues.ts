@@ -16,6 +16,7 @@ export const runtimeFunctionParameters = (
  */
 export const unwrapJavaScriptExpression = (
   node: t.Node,
+  options?: { readonly stopAtParentheses: boolean },
 ): { readonly node: t.Node; readonly depth: number } => {
   let current = node;
   let depth = 0;
@@ -28,6 +29,14 @@ export const unwrapJavaScriptExpression = (
     t.isTSInstantiationExpression(current) ||
     t.isTypeCastExpression(current)
   ) {
+    // Optional-chain grouping affects execution even when expression identity
+    // is transparent. Keep every grouping boundary available to that consumer.
+    if (
+      options?.stopAtParentheses === true &&
+      (t.isParenthesizedExpression(current) ||
+        current.extra?.parenthesized === true)
+    )
+      break;
     current = current.expression;
     depth += 1;
   }

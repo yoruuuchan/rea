@@ -372,6 +372,23 @@ describe("CdpElectronProvider malformed inventory replies", () => {
     return result.value;
   };
 
+  it("keeps documents unknown when the DOM string table is missing", async () => {
+    const inspected = await inspectWith("DOMSnapshot.captureSnapshot", () => ({
+      documents: [{ documentURL: 0, nodes: { nodeType: [] } }],
+    }));
+
+    expect(inspected.dom).toEqual({ total_nodes: 0, nodes: [] });
+    expect(inspected.completeness.unavailable_sections).toContain("dom");
+    expect(inspected.completeness.excluded).toContainEqual({
+      section: "dom",
+      reason: "invalid_protocol_value",
+      count: null,
+    });
+    expect(inspected.completeness.policy_filtered_sections).not.toContain(
+      "dom",
+    );
+  });
+
   it.each([
     ["dom", "DOMSnapshot.captureSnapshot", () => ({ strings: [] })],
     [

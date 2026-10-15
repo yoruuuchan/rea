@@ -6,7 +6,9 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
 import { toolContract } from "../../../src/contracts/toolContracts.js";
-import { parseEvidence } from "../../../src/domain/evidence.js";
+import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
+import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
+import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
 import { itWithCaptureCapability as captureTest } from "../../boundary/process/processCaptureCapability.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
@@ -19,6 +21,106 @@ const electron = {
   executable_path: "/tmp/Electron",
   application_path: "/tmp/main.js",
 };
+
+it("keeps overall replay verification unknown when capture divergence is unknown", async () => {
+  const { call } = await connectLocalToolsMcp();
+  const captureEvidence = (
+    side: "left" | "right",
+    {
+      environmentUnknown = false,
+      exitCode = 0,
+    }: {
+      readonly environmentUnknown?: boolean;
+      readonly exitCode?: number;
+    } = {},
+  ) =>
+    createEvidence(undefined, PROCESS_PROVIDER, {
+      predicateType: "rea.process-capture",
+      operation: "capture_process_scenario",
+      parameters: { side },
+      result: {
+        ...EMPTY_PROCESS_CAPTURE_EXAMPLE,
+        exit: { ...EMPTY_PROCESS_CAPTURE_EXAMPLE.exit, code: exitCode },
+        residual_unknowns: environmentUnknown
+          ? [
+              {
+                scope: "environment",
+                reason:
+                  "Inherited host environment variables are not recorded.",
+              },
+            ]
+          : [],
+      },
+      confidence: "observed",
+      authority: "controlled-replay",
+      environment: {
+        id: "fixture-process",
+        platform: "fixture",
+        architecture: "fixture",
+        isolation: "process",
+      },
+    });
+  const compare = async (left: unknown, right: unknown) => {
+    const response = await call("compare_process_captures", { left, right });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    return toolContract("compare_process_captures").outputSchema.parse(
+      response.structuredContent,
+    );
+  };
+  const verify = async (
+    comparison: { readonly evidence_id: string },
+    dimension: "overall" | "terminal",
+  ) => {
+    const response = await call("verify_reconstruction", {
+      specification: {
+        name: "Overall replay compatibility",
+        claims: [
+          {
+            kind: "behavioral",
+            claim_id: dimension,
+            title: "Replay behavior agrees",
+            comparison_evidence_id: comparison.evidence_id,
+            dimension,
+          },
+        ],
+      },
+    });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    return toolContract("verify_reconstruction").outputSchema.parse(
+      response.structuredContent,
+    ).normalized_result;
+  };
+
+  const complete = await compare(
+    captureEvidence("left"),
+    captureEvidence("right"),
+  );
+  expect((await verify(complete, "overall")).status).toBe("pass");
+
+  const incomplete = await compare(
+    captureEvidence("left", { environmentUnknown: true }),
+    captureEvidence("right", { environmentUnknown: true }),
+  );
+  expect(incomplete.normalized_result).toMatchObject({
+    status: "unchanged",
+    first_divergence: {
+      status: "unknown",
+      reason: "Residual unknowns prevent proving that no divergence occurred.",
+    },
+  });
+  const overall = await verify(incomplete, "overall");
+  expect(overall.status).toBe("unknown");
+  expect(overall.claims.items[0]?.limitations).toContain(
+    "Residual unknowns prevent proving that no divergence occurred.",
+  );
+  expect((await verify(incomplete, "terminal")).status).toBe("pass");
+
+  const changed = await compare(
+    captureEvidence("left", { environmentUnknown: true }),
+    captureEvidence("right", { environmentUnknown: true, exitCode: 1 }),
+  );
+  expect((await verify(changed, "overall")).status).toBe("fail");
+});
 
 const runCliExpectingInputError = async (
   scenarioPath: string,

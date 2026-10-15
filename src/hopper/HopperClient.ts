@@ -142,7 +142,12 @@ export class HopperClient {
     this.#rememberProcessFailure(error, []);
   };
   readonly #onSocketClose = (): void => {
-    if (this.#closing) return;
+    if (this.#closing) {
+      this.#failAll(
+        new HopperProcessError(null, { providerState: "unreachable" }),
+      );
+      return;
+    }
     const launch = this.#resources.launch;
     if (
       launch?.providerLifetime === "launcher-process" &&
@@ -215,6 +220,24 @@ export class HopperClient {
    * A recorded exit remains visible after request activity returns to idle.
    */
   operationHealth(): ProviderOperationHealth {
+    if (
+      this.#closing ||
+      this.#closePromise !== undefined ||
+      (!this.#ready &&
+        this.#startupController !== undefined &&
+        this.#operationFailure === undefined)
+    ) {
+      return {
+        state: "busy",
+        stage:
+          this.#closing || this.#closePromise !== undefined
+            ? "connection"
+            : "launch",
+        retryAction: "wait",
+        exitCode: null,
+        requests: [],
+      };
+    }
     const failure = this.#operationFailure;
     if (failure !== undefined) {
       const requests: readonly ProviderOperationRequest[] =
@@ -340,6 +363,7 @@ export class HopperClient {
     this.#operationFailure = undefined;
     this.#startupFailureResult = undefined;
     this.#resources.shutdownConfirmed = false;
+    this.#resources.externalApplication = undefined;
     const deadline = new ProviderStartupDeadline(
       this.#options.startupTimeoutMs,
       signal,
@@ -437,9 +461,31 @@ export class HopperClient {
           : health.error,
       );
     }
-    const parsed = parseHopperServerInfo(health.value, runId);
+    const parsed = await this.#authenticateServerInfo(health.value, runId);
     if (!parsed.ok) return this.#startupFailure(parsed.error);
+    await this.#lineage.observe(this.#resources.launch);
+    return parsed;
+  }
+
+  /** Bind process identity for both initial and late cleanup handshakes. */
+  async #authenticateServerInfo(
+    value: JsonValue,
+    runId: string,
+  ): Promise<Result<HopperServerInfo, HopperProtocolError>> {
+    const parsed = parseHopperServerInfo(value, runId);
+    if (!parsed.ok) return parsed;
     if (this.#resources.launch?.providerLifetime === "external-application") {
+      const application = this.#resources.externalApplication;
+      if (
+        application !== undefined &&
+        application.pid !== parsed.value.processId
+      )
+        return err(
+          new HopperProtocolError(
+            "Hopper bridge process changed within the same run",
+          ),
+        );
+      if (application?.identity.state === "readable") return parsed;
       let identity;
       try {
         identity = await observeProcessStartIdentity(parsed.value.processId);
@@ -460,7 +506,6 @@ export class HopperClient {
         },
       };
     }
-    await this.#lineage.observe(this.#resources.launch);
     return parsed;
   }
 
@@ -631,7 +676,11 @@ export class HopperClient {
           timeoutMs: HOPPER_SHUTDOWN_TIMEOUT_MS,
         },
       );
-      if (health.ok && parseHopperServerInfo(health.value, runId).ok) return;
+      if (
+        health.ok &&
+        (await this.#authenticateServerInfo(health.value, runId)).ok
+      )
+        return;
       this.#releaseTransport();
     } finally {
       this.#closing = false;

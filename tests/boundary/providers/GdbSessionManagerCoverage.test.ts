@@ -30,6 +30,16 @@ const managers: GdbSessionManager[] = [];
 
 it.each([
   ["empty list", "1^done,groups=[]", 0],
+  [
+    "valid trailing extension fields",
+    '1^done,groups=[],extension="retained",details=[{state="known"}]',
+    0,
+  ],
+  [
+    "valid leading and trailing extension fields",
+    '1^done,before={state="retained"},groups=[],after=["known"]',
+    0,
+  ],
   ["one group", '1^done,groups=[{id="i1",pid="123"}]', 1],
   [
     "multiple groups",
@@ -53,15 +63,52 @@ it.each([
     1,
   ],
   [
-    "nested groups field",
-    '1^done,groups=[{id="i1",extra="groups=["}]',
+    "unquoted nested groups field",
+    '1^done,groups=[{id="i1",children=[{id="i2",groups=[{id="i3"}]}]}]',
     undefined,
   ],
+  [
+    "unknown extension field ending in groups",
+    '1^done,groups=[{id="i1",other_groups=[{id="i2"}]}]',
+    0,
+  ],
+  [
+    "quoted groups marker before the top-level inventory",
+    '1^done,msg="fixture/groups=[",groups=[]',
+    0,
+  ],
+  [
+    "duplicate top-level groups fields",
+    '1^done,groups=[],groups=[{id="i1",pid="123"}]',
+    undefined,
+  ],
+  [
+    "duplicate groups field with a non-list value",
+    '1^done,groups=[],groups="unavailable"',
+    undefined,
+  ],
+  ["trailing bytes after inventory", "1^done,groups=[]garbage", undefined],
+  ["malformed trailing result value", "1^done,groups=[],extra=}", undefined],
+  ["malformed prefix result", "1^done,extra=},groups=[]", undefined],
+  ["groups list with a non-tuple value", '1^done,groups=["i1"]', undefined],
+  ["group tuple without its required id", "1^done,groups=[{}]", undefined],
   ["negative object depth", "1^done,groups=[}]", undefined],
   ["unclosed list", '1^done,groups=[{id="i1"}', undefined],
   ["missing groups field", "1^done", undefined],
+  [
+    "unclosed trailing quoted field",
+    '1^done,groups=[],extra="unterminated',
+    undefined,
+  ],
 ] as const)("parses recursive GDB MI groups: %s", (_label, mi, expected) => {
   expect(gdbThreadGroupCount(mi)).toBe(expected);
+});
+
+it("keeps GDB inventory unknown when MI nesting exceeds the parser frame budget", () => {
+  const nestedValue = "[".repeat(257) + "]".repeat(257);
+  expect(
+    gdbThreadGroupCount("1^done,groups=[],extension=" + nestedValue),
+  ).toBeUndefined();
 });
 
 it.each([
@@ -715,6 +762,34 @@ it("waits for GDB stdout settlement after a no-inferior exit without re-entering
   ).toHaveLength(1);
   expect(commands).toContain("-gdb-exit");
 });
+
+it("closes an idle session when its quoted executable contains groups=[", async () => {
+  const commands: string[] = [];
+  const fake = createFakeSpawner((child, token, command) => {
+    commands.push(command);
+    if (command.includes("list-thread-groups"))
+      child.stdout.write(
+        `${token}^done,groups=[{id="i1",executable="fixture/groups=[.out"}]\n`,
+      );
+    else if (command.includes("gdb-exit")) {
+      child.stdout.write(`${token}^exit\n`);
+      queueMicrotask(() => child.exit(0, null));
+    } else child.stdout.write(`${token}^done\n`);
+  });
+  const manager = managerWithFakeSpawner(fake.spawnProcess);
+  const started = await expectGdbSessionStarted(manager);
+
+  const closed = await manager.close(started.value.session_id);
+
+  expect(closed).toMatchObject({
+    ok: true,
+    value: { target_state: "none_observed" },
+  });
+  expect(
+    commands.filter((command) => command.includes("list-thread-groups")),
+  ).toHaveLength(1);
+  expect(commands).toContain("-gdb-exit");
+}, 10_000);
 
 it("reports incomplete stop if GDB exits while close waits in the serialized queue", async () => {
   let heldToken = "";
@@ -1696,31 +1771,43 @@ it("refuses to close a session while GDB reports a live target", async () => {
     );
 });
 
-it("retains ownership when recursive MI returns an unknown inferior list", async () => {
-  const commands: string[] = [];
-  const fake = createFakeSpawner((child, token, command) => {
-    commands.push(command);
-    child.stdout.write(
-      command.includes("list-thread-groups")
-        ? `${token}^done,groups=[}]\n`
-        : `${token}^done\n`,
-    );
-  });
-  const manager = managerWithFakeSpawner(fake.spawnProcess);
-  const started = await expectGdbSessionStarted(manager);
+it.each([
+  ["malformed recursive list", "groups=[}]"],
+  ["malformed result suffix", "groups=[],extra=}"],
+  ["malformed leading result", "extra=},groups=[]"],
+  [
+    "duplicate inventory with a live PID after an empty list",
+    'groups=[],groups=[{id="i1",pid="123"}]',
+  ],
+] as const)(
+  "retains ownership when recursive MI cannot establish one safe inventory: %s",
+  async (_label, groups) => {
+    const commands: string[] = [];
+    const fake = createFakeSpawner((child, token, command) => {
+      commands.push(command);
+      child.stdout.write(
+        command.includes("list-thread-groups")
+          ? `${token}^done,${groups}\n`
+          : `${token}^done\n`,
+      );
+    });
+    const manager = managerWithFakeSpawner(fake.spawnProcess);
+    const started = await expectGdbSessionStarted(manager);
 
-  const closed = await manager.close(started.value.session_id);
+    const closed = await manager.close(started.value.session_id);
 
-  expect(closed).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisCapabilityUnavailableError" },
-  });
-  expect(
-    commands.filter((command) => command.includes("list-thread-groups")),
-  ).toHaveLength(2);
-  expect(manager.status(started.value.session_id)).toBeDefined();
-  expect(fake.children[0]?.killSignals).toEqual([]);
-});
+    expect(closed).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCapabilityUnavailableError" },
+    });
+    expect(
+      commands.filter((command) => command.includes("list-thread-groups")),
+    ).toHaveLength(2);
+    expect(commands).not.toContain("-gdb-exit");
+    expect(manager.status(started.value.session_id)).toBeDefined();
+    expect(fake.children[0]?.killSignals).toEqual([]);
+  },
+);
 
 it("detaches a live inferior before the shared stop helper signals GDB", async () => {
   const tty = "/dev/pts/42";

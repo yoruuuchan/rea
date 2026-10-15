@@ -9,7 +9,10 @@ import { TOOL_CONTRACTS } from "../../../src/contracts/toolContracts.js";
 import { emptyArraySchema } from "../../../src/domain/emptyArraySchema.js";
 import { processScenarioSchema } from "../../../src/domain/process/processScenario.js";
 import { GENERATED_MCP_TOOL_CATALOG } from "../../fixtures/mcpToolCatalog.js";
-import { arrayItemSchemaError } from "../../fixtures/mcpClientSchemaConstraints.js";
+import {
+  arrayItemSchemaError,
+  booleanLiteralSchemaError,
+} from "../../fixtures/mcpClientSchemaConstraints.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 
 interface ToolSchemas {
@@ -40,7 +43,15 @@ function schemaErrors(tools: readonly ToolSchemas[]): string[] {
           schema,
           `${tool.name}.${kind}`,
         );
-        return clientError === undefined ? [] : [clientError];
+        if (clientError !== undefined) return [clientError];
+        if (kind === "inputSchema") {
+          const literalError = booleanLiteralSchemaError(
+            schema,
+            `${tool.name}.${kind}`,
+          );
+          if (literalError !== undefined) return [literalError];
+        }
+        return [];
       } catch (cause: unknown) {
         return [
           `${tool.name}.${kind}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -466,6 +477,35 @@ describe("MCP JSON Schema validity", () => {
       expect(recursiveReferences(tools)).toEqual([]);
       expectKnownAuthorityHints(tools);
       const byName = new Map(tools.map((tool) => [tool.name, tool]));
+      for (const side of ["before", "after"])
+        expect(byName.get("compare_web_captures")?.inputSchema).toHaveProperty(
+          [
+            "properties",
+            side,
+            "properties",
+            "inspection",
+            "properties",
+            "scripts",
+            "properties",
+            "items",
+            "items",
+            "properties",
+            "source",
+            "anyOf",
+          ],
+          expect.arrayContaining([
+            expect.objectContaining({
+              properties: expect.objectContaining({
+                reason: { type: "string" },
+              }),
+            }),
+            expect.objectContaining({
+              properties: expect.objectContaining({
+                artifact: expect.objectContaining({ type: "object" }),
+              }),
+            }),
+          ]),
+        );
       const catalogProjection = tools.map((tool) => ({
         name: tool.name,
         title: tool.title,
@@ -578,7 +618,11 @@ describe("MCP root input schemas", () => {
             (name === "inspect_web_page" && flag === false);
           const parsed = contract.inputSchema.safeParse(input);
           expect(parsed.success, `${name}: ${String(flag)}`).toBe(accepted);
-          expect(validate(input), `${name}: ${String(flag)}`).toBe(accepted);
+          // The advertisement relaxes Boolean literals; the canonical parser
+          // still rejects false when this operation requires script sources.
+          expect(validate(input), `${name}: ${String(flag)}`).toBe(
+            flag === undefined || typeof flag === "boolean",
+          );
           if (parsed.success && flag === undefined)
             expect(parsed.data).toMatchObject({
               include_script_sources: name === "analyze_web_bundle",
@@ -830,6 +874,21 @@ it("checks client array constraints in schema positions while preserving literal
     ),
   ).toBe(
     "broken.properties.examples: tool parameters array type must have items",
+  );
+  const booleanMetadata = {
+    type: "object",
+    properties: { default: { type: "boolean", const: false } },
+    default: { const: true },
+    examples: [{ enum: [false] }],
+  };
+  expect(
+    booleanLiteralSchemaError(
+      { ...booleanMetadata, properties: {} },
+      "literal",
+    ),
+  ).toBeUndefined();
+  expect(booleanLiteralSchemaError(booleanMetadata, "literal")).toBe(
+    "literal.properties.default.const is boolean",
   );
 });
 

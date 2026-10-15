@@ -33,19 +33,37 @@ const ancestryReads = (
   }
 };
 
-it("bounds ancestry reads for repeated deep lexical references", () => {
+it.each(["const a=1;", "let a; a=1;"])(
+  "bounds ancestry reads for repeated deep lexical references after %s",
+  (declaration) => {
+    const reads = (depth: number): number =>
+      ancestryReads(
+        `${declaration} module.exports.value=${"a+(".repeat(depth)}a${")".repeat(depth)};`,
+        (ir) => {
+          expect(ir.coverage).toEqual({ status: "complete", omittedCount: 0 });
+          expect(onlyBinding(ir, "a").value).toEqual({
+            status: "literal",
+            value: 1,
+          });
+        },
+      );
+
+    const smaller = reads(80);
+    const larger = reads(160);
+    expect(smaller).toBeGreaterThan(0);
+    expect(larger).toBeLessThan(3 * smaller);
+  },
+);
+
+it("bounds ancestry reads after a write in the same expression", () => {
   const reads = (depth: number): number =>
     ancestryReads(
-      `const a=1; module.exports.value=${"a+(".repeat(depth)}a${")".repeat(depth)};`,
+      `let a=0; module.exports.value={set:(a=1),value:${"a+(".repeat(depth)}a${")".repeat(depth)}};`,
       (ir) => {
         expect(ir.coverage).toEqual({ status: "complete", omittedCount: 0 });
-        expect(onlyBinding(ir, "a").value).toEqual({
-          status: "literal",
-          value: 1,
-        });
+        expect(onlyBinding(ir, "a").value.status).toBe("ambiguous");
       },
     );
-
   const smaller = reads(80);
   const larger = reads(160);
   expect(smaller).toBeGreaterThan(0);

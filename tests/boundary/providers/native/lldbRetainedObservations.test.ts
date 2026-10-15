@@ -66,6 +66,10 @@ describe("LLDB retained observations", () => {
       truncated: true,
     });
     expect(partial.process.stderr).toBeNull();
+    expect(partial.process).not.toHaveProperty("exit_status");
+    expect(partial.process).not.toHaveProperty("terminated");
+    expect(partial.target).not.toHaveProperty("launch_identity");
+    expect(partial).not.toHaveProperty("breakpoints");
     expect(partial.limitations).toContain(
       "The target stderr capture was unavailable.",
     );

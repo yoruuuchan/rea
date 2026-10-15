@@ -105,13 +105,193 @@ const truncateUtf8RecordPrefix = (line: string): string => {
   return `${prefix}${RECENT_RECORD_TRUNCATION_MARKER}`;
 };
 
+/** Bound parser memory when a capped MI record contains extreme nesting. */
+const MAX_GDB_MI_NESTED_VALUE_FRAMES = 256;
+
+/** Parse a complete MI result record and retain the unique top-level groups list span. */
+const gdbMiGroupsListSpan = (
+  mi: string,
+): { readonly start: number; readonly end: number } | undefined => {
+  const prefix = /^(?:\d+)?\^done/u.exec(mi)?.[0];
+  if (prefix === undefined) return undefined;
+  const isNameCharacter = (character: string | undefined): boolean =>
+    character !== undefined &&
+    !/[=,{}[\]"\s]/u.test(character) &&
+    character.charCodeAt(0) >= 0x20;
+  const readName = (start: number): number => {
+    if (!isNameCharacter(mi[start])) return start;
+    let cursor = start;
+    while (isNameCharacter(mi[cursor])) cursor += 1;
+    return cursor;
+  };
+  const readString = (start: number): number | undefined => {
+    for (let cursor = start + 1; cursor < mi.length; cursor += 1) {
+      const character = mi[cursor];
+      if (character === '"') return cursor + 1;
+      if (character === "\\") {
+        cursor += 1;
+        const escaped = mi[cursor];
+        if (escaped === undefined) return undefined;
+        if (escaped === "x") {
+          const startHex = cursor + 1;
+          cursor = startHex;
+          while (/[0-9a-f]/iu.test(mi[cursor] ?? "")) cursor += 1;
+          if (cursor === startHex) return undefined;
+          cursor -= 1;
+        } else if (/[0-7]/u.test(escaped)) {
+          let digits = 1;
+          while (digits < 3 && /[0-7]/u.test(mi[cursor + 1] ?? "")) {
+            cursor += 1;
+            digits += 1;
+          }
+        } else if (!/^[abfnrtv\\'"?]$/u.test(escaped)) return undefined;
+      } else if (mi.charCodeAt(cursor) < 0x20) return undefined;
+    }
+    return undefined;
+  };
+  const stack: {
+    readonly kind: "list" | "tuple";
+    readonly close: "]" | "}";
+    readonly groupInventory: boolean;
+    readonly groupStart: number | undefined;
+    readonly groupTuple: boolean;
+    phase: "first" | "afterComma" | "afterItem";
+    listItems: "result" | "value" | undefined;
+    groupIdSeen: boolean;
+  }[] = [];
+  let groupSpan: { start: number; end: number } | undefined;
+  let groupSeen = false;
+  let cursor = prefix.length;
+  let valueStart = -1;
+  let pendingGroupList = false;
+
+  const completeValue = (): void => {
+    const parent = stack.at(-1);
+    if (parent !== undefined) parent.phase = "afterItem";
+  };
+
+  const beginValue = (): boolean => {
+    const character = mi[cursor];
+    if (pendingGroupList && character !== "[") return false;
+    if (character === '"') {
+      const end = readString(cursor);
+      if (end === undefined) return false;
+      cursor = end;
+      completeValue();
+      return true;
+    }
+    if (character === "[" || character === "{") {
+      const kind = character === "[" ? "list" : "tuple";
+      const groupInventory = pendingGroupList;
+      if (groupInventory && kind !== "list") return false;
+      if (stack.length >= MAX_GDB_MI_NESTED_VALUE_FRAMES) return false;
+      const parent = stack.at(-1);
+      const groupTuple = kind === "tuple" && parent?.groupInventory === true;
+      pendingGroupList = false;
+      cursor += 1;
+      stack.push({
+        kind,
+        close: kind === "list" ? "]" : "}",
+        groupInventory,
+        groupStart: groupInventory ? valueStart : undefined,
+        groupTuple,
+        phase: "first",
+        listItems: undefined,
+        groupIdSeen: false,
+      });
+      return true;
+    }
+    return false;
+  };
+
+  while (true) {
+    const frame = stack.at(-1);
+    if (frame === undefined) {
+      if (cursor === mi.length) break;
+      if (mi[cursor] !== ",") return undefined;
+      cursor += 1;
+      const nameEnd = readName(cursor);
+      if (nameEnd === cursor || mi[nameEnd] !== "=") return undefined;
+      const name = mi.slice(cursor, nameEnd);
+      if (name === "groups") {
+        if (groupSeen) return undefined;
+        groupSeen = true;
+        valueStart = nameEnd + 1;
+        pendingGroupList = true;
+      }
+      cursor = nameEnd + 1;
+      if (!beginValue()) return undefined;
+      continue;
+    }
+
+    if (frame.phase === "afterItem") {
+      if (mi[cursor] === ",") {
+        cursor += 1;
+        frame.phase = "afterComma";
+        continue;
+      }
+      if (mi[cursor] !== frame.close) return undefined;
+      if (frame.groupTuple && !frame.groupIdSeen) return undefined;
+      cursor += 1;
+      stack.pop();
+      if (frame.groupInventory) {
+        if (frame.groupStart === undefined) return undefined;
+        groupSpan = { start: frame.groupStart, end: cursor };
+      }
+      completeValue();
+      continue;
+    }
+
+    if (frame.phase === "first" && mi[cursor] === frame.close) {
+      if (frame.groupTuple && !frame.groupIdSeen) return undefined;
+      cursor += 1;
+      stack.pop();
+      if (frame.groupInventory) {
+        if (frame.groupStart === undefined) return undefined;
+        groupSpan = { start: frame.groupStart, end: cursor };
+      }
+      completeValue();
+      continue;
+    }
+    if (frame.phase === "first" || frame.phase === "afterComma") {
+      if (frame.kind === "tuple") {
+        const nameEnd = readName(cursor);
+        if (nameEnd === cursor || mi[nameEnd] !== "=") return undefined;
+        if (frame.groupTuple && mi.slice(cursor, nameEnd) === "id") {
+          if (frame.groupIdSeen || mi[nameEnd + 1] !== '"') return undefined;
+          frame.groupIdSeen = true;
+        }
+        cursor = nameEnd + 1;
+        if (!beginValue()) return undefined;
+        continue;
+      }
+
+      const nameEnd = readName(cursor);
+      const itemIsResult = nameEnd > cursor && mi[nameEnd] === "=";
+      const itemKind = itemIsResult ? "result" : "value";
+      if (frame.listItems !== undefined && frame.listItems !== itemKind)
+        return undefined;
+      frame.listItems = itemKind;
+      if (frame.groupInventory && (itemIsResult || mi[cursor] !== "{"))
+        return undefined;
+      if (itemIsResult) cursor = nameEnd + 1;
+      if (!beginValue()) return undefined;
+      continue;
+    }
+
+    return undefined;
+  }
+
+  return groupSpan;
+};
+
 /** @internal Pure parser for live PIDs in recursive GDB MI thread groups. */
 export const gdbThreadGroupPids = (
   mi: string,
 ): readonly string[] | undefined => {
-  const marker = mi.indexOf("groups=[");
-  if (marker < 0) return undefined;
-  const start = marker + "groups=[".length;
+  const groupsSpan = gdbMiGroupsListSpan(mi);
+  if (groupsSpan === undefined) return undefined;
+  const start = groupsSpan.start + 1;
   let squareDepth = 1;
   let objectDepth = 0;
   let quoted = false;
@@ -138,6 +318,11 @@ export const gdbThreadGroupPids = (
       }
       continue;
     }
+    if (
+      (mi[index - 1] === "{" || mi[index - 1] === ",") &&
+      mi.startsWith("groups=", index)
+    )
+      return undefined;
     if (character === '"') {
       if (
         squareDepth === 1 &&
@@ -154,9 +339,7 @@ export const gdbThreadGroupPids = (
     else if (character === "]") {
       squareDepth -= 1;
       if (squareDepth === 0) {
-        if (objectDepth !== 0) return undefined;
-        const body = mi.slice(start, index);
-        if (body.includes("groups=[")) return undefined;
+        if (objectDepth !== 0 || index + 1 !== groupsSpan.end) return undefined;
         return pids;
       }
     } else if (character === "{") {

@@ -1,5 +1,7 @@
 import * as t from "@babel/types";
 
+import { semanticBranchMayBeSkipped } from "./javascriptSemanticEvaluationOrder.js";
+
 import {
   failedJavaScriptSemanticIr,
   type JavaScriptModuleOrigin,
@@ -900,56 +902,10 @@ const writeMayBeSkipped = (
       t.isStaticBlock(parent)
     )
       return false;
-    if (isSkippedBranch(parent, child)) return true;
+    if (semanticBranchMayBeSkipped(parent, child)) return true;
     child = parent;
   }
   return false;
-};
-
-const isSkippedBranch = (parent: t.Node, child: t.Node): boolean => {
-  if (t.isIfStatement(parent))
-    return child === parent.consequent || child === parent.alternate;
-  if (t.isSwitchCase(parent)) return true;
-  if (t.isTryStatement(parent))
-    return child === parent.block || child === parent.handler;
-  if (t.isForStatement(parent))
-    return child === parent.body || child === parent.update;
-  if (t.isWhileStatement(parent)) return child === parent.body;
-  if (t.isDoWhileStatement(parent)) return false;
-  if (t.isForInStatement(parent) || t.isForOfStatement(parent))
-    return child === parent.left || child === parent.body;
-  if (t.isLogicalExpression(parent)) return child === parent.right;
-  if (t.isConditionalExpression(parent))
-    return child === parent.consequent || child === parent.alternate;
-  if (t.isOptionalCallExpression(parent) || t.isCallExpression(parent))
-    return (
-      parent.arguments.includes(child as t.Expression) &&
-      optionalCallArgumentsMayBeSkipped(parent)
-    );
-  if (t.isOptionalMemberExpression(parent))
-    return parent.optional && parent.computed && child === parent.property;
-  return false;
-};
-
-const optionalCallArgumentsMayBeSkipped = (
-  call: t.CallExpression | t.OptionalCallExpression,
-): boolean => {
-  if (t.isOptionalCallExpression(call) && call.optional) return true;
-  let callee: t.Node = call.callee;
-  while (true) {
-    // Parentheses terminate optional-chain short-circuiting. In particular,
-    // `(foo?.bar)(arg)` evaluates arg before attempting the call.
-    if (callee.extra?.parenthesized === true) return false;
-    if (t.isOptionalMemberExpression(callee)) {
-      if (callee.optional) return true;
-      callee = callee.object;
-    } else if (t.isMemberExpression(callee)) callee = callee.object;
-    else if (t.isOptionalCallExpression(callee)) {
-      if (callee.optional) return true;
-      callee = callee.callee;
-    } else if (t.isCallExpression(callee)) callee = callee.callee;
-    else return false;
-  }
 };
 
 const bindOuterDeclaration = (
