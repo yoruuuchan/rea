@@ -709,7 +709,7 @@ it("projects package details from dumpsys package output", async () => {
   });
   expect(result).toMatchObject({
     version_name: "1.2.3",
-    version_code: 45,
+    version_code: "45",
     first_install_time: "2026-01-02 03:04:05",
     last_update_time: "2026-02-03 04:05:06",
     installer_package_name: "com.android.vending",
@@ -718,6 +718,30 @@ it("projects package details from dumpsys package output", async () => {
     coverage: "complete",
   });
 });
+
+// PackageInfo.getLongVersionCode() combines versionCodeMajor and versionCode
+// into a signed 64-bit long, which JSON numbers cannot hold exactly.
+it.each(["9007199254740993", "-4294967296"])(
+  "keeps the long version code %s exactly as dumpsys prints it",
+  async (versionCode) => {
+    const { binary } = await writeAdbStub(
+      shellStub({
+        "dumpsys:package": `Packages:
+  Package [com.example] (abcdef):
+    versionCode=${versionCode} minSdk=24 targetSdk=34
+`,
+      }),
+    );
+    const result = await evidenceResult(providerOver(binary), {
+      operation: "inspect_adb_package",
+      input: { serial: "emulator-5554", package: "com.example" },
+    });
+    expect(result).toMatchObject({
+      version_code: versionCode,
+      coverage: "complete",
+    });
+  },
+);
 
 // Android 10 and 11 append ": restricted=true" to hard- and soft-restricted
 // entries of the requested-permissions list (Settings.dumpPackageLPr).

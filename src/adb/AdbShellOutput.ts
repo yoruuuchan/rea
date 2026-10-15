@@ -193,7 +193,8 @@ export const parseWindowFocusOutput = (
 
 export interface AdbPackageDetails {
   readonly versionName: string | null;
-  readonly versionCode: number | null;
+  /** Signed 64-bit long version code exactly as Package Manager prints it. */
+  readonly versionCode: string | null;
   readonly firstInstallTime: string | null;
   readonly lastUpdateTime: string | null;
   readonly installerPackageName: string | null;
@@ -214,7 +215,7 @@ export const parseDumpsysPackageOutput = (
 ): AdbPackageDetails => {
   const details: {
     versionName: string | null;
-    versionCode: number | null;
+    versionCode: string | null;
     firstInstallTime: string | null;
     lastUpdateTime: string | null;
     installerPackageName: string | null;
@@ -252,8 +253,8 @@ export const parseDumpsysPackageOutput = (
     if (key === "versionName" && details.versionName === null)
       details.versionName = value === "" ? null : value;
     else if (key === "versionCode" && details.versionCode === null) {
-      const parsed = /^(\d+)/u.exec(value);
-      if (parsed !== null) details.versionCode = Number(parsed[1]!);
+      const parsed = /^(-?\d+)/u.exec(value);
+      if (parsed !== null) details.versionCode = parsed[1]!;
     } else if (key === "firstInstallTime" && details.firstInstallTime === null)
       details.firstInstallTime = value === "" ? null : value;
     else if (key === "lastUpdateTime" && details.lastUpdateTime === null)

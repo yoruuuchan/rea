@@ -961,6 +961,33 @@ describe("bounded Interface Builder archive decoding", () => {
     );
   });
 
+  it("decodes an archive whose date the decoder cannot represent", async () => {
+    const root = await createTestTempDirectory("rea-ib-test-");
+    const bundle = join(root, "Example.app");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    // plutil writes years past 9999 unsigned, which the decoder rejects.
+    await writeFile(
+      join(resources, "Far.nib"),
+      '<?xml version="1.0"?><plist version="1.0"><dict><key>$archiver</key><string>NSKeyedArchiver</string><key>$objects</key><array><string>$null</string><date>11507-08-17T05:20:00Z</date></array><key>$top</key><dict/></dict></plist>',
+    );
+
+    const result = await analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "f".repeat(64),
+    });
+
+    expect(result.documents).toHaveLength(1);
+    expect(result.limitations).toContainEqual(
+      expect.stringMatching(
+        /^Contents\/Resources\/Far\.nib: 1 date value\(s\)/u,
+      ),
+    );
+    expect(result.limitations).not.toContainEqual(
+      expect.stringContaining("could not be decoded"),
+    );
+  });
+
   it.skipIf(!xcodeIbtoolAvailable)(
     "decodes an Xcode-compiled storyboard NIB and recovers its UI routes",
     async () => {

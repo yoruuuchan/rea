@@ -29,11 +29,13 @@ describe.skipIf(process.platform === "win32")(
           ["direct.cjs", "./lib.js", "lib.js"],
           ["fallback.cjs", "./fallback", "fallback/index.js"],
           ["legacy-order.cjs", "./dep", "dep/index.js"],
+          ["bare-index.cjs", "./bare", "bare.js"],
         ] as const;
         const unresolved = [
           ["missing.cjs", "./missing/", "missing/"],
           ["escape.cjs", "../outside/", "../outside/"],
           ["main.ts", "./folder.js/.", "folder.js"],
+          ["only-bare.cjs", "./only/", "only/"],
         ] as const;
         const files = new Map<string, string>([
           ["index.js", 'module.exports = "root index";\n'],
@@ -48,6 +50,9 @@ describe.skipIf(process.platform === "win32")(
             'export const value = "emitted filename counterpart";\n',
           ],
           ["missing.js", 'module.exports = "not a directory";\n'],
+          ["bare.js", 'module.exports = "file before directory";\n'],
+          ["bare/index", 'module.exports = "extensionless index";\n'],
+          ["only/index", 'module.exports = "extensionless index";\n'],
           ...[...imports, ...unresolved].map(
             ([path, specifier]) =>
               [path, `require(${JSON.stringify(specifier)});\n`] as const,
@@ -74,6 +79,9 @@ describe.skipIf(process.platform === "win32")(
         ).toThrow();
         expect(() =>
           createRequire(join(root, "main.ts")).resolve("./folder.js/."),
+        ).toThrow();
+        expect(() =>
+          createRequire(join(root, "only-bare.cjs")).resolve("./only/"),
         ).toThrow();
         expect(
           createRequire(join(root, "escape.cjs")).resolve("../outside/"),

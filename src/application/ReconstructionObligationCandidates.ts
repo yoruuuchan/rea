@@ -413,7 +413,22 @@ const addCandidate = (
       ...current.authority_references,
       ...candidate.authority_references,
     ]),
-    definitionCount: current.definitionCount + candidate.definitionCount,
+    // Each observation keeps its own unresolved authority and next steps.
+    unavailable_authority: uniqueBy(
+      [...current.unavailable_authority, ...candidate.unavailable_authority],
+      (item) => item,
+    ),
+    required_next_evidence: uniqueBy(
+      [...current.required_next_evidence, ...candidate.required_next_evidence],
+      (item) => item,
+    ),
+    // A generated ID digests its derivation key, so two generated candidates
+    // with one ID are the same claim seen by several records. Only another
+    // reviewed definition can introduce a competing definition.
+    definitionCount:
+      current.origin === "generated" && candidate.origin === "generated"
+        ? current.definitionCount
+        : current.definitionCount + candidate.definitionCount,
   });
 };
 

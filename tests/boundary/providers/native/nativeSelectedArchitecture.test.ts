@@ -101,6 +101,12 @@ it.each([
     selected: "arm64e",
     dyldArchitecture: "arm64e.v1",
   },
+  // arm64e.x1 is its own subtype: otool and nm cannot reach it as arm64e.
+  {
+    architectures: ["x86_64", "arm64e.x1"],
+    selected: "arm64e.x1",
+    dyldArchitecture: "arm64e.x1",
+  },
 ] as const)(
   "selects the $dyldArchitecture slice of a universal arm64e target",
   async ({ architectures, selected, dyldArchitecture }) => {
@@ -154,6 +160,15 @@ it.each([
         .filter(({ tool }) => tool === "dyld_info")
         .every(({ arguments_ }) => arguments_.includes(dyldArchitecture)),
     ).toBe(true);
+    // vtool has no spelling for a variant subtype, so it is skipped rather
+    // than pointed at another slice.
+    const variant = selected.includes(".");
+    expect(calls.some(({ tool }) => tool === "vtool")).toBe(!variant);
+    expect(
+      result.value.limitations.some((limitation) =>
+        limitation.startsWith(`vtool cannot select the ${selected} slice`),
+      ),
+    ).toBe(variant);
   },
 );
 

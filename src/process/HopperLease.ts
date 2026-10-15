@@ -17,6 +17,8 @@ interface HopperTargetLeaseOwner {
 }
 
 export interface HopperTargetLease {
+  /** Bound socket identity for cleanup diagnostics; omission remains unknown. */
+  readonly socketPath?: string;
   readonly release: () => Promise<void>;
 }
 
@@ -65,6 +67,21 @@ export const acquireLinuxHopperApplicationLease = (input: {
   readonly directory?: string;
 }): Promise<HopperTargetLeaseAcquisition> =>
   acquireLease({ ...input, identity: { application: "linux-hopper-demo" } });
+
+/** Serialize approved publication/repair of one canonical signed-package entry. */
+export const acquireHopperReleaseCacheLease = async (input: {
+  readonly cacheDirectory: string;
+  readonly launcherSha256: string;
+  readonly runId: string;
+}): Promise<HopperTargetLeaseAcquisition> =>
+  acquireLease({
+    runId: input.runId,
+    identity: {
+      cacheDirectory: await realpath(input.cacheDirectory),
+      launcherSha256: input.launcherSha256,
+      operation: "signed-package-retention",
+    },
+  });
 
 const acquireLease = async (input: {
   readonly identity: Readonly<Record<string, unknown>>;
@@ -153,6 +170,7 @@ const tryAcquireLease = async (
   return {
     acquired: true,
     lease: {
+      socketPath,
       release: async () => {
         if (released) return;
         // Node removes a bound Unix socket on close. A second unlink here

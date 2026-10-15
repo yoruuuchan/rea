@@ -43,6 +43,35 @@ const callLabel = (node: t.Node): string =>
     ? callLabel(node.expressions.at(-1) ?? node)
     : calleeName(node) || "local call";
 
+const ipcEndpointKey = (value: ElectronIpcFinding): string =>
+  JSON.stringify([value.side, value.operation, value.channel, value.location]);
+
+/** Duplicate evidence already recorded for one endpoint and call site. */
+interface IpcEndpointFacts {
+  // A directly observed transmission stays one fact however it is reached.
+  observedTransmission: boolean;
+  readonly invocations: Set<string>;
+}
+
+const ipcInvocationKey = (location: unknown): string =>
+  String(JSON.stringify(location));
+
+const indexIpcFinding = (
+  index: Map<string, IpcEndpointFacts>,
+  value: ElectronIpcFinding,
+): void => {
+  const key = ipcEndpointKey(value);
+  let facts = index.get(key);
+  if (facts === undefined) {
+    facts = { observedTransmission: false, invocations: new Set() };
+    index.set(key, facts);
+  }
+  facts.observedTransmission ||=
+    value.resolution_basis === undefined &&
+    (value.mode === "send" || value.mode === "invoke");
+  facts.invocations.add(ipcInvocationKey(value.invocation_location));
+};
+
 interface PathContext {
   readonly entryNode: t.Node;
   readonly entry: string;
@@ -148,6 +177,16 @@ export const collectElectronWrappedCallPaths = (
         context,
       ) ?? context
     );
+  };
+  // Duplicate checks consult only facts at the same endpoint and call site.
+  // Scanning every prior fact made bundles with many registrations quadratic.
+  let ipcByEndpoint: Map<string, IpcEndpointFacts> | undefined;
+  const ipcAtEndpoint = (): Map<string, IpcEndpointFacts> => {
+    if (ipcByEndpoint !== undefined) return ipcByEndpoint;
+    ipcByEndpoint = new Map();
+    for (const { value } of accumulator.ipc)
+      indexIpcFinding(ipcByEndpoint, value);
+    return ipcByEndpoint;
   };
   const hasConditions = (value: SymbolicValue): boolean =>
     symbolicVariants(value).some((variant) => variant.conditions?.length);
@@ -351,24 +390,20 @@ export const collectElectronWrappedCallPaths = (
               };
     // A fully observed transmission stays one source fact when its callback is
     // traced. Registrations retain invocation identity because handlers compete.
-    const duplicate = accumulator.ipc.some(
-      ({ value }) =>
-        value.side === finding.side &&
-        value.operation === finding.operation &&
-        value.channel === channel &&
-        JSON.stringify(value.location) === JSON.stringify(location) &&
-        ((value.resolution_basis === undefined &&
-          (value.mode === "send" || value.mode === "invoke")) ||
-          JSON.stringify(value.invocation_location) ===
-            JSON.stringify(invocationLocation)),
-    );
+    const recorded = ipcAtEndpoint().get(ipcEndpointKey(finding));
+    const duplicate =
+      recorded !== undefined &&
+      (recorded.observedTransmission ||
+        recorded.invocations.has(ipcInvocationKey(invocationLocation)));
     const findingGuarded =
       context.conditions.length > 0 || hasConditions(first) || guardedDispatch;
     if (!duplicate && !findingGuarded) {
-      accumulator.ipc.push({
-        offset: node.start ?? -1,
-        value: { ...finding, resolution_basis: "wrapper-substitution" },
-      });
+      const value: ElectronIpcFinding = {
+        ...finding,
+        resolution_basis: "wrapper-substitution",
+      };
+      accumulator.ipc.push({ offset: node.start ?? -1, value });
+      indexIpcFinding(ipcAtEndpoint(), value);
       if (descriptor.mode !== "send" && descriptor.mode !== "invoke" && !fn)
         accumulator.unknownFindings += 1;
     } else if (findingGuarded) accumulator.unknownFindings += 1;

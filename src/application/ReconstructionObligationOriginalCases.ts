@@ -45,6 +45,14 @@ export const originalCaseDiagnostics = (
       });
       continue;
     }
+    // A valid entry for this case kind does not resolve another entry's
+    // reference; every referenced Evidence ID must be in the bundle.
+    for (const { evidence_id: evidenceId } of cases)
+      if (!evidenceById.has(evidenceId))
+        diagnostics.push({
+          code: "missing-original-case",
+          detail: `Original ${caseKind} case references Evidence ${evidenceId}, which is absent from the bundle.`,
+        });
     if (
       !cases.some(({ evidence_id: evidenceId }) => {
         const evidence = evidenceById.get(evidenceId);

@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-import type { Browser } from "playwright-core";
+import type {
+  Browser,
+  BrowserContext,
+  CDPSession,
+  Page,
+} from "playwright-core";
 
 import { browserScenarioSchema } from "../domain/browserScenario.js";
 import {
@@ -157,11 +162,12 @@ it("keeps attached-target ownership after the cleanup response timeout", async (
 
 it("does not configure a late attached connection after cancellation", async () => {
   const connection =
-    deferred<Pick<Browser, "contexts" | "close" | "version">>();
+    deferred<Pick<Browser, "contexts" | "close" | "isConnected" | "version">>();
   const connectionStarted = deferred<void>();
   const connectedBrowser = {
     close: vi.fn(async () => undefined),
     contexts: vi.fn(() => []),
+    isConnected: vi.fn(() => true),
     version: () => "fixture",
   };
   const controller = new AbortController();
@@ -211,6 +217,7 @@ it("closes an attached connection when cancellation starts target discovery", as
       controller.abort();
       return [];
     }),
+    isConnected: vi.fn(() => true),
     version: () => "fixture",
   };
   const launcher = {
@@ -243,6 +250,265 @@ it("closes an attached connection when cancellation starts target discovery", as
   });
   expect(connectedBrowser.contexts).toHaveBeenCalledOnce();
   expect(connectedBrowser.close).toHaveBeenCalledOnce();
+});
+
+const attachedBrowserFixture = (
+  callbacks: {
+    readonly send?: (method: string, parameters?: unknown) => Promise<unknown>;
+    readonly emulateMedia?: (
+      options: Parameters<Page["emulateMedia"]>[0],
+    ) => Promise<void>;
+    readonly detach?: () => Promise<void>;
+    readonly closeBrowser?: () => Promise<void>;
+    readonly isTargetClosed?: () => boolean;
+    readonly isBrowserConnected?: () => boolean;
+  } = {},
+) => {
+  const discoverySession = {
+    send: vi.fn(async () => ({ targetInfo: { targetId: "page-1" } })),
+    detach: vi.fn(async () => undefined),
+  } as unknown as CDPSession;
+  const environmentSession = {
+    send: vi.fn(callbacks.send ?? (async () => undefined)),
+    detach: vi.fn(callbacks.detach ?? (async () => undefined)),
+  } as unknown as CDPSession;
+  const page = {
+    emulateMedia: vi.fn(callbacks.emulateMedia ?? (async () => undefined)),
+    isClosed: vi.fn(callbacks.isTargetClosed ?? (() => false)),
+  } as unknown as Page;
+  const context = {
+    pages: () => [page],
+    newCDPSession: vi
+      .fn()
+      .mockResolvedValueOnce(discoverySession)
+      .mockResolvedValueOnce(environmentSession),
+  } as unknown as BrowserContext;
+  const browser = {
+    close: vi.fn(callbacks.closeBrowser ?? (async () => undefined)),
+    contexts: () => [context],
+    isConnected: vi.fn(callbacks.isBrowserConnected ?? (() => true)),
+    version: () => "fixture",
+  } as unknown as Pick<
+    Browser,
+    "contexts" | "close" | "isConnected" | "version"
+  >;
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "page-1",
+    },
+    start_url: { url: "https://example.test" },
+    actions: [{ step_id: "wait", action: "wait_for_timeout", duration_ms: 1 }],
+  });
+  return {
+    browser,
+    environmentSession,
+    page,
+    open: (signal?: AbortSignal) =>
+      openPlaywrightScenarioBrowser(
+        scenario,
+        {},
+        {
+          launcher: {
+            connectOverCDP: async () => browser,
+            launchPersistentContext: async () => {
+              throw new Error("Unexpected launch");
+            },
+          },
+          signal,
+        },
+      ),
+  };
+};
+
+it("restores its environment overrides before releasing an attached browser", async () => {
+  const cleanupOrder: string[] = [];
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        method === "Emulation.setTimezoneOverride" &&
+        (parameters as { timezoneId?: string }).timezoneId === ""
+      )
+        cleanupOrder.push("timezone");
+      if (
+        method === "Emulation.setLocaleOverride" &&
+        (parameters as { locale?: string }).locale === ""
+      )
+        cleanupOrder.push("locale");
+      if (method === "Emulation.clearDeviceMetricsOverride")
+        cleanupOrder.push("device-metrics");
+    },
+    emulateMedia: async (options) => {
+      if (options?.colorScheme === null) cleanupOrder.push("media");
+    },
+    detach: async () => {
+      cleanupOrder.push("session");
+    },
+    closeBrowser: async () => {
+      cleanupOrder.push("browser");
+    },
+  });
+  const opened = await fixture.open();
+  await opened.cleanup.close();
+
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.setLocaleOverride",
+    { locale: "en-US" },
+  );
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.setLocaleOverride",
+    { locale: "" },
+  );
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.setTimezoneOverride",
+    { timezoneId: "" },
+  );
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.clearDeviceMetricsOverride",
+  );
+  expect(fixture.page.emulateMedia).toHaveBeenLastCalledWith({
+    colorScheme: null,
+    reducedMotion: null,
+  });
+  expect(fixture.environmentSession.detach).toHaveBeenCalledOnce();
+  expect(fixture.browser.close).toHaveBeenCalledOnce();
+  expect(cleanupOrder).toEqual([
+    "timezone",
+    "locale",
+    "device-metrics",
+    "media",
+    "session",
+    "browser",
+  ]);
+});
+
+it("retains attached environment ownership until a failed reset can be retried", async () => {
+  let localeResetAttempts = 0;
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        method === "Emulation.setLocaleOverride" &&
+        (parameters as { locale?: string }).locale === ""
+      ) {
+        localeResetAttempts += 1;
+        if (localeResetAttempts === 1) throw new Error("reset interrupted");
+      }
+    },
+  });
+  const opened = await fixture.open();
+
+  await expect(opened.cleanup.close()).rejects.toMatchObject({
+    reason: "cleanup_failed",
+    cleanup: { reason: "reset interrupted" },
+  });
+  expect(fixture.browser.close).not.toHaveBeenCalled();
+  expect(fixture.environmentSession.detach).not.toHaveBeenCalled();
+
+  await opened.cleanup.close();
+  expect(localeResetAttempts).toBe(2);
+  expect(fixture.environmentSession.detach).toHaveBeenCalledOnce();
+  expect(fixture.browser.close).toHaveBeenCalledOnce();
+});
+
+it("does not clear an attached environment override it failed to acquire", async () => {
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        method === "Emulation.setLocaleOverride" &&
+        (parameters as { locale?: string }).locale === "en-US"
+      )
+        throw new Error("caller already owns locale");
+    },
+  });
+
+  await expect(fixture.open()).rejects.toThrow("caller already owns locale");
+  expect(fixture.environmentSession.send).not.toHaveBeenCalledWith(
+    "Emulation.setLocaleOverride",
+    { locale: "" },
+  );
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.clearDeviceMetricsOverride",
+  );
+  expect(fixture.environmentSession.detach).toHaveBeenCalledOnce();
+  expect(fixture.browser.close).toHaveBeenCalledOnce();
+});
+
+it("waits for a cancelled environment mutation before restoring it", async () => {
+  const localeStarted = deferred<void>();
+  const localeResult = deferred<void>();
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        method === "Emulation.setLocaleOverride" &&
+        (parameters as { locale?: string }).locale === "en-US"
+      ) {
+        localeStarted.resolve(undefined);
+        await localeResult.promise;
+      }
+    },
+  });
+  const controller = new AbortController();
+  const opening = fixture.open(controller.signal);
+  await localeStarted.promise;
+  const cancelled = expect(opening).rejects.toMatchObject({
+    _tag: "AnalysisCancelledError",
+  });
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(fixture.environmentSession.send).not.toHaveBeenCalledWith(
+    "Emulation.setLocaleOverride",
+    { locale: "" },
+  );
+
+  localeResult.resolve(undefined);
+  await cancelled;
+  expect(fixture.environmentSession.send).toHaveBeenCalledWith(
+    "Emulation.setLocaleOverride",
+    { locale: "" },
+  );
+  expect(fixture.environmentSession.detach).toHaveBeenCalledOnce();
+  expect(fixture.browser.close).toHaveBeenCalledOnce();
+});
+
+it("releases cleanup ownership when the attached target is destroyed", async () => {
+  let targetClosed = false;
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        targetClosed &&
+        method === "Emulation.setTimezoneOverride" &&
+        (parameters as { timezoneId?: string }).timezoneId === ""
+      )
+        throw new Error("Target closed");
+    },
+    isTargetClosed: () => targetClosed,
+  });
+  const opened = await fixture.open();
+  targetClosed = true;
+
+  await opened.cleanup.close();
+  expect(fixture.browser.close).toHaveBeenCalledOnce();
+});
+
+it("releases cleanup ownership when the attached browser disconnects", async () => {
+  let connected = true;
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        !connected &&
+        method === "Emulation.setTimezoneOverride" &&
+        (parameters as { timezoneId?: string }).timezoneId === ""
+      )
+        throw new Error("Browser disconnected");
+    },
+    isBrowserConnected: () => connected,
+  });
+  const opened = await fixture.open();
+  connected = false;
+
+  await opened.cleanup.close();
+  expect(fixture.browser.close).not.toHaveBeenCalled();
 });
 
 it("cancels same-target queued connection before acquiring a browser", async () => {
@@ -350,7 +616,7 @@ it("serializes concurrent attach across loopback spellings of one browser", asyn
       ],
     });
   const firstConnection =
-    deferred<Pick<Browser, "contexts" | "close" | "version">>();
+    deferred<Pick<Browser, "contexts" | "close" | "isConnected" | "version">>();
   let rejectFirstConnection: ((cause: Error) => void) | undefined;
   const failingConnection = new Promise<never>((_resolve, reject) => {
     rejectFirstConnection = reject;
@@ -399,6 +665,7 @@ it("serializes concurrent attach across loopback spellings of one browser", asyn
   firstConnection.resolve({
     close: vi.fn(async () => undefined),
     contexts: vi.fn(() => []),
+    isConnected: vi.fn(() => true),
     version: () => "fixture",
   });
   await expect(first).rejects.toThrow();

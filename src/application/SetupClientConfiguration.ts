@@ -6,6 +6,7 @@ import {
   type ClientConfigurationSource,
 } from "./ClientConfigurationFiles.js";
 import { err, ok, type Result } from "../domain/result.js";
+import { ConfigurationError } from "../domain/configurationErrors.js";
 import {
   clientRegistrationEntry,
   clientConfigurationValuesEqual,
@@ -26,6 +27,7 @@ import writeFileAtomic from "write-file-atomic";
 import {
   clientRegistrationEnvironment,
   clientRegistrationEnvironmentDetails,
+  type ProviderRequestBudgetResolver,
 } from "./ClientRegistrationEnvironment.js";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
@@ -81,16 +83,23 @@ export const configureClientConfiguration = (
   client: SetupClient,
   environment: SetupProviderEnvironment = {},
   command: readonly string[] = npxRegistrationCommand(),
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ): Promise<ClientConfigurationResult> => {
   if (client.configPathError !== undefined)
     return Promise.resolve({ status: "failed", reason: "path" });
-  return configureClientDocument(client, environment, command);
+  return configureClientDocument(
+    client,
+    environment,
+    command,
+    resolveProviderRequestBudget,
+  );
 };
 
 const configureClientDocument = async (
   client: SetupClient,
   environment: SetupProviderEnvironment,
   command: readonly string[],
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ): Promise<ClientConfigurationResult> => {
   const format = client.format;
   if (format === undefined || format === "unsupported")
@@ -118,6 +127,7 @@ const configureClientDocument = async (
       command,
       existing,
       files.value,
+      resolveProviderRequestBudget,
     ),
   );
   if (!policy.ok) {
@@ -156,6 +166,7 @@ const configureClientDocument = async (
         command,
         parsed,
         files.value,
+        resolveProviderRequestBudget,
       ),
     );
     if (!policy.ok) {
@@ -184,6 +195,7 @@ const configureClientDocument = async (
       servers: { ...fallback.value, ...parsed.servers },
     },
     files.value,
+    resolveProviderRequestBudget,
   );
   if (registrationCurrent(parsed, desired)) return { status: "unchanged" };
   return persistClientConfiguration({
@@ -353,6 +365,7 @@ export const clientConfigurationAligned = async (
   client: SetupClient,
   providerEnvironment: SetupProviderEnvironment,
   command: readonly string[],
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ): Promise<boolean> => {
   if (client.configPathError !== undefined) return false;
   try {
@@ -372,6 +385,7 @@ export const clientConfigurationAligned = async (
         command,
         parsed,
         files.value,
+        resolveProviderRequestBudget,
       ),
     );
     if (!policy.ok) {
@@ -388,6 +402,7 @@ export const clientConfigurationAligned = async (
           command,
           parsed,
           files.value,
+          resolveProviderRequestBudget,
         ),
       )
     );
@@ -404,11 +419,13 @@ export const inspectClientConfiguration = async (
   client: SetupClient,
   providerEnvironment: SetupProviderEnvironment,
   command: readonly string[],
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ): Promise<ClientConfigurationInspection> => {
   const inspection = await inspectClientDocument(
     client,
     providerEnvironment,
     command,
+    resolveProviderRequestBudget,
   );
   if (inspection.status !== "create" && inspection.status !== "update")
     return inspection;
@@ -423,6 +440,7 @@ const inspectClientDocument = async (
   client: SetupClient,
   providerEnvironment: SetupProviderEnvironment,
   command: readonly string[],
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ): Promise<ClientConfigurationInspection> => {
   if (client.configPathError !== undefined)
     return { status: "invalid", remediation: client.configPathError };
@@ -456,6 +474,7 @@ const inspectClientDocument = async (
       command,
       existing,
       files.value,
+      resolveProviderRequestBudget,
     ),
   );
   if (!policy.ok) {
@@ -505,6 +524,7 @@ const inspectClientDocument = async (
         command,
         parsed,
         files.value,
+        resolveProviderRequestBudget,
       ),
     );
     if (!policy.ok) {
@@ -522,6 +542,7 @@ const inspectClientDocument = async (
       command,
       parsed,
       files.value,
+      resolveProviderRequestBudget,
     );
     if (registrationCurrent(parsed, desired))
       return { status: "already_current" };
@@ -532,6 +553,8 @@ const inspectClientDocument = async (
     }
   } catch (cause: unknown) {
     if (cause instanceof RegularFileCleanupFailure) throw cause;
+    if (cause instanceof ConfigurationError)
+      return { status: "invalid", remediation: cause.message };
     // Malformed configuration is reported with the invalid remediation.
     void cause;
     return {
@@ -660,6 +683,7 @@ const clientConfigurationDesired = (
   command: readonly string[],
   parsed: ClientConfigurationDocument | undefined,
   sources: readonly ClientConfigurationSource[],
+  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
 ) => {
   const effective = effectiveClientConfiguration(sources, {
     client,
@@ -685,6 +709,10 @@ const clientConfigurationDesired = (
   const validated = clientRegistrationEnvironmentDetails(
     effective,
     providerEnvironment,
+    "effective",
+    client.name === "codex" || client.name === "kimi"
+      ? resolveProviderRequestBudget
+      : undefined,
   );
   if (!validated.ok) throw validated.error;
   // Preserve explicitly configured server settings, never the ambient process

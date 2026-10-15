@@ -353,6 +353,22 @@ it("retains distinct wrapper invocation ranges for one IPC API source", () => {
     findings[1]?.invocation_location,
   );
 });
+it("keeps one wrapper registration when one invocation reaches it twice", () => {
+  const result = analyzeJavaScriptStaticSource(`
+      const e=require("electron");
+      const copy=event=>event.sender.copy();
+      function register(channel,handler){e.ipcMain.on(channel,handler);}
+      function twice(channel){register(channel,copy);register(channel,copy);}
+      twice("same:invocation");
+    `);
+  expect(
+    result.electron.ipc.filter(
+      ({ resolution_basis, channel }) =>
+        resolution_basis === "wrapper-substitution" &&
+        channel === "same:invocation",
+    ),
+  ).toHaveLength(1);
+});
 it("keeps a directly observed renderer operation singular when tracing its exposed callback", () => {
   const result = analyzeJavaScriptStaticSource(`
     const {contextBridge,ipcRenderer}=require("electron");

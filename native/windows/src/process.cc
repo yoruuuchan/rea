@@ -454,17 +454,27 @@ napi_value processCall(napi_env env, const std::wstring& operation, const std::v
   throw Failure("Unknown native process operation", L"", ERROR_INVALID_PARAMETER);
 }
 
-napi_value inspect(napi_env env, std::unique_ptr<Runtime>& probe) {
+napi_value inspect(napi_env env, std::unique_ptr<Runtime>& pending) {
   // Settle the previous owner before admitting another probe. Failed cleanup
   // retains its handles, including when identity construction itself failed.
-  if (probe) { closeRuntime(*probe); probe.reset(); }
+  if (pending) { closeRuntime(*pending); pending.reset(); }
   wchar_t temp[32768];
   const auto length = GetTempPathW(32768, temp);
   require(length > 0 && length < 32768, "Read temporary directory coordinate failed");
-  probe = createRuntime(std::wstring(temp, length), L"rea-native-probe-");
-  auto filesystem = identity(env, probe->directory.get(), probe->path);
-  closeRuntime(*probe);
-  probe.reset();
+  createRuntime(std::wstring(temp, length), L"rea-native-probe-", pending);
+  napi_value filesystem;
+  try {
+    filesystem = identity(env, pending->directory.get(), pending->path);
+  } catch (Failure& primary) {
+    cleanupFailedRuntime(pending, primary);
+    throw;
+  } catch (const std::exception& error) {
+    Failure primary(error.what(), pending ? pending->path : L"", ERROR_GEN_FAILURE);
+    cleanupFailedRuntime(pending, primary);
+    throw primary;
+  }
+  closeRuntime(*pending);
+  pending.reset();
   auto job = createJob();
   Attributes attributes(1);
   HANDLE raw = job.get();

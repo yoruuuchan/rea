@@ -6,7 +6,10 @@ import {
   AnalysisInputError,
   AnalysisUnsupportedTargetError,
 } from "../../domain/analysisErrorCore.js";
-import { projectPlistValue } from "../../domain/apple/plistValue.js";
+import {
+  projectPlistValue,
+  unknownDateLimitation,
+} from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
   binaryPlistNumberLiterals,
@@ -75,9 +78,11 @@ export const decodeKeyedArchiveBytes = (
             : 0,
         }
       : parseXmlPropertyList(xmlText ?? "");
-  const { value: plistValue, unknownRealCount } = projectPlistValue(
-    parsed.value,
-  );
+  const {
+    value: plistValue,
+    unknownRealCount,
+    unknownDateCount,
+  } = projectPlistValue(parsed.value);
   const graph = projectKeyedArchive(plistValue, selection);
   const numbers = createPlistNumberProjection(
     binary
@@ -112,6 +117,9 @@ export const decodeKeyedArchiveBytes = (
         : [
             `${String(unknownRealCount)} non-finite real value(s) are reported as { "$plist_type": "real", "value": null } because JSON evidence cannot preserve NaN vs infinity.`,
           ]),
+      ...(unknownDateCount === 0
+        ? []
+        : [unknownDateLimitation(unknownDateCount)]),
     ],
   };
 };

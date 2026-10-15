@@ -45,6 +45,13 @@ export const managedCli32BitRequirement = (
   return pair === 0x0002_0002 ? "preferred" : "none";
 };
 
+/**
+ * crossgen2 clears ILONLY on ReadyToRun output, so only a clear ILONLY flag
+ * without the ReadyToRun signature marks mixed CLR/native code.
+ */
+export const managedCliIsMixedClrNative = (cli: ManagedCliHeader): boolean =>
+  (cli.flags & 0x0000_0001) === 0 && !cli.readyToRunSignature;
+
 export interface ManagedPeLayout {
   readonly machine: number;
   readonly architecture: "x86" | "x86_64" | "arm" | "arm64";

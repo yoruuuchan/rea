@@ -12,13 +12,22 @@ import { cliTest } from "../../support/cli/cliFixture.js";
 describe.skipIf(process.platform !== "darwin")(
   "native plist CLI selection",
   () => {
+    // Targets are app-relative: the bundle, its program file, or a plist file.
     cliTest.for([
-      ["default", undefined, "default"],
-      ["alternate", "Contents/Alternate.plist", "alternate"],
-      ["missing", "Contents/Missing.plist", undefined],
+      ["default", "", undefined, "default"],
+      ["alternate", "", "Contents/Alternate.plist", "alternate"],
+      ["missing", "", "Contents/Missing.plist", undefined],
+      ["program default", "Contents/MacOS/App", undefined, "default"],
+      [
+        "program alternate",
+        "Contents/MacOS/App",
+        "Contents/Alternate.plist",
+        "alternate",
+      ],
+      ["plist file", "Contents/Alternate.plist", undefined, "alternate"],
     ] as const)(
       "honors the $0 plist selection",
-      async ([, selected, identifier], { cli }) => {
+      async ([, target, selected, identifier], { cli }) => {
         const directory = await createTestTempDirectory("rea-plist-cli-");
         const app = join(directory, "Example.app");
         const contents = join(app, "Contents");
@@ -39,7 +48,7 @@ describe.skipIf(process.platform !== "darwin")(
         const result = await cli.run({
           arguments: [
             "inspect-plist",
-            app,
+            join(app, target),
             ...(selected === undefined ? [] : ["--relative-path", selected]),
             "--json",
           ],
@@ -55,7 +64,11 @@ describe.skipIf(process.platform !== "darwin")(
           expect(result.exitCode).toBe(0);
           expect(result.json).toMatchObject({
             normalized_result: {
-              source_path: join(app, selected ?? "Contents/Info.plist"),
+              source_path: join(
+                app,
+                selected ??
+                  (target.endsWith(".plist") ? target : "Contents/Info.plist"),
+              ),
               value: { CFBundleIdentifier: identifier },
             },
           });
@@ -83,6 +96,8 @@ describe.skipIf(process.platform !== "darwin")(
             "<key>CFBundleIdentifier</key><string>com.example.types</string>",
             "<key>Blob</key><data>AAEC</data>",
             "<key>Built</key><date>2020-01-01T00:00:00Z</date>",
+            // plutil writes years past 9999 unsigned, which the decoder rejects.
+            "<key>Far</key><date>11507-08-17T05:20:00Z</date>",
             "<key>Ratio</key><real>nan</real>",
             "<key>Nested</key><array><dict>",
             "<key>Ratio</key><real>0.5</real>",
@@ -117,6 +132,7 @@ describe.skipIf(process.platform !== "darwin")(
                 $plist_type: "date",
                 iso8601: "2020-01-01T00:00:00.000Z",
               },
+              Far: { $plist_type: "date", iso8601: null },
               Ratio: { $plist_type: "real", value: null },
               Nested: [
                 {
@@ -135,6 +151,7 @@ describe.skipIf(process.platform !== "darwin")(
             limitations: [
               expect.stringContaining("XML conversion"),
               expect.stringContaining("2 non-finite real"),
+              expect.stringContaining("1 date value(s)"),
             ],
           },
         });

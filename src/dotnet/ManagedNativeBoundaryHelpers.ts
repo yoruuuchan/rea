@@ -20,6 +20,8 @@ import { managedTableRowCounts } from "./ManagedMetadataInventory.js";
 import type { ManagedMetadataInventory } from "./ManagedMetadataInventory.js";
 import {
   managedCli32BitRequirement,
+  managedCliIsMixedClrNative,
+  type ManagedCliHeader,
   type ManagedPeLayout,
 } from "./ManagedPeReader.js";
 import { readManagedValue } from "./ManagedReaderFailure.js";
@@ -378,36 +380,37 @@ const boundaryKind = (
 };
 
 export const cliNative = (
-  pe: ManagedPeLayout,
+  cli: ManagedCliHeader | null,
 ): ManagedNativeBoundaryInspection["cli_native"] => {
-  if (pe.cli === null) return null;
+  if (cli === null) return null;
   return {
-    il_only: (pe.cli.flags & 0x0000_0001) !== 0,
-    requires_32bit: managedCli32BitRequirement(pe.cli.flags) === "required",
-    strong_name_signed: (pe.cli.flags & 0x0000_0008) !== 0,
-    native_entry_point: (pe.cli.flags & 0x0000_0010) !== 0,
-    ready_to_run_signature: pe.cli.readyToRunSignature,
-    managed_native_header_rva: pe.cli.managedNativeHeader.rva,
-    managed_native_header_size: pe.cli.managedNativeHeader.size,
+    il_only: (cli.flags & 0x0000_0001) !== 0,
+    requires_32bit: managedCli32BitRequirement(cli.flags) === "required",
+    strong_name_signed: (cli.flags & 0x0000_0008) !== 0,
+    native_entry_point: (cli.flags & 0x0000_0010) !== 0,
+    ready_to_run_signature: cli.readyToRunSignature,
+    managed_native_header_rva: cli.managedNativeHeader.rva,
+    managed_native_header_size: cli.managedNativeHeader.size,
   };
 };
 
 /** Summarize declaration counts with the native facets of the CLI header. */
 export const nativeBoundarySummary = (
-  native: ManagedNativeBoundaryInspection["cli_native"],
+  cli: ManagedCliHeader | null,
   counts: Pick<
     ManagedNativeBoundaryInspection["summary"],
     "module_ref_count" | "pinvoke_import_count" | "native_implementation_count"
   >,
 ): ManagedNativeBoundaryInspection["summary"] => ({
   ...counts,
-  ready_to_run: native?.ready_to_run_signature ?? null,
+  ready_to_run: cli?.readyToRunSignature ?? null,
   mixed_mode_or_native_header:
-    native === null
+    cli === null
       ? null
-      : native.managed_native_header_rva !== 0 ||
-        native.managed_native_header_size !== 0 ||
-        native.native_entry_point,
+      : managedCliIsMixedClrNative(cli) ||
+        cli.managedNativeHeader.rva !== 0 ||
+        cli.managedNativeHeader.size !== 0 ||
+        (cli.flags & 0x0000_0010) !== 0,
 });
 
 interface BoundaryInspectionContext {
@@ -419,19 +422,18 @@ interface BoundaryInspectionContext {
   readonly moduleRefs: readonly ModuleRef[];
   readonly imports: readonly NativeImport[];
   readonly implementations: readonly NativeImplementation[];
-  readonly native: ManagedNativeBoundaryInspection["cli_native"];
   readonly issues: readonly ManagedParseIssue[];
 }
 
 export const buildNativeBoundaryInspection = ({
   target,
   bytes,
+  pe,
   layout,
   inventory,
   moduleRefs,
   imports,
   implementations,
-  native,
   issues,
 }: BoundaryInspectionContext): ManagedNativeBoundaryInspection =>
   managedNativeBoundaryInspectionSchema.parse(
@@ -454,11 +456,11 @@ export const buildNativeBoundaryInspection = ({
           requires_artifact_sha256: target.sha256,
           requires_mvid: inventory.module?.mvid ?? null,
         },
-        cli_native: native,
+        cli_native: cliNative(pe.cli),
         module_refs: moduleRefs,
         pinvoke_imports: imports,
         native_implementations: implementations,
-        summary: nativeBoundarySummary(native, {
+        summary: nativeBoundarySummary(pe.cli, {
           module_ref_count: moduleRefs.length,
           pinvoke_import_count: imports.length,
           native_implementation_count: implementations.length,

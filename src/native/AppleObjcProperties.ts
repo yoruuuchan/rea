@@ -19,8 +19,21 @@ export interface ObjcPropertyReaders {
 export const parsePropertyAttributes = (
   name: string,
   attributes: string,
-): ObjcProperty => {
-  const tokens = attributes.length === 0 ? [] : splitAttributes(attributes);
+): ObjcProperty => decodePropertyAttributes(name, attributes).property;
+
+/**
+ * Decode one attribute string. A quoted class name that never closes leaves
+ * the string incomplete: later attributes may be inside the unfinished type,
+ * so a missing `N` or `R` does not establish the Objective-C defaults.
+ */
+const decodePropertyAttributes = (
+  name: string,
+  attributes: string,
+): { readonly property: ObjcProperty; readonly complete: boolean } => {
+  const { tokens, complete } =
+    attributes.length === 0
+      ? { tokens: [], complete: true }
+      : splitAttributes(attributes);
   const typeAttributes = tokens.filter((token) => token[0] === "T");
   const typeAttribute =
     typeAttributes.length === 1 ? typeAttributes[0] : undefined;
@@ -30,7 +43,8 @@ export const parsePropertyAttributes = (
       : null;
   const value = (code: string): string | null =>
     tokens.find((token) => token[0] === code)?.slice(1) ?? null;
-  return {
+  const defaultsEstablished = typeEncoding !== null && complete;
+  const property: ObjcProperty = {
     name,
     type_encoding: typeEncoding,
     attributes: tokens.map((token) => ({
@@ -39,21 +53,27 @@ export const parsePropertyAttributes = (
     })),
     atomicity: tokens.includes("N")
       ? "nonatomic"
-      : typeEncoding === null
-        ? null
-        : "atomic",
+      : defaultsEstablished
+        ? "atomic"
+        : null,
     is_readonly: tokens.includes("R")
       ? true
-      : typeEncoding === null
-        ? null
-        : false,
+      : defaultsEstablished
+        ? false
+        : null,
     getter: value("G"),
     setter: value("S"),
   };
+  return { property, complete };
 };
 
-/** Split on commas that are outside a quoted class name in the type encoding. */
-const splitAttributes = (attributes: string): string[] => {
+/**
+ * Split on commas that are outside a quoted class name in the type encoding,
+ * and report whether every quote closed.
+ */
+const splitAttributes = (
+  attributes: string,
+): { readonly tokens: string[]; readonly complete: boolean } => {
   const tokens: string[] = [];
   let current = "";
   let quoted = false;
@@ -65,7 +85,10 @@ const splitAttributes = (attributes: string): string[] => {
     } else current += character;
   }
   tokens.push(current);
-  return tokens.filter((token) => token.length > 0);
+  return {
+    tokens: tokens.filter((token) => token.length > 0),
+    complete: !quoted,
+  };
 };
 
 /** Decode `property_list_t { entsize_and_flags, count, property_t[] }`. */
@@ -73,8 +96,13 @@ export const readObjcPropertyList = (
   read: ObjcPropertyReaders,
   list: bigint,
   admit: () => boolean,
-): ObjcProperty[] => {
-  if (list === 0n) return [];
+): {
+  readonly properties: ObjcProperty[];
+  /** Names of properties whose attribute string is incomplete. */
+  readonly incomplete: string[];
+} => {
+  const incomplete: string[] = [];
+  if (list === 0n) return { properties: [], incomplete };
   const entrySize = read.u32(list) & ~3;
   const count = read.u32(list + 4n);
   if (entrySize !== 16)
@@ -85,14 +113,14 @@ export const readObjcPropertyList = (
   for (let index = 0; index < count; index++) {
     if (!admit()) break;
     const entry = list + 8n + BigInt(index * entrySize);
-    properties.push(
-      parsePropertyAttributes(
-        read.string(read.pointer(entry)),
-        read.string(read.pointer(entry + 8n)),
-      ),
+    const decoded = decodePropertyAttributes(
+      read.string(read.pointer(entry)),
+      read.string(read.pointer(entry + 8n)),
     );
+    properties.push(decoded.property);
+    if (!decoded.complete) incomplete.push(decoded.property.name);
   }
-  return properties;
+  return { properties, incomplete };
 };
 
 /** Decode a property list, recording a failure for `owner` instead of throwing. */
@@ -107,7 +135,21 @@ export const readObjcPropertiesOf = (
   },
 ): ObjcProperty[] => {
   try {
-    return readObjcPropertyList(read, list, context.admit);
+    const { properties, incomplete } = readObjcPropertyList(
+      read,
+      list,
+      context.admit,
+    );
+    for (const name of incomplete)
+      context.issues.push(
+        issue(
+          "objc_properties_categories",
+          "property_attributes_incomplete",
+          `${context.owner}.${name}: the type attribute has an unterminated quoted class name, so atomicity and unestablished read-only state are unknown`,
+          context.location,
+        ),
+      );
+    return properties;
   } catch (cause: unknown) {
     context.issues.push(
       issue(

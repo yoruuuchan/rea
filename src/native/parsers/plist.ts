@@ -4,6 +4,7 @@ import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import {
   projectPlistValue,
+  unknownDateLimitation,
   type ProjectedPlistValue,
 } from "../../domain/apple/plistValue.js";
 import {
@@ -178,6 +179,9 @@ export const parsePlistXml = (
         : [
             `${String(projected.unknownRealCount)} non-finite real value(s) are reported as { "$plist_type": "real", "value": null } because the XML decoder does not distinguish NaN from infinity.`,
           ]),
+      ...(projected.unknownDateCount === 0
+        ? []
+        : [unknownDateLimitation(projected.unknownDateCount)]),
       ...numberLimitations(exactIntegerCount, ambiguousNumberCount),
       ...prototypeKeyLimitations(omittedPrototypeKeys),
     ],

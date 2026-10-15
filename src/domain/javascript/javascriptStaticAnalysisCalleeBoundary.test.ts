@@ -27,11 +27,12 @@ describe("static callee boundary matching", () => {
       ["./bare.html", "call:loadFile"],
       ["https://optional.example.test", "call:win.loadURL"],
     ]);
+    // The document base URL is unknown, so the script path stays unresolved.
     expect(
       analysis.references
         .filter(({ kind }) => kind === "service-worker")
-        .map(({ specifier }) => specifier),
-    ).toEqual(["./worker.js"]);
+        .map(({ specifier, expression }) => [specifier, expression]),
+    ).toEqual([[null, 'navigator.serviceWorker.register("./worker.js")']]);
     expect(
       analysis.endpoints
         .filter(({ mechanism }) => mechanism.endsWith("loadURL"))

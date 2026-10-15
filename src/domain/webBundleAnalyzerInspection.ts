@@ -4,14 +4,8 @@ import { sanitizeEndpointCandidate } from "./browserObservation.js";
 import { compositeKey } from "./unicodeCodePointOrder.js";
 import type { WebPageInspection } from "./browserObservationSchemas.js";
 import type { WebBundleAnalysis } from "./webBundleAnalysis.js";
-import {
-  completeSemanticSteps,
-  traverseJavaScriptAst,
-} from "./javascript/javascriptSemanticTraversal.js";
-import {
-  classifyParsedJavaScriptOpenReceivers,
-  classifyParsedJavaScriptRpcClientRootsSteps,
-} from "./javascript/javascriptSemanticAnalysis.js";
+import { traverseJavaScriptAst } from "./javascript/javascriptSemanticTraversal.js";
+import { classifyParsedJavaScriptReceivers } from "./javascript/javascriptSemanticAnalysis.js";
 import type { JavaScriptOpenReceiverFact } from "./javascript/javascriptSemanticAnalysis.js";
 import { semanticStaticPropertyName } from "./javascript/javascriptAstValues.js";
 import {
@@ -67,10 +61,11 @@ export const analyzeScript = (
   if ((file.errors?.length ?? 0) > 0)
     accumulator.recoveredScripts.push(script.script_key);
   detectVendorFingerprints(script, accumulator);
-  const openReceiverFacts = classifyParsedJavaScriptOpenReceivers(file);
+  const receivers = classifyParsedJavaScriptReceivers(file);
+  const openReceiverFacts = receivers.openReceivers;
   const rpc = createJavaScriptRpcScan(
     script.source.artifact.text,
-    completeSemanticSteps(classifyParsedJavaScriptRpcClientRootsSteps(file)),
+    receivers.rpcClientRoots,
   );
   traverseJavaScriptAst(file, {
     enter: (node) => {

@@ -18,6 +18,7 @@ export class ManagedDecodeBudget {
   readonly #rows = new Map<number, Set<number>>();
   readonly #strings = new Map<number, CachedString>();
   readonly #digests = new WeakMap<ArrayBufferLike, Map<string, string>>();
+  readonly #prepaid = new WeakSet<object>();
 
   reserve(bytes: number, offset: number | null): void {
     this.#admit(bytes, offset);
@@ -82,6 +83,16 @@ export class ManagedDecodeBudget {
     return digest;
   }
 
+  /** Record an admitted projection; its next serialized occurrence is already charged. */
+  prepay(value: object): void {
+    this.#prepaid.add(value);
+  }
+
+  /** Spend an admitted projection's charge once; repeated occurrences pay again. */
+  consumePrepaid(value: object): boolean {
+    return this.#prepaid.delete(value);
+  }
+
   cachedString(index: number): CachedString | undefined {
     return this.#strings.get(index);
   }
@@ -141,12 +152,23 @@ const jsonBytes = (item: unknown): number =>
     ? managedJsonStringBytes(item)
     : Buffer.byteLength(JSON.stringify(item) ?? "null");
 
-/** Admit repeated values too: shared heap strings still expand at the JSON boundary. */
+/**
+ * Admit repeated values too: shared heap strings still expand at the JSON
+ * boundary. An object admitted earlier was charged for one occurrence, so a
+ * containing projection spends that charge instead of counting it again.
+ * Admitted values must stay unmodified.
+ */
 export const admitManagedProjection = <Value>(
   value: Value,
   budget: ManagedDecodeBudget = new ManagedDecodeBudget(),
 ): Value => {
   const visit = (item: unknown): void => {
+    if (
+      item !== null &&
+      typeof item === "object" &&
+      budget.consumePrepaid(item)
+    )
+      return;
     if (Array.isArray(item)) {
       budget.reserve(item.length + 2, null);
       for (const child of item) visit(child);
@@ -161,5 +183,6 @@ export const admitManagedProjection = <Value>(
     }
   };
   visit(value);
+  if (value !== null && typeof value === "object") budget.prepay(value);
   return value;
 };

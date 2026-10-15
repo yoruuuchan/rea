@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   acquireHopperTargetLease,
   acquireLinuxHopperApplicationLease,
-} from "./HopperTargetLease.js";
+} from "../process/HopperLease.js";
 
 const directories: string[] = [];
 

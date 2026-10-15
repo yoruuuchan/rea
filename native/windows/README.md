@@ -111,7 +111,9 @@ automatically. Alternatively, build it using the Linux/MinGW lane above.
 - Cleanup walks locked directory objects, removes files by handle, and unlinks
   reparse entries without traversing their targets. Failed removal retains the
   root and ancestor leases for retry; a partially removed runtime accepts only
-  cleanup, and its registry entry remains until removal succeeds. Normal close, cancellation,
+  cleanup, and its registry entry remains until removal succeeds. The owned root
+  handle includes attribute-write access so cleanup can clear a read-only marker,
+  matching the child cleanup handles. Normal close, cancellation,
   startup failure, and timeout release provider resources. Abrupt owner death
   kills the owned job. The Android provider additionally uses a detached helper
   that owns its private runtime directory and cleans it when the owner pipe
@@ -156,8 +158,11 @@ npm run verify:windows-native
 npm run verify:ghidra:windows
 ```
 
-The native inspection probe retains its directory owner if deletion fails. A
-later availability query retries that cleanup before creating another probe;
+An unpublished runtime retains its directory and parent handles if validation,
+result publication, or rollback fails. Errors retain the original failure and
+any rollback failure. Later runtime creation or native inspection retries that
+exact owner before allocating another directory. The same owner covers the
+native inspection probe. A later availability query retries failed probe cleanup;
 successful admission and static artifact failures remain cached. Environment
 teardown makes one final cleanup attempt and reports a persistent failure to
 stderr rather than claiming the directory was removed.
@@ -174,9 +179,11 @@ On Windows, after compiling the runtime:
 node scripts/verify-windows-native-inspection.mjs
 ```
 
-This artifact injects one access-denied disposition result while using a real
-NTFS directory. The verifier checks retained ownership, recovery on a later
-query, cached successful admission, and cleanup on environment teardown. It
+This artifact injects an access-denied disposition result while using real
+NTFS directories, and separately denies post-create validation and rollback.
+The verifier checks retained ownership after inspection and direct runtime
+creation failures, recovery on later admission, cached successful inspection,
+and cleanup on environment teardown. It
 renames the retained probe and recreates its old path, checking that cleanup
 removes the owned inode while preserving the replacement directory.
 It does not reproduce or identify the host-dependent cause reported in #1701.

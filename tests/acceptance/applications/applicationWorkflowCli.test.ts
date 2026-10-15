@@ -541,7 +541,7 @@ it("resolves source-map URL paths once without changing their declarations", asy
   await writeFile(
     join(root, "app.js"),
     cases.map(([url]) => `//# sourceMappingURL=${url}\n`).join("") +
-      'new Worker("./worker%20file.js");\n' +
+      'new Worker(new URL("./worker%20file.js", import.meta.url));\n' +
       'navigator.serviceWorker.register("./service%20worker.js");\n',
   );
   await writeFile(join(root, "worker file.js"), "export const worker = 1;\n");
@@ -598,27 +598,41 @@ it("resolves source-map URL paths once without changing their declarations", asy
       }),
     );
   }
-  for (const [kind, specifier, path] of [
-    ["worker", "./worker%20file.js", "worker file.js"],
-    ["service-worker", "./service%20worker.js", "service worker.js"],
-  ]) {
-    const worker = graph.nodes.find((node) => node.kind === kind);
-    expect(worker?.observations).toContainEqual(
-      expect.objectContaining({
-        properties: expect.objectContaining({
-          declared_specifier: specifier,
-          resolved_path: path,
-        }),
+  const worker = graph.nodes.find((node) => node.kind === "worker");
+  expect(worker?.observations).toContainEqual(
+    expect.objectContaining({
+      properties: expect.objectContaining({
+        declared_specifier: "./worker%20file.js",
+        resolved_path: "worker file.js",
       }),
-    );
-    expect(graph.edges).toContainEqual(
-      expect.objectContaining({
-        source_node_id: worker?.node_id,
-        relation: "maps_to",
-        properties: { resolved_path: path },
+    }),
+  );
+  expect(graph.edges).toContainEqual(
+    expect.objectContaining({
+      source_node_id: worker?.node_id,
+      relation: "maps_to",
+      properties: { resolved_path: "worker file.js" },
+    }),
+  );
+  // A service worker script URL is relative to the unestablished document base.
+  const serviceWorker = graph.nodes.find(
+    (node) => node.kind === "service-worker",
+  );
+  expect(serviceWorker?.observations).toContainEqual(
+    expect.objectContaining({
+      properties: expect.objectContaining({
+        declared_specifier: null,
+        expression: 'navigator.serviceWorker.register("./service%20worker.js")',
+        resolved_path: null,
       }),
-    );
-  }
+    }),
+  );
+  expect(
+    graph.edges.some(
+      ({ source_node_id, relation }) =>
+        source_node_id === serviceWorker?.node_id && relation === "maps_to",
+    ),
+  ).toBe(false);
   expect((await analyzeThroughStdioMcp(root)).graph).toEqual(graph);
 }, 20_000);
 

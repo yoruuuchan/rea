@@ -122,7 +122,7 @@ describe.skipIf(process.platform !== "darwin")(
           details: {
             operation: "inspect_plist",
             reason: expect.stringContaining(
-              `no readable Contents/Info.plist at ${join(directory, "Contents/Info.plist")}: no file exists there.`,
+              `no readable default plist at ${join(directory, "Contents/Info.plist")}: no file exists there.`,
             ),
           },
         });

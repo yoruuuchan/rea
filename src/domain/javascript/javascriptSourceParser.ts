@@ -9,17 +9,21 @@ export type ParsedJavaScriptSource = ReturnType<typeof parse>;
  *
  * - `dts:true` only for `.d.ts/.d.mts/.d.cts` ambient declarations;
  *   ordinary `.ts` keeps the missing-initializer diagnostic.
- * - JSX enabled for `.tsx`, `.jsx`, `.js`, and unknown paths; disabled for
- *   plain `.ts/.cts/.mts` (angle-bracket assertions, not JSX) and for all
+ * - `.js/.jsx/.mjs/.cjs` use JavaScript grammar with JSX. TypeScript reads
+ *   some valid JavaScript differently (`c?x=>(a):y=>(b)` as a return type,
+ *   `a<b>(c)` as a generic call), so it must not select their meaning.
+ * - JSX enabled for `.tsx` and unknown paths; disabled for plain
+ *   `.ts/.cts/.mts` (angle-bracket assertions, not JSX) and for all
  *   declaration files. `.mts` (including `.d.mts`) sets
  *   `disallowAmbiguousJSXLike`, matching tsc's `.mts` mode.
  * - `decorators-legacy` always present: without it decorated sources fail
  *   hard instead of reporting recovered syntax, losing every derived fact.
- * - Unknown paths retain the existing JSX-capable contract (best-effort
- *   parse; failures surface via `errorRecovery`, never silent misparse).
+ * - Unknown paths retain the existing JSX- and TypeScript-capable contract
+ *   (best-effort parse; failures surface via `errorRecovery`).
  */
 export const parserPluginsForPath = (sourcePath?: string): ParserPlugin[] => {
   const path = sourcePath ?? "";
+  if (/\.(?:js|jsx|mjs|cjs)$/iu.test(path)) return ["decorators-legacy", "jsx"];
   const dts = /\.d\.(?:ts|mts|cts)$/iu.test(path);
   const isTsLike = /\.(?:ts|cts|mts)$/iu.test(path);
   const isTsx = /\.tsx$/iu.test(path);

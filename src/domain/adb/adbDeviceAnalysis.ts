@@ -527,7 +527,13 @@ export const adbResultSchemas = {
     serial: z.string().min(1),
     package_name: packageNameSchema,
     version_name: z.string().nullable(),
-    version_code: z.number().int().nullable(),
+    version_code: z
+      .string()
+      .regex(/^-?\d+$/u)
+      .nullable()
+      .describe(
+        "Long version code exactly as dumpsys package prints it; may exceed the JSON safe-integer range",
+      ),
     first_install_time: z.string().nullable(),
     last_update_time: z.string().nullable(),
     installer_package_name: z.string().nullable(),

@@ -983,4 +983,17 @@ describe("Objective-C property attributes", () => {
     expect(parsePropertyAttributes("count", "").atomicity).toBeNull();
     expect(parsePropertyAttributes("count", "R").atomicity).toBeNull();
   });
+
+  it("establishes no defaults from an unfinished quoted class name", () => {
+    // `,N,R` here lie inside the unterminated quote, so they are not flags.
+    expect(parsePropertyAttributes("title", 'T@"NSString,N,R')).toMatchObject({
+      type_encoding: '@"NSString,N,R',
+      atomicity: null,
+      is_readonly: null,
+    });
+    expect(parsePropertyAttributes("title", 'N,R,T@"NSString')).toMatchObject({
+      atomicity: "nonatomic",
+      is_readonly: true,
+    });
+  });
 });

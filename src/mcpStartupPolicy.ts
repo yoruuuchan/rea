@@ -24,6 +24,7 @@ export interface McpToolTimeoutInputs {
   readonly ghidraStartupTimeoutMs: number;
   readonly hopperStartupTimeoutMs: number;
   readonly jebMcpTimeoutMs?: number;
+  readonly providerRequestTimeoutMs?: number;
 }
 
 /** Allow for known startup phases and caller-selected upstream request budgets. */
@@ -40,7 +41,11 @@ export const mcpProviderDeadlineAllowanceMs = (
             inputs.ghidraStartupTimeoutMs,
             inputs.hopperStartupTimeoutMs,
           );
-  return Math.max(selectedTimeout, inputs.jebMcpTimeoutMs ?? 0);
+  return Math.max(
+    selectedTimeout,
+    inputs.jebMcpTimeoutMs ?? 0,
+    inputs.providerRequestTimeoutMs ?? 0,
+  );
 };
 
 /** Add operation headroom to the parsed provider deadline allowance. */

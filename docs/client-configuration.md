@@ -148,8 +148,10 @@ startup; an explicit Ghidra startup timeout of 2700000 ms produces a 2820000 ms
 tool timeout. The startup allowance follows an explicitly selected Ghidra or
 Hopper provider, and otherwise uses the larger known Ghidra/Hopper deadline.
 An explicit `REA_JEB_MCP_TIMEOUT_MS` request budget also contributes to that
-maximum. Setup forwards these explicitly selected REA deadlines and the input
-schema profile into the registration; unrelated process values are omitted.
+maximum. For `ida` or `auto` selection, a valid IDA registration's parsed
+`timeoutMs` also contributes to that maximum; its default is 300000 ms.
+Setup forwards these explicitly selected REA deadlines and the input schema
+profile into the registration; unrelated process values are omitted.
 This headroom is a practical default, not a guarantee for every analysis
 duration. Setup preserves positive timeout values already in the `rea` entry.
 You can edit `startupTimeoutMs` and `toolTimeoutMs` there; doctor keeps positive
@@ -241,8 +243,9 @@ the default Ghidra allowance; an explicit Ghidra startup timeout of 2700
 seconds yields 2820 seconds. Setup preserves positive caller-selected timeout
 values in the REA entry, and doctor reports a non-blocking advisory when a tool
 timeout is shorter than the known provider allowance. An explicitly selected
-JEB request budget also contributes to the allowance. These values are
-client-side deadlines, so increase them in `~/.codex/config.toml` if a
+JEB request budget also contributes to the allowance. A configured IDA
+registration's parsed `timeoutMs` contributes for `ida` or `auto` selection.
+These values are client-side deadlines, so increase them in `~/.codex/config.toml` if a
 workload needs more time. Devin honors `XDG_CONFIG_HOME` for its
 `devin/mcp_config.json` on non-Windows systems.
 

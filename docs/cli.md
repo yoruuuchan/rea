@@ -314,7 +314,9 @@ diagnostics appear inside the report when `--full-output` is selected. Log
 truncation alone does not change the diagnostic health or exit status.
 
 The default terminal format is TOON. Use `--json` when saving results for a
-JSON consumer. `--json` is indented on a terminal and compact when piped or
+JSON consumer. Valued output flags (`--format`, `--filter-output`,
+`--token-limit`, `--token-offset`) accept `--flag value` or `--flag=value`; a
+missing value fails with `MISSING_OUTPUT_VALUE` before the command runs. `--json` is indented on a terminal and compact when piped or
 redirected, which keeps large results smaller for agents and scripts; pipe
 through `jq .` for indented files. Output selection and formatting do not change
 operation status.
@@ -351,6 +353,11 @@ command, objdump, Rizin and GDB. In these paths, a returned structured
 `cancelled` result can be printed before the wrapper assigns the
 signal-derived status. This describes the current source routing; it is not a
 claim that every command or provider runtime has been independently exercised.
+
+When the reader of piped output closes early, as `rea ... | head` does, the
+CLI stops writing, prints no error and exits `141` (`128 + 13`, the status of a
+SIGPIPE-terminated writer). The operation itself may have completed; only its
+output was declined.
 
 `inspect-artifact` also returns a structured cancelled result, but its direct
 analysis cancellation path does not set a signal-derived exit status, so it

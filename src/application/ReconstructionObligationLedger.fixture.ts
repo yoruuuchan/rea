@@ -14,7 +14,10 @@ import {
   type ReviewedReconstructionObligation,
 } from "../domain/reconstructionObligationLedgerSchemas.js";
 
-import { processCaptureSchema } from "../domain/process/processCapture.js";
+import {
+  processCaptureSchema,
+  type UnverifiedProcessCapture,
+} from "../domain/process/processCapture.js";
 /** Build controlled fixture Evidence used by reconstruction-ledger scenarios. */
 export const proofEvidence = (id: string) =>
   createEvidence(
@@ -31,13 +34,18 @@ export const proofEvidence = (id: string) =>
   );
 
 /** Use the canonical empty process capture as a controlled Evidence example. */
-export const processEvidence = () =>
+export const processEvidence = (
+  overrides: Partial<UnverifiedProcessCapture> = {},
+) =>
   createEvidence(undefined, PROCESS_PROVIDER, {
     predicateType: "rea.process-capture",
     operation: "capture_process_scenario",
     parameters: {},
     result: jsonValueSchema.parse(
-      processCaptureSchema.parse(EMPTY_PROCESS_CAPTURE_EXAMPLE),
+      processCaptureSchema.parse({
+        ...EMPTY_PROCESS_CAPTURE_EXAMPLE,
+        ...overrides,
+      }),
     ),
     confidence: "observed",
     authority: "controlled-replay",

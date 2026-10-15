@@ -5,10 +5,7 @@ import { setImmediate } from "node:timers/promises";
 
 import { resolveJavaScriptSourceMapReferences } from "../../domain/javascript/javascriptSourceMapPaths.js";
 import { analyzeParsedJavaScriptStaticSourceSteps } from "../../domain/javascript/javascriptStaticAnalysis.js";
-import {
-  analyzeParsedJavaScriptSemanticsSteps,
-  classifyParsedJavaScriptOpenReceiversSteps,
-} from "../../domain/javascript/javascriptSemanticAnalysis.js";
+import { analyzeParsedJavaScriptSemanticsSteps } from "../../domain/javascript/javascriptSemanticAnalysis.js";
 import type { JavaScriptSemanticIr } from "../../domain/javascript/javascriptSemanticIr.js";
 import { projectJavaScriptModuleSemantics } from "../../domain/javascript/javascriptModuleSemanticIr.js";
 import { parseJavaScriptSource } from "../../domain/javascript/javascriptSourceParser.js";
@@ -382,12 +379,9 @@ function* analyzeArtifactFileSteps<
     state.parseFailures += 1;
     return;
   }
-  const openReceiverFacts =
-    yield* classifyParsedJavaScriptOpenReceiversSteps(parsed);
   const analysis = yield* analyzeParsedJavaScriptStaticSourceSteps(
     file.text.value,
     parsed,
-    openReceiverFacts,
   );
   const staticFindings = findingCount(analysis);
   yield;

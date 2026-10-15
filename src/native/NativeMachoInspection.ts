@@ -101,19 +101,27 @@ export const inspectNativeMacho = async (
       ],
       context.signal,
     );
+  // vtool knows no variant subtypes, so no spelling selects an arm64e.x1 slice.
+  const vtoolSelectsSlice =
+    selectedArchitecture === null ||
+    !toolArchitectureName("vtool", selectedArchitecture).includes(".");
   // Slice commands only read the selected artifact, so launch them together.
   // Every launch settles before return; declared order fixes provenance and
   // which failure is reported.
   const [required, optional] = await Promise.all([
     Promise.all(REQUIRED_SLICE_COMMANDS.map(runSliceCommand)),
-    runSliceCommand(OPTIONAL_VTOOL_COMMAND),
+    vtoolSelectsSlice ? runSliceCommand(OPTIONAL_VTOOL_COMMAND) : null,
   ]);
   for (const captured of required) {
     if (!captured.ok) return err(captured.error);
     captures.push(captured.value);
   }
   const limitations: string[] = [];
-  if (optional.ok) captures.push(optional.value);
+  if (optional === null)
+    limitations.push(
+      `vtool cannot select the ${selectedArchitecture} slice; build metadata is normalized from otool only.`,
+    );
+  else if (optional.ok) captures.push(optional.value);
   else if (optional.error._tag === "AnalysisCapabilityUnavailableError")
     limitations.push(VTOOL_UNAVAILABLE_LIMITATION);
   else return err(optional.error);
@@ -419,16 +427,21 @@ export const architectureLocations = (
   return locations;
 };
 
+/**
+ * lipo appends the pointer-auth ABI version to arm64e (`arm64e.v1`). Only
+ * dyld_info accepts that spelling; the other Apple tools select the slice by
+ * its CPU-family name. Other variants are distinct subtypes (`arm64e.x1`)
+ * that the tools address only by their exact name.
+ */
+const toolArchitectureName = (tool: string, architecture: string): string =>
+  tool === "dyld_info" ? architecture : architecture.replace(/\.v\d+$/u, "");
+
 const selectedArchitectureArguments = (
   tool: string,
   architecture: string | null,
 ): string[] => {
   if (architecture === null) return [];
-  const baseArchitecture = architecture.split(".")[0] ?? architecture;
-  // dyld_info distinguishes arm64e ABI variants; the other Apple tools use
-  // the base CPU-family spelling for the same slice.
-  const toolArchitecture =
-    tool === "dyld_info" ? architecture : baseArchitecture;
+  const toolArchitecture = toolArchitectureName(tool, architecture);
   return tool === "dwarfdump"
     ? [`--arch=${toolArchitecture}`]
     : ["-arch", toolArchitecture];

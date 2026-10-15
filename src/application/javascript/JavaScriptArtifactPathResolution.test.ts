@@ -2495,20 +2495,61 @@ describe("url-reference directory and empty-segment semantics", () => {
     });
   });
 
-  it.each(["./nested//worker.js", "./nested//../worker.js"])(
-    "does not collapse empty URL path segments: %s",
-    (declaredPath) => {
+  it.each([
+    ["./nested//worker.js", null],
+    ["./nested//../worker.js", "dist/nested/worker.js"],
+  ])(
+    "keeps empty URL path segments significant: %s",
+    (declaredPath, resolvedPath) => {
+      // A dot segment removes the preceding empty segment, never `nested`.
+      expect(new URL(declaredPath, "file:///root/dist/app.mjs").pathname).toBe(
+        resolvedPath === null
+          ? "/root/dist/nested//worker.js"
+          : `/root/${resolvedPath}`,
+      );
+      for (const context of ["url-reference", "html-reference"] as const)
+        expect(
+          resolve({
+            declaredPath,
+            sourcePath: "dist/app.mjs",
+            context,
+            files: fileMap([
+              file("dist/worker.js", "root"),
+              file("dist/nested/worker.js", "root"),
+            ]),
+          }),
+          context,
+        ).toMatchObject({ resolved_path: resolvedPath });
       expect(
         resolve({
           declaredPath,
           sourcePath: "dist/app.mjs",
-          context: "url-reference",
+          context: "module-specifier",
+          moduleKind: "import",
           files: fileMap([
             file("dist/worker.js", "root"),
             file("dist/nested/worker.js", "root"),
           ]),
         }),
-      ).toMatchObject({ resolved_path: null });
+      ).toMatchObject({ resolved_path: resolvedPath });
+      // CommonJS keeps filesystem path semantics.
+      expect(
+        resolve({
+          declaredPath,
+          sourcePath: "dist/app.mjs",
+          context: "module-specifier",
+          moduleKind: "require",
+          files: fileMap([
+            file("dist/worker.js", "root"),
+            file("dist/nested/worker.js", "root"),
+          ]),
+        }),
+      ).toMatchObject({
+        resolved_path:
+          declaredPath === "./nested//worker.js"
+            ? "dist/nested/worker.js"
+            : "dist/worker.js",
+      });
     },
   );
 

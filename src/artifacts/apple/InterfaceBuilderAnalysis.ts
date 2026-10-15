@@ -7,7 +7,10 @@ import {
   isUIKitRuntimeConnectionClass,
 } from "../../domain/apple/interfaceBuilderKeyedArchive.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
-import { projectPlistValue } from "../../domain/apple/plistValue.js";
+import {
+  projectPlistValue,
+  unknownDateLimitation,
+} from "../../domain/apple/plistValue.js";
 import {
   omittedPrototypeKeysLimitation,
   parseXmlPropertyList,
@@ -58,6 +61,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
   const incompleteHierarchies = new Map<string, number>();
   const unresolvedConnections = new Map<string, number>();
   const prototypeKeyOmissions = new Map<string, number | null>();
+  const unknownDates = new Map<string, number>();
   let omitted = 0;
   let attempted = 0;
   let aggregateInputBytes = 0;
@@ -131,16 +135,21 @@ export const analyzeInterfaceBuilderBundle = async (input: {
           binaryPrototypeKeyObserved =
             decodedReservation.binaryPrototypeKeyObserved;
         }
-        const { value: raw, omittedPrototypeKeys } =
-          nib === null
-            ? decodePlist(bytes, xmlText, binaryPrototypeKeyObserved)
-            : { value: nib.raw, omittedPrototypeKeys: 0 };
+        const {
+          value: raw,
+          omittedPrototypeKeys,
+          unknownDateCount,
+        } = nib === null
+          ? decodePlist(bytes, xmlText, binaryPrototypeKeyObserved)
+          : { value: nib.raw, omittedPrototypeKeys: 0, unknownDateCount: 0 };
         if (nib !== null && nib.omitted > 0)
           incompleteHierarchies.set(entry.path, nib.omitted);
         if (nib !== null && nib.unresolvedConnections > 0)
           unresolvedConnections.set(entry.path, nib.unresolvedConnections);
         if (omittedPrototypeKeys !== 0)
           prototypeKeyOmissions.set(entry.path, omittedPrototypeKeys);
+        if (unknownDateCount !== 0)
+          unknownDates.set(entry.path, unknownDateCount);
         const documentHash = createHash("sha256").update(bytes).digest("hex");
         documents.push({
           relativePath: entry.path,
@@ -178,6 +187,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
     incompleteHierarchies,
     unresolvedConnections,
     prototypeKeyOmissions,
+    unknownDates,
     invalid,
     omittedArchives,
     unreportedOmittedArchives,
@@ -246,6 +256,7 @@ const finalizeHierarchyCoverage = (
     incompleteHierarchies: ReadonlyMap<string, number>;
     unresolvedConnections: ReadonlyMap<string, number>;
     prototypeKeyOmissions: ReadonlyMap<string, number | null>;
+    unknownDates: ReadonlyMap<string, number>;
     invalid: readonly string[];
     omittedArchives: readonly { path: string; reason: string }[];
     unreportedOmittedArchives: number;
@@ -257,6 +268,7 @@ const finalizeHierarchyCoverage = (
     incompleteHierarchies,
     unresolvedConnections,
     prototypeKeyOmissions,
+    unknownDates,
     invalid,
     omittedArchives,
     unreportedOmittedArchives,
@@ -341,6 +353,9 @@ const finalizeHierarchyCoverage = (
           ]),
       ...[...prototypeKeyOmissions].map(
         ([path, count]) => `${path}: ${omittedPrototypeKeysLimitation(count)}`,
+      ),
+      ...[...unknownDates].map(
+        ([path, count]) => `${path}: ${unknownDateLimitation(count)}`,
       ),
       ...omittedArchives.map(
         ({ path, reason }) =>
@@ -693,6 +708,7 @@ const decodePlist = (
 ): {
   readonly value: JsonValue;
   readonly omittedPrototypeKeys: number | null;
+  readonly unknownDateCount: number;
 } => {
   const binary = hasBinaryPlistSignature(bytes);
   const { value, omittedPrototypeKeys } = binary
@@ -701,5 +717,10 @@ const decodePlist = (
         omittedPrototypeKeys: binaryPrototypeKeyObserved ? null : 0,
       }
     : parseXmlPropertyList(xmlText ?? decodeXmlPlistText(bytes));
-  return { value: projectPlistValue(value).value, omittedPrototypeKeys };
+  const projected = projectPlistValue(value);
+  return {
+    value: projected.value,
+    omittedPrototypeKeys,
+    unknownDateCount: projected.unknownDateCount,
+  };
 };

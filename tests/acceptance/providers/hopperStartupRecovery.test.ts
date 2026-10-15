@@ -10,7 +10,7 @@ import { z } from "zod";
 
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { workspaceCliTest } from "../../support/cli/workspaceCliFixture.js";
-import { acquireHopperTargetLease } from "../../../src/hopper/HopperTargetLease.js";
+import { acquireHopperTargetLease } from "../../../src/process/HopperLease.js";
 
 const statusSchema = z.object({ result: z.object({ open: z.boolean() }) });
 const test = workspaceCliTest.skipIf(process.platform !== "darwin");

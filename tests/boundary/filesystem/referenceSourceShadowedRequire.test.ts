@@ -119,3 +119,67 @@ it("resolves require calls by lexical binding and source mode", async () => {
     ["top-level-var.cjs", "loaded.cjs"],
   ]);
 });
+
+it("does not attribute overwritten require members to Node's resolver", async () => {
+  const root = await createTestTempDirectory("rea-reference-require-member-");
+  const sources: Record<string, string> = {
+    "assigned.cjs":
+      "require.resolve = () => 'custom';\nconsole.log(require.resolve('./loaded.cjs'));",
+    "defined.cjs":
+      "Object.defineProperty(require, 'resolve', { value: () => 'custom' });\nconsole.log(require.resolve('./loaded.cjs'));",
+    "computed.cjs":
+      "const key = 'resolve';\nrequire[key] = () => 'custom';\nconsole.log(require.resolve('./loaded.cjs'));",
+    "control.cjs": "console.log(typeof require.resolve('./loaded.cjs'));",
+    // A member overwrite does not change bare loader calls.
+    "bare-after-overwrite.cjs":
+      "require.resolve = () => 'custom';\nconsole.log(require('./loaded.cjs'));",
+    // A local loader's member write does not touch Node's loader.
+    "local-loader.cjs":
+      "function patch(require) { require.resolve = () => 'custom'; }\npatch({});\nconsole.log(typeof require.resolve('./loaded.cjs'));",
+    // Optional calls and inert wrappers do not let the loader escape.
+    "optional-call.cjs":
+      "require?.('./loaded.cjs');\nconsole.log(typeof (require).resolve('./loaded.cjs'));",
+    "loaded.cjs": "module.exports = 'real';\n",
+  };
+  await Promise.all(
+    Object.entries(sources).map(([path, source]) =>
+      writeFile(join(root, path), source),
+    ),
+  );
+  const runNode = promisify(execFile);
+  for (const [path, stdout] of [
+    ["assigned.cjs", "custom\n"],
+    ["defined.cjs", "custom\n"],
+    ["computed.cjs", "custom\n"],
+    ["control.cjs", "string\n"],
+    ["bare-after-overwrite.cjs", "real\n"],
+    ["local-loader.cjs", "string\n"],
+    ["optional-call.cjs", "string\n"],
+  ] as const)
+    expect(
+      (
+        await runNode(process.execPath, [join(root, path)], {
+          cwd: root,
+          timeout: 5_000,
+        })
+      ).stdout,
+    ).toBe(stdout);
+
+  const result = await importReferenceSource({
+    root,
+    caller: "reference-require-member-test",
+    policy: { secretPatterns: [] },
+  });
+  if (!result.ok) throw result.error;
+  expect(
+    result.value.relationships
+      .filter(({ kind }) => kind === "requires")
+      .map(({ from_path, to }) => [from_path, to])
+      .sort((left, right) => (left[0] ?? "").localeCompare(right[0] ?? "")),
+  ).toEqual([
+    ["bare-after-overwrite.cjs", "loaded.cjs"],
+    ["control.cjs", "loaded.cjs"],
+    ["local-loader.cjs", "loaded.cjs"],
+    ["optional-call.cjs", "loaded.cjs"],
+  ]);
+});

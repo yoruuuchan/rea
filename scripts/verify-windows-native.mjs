@@ -48,6 +48,13 @@ const { PrivateRuntimeRootUnavailableError } = await import(
   )
 );
 const workspace = await mkdtemp(join(tmpdir(), "rea-native-conformance-"));
+// A pwsh caller can supply module paths incompatible with Windows PowerShell.
+// Each independent observer must discover its own module path.
+const windowsPowerShellEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) => name.toLowerCase() !== "psmodulepath",
+  ),
+);
 const environment = Object.entries(process.env)
   .filter(([, value]) => value !== undefined)
   .map(([key, value]) => `${key}=${value}`);
@@ -309,6 +316,7 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
   ]);
   const sentinel = join(sourceDirectory, "sentinel");
   await writeFile(sentinel, "preserve");
+  const runtimeVerificationErrors = [];
   try {
     const acl = JSON.parse(
       execFileSync(
@@ -317,18 +325,13 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
           "-NoProfile",
           "-NonInteractive",
           "-Command",
-          "$a=Get-Acl -LiteralPath $env:REA_TEST_PRIVATE_RUNTIME_PATH; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User; @{protected=$a.AreAccessRulesProtected; ownerMatchesUser=($a.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq $u.Value); trusteesOnlyUserAndSystem=(@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object {$_.IdentityReference.Value -ne $u.Value -and $_.IdentityReference.Value -ne 'S-1-5-18'}).Count -eq 0); count=@($a.Access).Count} | ConvertTo-Json -Compress",
+          "$ErrorActionPreference='Stop'; $p=$env:REA_TEST_PRIVATE_RUNTIME_PATH; $a=Get-Acl -LiteralPath $p; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User; [IO.File]::SetAttributes($p,[IO.FileAttributes]([int][IO.File]::GetAttributes($p) -bor 1)); @{protected=$a.AreAccessRulesProtected; ownerMatchesUser=($a.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq $u.Value); trusteesOnlyUserAndSystem=(@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object {$_.IdentityReference.Value -ne $u.Value -and $_.IdentityReference.Value -ne 'S-1-5-18'}).Count -eq 0); count=@($a.Access).Count; rootReadonly=(([int][IO.File]::GetAttributes($p) -band 1) -ne 0)} | ConvertTo-Json -Compress",
         ],
         {
           encoding: "utf8",
-          // A pwsh caller can supply module paths incompatible with the
-          // Windows PowerShell observer. Let that observer build its own path.
+          timeout: 15_000,
           env: {
-            ...Object.fromEntries(
-              Object.entries(process.env).filter(
-                ([name]) => name.toLowerCase() !== "psmodulepath",
-              ),
-            ),
+            ...windowsPowerShellEnvironment,
             REA_TEST_PRIVATE_RUNTIME_PATH: runtime.path,
           },
         },
@@ -339,6 +342,7 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
       ownerMatchesUser: true,
       trusteesOnlyUserAndSystem: true,
       count: 2,
+      rootReadonly: true,
     });
     native.call("runtime_mkdir", [runtime.handle, "inputs"]);
     native.call("runtime_write", [
@@ -484,7 +488,10 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
         {
           encoding: "utf8",
           timeout: 15_000,
-          env: { ...process.env, REA_SNAPSHOT_READER_PATH: snapshotPath },
+          env: {
+            ...windowsPowerShellEnvironment,
+            REA_SNAPSHOT_READER_PATH: snapshotPath,
+          },
         },
       ).trim();
       assert.equal(readerDigest, readbackSnapshot.sha256);
@@ -574,12 +581,52 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
       asynchronousSnapshot: true,
       snapshotCancellation: true,
     };
-  } finally {
-    native.call("runtime_close", [runtime.handle]);
+    const readonlyChildren = JSON.parse(
+      execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$ErrorActionPreference='Stop'; $items=ConvertFrom-Json -InputObject $env:REA_TEST_READONLY_CHILDREN; @($items | ForEach-Object { $current=[int][IO.File]::GetAttributes($_); $next=if(($current -band 16) -ne 0){$current -bor 1}else{1}; [IO.File]::SetAttributes($_,[IO.FileAttributes]$next); $a=[int][IO.File]::GetAttributes($_); @{readonly=(($a -band 1) -ne 0); directory=(($a -band 16) -ne 0); onlyReadonly=($a -eq 1)} }) | ConvertTo-Json -Compress",
+        ],
+        {
+          encoding: "utf8",
+          timeout: 15_000,
+          env: {
+            ...windowsPowerShellEnvironment,
+            REA_TEST_READONLY_CHILDREN: JSON.stringify([
+              join(runtime.path, "inputs"),
+              join(runtime.path, "inputs", "target.bin"),
+            ]),
+          },
+        },
+      ),
+    );
+    assert.deepEqual(readonlyChildren, [
+      { readonly: true, directory: true, onlyReadonly: false },
+      { readonly: true, directory: false, onlyReadonly: true },
+    ]);
+  } catch (failure) {
+    runtimeVerificationErrors.push(failure);
   }
+  try {
+    native.call("runtime_close", [runtime.handle]);
+  } catch (cleanupFailure) {
+    runtimeVerificationErrors.push(cleanupFailure);
+  }
+  if (runtimeVerificationErrors.length === 1)
+    throw runtimeVerificationErrors[0];
+  if (runtimeVerificationErrors.length > 1)
+    throw new AggregateError(
+      runtimeVerificationErrors,
+      "Native runtime verification and cleanup failed",
+    );
   assert.equal(await exists(runtime.path), false);
   assert.equal(await readFile(sentinel, "utf8"), "preserve");
   report.controls.cleanupDoesNotTraverseJunctions = true;
+  report.controls.readonlyRootAndChildrenRemoved = true;
+  report.controls.readonlyFileWithoutArchiveAttributeRemoved = true;
   const fixture = join(workspace, "tree.mjs");
   await writeFile(
     fixture,

@@ -378,7 +378,9 @@ complete observation.
   property: `N` means `nonatomic`; a complete typed attribute string without
   `N` means the Objective-C default `atomic`;
   missing or incomplete attribute metadata leaves `atomicity` and any
-  unestablished read-only value null. `is_meta_class`, `is_root_class`, and
+  unestablished read-only value null. A type attribute whose quoted class name
+  never closes is incomplete and marks `objc_properties_categories` partial
+  with `property_attributes_incomplete`. `is_meta_class`, `is_root_class`, and
   `ivar_count` are also nullable when the selected provider exposes only symbol
   names. Class implementation methods have null `is_required` and `is_optional`
   fields because those facts apply to protocol declarations; decoded protocol
@@ -569,6 +571,12 @@ Value projection preserves serialized node kinds, IDs, references and pagination
 Exact and ambiguous value counts describe emitted root/object value instances;
 a root and an object may contain the same value. Archive digests identify the
 original bytes.
+
+Dates are reported as `{ "$plist_type": "date", "iso8601": "<timestamp>" }`. A
+date the decoder cannot represent, such as an XML date with a year beyond 9999
+or a negative year, is reported as `{ "$plist_type": "date", "iso8601": null }`
+with a counted limitation; the rest of the plist or archive is still decoded.
+`inspect_plist` and Interface Builder decoding use the same projection.
 
 ## Locate a byte signature
 

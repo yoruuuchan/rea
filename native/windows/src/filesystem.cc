@@ -184,6 +184,29 @@ static Handle createRelative(HANDLE parent, const std::wstring& name, DWORD acce
   return result;
 }
 
+void cleanupFailedRuntime(std::unique_ptr<Runtime>& owner, Failure& primary) {
+  if (!owner || !owner->directory.valid()) {
+    owner.reset();
+    return;
+  }
+  try {
+    closeRuntime(*owner);
+    owner.reset();
+  } catch (const Failure& cleanup) {
+    primary.cleanupConstraint = cleanup.constraint;
+    primary.cleanupWin32 = cleanup.win32;
+    primary.cleanupPath = cleanup.path;
+  } catch (const std::exception& cleanup) {
+    primary.cleanupConstraint = cleanup.what();
+    primary.cleanupWin32 = ERROR_GEN_FAILURE;
+    primary.cleanupPath = owner->path;
+  } catch (...) {
+    primary.cleanupConstraint = "Unknown runtime cleanup failure";
+    primary.cleanupWin32 = ERROR_GEN_FAILURE;
+    primary.cleanupPath = owner->path;
+  }
+}
+
 // Lookup relative to an already-owned directory; path is diagnostic only.
 static Handle openRelative(HANDLE parent, const std::wstring& name, DWORD access,
                            DWORD sharing, ULONG kind, const std::wstring& path) {
@@ -337,7 +360,11 @@ static napi_value readCutterBridgeDescriptor(napi_env env, const std::vector<nap
   return result;
 }
 
-std::unique_ptr<Runtime> createRuntime(const std::wstring& parentPath, const std::wstring& prefix) {
+void createRuntime(const std::wstring& parentPath, const std::wstring& prefix,
+                   std::unique_ptr<Runtime>& owner) {
+  // A previous failed admission retains the original root handle. Retry that
+  // owner before allowing this environment to allocate another runtime.
+  if (owner) { closeRuntime(*owner); owner.reset(); }
   std::unique_ptr<File> parent;
   try { parent = openFile(parentPath, 0, true); }
   catch (Failure& failure) {
@@ -349,24 +376,29 @@ std::unique_ptr<Runtime> createRuntime(const std::wstring& parentPath, const std
   std::array<unsigned char, 16> random;
   require(BCryptGenRandom(nullptr, random.data(), random.size(), BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0,
           "Generate runtime identity failed", parentPath, ERROR_GEN_FAILURE);
+  Security security;
   auto result = std::make_unique<Runtime>();
   const auto name = prefix + hex(random.data(), random.size());
   result->path = parent->path + (parent->path.back() == L'\\' ? L"" : L"\\") + name;
-  Security security;
-  result->directory = createRelative(parent->get(), name,
-                                     DELETE | FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL,
-                                     true, security, result->path);
+  result->parents = std::move(parent->handles);
+  owner = std::move(result);
   try {
-    verifyPrivate(result->directory.get(), result->path, true);
-    // The owned child pins the parent nonempty before write sharing is relaxed.
-    parent->handles.back() = openComponent(parent->path, 0, true, FILE_SHARE_READ | FILE_SHARE_WRITE);
-    result->parents = std::move(parent->handles);
-  } catch (...) {
-    FILE_DISPOSITION_INFO deletion{TRUE};
-    SetFileInformationByHandle(result->directory.get(), FileDispositionInfo, &deletion, sizeof(deletion));
+    owner->directory = createRelative(owner->parents.back().get(), name,
+                                      DELETE | FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | READ_CONTROL,
+                                      true, security, owner->path);
+    // FILE_CREATE proves ownership and pins the parent nonempty independently
+    // of admission validation. A failed validation must not retain a strict
+    // parent lease that prevents renaming the still-owned child before retry.
+    owner->parents.back() = openComponent(parent->path, 0, true, FILE_SHARE_READ | FILE_SHARE_WRITE);
+    verifyPrivate(owner->directory.get(), owner->path, true);
+  } catch (Failure& primary) {
+    cleanupFailedRuntime(owner, primary);
     throw;
+  } catch (const std::exception& error) {
+    Failure primary(error.what(), owner->path, ERROR_GEN_FAILURE);
+    cleanupFailedRuntime(owner, primary);
+    throw primary;
   }
-  return result;
 }
 
 static std::wstring relativePath(Runtime& root, const std::wstring& relative) {
@@ -441,6 +473,9 @@ static void dispose(HANDLE handle, const std::wstring& path) {
   require(GetFileInformationByHandleEx(handle, FileBasicInfo, &info, sizeof(info)), "Read cleanup attributes failed", path);
   if ((info.FileAttributes & FILE_ATTRIBUTE_READONLY) != 0) {
     info.FileAttributes &= ~FILE_ATTRIBUTE_READONLY;
+    // Zero means "leave attributes unchanged" to FileBasicInfo. A file whose
+    // sole attribute was READONLY needs NORMAL to actually clear that marker.
+    if (info.FileAttributes == 0) info.FileAttributes = FILE_ATTRIBUTE_NORMAL;
     require(SetFileInformationByHandle(handle, FileBasicInfo, &info, sizeof(info)), "Clear owned readonly attribute failed", path);
   }
   FILE_DISPOSITION_INFO deletion{TRUE};
@@ -657,7 +692,8 @@ static napi_value snapshot(napi_env env, napi_value rootValue, Runtime& root,
   return promise;
 }
 
-napi_value filesystemCall(napi_env env, const std::wstring& operation, const std::vector<napi_value>& args) {
+napi_value filesystemCall(napi_env env, const std::wstring& operation,
+                          const std::vector<napi_value>& args, RuntimeContext& context) {
   if (operation == L"cutter_bridge_verify_directory") return verifyCutterBridgeDirectory(env, args);
   if (operation == L"cutter_bridge_read_descriptor") return readCutterBridgeDescriptor(env, args);
   const auto expected = operation == L"open" || operation == L"close" || operation == L"runtime_close" || operation == L"runtime_snapshot_cancel" ? 1
@@ -691,12 +727,21 @@ napi_value filesystemCall(napi_env env, const std::wstring& operation, const std
     return result;
   }
   if (operation == L"runtime_create") {
-    auto root = createRuntime(wide(env, args[0]), wide(env, args[1]));
-    auto result = identity(env, root->directory.get(), root->path);
-    set(env, result, "path", string(env, root->path));
-    set(env, result, "privateDacl", boolean(env, true));
-    set(env, result, "handle", wrap(env, std::move(root)));
-    return result;
+    createRuntime(wide(env, args[0]), wide(env, args[1]), context.pending);
+    try {
+      auto result = identity(env, context.pending->directory.get(), context.pending->path);
+      set(env, result, "path", string(env, context.pending->path));
+      set(env, result, "privateDacl", boolean(env, true));
+      publishRuntimeHandle(env, result, context.pending);
+      return result;
+    } catch (Failure& primary) {
+      cleanupFailedRuntime(context.pending, primary);
+      throw;
+    } catch (const std::exception& error) {
+      Failure primary(error.what(), context.pending ? context.pending->path : L"", ERROR_GEN_FAILURE);
+      cleanupFailedRuntime(context.pending, primary);
+      throw primary;
+    }
   }
   auto& root = static_cast<Runtime&>(resource(env, args[0], Kind::Runtime));
   require(!root.closing || operation == L"runtime_close", "Runtime cleanup is pending", root.path, ERROR_BUSY);

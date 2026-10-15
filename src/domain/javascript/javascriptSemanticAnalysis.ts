@@ -223,37 +223,6 @@ export function* analyzeParsedJavaScriptSemanticsSteps(
   };
 }
 
-/** Resolve tRPC client roots by lexical identity, excluding overwritten bindings. */
-export function* classifyParsedJavaScriptRpcClientRootsSteps(
-  file: ParsedJavaScriptSource,
-): Generator<void, ReadonlySet<t.Node>> {
-  const state = createState(file.program);
-  yield* collectDefinitionsSteps(file.program, state);
-  const roots = new Set<t.Node>();
-  const clients = new Map<string, boolean>();
-  yield* traverseJavaScriptAstSteps(file.program, {
-    enter: (node) => {
-      if (!t.isMemberExpression(node) && !t.isOptionalMemberExpression(node))
-        return;
-      const root = node.object;
-      if (!t.isIdentifier(root)) return;
-      const binding = resolveSemanticBindingState(state, root, root.name);
-      if (binding === undefined) return;
-      let client = clients.get(binding.bindingId);
-      if (client === undefined) {
-        const initializer = semanticStableInitializer(binding, state);
-        client =
-          initializer !== undefined &&
-          initializer.projection.length === 0 &&
-          isJavaScriptRpcClientFactory(initializer.node);
-        clients.set(binding.bindingId, client);
-      }
-      if (client) roots.add(root);
-    },
-  });
-  return roots;
-}
-
 /**
  * Receiver identity facts for the overloaded `.open` syntax, plus
  * `configuration` for `.get` reads of a `getConfiguration(...)` result.
@@ -268,111 +237,169 @@ export type JavaScriptOpenReceiverFact =
   | "configuration"
   | "extension-state";
 
-/**
- * Resolve only the lexical receiver identity needed to distinguish browser
- * `window.open` from XHR and global storage `.open` calls, and configuration
- * `.get` reads from HTTP client calls. This deliberately builds definitions
- * without running semantic value or provenance analysis.
- */
-export const classifyParsedJavaScriptOpenReceivers = (
-  file: ParsedJavaScriptSource,
-): ReadonlyMap<number, JavaScriptOpenReceiverFact> =>
-  completeSemanticSteps(classifyParsedJavaScriptOpenReceiversSteps(file));
+/** Lexical receiver identities that select static endpoint interpretations. */
+export interface JavaScriptReceiverFacts {
+  readonly openReceivers: ReadonlyMap<number, JavaScriptOpenReceiverFact>;
+  readonly rpcClientRoots: ReadonlySet<t.Node>;
+}
 
-/** Classify `.open` receivers while yielding during lexical and AST scans. */
-export function* classifyParsedJavaScriptOpenReceiversSteps(
+/**
+ * Resolve only the lexical receiver identities needed to distinguish browser
+ * `window.open` from XHR and global storage `.open` calls, configuration
+ * `.get` reads from HTTP client calls, and tRPC client roots (excluding
+ * overwritten bindings). This deliberately builds definitions without running
+ * semantic value or provenance analysis.
+ */
+export const classifyParsedJavaScriptReceivers = (
   file: ParsedJavaScriptSource,
-): Generator<void, ReadonlyMap<number, JavaScriptOpenReceiverFact>> {
+): JavaScriptReceiverFacts =>
+  completeSemanticSteps(classifyParsedJavaScriptReceiversSteps(file));
+
+/** Classify receivers while yielding during lexical and AST scans. */
+export function* classifyParsedJavaScriptReceiversSteps(
+  file: ParsedJavaScriptSource,
+): Generator<void, JavaScriptReceiverFacts> {
   const state = createState(file.program);
   yield* collectDefinitionsSteps(file.program, state);
+  return yield* classifyDefinitionReceiversSteps(file.program, state);
+}
+
+/**
+ * Index bindings and classify receivers from one definitions pass. Receiver
+ * facts read the definitions-only phase, so they are classified before the
+ * same state is extended with ambient writes.
+ */
+export function* indexJavaScriptBindingsWithReceiversSteps(
+  program: t.Program,
+): Generator<
+  void,
+  {
+    readonly bindings: JavaScriptSemanticAnalysisState;
+    readonly receivers: JavaScriptReceiverFacts;
+  }
+> {
+  const state = createState(program);
+  yield* collectDefinitionsSteps(program, state);
+  const receivers = yield* classifyDefinitionReceiversSteps(program, state);
+  yield* indexJavaScriptAmbientWritesSteps(program, state);
+  return { bindings: state, receivers };
+}
+
+function* classifyDefinitionReceiversSteps(
+  program: t.Program,
+  state: JavaScriptSemanticAnalysisState,
+): Generator<void, JavaScriptReceiverFacts> {
   const facts = new Map<number, JavaScriptOpenReceiverFact>();
   const extensionStateReads: number[] = [];
-  yield* traverseJavaScriptAstSteps(file.program, {
-    enter: (node) => {
-      if (
-        (!t.isCallExpression(node) && !t.isOptionalCallExpression(node)) ||
-        (!t.isMemberExpression(node.callee) &&
-          !t.isOptionalMemberExpression(node.callee))
-      )
-        return;
-      const method = semanticStaticPropertyKey(
-        node.callee.property,
-        node.callee.computed,
+  const roots = new Set<t.Node>();
+  const clients = new Map<string, boolean>();
+  const classifyRpcRoot = (node: t.Node): void => {
+    if (!t.isMemberExpression(node) && !t.isOptionalMemberExpression(node))
+      return;
+    const root = node.object;
+    if (!t.isIdentifier(root)) return;
+    const binding = resolveSemanticBindingState(state, root, root.name);
+    if (binding === undefined) return;
+    let client = clients.get(binding.bindingId);
+    if (client === undefined) {
+      const initializer = semanticStableInitializer(binding, state);
+      client =
+        initializer !== undefined &&
+        initializer.projection.length === 0 &&
+        isJavaScriptRpcClientFactory(initializer.node);
+      clients.set(binding.bindingId, client);
+    }
+    if (client) roots.add(root);
+  };
+  const classifyOpenReceiver = (node: t.Node): void => {
+    if (
+      (!t.isCallExpression(node) && !t.isOptionalCallExpression(node)) ||
+      (!t.isMemberExpression(node.callee) &&
+        !t.isOptionalMemberExpression(node.callee))
+    )
+      return;
+    const method = semanticStaticPropertyKey(
+      node.callee.property,
+      node.callee.computed,
+    );
+    if (method === "get") {
+      if (isConfigurationReceiver(state, node.callee.object))
+        facts.set(node.start ?? -1, "configuration");
+      else if (isExtensionStateMember(node.callee.object))
+        extensionStateReads.push(node.start ?? -1);
+      return;
+    }
+    if (method !== "open" || !t.isIdentifier(node.callee.object)) return;
+    const receiver = node.callee.object.name;
+    const binding = resolveSemanticBindingState(state, node, receiver);
+    if (binding === undefined) {
+      if (semanticResolutionBlocked(state, node, receiver)) return;
+      const fact = openGlobalFact(receiver);
+      if (fact !== undefined) facts.set(node.start ?? -1, fact);
+      return;
+    }
+    // A lexically bound receiver overrides ambient browser globals. Mark an
+    // otherwise unresolved local as local so name-based window.open
+    // heuristics do not hide its XHR-like overloads.
+    facts.set(node.start ?? -1, "local");
+    if (receiver === "indexedDB" || receiver === "caches") {
+      facts.set(
+        node.start ?? -1,
+        receiver === "indexedDB" ? "local-indexed-db" : "local-cache-storage",
       );
-      if (method === "get") {
-        if (isConfigurationReceiver(state, node.callee.object))
-          facts.set(node.start ?? -1, "configuration");
-        else if (isExtensionStateMember(node.callee.object))
-          extensionStateReads.push(node.start ?? -1);
-        return;
-      }
-      if (method !== "open" || !t.isIdentifier(node.callee.object)) return;
-      const receiver = node.callee.object.name;
-      const binding = resolveSemanticBindingState(state, node, receiver);
-      if (binding === undefined) {
-        if (semanticResolutionBlocked(state, node, receiver)) return;
-        const fact = openGlobalFact(receiver);
-        if (fact !== undefined) facts.set(node.start ?? -1, fact);
-        return;
-      }
-      // A lexically bound receiver overrides ambient browser globals. Mark an
-      // otherwise unresolved local as local so name-based window.open
-      // heuristics do not hide its XHR-like overloads.
-      facts.set(node.start ?? -1, "local");
-      if (receiver === "indexedDB" || receiver === "caches") {
-        facts.set(
-          node.start ?? -1,
-          receiver === "indexedDB" ? "local-indexed-db" : "local-cache-storage",
-        );
-        return;
-      }
-      if (binding.mutable || binding.initializers.length !== 1) return;
-      const initializer = binding.initializers[0]?.node;
-      if (!t.isIdentifier(initializer)) return;
-      const initializerBinding = resolveSemanticBindingState(
-        state,
-        initializer,
-        initializer.name,
-      );
-      if (initializerBinding !== undefined) {
-        if (initializer.name === "indexedDB" || initializer.name === "caches") {
-          const localFact =
-            initializer.name === "indexedDB"
-              ? "local-indexed-db"
-              : "local-cache-storage";
-          facts.set(node.start ?? -1, localFact);
-          if (
-            initializerBinding.mutable ||
-            initializerBinding.initializers.length !== 1
-          )
-            return;
-          const nested = initializerBinding.initializers[0]?.node;
-          if (t.isIdentifier(nested)) {
-            const nestedFact = resolveGlobalAliasFact(
-              state,
-              initializer,
-              nested.name,
-            );
-            if (nestedFact !== undefined)
-              facts.set(node.start ?? -1, nestedFact);
-          }
-        } else if (initializer.name === "window") {
-          facts.set(node.start ?? -1, "local");
+      return;
+    }
+    if (binding.mutable || binding.initializers.length !== 1) return;
+    const initializer = binding.initializers[0]?.node;
+    if (!t.isIdentifier(initializer)) return;
+    const initializerBinding = resolveSemanticBindingState(
+      state,
+      initializer,
+      initializer.name,
+    );
+    if (initializerBinding !== undefined) {
+      if (initializer.name === "indexedDB" || initializer.name === "caches") {
+        const localFact =
+          initializer.name === "indexedDB"
+            ? "local-indexed-db"
+            : "local-cache-storage";
+        facts.set(node.start ?? -1, localFact);
+        if (
+          initializerBinding.mutable ||
+          initializerBinding.initializers.length !== 1
+        )
+          return;
+        const nested = initializerBinding.initializers[0]?.node;
+        if (t.isIdentifier(nested)) {
+          const nestedFact = resolveGlobalAliasFact(
+            state,
+            initializer,
+            nested.name,
+          );
+          if (nestedFact !== undefined) facts.set(node.start ?? -1, nestedFact);
         }
-        return;
+      } else if (initializer.name === "window") {
+        facts.set(node.start ?? -1, "local");
       }
-      const aliasFact = resolveGlobalAliasFact(
-        state,
-        initializer,
-        initializer.name,
-      );
-      if (aliasFact !== undefined) facts.set(node.start ?? -1, aliasFact);
+      return;
+    }
+    const aliasFact = resolveGlobalAliasFact(
+      state,
+      initializer,
+      initializer.name,
+    );
+    if (aliasFact !== undefined) facts.set(node.start ?? -1, aliasFact);
+  };
+  yield* traverseJavaScriptAstSteps(program, {
+    enter: (node) => {
+      classifyRpcRoot(node);
+      classifyOpenReceiver(node);
     },
   });
   if (extensionStateReads.length > 0 && importsVsCodeModule(state))
     for (const start of extensionStateReads)
       facts.set(start, "extension-state");
-  return facts;
+  return { openReceivers: facts, rpcClientRoots: roots };
 }
 
 /** VS Code passes extension state through ExtensionContext, not an import. */

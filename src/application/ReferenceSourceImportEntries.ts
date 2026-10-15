@@ -110,9 +110,11 @@ const resolveInternalSpecifier = (
   const directoryReference =
     specifier.endsWith("/") || [".", ".."].includes(posix.basename(specifier));
   const suffixes = ["", ".ts", ".js", ".mjs", ".cjs", ".tsx", ".jsx"];
+  // A directory resolves only to an index with an extension; neither Node nor
+  // TypeScript selects an extensionless `index` file.
   const candidates = suffixes.flatMap((suffix) => [
     ...(directoryReference ? [] : [`${normalized}${suffix}`]),
-    posix.join(normalized, `index${suffix}`),
+    ...(suffix === "" ? [] : [posix.join(normalized, `index${suffix}`)]),
   ]);
   // Retain present runtime files first; substitute only a missing counterpart.
   // Counterparts cover explicit filenames, not directory/index resolution.

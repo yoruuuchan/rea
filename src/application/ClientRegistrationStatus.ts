@@ -35,6 +35,7 @@ import type { SetupClient } from "./SupportedClients.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { dshDocument } from "./DshCordisPatch.js";
 import { clientRegistrationEnvironmentDetails } from "./ClientRegistrationEnvironment.js";
+import type { ProviderRequestBudgetResolver } from "./ClientRegistrationEnvironment.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
 interface ClientRegistrationStatusBase {
@@ -98,6 +99,7 @@ interface ClientRegistrationReadOptions {
   readonly platform?: NodeJS.Platform;
   readonly environment?: NodeJS.ProcessEnv;
   readonly resources?: ArtifactResourceScope;
+  readonly resolveProviderRequestBudget?: ProviderRequestBudgetResolver;
 }
 
 /** Registration facts shared by diagnostics and update maintenance. */
@@ -227,10 +229,26 @@ export const readClientRegistrationInspections = async (
       const registration = parseRegistration(raw, effectiveClient);
       const registrationEnvironment =
         client.name === "kimi" || client.name === "codex"
-          ? clientRegistrationEnvironmentDetails(parsed)
+          ? clientRegistrationEnvironmentDetails(
+              parsed,
+              {},
+              "effective",
+              options.resolveProviderRequestBudget,
+            )
           : undefined;
-      if (registrationEnvironment !== undefined && !registrationEnvironment.ok)
-        throw registrationEnvironment.error;
+      if (
+        registrationEnvironment !== undefined &&
+        !registrationEnvironment.ok
+      ) {
+        record({
+          client: client.name,
+          config_path: configPath,
+          command: [],
+          state: "invalid",
+          remediation: registrationEnvironment.error.message,
+        });
+        continue;
+      }
       const command: RegistrationCommand = [
         registration.command,
         ...registration.args,
