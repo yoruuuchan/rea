@@ -1,5 +1,8 @@
 import type { JavaScriptSourceRange } from "./javascriptStaticAnalysisTypes.js";
-import type { JavaScriptSemanticValue } from "./javascriptSemanticValueTypes.js";
+import type {
+  JavaScriptSemanticResourceLimit,
+  JavaScriptSemanticValue,
+} from "./javascriptSemanticValueTypes.js";
 import type {
   JavaScriptSemanticCoverage,
   JavaScriptSemanticReturnCoverage,
@@ -302,6 +305,7 @@ export interface JavaScriptSemanticConfigurationOperation {
   readonly key: string | null;
   readonly sourceConfigId: string | null;
   readonly value: string | number | boolean | null;
+  readonly valueResourceLimit?: JavaScriptSemanticResourceLimit;
   readonly resolution: "complete" | "partial";
 }
 

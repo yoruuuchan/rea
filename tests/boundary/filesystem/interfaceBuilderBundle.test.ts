@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { buildBinary } from "plist";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { analyzeInterfaceBuilderBundle } from "../../../src/artifacts/apple/InterfaceBuilderAnalysis.js";
+import { InterfaceBuilderDecodeBudget } from "../../../src/artifacts/apple/InterfaceBuilderDecodeBudget.js";
 import { encodeNibArchiveFixture } from "../../../src/artifacts/apple/NibArchive.fixture.js";
 import { thinMach } from "../../../src/domain/binaryTarget.fixture.js";
 import { xcodeIbtoolAvailable } from "../../fixtures/ibtool.js";
@@ -904,6 +905,57 @@ describe("aggregate Interface Builder archive retention budget", () => {
     expect(result.limitations).toContain(
       "Contents/Resources/D.nib: omitted because aggregate decode budget exhausted.",
     );
+  });
+});
+
+describe("Interface Builder XML plist depth", () => {
+  it("bounds XML archives by plist value depth, not element depth", async () => {
+    const root = await createTestTempDirectory("rea-ib-depth-test-");
+    const bundle = join(root, "Example.app");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    // The root dict is value depth 0, so the leaf sits at `nested + 1`. The
+    // plist envelope and keys add XML elements but not value depth.
+    const document = (nested: number) =>
+      `<?xml version="1.0"?><plist version="1.0"><dict>${"<key>child</key><dict>".repeat(nested)}<key>leaf</key><integer>1</integer>${"</dict>".repeat(nested)}</dict></plist>`;
+    await writeFile(join(resources, "AtLimit.nib"), document(127));
+    await writeFile(join(resources, "BeyondLimit.nib"), document(128));
+
+    const release = vi.spyOn(InterfaceBuilderDecodeBudget.prototype, "release");
+    const result = await analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "e".repeat(64),
+    });
+    const released = release.mock.calls.map(([bytes]) => bytes);
+    release.mockRestore();
+
+    // The rejected archive returns its reservation to later documents.
+    expect(released).toHaveLength(1);
+    expect(released[0]).toBeGreaterThan(0);
+    expect(result.documents.map(({ relative_path }) => relative_path)).toEqual([
+      "Contents/Resources/AtLimit.nib",
+    ]);
+    expect(result.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "archive_decode",
+        status: "partial",
+        reason: "aggregate_decode_budget_exhausted",
+        examined: 2,
+        omitted: 1,
+      }),
+    );
+    expect(result.limitations).toContain(
+      "Contents/Resources/BeyondLimit.nib: omitted because aggregate decode budget exhausted.",
+    );
+  });
+
+  it("restores released representation bytes up to the initial budget", () => {
+    const budget = new InterfaceBuilderDecodeBudget(100);
+    budget.reserve(60, "reserve");
+    budget.release(60);
+    expect(budget.remainingBytes).toBe(100);
+    budget.release(10);
+    expect(budget.remainingBytes).toBe(100);
   });
 });
 

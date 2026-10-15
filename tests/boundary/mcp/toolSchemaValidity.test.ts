@@ -240,46 +240,6 @@ function resolveReference(schema: unknown, reference: string): unknown {
   return value;
 }
 
-function localReferenceExpansions(schema: Record<string, unknown>): number {
-  // Clients that render SDK declarations from the advertised input expand
-  // schema-local references against a shared per-input budget; Pi 1.1.0
-  // code-mode allows 32 and renders every later reference as `unknown`.
-  // Count conservatively: every resolvable, non-cyclic reference occurrence
-  // reached while walking the input, never the definitions themselves.
-  let count = 0;
-  const visit = (node: unknown, active: ReadonlySet<string>): void => {
-    if (Array.isArray(node)) {
-      node.forEach((child) => visit(child, active));
-      return;
-    }
-    if (!isRecord(node)) return;
-    if (typeof node.$ref === "string" && !active.has(node.$ref)) {
-      const target = resolveReference(schema, node.$ref);
-      if (target !== undefined) {
-        count += 1;
-        visit(target, new Set([...active, node.$ref]));
-        return;
-      }
-    }
-    for (const [key, value] of Object.entries(node)) {
-      if (
-        [
-          "$defs",
-          "definitions",
-          "examples",
-          "default",
-          "const",
-          "enum",
-        ].includes(key)
-      )
-        continue;
-      visit(value, active);
-    }
-  };
-  visit(schema, new Set());
-  return count;
-}
-
 function recursiveReferences(tools: readonly ToolSchemas[]): string[] {
   return tools.flatMap((tool) =>
     (["inputSchema", "outputSchema"] as const).flatMap((kind) => {
@@ -311,6 +271,85 @@ function recursiveReferences(tools: readonly ToolSchemas[]): string[] {
     }),
   );
 }
+
+const schemaMapKeywords = new Set([
+  "$defs",
+  "definitions",
+  "properties",
+  "patternProperties",
+  "dependentSchemas",
+  "dependencies",
+]);
+const schemaArrayKeywords = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+const schemaChildKeywords = new Set([
+  "items",
+  "additionalItems",
+  "contains",
+  "additionalProperties",
+  "unevaluatedProperties",
+  "unevaluatedItems",
+  "propertyNames",
+  "not",
+  "if",
+  "then",
+  "else",
+]);
+
+function localInputReferences(tools: readonly ToolSchemas[]): string[] {
+  return tools.flatMap((tool) => {
+    const references: string[] = [];
+    const visit = (node: unknown, path: string): void => {
+      if (!isRecord(node)) return;
+      if (typeof node.$ref === "string") references.push(`${path}.$ref`);
+      for (const [key, value] of Object.entries(node)) {
+        if (schemaMapKeywords.has(key) && isRecord(value)) {
+          for (const [name, schema] of Object.entries(value))
+            visit(schema, `${path}.${key}.${name}`);
+        } else if (schemaArrayKeywords.has(key) && Array.isArray(value)) {
+          value.forEach((schema, index) =>
+            visit(schema, `${path}.${key}[${index}]`),
+          );
+        } else if (schemaChildKeywords.has(key)) {
+          if (Array.isArray(value))
+            value.forEach((schema, index) =>
+              visit(schema, `${path}.${key}[${index}]`),
+            );
+          else visit(value, `${path}.${key}`);
+        }
+      }
+    };
+    visit(tool.inputSchema, `${tool.name}.inputSchema`);
+    return references;
+  });
+}
+
+it("finds references only in input schema positions, not literal data", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      $ref: { type: "string" },
+      default: { type: "array", items: { type: "string" } },
+    },
+    default: { $ref: "literal data" },
+    examples: [{ $defs: { field: { $ref: "literal data" } } }],
+  };
+  expect(
+    localInputReferences([{ name: "literal", inputSchema: schema }]),
+  ).toEqual([]);
+  expect(
+    localInputReferences([
+      {
+        name: "nested",
+        inputSchema: {
+          type: "object",
+          properties: {
+            default: { type: "array", items: { $ref: "#/definitions/value" } },
+          },
+        },
+      },
+    ]),
+  ).toEqual(["nested.inputSchema.properties.default.items.$ref"]);
+});
 
 const advertiseAndEnforceProcessEnvironmentKeyConstraint =
   async (): Promise<void> => {
@@ -423,6 +462,7 @@ describe("MCP JSON Schema validity", () => {
         TOOL_CONTRACTS.map(({ name }) => name).sort(),
       );
       expect(schemaErrors(tools)).toEqual([]);
+      expect(localInputReferences(tools)).toEqual([]);
       expect(recursiveReferences(tools)).toEqual([]);
       expectKnownAuthorityHints(tools);
       const byName = new Map(tools.map((tool) => [tool.name, tool]));
@@ -737,12 +777,8 @@ it("ships nonrecursive input and output schemas in the generated catalog", () =>
   expect(recursiveReferences(GENERATED_MCP_TOOL_CATALOG)).toEqual([]);
 });
 
-it("keeps advertised input references within the client expansion budget", () => {
-  for (const tool of GENERATED_MCP_TOOL_CATALOG)
-    expect(
-      localReferenceExpansions(tool.inputSchema),
-      `${tool.name} exhausts the shared reference-expansion budget`,
-    ).toBeLessThanOrEqual(32);
+it("ships input schemas without local references in the generated catalog", () => {
+  expect(localInputReferences(GENERATED_MCP_TOOL_CATALOG)).toEqual([]);
 });
 
 it("rejects unresolved output-schema references even for uncalled tools", () => {

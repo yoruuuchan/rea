@@ -15,11 +15,13 @@ import {
   type GhidraJavaObservation,
 } from "./GhidraInstallation.js";
 import {
-  SUPPORTED_GHIDRA_JAVA_MAJOR,
-  SUPPORTED_GHIDRA_VERSION,
   ghidraApplicationProperties,
   ghidraJavaRequirement,
 } from "./GhidraInstallationPolicy.js";
+import {
+  SUPPORTED_GHIDRA_JAVA_MAJOR,
+  SUPPORTED_GHIDRA_VERSION,
+} from "./GhidraReleasePolicy.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 
 // The real Java probe shells out via spawnSync; stub it so one test can run

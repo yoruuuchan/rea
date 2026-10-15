@@ -915,15 +915,6 @@ export const dataEffectArgumentBindingId = (
     ? (resolveSemanticBindingState(state, node, node.name)?.bindingId ?? null)
     : null;
 
-/** Read one JSON primitive default without evaluating code. */
-export const dataEffectPrimitive = (
-  node: t.Node,
-): string | number | boolean | null => {
-  if (t.isStringLiteral(node) || t.isNumericLiteral(node)) return node.value;
-  if (t.isBooleanLiteral(node)) return node.value;
-  return null;
-};
-
 /**
  * Read one static string or expression-free template. A template recovered
  * with an invalid escape has no cooked value; its raw spelling is not a

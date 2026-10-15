@@ -16,6 +16,19 @@ export const isTypeOnlyExportDeclaration = (
       t.isTSTypeAliasDeclaration(node.declaration) ||
       t.isTSDeclareFunction(node.declaration)));
 
+/**
+ * Runtime external-module target for a value import-equals declaration;
+ * `import type X = require("m")` is erased and declares no dependency.
+ */
+export const semanticImportEqualsSpecifier = (
+  node: t.TSImportEqualsDeclaration,
+): string | null =>
+  node.importKind !== "type" &&
+  t.isTSExternalModuleReference(node.moduleReference) &&
+  t.isStringLiteral(node.moduleReference.expression)
+    ? node.moduleReference.expression.value
+    : null;
+
 /** Whether this import binding is explicitly type-only. */
 export const isTypeOnlyImportSpecifier = (node: t.ImportSpecifier): boolean =>
   node.importKind === "type" || node.importKind === "typeof";

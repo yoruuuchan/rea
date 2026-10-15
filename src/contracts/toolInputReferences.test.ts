@@ -3,12 +3,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import {
-  advertisedReferenceExpansionBudget,
-  countLocalReferenceExpansions,
-  inputSchemaWithinReferenceExpansionBudget,
-  presentInputJsonSchema,
-} from "./inputSchemaPresentation.js";
+import { presentInputJsonSchema } from "./inputSchemaPresentation.js";
 import { toolContract } from "./toolContracts.js";
 import {
   toolInputSchemaWithMetadata,
@@ -20,27 +15,27 @@ it.each(["draft-2020-12", "draft-07"] as const)(
   "honors projection options independently of cached wire transformations in %s",
   (target) => {
     const range = z.strictObject({ offset: z.number(), length: z.number() });
-    const canonical = toolInputSchemaWithMetadata({
-      ...toolContract("open_binary"),
-      inputSchema: z.strictObject({ before: range, after: range }),
-    });
+    const canonical = z.strictObject({ before: range, after: range });
     const transform = (schema: Record<string, unknown>) => ({
       ...schema,
       title: "Transformed range inputs",
     });
-    const options = { target, libraryOptions: { reused: "inline" as const } };
-    for (const inlineFirst of [false, true]) {
+    const options = { target, libraryOptions: { reused: "ref" as const } };
+    for (const sharedFirst of [false, true]) {
       const wrapped = transformAdvertisedInputJsonSchema(canonical, transform);
       const project = wrapped["~standard"].jsonSchema.input;
-      if (inlineFirst) project(options);
-      const shared = project({ target });
+      if (sharedFirst) project(options);
+      const advertised = project({ target });
+      expect(JSON.stringify(advertised)).not.toContain('"$ref":');
+      expect(advertised).toEqual(
+        transform(canonical["~standard"].jsonSchema.input({ target })),
+      );
+      const shared = project(options);
       expect(JSON.stringify(shared)).toContain('"$ref":');
-      const inline = project(options);
-      expect(inline).toEqual(
+      expect(shared).toEqual(
         transform(canonical["~standard"].jsonSchema.input(options)),
       );
-      expect(JSON.stringify(inline)).not.toContain('"$ref":');
-      expect(project({ target })).toBe(shared);
+      expect(project({ target })).toBe(advertised);
     }
   },
 );
@@ -237,105 +232,6 @@ describe("advertised schema metadata and validation", () => {
         expect(validate(sample)).toBe(canonical.safeParse(sample).success);
     },
   );
-});
-
-describe("advertised reference expansion budget", () => {
-  it("counts references in keyword-named fields, excluding literals", () => {
-    const fields = ["default", "enum", "examples", "const", "$defs"];
-    const schema = {
-      type: "object",
-      properties: Object.fromEntries(
-        fields.map((name) => [name, { $ref: "#/$defs/value" }]),
-      ),
-      $defs: { value: { type: "string" } },
-      default: { $ref: "#/$defs/value" },
-      examples: [{ $ref: "#/$defs/value" }],
-    };
-    expect(countLocalReferenceExpansions(schema)).toBe(fields.length);
-  });
-  const reusedComponent = z
-    .object({ kind: z.literal("rec"), value: z.string() })
-    .strict();
-  const inputWithReusedFields = (count: number) =>
-    z.strictObject(
-      Object.fromEntries(
-        Array.from({ length: count }, (_, index) => [
-          `field_${String(index).padStart(2, "0")}`,
-          reusedComponent,
-        ]),
-      ),
-    );
-  const advertisedInput = (
-    canonical: z.ZodType<Readonly<Record<string, unknown>>>,
-  ) =>
-    toolInputSchemaWithMetadata({
-      ...toolContract("open_binary"),
-      inputSchema: canonical,
-    })["~standard"].jsonSchema.input({ target: "draft-2020-12" });
-
-  it("keeps shared definitions while every client can resolve them", () => {
-    const advertised = advertisedInput(inputWithReusedFields(8));
-    expect(advertised.$defs).toBeDefined();
-    expect(countLocalReferenceExpansions(advertised)).toBe(8);
-  });
-
-  it("keeps shared definitions exactly at the budget", () => {
-    const advertised = advertisedInput(
-      inputWithReusedFields(advertisedReferenceExpansionBudget),
-    );
-    expect(advertised.$defs).toBeDefined();
-    expect(countLocalReferenceExpansions(advertised)).toBe(
-      advertisedReferenceExpansionBudget,
-    );
-  });
-
-  it("re-projects without shared definitions once the budget is exceeded", () => {
-    const advertised = advertisedInput(
-      inputWithReusedFields(advertisedReferenceExpansionBudget + 1),
-    );
-    expect(advertised.$defs).toBeUndefined();
-    expect(countLocalReferenceExpansions(advertised)).toBe(0);
-    const properties = advertised.properties as Record<string, unknown>;
-    expect(properties.field_00).toMatchObject({
-      type: "object",
-      properties: { kind: { const: "rec" }, value: { type: "string" } },
-      required: ["kind", "value"],
-    });
-  });
-
-  it("keeps the shared form untouched when it fits and swaps it when not", () => {
-    const shared = {
-      type: "object",
-      properties: { value: { $ref: "#/$defs/shared" } },
-      $defs: { shared: { type: "string" } },
-    };
-    const inlined = {
-      type: "object",
-      properties: { value: { type: "string" } },
-    };
-    expect(
-      inputSchemaWithinReferenceExpansionBudget(
-        shared,
-        () => inlined,
-        advertisedReferenceExpansionBudget,
-      ),
-    ).toBe(shared);
-    expect(
-      inputSchemaWithinReferenceExpansionBudget(
-        {
-          ...shared,
-          properties: Object.fromEntries(
-            Array.from({ length: 33 }, (_, index) => [
-              `field_${index}`,
-              { $ref: "#/$defs/shared" },
-            ]),
-          ),
-        },
-        () => inlined,
-        advertisedReferenceExpansionBudget,
-      ),
-    ).toBe(inlined);
-  });
 });
 
 describe("root input presentation", () => {

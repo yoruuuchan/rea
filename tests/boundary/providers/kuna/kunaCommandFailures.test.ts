@@ -80,3 +80,41 @@ it("reports a graph beyond REA's buffer once per session instead of rebuilding i
     expect(await client.close()).toEqual({ ok: true, value: null });
   }
 });
+
+it("says why Kuna cannot answer instead of a generic unavailable message", async () => {
+  const { open } = await session("rea-kuna-unavailable-reasons-");
+  const client = open();
+  try {
+    const cases = [
+      {
+        operation: "procedure_assembly",
+        parameters: { procedure: "0x2000" },
+        message:
+          "Kuna's export lists no code at 0x2000; import slots and data entries have no listing.",
+      },
+      {
+        operation: "procedure_callers",
+        parameters: { procedure: "0x1004" },
+        message:
+          "Kuna's graph has no function node at 0x1004; its relationships are unknown.",
+      },
+      {
+        operation: "list_segments",
+        parameters: {},
+        message:
+          "Kuna answers procedure and string queries, pseudocode, assembly and references; this operation needs another provider.",
+      },
+    ] as const;
+    for (const { operation, parameters, message } of cases) {
+      const result = await client.execute(operation, parameters);
+      if (result.ok) throw new Error(`${operation} unexpectedly succeeded`);
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "capability_unavailable",
+        message,
+        retryable: false,
+      });
+    }
+  } finally {
+    expect(await client.close()).toEqual({ ok: true, value: null });
+  }
+});

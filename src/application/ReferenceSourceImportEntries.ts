@@ -137,7 +137,23 @@ const readPackageMains = (
   return mains;
 };
 
-const RESOLUTION_SUFFIXES = ["", ".ts", ".js", ".mjs", ".cjs", ".tsx", ".jsx"];
+/**
+ * Extension slots in probe order. Within a slot, files precede directory
+ * indexes. The CommonJS loader tries `X.json` after `X.js` and before any
+ * directory index; ESM and TypeScript require an explicit `.json`.
+ */
+const RESOLUTION_SUFFIXES: readonly (readonly string[])[] = [
+  [""],
+  [".ts"],
+  [".js"],
+  [".mjs"],
+  [".cjs"],
+  [".tsx"],
+  [".jsx"],
+];
+const REQUIRE_RESOLUTION_SUFFIXES = RESOLUTION_SUFFIXES.map((slot) =>
+  slot.includes(".js") ? [...slot, ".json"] : slot,
+);
 
 /** Inventory facts an internal specifier resolves against. */
 interface SpecifierContext {
@@ -153,6 +169,7 @@ interface SpecifierContext {
 const selectPackageMain = (
   index: string,
   context: SpecifierContext,
+  slots: readonly (readonly string[])[],
 ): { to: string; resolution: "internal" | "unresolved" } => {
   const directory = posix.dirname(index);
   const manifest = context.packageMains.get(directory);
@@ -170,11 +187,12 @@ const selectPackageMain = (
   // Node would load a declared entry outside the imported root.
   if (logicalPathEscapesRoot(target))
     return { to: target, resolution: "unresolved" };
+  const suffixes = slots.flat();
   const selected = context.lookupPath.resolveCandidates([
-    ...RESOLUTION_SUFFIXES.map((suffix) => `${target}${suffix}`),
-    ...RESOLUTION_SUFFIXES.filter((suffix) => suffix !== "").map((suffix) =>
-      posix.join(target, `index${suffix}`),
-    ),
+    ...suffixes.map((suffix) => `${target}${suffix}`),
+    ...suffixes
+      .filter((suffix) => suffix !== "")
+      .map((suffix) => posix.join(target, `index${suffix}`)),
   ]);
   return { to: selected ?? index, resolution: "internal" };
 };
@@ -183,6 +201,7 @@ const resolveInternalSpecifier = (
   fromPath: string,
   specifier: string,
   context: SpecifierContext,
+  slots: readonly (readonly string[])[],
 ): { to: string; resolution: "internal" | "unresolved" } => {
   if (posix.isAbsolute(specifier))
     return { to: specifier, resolution: "unresolved" };
@@ -196,9 +215,13 @@ const resolveInternalSpecifier = (
     specifier.endsWith("/") || [".", ".."].includes(posix.basename(specifier));
   // A directory resolves only to an index with an extension; neither Node nor
   // TypeScript selects an extensionless `index` file.
-  const candidates = RESOLUTION_SUFFIXES.flatMap((suffix) => [
-    ...(directoryReference ? [] : [`${normalized}${suffix}`]),
-    ...(suffix === "" ? [] : [posix.join(normalized, `index${suffix}`)]),
+  const candidates = slots.flatMap((slot) => [
+    ...(directoryReference
+      ? []
+      : slot.map((suffix) => `${normalized}${suffix}`)),
+    ...slot
+      .filter((suffix) => suffix !== "")
+      .map((suffix) => posix.join(normalized, `index${suffix}`)),
   ]);
   // Retain present runtime files first; substitute only a missing counterpart.
   // Counterparts cover explicit filenames, not directory/index resolution.
@@ -214,7 +237,7 @@ const resolveInternalSpecifier = (
     posix.basename(match).startsWith("index.") &&
     posix.dirname(match).normalize("NFC") === normalized.normalize("NFC");
   return resolvedThroughIndex
-    ? selectPackageMain(match, context)
+    ? selectPackageMain(match, context, slots)
     : { to: match, resolution: "internal" };
 };
 
@@ -250,6 +273,9 @@ const appendFile = (
       relationship.from_path,
       relationship.to,
       context,
+      relationship.kind === "requires"
+        ? REQUIRE_RESOLUTION_SUFFIXES
+        : RESOLUTION_SUFFIXES,
     );
     output.relationships.push({
       ...relationship,

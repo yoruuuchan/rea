@@ -131,7 +131,7 @@ export const parseInterfaceBuilderRecords = (
   return {
     objects,
     connections,
-    hierarchy: Array.isArray(hierarchyRaw) ? hierarchyRaw.slice(0, 20_000) : [],
+    hierarchy: Array.isArray(hierarchyRaw) ? hierarchyRaw : [],
     classes: classesRaw,
     objectCount: objectEntries.length,
     omittedObjects: Math.max(0, objectEntries.length - 20_000),
@@ -327,11 +327,16 @@ const parseKeyedArchive = (
     if (index === 0) continue;
     const resolved = record(resolve(raw));
     const className = firstString(resolved.className);
-    if (className === null) continue;
+    // An archived object names its class with its own `$class` reference;
+    // when that reference cannot be resolved the object is still observed,
+    // with an unknown class. Scalars and class descriptors are not objects.
+    if (className === null && !Object.hasOwn(record(raw), "$class")) continue;
     objectCount += 1;
     const fields = Object.fromEntries(
       Object.entries(resolved).filter(([key]) => key !== "className"),
     );
+    // Keep the unresolvable class reference itself, e.g. a dangling UID.
+    if (className === null) fields.$class = record(raw).$class;
     const authoredId = firstString(fields.objectID, fields["object-id"]);
     const objectId =
       authoredId ??
@@ -357,6 +362,7 @@ const parseKeyedArchive = (
         }),
       );
     if (
+      className !== null &&
       /(?:Outlet|Connection|Segue|ActionConnection|ControlConnector)/iu.test(
         className,
       )

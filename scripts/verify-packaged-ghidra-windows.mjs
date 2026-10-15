@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { execNpm } from "./lib/verify-package-core.mjs";
 
 if (process.platform !== "win32" || process.arch !== "x64")
   throw new Error(
@@ -82,15 +83,10 @@ let packageRoot = resolve(packageRootArgument ?? ".");
 // package roots support an already-installed artifact without a second install.
 if (packageRootArgument === undefined) {
   try {
-    const npmEntry =
-      process.env.npm_execpath ??
-      join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
     const packed = JSON.parse(
       (
-        await exec(
-          process.execPath,
+        await execNpm(
           [
-            npmEntry,
             "pack",
             "--json",
             "--ignore-scripts",
@@ -107,10 +103,8 @@ if (packageRootArgument === undefined) {
       "The package lane must produce one artifact.",
     );
     const prefix = join(workspace, "installed");
-    await exec(
-      process.execPath,
+    await execNpm(
       [
-        npmEntry,
         "install",
         "--prefix",
         prefix,

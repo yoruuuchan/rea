@@ -2,7 +2,8 @@
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { PrivateRuntimeRoot } from "../dist/process/PrivateRuntimeRoot.js";
-import { exec } from "./lib/verify-package-core.mjs";
+import { exec, execNpm } from "./lib/verify-package-core.mjs";
+import { WABT_WORKFLOW_TIMEOUT_MS } from "./lib/wabt-verifier-timeouts.mjs";
 import { verifyPackagePack } from "./verify-package-pack.mjs";
 
 const root = await PrivateRuntimeRoot.create({
@@ -23,8 +24,7 @@ try {
     XDG_CONFIG_HOME: join(home, ".config"),
     XDG_CACHE_HOME: join(home, ".cache"),
   };
-  await exec(
-    "npm",
+  await execNpm(
     [
       "install",
       "--global",
@@ -49,7 +49,11 @@ try {
   const verified = await exec(
     process.execPath,
     ["scripts/verify-wasm-artifact.mjs", entrypoint, "--require-tools"],
-    { env: environment, timeout: 180_000, maxBuffer: 4 * 1024 * 1024 },
+    {
+      env: environment,
+      timeout: WABT_WORKFLOW_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    },
   );
   process.stdout.write(verified.stdout);
 } finally {

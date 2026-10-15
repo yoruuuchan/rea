@@ -6,7 +6,7 @@ import {
   inspectGhidraInstallation,
   ghidraInstallationDiagnostics,
 } from "../../../src/ghidra/GhidraInstallation.js";
-import { SUPPORTED_GHIDRA_VERSION } from "../../../src/ghidra/GhidraInstallationPolicy.js";
+import { SUPPORTED_GHIDRA_VERSION } from "../../../src/ghidra/GhidraReleasePolicy.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const { mockSpawnSync } = vi.hoisted(() => ({ mockSpawnSync: vi.fn() }));

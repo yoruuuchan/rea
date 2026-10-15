@@ -510,28 +510,40 @@ const chainedFixups = (
 
 const uleb = (bytes: Buffer, cursor: { at: number }, end: number): bigint => {
   let value = 0n;
-  let shift = 0n;
+  let shift = 0;
   for (;;) {
     if (cursor.at >= end) throw new RangeError("Truncated bind opcode operand");
     const byte = bytes[cursor.at++] ?? 0;
-    value |= BigInt(byte & 0x7f) << shift;
-    shift += 7n;
+    const slice = byte & 0x7f;
+    if ((shift === 63 && slice > 1) || (shift === 64 && slice !== 0))
+      throw new RangeError("Oversized bind opcode operand");
+    if (shift < 64) value |= BigInt(slice) << BigInt(shift);
+    // Padding may extend the encoding, but never the represented integer.
+    shift = Math.min(64, shift + 7);
     if ((byte & 0x80) === 0) return value;
-    if (shift > 63n) throw new RangeError("Oversized bind opcode operand");
   }
 };
 
 const sleb = (bytes: Buffer, cursor: { at: number }, end: number): bigint => {
   let value = 0n;
-  let shift = 0n;
+  let shift = 0;
   let byte = 0;
   do {
     if (cursor.at >= end) throw new RangeError("Truncated bind opcode operand");
     byte = bytes[cursor.at++] ?? 0;
-    value |= BigInt(byte & 0x7f) << shift;
-    shift += 7n;
-  } while ((byte & 0x80) !== 0 && shift <= 63n);
-  return (byte & 0x40) !== 0 ? value - (1n << shift) : value;
+    const slice = byte & 0x7f;
+    if (
+      (shift === 63 && slice !== 0 && slice !== 0x7f) ||
+      (shift === 64 && slice !== (value < 0n ? 0x7f : 0))
+    )
+      throw new RangeError("Oversized bind opcode operand");
+    if (shift < 64)
+      value = BigInt.asIntN(64, value | (BigInt(slice) << BigInt(shift)));
+    shift = Math.min(64, shift + 7);
+  } while ((byte & 0x80) !== 0);
+  return shift < 64 && (byte & 0x40) !== 0
+    ? value - (1n << BigInt(shift))
+    : value;
 };
 
 /** Registers of the `LC_DYLD_INFO` bind state machine. */

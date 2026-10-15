@@ -163,37 +163,47 @@ const partialSiblingsFixture = (
 };
 
 describe("Apple dispatch pointer fixup metadata", () => {
-  it("keeps decoded bindings and their coverage when an independent stream fails", () => {
-    const bytes = fixture();
-    bytes.writeUInt32LE(2, 16);
-    bytes.writeUInt32LE(200, 20);
-    bytes.writeUInt32LE(0x80000022, 184);
-    bytes.writeUInt32LE(48, 188);
-    const bindings = Buffer.from([
-      0x40,
-      ...Buffer.from("_OBJC_CLASS_$_NSObject\0"),
-      0x70,
-      0x88,
-      0x04,
-      0x90,
-      0x00,
-    ]);
-    bindings.copy(bytes, 0xc00);
-    bytes[0xc80] = 0xd0;
-    bytes.writeUInt32LE(0xc00, 200);
-    bytes.writeUInt32LE(bindings.length, 204);
-    bytes.writeUInt32LE(0xc80, 208);
-    bytes.writeUInt32LE(1, 212);
+  it.each([
+    { name: "unsupported opcode", operand: [0xd0] },
+    {
+      name: "oversized addend whose tail resembles DO_BIND",
+      operand: [0x60, ...Array<number>(10).fill(0x80), 0x90, 0x00],
+    },
+  ])(
+    "keeps decoded bindings when an independent stream has $name",
+    ({ operand }) => {
+      const bytes = fixture();
+      bytes.writeUInt32LE(2, 16);
+      bytes.writeUInt32LE(200, 20);
+      bytes.writeUInt32LE(0x80000022, 184);
+      bytes.writeUInt32LE(48, 188);
+      const bindings = Buffer.from([
+        0x40,
+        ...Buffer.from("_OBJC_CLASS_$_NSObject\0"),
+        0x70,
+        0x88,
+        0x04,
+        0x90,
+        0x00,
+      ]);
+      bindings.copy(bytes, 0xc00);
+      const invalid = Buffer.from([...bindings.subarray(0, -2), ...operand]);
+      invalid.copy(bytes, 0xc80);
+      bytes.writeUInt32LE(0xc00, 200);
+      bytes.writeUInt32LE(bindings.length, 204);
+      bytes.writeUInt32LE(0xc80, 208);
+      bytes.writeUInt32LE(invalid.length, 212);
 
-    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
-    expect(result.objc_classes[0]).toMatchObject({
-      name: "Fixture",
-      super_class: "NSObject",
-    });
-    expect(
-      result.coverage.find(({ facet }) => facet === "pointer_fixups"),
-    ).toMatchObject({ status: "partial", examined: 2, decoded: 1 });
-  });
+      const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+      expect(result.objc_classes[0]).toMatchObject({
+        name: "Fixture",
+        super_class: "NSObject",
+      });
+      expect(
+        result.coverage.find(({ facet }) => facet === "pointer_fixups"),
+      ).toMatchObject({ status: "partial", examined: 2, decoded: 1 });
+    },
+  );
 
   it("keeps absolute metadata pointers between declared chained fixups", () => {
     const bytes = fixture();

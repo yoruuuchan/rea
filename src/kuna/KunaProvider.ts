@@ -8,10 +8,7 @@ import type {
   ProviderAvailability,
   ProviderTargetSupport,
 } from "../application/AnalysisProvider.js";
-import {
-  AnalysisCancelledError,
-  AnalysisCapabilityUnavailableError,
-} from "../domain/analysisErrorCore.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import {
   createAnalysisProfile,
   type AnalysisProfileCommitment,
@@ -33,6 +30,7 @@ import {
 import { KUNA_COMMAND_REMEDIATION, KUNA_PROVIDER_ID } from "./KunaRelease.js";
 import { KunaRunSlots } from "./KunaRunSlots.js";
 import { KunaSessionClient } from "./KunaSessionClient.js";
+import { kunaUnavailable } from "./KunaUnavailable.js";
 
 /** Architectures REA verified Kuna on: x86-64 and AArch64 ELF and Mach-O, plus ARM Thumb. */
 const VERIFIED_ARCHITECTURES: ReadonlySet<string> = new Set([
@@ -169,14 +167,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
     });
     if (!installation.ok)
-      return err(
-        new AnalysisCapabilityUnavailableError(
-          KUNA_PROVIDER_ID,
-          "open_binary",
-          installation.error.reason,
-          { userMessage: installation.error.reason },
-        ),
-      );
+      return err(kunaUnavailable("open_binary", installation.error.reason));
     const { value } = installation;
     return ok({
       profile: createAnalysisProfile(
@@ -218,13 +209,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
     if (!configuration.ok)
       return {
         execute: async (operation) =>
-          err(
-            new AnalysisCapabilityUnavailableError(
-              KUNA_PROVIDER_ID,
-              operation,
-              configuration.error.reason,
-            ),
-          ),
+          err(kunaUnavailable(operation, configuration.error.reason)),
         close: async () => ok(null),
       };
     return new KunaSessionClient(target, profile, {

@@ -989,7 +989,19 @@ the Apple or Windows curated lanes invoke explicitly, which also select that
 lane. Edits to verifier entrypoints run only by manual, licensed or self-hosted
 workflows run static checks and the Linux suite. Website changes run website
 checks. Provider workflow changes validate the workflow and run that provider's
-verifier. Manual-provider/Android workflow changes run workflow validation only.
+verifier. Changes under `bridge/ghidra/` also select the `ghidra_bridge` lane,
+which compiles the packaged bridge sources against the pinned Ghidra 12.1.4
+jars with `npm run verify:ghidra:bridge-sources`. It never launches Ghidra or
+imports a target, so a missing import fails the PR instead of every Ghidra
+session. The launcher, compiler and package checks share named required source
+roles. The manifest must match the complete Java cohort, so deleting a helper
+or adding an unregistered dependency cannot silently change the shipped set.
+The preflight reuses the provider's Java Properties parser with the pinned Node
+toolchain's native type stripping, without an npm install or runtime build.
+The shared release policy owns the verified version and JDK major. CI checks
+the archive pin before downloading and verifies the extracted SDK version;
+changes to these source owners also select the compile lane.
+Manual-provider/Android workflow changes run workflow validation only.
 The four-version SQLite compatibility matrix has its own `sqlite` scope for
 SQLite implementation, contracts, CLI/MCP registration, fixtures, and shared
 runtime boundaries. SQLite and server-lifecycle test edits and the SQLite npm

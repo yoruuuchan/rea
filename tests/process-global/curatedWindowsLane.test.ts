@@ -69,6 +69,12 @@ describe("curated Windows test lane", () => {
       "tests/boundary/process/windowsOutputCapture.test.ts",
     );
   });
+
+  it("keeps the adjacent npm fallback regression in the lane", async () => {
+    expect(await explicitPaths("windows")).toContain(
+      "tests/boundary/process/packageNpmInvocation.test.ts",
+    );
+  });
 });
 
 it("keeps every explicit focused CI test path executable after file moves", async () => {

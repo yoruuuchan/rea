@@ -360,6 +360,50 @@ describe("unknown process trace evidence", () => {
 });
 
 describe("process trace dimension attribution", () => {
+  it.each([false, true])(
+    "preserves an independently observed terminal addition/removal (reversed: %s)",
+    (reversed) => {
+      const absent = capture({
+        frames: [],
+        process_samples: [],
+        event_journal: [],
+      });
+      const present = capture(values(["terminal", "process"]));
+      const specification = partialSpecification();
+      const result = compareProcessCaptures(
+        reversed ? present : absent,
+        reversed ? absent : present,
+        {
+          traceSpecification: {
+            ...specification,
+            events: specification.events.map((event) =>
+              event.id === "ready"
+                ? { ...event, cardinality: { kind: "optional" } }
+                : event,
+            ),
+            language: {
+              kind: "partial_order",
+              happens_before: [],
+              not_before: [],
+              unordered_groups: [{ events: ["ready", "worker"] }],
+              prefix: [],
+              suffix: [],
+            },
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        terminal: reversed ? "removed" : "added",
+        process: "changed",
+        status: "changed",
+        trace: {
+          verdict: "different",
+          diagnostic: { event_ids: ["worker"], locations: [] },
+        },
+      });
+    },
+  );
+
   it("applies passing filesystem trace timestamp omissions to exact comparison", () => {
     const base = capture(values(["terminal", "process"]));
     const left = base;

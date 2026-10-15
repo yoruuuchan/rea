@@ -14,14 +14,20 @@ export const buildJavaScriptNativeHandoffs = (
   edges: readonly ApplicationEdge[],
   nativeEvidence: readonly Evidence[],
 ): NativeHandoff[] => {
-  const nodeById = new Map(nodes.map((node) => [node.node_id, node]));
+  let nodeById: Map<string, ApplicationNode> | undefined;
   return nodes
     .filter(({ kind }) => kind === "native-addon")
     .flatMap((node) => {
-      const digest = artifactDigest(node);
-      if (digest === null) return [];
+      // Observations may describe only a containing archive. A native target
+      // requires the node owner's exact byte identity, independently of its
+      // path, availability labels or the artifact supporting an observation.
+      if (node.identity.strategy !== "content-digest") return [];
+      const digest = node.identity.sha256;
       const linked = nativeEvidence.filter(
         ({ subject }) => subject?.digest.sha256 === digest,
+      );
+      nodeById ??= new Map(
+        nodes.map((candidate) => [candidate.node_id, candidate]),
       );
       const exportNodes = nativeExportNodes(node, edges, nodeById);
       return [
@@ -52,16 +58,6 @@ export const buildJavaScriptNativeHandoffs = (
     .sort((left, right) =>
       compareUnicodeCodePoints(left.native_node_id, right.native_node_id),
     );
-};
-
-const artifactDigest = (node: ApplicationNode): string | null => {
-  if (node.identity.strategy === "content-digest") return node.identity.sha256;
-  const observation = node.observations.find(
-    ({ evidence }) => evidence.artifact.available,
-  );
-  return observation?.evidence.artifact.available === true
-    ? observation.evidence.artifact.sha256
-    : null;
 };
 
 const artifactPath = (node: ApplicationNode): string | null => {

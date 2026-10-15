@@ -403,6 +403,7 @@ it.each([
     for (const [scope, lane] of [
       ["sqlite", "sqlite-runtime"],
       ["workflows", "static"],
+      ["ghidra_bridge", "ghidra_bridge"],
     ] as const) {
       // GitHub exposes only direct dependencies in the required job's needs context.
       const needs: Record<

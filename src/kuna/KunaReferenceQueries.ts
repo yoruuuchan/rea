@@ -1,7 +1,6 @@
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisCapabilityUnavailableError,
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -21,6 +20,7 @@ import {
 } from "./KunaReferenceFiles.js";
 import { KUNA_PROVIDER_ID } from "./KunaRelease.js";
 import type { KunaPendingQuery, KunaQueryWork } from "./KunaQueryWork.js";
+import { kunaUnavailable } from "./KunaUnavailable.js";
 
 /** Charge raw JSON bytes conservatively; retained projections are smaller. */
 const XREF_CACHE_BYTES = 16 * 1024 * 1024;
@@ -158,8 +158,7 @@ export class KunaReferenceQueries {
     const node = graph.nodes.get(address);
     if (node === undefined)
       return err(
-        new AnalysisCapabilityUnavailableError(
-          KUNA_PROVIDER_ID,
+        kunaUnavailable(
           operation,
           `Kuna's graph has no function node at ${address}; its relationships are unknown.`,
         ),

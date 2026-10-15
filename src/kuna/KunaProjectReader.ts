@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
-  AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
@@ -19,6 +18,7 @@ import {
 } from "./KunaProjectFiles.js";
 import { KUNA_PROVIDER_ID } from "./KunaRelease.js";
 import { KUNA_FUNCTION_TEXT_BYTES } from "./KunaLimits.js";
+import { kunaUnavailable } from "./KunaUnavailable.js";
 
 /** The exact producing range for one facet, including a failed C block. */
 export interface KunaProjectFileSpan {
@@ -134,8 +134,7 @@ export class KunaProjectReader {
     const span = index.value.code.get(address);
     if (span === undefined)
       return err(
-        new AnalysisCapabilityUnavailableError(
-          KUNA_PROVIDER_ID,
+        kunaUnavailable(
           operation,
           `Kuna's export lists no code at ${address}; import slots and data entries have no listing.`,
         ),

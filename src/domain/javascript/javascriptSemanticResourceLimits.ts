@@ -77,25 +77,6 @@ export const semanticResourceLimitUnknown = (
   resourceLimit,
 });
 
-/** Collect resource-limit classifications from nested semantic values. */
-export const semanticResourceLimitsIn = (
-  values: readonly JavaScriptSemanticValue[],
-): readonly JavaScriptSemanticResourceLimit[] => {
-  const found = new Set<JavaScriptSemanticResourceLimit>();
-  const pending = [...values];
-  while (pending.length > 0) {
-    const value = pending.pop();
-    if (value === undefined) continue;
-    if (value.status === "unknown" && value.resourceLimit !== undefined)
-      found.add(value.resourceLimit);
-    else if (value.status === "object")
-      for (const property of value.properties) pending.push(property.value);
-    else if (value.status === "array")
-      for (const item of value.items) pending.push(item.value);
-  }
-  return [...found].sort();
-};
-
 /** Display label for one stable resource classification. */
 export const semanticResourceLimitReason = (
   resourceLimit: JavaScriptSemanticResourceLimit,

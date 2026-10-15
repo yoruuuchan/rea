@@ -14,6 +14,10 @@ import type {
   JavaScriptSemanticReference,
 } from "./javascriptSemanticIr.js";
 import type { JavaScriptModuleResolutionMode } from "./javascriptModuleResolutionMode.js";
+import type {
+  JavaScriptSemanticResourceLimit,
+  JavaScriptSemanticValue,
+} from "./javascriptSemanticValueTypes.js";
 
 /** Internal initializer plus a destructuring/member projection. */
 interface JavaScriptSemanticInitializer {
@@ -75,6 +79,8 @@ export interface JavaScriptSemanticAnalysisState {
   readonly program: t.Program;
   /** Effective loader for static imports in this source artifact. */
   readonly staticImportResolutionMode: JavaScriptModuleResolutionMode;
+  /** Bounds encountered during this analysis, independent of later projections. */
+  readonly valueResourceLimits: Set<JavaScriptSemanticResourceLimit>;
   readonly parentsByNode: WeakMap<t.Node, t.Node>;
   readonly scopes: JavaScriptSemanticScopeState[];
   readonly scopesById: Map<string, JavaScriptSemanticScopeState>;
@@ -109,6 +115,15 @@ export interface JavaScriptSemanticAnalysisState {
   /** Source sites distinguish replacement before an ambient identity capture from later writes. */
   readonly ambientWriteEffects: JavaScriptSemanticMemberEffect[];
 }
+
+/** Record one producer outcome without traversing or retaining its value graph. */
+export const recordSemanticValueLimit = (
+  state: JavaScriptSemanticAnalysisState,
+  value: JavaScriptSemanticValue,
+): void => {
+  if (value.status === "unknown" && value.resourceLimit !== undefined)
+    state.valueResourceLimits.add(value.resourceLimit);
+};
 
 /** One parsed source owns its optional indexes and their per-source lifetime. */
 export interface JavaScriptBindingIndex {

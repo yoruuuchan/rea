@@ -34,6 +34,12 @@ describe.skipIf(process.platform === "win32")(
           ["package-main.cjs", "./pkg", "pkg/actual.js"],
           ["package-main-fallback.cjs", "./stale", "stale/index.js"],
           ["package-main-slash.cjs", "./slashed", "slashed/lib.js"],
+          ["json.cjs", "./data", "data.json"],
+          ["json-explicit.cjs", "./data.json", "data.json"],
+          ["json-before-index.cjs", "./conf", "conf.json"],
+          ["js-before-json.cjs", "./both", "both.js"],
+          ["json-index.cjs", "./settings", "settings/index.json"],
+          ["json-main.cjs", "./jpkg", "jpkg/config.json"],
         ] as const;
         const unresolved = [
           ["missing.cjs", "./missing/", "missing/"],
@@ -75,6 +81,16 @@ describe.skipIf(process.platform === "win32")(
           ["slashed/index.js", 'module.exports = "not selected";\n'],
           ["absolute/package.json", `${JSON.stringify({ main: outside })}\n`],
           ["absolute/index.js", 'module.exports = "not selected";\n'],
+          // CommonJS loads X.json after X.js and before any directory index.
+          ["data.json", '{"value":1}\n'],
+          ["conf.json", '{"value":"file before index"}\n'],
+          ["conf/index.js", 'module.exports = "not selected";\n'],
+          ["both.js", 'module.exports = "JavaScript first";\n'],
+          ["both.json", '{"value":"not selected"}\n'],
+          ["settings/index.json", '{"value":"JSON index"}\n'],
+          ["jpkg/package.json", '{"main":"config"}\n'],
+          ["jpkg/config.json", '{"value":"JSON main"}\n'],
+          ["jpkg/index.js", 'module.exports = "not selected";\n'],
           ...[...imports, ...unresolved].map(
             ([path, specifier]) =>
               [path, `require(${JSON.stringify(specifier)});\n`] as const,

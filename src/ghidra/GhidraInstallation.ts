@@ -28,14 +28,16 @@ import {
   ghidraJavaMajorAccepted,
   ghidraJavaRangeLabel,
   ghidraJavaRequirement,
+  type GhidraApplicationProperties,
+  type GhidraJavaRequirement,
+} from "./GhidraInstallationPolicy.js";
+import {
   ghidraReleaseAccepted,
   ghidraReleaseCompatibility,
   ghidraReleaseLine,
   ghidraVersionDetail,
   SUPPORTED_GHIDRA_VERSION,
-  type GhidraApplicationProperties,
-  type GhidraJavaRequirement,
-} from "./GhidraInstallationPolicy.js";
+} from "./GhidraReleasePolicy.js";
 
 const NATIVE_PLATFORMS: Readonly<
   Partial<

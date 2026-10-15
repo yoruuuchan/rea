@@ -180,9 +180,9 @@ export const staticPathResolutionContext = (
 
 /** Resolve a path composed only from inert literal syntax. */
 export const staticPath = (node: t.Node): string | undefined => {
-  if (t.isStringLiteral(node)) return node.value;
-  if (t.isTemplateLiteral(node) && node.expressions.length === 0)
-    return stringValue(node);
+  node = unwrapJavaScriptExpression(node).node;
+  const value = stringValue(node);
+  if (value !== undefined) return value;
   if (t.isBinaryExpression(node, { operator: "+" }))
     return staticConcatenation(node);
   if (t.isCallExpression(node) || t.isNewExpression(node))
@@ -200,7 +200,7 @@ const staticConcatenation = (node: t.BinaryExpression): string | undefined => {
   let current: t.Node = node;
   while (t.isBinaryExpression(current, { operator: "+" })) {
     operands.push(current.right);
-    current = current.left;
+    current = unwrapJavaScriptExpression(current.left).node;
   }
   const anchored = isDirectoryPath(current);
   if (!anchored) operands.push(current);
@@ -249,8 +249,9 @@ const staticFileUrlPath = (
   node: t.CallExpression | t.NewExpression,
 ): string | undefined => {
   if (node.arguments.length !== 1) return undefined;
-  const argument = argumentNode(node.arguments[0]);
-  if (argument === undefined) return undefined;
+  const rawArgument = argumentNode(node.arguments[0]);
+  if (rawArgument === undefined) return undefined;
+  const argument = unwrapJavaScriptExpression(rawArgument).node;
   if (isSourceFileUrl(argument)) return sourceRelativeFileUrlPath(argument);
   const value = staticPath(argument);
   const rawPath = value?.split(/[?#]/u, 1)[0] ?? "";
@@ -277,8 +278,9 @@ const staticFileUrlPath = (
 };
 
 /** Project a known source-relative URL through the actual file URL decoder. */
-const sourceRelativeFileUrlPath = (node: t.Node): string | undefined => {
-  if (!isSourceFileUrl(node)) return undefined;
+const sourceRelativeFileUrlPath = (
+  node: t.CallExpression | t.NewExpression,
+): string | undefined => {
   const value = stringValue(node.arguments[0]);
   if (
     value === undefined ||
@@ -347,7 +349,9 @@ const staticResolvedPath = (
 };
 
 const isFilesystemPathExpression = (node: t.Node): boolean => {
-  if (t.isStringLiteral(node)) return node.value.startsWith("/");
+  node = unwrapJavaScriptExpression(node).node;
+  const value = stringValue(node);
+  if (value !== undefined) return value.startsWith("/");
   if (isFileIdentity(node) || isDirectoryIdentity(node)) return true;
   if (t.isBinaryExpression(node, { operator: "+" }))
     return (
@@ -377,6 +381,7 @@ const isFilesystemPathExpression = (node: t.Node): boolean => {
 };
 
 const isDirectoryIdentity = (node: t.Node | undefined): boolean => {
+  if (node !== undefined) node = unwrapJavaScriptExpression(node).node;
   if (isDirectoryPath(node)) return true;
   if (!t.isCallExpression(node) && !t.isNewExpression(node)) return false;
   const name = calleeName(node.callee);
@@ -388,6 +393,7 @@ const isDirectoryIdentity = (node: t.Node | undefined): boolean => {
 
 /** `__dirname` or the dirname of the source file, as a string. */
 const isDirectoryPath = (node: t.Node | undefined): boolean => {
+  if (node !== undefined) node = unwrapJavaScriptExpression(node).node;
   if (t.isIdentifier(node, { name: "__dirname" })) return true;
   if (!t.isCallExpression(node)) return false;
   const name = calleeName(node.callee);
@@ -413,6 +419,7 @@ export const isImportMetaUrl = (node: t.Node | undefined): boolean => {
 };
 
 const isFileIdentity = (node: t.Node | undefined): boolean => {
+  if (node !== undefined) node = unwrapJavaScriptExpression(node).node;
   if (t.isIdentifier(node, { name: "__filename" }) || isImportMetaUrl(node))
     return true;
   if (!t.isCallExpression(node)) return false;
@@ -560,14 +567,17 @@ const KEYED_COLLECTION_CONSTRUCTORS = new Set([
  * binding, so callers keep URL and path literals as requests.
  */
 const isKeyedCollectionReceiver = (callee: t.Node): boolean => {
+  callee = unwrapJavaScriptExpression(callee).node;
   if (!t.isMemberExpression(callee) && !t.isOptionalMemberExpression(callee))
     return false;
-  const receiver = callee.object;
-  if (t.isNewExpression(receiver))
+  const receiver = unwrapJavaScriptExpression(callee.object).node;
+  if (t.isNewExpression(receiver)) {
+    const constructor = unwrapJavaScriptExpression(receiver.callee).node;
     return (
-      t.isIdentifier(receiver.callee) &&
-      KEYED_COLLECTION_CONSTRUCTORS.has(receiver.callee.name)
+      t.isIdentifier(constructor) &&
+      KEYED_COLLECTION_CONSTRUCTORS.has(constructor.name)
     );
+  }
   if (
     !t.isMemberExpression(receiver) &&
     !t.isOptionalMemberExpression(receiver)
@@ -669,14 +679,15 @@ export const storageKind = (
   return undefined;
 };
 
-/** Produce a dotted callee name from member syntax. */
+/** Produce a dotted callee name through type-erased expression wrappers. */
 export const calleeName = (node: t.Node): string => {
+  node = unwrapJavaScriptExpression(node).node;
   const segments: string[] = [];
   while (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     // Dynamic keys retain their syntax identity instead of inventing a name.
     segments.push(memberPropertyName(node));
     if (!t.isNode(node.object)) break;
-    node = node.object;
+    node = unwrapJavaScriptExpression(node.object).node;
   }
   const base = t.isIdentifier(node)
     ? node.name

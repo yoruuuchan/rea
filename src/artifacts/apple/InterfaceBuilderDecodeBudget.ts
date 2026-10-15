@@ -49,6 +49,14 @@ export class InterfaceBuilderDecodeBudget {
     this.#remainingBytes -= bytes;
   }
 
+  /** Return a reservation whose representation was rejected and not retained. */
+  release(bytes: number): void {
+    this.#remainingBytes = Math.min(
+      this.#initialBytes,
+      this.#remainingBytes + bytes,
+    );
+  }
+
   /** Reserve an upper bound for one JSON-serialized string occurrence. */
   reserveJsonStringOccurrence(value: string): void {
     // JSON escaping uses at most six ASCII bytes per UTF-16 code unit, plus
@@ -117,7 +125,8 @@ const estimateXmlPlistExpansion = (
   const xml = xmlText ?? decodeXmlPlistText(bytes);
   const decodedSourceBytes = xml.length * 2;
   let elementCount = 0;
-  let xmlDepth = 0;
+  // Value nesting is bounded by the shared plist parser, which counts plist
+  // value depth; raw element depth would also count the envelope and keys.
   for (const token of xmlPreflightTokens(xml)) {
     if (token.doctype) {
       // Only a declaration outside opaque text can introduce an internal
@@ -130,15 +139,6 @@ const estimateXmlPlistExpansion = (
       continue;
     }
     elementCount += 1;
-    if (token.closing) xmlDepth -= 1;
-    else if (!token.selfClosing) {
-      xmlDepth += 1;
-      if (xmlDepth > 128)
-        throw new InterfaceBuilderDecodeBudgetExceeded(
-          "aggregate_decode_budget_exhausted",
-          "XML plist nesting exceeds the aggregate Interface Builder decode budget",
-        );
-    }
     if (decodedSourceBytes * 2 + elementCount * 128 > maxBytes)
       return maxBytes + 1;
   }
@@ -179,13 +179,7 @@ function* xmlPreflightTokens(xml: string) {
     }
     if (end === xml.length) return;
     cursor = end + 1;
-    if (doctype || element)
-      yield {
-        doctype,
-        internalSubset,
-        closing: xml[start + 1] === "/",
-        selfClosing: xml[end - 1] === "/",
-      };
+    if (doctype || element) yield { doctype, internalSubset };
   }
 }
 

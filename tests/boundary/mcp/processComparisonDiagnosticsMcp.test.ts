@@ -9,6 +9,17 @@ import { compareProcessEvidenceFiles } from "../../../src/application/process/Pr
 import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
 import {
+  capture,
+  partialSpecification,
+  processStarted,
+  terminal,
+} from "../../../src/domain/process/processTraceComparison.fixture.js";
+import {
+  parseProcessCapture,
+  type ProcessCapture,
+} from "../../../src/domain/process/processCaptureParsing.js";
+import type { ProcessTraceSpecification } from "../../../src/domain/process/processTraceSpecification.js";
+import {
   createEvidence,
   parseEvidence,
   type EvidenceProvider,
@@ -23,15 +34,18 @@ const captureEvidence = (
   side: "left" | "right",
   comparisonContract: Readonly<Record<string, string>> = {},
   provider: EvidenceProvider = PROCESS_PROVIDER,
+  observation: ProcessCapture = parseProcessCapture(
+    EMPTY_PROCESS_CAPTURE_EXAMPLE,
+  ),
 ) =>
   createEvidence(undefined, provider, {
     predicateType: "rea.process-capture",
     operation: "capture_process_scenario",
     parameters: { side },
     result: jsonValueSchema.parse({
-      ...EMPTY_PROCESS_CAPTURE_EXAMPLE,
+      ...observation,
       manifest: {
-        ...EMPTY_PROCESS_CAPTURE_EXAMPLE.manifest,
+        ...observation.manifest,
         comparison_contract: comparisonContract,
         comparison_contract_sha256: digestProcessCommitment(comparisonContract),
       },
@@ -64,6 +78,7 @@ const connect = async () => {
 const compareViaCli = async (
   left: ReturnType<typeof captureEvidence>,
   right: ReturnType<typeof captureEvidence>,
+  specification?: ProcessTraceSpecification,
 ) => {
   const root = await createTestTempDirectory("rea-process-provider-");
   const leftPath = join(root, "left.json");
@@ -72,8 +87,99 @@ const compareViaCli = async (
     writeFile(leftPath, JSON.stringify(left)),
     writeFile(rightPath, JSON.stringify(right)),
   ]);
-  return compareProcessEvidenceFiles(leftPath, rightPath);
+  const tracePath = join(root, "trace.json");
+  if (specification !== undefined)
+    await writeFile(tracePath, JSON.stringify(specification));
+  return compareProcessEvidenceFiles(
+    leftPath,
+    rightPath,
+    specification === undefined ? undefined : tracePath,
+  );
 };
+
+it.each(
+  (["left", "right"] as const).flatMap((missingWorker) =>
+    (["left", "right", "both", "neither"] as const).map((omittedRendered) => ({
+      missingWorker,
+      omittedRendered,
+    })),
+  ),
+)(
+  "preserves terminal coverage when $missingWorker lacks a worker and $omittedRendered omits rendered output",
+  async ({ missingWorker, omittedRendered }) => {
+    const observation = (side: "left" | "right") => {
+      const hasWorker = side !== missingWorker;
+      const complete = capture({
+        frames: [terminal],
+        process_samples: hasWorker ? [processStarted] : [],
+        event_journal: [
+          { collection: "frames", index: 0 },
+          ...(hasWorker
+            ? [{ collection: "process_samples" as const, index: 0 }]
+            : []),
+        ],
+      });
+      const omitted = omittedRendered === "both" || omittedRendered === side;
+      return captureEvidence(
+        side,
+        {},
+        PROCESS_PROVIDER,
+        omitted
+          ? parseProcessCapture({
+              ...complete,
+              truncated: true,
+              truncation_details: {
+                ...complete.truncation_details,
+                rendered_terminal: {
+                  budget_bytes: 5,
+                  observed_bytes: 0,
+                  retained_bytes: 0,
+                  observed_frames: 1,
+                  retained_frames: 0,
+                  unknown_size_frames: 1,
+                },
+              },
+            })
+          : complete,
+      );
+    };
+    const left = observation("left");
+    const right = observation("right");
+    const terminalStatus =
+      omittedRendered === "neither" ? "unchanged" : "unknown";
+    const plain = parseEvidence(await compareViaCli(left, right));
+    expect(plain.normalized_result).toMatchObject({
+      terminal: terminalStatus,
+      process: missingWorker === "left" ? "added" : "removed",
+      status: "changed",
+    });
+
+    const specification = partialSpecification();
+    const cli = parseEvidence(await compareViaCli(left, right, specification));
+    const client = await connect();
+    const response = await client.callTool({
+      name: "compare_process_captures",
+      arguments: { left, right, trace_spec: specification },
+    });
+    expect(response.isError).not.toBe(true);
+    expect(parseEvidence(response.structuredContent)).toEqual(cli);
+    expect(cli.evidence_links).toEqual([left.evidence_id, right.evidence_id]);
+    expect(cli.normalized_result).toMatchObject({
+      terminal: terminalStatus,
+      process: "changed",
+      status: "changed",
+      trace: {
+        verdict: "different",
+        diagnostic: {
+          kind: "cardinality",
+          side: missingWorker,
+          event_ids: ["worker"],
+          locations: [],
+        },
+      },
+    });
+  },
+);
 
 it.each(
   (["left", "right"] as const).flatMap((side) =>

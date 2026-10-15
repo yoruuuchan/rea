@@ -211,6 +211,7 @@ export const buildInterfaceBuilderAnalysis = (input: {
       );
     };
     let hierarchyCount = 0;
+    let documentOmittedHierarchyNodes = 0;
     const visitHierarchy = (
       initial: unknown,
       initialParentId: string,
@@ -218,11 +219,6 @@ export const buildInterfaceBuilderAnalysis = (input: {
       const pending: { readonly value: unknown; readonly parentId: string }[] =
         [{ value: initial, parentId: initialParentId }];
       while (pending.length > 0) {
-        if (hierarchyCount >= input.limits.max_objects) {
-          truncated = true;
-          hierarchyTruncated = true;
-          return;
-        }
         const entry = pending.pop();
         if (entry === undefined) break;
         const { value, parentId } = entry;
@@ -242,7 +238,13 @@ export const buildInterfaceBuilderAnalysis = (input: {
           typeof item.archiveUID === "number" ? String(item.archiveUID) : null,
         );
         let nextParent = parentId;
-        if (objectId !== null) {
+        if (objectId !== null && hierarchyCount >= input.limits.max_objects) {
+          // The walk continues over the decoded records so the omission is
+          // counted rather than reported as an unknown remainder.
+          truncated = true;
+          hierarchyTruncated = true;
+          documentOmittedHierarchyNodes += 1;
+        } else if (objectId !== null) {
           const known = objectIds.has(objectId);
           const childId = known
             ? objectNodeId(objectId)
@@ -504,6 +506,7 @@ export const buildInterfaceBuilderAnalysis = (input: {
                   : null,
         examined: hierarchyCount,
         omitted:
+          documentOmittedHierarchyNodes +
           documentOmittedHierarchyEdges +
           parserOmittedHierarchyReferences +
           omittedSerializedHierarchyReferences,

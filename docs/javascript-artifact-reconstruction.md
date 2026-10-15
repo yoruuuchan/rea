@@ -437,7 +437,18 @@ retained candidate strings and temporary canonical-key serialization. This is
 an in-memory semantic allocation bound independent of CLI or MCP transport
 budgets. Source literal bytes remain in the parsed source and artifact evidence;
 when a normalized semantic value exceeds the bound, its value is unknown and
-coverage is partial. Expression
+coverage is partial. Direct string literals, cooked templates without
+substitutions, and derived strings all use this normalization boundary. A
+single exact primitive is validated without allocating deduplication or sort
+state or serializing a canonical key. Configuration defaults use the same
+normalizer; limited defaults retain `value_resource_limit` and an anchored
+resource-limit unknown. Known null, false, zero, and empty-string defaults stay
+exact. This primitive-value bound does not truncate lookup identities such as
+source paths, field names or request endpoints. Full endpoint properties remain
+available for endpoint queries, tracing and comparison. Each analysis records encountered limit classifications independently of
+later projections: a selected healthy sibling can remain exact while whole-file
+coverage reports the encountered bound. Projection preserves limiting values
+from the shared property-slot owner. Expression
 evaluation and provenance walks stop after 256 nested levels. Union products
 and string lengths are checked before allocating combinations or concatenated
 strings. When a boundary is reached, the value stays unknown, semantic coverage

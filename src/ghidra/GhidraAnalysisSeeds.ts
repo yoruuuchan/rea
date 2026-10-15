@@ -11,7 +11,6 @@ import { err, ok, type Result } from "../domain/result.js";
 
 /** Seed file format admitted by this adapter. */
 export const GHIDRA_SEED_FORMAT = "rea-ghidra-seeds-v1";
-export const GHIDRA_SEED_SCRIPT = "ReaGhidraApplySeeds.java";
 export const MAX_GHIDRA_SEED_BYTES = 32 * 1024 * 1024;
 export const MAX_GHIDRA_SEED_ENTRIES = 1_000_000;
 const MAX_SEED_NAME_LENGTH = 2000;

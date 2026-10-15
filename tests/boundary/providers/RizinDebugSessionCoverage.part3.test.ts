@@ -1,17 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { AnalysisInputError } from "../../../src/domain/analysisErrorCore.js";
-import { RizinDebugSessionManager } from "../../../src/rizin/RizinDebugSessionManager.js";
-import {
-  createRizinTestManager,
-  rizinTestInferiorTty,
-} from "./RizinTestInferiorTty.js";
+import { rizinTestInferiorTty } from "./RizinTestInferiorTty.js";
 import {
   createRizinCoverageHarness,
   abortOnCheck,
   createInjectedProcess,
 } from "./RizinDebugSessionCoverage.fixtures.js";
 
-const { cleanup, startInjected, track } = createRizinCoverageHarness();
+const { cleanup, startInjected, createManager } = createRizinCoverageHarness();
 afterEach(cleanup);
 
 it.skipIf(process.platform === "win32")(

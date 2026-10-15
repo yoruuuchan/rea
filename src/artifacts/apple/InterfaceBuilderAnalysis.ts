@@ -84,6 +84,8 @@ export const analyzeInterfaceBuilderBundle = async (input: {
       recordOmittedArchive(entry.path, "max_documents");
     unreportedOmittedArchives += selection.unreportedOmitted;
     for (const entry of selection.selected) {
+      // Plist representation reserved for this document before decoding.
+      let plistReservation = 0;
       try {
         const remainingInputBytes =
           MAX_AGGREGATE_INPUT_BYTES - aggregateInputBytes;
@@ -132,6 +134,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
             decodedReservation.estimatedBytes,
             "plist representation exceeds the aggregate Interface Builder decode budget",
           );
+          plistReservation = decodedReservation.estimatedBytes;
           binaryPrototypeKeyObserved =
             decodedReservation.binaryPrototypeKeyObserved;
         }
@@ -165,6 +168,9 @@ export const analyzeInterfaceBuilderBundle = async (input: {
       } catch (cause: unknown) {
         if (input.signal?.aborted === true) throw cause;
         if (cause instanceof InterfaceBuilderDecodeBudgetExceeded) {
+          // A document rejected while decoding, e.g. beyond the shared depth
+          // limit, retains no representation; later documents keep its share.
+          decodeBudget.release(plistReservation);
           omitted += 1;
           recordOmittedArchive(entry.path, cause.reason);
           continue;
@@ -700,6 +706,24 @@ const readEntry = async (
   return Buffer.concat(chunks, length);
 };
 
+/**
+ * The shared parser bounds plist value nesting before its recursive decode and
+ * reports the limit as a RangeError; that is an omitted archive, not a
+ * malformed one.
+ */
+const parseXmlWithinDecodeBudget = (text: string) => {
+  try {
+    return parseXmlPropertyList(text);
+  } catch (cause: unknown) {
+    if (cause instanceof RangeError)
+      throw new InterfaceBuilderDecodeBudgetExceeded(
+        "aggregate_decode_budget_exhausted",
+        cause.message,
+      );
+    throw cause;
+  }
+};
+
 /** Project decoded plist data and dates while retaining omitted-key coverage. */
 const decodePlist = (
   bytes: Buffer,
@@ -716,7 +740,7 @@ const decodePlist = (
         value: parseBinary(bytes),
         omittedPrototypeKeys: binaryPrototypeKeyObserved ? null : 0,
       }
-    : parseXmlPropertyList(xmlText ?? decodeXmlPlistText(bytes));
+    : parseXmlWithinDecodeBudget(xmlText ?? decodeXmlPlistText(bytes));
   const projected = projectPlistValue(value);
   return {
     value: projected.value,

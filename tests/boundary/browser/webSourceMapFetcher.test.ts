@@ -1103,6 +1103,11 @@ describe("source-map dependency coverage of hard-to-parse sources", () => {
       ["./lib.js"],
     ],
     [
+      "type-only import equals",
+      'import type Types = require("./types.js");\nimport lib = require("./lib.js");',
+      ["./lib.js"],
+    ],
+    [
       "whole-statement type-only import",
       'import type { Value } from "./types.js";',
       [],

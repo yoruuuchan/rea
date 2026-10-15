@@ -36,6 +36,7 @@ import {
   isTypeOnlyExportSpecifier,
   isTypeOnlyImportDeclaration,
   isTypeOnlyImportSpecifier,
+  semanticImportEqualsSpecifier,
 } from "./javascriptModuleDeclaration.js";
 import {
   commonJsExportName,
@@ -148,16 +149,6 @@ const collectImportEquals = (
     node,
   );
 };
-
-/** Runtime external-module target for a value import-equals declaration. */
-export const semanticImportEqualsSpecifier = (
-  node: t.TSImportEqualsDeclaration,
-): string | null =>
-  node.importKind !== "type" &&
-  t.isTSExternalModuleReference(node.moduleReference) &&
-  t.isStringLiteral(node.moduleReference.expression)
-    ? node.moduleReference.expression.value
-    : null;
 
 /** Collect lexical references after definitions exist, optionally for one name. */
 export const collectSemanticReferences = (
