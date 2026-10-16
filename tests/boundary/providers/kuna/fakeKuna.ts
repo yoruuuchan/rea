@@ -47,22 +47,34 @@ export interface FakeKunaBehavior {
   readonly inventoryDelayMs?: number;
   /** Milliseconds the export takes before writing its files. */
   readonly delayMs?: number;
-  /** `oversized` writes more graph output than REA buffers (32 MiB). */
+  /** `noisy` writes more diagnostics than REA buffers (8 MiB) before the graph. */
   readonly graph?:
     | "ok"
     | "hang"
     | "not-json"
     | "miscounted"
     | "with-bodies"
-    | "oversized";
+    | "noisy";
   readonly graphIndirectCalls?: boolean;
+  /** Bytes of an extra root member in the graph JSON. */
+  readonly graphPadding?: number;
   readonly xrefs?: "ok" | "hang" | "not-json";
   readonly referenceDelayMs?: number;
   readonly referencePadding?: number;
-  readonly strings?: "ok" | "hang" | "not-json" | "miscounted" | "exit-failure";
+  /** `invalid-then-hang` writes a contradictory first row, then never finishes. */
+  readonly strings?:
+    | "ok"
+    | "hang"
+    | "not-json"
+    | "miscounted"
+    | "exit-failure"
+    | "invalid-then-hang";
   readonly stringRows?: readonly FakeKunaString[];
   readonly stringDelayMs?: number;
+  /** Bytes of an extra root member in the string JSON. */
   readonly stringPadding?: number;
+  /** Bytes written to stderr before the string JSON. */
+  readonly stringStderrBytes?: number;
 }
 
 /**
@@ -96,7 +108,9 @@ if (args[0] === "--version") {
   if (behavior.strings === "exit-failure") { process.stderr.write("fixture string scan failed\n"); process.exit(7); }
   else if (behavior.strings === "hang") hang();
   else if (behavior.strings === "not-json") process.stdout.write("not string JSON");
+  else if (behavior.strings === "invalid-then-hang") { process.stdout.write('{"binary":' + JSON.stringify(args[1]) + ',"strings":[{"address":12288,"address_hex":"0x3001"}'); hang(); }
   else {
+    if (behavior.stringStderrBytes) process.stderr.write(Buffer.alloc(behavior.stringStderrBytes, 0x78));
     if (!args.includes("--no-xrefs") || args[args.indexOf("--encoding") + 1] !== "all") throw new Error("strings must skip reference analysis and include all supported encodings");
     const rows = (behavior.stringRows ?? [{ address: 12288, text: "REA fixture prompt" }, { address: 12320, text: "Δelta", encoding: "utf8", terminated: false }]).map((item) => ({ address: item.address, address_hex: "0x" + item.address.toString(16), text: item.text, length: [...item.text].length, byte_length: Buffer.byteLength(item.text, item.encoding === "utf16" ? "utf16le" : "utf8") + (item.terminated === false ? 0 : item.encoding === "utf16" ? 2 : 1), nul_terminated: item.terminated !== false, encoding: item.encoding ?? "ascii", section: ".rodata", xrefs_count: 0, functions: [] }));
     const document = { binary: args[1], encoding: "all", min_length: 5, filter: null, section: null, termination: "any", scanned: "sections", xrefs: false, count: rows.length + (behavior.strings === "miscounted" ? 1 : 0), strings: rows, padding: "x".repeat(behavior.stringPadding ?? 0) };
@@ -105,15 +119,15 @@ if (args[0] === "--version") {
 } else if (args[0] === "decompile-graph") {
   if (behavior.graph === "hang") hang();
   else if (behavior.graph === "not-json") process.stdout.write("not graph JSON");
-  else if (behavior.graph === "oversized") process.stdout.write(Buffer.alloc(33 * 1024 * 1024, 0x20));
   else {
+    if (behavior.graph === "noisy") process.stderr.write(Buffer.alloc(9 * 1024 * 1024, 0x78));
     if (args[args.indexOf("--functions") + 1] !== "") throw new Error("graph must request no bodies");
     const nodes = [...functions, { name: "puts", addr: "0x2000" }].map((fn) => ({ address: parseInt(fn.addr, 16), name: fn.name, kind: "normal", hasIndirectCalls: behavior.graphIndirectCalls !== false && fn === functions[0], forwardsTo: null, codeC: behavior.graph === "with-bodies" ? "unrequested code" : null, assembly: null, error: null }));
     const edges = [];
     if (functions[1]) edges.push({ callerAddress: nodes[0].address, calleeAddress: nodes[1].address, kind: "call", calleeOrder: 0 });
     if (functions[2]) edges.push({ callerAddress: nodes[0].address, calleeAddress: nodes[2].address, kind: functions[2].error ? "jump" : "call", calleeOrder: 1 });
     if (functions[1]?.name === "parse") edges.push({ callerAddress: nodes[1].address, calleeAddress: 8192, kind: "call", calleeOrder: 0 });
-    setTimeout(() => process.stdout.write(JSON.stringify({ schemaVersion: 4, binary: { sourcePath: args[1], functionCount: nodes.length + (behavior.graph === "miscounted" ? 1 : 0), edgeCount: edges.length }, functions: nodes, edges })), behavior.referenceDelayMs ?? 0);
+    setTimeout(() => process.stdout.write(JSON.stringify({ schemaVersion: 4, binary: { sourcePath: args[1], functionCount: nodes.length + (behavior.graph === "miscounted" ? 1 : 0), edgeCount: edges.length }, functions: nodes, edges, padding: "x".repeat(behavior.graphPadding ?? 0) })), behavior.referenceDelayMs ?? 0);
   }
 } else if (args[0] === "xrefs") {
   if (behavior.xrefs === "hang") hang();

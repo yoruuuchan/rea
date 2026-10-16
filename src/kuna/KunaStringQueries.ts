@@ -2,8 +2,6 @@ import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
-  AnalysisOutputError,
-  AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import {
   analysisSearchPredicate,
@@ -16,12 +14,9 @@ import { normalizeKunaAddress } from "./KunaAddress.js";
 import type { KunaInstallation } from "./KunaInstallation.js";
 import type { KunaPendingQuery, KunaQueryWork } from "./KunaQueryWork.js";
 import { kunaQueryFailureForCaller } from "./KunaQueryErrors.js";
+import { KUNA_STRING_MIN_LENGTH } from "./KunaLimits.js";
 import {
-  KUNA_STRING_MIN_LENGTH,
-  KUNA_STRING_OUTPUT_BYTES,
-} from "./KunaLimits.js";
-import {
-  parseKunaStringInventory,
+  KunaStringInventoryReader,
   type KunaStringInventory,
   type KunaStringItem,
 } from "./KunaStringInventory.js";
@@ -129,46 +124,31 @@ export class KunaStringQueries {
     }
     if (this.#pending === undefined) {
       const pending = this.work.start<KunaStringInventory>(
-        async (producerSignal) => {
-          const run = await this.work.run({
-            installation,
-            operation: "kuna:strings",
-            arguments: (input) => [
-              "strings",
-              input,
-              "--json",
-              "--encoding",
-              "all",
-              "--min-length",
-              String(KUNA_STRING_MIN_LENGTH),
-              "--termination",
-              "any",
-              "--no-xrefs",
-            ],
-            timeoutMs: installation.configuration.projectTimeoutMs,
-            outputBytes: KUNA_STRING_OUTPUT_BYTES,
-            signal: producerSignal,
-          });
-          if (!run.ok) {
-            if (
-              run.error instanceof AnalysisResourceConstraintError &&
-              run.error.resource === "memory"
-            )
-              this.#failure = run.error;
-            return run;
-          }
-          const parsed = parseKunaStringInventory(
-            run.value.stdout.text,
-            run.value.input,
-          );
-          return parsed.ok
-            ? parsed
-            : err(
-                new AnalysisOutputError("kuna:strings", parsed.error, {
-                  userMessage: `Kuna's string inventory cannot be used: ${parsed.error}`,
-                }),
-              );
-        },
+        (producerSignal) =>
+          this.work.scan(
+            {
+              installation,
+              operation: "kuna:strings",
+              arguments: (input) => [
+                "strings",
+                input,
+                "--json",
+                "--encoding",
+                "all",
+                "--min-length",
+                String(KUNA_STRING_MIN_LENGTH),
+                "--termination",
+                "any",
+                "--no-xrefs",
+              ],
+              timeoutMs: installation.configuration.projectTimeoutMs,
+            },
+            new KunaStringInventoryReader(),
+            producerSignal,
+            (failure) => {
+              this.#failure = failure;
+            },
+          ),
         (value) => {
           this.#inventory = value;
         },

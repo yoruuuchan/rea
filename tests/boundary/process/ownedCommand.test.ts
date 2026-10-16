@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { beforeAll, expect, it, vi } from "vitest";
 import {
@@ -98,6 +98,75 @@ it("collects a real owned command and verifies its exit before returning diagnos
     exitCode: 0,
     signal: null,
     stdout: { text: "observed-output", bytes: 15 },
+  });
+});
+
+it("streams stdout beyond the diagnostic budget into a sink and returns after it finishes", async () => {
+  let received = 0;
+  let finished = false;
+  const sink = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      received += chunk.byteLength;
+      callback();
+    },
+    final(callback) {
+      // A sink still parsing after output closes delays the result.
+      setTimeout(() => {
+        finished = true;
+        callback();
+      }, 50);
+    },
+  });
+  const result = await runOwnedCommand(
+    command(
+      'process.stdout.write("a".repeat(256 * 1024)); process.stderr.write("diagnostic")',
+    ),
+    { timeoutMs: 2_000, diagnosticBytes: 1024, stdout: sink },
+  );
+  expect(finished).toBe(true);
+  expect(received).toBe(256 * 1024);
+  expect(result).toMatchObject({
+    exitCode: 0,
+    stdout: { text: "", bytes: 0 },
+    stderr: { text: "diagnostic" },
+  });
+});
+
+it("destroys a sink still finishing when the command deadline elapses", async () => {
+  const sink = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+    final(callback) {
+      setTimeout(callback, 5_000);
+    },
+  });
+  await expect(
+    runOwnedCommand(command('process.stdout.write("observed-output")'), {
+      timeoutMs: 300,
+      diagnosticBytes: 1024,
+      stdout: sink,
+    }),
+  ).rejects.toMatchObject({ reason: "timeout" });
+  expect(sink.destroyed).toBe(true);
+});
+
+it("reports a failed stdout sink as a collection failure", async () => {
+  const sink = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback(new Error("fixture sink failure"));
+    },
+  });
+  await expect(
+    runOwnedCommand(command('process.stdout.write("observed-output")'), {
+      timeoutMs: 2_000,
+      diagnosticBytes: 1024,
+      stdout: sink,
+    }),
+  ).rejects.toMatchObject({
+    reason: "process",
+    collectionFailure: true,
+    message: "stdout stream failed: fixture sink failure",
   });
 });
 

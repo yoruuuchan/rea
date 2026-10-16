@@ -1,20 +1,14 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { analysisStringSchema } from "../domain/hopperValues.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { compareKunaAddresses } from "./KunaAddress.js";
-import { parseKunaJson } from "./KunaJson.js";
-
-import {
-  KUNA_STRING_OUTPUT_BYTES,
-  KUNA_STRING_MIN_LENGTH,
-} from "./KunaLimits.js";
+import { KunaJsonDocumentReader, parseKunaRow } from "./KunaJsonStream.js";
+import { KUNA_STRING_MIN_LENGTH } from "./KunaLimits.js";
 
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const address = z.string().regex(/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/u);
-const addressKeys = new Set(["address"]);
 const header = z.object({
   binary: z.string(),
   encoding: z.literal("all"),
@@ -25,7 +19,6 @@ const header = z.object({
   scanned: z.enum(["sections", "segments"]),
   xrefs: z.literal(false),
   count,
-  strings: z.array(z.unknown()),
 });
 const row = z.object({
   address,
@@ -39,6 +32,28 @@ const row = z.object({
   xrefs_count: z.literal(0),
   functions: z.tuple([]),
 });
+
+const ROWS = "strings";
+const DOCUMENT = {
+  header: new Set(Object.keys(header.shape)),
+  sections: new Map(),
+  rows: new Map([
+    [
+      ROWS,
+      {
+        fields: new Set(
+          Object.keys(row.shape).filter(
+            (key) => key !== "address" && key !== "functions",
+          ),
+        ),
+        addresses: new Set(["address"]),
+        // Rows are scanned with --no-xrefs, so `functions` must be empty.
+        empty: new Set(["functions"]),
+        nulls: new Set<string>(),
+      },
+    ],
+  ]),
+} as const;
 
 /** JSON text omits terminators; native lengths describe the encoded source. */
 const validateStringFacts = (entry: z.infer<typeof row>): void => {
@@ -84,43 +99,30 @@ export interface KunaStringInventory {
   readonly scanned: "sections" | "segments";
 }
 
-/** Validate the producer's complete scan before publishing any selected row. */
-export const parseKunaStringInventory = (
-  text: string,
-  input: string,
-): Result<KunaStringInventory, string> => {
-  try {
-    const document = header.parse(
-      parseKunaJson(text, KUNA_STRING_OUTPUT_BYTES, addressKeys),
-    );
-    if (document.binary !== input)
-      throw new Error("string inventory names a different input");
-    if (document.count !== document.strings.length)
-      throw new Error("string inventory count disagrees with examined rows");
-    const seen = new Set<string>();
-    const items = document.strings.map((value): KunaStringItem => {
-      const entry = row.parse(value);
-      validateStringFacts(entry);
-      if (entry.address !== entry.address_hex)
-        throw new Error("string address disagrees with its hex field");
-      const identity = `${entry.address}:${entry.encoding}`;
-      if (seen.has(identity))
-        throw new Error("string inventory repeats an identity");
-      seen.add(identity);
-      return {
-        address: entry.address,
-        value: entry.text,
-        string: {
-          encoding: entry.encoding,
-          encoding_status: "observed",
-          termination: entry.nul_terminated
-            ? "present_or_not_required"
-            : "missing",
-          byte_length: entry.byte_length,
-        },
-      };
-    });
-    items.sort(
+/** Validates `kuna strings --json` row by row as Kuna writes it. */
+export class KunaStringInventoryReader extends KunaJsonDocumentReader<KunaStringInventory> {
+  readonly #items: KunaStringItem[] = [];
+  readonly #identities = new Set<string>();
+
+  constructor() {
+    super("kuna:strings", "Kuna's string inventory", DOCUMENT);
+  }
+
+  override finish(input: string): Result<KunaStringInventory, AnalysisError> {
+    const completed = this.complete();
+    if (!completed.ok) return completed;
+    const fields = header.safeParse(completed.value.header);
+    if (!fields.success)
+      return err(
+        this.unusable("the string inventory header is not Kuna's scan"),
+      );
+    if (fields.data.binary !== input)
+      return err(this.unusable("string inventory names a different input"));
+    if (fields.data.count !== this.#items.length)
+      return err(
+        this.unusable("string inventory count disagrees with examined rows"),
+      );
+    this.#items.sort(
       (left, right) =>
         compareKunaAddresses(left.address, right.address) ||
         (left.string?.encoding ?? "").localeCompare(
@@ -129,12 +131,41 @@ export const parseKunaStringInventory = (
         ),
     );
     return ok({
-      items,
-      sha256: createHash("sha256").update(text).digest("hex"),
-      bytes: Buffer.byteLength(text),
-      scanned: document.scanned,
+      items: this.#items,
+      sha256: completed.value.sha256,
+      bytes: completed.value.bytes,
+      scanned: fields.data.scanned,
     });
-  } catch (cause: unknown) {
-    return err(cause instanceof Error ? cause.message : String(cause));
   }
-};
+
+  protected override acceptRow(
+    _member: string,
+    fields: Readonly<Record<string, unknown>>,
+  ): void {
+    const entry = parseKunaRow(row, "string", fields);
+    validateStringFacts(entry);
+    if (entry.address !== entry.address_hex)
+      throw new Error("string address disagrees with its hex field");
+    const identity = `${entry.address}:${entry.encoding}`;
+    if (this.#identities.has(identity))
+      throw new Error("string inventory repeats an identity");
+    this.#identities.add(identity);
+    this.#items.push({
+      address: entry.address,
+      value: entry.text,
+      string: {
+        encoding: entry.encoding,
+        encoding_status: "observed",
+        termination: entry.nul_terminated
+          ? "present_or_not_required"
+          : "missing",
+        byte_length: entry.byte_length,
+      },
+    });
+  }
+
+  protected override discardRows(): void {
+    this.#items.length = 0;
+    this.#identities.clear();
+  }
+}

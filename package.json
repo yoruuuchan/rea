@@ -215,6 +215,7 @@
     "verify:javascript:output": "npm run build:cached && node scripts/verify/javascript/output.mjs",
     "verify:javascript:module-references": "npm run build:cached && node scripts/verify/javascript/module-references.mjs",
     "verify:javascript:native-handoffs": "npm run build:cached && node scripts/verify/javascript/native-handoffs.mjs",
+    "verify:javascript:retained-facts": "npm run build:cached && node scripts/verify/javascript/retained-facts.mjs",
     "verify:application-workflows": "npm run build:cached && node scripts/verify/javascript/application-workflows.mjs",
     "verify:managed": "npm run build:cached && node scripts/verify/managed/conformance.mjs",
     "verify:firmware": "npm run build:cached && node scripts/verify/firmware/analysis.mjs",

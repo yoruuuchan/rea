@@ -292,14 +292,17 @@ export const cleanupElectronProcesses = async (
     terminateTree: cleanupWindowsProcessTree,
   },
 ): Promise<ProcessCleanupResult> => {
+  if (lineage?.status !== "verified") {
+    if (host.platform !== "win32") {
+      const root = await cleanupOwnedProcessGroup(ownership);
+      if (!root.cleaned) return root;
+    }
+    return {
+      cleaned: false,
+      reason: `${lineage?.reason ?? "owned Electron lineage was not observed"}; helper cleanup was not proven`,
+    };
+  }
   if (host.platform === "win32") {
-    // An empty Windows process table is not ownership proof for this PID.
-    if (lineage?.status !== "verified")
-      return {
-        cleaned: false,
-        reason:
-          "owned Electron lineage was unavailable; helper cleanup was not proven",
-      };
     const root = await host.terminateTree(ownership.leaderPid);
     if (!root.cleaned) return root;
     for (const descendant of lineage.lineage.descendants) {
@@ -307,16 +310,6 @@ export const cleanupElectronProcesses = async (
       if (!result.cleaned) return result;
     }
     return root;
-  }
-  if (lineage?.status !== "verified") {
-    const root = await cleanupOwnedProcessGroup(ownership);
-    return root.cleaned
-      ? {
-          cleaned: false,
-          reason:
-            "owned Electron lineage was unavailable; helper cleanup was not proven",
-        }
-      : root;
   }
   const groupIds = selectCapturedProcessGroupIds(
     ownership.leaderPid,

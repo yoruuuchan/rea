@@ -1,12 +1,9 @@
 import { z } from "zod";
 import { prefixedDigestSchema } from "../digests.js";
 import {
-  applicationCoverageSchema,
   applicationGraphEvidenceSchema,
   applicationNodeIdentitySchema,
 } from "../javascript/javascriptApplicationEvidenceSchemas.js";
-import { javaScriptSemanticGraphInputSchema } from "../javascript/javascriptSemanticGraphSchemas.js";
-import { javaScriptSourceSelectionSchema } from "../javascript/javascriptSourceSelection.js";
 
 const moduleKindSchema = z.enum([
   "javascript-asset",
@@ -44,16 +41,6 @@ export const javascriptModuleReferenceSchema = z.strictObject({
   identity: applicationNodeIdentitySchema,
   retained_source_range_count: z.number().int().nonnegative(),
   basis: z.array(basisSchema).min(1),
-});
-
-export const javascriptModuleSourceCoverageSchema = z.strictObject({
-  source_selection: javaScriptSourceSelectionSchema.exactOptional(),
-  application: applicationCoverageSchema,
-  semantic: javaScriptSemanticGraphInputSchema.shape.coverage.omit({
-    families: true,
-  }),
-  application_unknown_count: z.number().int().nonnegative(),
-  semantic_unknown_count: z.number().int().nonnegative(),
 });
 
 export type JavaScriptModuleReference = z.infer<

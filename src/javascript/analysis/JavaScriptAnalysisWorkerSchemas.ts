@@ -140,6 +140,7 @@ const windowShape = {
   web_preferences: z.array(
     z.strictObject({ name: z.string(), value: staticValue }),
   ),
+  resolution_sources: z.array(range).exactOptional(),
 };
 const bridgeShape = {
   resolution_basis: z.literal("wrapper-substitution").optional(),

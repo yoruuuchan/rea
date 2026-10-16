@@ -163,11 +163,21 @@ export interface JavaScriptBindingIndex {
   readonly bindings: JavaScriptSemanticAnalysisState;
   indexAmbientWritesSteps(): Generator<void, void>;
   indexMemberMutationFactsSteps(): Generator<void, void>;
+  /** Resolve certain lexical ownership without collecting mutation reports. */
+  bindingForReferenceAt(
+    referenceNode: t.Node,
+  ): JavaScriptSemanticBindingState | undefined;
   effectsForReferenceAt(
     site: t.Node,
     referenceNode: t.Node,
     propertyPath?: JavaScriptSemanticPropertyPath,
   ): JavaScriptSemanticReferenceEffectsAtSite;
+  /** Stop at the first relevant prior/uncertain effect without retaining a report. */
+  referenceMayHaveChangedAt(
+    site: t.Node,
+    referenceNode: t.Node,
+    propertyPath?: JavaScriptSemanticPropertyPath,
+  ): boolean;
   referencesSteps(): Generator<void, readonly JavaScriptSemanticReference[]>;
 }
 

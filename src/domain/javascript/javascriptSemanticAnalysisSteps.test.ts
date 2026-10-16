@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import * as t from "@babel/types";
 
 import {
   analyzeParsedJavaScriptSemantics,
@@ -14,6 +15,51 @@ import {
   traverseJavaScriptAst,
   traverseJavaScriptAstSteps,
 } from "./javascriptSemanticTraversal.js";
+
+it("bounds repeated capture checks while preserving unindexed and escaped unknowns", () => {
+  const count = 128;
+  const parsed = parseJavaScriptSource(
+    [
+      "const options = {webPreferences: {sandbox: true}};",
+      ...Array.from({ length: count }, () => "new BrowserWindow(options);"),
+    ].join("\n"),
+  );
+  if (parsed === null) throw new Error("Expected parsed source");
+  const index = completeSemanticSteps(
+    indexJavaScriptBindingsWithReceiversSteps(parsed.program),
+  );
+  const sites = parsed.program.body.flatMap((node) =>
+    t.isExpressionStatement(node) && t.isNewExpression(node.expression)
+      ? [node.expression]
+      : [],
+  );
+  const first = sites[0];
+  if (first === undefined || !t.isIdentifier(first.arguments[0]))
+    throw new Error("Expected capture");
+  expect(index.referenceMayHaveChangedAt(first, first.arguments[0])).toBe(true);
+  completeSemanticSteps(index.indexMemberMutationFactsSteps());
+  const binding = index.bindingForReferenceAt(first.arguments[0]);
+  if (binding === undefined) throw new Error("Expected local binding");
+  let reads = 0;
+  const effects = new Proxy(binding.escapedPaths, {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/u.test(key)) reads += 1;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  Object.defineProperty(binding, "escapedPaths", { value: effects });
+  const changed = sites.map((site) => {
+    const reference = site.arguments[0];
+    if (!t.isIdentifier(reference)) throw new Error("Expected local reference");
+    return index.referenceMayHaveChangedAt(site, reference, ["webPreferences"]);
+  });
+  expect(changed).toEqual([
+    false,
+    ...Array.from({ length: count - 1 }, () => true),
+  ]);
+  // Allow implementation headroom while rejecting a full N-by-N effect report.
+  expect(reads).toBeLessThanOrEqual(count * 4);
+});
 
 it.each([false, true])(
   "checkpoints suppressed GraphQL sources, including alias proof (aliases: %s)",

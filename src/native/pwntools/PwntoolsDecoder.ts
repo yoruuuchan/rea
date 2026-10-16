@@ -299,9 +299,6 @@ export class PwntoolsDecoder<
             requestPath,
           ],
           cwd: root.path,
-          // Caller-selected Python launchers can exec through prlimit or a
-          // shell wrapper. Keep parent/group/run-token ownership across exec.
-          expectedCommand: null,
           runId: `rea-artifact-decoder-${randomUUID()}`,
           hostEnvironment: {
             ...this.environment,
@@ -478,7 +475,13 @@ export class PwntoolsDecoder<
     try {
       outcome = ok(
         await runOwnedCommand(
-          spawn,
+          {
+            ...spawn,
+            // Every decoder stage can replace its launcher through exec,
+            // including the optional Python-to-GDB handoff. Preserve explicit
+            // pins; otherwise keep parent/group/run-token proof across exec.
+            expectedCommand: spawn.expectedCommand ?? null,
+          },
           {
             timeoutMs: PWNTOOLS_LIMITS.timeoutMs,
             diagnosticBytes: PWNTOOLS_LIMITS.diagnosticBytes,

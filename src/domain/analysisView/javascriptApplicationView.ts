@@ -9,6 +9,11 @@ import type { ApplicationNode } from "../javascript/javascriptApplicationGraphSc
 import { err, ok, type Result } from "../result.js";
 import type { JavaScriptModuleReference } from "./javascriptModuleReferences.js";
 import {
+  javascriptApplicationSourceCoverage,
+  type JavaScriptApplicationSourceCoverage,
+} from "./javascriptApplicationCoverage.js";
+import { projectJavaScriptFacts } from "./javascriptFactsView.js";
+import {
   boundedViewMessages,
   completeWithinViewCoverage as completeCoverage,
   pageViewCoverage as pageCoverage,
@@ -190,32 +195,24 @@ const moduleReference = ({
   };
 };
 
-const applicationUnknownCount = (
-  analysis: JavaScriptApplicationAnalysisResult,
-): number =>
-  analysis.graph.nodes.reduce(
-    (count, node) => count + Number(node.kind === "unknown"),
-    0,
-  );
-
 const javascriptCoverageUnknowns = (
-  analysis: JavaScriptApplicationAnalysisResult,
+  coverage: JavaScriptApplicationSourceCoverage,
 ): readonly string[] => {
   const unknowns: string[] = [];
-  if (analysis.graph.coverage.status !== "complete")
-    unknowns.push(`graph.coverage.status is ${analysis.graph.coverage.status}`);
-  if (analysis.semantic_graph.coverage.status !== "complete")
+  if (coverage.application.status !== "complete")
+    unknowns.push(`graph.coverage.status is ${coverage.application.status}`);
+  if (coverage.semantic.status !== "complete")
     unknowns.push(
-      `semantic_graph.coverage.status is ${analysis.semantic_graph.coverage.status}`,
+      `semantic_graph.coverage.status is ${coverage.semantic.status}`,
     );
-  const applicationUnknowns = applicationUnknownCount(analysis);
+  const applicationUnknowns = coverage.application_unknown_count;
   if (applicationUnknowns > 0)
     unknowns.push(
       `${String(applicationUnknowns)} application graph unknowns remain in the parent Evidence.`,
     );
-  if (analysis.semantic_graph.unknowns.length > 0)
+  if (coverage.semantic_unknown_count > 0)
     unknowns.push(
-      `${String(analysis.semantic_graph.unknowns.length)} semantic graph unknowns remain in the parent Evidence.`,
+      `${String(coverage.semantic_unknown_count)} semantic graph unknowns remain in the parent Evidence.`,
     );
   return unknowns;
 };
@@ -223,6 +220,7 @@ const javascriptCoverageUnknowns = (
 const parentFields = (
   parent: AnalysisViewParent,
   analysis: JavaScriptApplicationAnalysisResult,
+  sourceCoverage: JavaScriptApplicationSourceCoverage,
 ) => {
   const limitations = [
     ...analysis.limitations,
@@ -246,7 +244,7 @@ const parentFields = (
       limitations,
       parent.evidenceId,
       "unknowns",
-      javascriptCoverageUnknowns(analysis),
+      javascriptCoverageUnknowns(sourceCoverage),
     ),
   };
 };
@@ -315,33 +313,36 @@ export const projectJavaScriptApplicationView = (
     view.kind !== "summary" &&
     view.kind !== "item" &&
     view.kind !== "page" &&
-    view.kind !== "javascript"
+    view.kind !== "javascript" &&
+    view.kind !== "javascript-facts"
   )
     return err(
       jsIncompatible(
-        "JavaScript application Evidence supports summary, module item, module page or typed JavaScript reference views.",
+        "JavaScript application Evidence supports summary, module item/page, typed module references or selected JavaScript facts.",
       ),
     );
-  const shared = parentFields(parent, analysis);
+  const sourceCoverage = javascriptApplicationSourceCoverage(analysis);
+  const shared = parentFields(parent, analysis, sourceCoverage);
+  if (view.kind === "javascript-facts") {
+    const { rows, total } = projectJavaScriptFacts(analysis.graph.nodes, view);
+    return ok({
+      ...shared,
+      kind: "javascript-facts",
+      view,
+      rows,
+      source_coverage: sourceCoverage,
+      coverage: pageCoverage(view.offset, rows.length, total),
+    });
+  }
   if (view.kind === "javascript") {
     const { entries, total } = modulePage(analysis.graph.nodes, view);
     const rows = entries.map(moduleReference);
-    const { families: _families, ...semantic } =
-      analysis.semantic_graph.coverage;
     return ok({
       ...shared,
       kind: "javascript",
       view,
       rows,
-      source_coverage: {
-        ...(analysis.source_selection === undefined
-          ? {}
-          : { source_selection: analysis.source_selection }),
-        application: analysis.graph.coverage,
-        semantic,
-        application_unknown_count: applicationUnknownCount(analysis),
-        semantic_unknown_count: analysis.semantic_graph.unknowns.length,
-      },
+      source_coverage: sourceCoverage,
       coverage: pageCoverage(view.offset, rows.length, total),
     });
   }
@@ -375,8 +376,8 @@ export const projectJavaScriptApplicationView = (
               }),
             ),
           },
-          application_unknowns: applicationUnknownCount(analysis),
-          semantic_unknowns: analysis.semantic_graph.unknowns.length,
+          application_unknowns: sourceCoverage.application_unknown_count,
+          semantic_unknowns: sourceCoverage.semantic_unknown_count,
         }),
         limitation_count: analysis.limitations.length,
       },

@@ -1,5 +1,6 @@
 import { expect, it as test, vi } from "vitest";
 import { readKunaConfiguration } from "../../../../src/kuna/KunaConfiguration.js";
+import { KUNA_DIAGNOSTIC_BYTES } from "../../../../src/kuna/KunaLimits.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { ProviderCleanupError } from "../../../../src/domain/providerCleanupError.js";
 
@@ -114,6 +115,57 @@ it.each(["not-json", "miscounted"] as const)(
     }
   },
 );
+
+it("parses a scan larger than any fixed output buffer as it streams", async () => {
+  const padding = 24 * 1024 * 1024;
+  const { open } = await session("rea-kuna-strings-large-", {
+    stringPadding: padding,
+  });
+  const client = open();
+  try {
+    const listed = await run(client, "list_strings");
+    expect(listed.result).toHaveLength(2);
+    expect(listed.rawResult).toMatchObject({
+      strings: {
+        bytes: expect.any(Number),
+        inventory_count: 2,
+      },
+    });
+    expect(
+      (listed.rawResult as { strings: { bytes: number } }).strings.bytes,
+    ).toBeGreaterThan(padding);
+  } finally {
+    expect(await client.close()).toEqual({ ok: true, value: null });
+  }
+});
+
+it("stops Kuna at the first contradictory row instead of awaiting the rest", async () => {
+  const { open, kuna } = await session(
+    "rea-kuna-strings-reject-",
+    { strings: "invalid-then-hang" },
+    { REA_KUNA_PROJECT_TIMEOUT_MS: "60000" },
+  );
+  const client = open();
+  try {
+    const started = Date.now();
+    expect(
+      await client.execute("search_strings", { pattern: "fixture" }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisOutputError",
+        operation: "search_strings",
+        diagnostics: { producer_operation: "kuna:strings" },
+      },
+    });
+    expect(Date.now() - started).toBeLessThan(30_000);
+    await setFakeKunaBehavior(kuna, {});
+    expect((await run(client, "list_strings")).result).toHaveLength(2);
+    expect(await scans(kuna)).toHaveLength(2);
+  } finally {
+    expect(await client.close()).toEqual({ ok: true, value: null });
+  }
+});
 
 it("cancels one waiter without stopping the shared scan, and rebuilds in a fresh session", async () => {
   const { open, kuna } = await session("rea-kuna-strings-waiters-", {
@@ -283,7 +335,7 @@ it.each([
     const { open, kuna } = await session(
       "rea-kuna-shared-string-failure-",
       mode === "oversize"
-        ? { stringPadding: 16 * 1024 * 1024 }
+        ? { stringStderrBytes: KUNA_DIAGNOSTIC_BYTES + 1 }
         : { strings: mode },
       { REA_KUNA_PROJECT_TIMEOUT_MS: mode === "hang" ? "500" : "5000" },
     );

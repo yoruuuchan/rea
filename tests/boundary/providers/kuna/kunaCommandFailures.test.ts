@@ -53,9 +53,38 @@ it("reports output beyond REA's fixed buffer as a deterministic memory bound", a
   }
 });
 
-it("reports a graph beyond REA's buffer once per session instead of rebuilding it", async () => {
+it("parses a graph larger than any fixed output buffer as it streams", async () => {
+  const padding = 40 * 1024 * 1024;
+  const { open } = await session("rea-kuna-graph-large-", {
+    graphPadding: padding,
+  });
+  const client = open();
+  try {
+    const result = await client.execute("procedure_callees", {
+      procedure: "main",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        result: ["0x1040"],
+        rawResult: {
+          references: { kind: "kuna-call-graph", functions: 4, edges: 3 },
+        },
+      },
+    });
+    if (!result.ok) return;
+    expect(
+      (result.value.rawResult as { references: { bytes: number } }).references
+        .bytes,
+    ).toBeGreaterThan(padding);
+  } finally {
+    expect(await client.close()).toEqual({ ok: true, value: null });
+  }
+});
+
+it("reports graph diagnostics beyond REA's buffer once per session instead of rebuilding it", async () => {
   const { kuna, open } = await session("rea-kuna-graph-overflow-", {
-    graph: "oversized",
+    graph: "noisy",
   });
   const client = open();
   try {
@@ -63,7 +92,7 @@ it("reports a graph beyond REA's buffer once per session instead of rebuilding i
       const result = await client.execute("procedure_callers", {
         procedure: "0x1000",
       });
-      if (result.ok) throw new Error("the oversized graph was admitted");
+      if (result.ok) throw new Error("the overflowing graph was admitted");
       expect(result.error).toMatchObject({
         _tag: "AnalysisResourceConstraintError",
         resource: "memory",

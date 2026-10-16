@@ -10,9 +10,8 @@ import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { KunaInstallation } from "./KunaInstallation.js";
 import {
-  KUNA_GRAPH_OUTPUT_BYTES,
   KUNA_XREF_OUTPUT_BYTES,
-  parseKunaCallGraph,
+  KunaCallGraphReader,
   parseKunaIncomingReferences,
   type KunaCallGraph,
   type KunaGraphNode,
@@ -108,33 +107,25 @@ export class KunaReferenceQueries {
       }
       if (this.#pendingGraph === undefined) {
         const pending = this.work.start<KunaCallGraph>(
-          async (producerSignal) => {
-            const run = await this.work.run({
-              installation,
-              operation: "kuna:call-graph",
-              arguments: (input) => [
-                "decompile-graph",
-                input,
-                "--functions",
-                "",
-              ],
-              timeoutMs: installation.configuration.projectTimeoutMs,
-              outputBytes: KUNA_GRAPH_OUTPUT_BYTES,
-              signal: producerSignal,
-            });
-            if (!run.ok) {
-              if (
-                run.error instanceof AnalysisResourceConstraintError &&
-                run.error.resource === "memory"
-              )
-                this.#graphFailure = run.error;
-              return run;
-            }
-            return this.#parsed(
-              parseKunaCallGraph(run.value.stdout.text, run.value.input),
-              "call graph",
-            );
-          },
+          (producerSignal) =>
+            this.work.scan(
+              {
+                installation,
+                operation: "kuna:call-graph",
+                arguments: (input) => [
+                  "decompile-graph",
+                  input,
+                  "--functions",
+                  "",
+                ],
+                timeoutMs: installation.configuration.projectTimeoutMs,
+              },
+              new KunaCallGraphReader(),
+              producerSignal,
+              (failure) => {
+                this.#graphFailure = failure;
+              },
+            ),
           (value) => {
             this.#graph = value;
           },

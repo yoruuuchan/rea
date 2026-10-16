@@ -38,6 +38,8 @@ export type ElectronBrowserWindowFinding = ElectronBrowserWindowPreload & {
   readonly options_status: "object-literal" | "dynamic" | "missing";
   readonly web_preferences_status: "object-literal" | "dynamic" | "missing";
   readonly web_preferences: readonly ElectronWebPreference[];
+  /** Object syntax supporting constant substitution, separate from construction. */
+  readonly resolution_sources?: readonly JavaScriptSourceRange[];
   readonly module_key: string | null;
   /** Recovered factory runtime; absent in older or unbundled findings. */
   readonly module_runtime?: string;

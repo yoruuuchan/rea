@@ -11,6 +11,7 @@ import {
 } from "./javascriptSemanticTraversal.js";
 
 import { inspectElectronStaticNode } from "./electronStaticAnalysis.js";
+import { finishElectronBrowserWindowsSteps } from "./electronStaticAnalysisBrowser.js";
 import {
   detectVendors,
   failedJavaScriptStaticAnalysis,
@@ -99,6 +100,7 @@ export function* analyzeParsedJavaScriptStaticSourceSteps(
     rpcScan: createJavaScriptRpcScan(source, receivers.rpcClientRoots, index),
   };
   yield* traverseStaticSourceSteps(file, findings, bindings);
+  yield* finishElectronBrowserWindowsSteps(findings, index);
   if (accumulator.pendingNetworkCalls.length > 0) {
     yield* index.indexMemberMutationFactsSteps();
     finishPartialNetworkEndpoints(findings, bindings, index);

@@ -30,40 +30,123 @@ import {
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import type { JavaScriptFindingContext } from "./javascriptStaticAnalysisState.js";
+import type { JavaScriptBindingIndex } from "./javascriptSemanticState.js";
+import {
+  hasElectronOptionObjectCandidate,
+  resolveElectronOptionObject,
+} from "./electronStaticOptionObjects.js";
 
 /** Inspect BrowserWindow, contextBridge, and utility-process syntax. */
 export const inspectElectronBrowserNode = (
   node: t.Node,
   context: JavaScriptFindingContext,
 ): void => {
-  if (t.isNewExpression(node)) inspectBrowserWindow(node, context);
+  if (t.isNewExpression(node)) {
+    const path = electronCalleePath(node.callee, context);
+    if (path?.length === 1 && path[0] === "BrowserWindow") {
+      if (needsConstantOptions(node))
+        context.accumulator.pendingBrowserWindows.push(node);
+      else inspectBrowserWindow(node, context);
+    }
+  }
   if (!t.isCallExpression(node) && !t.isOptionalCallExpression(node)) return;
   inspectContextBridge(node, context);
   inspectUtilityProcess(node, context);
 };
 
+const needsConstantOptions = (node: t.NewExpression): boolean => {
+  const argument = argumentNode(node.arguments[0]);
+  const options = argument && unwrapJavaScriptExpression(argument).node;
+  if (t.isIdentifier(options)) return true;
+  const lookup = objectProperty(options, "webPreferences");
+  return (
+    lookup.status === "explicit" &&
+    t.isIdentifier(unwrapJavaScriptExpression(lookup.property.value).node)
+  );
+};
+
+/** Batch deferred options after the shared mutation index can yield safely. */
+export function* finishElectronBrowserWindowsSteps(
+  context: JavaScriptFindingContext,
+  index: JavaScriptBindingIndex,
+): Generator<void, void> {
+  const pending = context.accumulator.pendingBrowserWindows;
+  if (pending.length === 0) return;
+  if (
+    pending.some((node) => {
+      const argument = argumentNode(node.arguments[0]);
+      const options = argument && unwrapJavaScriptExpression(argument).node;
+      if (t.isIdentifier(options))
+        return hasElectronOptionObjectCandidate(options, index);
+      const lookup = objectProperty(options, "webPreferences");
+      return (
+        lookup.status === "explicit" &&
+        hasElectronOptionObjectCandidate(lookup.property.value, index)
+      );
+    })
+  )
+    yield* index.indexMemberMutationFactsSteps();
+  for (const node of pending) {
+    inspectBrowserWindow(node, context, index);
+    yield;
+  }
+  // Inline findings arrive during traversal; deferred findings join that same
+  // source-ordered collection before module attribution and public projection.
+  context.accumulator.browserWindows.sort(
+    (left, right) => left.offset - right.offset,
+  );
+  pending.length = 0;
+}
+
 const inspectBrowserWindow = (
   node: t.NewExpression,
   context: JavaScriptFindingContext,
+  index?: JavaScriptBindingIndex,
 ): void => {
-  const path = electronCalleePath(node.callee, context);
-  if (path?.length !== 1 || path[0] !== "BrowserWindow") return;
   const argument = argumentNode(node.arguments[0]);
   const options =
     argument === undefined
       ? undefined
       : unwrapJavaScriptExpression(argument).node;
-  const collected = collectWindowOptions(context.source, options);
+  const resolvedOptions =
+    (index &&
+      resolveElectronOptionObject(options, node, index, ["webPreferences"])) ??
+    options;
+  const lookup = objectProperty(resolvedOptions, "webPreferences");
+  const declaredPreferences =
+    lookup.status === "explicit"
+      ? unwrapJavaScriptExpression(lookup.property.value).node
+      : undefined;
+  const resolvedPreferences =
+    (index && resolveElectronOptionObject(declaredPreferences, node, index)) ??
+    declaredPreferences;
+  const resolutionSources = [
+    ...(resolvedOptions !== options && resolvedOptions !== undefined
+      ? [range(resolvedOptions)]
+      : []),
+    ...(resolvedPreferences !== declaredPreferences &&
+    resolvedPreferences !== undefined
+      ? [range(resolvedPreferences)]
+      : []),
+  ];
+  const collected = collectWindowOptions(
+    context.source,
+    lookup.status,
+    resolvedPreferences,
+  );
   context.accumulator.unknownFindings += collected.unknown;
   const finding: ElectronBrowserWindowFinding = {
     options_status:
-      options === undefined
+      resolvedOptions === undefined
         ? "missing"
-        : t.isObjectExpression(options)
+        : t.isObjectExpression(resolvedOptions)
           ? "object-literal"
           : "dynamic",
     web_preferences_status: collected.status,
     web_preferences: collected.preferences,
+    ...(resolutionSources.length > 0
+      ? { resolution_sources: resolutionSources }
+      : {}),
     ...collected.preload,
     module_key: null,
     location: range(node),
@@ -78,24 +161,20 @@ const inspectBrowserWindow = (
 
 const collectWindowOptions = (
   source: string,
-  options: t.Node | undefined,
+  lookupStatus: "explicit" | "missing" | "dynamic",
+  preferences: t.Node | undefined,
 ): {
   readonly status: ElectronBrowserWindowFinding["web_preferences_status"];
   readonly preferences: readonly ElectronWebPreference[];
   readonly preload: ElectronBrowserWindowPreload;
   readonly unknown: number;
 } => {
-  const lookup = objectProperty(options, "webPreferences");
-  const preferences =
-    lookup.status === "explicit"
-      ? unwrapJavaScriptExpression(lookup.property.value).node
-      : undefined;
-  if (lookup.status !== "explicit" || !t.isObjectExpression(preferences))
+  if (lookupStatus !== "explicit" || !t.isObjectExpression(preferences))
     return {
-      status: lookup.status === "missing" ? "missing" : "dynamic",
+      status: lookupStatus === "missing" ? "missing" : "dynamic",
       preferences: [],
       preload: { preload_path: null, preload_resolution_context: null },
-      unknown: lookup.status === "missing" ? 0 : 1,
+      unknown: lookupStatus === "missing" ? 0 : 1,
     };
   return collectWebPreferences(source, preferences);
 };

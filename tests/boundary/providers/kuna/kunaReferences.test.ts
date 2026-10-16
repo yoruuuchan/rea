@@ -271,7 +271,10 @@ it.each(["not-json", "miscounted", "with-bodies"] as const)(
     try {
       expect(
         await client.execute("procedure_callees", { procedure: "main" }),
-      ).toMatchObject({ ok: false, error: { _tag: "ProviderAdapterError" } });
+      ).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisOutputError", operation: "kuna:call-graph" },
+      });
       await setFakeKunaBehavior(kuna, { functions: FUNCTIONS });
       expect(
         (await run(client, "procedure_callees", { procedure: "main" })).result,

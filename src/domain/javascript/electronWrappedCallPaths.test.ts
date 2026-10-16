@@ -771,3 +771,24 @@ describe("wrapped Electron API identity", () => {
     );
   });
 });
+
+it.each([false, true])(
+  "preserves a guarded bridge entry sharing a registration with an unconditional member (reverse=%s)",
+  (reverse) => {
+    const members = ["always:register", "conditional:flag?register:()=>{}"];
+    if (reverse) members.reverse();
+    const result = analyzeJavaScriptStaticSource(`const e=require("electron");
+    function register(){e.ipcMain.on("bridge:register",()=>{});}
+    e.contextBridge.exposeInMainWorld("api",{${members.join(",")}});`);
+    expect(result.electron.call_paths).toContainEqual(
+      expect.objectContaining({
+        entry_kind: "bridge-member",
+        entry: "api.conditional",
+        terminal: "electron.ipcMain.on",
+        conditions: expect.arrayContaining([
+          expect.objectContaining({ expression: "flag" }),
+        ]),
+      }),
+    );
+  },
+);

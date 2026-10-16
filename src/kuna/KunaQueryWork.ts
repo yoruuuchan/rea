@@ -1,8 +1,13 @@
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisResourceConstraintError,
+} from "../domain/analysisErrorCore.js";
 import { err, type Result } from "../domain/result.js";
 import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
 import { matchRegexValues } from "../process/RegexMatcher.js";
+import type { KunaJsonDocumentReader } from "./KunaJsonStream.js";
+import { KUNA_DIAGNOSTIC_BYTES } from "./KunaLimits.js";
 import { KunaRunSlots } from "./KunaRunSlots.js";
 import type {
   KunaTargetCommands,
@@ -60,6 +65,43 @@ export class KunaQueryWork {
       else release();
       throw cause;
     }
+  }
+
+  /**
+   * Run a whole-program command whose stdout `reader` validates as it
+   * arrives. A rejected document stops Kuna and reports why; diagnostics
+   * beyond their buffer recur for this target and executable, so they are
+   * passed to `retain` for the session to keep.
+   */
+  async scan<Parsed>(
+    request: Omit<
+      KunaTargetCommandRequest,
+      "releaseRun" | "outputBytes" | "stdout" | "signal"
+    >,
+    reader: KunaJsonDocumentReader<Parsed>,
+    signal: AbortSignal,
+    retain: (failure: AnalysisError) => void,
+  ): Promise<Result<Parsed, AnalysisError>> {
+    const run = await this.run({
+      ...request,
+      outputBytes: KUNA_DIAGNOSTIC_BYTES,
+      stdout: reader,
+      signal: AbortSignal.any([signal, reader.rejected]),
+    });
+    if (run.ok) return reader.finish(run.value.input);
+    const rejection = reader.rejection;
+    if (
+      rejection !== undefined &&
+      run.error instanceof AnalysisCancelledError &&
+      !signal.aborted
+    )
+      return err(rejection);
+    if (
+      run.error instanceof AnalysisResourceConstraintError &&
+      run.error.resource === "memory"
+    )
+      retain(run.error);
+    return run;
   }
 
   /** Bound inventory copies and regex workers; close cancels and drains both. */

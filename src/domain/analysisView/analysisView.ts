@@ -2,8 +2,12 @@ import { z } from "zod";
 import {
   javascriptModuleReferencesRequestSchema,
   javascriptModuleReferenceSchema,
-  javascriptModuleSourceCoverageSchema,
 } from "./javascriptModuleReferences.js";
+import { javascriptApplicationSourceCoverageSchema } from "./javascriptApplicationCoverage.js";
+import {
+  javascriptFactsViewRequestSchema,
+  javascriptFactRowSchema,
+} from "./javascriptFactsView.js";
 import { javaScriptSourceSelectionSchema } from "../javascript/javascriptSourceSelection.js";
 
 import {
@@ -222,6 +226,7 @@ export const analysisViewRequestSchema = z.discriminatedUnion("kind", [
   itemViewSchema,
   pageViewSchema,
   javascriptModuleReferencesRequestSchema,
+  javascriptFactsViewRequestSchema,
   nativeViewSchema,
   inventoryViewSchema,
   wasmViewRequestSchema,
@@ -392,7 +397,17 @@ export const javascriptModuleReferencesViewResultSchema = z.strictObject({
   view: javascriptModuleReferencesRequestSchema,
   parent_operation: z.literal("analyze_javascript_application"),
   rows: z.array(javascriptModuleReferenceSchema),
-  source_coverage: javascriptModuleSourceCoverageSchema,
+  source_coverage: javascriptApplicationSourceCoverageSchema,
+});
+
+/** Paged retained observations with exact selected properties and provenance. */
+const javascriptFactsViewResultSchema = z.strictObject({
+  ...viewResultBase,
+  kind: z.literal("javascript-facts"),
+  view: javascriptFactsViewRequestSchema,
+  parent_operation: z.literal("analyze_javascript_application"),
+  rows: z.array(javascriptFactRowSchema),
+  source_coverage: javascriptApplicationSourceCoverageSchema,
 });
 
 /** Exact summary carrier for artifact inspection's optional delivery contract. */
@@ -544,6 +559,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     ...viewResultBase,
   }),
   javascriptModuleReferencesViewResultSchema,
+  javascriptFactsViewResultSchema,
   z.strictObject({
     kind: z.literal("native"),
     view: nativeViewSchema,
@@ -666,6 +682,10 @@ export type UnsignedAnalysisView =
   | Omit<Extract<AnalysisViewResult, { readonly kind: "page" }>, "view_digest">
   | Omit<
       Extract<AnalysisViewResult, { readonly kind: "javascript" }>,
+      "view_digest"
+    >
+  | Omit<
+      Extract<AnalysisViewResult, { readonly kind: "javascript-facts" }>,
       "view_digest"
     >
   | Omit<
