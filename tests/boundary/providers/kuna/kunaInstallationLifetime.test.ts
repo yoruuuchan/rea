@@ -1,3 +1,4 @@
+import { regularFileCancellation } from "../../../../src/filesystem/OwnedRegularFile.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const gates = vi.hoisted(() => {
@@ -128,7 +129,12 @@ it
       }
 
       gates.shebangRead.release();
-      await expect(inspection).rejects.toBe(controller.signal.reason);
+      const failure: unknown = await inspection.catch(
+        (cause: unknown) => cause,
+      );
+      const cancellation = regularFileCancellation(failure);
+      expect(cancellation).toBeDefined();
+      expect(cancellation?.reason).toBe(controller.signal.reason);
       await expect(cleanup).resolves.toBeUndefined();
       expect(gates.opens).toBe(phase === "hash-close" ? 1 : 2);
       expect(scope.hasPending).toBe(false);

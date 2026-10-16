@@ -1,3 +1,4 @@
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
@@ -49,6 +50,7 @@ import { GhidraResponseRouter } from "./GhidraResponseRouter.js";
 import { GhidraRequestQueue } from "./GhidraRequestQueue.js";
 import {
   bindGhidraSessionFailure,
+  GHIDRA_STARTUP_DEADLINE_ELAPSED,
   GhidraSessionError,
 } from "./GhidraSessionError.js";
 import {
@@ -64,6 +66,7 @@ import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import {
   openRegularFile,
+  assertRegularFileActive,
   RegularFileChangedError,
   RegularFileAdmissionFailure,
   sameRegularFileState,
@@ -453,13 +456,13 @@ export class GhidraClient {
       let result: Result<T, unknown>;
       try {
         const initial = await handle.stat();
-        signal?.throwIfAborted();
+        assertRegularFileActive(signal);
         if (!Number.isSafeInteger(initial.size) || initial.size < 0)
           throw new RangeError("Snapshot size must be a safe integer");
         const value = await read(handle, initial, path);
-        signal?.throwIfAborted();
+        assertRegularFileActive(signal);
         const after = await handle.stat();
-        signal?.throwIfAborted();
+        assertRegularFileActive(signal);
         if (!sameRegularFileState(initial, after))
           throw new RegularFileChangedError(path);
         result = ok(value);
@@ -480,11 +483,20 @@ export class GhidraClient {
     } catch (cause: unknown) {
       if (cause instanceof RegularFileAdmissionFailure)
         this.#snapshotOwners.add(cause.owner);
+      const primary =
+        cause instanceof RegularFileAdmissionFailure ? cause.cause : cause;
+      const cancellation = regularFileCancellation(primary);
       return err(
         this.#failure(
-          signal?.aborted === true ? "cancelled" : "protocol",
+          cancellation !== undefined || signal?.aborted === true
+            ? "cancelled"
+            : "protocol",
           "Ghidra target snapshot could not be read for load-image verification",
-          cause,
+          cancellation === undefined ||
+            cause instanceof RegularFileAdmissionFailure
+            ? cause
+            : cancellation.reason,
+          cancellation === undefined ? {} : { cancellation },
         ),
       );
     }
@@ -1121,7 +1133,7 @@ export class GhidraClient {
       ? this.#failure("cancelled", "Ghidra startup was cancelled", cause, {
           cancellation: { reason: deadline.signal.reason },
         })
-      : this.#failure("timeout", "Ghidra startup deadline elapsed", cause, {
+      : this.#failure("timeout", GHIDRA_STARTUP_DEADLINE_ELAPSED, cause, {
           timeoutMs: deadline.timeoutMs,
         });
   }

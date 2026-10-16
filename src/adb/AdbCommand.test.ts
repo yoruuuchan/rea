@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { execFileBytes } from "../process/ExecFileOutput.js";
-import { probeAdbPathExistence } from "./AdbCommand.js";
+import {
+  ExecFileOutputCancelledError,
+  execFileBytes,
+} from "../process/ExecFileOutput.js";
+import { probeAdbPathExistence, runAdbCapture } from "./AdbCommand.js";
 
 vi.mock("../process/ExecFileOutput.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../process/ExecFileOutput.js")>()),
@@ -64,7 +67,6 @@ it.each([
 it.each([
   [{ killed: true }, "AnalysisTimeoutError"],
   [{ outputTruncated: true }, "AnalysisResourceConstraintError"],
-  [{ code: "ABORT_ERR" }, "AnalysisCancelledError"],
 ] as const)(
   "preserves a stopped or incomplete probe: %j",
   async (extra, tag) => {
@@ -110,3 +112,63 @@ it.each(["stdout", "stderr"] as const)(
     });
   },
 );
+
+it.each([null, "caller stopped", new Error("caller stopped")] as const)(
+  "uses the command owner's exact %s cancellation reason",
+  async (reason) => {
+    const cancelled = Object.assign(new ExecFileOutputCancelledError(reason), {
+      stdout: "partial",
+      stderr: "diagnostic",
+      stdoutBytes: 7,
+      stderrBytes: 10,
+    });
+    vi.mocked(execFileBytes).mockRejectedValueOnce(cancelled);
+    const result = await probe();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError" },
+    });
+    if (result.ok) throw new Error("Expected owned cancellation");
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.capturedOutput).toMatchObject({
+      stdout: "partial",
+      stderr: "diagnostic",
+      stdout_bytes: 7,
+      stderr_bytes: 10,
+    });
+  },
+);
+
+it("does not infer cancellation from a foreign ABORT_ERR code", async () => {
+  const failure = Object.assign(new Error("foreign code"), {
+    code: "ABORT_ERR",
+    stdout: "",
+    stderr: "",
+  });
+  vi.mocked(execFileBytes).mockRejectedValueOnce(failure);
+  expect(await probe()).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisProtocolError" },
+  });
+});
+
+it("keeps a physical failure even when the later abort reason is that same error", async () => {
+  const controller = new AbortController();
+  const failure = new Error("physical command failure");
+  vi.mocked(execFileBytes).mockImplementationOnce(async () => {
+    controller.abort(failure);
+    throw failure;
+  });
+  const result = await runAdbCapture(
+    "inspect_adb_device",
+    "device",
+    "/host/adb",
+    [],
+    { timeoutMs: 100, maxOutputBytes: 1024 },
+    controller.signal,
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisProtocolError", cause: failure },
+  });
+});

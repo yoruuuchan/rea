@@ -25,6 +25,10 @@ export type GhidraSessionFailureKind =
   | "remote"
   | "analysis_timeout";
 
+/** Message of the failure raised when the provider startup deadline elapses. */
+export const GHIDRA_STARTUP_DEADLINE_ELAPSED =
+  "Ghidra startup deadline elapsed";
+
 /** Additional structured context for a Ghidra session failure. */
 export interface GhidraSessionErrorOptions extends ErrorOptions {
   readonly cancellation?: { readonly reason: unknown };

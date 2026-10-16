@@ -1,3 +1,4 @@
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 import type { ExecutionOptions } from "../application/AnalysisProvider.js";
 import type { ElectronFusePort } from "../application/electron/ElectronFusePort.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -93,7 +94,13 @@ const failureFor = (
   signal?: AbortSignal,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
-  if (signal?.aborted) return new AnalysisCancelledError(OPERATION);
+  const cancellation = regularFileCancellation(cause);
+  if (cancellation !== undefined)
+    return new AnalysisCancelledError(OPERATION, {
+      cause: cancellation.reason,
+    });
+  if (signal?.aborted)
+    return new AnalysisCancelledError(OPERATION, { cause: signal.reason });
   if (cause instanceof ElectronFusePathFailure)
     return new AnalysisInputError(OPERATION, { cause }, [
       { path: ["path"], reason: cause.reason, message: cause.message },

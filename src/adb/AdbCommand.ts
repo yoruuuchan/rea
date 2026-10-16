@@ -5,16 +5,37 @@ import {
   AnalysisTimeoutError,
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import type {
+  AnalysisCapturedOutput,
+  AnalysisError,
+} from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   execFileBytes,
+  ExecFileOutputCancelledError,
   execFileOutputFailure,
   type ExecFileOutputFailure,
 } from "../process/ExecFileOutput.js";
 import { packageChangeFailureReason } from "./AdbShellOutput.js";
 
 const STDERR_EXCERPT_BYTES = 512;
+
+/** Project parsed command-owner facts without reinterpreting the rejection. */
+export const adbCommandCapturedOutput = (
+  failure: ExecFileOutputFailure,
+): AnalysisCapturedOutput => ({
+  stdout: failure.stdout,
+  stderr: failure.stderr,
+  ...(failure.stdoutBytes === undefined
+    ? {}
+    : { stdout_bytes: failure.stdoutBytes }),
+  ...(failure.stderrBytes === undefined
+    ? {}
+    : { stderr_bytes: failure.stderrBytes }),
+  exit_code: typeof failure.code === "number" ? failure.code : null,
+  signal: failure.signal,
+  truncated: failure.outputTruncated,
+});
 
 /** Parsed command failure owned by this adapter, separate from its public tag. */
 class AdbProtocolError extends AnalysisProtocolError {
@@ -71,8 +92,15 @@ export const runAdbCapture = async (
     );
   } catch (cause) {
     const failure = execFileOutputFailure(cause);
-    if (signal?.aborted || failure?.code === "ABORT_ERR")
-      return err(new AnalysisCancelledError(operation, { cause }));
+    if (cause instanceof ExecFileOutputCancelledError)
+      return err(
+        new AnalysisCancelledError(operation, {
+          cause: cause.cause,
+          ...(failure === undefined
+            ? {}
+            : { capturedOutput: adbCommandCapturedOutput(failure) }),
+        }),
+      );
     if (failure === undefined)
       return err(
         new AnalysisProtocolError(`adb failed for ${operation}`, { cause }),
@@ -226,19 +254,7 @@ export const probeAdbPathExistence = async (
     new AnalysisProtocolError(error.message, {
       cause: error.cause,
       diagnostics: { destination_existence: "unknown" },
-      capturedOutput: {
-        stdout: failure.stdout,
-        stderr: failure.stderr,
-        ...(failure.stdoutBytes === undefined
-          ? {}
-          : { stdout_bytes: failure.stdoutBytes }),
-        ...(failure.stderrBytes === undefined
-          ? {}
-          : { stderr_bytes: failure.stderrBytes }),
-        exit_code: typeof failure.code === "number" ? failure.code : null,
-        signal: failure.signal,
-        truncated: failure.outputTruncated,
-      },
+      capturedOutput: adbCommandCapturedOutput(failure),
     }),
   );
 };

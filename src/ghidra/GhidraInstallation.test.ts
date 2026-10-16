@@ -1410,3 +1410,80 @@ it("explains the macOS keg-only JDK case without probing an unselected installat
     "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home",
   );
 });
+
+it.each([
+  ["arm64", "/opt/homebrew"],
+  ["x64", "/usr/local"],
+] as const)("discovers keg-only Java for macOS %s", (architecture, prefix) => {
+  const probed: string[] = [];
+  const checked: string[] = [];
+  const inspection = inspectGhidraInstallation(
+    {
+      environment: { PATH: ":relative-bin:/empty-bin" },
+      installDir: INSTALL,
+      platform: "darwin",
+      architecture,
+    },
+    host({
+      executable: (candidate) => {
+        checked.push(candidate);
+        return (
+          candidate.includes("/opt/openjdk/") || host().executable(candidate)
+        );
+      },
+      probeJava: (command) => {
+        probed.push(command);
+        return javaProbeOk({
+          ...JAVA,
+          home: `${prefix}/opt/openjdk/libexec/openjdk.jdk/Contents/Home`,
+          osArch: architecture === "arm64" ? "aarch64" : "x86_64",
+          osName: "Mac OS X",
+        });
+      },
+    }),
+  );
+  expect(probed).toEqual([
+    `${prefix}/opt/openjdk/libexec/openjdk.jdk/Contents/Home/bin/java`,
+  ]);
+  expect(checked).not.toContain("java");
+  expect(checked).not.toContain("relative-bin/java");
+  expect(inspection.checks.find(({ name }) => name === "java")).toMatchObject({
+    status: "passed",
+  });
+});
+
+it.each([
+  ["darwin", undefined, "/selected-bin/java", "java"],
+  ["darwin", "/selected-jdk", undefined, "/selected-jdk/bin/java"],
+  ["linux", undefined, undefined, "java"],
+  ["win32", undefined, undefined, "java.exe"],
+] as const)(
+  "preserves selected Java on %s with JAVA_HOME %s",
+  (platform, javaHome, pathJava, expected) => {
+    const checked: string[] = [];
+    const probed: string[] = [];
+    inspectGhidraInstallation(
+      {
+        environment: { PATH: "/selected-bin" },
+        installDir: INSTALL,
+        platform,
+        architecture: "arm64",
+        ...(javaHome === undefined ? {} : { javaHome }),
+      },
+      host({
+        executable: (candidate) => {
+          checked.push(candidate);
+          return candidate === pathJava || host().executable(candidate);
+        },
+        probeJava: (command) => {
+          probed.push(command);
+          return missingJavaProbe;
+        },
+      }),
+    );
+    expect(probed).toEqual([expected]);
+    expect(
+      checked.some((candidate) => candidate.includes("/opt/openjdk/")),
+    ).toBe(false);
+  },
+);

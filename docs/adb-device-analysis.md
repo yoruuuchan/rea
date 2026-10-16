@@ -169,8 +169,10 @@ and during shutdown.
   The app/activity lifecycle tools use `am start -W` and `am force-stop`.
 - Per-invocation budgets: client/devices 10-20 s, shell reads 20-60 s with
   64 KiB-8 MiB capture caps (logcat 4 MiB, screen 32 MiB), transfers and
-  bugreports 600 s. Exceeded budgets report `resource_constraint`; stopped
-  commands report `provider_timeout`.
+  bugreports 600 s. Output capture overflow reports `resource_constraint`;
+  deadline expiration, including the client-version probe, reports
+  `provider_timeout`. Command cancellation preserves the caller's exact reason;
+  a later abort does not replace an already completed command failure.
 - Pull and capture outputs are additive: the destination must not already
   exist. Re-running a completed pull refuses the existing directory instead
   of overwriting evidence.

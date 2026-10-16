@@ -3,7 +3,10 @@ import { open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
-import { withRegularFile } from "../../../src/application/RegularFileRead.js";
+import {
+  withRegularFile,
+  retryRegularFileCleanup,
+} from "../../../src/application/RegularFileRead.js";
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import {
@@ -229,5 +232,55 @@ it.each(["completed", "failed"] as const)(
       await retained[0]?.close();
     }
     expect(retained[0]?.handle.fd).toBe(-1);
+  },
+);
+
+it.each(
+  [null, "caller stopped", new Error("caller stopped")].flatMap((reason) =>
+    [false, true].map((retryFails) => ({ reason, retryFails })),
+  ),
+)(
+  "projects the exact checkpoint reason after application cleanup retry fails=$retryFails ($reason)",
+  async ({ reason, retryFails }) => {
+    const root = await createTestTempDirectory("rea-file-retry-reason-");
+    const path = join(root, "input.bin");
+    await writeFile(path, "file bytes");
+    const controller = new AbortController();
+    const resources = new ArtifactResourceScope();
+    const nativeClose = OwnedFileHandle.prototype.close;
+    let allowClose = false;
+    const close = vi
+      .spyOn(OwnedFileHandle.prototype, "close")
+      .mockImplementation(async function (this: OwnedFileHandle) {
+        if (!allowClose) throw new Error("close unavailable");
+        await nativeClose.call(this);
+      });
+    let failure: unknown;
+    try {
+      failure = await withRegularFile(
+        path,
+        async () => {
+          controller.abort(reason);
+          return "completed callback";
+        },
+        { signal: controller.signal },
+      ).catch((cause: unknown) => cause);
+      if (!(failure instanceof RegularFileCleanupFailure))
+        throw new Error("Missing checkpoint cleanup owner");
+      allowClose = !retryFails;
+      const retried = await retryRegularFileCleanup(failure, resources);
+      expect(retried.outcome.kind).toBe("failed");
+      if (retried.outcome.kind !== "failed")
+        throw new Error("Lost cancellation outcome");
+      expect(retried.outcome.cause).toBe(reason);
+      expect(retried.cleanup !== undefined).toBe(retryFails);
+      expect(resources.hasPending).toBe(retryFails);
+    } finally {
+      allowClose = true;
+      await resources.close();
+      if (failure instanceof RegularFileCleanupFailure)
+        await failure.owner.close();
+      close.mockRestore();
+    }
   },
 );

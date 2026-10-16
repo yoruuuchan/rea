@@ -1,3 +1,4 @@
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, open as openFile, rm, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -165,6 +166,11 @@ const mapInputFailure = (
   cause: unknown,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
+  const cancellation = regularFileCancellation(cause);
+  if (cancellation !== undefined)
+    return new AnalysisCancelledError(operation, {
+      cause: cancellation.reason,
+    });
   if (isCancellation(cause))
     return new AnalysisCancelledError(operation, { cause });
   if (
@@ -212,6 +218,11 @@ const mapOwnedIoFailure = (
   cause: unknown,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
+  const cancellation = regularFileCancellation(cause);
+  if (cancellation !== undefined)
+    return new AnalysisCancelledError(operation, {
+      cause: cancellation.reason,
+    });
   if (isCancellation(cause))
     return new AnalysisCancelledError(operation, { cause });
   if (

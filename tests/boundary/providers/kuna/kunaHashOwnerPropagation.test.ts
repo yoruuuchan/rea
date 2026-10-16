@@ -145,7 +145,7 @@ it
 );
 
 it.skipIf(process.platform === "win32")(
-  "keeps cancellation primary when an executable hash read and close both fail",
+  "keeps the physical hash read failure primary when cancellation and close failure follow",
   async () => {
     const fixture = await session("rea-kuna-cancelled-read-close-");
     const installed = await inspectKunaInstallationOwned({
@@ -174,9 +174,15 @@ it.skipIf(process.platform === "win32")(
       if (result.ok) throw new Error("injected cancelled read passed");
       originatingError = result.error;
       expect(result.error).toMatchObject({
-        _tag: "AnalysisCancelledError",
+        _tag: "ProviderAdapterError",
         cleanupIncomplete: true,
         cleanupResources: [installed.value.executable],
+        diagnostics: {
+          primary_error: {
+            code: "execution_failure",
+            message: expect.stringContaining("injected read fault"),
+          },
+        },
       });
     } finally {
       injected.failReadStage = undefined;

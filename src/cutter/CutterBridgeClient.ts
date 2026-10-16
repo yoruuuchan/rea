@@ -1049,9 +1049,9 @@ const descriptorFailure = (
         ? descriptorFailure(outcome.cause, operation)
         : outcome?.kind === "completed" &&
             cause instanceof ArtifactFileCleanupFailure &&
-            cause.completionCancellation !== undefined
+            cause.fileCleanupFailure.completionCancellation !== undefined
           ? new AnalysisCancelledError(operation, {
-              cause: cause.completionCancellation.reason,
+              cause: cause.fileCleanupFailure.completionCancellation.reason,
             })
           : undefined;
     if (primary === undefined && outcome?.kind !== "failed") return cleanup;

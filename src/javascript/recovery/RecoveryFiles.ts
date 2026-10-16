@@ -1,3 +1,4 @@
+import { regularFileCancellation } from "../../filesystem/OwnedRegularFile.js";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, opendir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -37,7 +38,11 @@ const scanRecoveryFile = async (
     // A descriptor whose close failed stays owned by its error, even when
     // cancellation was also requested.
     if (cause instanceof RegularFileAdmissionFailure) throw cause;
-    checkRecoveryCancellation(signal);
+    const cancellation = regularFileCancellation(cause);
+    if (cancellation !== undefined)
+      throw new AnalysisCancelledError(OPERATION, {
+        cause: cancellation.reason,
+      });
     if (cause instanceof NonRegularFileReadError)
       throw new AnalysisOutputError(
         OPERATION,

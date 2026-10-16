@@ -19,7 +19,10 @@ import {
 } from "../process/OwnedCommand.js";
 import { hashStableFile } from "../filesystem/StableFileHash.js";
 import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
-import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCleanupFailure,
+  regularFileCancellation,
+} from "../filesystem/OwnedRegularFile.js";
 import type {
   OwnedProviderProcessSpawnOptions,
   ProviderProcessSnapshot,
@@ -92,7 +95,6 @@ const message = (cause: unknown): string =>
 export const kunaFileCleanupError = (
   failure: RegularFileCleanupFailure,
   operation: string,
-  signal?: AbortSignal,
 ): AnalysisError => {
   const cleanup = new ProviderCleanupError(
     KUNA_PROVIDER_ID,
@@ -100,33 +102,24 @@ export const kunaFileCleanupError = (
     { reason: message(failure.cleanupCause) },
     { cause: failure, operation },
   );
+  const cancellation = regularFileCancellation(failure);
+  if (cancellation !== undefined)
+    return new AnalysisCancelledError(operation, {
+      cause: cancellation.reason,
+      cleanup: {
+        reason: message(failure.cleanupCause),
+        resources: [failure.path],
+      },
+    });
   if (failure.outcome.kind === "completed") return cleanup;
   const primaryCause = failure.outcome.cause;
   const primary =
     primaryCause instanceof AnalysisError
       ? primaryCause
-      : signal?.aborted === true
-        ? new AnalysisCancelledError(operation, { cause: primaryCause })
-        : new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
-            cause: primaryCause,
-            userMessage: `Kuna ${operation} failed: ${message(primaryCause)}`,
-          });
-  if (primary instanceof AnalysisCancelledError)
-    return new AnalysisCancelledError(operation, {
-      cause: new AggregateError(
-        [primary, cleanup],
-        "Kuna operation was cancelled and descriptor cleanup failed",
-        { cause: primary },
-      ),
-      cleanup: {
-        reason: cleanup.message,
-        resources: [failure.path],
-      },
-      ...(primary.capturedOutput === undefined
-        ? {}
-        : { capturedOutput: primary.capturedOutput }),
-      partialObservation: primary.partialObservation,
-    });
+      : new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
+          cause: primaryCause,
+          userMessage: `Kuna ${operation} failed: ${message(primaryCause)}`,
+        });
   return analysisErrorWithCleanupFailure(primary, cleanup, operation);
 };
 
@@ -194,18 +187,22 @@ export const runKunaCommand = async (
     if (cause instanceof RegularFileCleanupFailure) {
       return {
         kind: "failed",
-        error: kunaFileCleanupError(cause, request.operation, request.signal),
+        error: kunaFileCleanupError(cause, request.operation),
         fileCleanupFailure: cause,
       };
     }
+    const cancellation = regularFileCancellation(cause);
     return {
       kind: "failed",
-      error: request.signal.aborted
-        ? new AnalysisCancelledError(request.operation, { cause })
-        : new ProviderAdapterError(KUNA_PROVIDER_ID, request.operation, {
-            cause,
-            userMessage: `Cannot verify ${installation.executable}: ${message(cause)}`,
-          }),
+      error:
+        cancellation !== undefined
+          ? new AnalysisCancelledError(request.operation, {
+              cause: cancellation.reason,
+            })
+          : new ProviderAdapterError(KUNA_PROVIDER_ID, request.operation, {
+              cause,
+              userMessage: `Cannot verify ${installation.executable}: ${message(cause)}`,
+            }),
     };
   }
   try {

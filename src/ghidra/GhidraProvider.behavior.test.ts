@@ -2402,6 +2402,64 @@ it("projects Ghidra startup failure and its incomplete cleanup together", async 
     });
 });
 
+describe("Ghidra deadline guidance", () => {
+  const timedOut = async (phase: "start" | "request", message: string) => {
+    const failure = new GhidraSessionError(
+      "timeout",
+      message,
+      { failure_kind: "timeout" },
+      { timeoutMs: 250 },
+    );
+    const ghidra = provider(installationHost(), () => ({
+      start: async () => (phase === "start" ? err(failure) : ok(sessionInfo())),
+      callTool: async () => err(failure),
+      close: async () => ok(null),
+    }));
+    const target = executableTarget("elf", "x86_64");
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("Expected Ghidra analysis profile");
+    const result = await ghidra
+      .createClient(target, profile.value.profile)
+      .execute("list_documents", {});
+    if (result.ok) throw new Error("Expected a Ghidra timeout");
+    return projectAnalysisError(result.error);
+  };
+
+  it("names the startup deadline setting and its value when startup times out", async () => {
+    const projected = await timedOut(
+      "start",
+      "Ghidra startup deadline elapsed",
+    );
+    expect(projected).toMatchObject({
+      code: "provider_timeout",
+      details: { timeout_ms: 250 },
+    });
+    expect(projected.message).toContain(
+      "250 ms startup deadline (REA_GHIDRA_STARTUP_TIMEOUT_MS)",
+    );
+    expect(projected.remediation.action).toContain(
+      "REA_GHIDRA_STARTUP_TIMEOUT_MS above 250",
+    );
+    expect(projected.remediation.action).toContain(
+      "REA_GHIDRA_DISABLED_ANALYZERS",
+    );
+    expect(projected.remediation.action).not.toContain("rea doctor");
+  });
+
+  it("keeps generic guidance for a bridge request deadline", async () => {
+    const projected = await timedOut(
+      "request",
+      "Ghidra bridge request timed out",
+    );
+    expect(projected.code).toBe("provider_timeout");
+    expect(projected.message).not.toContain("REA_GHIDRA_STARTUP_TIMEOUT_MS");
+    expect(projected.remediation.action).not.toContain(
+      "REA_GHIDRA_STARTUP_TIMEOUT_MS",
+    );
+  });
+});
+
 describe("Ghidra analysis seeds and configured language", () => {
   const seedSession = async (
     report: (sha256: string) => GhidraSeedReport | undefined,

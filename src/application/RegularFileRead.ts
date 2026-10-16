@@ -4,6 +4,8 @@ import { lstat, stat, type FileHandle } from "node:fs/promises";
 import {
   sameRegularFileState,
   RegularFileChangedError,
+  RegularFileOperationCancelled,
+  assertRegularFileActive,
 } from "../filesystem/RegularFile.js";
 import {
   RegularFileCleanupFailure,
@@ -45,14 +47,19 @@ export const retryRegularFileCleanup = async <Value>(
   readonly outcome: RegularFileReadOutcome<Value>;
   readonly cleanup?: AnalysisCleanupObservation;
 }> => {
+  const outcome: RegularFileReadOutcome<Value> =
+    failure.outcome.kind === "failed" &&
+    failure.outcome.cause instanceof RegularFileOperationCancelled
+      ? { kind: "failed", cause: failure.outcome.cause.reason }
+      : failure.outcome;
   const released = await resources.release({
     kind: "file-handle",
     handle: failure.owner,
     resource: failure.path,
   });
-  if (released.kind === "released") return { outcome: failure.outcome };
+  if (released.kind === "released") return { outcome };
   return {
-    outcome: failure.outcome,
+    outcome,
     cleanup: {
       reason: `${failureMessage(failure.cleanupCause)}; retry: ${failureMessage(released.cause)}`,
       resources: [failure.path],
@@ -82,9 +89,9 @@ export const withRegularFile = async <Value>(
         async (handle) => {
           admitted = handle;
           const stats = await handle.stat();
-          signal?.throwIfAborted();
+          assertRegularFileActive(signal);
           const value = await read(handle, stats);
-          signal?.throwIfAborted();
+          assertRegularFileActive(signal);
           const [opened, currentPath] = await Promise.all([
             handle.stat(),
             options.symlinks === "reject" ? lstat(path) : stat(path),
@@ -94,11 +101,12 @@ export const withRegularFile = async <Value>(
             !sameRegularFileState(stats, currentPath)
           )
             throw new RegularFileChangedError(path);
+          assertRegularFileActive(signal);
           return value;
         },
       );
     } catch (cause: unknown) {
-      if (signal?.aborted === true && cause === signal.reason) throw cause;
+      if (cause instanceof RegularFileOperationCancelled) throw cause.reason;
       if (
         cause instanceof RegularFileCancelled &&
         cause.owner.handle === admitted

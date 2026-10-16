@@ -44,6 +44,7 @@ import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import type { NativeUiObservationResult } from "../domain/native/nativeUiObservation.js";
 import {
@@ -211,6 +212,13 @@ class NativeMacOSClient implements AnalysisClient {
         );
       } catch (cause) {
         if (cause instanceof AnalysisError) return err(cause);
+        const cancellation = regularFileCancellation(cause);
+        if (cancellation !== undefined)
+          return err(
+            new AnalysisCancelledError(operation, {
+              cause: cancellation.reason,
+            }),
+          );
         return err(
           options?.signal?.aborted
             ? new AnalysisCancelledError(operation)

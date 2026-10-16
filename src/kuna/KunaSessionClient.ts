@@ -73,7 +73,10 @@ import {
   type KunaProjectFileSpan,
 } from "./KunaProjectReader.js";
 import { kunaUnavailable } from "./KunaUnavailable.js";
-import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCleanupFailure,
+  regularFileCancellation,
+} from "../filesystem/OwnedRegularFile.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 
@@ -1331,12 +1334,18 @@ export class KunaSessionClient implements AnalysisClient {
           );
         return ok(inspected.value);
       } catch (cause: unknown) {
+        const cancellation = regularFileCancellation(cause);
+        if (
+          !(cause instanceof RegularFileCleanupFailure) &&
+          cancellation !== undefined
+        )
+          return err(
+            new AnalysisCancelledError("health", {
+              cause: cancellation.reason,
+            }),
+          );
         if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
-        const error = kunaFileCleanupError(
-          cause,
-          "health",
-          this.#session.signal,
-        );
+        const error = kunaFileCleanupError(cause, "health");
         fileCloseScope.bindFailure(cause, error);
         return err(error);
       }

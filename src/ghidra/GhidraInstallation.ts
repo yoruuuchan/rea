@@ -446,16 +446,38 @@ const installationCoordinates = (
     applicationPropertiesPath === null
       ? undefined
       : host.readText(applicationPropertiesPath);
-  const javaCommand =
-    options.javaHome === undefined
-      ? platform === "win32"
-        ? "java.exe"
-        : "java"
-      : path.join(
-          options.javaHome,
-          "bin",
-          platform === "win32" ? "java.exe" : "java",
-        );
+  const javaCommand = (() => {
+    if (options.javaHome !== undefined)
+      return path.join(
+        options.javaHome,
+        "bin",
+        platform === "win32" ? "java.exe" : "java",
+      );
+    if (platform !== "darwin")
+      return platform === "win32" ? "java.exe" : "java";
+    // Check the caller's PATH, never a file named java in the working directory.
+    const javaOnPath = options.environment.PATH?.split(":").some(
+      (directory) =>
+        path.isAbsolute(directory) &&
+        host.executable(path.join(directory, "java")),
+    );
+    if (javaOnPath) return "java";
+    // Prefer the Homebrew prefix matching the process architecture.
+    const prefixes =
+      architecture === "arm64"
+        ? ["/opt/homebrew", "/usr/local"]
+        : ["/usr/local", "/opt/homebrew"];
+    return (
+      prefixes
+        .map((prefix) =>
+          path.join(
+            prefix,
+            "opt/openjdk/libexec/openjdk.jdk/Contents/Home/bin/java",
+          ),
+        )
+        .find((candidate) => host.executable(candidate)) ?? "java"
+    );
+  })();
   // Relative JAVA_HOME is refused by configuration validation without execution.
   const javaProbe =
     options.javaHome === undefined || path.isAbsolute(options.javaHome)

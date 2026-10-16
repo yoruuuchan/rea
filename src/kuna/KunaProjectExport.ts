@@ -10,7 +10,10 @@ import {
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { hashStableFile } from "../filesystem/StableFileHash.js";
+import {
+  hashStableFile,
+  StableFileHashFailure,
+} from "../filesystem/StableFileHash.js";
 import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { prepareProcessOwnershipInspection } from "../process/ProcessOwnershipObservation.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
@@ -32,7 +35,10 @@ import {
   type KunaProjectFunction,
 } from "./KunaProjectFiles.js";
 import { KUNA_PROVIDER_ID } from "./KunaRelease.js";
-import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCleanupFailure,
+  regularFileCancellation,
+} from "../filesystem/OwnedRegularFile.js";
 
 /** Operation name every export and cache failure reports. */
 export const KUNA_EXPORT_OPERATION = "kuna:decompile-project";
@@ -125,10 +131,15 @@ export const kunaExportFailure = (
   signal: AbortSignal | undefined,
 ): AnalysisError => {
   if (cause instanceof RegularFileCleanupFailure)
-    return kunaFileCleanupError(cause, KUNA_EXPORT_OPERATION, signal);
-  if (signal?.aborted === true)
-    return new AnalysisCancelledError(KUNA_EXPORT_OPERATION, { cause });
+    return kunaFileCleanupError(cause, KUNA_EXPORT_OPERATION);
+  const cancellation = regularFileCancellation(cause);
+  if (cancellation !== undefined)
+    return new AnalysisCancelledError(KUNA_EXPORT_OPERATION, {
+      cause: cancellation.reason,
+    });
   if (cause instanceof AnalysisError) return cause;
+  if (!(cause instanceof StableFileHashFailure) && signal?.aborted === true)
+    return new AnalysisCancelledError(KUNA_EXPORT_OPERATION, { cause });
   return new ProviderAdapterError(KUNA_PROVIDER_ID, KUNA_EXPORT_OPERATION, {
     cause,
     userMessage: `Kuna project cache failed: ${message(cause)}`,

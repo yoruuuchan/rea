@@ -94,7 +94,10 @@ import {
   windowsP0Limitations,
   limitationsFor,
 } from "./GhidraProviderCapabilities.js";
-import type { GhidraSessionError } from "./GhidraSessionError.js";
+import {
+  GHIDRA_STARTUP_DEADLINE_ELAPSED,
+  type GhidraSessionError,
+} from "./GhidraSessionError.js";
 import type { GhidraSessionInfo } from "./GhidraSessionValues.js";
 import { ghidraExtensionFailure } from "./extensions/GhidraExtensionFailures.js";
 import {
@@ -1147,12 +1150,16 @@ const projectPrimarySessionError = (
     context,
   );
   if (memoryFailure !== undefined) return memoryFailure;
-  if (failure.kind === "timeout")
+  if (failure.kind === "timeout") {
+    const timeoutMs = failure.timeoutMs ?? startupTimeoutMs;
     return new AnalysisTimeoutError(
       operation,
-      failure.timeoutMs ?? startupTimeoutMs,
-      context,
+      timeoutMs,
+      failure.message === GHIDRA_STARTUP_DEADLINE_ELAPSED
+        ? { ...context, ...ghidraStartupTimeoutGuidance(timeoutMs) }
+        : context,
     );
+  }
   const exited = exitedProviderMessage(operation, failure, health);
   if (exited !== undefined)
     return new ProviderAdapterError("ghidra", operation, {
@@ -1245,6 +1252,12 @@ const projectObservedJvmMemoryFailure = (
     },
   );
 };
+
+/** Name the settings that change Ghidra's import-and-analysis startup deadline. */
+const ghidraStartupTimeoutGuidance = (timeoutMs: number) => ({
+  userMessage: `Ghidra did not finish importing and analyzing the target within its ${String(timeoutMs)} ms startup deadline (REA_GHIDRA_STARTUP_TIMEOUT_MS).`,
+  remediationAction: `Large binaries can need longer: set REA_GHIDRA_STARTUP_TIMEOUT_MS above ${String(timeoutMs)} in the environment that starts REA, or skip expensive analyzers with REA_GHIDRA_DISABLED_ANALYZERS, then open the target again. An MCP client's own tool-call timeout is separate and may also need raising.`,
+});
 
 /** A provider already observed as running can be restarted by reopening. */
 const exitedProviderMessage = (

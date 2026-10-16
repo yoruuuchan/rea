@@ -923,6 +923,9 @@ bridge, and health readiness. Large binaries can need more: set
 `REA_GHIDRA_STARTUP_TIMEOUT_MS` to an integer between 1 and 2,147,483,647
 milliseconds in the server environment. An absent setting uses the default;
 empty, invalid or out-of-range supplied values fail configuration validation.
+When the deadline elapses, the `provider_timeout` error names
+`REA_GHIDRA_STARTUP_TIMEOUT_MS` with the deadline that was applied and suggests
+`REA_GHIDRA_DISABLED_ANALYZERS` for analyzers that dominate the time.
 REA parses the supplied configuration environment and
 passes the deadline to each provider client; a startup failure is returned by the query that triggered it,
 without exposing partial analysis. This deadline is separate from MCP transport
