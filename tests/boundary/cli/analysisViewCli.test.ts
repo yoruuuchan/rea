@@ -17,11 +17,49 @@ import {
   analysisViewObjectDenseCapture,
   analysisViewJavaScriptEvidence,
   analysisViewJavaScriptAnalysisWithSource,
+  analysisViewNativeEvidence,
 } from "../../fixtures/analysisView.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { inspectEvidenceBundle } from "../../../src/application/investigation/InspectEvidenceBundle.js";
+
+cliTest(
+  "preserves native relationship coverage independently of exhausted CLI pages",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-native-coverage-cli-");
+    const parent = analysisViewNativeEvidence({
+      status: "partial",
+      limited_directions: ["callees"],
+      limitations: ["Callees: fixture read limit"],
+      diagnostics: ["Fixture relationship diagnostic"],
+    });
+    const parentBefore = JSON.stringify(parent);
+    const request = join(root, "request.json");
+    await writeFile(
+      request,
+      JSON.stringify({
+        source: { kind: "inline", evidence: parent },
+        view: { kind: "native", facet: "callees", offset: 0, limit: 1 },
+      }),
+    );
+    const response = await cli.run({
+      arguments: ["inspect-analysis-view", request, "--json"],
+    });
+    expect(response.exitCode).toBe(0);
+    const evidence = parseEvidence(response.json);
+    expect(evidence.relationship_coverage).toEqual(
+      parent.relationship_coverage,
+    );
+    expect(evidence.normalized_result).toMatchObject({
+      item: [],
+      coverage: { total: 0, exhausted: true },
+      limitations: expect.arrayContaining(["Fixture dossier caveat"]),
+    });
+    expect(evidence.evidence_links).toEqual([parent.evidence_id]);
+    expect(JSON.stringify(parent)).toBe(parentBefore);
+  },
+);
 
 cliTest(
   "reads typed module references through the public CLI with canonical Evidence",

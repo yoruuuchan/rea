@@ -1,7 +1,32 @@
 import { expect, it } from "vitest";
 
 import { analyzeJavaScriptStaticSource } from "../../domain/javascript/javascriptStaticAnalysis.js";
-import { javaScriptWorkerStaticAnalysisSchema } from "./JavaScriptAnalysisWorkerSchemas.js";
+import {
+  javaScriptWorkerModuleHeaderSchema,
+  javaScriptWorkerModuleRecordSchema,
+  javaScriptWorkerStaticAnalysisSchema,
+} from "./JavaScriptAnalysisWorkerSchemas.js";
+import { analyzeJavaScriptSemantics } from "../../domain/javascript/javascriptSemanticAnalysis.js";
+import { getterExpansionSource } from "../../../tests/fixtures/javascriptGetterExpansion.js";
+
+it("transfers getter expansion limits and unknown bindings across the worker boundary", () => {
+  const ir = analyzeJavaScriptSemantics(getterExpansionSource());
+  const header = { coverage: ir.coverage, limitations: ir.limitations };
+  expect(
+    javaScriptWorkerModuleHeaderSchema.parse(
+      JSON.parse(JSON.stringify(header)) as unknown,
+    ),
+  ).toEqual(header);
+  for (const value of ir.bindings) {
+    const record = { kind: "binding", value };
+    expect(
+      javaScriptWorkerModuleRecordSchema.parse(
+        JSON.parse(JSON.stringify(record)) as unknown,
+      ),
+    ).toEqual(record);
+  }
+  expect(ir.coverage.resourceLimits).toEqual(["getter-expansion"]);
+});
 
 it("retains candidate endpoint interpretation across the worker boundary", () => {
   const facts = analyzeJavaScriptStaticSource(`

@@ -7,6 +7,13 @@ import { describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { parseJavaScriptApplicationGraph } from "../../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { compareJavaScriptApplicationVersions } from "../../../../src/domain/javascript/javascriptApplicationVersionComparison.js";
+import { semanticResourceLimitReason } from "../../../../src/domain/javascript/javascriptSemanticResourceLimits.js";
+import { getterExpansionSource } from "../../../fixtures/javascriptGetterExpansion.js";
+import { scanCanonicalArtifactInventory } from "../../../fixtures/artifactInventory.js";
+import { readJavaScriptArtifactFiles } from "../../../support/javascriptApplicationScope.js";
+import { createJavaScriptArtifactReader } from "../../../../src/artifacts/javascript/JavaScriptArtifactReader.js";
+import { analyzeJavaScriptArtifactFiles } from "../../../../src/application/javascript/JavaScriptArtifactAnalysis.js";
+import { buildJavaScriptArtifactGraph } from "../../../../src/application/javascript/JavaScriptArtifactGraphBuilder.js";
 
 import {
   findExportNode,
@@ -15,6 +22,64 @@ import {
   reconstructJavaScriptFixture,
   writeFixtureFiles,
 } from "../../../support/javascriptApplicationFixture.js";
+
+const relationshipGraph = async (root: string) => {
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    return buildJavaScriptArtifactGraph(
+      snapshot,
+      files,
+      analyzeJavaScriptArtifactFiles(files),
+    );
+  } finally {
+    await reader.close();
+  }
+};
+
+it.each([
+  ["getter-expansion", getterExpansionSource()],
+  [
+    "primitive-candidates",
+    `const result = ${Array.from({ length: 20 }, () => '(true ? "a" : "b")').join(" + ")};`,
+  ],
+] as const)(
+  "deduplicates %s limitations on import and export relationships",
+  async (limit, source) => {
+    const root = await createTestTempDirectory("rea-module-limit-evidence-");
+    await writeFixtureFiles(root, {
+      "entry.js": `import imported from "./dep.js"; ${source} export { result };`,
+      "dep.js": "export default 42;",
+    });
+    const graph = await relationshipGraph(root);
+    const module = findSourceModule(graph, "entry.js");
+    const relationships = graph.edges.filter(
+      ({ source_node_id, relation, properties }) =>
+        source_node_id === module?.node_id &&
+        (relation === "exposes" ||
+          (relation === "imports" && properties.module_link_kind === "import")),
+    );
+    expect(relationships.map(({ relation }) => relation).sort()).toEqual([
+      "exposes",
+      "imports",
+    ]);
+    for (const { evidence } of relationships) {
+      expect(
+        evidence.limitations.filter(
+          (reason) => reason === semanticResourceLimitReason(limit),
+        ),
+      ).toEqual([semanticResourceLimitReason(limit)]);
+      expect(evidence.coverage.status).toBe("partial");
+      expect(evidence.limitations).toContain(
+        "Static syntax does not prove that this relationship executes at runtime.",
+      );
+      expect(evidence.limitations).toContain(
+        "Values and aliases were recovered from inert syntax only; no JavaScript was executed.",
+      );
+    }
+  },
+);
 
 describe("cross-version source module identity", () => {
   it("keeps a source module unchanged when only a sibling file changes", async () => {

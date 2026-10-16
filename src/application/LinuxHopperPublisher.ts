@@ -11,6 +11,11 @@ import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { hashStableFile } from "../filesystem/StableFileHash.js";
+import {
+  StableFileHashCleanupFailure,
+  type StableFileHashResult,
+} from "../filesystem/StableFileHash.js";
+import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import { verifyDetachedPgpSignature } from "../process/DetachedPgpSignature.js";
 import { execFileOutput } from "../process/ExecFileOutput.js";
@@ -123,6 +128,46 @@ export class LinuxHopperPublisher {
     readonly environment: Readonly<NodeJS.ProcessEnv>,
     readonly packageFamily: () => Promise<LinuxPackageFamily | undefined>,
   ) {}
+
+  /** Hash a selected launcher while retaining any descriptor cleanup owner. */
+  hashLauncher(path: string): Promise<StableFileHashResult> {
+    return this.#hashStableFile(path);
+  }
+
+  async #hashStableFile(
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<StableFileHashResult> {
+    try {
+      return await hashStableFile(path, signal);
+    } catch (cause: unknown) {
+      if (!(cause instanceof OwnedRegularFileCleanupFailure)) throw cause;
+      const cleanup = await this.#resources.release({
+        kind: "file-handle",
+        resource: path,
+        handle: cause.owner,
+      });
+      if (cleanup.kind === "failed") {
+        pendingCleanup.add(this.#resources);
+        throw new HopperReleaseError(
+          "cleanup_failed",
+          `Hopper publisher retained file descriptor cleanup for ${path}.`,
+          {
+            cause: new AggregateError(
+              [cause, cleanup.cause],
+              "Stable file hash and descriptor cleanup failed",
+              { cause },
+            ),
+          },
+        );
+      }
+      if (cause instanceof StableFileHashCleanupFailure) {
+        if (cause.hasPrimaryCause) throw cause.cause;
+        if (cause.completedHash !== undefined) return cause.completedHash;
+      }
+      throw cause;
+    }
+  }
 
   get cacheRoot(): string {
     const location = linuxHopperReleaseCacheDirectory(this.environment);
@@ -293,8 +338,8 @@ export class LinuxHopperPublisher {
           await this.#withTemporary(async (stage) => {
             await copyFile(archive, join(stage, "archive"));
             if (
-              (await hashStableFile(join(stage, "archive"), signal)).sha256 !==
-              verified.packageSha256
+              (await this.#hashStableFile(join(stage, "archive"), signal))
+                .sha256 !== verified.packageSha256
             )
               throw new HopperReleaseError(
                 "integrity",
@@ -435,10 +480,12 @@ export class LinuxHopperPublisher {
     signal?: AbortSignal,
   ): Promise<Result<VerifiedLinuxHopperLauncher, HopperReleaseError>> {
     try {
-      const observed = await hashStableFile(path, signal);
+      const observed = await this.#hashStableFile(path, signal);
       const cached = await this.#cachedPackage(observed.sha256, signal);
       if (cached.ok) {
-        if ((await hashStableFile(path, signal)).sha256 !== observed.sha256)
+        if (
+          (await this.#hashStableFile(path, signal)).sha256 !== observed.sha256
+        )
           return err(
             new HopperReleaseError(
               "integrity",
@@ -490,7 +537,7 @@ export class LinuxHopperPublisher {
         if (!verified.ok) throw verified.error;
         return verified.value;
       });
-      if ((await hashStableFile(path, signal)).sha256 !== observed.sha256)
+      if ((await this.#hashStableFile(path, signal)).sha256 !== observed.sha256)
         return err(
           new HopperReleaseError(
             "integrity",
@@ -683,7 +730,7 @@ export class LinuxHopperPublisher {
         commandOptions,
       );
     return (
-      await hashStableFile(
+      await this.#hashStableFile(
         join(extracted, "opt", "hopper", "bin", "Hopper"),
         signal,
       )

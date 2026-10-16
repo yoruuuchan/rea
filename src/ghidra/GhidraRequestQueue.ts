@@ -1,9 +1,10 @@
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { err, type Result } from "../domain/result.js";
 import type { GhidraRequestOptions } from "./GhidraClientTypes.js";
-import type {
+import {
   GhidraSessionError,
-  GhidraSessionFailureKind,
+  type GhidraSessionFailureKind,
 } from "./GhidraSessionError.js";
 
 /** Result settled by one queued Ghidra Program request. */
@@ -22,7 +23,9 @@ export type GhidraQueueFailureFactory = (
 ) => GhidraSessionError;
 
 /** Stop the provider session when an admitted operation is cancelled. */
-export type GhidraActiveCancellationHandler = () => Promise<void>;
+export type GhidraActiveCancellationHandler = () => Promise<
+  Result<null, AnalysisError>
+>;
 
 interface QueuedRequest {
   readonly method: string;
@@ -108,7 +111,7 @@ export class GhidraRequestQueue {
     }
     this.#active = true;
     let executionSettled = false;
-    let activeCancellation: Promise<void> | undefined;
+    let activeCancellation: Promise<Result<null, AnalysisError>> | undefined;
     const onAbort =
       entry.signal === undefined
         ? undefined
@@ -131,18 +134,15 @@ export class GhidraRequestQueue {
     )
       .then(async (result) => {
         if (activeCancellation !== undefined) {
+          const primary = result.ok
+            ? this.failure("cancelled", "Ghidra request was cancelled")
+            : result.error;
           try {
-            await activeCancellation;
+            const cleanup = await activeCancellation;
+            if (!cleanup.ok)
+              result = err(this.#withCleanupFailure(primary, cleanup.error));
           } catch (cause: unknown) {
-            result = err(
-              this.failure(
-                "process",
-                cause instanceof Error
-                  ? `Ghidra cleanup after cancellation failed: ${cause.message}`
-                  : "Ghidra cleanup after cancellation failed",
-                cause,
-              ),
-            );
+            result = err(this.#withUnexpectedCleanupRejection(primary, cause));
           }
         }
         executionSettled = true;
@@ -174,6 +174,52 @@ export class GhidraRequestQueue {
     this.#queue.splice(index, 1);
     this.#release(entry);
     entry.resolve(result);
+  }
+
+  #withCleanupFailure(
+    primary: GhidraSessionError,
+    cleanupFailure: AnalysisError,
+  ): GhidraSessionError {
+    return new GhidraSessionError(
+      primary.kind,
+      primary.message,
+      primary.diagnostics,
+      {
+        ...(primary.cause === undefined ? {} : { cause: primary.cause }),
+        ...(primary.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: primary.timeoutMs }),
+        ...(primary.remoteCode === undefined
+          ? {}
+          : { remoteCode: primary.remoteCode }),
+        cleanupFailure,
+      },
+    );
+  }
+
+  #withUnexpectedCleanupRejection(
+    primary: GhidraSessionError,
+    cause: unknown,
+  ): GhidraSessionError {
+    const described = this.failure(primary.kind, primary.message, cause);
+    const rejection = described.diagnostics.failure_cause;
+    return new GhidraSessionError(
+      primary.kind,
+      primary.message,
+      {
+        ...primary.diagnostics,
+        unexpected_cleanup_rejection: rejection ?? { type: typeof cause },
+      },
+      {
+        ...(primary.cause === undefined ? {} : { cause: primary.cause }),
+        ...(primary.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: primary.timeoutMs }),
+        ...(primary.remoteCode === undefined
+          ? {}
+          : { remoteCode: primary.remoteCode }),
+      },
+    );
   }
 
   #release(entry: QueuedRequest): void {

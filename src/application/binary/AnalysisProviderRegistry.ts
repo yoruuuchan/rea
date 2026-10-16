@@ -7,6 +7,7 @@ import type { AnalysisProfileCommitment } from "../../domain/analysisProfile.js"
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import {
   ProviderSelectionError,
   type ProviderSelectionFailureReason,
@@ -132,6 +133,35 @@ export class AnalysisProviderRegistry {
   identities(): readonly ProviderIdentity[] {
     return this.#providers.map((provider) =>
       structuredClone(provider.identity()),
+    );
+  }
+
+  /** Report retained candidate resources without retrying cleanup. */
+  hasPendingOwnedResources(): boolean {
+    return this.#providers.some(
+      (provider) => provider.hasPendingOwnedResources?.() === true,
+    );
+  }
+
+  /** Close candidate-owned resources even when no target client was opened. */
+  async closeOwnedResources(): Promise<Result<null, AnalysisError>> {
+    const failures: AnalysisError[] = [];
+    for (const provider of this.#providers) {
+      if (provider.closeOwnedResources === undefined) continue;
+      const result = await provider.closeOwnedResources();
+      if (!result.ok) failures.push(result.error);
+    }
+    if (failures.length === 0) return ok(null);
+    if (failures.length === 1) return err(failures[0]!);
+    return err(
+      new ProviderCleanupError(
+        "rea",
+        failures.flatMap((failure) => failure.cleanupResources),
+        {
+          reason: failures.map((failure) => failure.message).join("; "),
+        },
+        { cause: new AggregateError(failures) },
+      ),
     );
   }
 

@@ -7,6 +7,7 @@ import { expect, it, onTestFinished, vi } from "vitest";
 import { CdpBrowserProvider } from "../../../src/browser/CdpBrowserProvider.js";
 import { CdpElectronProvider } from "../../../src/browser/CdpElectronProvider.js";
 import { observeWebSessionInputSchema } from "../../../src/domain/browserSession.js";
+import { analyzeWebBundleInputSchema } from "../../../src/domain/webBundleAnalysis.js";
 import { inspectElectronPageInputSchema } from "../../../src/domain/javascript/electronObservation.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { startFakeCdpBrowser } from "../../fixtures/fakeCdpBrowser.js";
@@ -90,6 +91,45 @@ it("releases cleanup when cancellation arrives after capture completes", async (
   expect((await fetch(`${browser.endpoint}/json/version`)).ok).toBe(true);
 });
 
+it("retains the page inspection when bundle cleanup is cancelled", async () => {
+  const controller = new AbortController();
+  const browser = await startFakeCdpBrowser({
+    commandError(command) {
+      if (command.method !== "Target.detachFromTarget") return undefined;
+      controller.abort();
+      return undefined;
+    },
+  });
+  const provider = new CdpBrowserProvider();
+  onTestFinished(async () => {
+    await provider.close();
+    await browser.close();
+  });
+
+  const result = await provider.analyzeBundle(
+    analyzeWebBundleInputSchema.parse({
+      cdp_endpoint: browser.endpoint,
+      allowed_origins: [browser.allowedOrigin],
+      target_id: "allowed-page",
+      fetch_source_maps: false,
+    }),
+    { signal: controller.signal },
+  );
+
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisCancelledError",
+      operation: "analyze_web_bundle",
+      partialObservation: {
+        target: { target_id: "allowed-page" },
+        capture_window: expect.any(Object),
+      },
+    },
+  });
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+});
+
 it("closes an Electron inspection session when cleanup is cancelled", async () => {
   const root = await createTestTempDirectory("rea-electron-cancel-");
   const page = join(root, "index.html");
@@ -136,6 +176,54 @@ it("closes an Electron inspection session when cleanup is cancelled", async () =
   });
   const methods = browser.commands.map(({ method }) => method);
   expect(methods).not.toContain("Page.disable");
+  expect(methods).toContain("Target.detachFromTarget");
+  expect(methods).not.toContain("Target.closeTarget");
+  expect(methods).not.toContain("Browser.close");
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+  expect((await fetch(`${browser.endpoint}/json/version`)).ok).toBe(true);
+});
+
+it("classifies cancellation that arrives during final Electron detach", async () => {
+  const root = await createTestTempDirectory("rea-electron-final-detach-");
+  const page = join(root, "index.html");
+  await writeFile(page, "<main>completed fixture</main>");
+  const controller = new AbortController();
+  const browser = await startFakeCdpBrowser({
+    electronFileUrl: pathToFileURL(page).href,
+    commandError(command) {
+      if (command.method !== "Target.detachFromTarget") return undefined;
+      // This command is issued only after page inspection has completed.
+      controller.abort();
+      return { code: -32_000, message: "controlled detach rejection" };
+    },
+  });
+  onTestFinished(async () => {
+    await browser.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const result = await new CdpElectronProvider().inspectPage(
+    inspectElectronPageInputSchema.parse({
+      cdp_endpoint: browser.endpoint,
+      target_id: "electron-page",
+      observation_ms: 0,
+    }),
+    { signal: controller.signal },
+  );
+
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisCancelledError",
+      operation: "inspect_electron_page",
+      partialObservation: {
+        target: { target_id: "electron-page", file_path: page },
+        dom: { total_nodes: expect.any(Number) },
+      },
+    },
+  });
+  const methods = browser.commands.map(({ method }) => method);
+  expect(methods).toContain("Page.getFrameTree");
   expect(methods).toContain("Target.detachFromTarget");
   expect(methods).not.toContain("Target.closeTarget");
   expect(methods).not.toContain("Browser.close");

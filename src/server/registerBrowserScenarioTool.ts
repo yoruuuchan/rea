@@ -15,6 +15,7 @@ import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
+import { deliverObservationEvidence } from "./observationEvidenceDelivery.js";
 
 interface BrowserScenarioToolRegistration {
   readonly logger: Logger;
@@ -54,13 +55,11 @@ export const registerBrowserScenarioTool = (
                 signal: context.mcpReq.signal,
               }),
           );
-          if (!result.ok)
-            return server.delivery.toCallToolResult(result, contract);
-          const recorded = options.recordEvidence?.(result.value);
-          return server.delivery.toEvidenceToolResult(
-            result.value,
+          return deliverObservationEvidence(
+            server,
             contract,
-            recorded,
+            result,
+            options.recordEvidence,
           );
         },
       );

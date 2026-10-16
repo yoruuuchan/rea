@@ -4,7 +4,11 @@ import { join } from "node:path";
 
 import type { JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { hashStableFile } from "../filesystem/StableFileHash.js";
+import {
+  hashStableFile,
+  StableFileHashCleanupFailure,
+} from "../filesystem/StableFileHash.js";
+import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
 import {
   execFileOutput,
   execFileOutputFailure,
@@ -46,7 +50,7 @@ export interface KunaInstallation {
 }
 
 /** Why the selected Kuna installation cannot be used. */
-export interface KunaReadinessFailure {
+interface KunaReadinessFailureBase {
   readonly code:
     | KunaConfigurationFailure["code"]
     | "executable_missing"
@@ -54,6 +58,19 @@ export interface KunaReadinessFailure {
   readonly reason: string;
   readonly diagnostics: Readonly<Record<string, JsonValue>>;
 }
+
+/** Hash close failure with one owner and any already-completed installation facts. */
+export interface KunaInstallationHashCleanupFailure {
+  readonly code: "hash_cleanup_failed";
+  readonly reason: string;
+  readonly diagnostics: Readonly<Record<string, JsonValue>>;
+  readonly hashCleanupFailure: OwnedRegularFileCleanupFailure;
+  readonly completedInstallation?: KunaInstallation;
+}
+
+export type KunaReadinessFailure =
+  | KunaReadinessFailureBase
+  | KunaInstallationHashCleanupFailure;
 
 /**
  * Environment for every Kuna child. Kuna unpacks its built-in SLEIGH tree into
@@ -72,10 +89,11 @@ export const kunaChildEnvironment = (
 };
 
 const failure = (
-  code: KunaReadinessFailure["code"],
+  code: KunaReadinessFailureBase["code"],
   reason: string,
   diagnostics: Readonly<Record<string, JsonValue>>,
-): Result<never, KunaReadinessFailure> => err({ code, reason, diagnostics });
+): Result<never, KunaReadinessFailureBase> =>
+  err({ code, reason, diagnostics });
 
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -156,11 +174,38 @@ export const inspectKunaInstallation = async (
     );
 
   let fingerprint: { readonly sha256: string; readonly bytes: number };
-  let script: boolean;
+  let script: boolean | undefined;
   try {
-    fingerprint = await hashStableFile(executable, options.signal);
     script = await startsWithShebang(executable);
+    fingerprint = await hashStableFile(executable, options.signal);
   } catch (cause: unknown) {
+    if (cause instanceof OwnedRegularFileCleanupFailure)
+      return err({
+        code: "hash_cleanup_failed",
+        reason: `Cannot fingerprint ${executable}: ${message(cause)}`,
+        diagnostics: {
+          command,
+          executable,
+          version,
+          ...(typeof script === "boolean" ? { script } : {}),
+        },
+        hashCleanupFailure: cause,
+        ...(cause instanceof StableFileHashCleanupFailure &&
+        !cause.hasPrimaryCause &&
+        cause.completedHash !== undefined &&
+        script !== undefined
+          ? {
+              completedInstallation: {
+                configuration: configuration.value,
+                executable,
+                version,
+                verified: version === KUNA_VERIFIED_VERSION,
+                ...cause.completedHash,
+                script,
+              },
+            }
+          : {}),
+      });
     options.signal?.throwIfAborted();
     return failure(
       "executable_missing",
@@ -168,6 +213,13 @@ export const inspectKunaInstallation = async (
       { command, executable },
     );
   }
+
+  if (script === undefined)
+    return failure(
+      "executable_missing",
+      `Cannot inspect Kuna executable ${executable}.`,
+      { command, executable },
+    );
 
   return ok({
     configuration: configuration.value,

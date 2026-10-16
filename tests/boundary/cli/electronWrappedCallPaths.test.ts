@@ -22,6 +22,105 @@ const callPathTerminalObservationSchema = z.object({
   evidence: z.object({ coverage: z.object({ status: z.string() }) }),
 });
 
+const restArrayPropertyCases = [
+  {
+    name: "leading-zero index",
+    expression: 'items["01"] ?? "FALLBACK"',
+    parameters: "",
+    channel: null,
+  },
+  {
+    name: "double-zero key",
+    expression: 'items["00"] ?? "FALLBACK"',
+    parameters: "",
+    channel: null,
+  },
+  {
+    name: "decimal-form key",
+    expression: 'items["1.0"] ?? "FALLBACK"',
+    parameters: "",
+    channel: null,
+  },
+  {
+    name: "canonical index",
+    expression: 'items["1"] ?? "FALLBACK"',
+    parameters: "",
+    channel: "SECOND",
+  },
+  {
+    name: "literal fallback",
+    expression: '"FALLBACK"',
+    parameters: "",
+    channel: "FALLBACK",
+  },
+  {
+    name: "dynamic key",
+    expression: 'items[key] ?? "FALLBACK"',
+    parameters: "key",
+    channel: null,
+  },
+] as const;
+
+for (const fixture of restArrayPropertyCases)
+  cliTest(
+    `preserves rest-array property identity for ${fixture.name} through the public CLI`,
+    async ({ cli }) => {
+      const root = await createTestTempDirectory("rea-electron-rest-key-");
+      await writeFixtureFiles(root, {
+        "main.cjs": `const e = require("electron");
+          function make(...items) {
+            return (${fixture.parameters}) => e.ipcRenderer.send(${fixture.expression});
+          }
+          e.contextBridge.exposeInMainWorld("desktop", { read: make("FIRST", "SECOND") });`,
+      });
+      const application = await analyzeJavaScriptDirectory("CLI", cli, root);
+      expect(application.statistics).toMatchObject({
+        parsed_javascript_files: 1,
+        parse_failures: 0,
+      });
+      const observations = application.graph.nodes.flatMap(
+        (node) => node.observations,
+      );
+      const terminals = observations.filter(
+        (observation) =>
+          observation.properties.entry === "desktop.read" &&
+          observation.properties.step_kind === "terminal",
+      );
+      const channels = application.graph.nodes
+        .filter((node) => node.kind === "ipc-channel")
+        .flatMap((node) => node.observations);
+      expect(
+        terminals.map((observation) => observation.properties.channel),
+      ).toEqual(fixture.channel === null ? [] : [fixture.channel]);
+      expect(
+        channels
+          .filter(
+            (observation) => observation.properties.resolution === "literal",
+          )
+          .map((observation) => observation.properties.channel),
+      ).toEqual(fixture.channel === null ? [] : [fixture.channel]);
+      for (const terminal of terminals)
+        expect(terminal).toMatchObject({
+          properties: { resolution: "candidate" },
+          evidence: {
+            state: "inferred",
+            authority: "static-relationship-inference",
+          },
+        });
+      if (fixture.expression !== '"FALLBACK"')
+        expect(channels).toContainEqual(
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              channel: null,
+              resolution: "dynamic",
+              channel_expression: fixture.expression,
+            }),
+            evidence: expect.objectContaining({ state: "observed" }),
+          }),
+        );
+    },
+  );
+
 const analyze = async (cli: TestCli, extra = "") => {
   const root = await createTestTempDirectory("rea-electron-wrapped-paths-");
   await writeFixtureFiles(root, {

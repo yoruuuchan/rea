@@ -8,9 +8,12 @@ import {
   AnalysisCancelledError,
 } from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
-import type { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { hashStableFile } from "../filesystem/StableFileHash.js";
+import { StableFileHashCleanupFailure } from "../filesystem/StableFileHash.js";
+import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
 import { prepareProcessOwnershipInspection } from "../process/ProcessOwnershipObservation.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
 import {
@@ -83,6 +86,7 @@ export type KunaExportOutcome =
   | {
       readonly kind: "done";
       readonly result: Result<KunaExport, AnalysisError>;
+      readonly fileCleanup?: OwnedRegularFileCleanupFailure;
     }
   | {
       readonly kind: "retained";
@@ -118,6 +122,36 @@ export const kunaExportFailure = (
   cause: unknown,
   signal: AbortSignal,
 ): AnalysisError => {
+  if (cause instanceof OwnedRegularFileCleanupFailure) {
+    const primary = signal.aborted
+      ? new AnalysisCancelledError(KUNA_EXPORT_OPERATION, {
+          cause: cause.cause,
+        })
+      : new ProviderAdapterError(KUNA_PROVIDER_ID, KUNA_EXPORT_OPERATION, {
+          cause: cause.cause,
+          userMessage: `Kuna project cache failed: ${message(cause.cause)}`,
+        });
+    const cleanup = new ProviderCleanupError(
+      KUNA_PROVIDER_ID,
+      [cause.path],
+      {
+        reason:
+          cause.cleanupCause instanceof Error
+            ? cause.cleanupCause.message
+            : String(cause.cleanupCause),
+        ...(cause instanceof StableFileHashCleanupFailure &&
+        cause.completedHash !== undefined
+          ? { completed_hash: cause.completedHash }
+          : {}),
+      },
+      { operation: KUNA_EXPORT_OPERATION, cause: cause.cleanupCause },
+    );
+    return analysisErrorWithCleanupFailure(
+      primary,
+      cleanup,
+      KUNA_EXPORT_OPERATION,
+    );
+  }
   if (signal.aborted)
     return new AnalysisCancelledError(KUNA_EXPORT_OPERATION, { cause });
   if (cause instanceof AnalysisError) return cause;
@@ -206,7 +240,13 @@ export const exportKunaProject = async (
               error: outcome.error,
               owner: outcome.owner,
             } as const)
-          : ({ kind: "done", result: err(outcome.error) } as const),
+          : ({
+              kind: "done",
+              result: err(outcome.error),
+              ...(outcome.fileCleanup === undefined
+                ? {}
+                : { fileCleanup: outcome.fileCleanup }),
+            } as const),
     };
   };
 

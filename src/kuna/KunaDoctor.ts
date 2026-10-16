@@ -6,6 +6,7 @@ import type {
   DoctorProviderCheck,
   DoctorProviderInspection,
 } from "../application/Doctor.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { readKunaConfiguration } from "./KunaConfiguration.js";
 import {
   inspectKunaInstallation,
@@ -29,10 +30,34 @@ const REGISTRATION_SETTINGS = [
   "REA_KUNA_JOBS",
 ] as const;
 
+/** Readiness failed and doctor has no lifecycle owner for the hash descriptor. */
+export class KunaDoctorHashCleanupFailure extends Error {
+  constructor(
+    readonly readinessFailure: KunaReadinessFailure,
+    readonly owner: OwnedFileHandle,
+    readonly cleanupCause: unknown,
+  ) {
+    super(
+      `${readinessFailure.reason}; the executable hash descriptor could not be closed`,
+      {
+        cause:
+          readinessFailure.code === "hash_cleanup_failed"
+            ? readinessFailure.hashCleanupFailure
+            : cleanupCause,
+      },
+    );
+    this.name = "KunaDoctorHashCleanupFailure";
+  }
+}
+
 /** Project Kuna readiness into the doctor contract without writing anything. */
 export const inspectKunaProvider = async (
   environment: Readonly<NodeJS.ProcessEnv>,
   platform: NodeJS.Platform = process.platform,
+  adoptFileHandle?: (
+    resource: string,
+    handle: OwnedFileHandle,
+  ) => Promise<boolean>,
 ): Promise<DoctorProviderInspection> => {
   const installation = await inspectKunaInstallation(environment, {
     platform,
@@ -40,15 +65,39 @@ export const inspectKunaProvider = async (
   const configured =
     environment.REA_KUNA_COMMAND !== undefined &&
     environment.REA_KUNA_COMMAND.length > 0;
-  if (!installation.ok)
+  if (!installation.ok) {
+    let cleanupDetail: string | undefined;
+    const hashFailure =
+      installation.error.code === "hash_cleanup_failed"
+        ? installation.error.hashCleanupFailure
+        : undefined;
+    if (hashFailure !== undefined) {
+      if (adoptFileHandle === undefined) {
+        throw new KunaDoctorHashCleanupFailure(
+          installation.error,
+          hashFailure.owner,
+          hashFailure.cleanupCause,
+        );
+      } else {
+        const closed = await adoptFileHandle(
+          hashFailure.path,
+          hashFailure.owner,
+        );
+        if (!closed)
+          cleanupDetail = "Executable hash cleanup is still pending.";
+      }
+    }
     return {
       id: KUNA_PROVIDER_ID,
       configured,
       available: false,
       providerVersion: null,
       registrationEnvironment: {},
-      checks: [installationFailure(installation.error, configured)],
+      checks: [
+        installationFailure(installation.error, configured, cleanupDetail),
+      ],
     };
+  }
   const { value } = installation;
   return {
     id: KUNA_PROVIDER_ID,
@@ -88,11 +137,15 @@ export const inspectKunaProvider = async (
 const installationFailure = (
   failure: KunaReadinessFailure,
   configured: boolean,
+  cleanupDetail?: string,
 ): DoctorProviderCheck => ({
   name: "installation",
   ok: false,
   code: failure.code,
-  detail: failure.reason,
+  detail:
+    cleanupDetail === undefined
+      ? failure.reason
+      : `${failure.reason} ${cleanupDetail}`,
   remediation:
     failure.code === "unsupported_host"
       ? KUNA_UNSUPPORTED_HOST_REMEDIATION

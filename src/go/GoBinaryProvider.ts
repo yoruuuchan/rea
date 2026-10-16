@@ -17,6 +17,7 @@ import {
 import {
   goBinarySchema,
   type GoBinary,
+  type GoModuleMetadata,
   type InspectGoBinaryInput,
 } from "../domain/go/goBinary.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
@@ -138,6 +139,36 @@ const outputLimit = (path: string) =>
     { maximum_output_bytes: OUTPUT_BYTES },
   );
 
+/** Fixed reader boundaries plus unknowns left by the observed metadata. */
+const limitationsFor = (
+  info: { go_version: string | null; module_text: string | null } | null,
+  module: GoModuleMetadata | null,
+): string[] => [
+  "Embedded build metadata is observed file content, not proof of compiler identity, dependency authenticity or runtime behavior.",
+  "Only Go build information is inspected; function names, source mappings, type metadata and decompiled code are not recovered.",
+  "Resource guards bound stable artifact reads and cumulative header searches to 256 MiB each, aggregate embedded strings to 1 MiB, structural table decoding to 16 MiB and complete metadata payloads to 8 MiB; these are not operating-system memory or CPU limits.",
+  ...(info !== null && (info.go_version === null || info.module_text === null)
+    ? [
+        "Some embedded Go strings contain non-UTF8 bytes; undecodable text is null and exact source bytes are preserved as base64.",
+      ]
+    : []),
+  ...(info === null
+    ? [
+        "No recognized Go build-info record was found in the inspected image; absent metadata does not establish that the binary is not Go.",
+      ]
+    : []),
+  ...(module !== null && module.main === null
+    ? [
+        "Dependency coverage is unknown because no main-module record was decoded from the embedded module information, as in GOPATH-mode builds. Decoded dependency records remain visible; an empty list does not establish the absence of dependencies.",
+      ]
+    : []),
+  ...(module?.complete === false
+    ? [
+        "Some embedded module-text records could not be parsed completely; their original lines are preserved and additional metadata remains unknown.",
+      ]
+    : []),
+];
+
 /** Stable in-process metadata inspection without subprocesses, temporary files or Go installation. */
 export class GoBinaryProvider implements GoBinaryPort {
   readonly identity = GO_BINARY_PROVIDER_IDENTITY;
@@ -191,27 +222,7 @@ export class GoBinaryProvider implements GoBinaryPort {
           bytes: snapshot.bytes.length,
         },
         build_info: info === null ? null : { ...info, module },
-        limitations: [
-          "Embedded build metadata is observed file content, not proof of compiler identity, dependency authenticity or runtime behavior.",
-          "Only Go build information is inspected; function names, source mappings, type metadata and decompiled code are not recovered.",
-          "Resource guards bound stable artifact reads and cumulative header searches to 256 MiB each, aggregate embedded strings to 1 MiB, structural table decoding to 16 MiB and complete metadata payloads to 8 MiB; these are not operating-system memory or CPU limits.",
-          ...(info !== null &&
-          (info.go_version === null || info.module_text === null)
-            ? [
-                "Some embedded Go strings contain non-UTF8 bytes; undecodable text is null and exact source bytes are preserved as base64.",
-              ]
-            : []),
-          ...(info === null
-            ? [
-                "No recognized Go build-info record was found in the inspected image; absent metadata does not establish that the binary is not Go.",
-              ]
-            : []),
-          ...(module?.complete === false
-            ? [
-                "Some embedded module-text records could not be parsed completely; their original lines are preserved and additional metadata remains unknown.",
-              ]
-            : []),
-        ],
+        limitations: limitationsFor(info, module),
       };
       if (Buffer.byteLength(JSON.stringify(report), "utf8") > OUTPUT_BYTES)
         throw outputLimit(input.path);

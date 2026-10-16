@@ -174,6 +174,54 @@ const serveScenario = async () => {
   };
 };
 
+it("retains the completed scenario when cancellation arrives during final close", async () => {
+  let announceClose!: () => void;
+  const closeStarted = new Promise<void>((resolve) => {
+    announceClose = resolve;
+  });
+  let releaseClose!: () => void;
+  const closeBarrier = new Promise<void>((resolve) => {
+    releaseClose = resolve;
+  });
+  class FinalCloseSession extends RetrySession {
+    override async close() {
+      announceClose();
+      await closeBarrier;
+      return super.close();
+    }
+  }
+
+  const session = new FinalCloseSession(0);
+  const provider = new PlaywrightBrowserScenarioProvider(async () => session);
+  const cancellation = new AbortController();
+  try {
+    const pending = provider.captureScenario(scenario, {
+      signal: cancellation.signal,
+    });
+    await closeStarted;
+    cancellation.abort();
+    releaseClose();
+
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.partialObservation).toMatchObject({
+      kind: "browser-scenario-observation",
+      capture: {
+        browser: { cleanup: "terminated-owned-process" },
+        steps: [{ step_id: "scenario_start" }, { step_id: "wait" }],
+      },
+    });
+    expect(session.closeBrowserCalls).toBe(1);
+    expect(session.profileRemovalCalls).toBe(1);
+  } finally {
+    releaseClose();
+    cancellation.abort();
+    await provider.close();
+  }
+});
+
 it("retries retained browser cleanup before the one-shot CLI releases its provider", async () => {
   const savedExitCode = process.exitCode;
   const session = new RetrySession();

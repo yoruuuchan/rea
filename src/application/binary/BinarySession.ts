@@ -499,15 +499,26 @@ export class BinarySession
     if (clearRecords) this.clearSessionRecords();
     this.#clearRuntimeAvailability();
     const fileResources = await this.closeWriteResources();
+    const candidates = await this.#providerRouter.closeOwnedResources();
+    let lifecycle: Result<null, AnalysisError>;
     if (!closed.ok && !fileResources.ok)
-      return err(
+      lifecycle = err(
         analysisErrorWithCleanupFailure(
           closed.error,
           fileResources.error,
           "close_binary",
         ),
       );
-    return closed.ok ? fileResources : closed;
+    else lifecycle = closed.ok ? fileResources : closed;
+    if (!lifecycle.ok && !candidates.ok)
+      return err(
+        analysisErrorWithCleanupFailure(
+          lifecycle.error,
+          candidates.error,
+          "close_binary",
+        ),
+      );
+    return lifecycle.ok ? candidates : lifecycle;
   }
 
   async #retireClient(
@@ -583,7 +594,10 @@ export class BinarySession
       runtimeLineageSnapshots: client?.runtimeLineageSnapshots?.() ?? [],
       requestActivitySnapshots: client?.requestActivitySnapshots?.() ?? [],
       providerOperationHealth: client?.operationHealthSnapshot?.() ?? null,
-      cleanupPending: this.#pendingCleanup !== undefined,
+      cleanupPending:
+        this.#pendingCleanup !== undefined ||
+        this.hasPendingWriteResources ||
+        this.#providerRouter.hasPendingOwnedResources(),
     });
   }
 

@@ -65,6 +65,8 @@ export type GhidraLaunch = ProviderProcessLaunch & {
   readonly projectRoot: string;
   readonly ghidraLogPath: string;
   readonly scriptLogPath: string;
+  /** Value supplied to the JVM as -Xmx, not a measurement of effective memory. */
+  readonly configuredMaxHeap?: string;
   readonly launchSupport?: readonly GhidraLaunchSupportDiagnostic[];
 };
 
@@ -195,6 +197,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
     const paths = ghidraRuntimePaths(session.runtimeRoot);
     const platform = this.options.platform ?? process.platform;
     let started: SpawnedOwnedProviderProcess | undefined;
+    let configuredMaxHeap: string | undefined;
     const launchSupport: GhidraLaunchSupportDiagnostic[] = [];
     try {
       const psp = this.options.pspExtension;
@@ -341,6 +344,11 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         },
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
+      // Windows starts the script wrapper rather than this inspected JVM command.
+      configuredMaxHeap =
+        platform === "win32"
+          ? undefined
+          : inspectedJavaLaunch.configuredMaxHeap;
       const command =
         platform === "win32"
           ? { ...scriptCommand, environment }
@@ -363,6 +371,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         paths,
         platform,
         launchSupport,
+        configuredMaxHeap,
       );
       await writeGhidraRuntimeFile(
         paths.ownershipPath,
@@ -416,6 +425,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           paths,
           platform,
           launchSupport,
+          configuredMaxHeap,
         );
         const primaryMessage = isAborted(options.signal)
           ? primary.message
@@ -446,11 +456,13 @@ const ownedGhidraLaunch = (
   paths: ReturnType<typeof ghidraRuntimePaths>,
   platform: NodeJS.Platform,
   launchSupport: readonly GhidraLaunchSupportDiagnostic[],
+  configuredMaxHeap?: string,
 ): GhidraLaunch => ({
   ...ownedGhidraProcess(spawned, platform),
   projectRoot: paths.projectRoot,
   ghidraLogPath: paths.ghidraLogPath,
   scriptLogPath: paths.scriptLogPath,
+  ...(configuredMaxHeap === undefined ? {} : { configuredMaxHeap }),
   ...(launchSupport.length === 0 ? {} : { launchSupport: [...launchSupport] }),
 });
 

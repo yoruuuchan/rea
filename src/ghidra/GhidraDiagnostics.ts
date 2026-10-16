@@ -23,6 +23,7 @@ export interface GhidraDiagnosticsOptions {
   readonly snapshot?: ProviderProcessSnapshot;
   readonly token?: string;
   readonly previous: Readonly<Record<string, JsonValue>>;
+  readonly failure_output?: JsonValue;
 }
 
 /** Preserve actionable runtime coordinates after cleanup and redact bearer data. */
@@ -33,8 +34,11 @@ export const createGhidraDiagnostics = (
     options.runtimeRoot === undefined &&
     options.launch === undefined &&
     Object.keys(options.previous).length > 0
-  )
-    return options.previous;
+  ) {
+    const history: Record<string, JsonValue> = { ...options.previous };
+    delete history.failure_output;
+    return history;
+  }
   return {
     target_path: options.targetPath,
     target_sha256: options.targetSha256,
@@ -69,19 +73,32 @@ export const createGhidraDiagnostics = (
                 })),
               }),
         }),
+    ...(options.launch?.configuredMaxHeap === undefined
+      ? {}
+      : { configured_jvm_max_heap: options.launch.configuredMaxHeap }),
     ...(options.snapshot === undefined
       ? {}
       : {
           exit_code: options.snapshot.exitCode ?? null,
           exit_signal: options.snapshot.signal ?? null,
           diagnostic_truncated: options.snapshot.diagnosticTruncated === true,
-          stdout: boundedStream(options.snapshot.stdout, options.token),
-          stderr: boundedStream(options.snapshot.stderr, options.token),
+          output_incomplete: options.snapshot.outputIncomplete === true,
+          stdout: ghidraDiagnosticStream(
+            options.snapshot.stdout,
+            options.token,
+          ),
+          stderr: ghidraDiagnosticStream(
+            options.snapshot.stderr,
+            options.token,
+          ),
         }),
+    ...(options.failure_output === undefined
+      ? {}
+      : { failure_output: options.failure_output }),
   };
 };
 
-const boundedStream = (
+export const ghidraDiagnosticStream = (
   stream: ProviderProcessSnapshot["stdout"],
   token: string | undefined,
 ): JsonValue => ({
@@ -89,4 +106,5 @@ const boundedStream = (
   // Preserve the historical total-byte counter; text is now bounded separately.
   bytes: stream.observedBytes,
   retained_bytes: stream.bytes,
+  ...(stream.invalidUtf8 === true ? { invalid_utf8: true } : {}),
 });

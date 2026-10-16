@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { join } from "node:path";
 
@@ -433,9 +434,12 @@ export interface SystemDoctorHostOptions {
   readonly architecture?: NodeJS.Architecture;
   readonly environment?: NodeJS.ProcessEnv;
   readonly execFileOutput?: typeof execFileOutput;
-  readonly providerInspections?: () => Promise<
-    readonly DoctorProviderInspection[]
-  >;
+  readonly providerInspections?: (
+    adoptFileHandle: (
+      resource: string,
+      handle: OwnedFileHandle,
+    ) => Promise<boolean>,
+  ) => Promise<readonly DoctorProviderInspection[]>;
   readonly providerRegistrationEnvironment?: () => Readonly<
     Record<string, string>
   >;
@@ -549,7 +553,19 @@ export const systemDoctorHost = (
     manualHopperPaths: () => manualHopperPaths(homeDirectory),
     ...(options.providerInspections === undefined
       ? {}
-      : { providerInspections: options.providerInspections }),
+      : {
+          providerInspections: () =>
+            options.providerInspections!(
+              async (resource, handle) =>
+                (
+                  await resources.release({
+                    kind: "file-handle",
+                    resource,
+                    handle,
+                  })
+                ).kind === "released",
+            ),
+        }),
     ...(options.providerRegistrationEnvironment === undefined
       ? {}
       : {

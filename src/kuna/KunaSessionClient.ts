@@ -30,6 +30,8 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { RelationshipCoverage } from "../domain/relationshipCoverage.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { StableFileHashCleanupFailure } from "../filesystem/StableFileHash.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
 import {
@@ -1271,8 +1273,42 @@ export class KunaSessionClient implements AnalysisClient {
   > {
     this.#installation ??= inspectKunaInstallation(this.#environment).then(
       (inspected): Result<KunaInstallation, AnalysisError> => {
-        if (!inspected.ok)
+        if (!inspected.ok) {
+          const hashFailure =
+            inspected.error.code === "hash_cleanup_failed"
+              ? inspected.error.hashCleanupFailure
+              : undefined;
+          if (hashFailure !== undefined) {
+            this.#commands.retainHashCleanup(hashFailure);
+            const primary = this.#session.signal.aborted
+              ? new AnalysisCancelledError("health", {
+                  cause: hashFailure.cause,
+                })
+              : new ProviderAdapterError(KUNA_PROVIDER_ID, "health", {
+                  cause: hashFailure.cause,
+                  userMessage: inspected.error.reason,
+                });
+            const cleanup = new ProviderCleanupError(
+              KUNA_PROVIDER_ID,
+              [hashFailure.path],
+              {
+                reason:
+                  hashFailure.cleanupCause instanceof Error
+                    ? hashFailure.cleanupCause.message
+                    : String(hashFailure.cleanupCause),
+                ...(hashFailure instanceof StableFileHashCleanupFailure &&
+                hashFailure.completedHash !== undefined
+                  ? { completed_hash: hashFailure.completedHash }
+                  : {}),
+              },
+              { operation: "health", cause: hashFailure.cleanupCause },
+            );
+            return err(
+              analysisErrorWithCleanupFailure(primary, cleanup, "health"),
+            );
+          }
           return err(kunaUnavailable("health", inspected.error.reason));
+        }
         const committed = this.#profile?.parameters["kuna_sha256"];
         if (committed !== undefined && committed !== inspected.value.sha256)
           return err(

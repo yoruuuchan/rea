@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import type {
+  AnalysisError,
+  AnalysisErrorOptions,
+} from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
@@ -26,6 +29,24 @@ export interface ProviderOperationPort<
     options?: ExecutionOptions,
   ): Promise<Result<AnalysisExecution, AnalysisError>>;
 }
+
+/** Preserve valid completed Evidence when cancellation arrives at completion. */
+export const completeProviderEvidence = (
+  completed: Result<Evidence, AnalysisError>,
+  operation: string,
+  options?: ExecutionOptions,
+  errorOptions?: Omit<AnalysisErrorOptions, "partialObservation">,
+): Result<Evidence, AnalysisError> => {
+  if (!completed.ok) return completed;
+  return options?.signal?.aborted
+    ? err(
+        new AnalysisCancelledError(operation, {
+          ...errorOptions,
+          partialObservation: completed.value,
+        }),
+      )
+    : completed;
+};
 
 /**
  * Shared CLI/MCP admission, execution, and Evidence composition for
@@ -69,9 +90,5 @@ export const executeProviderOperation = async <
   // the caller no longer wants. The observation it completed is still this
   // provider's Evidence, so the cancellation carries it as the partial
   // observation instead of discarding a finished result.
-  if (options?.signal?.aborted)
-    return err(
-      new AnalysisCancelledError(operation, { partialObservation: evidence }),
-    );
-  return ok(evidence);
+  return completeProviderEvidence(ok(evidence), operation, options);
 };

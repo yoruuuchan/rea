@@ -11,6 +11,7 @@ import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import { logToolExecution } from "./toolLogging.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
+import { deliverObservationEvidence } from "./observationEvidenceDelivery.js";
 
 /** Application service executing one named contract operation. */
 export interface ContractToolService<TOperation extends string> {
@@ -61,25 +62,11 @@ export const createEvidenceToolHandler =
         const result = await logToolExecution(logger, name, () =>
           operation(input, { signal: context.mcpReq.signal }),
         );
-        if (!result.ok) {
-          const partial = result.error.partialObservation;
-          if (partial !== undefined && "evidence_id" in partial) {
-            const recorded = recordEvidence?.(partial);
-            if (recorded !== undefined)
-              return server.delivery.toRecordedPartialErrorToolResult(
-                result.error,
-                partial.evidence_id,
-                recorded,
-                contract.returnsTargetContent,
-              );
-          }
-          return server.delivery.toCallToolResult(result, contract);
-        }
-        const recorded = recordEvidence?.(result.value);
-        return server.delivery.toEvidenceToolResult(
-          result.value,
+        return deliverObservationEvidence(
+          server,
           contract,
-          recorded,
+          result,
+          recordEvidence,
         );
       };
       return runAdmittedToolOperation(

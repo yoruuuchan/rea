@@ -76,13 +76,30 @@ function runCommand() {
       env: process.env,
       stdio: "inherit",
     });
-    child.once("error", reject);
+    let spawned = false;
+    let childError;
+    let hasChildError = false;
+    child.once("spawn", () => {
+      spawned = true;
+    });
+    const rememberChildError = (cause) => {
+      if (!hasChildError) {
+        hasChildError = true;
+        childError = cause;
+      }
+      if (!spawned) {
+        reject(childError);
+      }
+    };
+    child.on("error", rememberChildError);
     child.once("close", (code) => {
+      child.off("error", rememberChildError);
       // During POSIX cancellation the group leader must stay alive, retaining
       // both its group identity and SQLite ownership until the entire group is
       // killed. A completed command can still have uncooperative descendants.
-      if (shutdownSignal === undefined || process.platform === "win32")
-        resolveResult({ code });
+      if (shutdownSignal !== undefined && process.platform !== "win32") return;
+      if (hasChildError) reject(childError);
+      else resolveResult({ code });
     });
   });
 }
@@ -99,7 +116,13 @@ function handleDisconnect() {
 function handleSignal(signal) {
   if (shutdownSignal !== undefined) return;
   shutdownSignal = signal;
-  if (child === undefined || process.platform === "win32") return;
+  if (child === undefined) return;
+  if (process.platform === "win32") {
+    // Windows has no POSIX process groups. Stop only the command owned by this
+    // supervisor, and keep the SQLite transaction until its close event.
+    child.kill(signal);
+    return;
+  }
   // Establish cancellation before signalling the group. This supervisor is
   // its live leader, so the group identifier cannot be reused during cleanup.
   process.kill(-process.pid, signal);

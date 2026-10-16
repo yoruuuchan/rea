@@ -81,6 +81,8 @@ export interface JavaScriptSemanticAnalysisState {
   readonly staticImportResolutionMode: JavaScriptModuleResolutionMode;
   /** Bounds encountered during this analysis, independent of later projections. */
   readonly valueResourceLimits: Set<JavaScriptSemanticResourceLimit>;
+  /** Getter query bounds encountered while resolving object and class properties. */
+  readonly getterResourceLimits: Set<JavaScriptSemanticResourceLimit>;
   readonly parentsByNode: WeakMap<t.Node, t.Node>;
   readonly scopes: JavaScriptSemanticScopeState[];
   readonly scopesById: Map<string, JavaScriptSemanticScopeState>;

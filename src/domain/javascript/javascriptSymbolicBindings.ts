@@ -12,6 +12,7 @@ import {
   indexJavaScriptElectronIdentitySteps,
   type JavaScriptElectronIdentity,
 } from "./javascriptSemanticAnalysis.js";
+import { semanticArrayIndex } from "./javascriptSemanticPropertyPaths.js";
 import { symbolicLogicalRight } from "./javascriptSymbolicControlFlow.js";
 import {
   moduleFactory,
@@ -301,8 +302,11 @@ export class JavaScriptSymbolicBindings {
           return symbolicUnknown("dynamic property overwrite");
       }
     }
-    if (value.kind === "array" && /^\d+$/u.test(key))
-      return value.values[Number(key)] ?? symbolicUnknown("missing argument");
+    if (value.kind === "array") {
+      const index = semanticArrayIndex(key);
+      if (index !== null)
+        return value.values[index] ?? symbolicUnknown("missing argument");
+    }
     return symbolicUnknown("unresolved property");
   }
 

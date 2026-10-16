@@ -19,21 +19,38 @@ export class NonRegularFileReadError extends Error {
   }
 }
 
-/** Admission failed and the opened descriptor could not be confirmed closed. */
-export class RegularFileAdmissionFailure extends Error {
+/** One regular-file operation failed while its opened descriptor could not be confirmed closed. */
+export class OwnedRegularFileCleanupFailure extends Error {
   override readonly cause: unknown;
 
   constructor(
     readonly path: string,
-    admissionCause: unknown,
+    cause: unknown,
     readonly cleanupCause: unknown,
     readonly owner: OwnedFileHandle,
+    message: string,
+  ) {
+    super(message, { cause });
+    this.cause = cause;
+  }
+}
+
+/** Admission failed and the opened descriptor could not be confirmed closed. */
+export class RegularFileAdmissionFailure extends OwnedRegularFileCleanupFailure {
+  constructor(
+    path: string,
+    admissionCause: unknown,
+    cleanupCause: unknown,
+    owner: OwnedFileHandle,
   ) {
     super(
+      path,
+      admissionCause,
+      cleanupCause,
+      owner,
       `Selected input failed admission and its descriptor close failed: ${path}`,
     );
     this.name = "RegularFileAdmissionFailure";
-    this.cause = admissionCause;
   }
 }
 

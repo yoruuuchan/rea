@@ -322,6 +322,47 @@ class WebsiteMaintenanceChecks(unittest.TestCase):
             self.assertTrue(any("missing Markdown fragment" in error for error in errors))
             self.assertTrue(any("missing repository target" in error for error in errors))
 
+    def test_repository_links_accept_aliased_roots_and_reject_escaping_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = (Path(directory) / "repository").resolve()
+            (root / "website/public").mkdir(parents=True)
+            (root / "docs").mkdir()
+            (root / "docs/guide.md").write_text("# Guide\n")
+            page = root / "website/README.md"
+            page.write_text("[Guide](../docs/guide.md#guide)\n")
+            alias = Path(directory) / "repository-alias"
+            alias.symlink_to(root, target_is_directory=True)
+            self.assertEqual(VERIFY.check_repository_links(root), [])
+            self.assertEqual(VERIFY.check_repository_links(alias), [])
+            (root.parent / "outside.md").write_text("# Outside\n")
+            page.write_text("[Outside](../../outside.md)\n")
+            for boundary in (root, alias):
+                with self.subTest(boundary=boundary):
+                    self.assertEqual(VERIFY.check_repository_links(boundary), [
+                        "website/README.md: missing repository target: ../../outside.md"
+                    ])
+
+    def test_site_links_preserve_containment_through_aliased_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            site = (Path(directory) / "site").resolve()
+            site.mkdir()
+            page = site / "index.html"
+            page.write_text('<html lang="en"><head><title>Fixture</title><meta name="robots" content="noindex"></head><body><h1>Fixture</h1><a href="guide.html#answer">Guide</a></body></html>')
+            (site / "guide.html").write_text('<html lang="en"><head><title>Guide</title><meta name="robots" content="noindex"></head><body><h1 id="answer">Answer</h1></body></html>')
+            (site / "sitemap.xml").write_text('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>')
+            (site / "robots.txt").write_text("User-agent: *\nAllow: /\nSitemap: https://rea.tools/sitemap.xml\n")
+            alias = Path(directory) / "site-alias"
+            alias.symlink_to(site, target_is_directory=True)
+            # The tiny link fixture intentionally omits the social preview.
+            expected = ["Social preview PNG is missing; run scripts/prepare-website.py"]
+            self.assertEqual(VERIFY.check_site(site)[3], expected)
+            self.assertEqual(VERIFY.check_site(alias)[3], expected)
+            (site.parent / "outside.html").write_text("<p>Outside</p>")
+            page.write_text(page.read_text().replace("guide.html#answer", "../outside.html"))
+            for boundary in (site, alias):
+                with self.subTest(boundary=boundary):
+                    self.assertIn("index.html: reference leaves the website: ../outside.html", VERIFY.check_site(boundary)[3])
+
     def test_preview_preserves_pages_prefix_for_assets_and_directory_redirects(self):
         with tempfile.TemporaryDirectory() as directory:
             site = Path(directory)

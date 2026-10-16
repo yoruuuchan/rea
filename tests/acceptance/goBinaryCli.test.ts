@@ -284,3 +284,33 @@ cliTest(
     );
   },
 );
+
+cliTest(
+  "returns unknown dependency coverage for parse-complete GOPATH metadata in CLI Evidence",
+  async ({ cli }) => {
+    const moduleText =
+      "path\texample.com/tool/cmd/tool\n" +
+      "build\t-compiler=gc\n" +
+      "build\tGOOS=linux\n";
+    const root = await createTestTempDirectory("rea-go-gopath-cli-");
+    const path = join(root, "application.elf");
+    await writeFile(path, createGoBinaryFixture({ moduleText }).bytes);
+    const result = await cli.run({
+      arguments: ["inspect-go-binary", path, "--json"],
+    });
+    expect(result.exitCode, result.stderr).toBe(0);
+    const evidence = toolContract("inspect_go_binary").outputSchema.parse(
+      result.json,
+    );
+    expect(evidence.normalized_result.build_info?.module).toMatchObject({
+      path: "example.com/tool/cmd/tool",
+      main: null,
+      dependencies: [],
+      complete: true,
+      unparsed_lines: [],
+    });
+    expect(evidence.limitations.join(" ")).toContain(
+      "Dependency coverage is unknown",
+    );
+  },
+);

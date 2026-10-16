@@ -126,6 +126,7 @@ import type {
 import type { FileOffsetPartialObservation } from "./native/fileOffsetPartialObservation.js";
 import type { NativeCallPartialObservation } from "./native/nativeCallPartialObservation.js";
 import type { ElectronActivePartialObservation } from "./javascript/electronActiveObservation.js";
+import type { ElectronPageInspection } from "./javascript/electronObservation.js";
 import type { JavaScriptRuntimeObservation } from "./javascript/javascriptRuntimeObservation.js";
 import type {
   ArtifactInventoryPartialObservation,
@@ -148,6 +149,9 @@ import type {
   RecordedCrash,
   RecordedCrashPartialObservation,
 } from "./native/recordedCrash.js";
+import type { WebPageInspection } from "./browserObservationSchemas.js";
+import type { WebExecution } from "./webExecution.js";
+import type { WebEventListeners } from "./webEventListeners.js";
 
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
@@ -155,7 +159,11 @@ export type AnalysisPartialObservation =
   | NativeCallPartialObservation
   | FileOffsetPartialObservation
   | ElectronActivePartialObservation
+  | ElectronPageInspection
   | BrowserScenarioPartialObservation
+  | WebPageInspection
+  | WebExecution
+  | WebEventListeners
   | JavaScriptRuntimeObservation
   | ArtifactInventoryPartialObservation
   | ArtifactExtractionPartialObservation

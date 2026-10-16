@@ -58,7 +58,9 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
       ? "-Dos.arch=x86_64\\n"
       : mode === "os-name-override"
         ? "-Dos.name=Windows\\n"
-        : "-Dfile.encoding=UTF8\\n";
+        : mode === "heap-override"
+          ? "-Xmx128M\\n"
+          : "-Dfile.encoding=UTF8\\n";
   process.stdout.write(vmArguments);
 }
 `,
@@ -111,6 +113,29 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
 describe.skipIf(process.platform === "win32")(
   "Ghidra LaunchSupport JVM compatibility",
   () => {
+    it("reports the selected heap after LaunchSupport's earlier heap argument", async () => {
+      const { session, launcher, analysisArguments } =
+        await fixture("heap-override");
+      const launched = await launcher.launch(session);
+      if (!launched.ok) throw launched.error;
+      expect(
+        analysisArguments[0]?.filter((argument) => argument.startsWith("-Xmx")),
+      ).toEqual(["-Xmx128M", "-Xmx1G"]);
+      expect(launched.value.configuredMaxHeap).toBe("1G");
+      expect(
+        createGhidraDiagnostics({
+          targetPath: session.targetPath,
+          targetSha256: session.targetSha256,
+          transport: session.transport,
+          providerVersion: session.providerVersion,
+          profileDigest: session.profileDigest,
+          launch: launched.value,
+          token: session.token,
+          previous: {},
+        }),
+      ).toMatchObject({ configured_jvm_max_heap: "1G" });
+    });
+
     it.each(["Eclipse OpenJ9 VM", "unrecognized VM", ""])(
       "keeps HotSpot-only flags off a VM identified as %s",
       async (javaVmName) => {

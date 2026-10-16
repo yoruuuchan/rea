@@ -17,7 +17,7 @@ import {
   nativeAotPeDigest,
   nativeAotPeFixture,
 } from "../../tests/fixtures/nativeaotPe.js";
-import { jsonValueSchema } from "../domain/jsonValue.js";
+import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 
 import { parseConfig } from "../config/parseConfig.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
@@ -2741,5 +2741,205 @@ describe("Ghidra queries after the owned provider is lost", () => {
     expect(projectAnalysisError(result.error).message).not.toContain(
       "Call open_binary",
     );
+  });
+});
+
+const output = (text: string) => ({
+  text,
+  bytes: Buffer.byteLength(text),
+  retained_bytes: Buffer.byteLength(text),
+});
+const failureOutput = (stdout = "", stderr = "") => ({
+  stdout: output(stdout),
+  stderr: output(stderr),
+  complete: true,
+});
+const projectFailure = async (
+  kind: "cancelled" | "process" | "protocol" | "remote" | "timeout",
+  diagnostics: Readonly<Record<string, JsonValue>>,
+) => {
+  const ghidra = provider(installationHost(), () => ({
+    start: async () =>
+      err(new GhidraSessionError("start", "startup is not exercised")),
+    callTool: async () =>
+      err(
+        new GhidraSessionError(
+          kind,
+          "Ghidra request failed",
+          { failure_kind: kind, ...diagnostics },
+          kind === "remote" ? { remoteCode: "internal" } : {},
+        ),
+      ),
+    close: async () => ok(null),
+  }));
+  const target = executableTarget("elf", "x86_64");
+  const profile = await ghidra.resolveAnalysisProfile(target);
+  if (!profile.ok || profile.value.profile === null)
+    throw new Error("Expected Ghidra analysis profile");
+  const result = await ghidra
+    .createClient(target, profile.value.profile)
+    .execute("list_documents", {});
+  if (result.ok) throw new Error("Expected a Ghidra failure");
+  return projectAnalysisError(result.error);
+};
+
+const issueOutput = [
+  "INFO  ANALYZING all memory and code: /hugo (HeadlessAnalyzer)",
+  "ERROR Abort due to Headless analyzer error: Java heap space (HeadlessAnalyzer) java.lang.OutOfMemoryError:",
+  "\tat ghidra.app.plugin.core.analysis.GolangSymbolAnalyzer$PropagateRttiBackgroundCommand.applyTo",
+].join("\n");
+
+describe("Ghidra OOME error projection", () => {
+  it("recognizes the headless analyzer's real detail-before-class output", async () => {
+    const projected = await projectFailure("process", {
+      stdout: output(issueOutput),
+      stderr: output(""),
+      failure_output: failureOutput(issueOutput),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: {
+        resource: "memory",
+        reported_limits: { configured_jvm_max_heap: "4G" },
+      },
+    });
+    expect(projected.message).toContain("Java heap space");
+    expect(projected.remediation.action).toContain("GHIDRA_HEADLESS_MAXMEM");
+    expect(projected.remediation.action).toContain(
+      "REA_GHIDRA_DISABLED_ANALYZERS",
+    );
+  });
+
+  it("retains an unknown heap for GC overhead when the launch did not report one", async () => {
+    const projected = await projectFailure("timeout", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: failureOutput(
+        "",
+        'Exception in thread "main" java.lang.OutOfMemoryError: GC overhead limit exceeded',
+      ),
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: {
+        resource: "memory",
+        reported_limits: { configured_jvm_max_heap: null },
+      },
+    });
+    expect(projected.remediation.action).toContain("GHIDRA_HEADLESS_MAXMEM");
+  });
+
+  it.each([
+    ["Metaspace", "java.lang.OutOfMemoryError: Metaspace"],
+    [
+      "array VM limit",
+      "java.lang.OutOfMemoryError: Requested array size exceeds VM limit",
+    ],
+  ])("does not recommend a larger Java heap for %s", async (_name, text) => {
+    const projected = await projectFailure("process", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: failureOutput("", text),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected.code).toBe("resource_constraint");
+    expect(projected.message).toContain(text);
+    expect(projected.remediation.action).not.toContain(
+      "GHIDRA_HEADLESS_MAXMEM",
+    );
+  });
+
+  it("reports native-thread exhaustion as capacity without inventing a limit", async () => {
+    const projected = await projectFailure("process", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: failureOutput(
+        "",
+        "java.lang.OutOfMemoryError: unable to create native thread: possibly out of memory or process/resource limits reached",
+      ),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: { resource: "capacity", reported_limits: null },
+    });
+    expect(projected.remediation.action).not.toContain(
+      "GHIDRA_HEADLESS_MAXMEM",
+    );
+  });
+
+  it("keeps a bare OOME class at unknown subtype without heap advice", async () => {
+    const projected = await projectFailure("process", {
+      failure_output: failureOutput("", "java.lang.OutOfMemoryError"),
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: { resource: "memory", reported_limits: null },
+    });
+    expect(projected.remediation.action).not.toContain(
+      "GHIDRA_HEADLESS_MAXMEM",
+    );
+  });
+
+  it("does not reclassify a later failure from OOME retained after an earlier success", async () => {
+    let calls = 0;
+    const ghidra = provider(installationHost(), () => ({
+      start: async () =>
+        err(new GhidraSessionError("start", "startup is not exercised")),
+      callTool: async () => {
+        calls += 1;
+        if (calls === 1) return ok(["fixture"]);
+        return err(
+          new GhidraSessionError(
+            "protocol",
+            "Ghidra returned an invalid later response",
+            {
+              stdout: output(issueOutput),
+              stderr: output(""),
+              // The OOME remains visible in full process history above, but
+              // the current operation produced no such error.
+              failure_output: failureOutput(),
+            },
+          ),
+        );
+      },
+      close: async () => ok(null),
+    }));
+    const target = executableTarget("elf", "x86_64");
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("Expected Ghidra analysis profile");
+    const client = ghidra.createClient(target, profile.value.profile);
+    const earlier = await client.execute("list_documents", {});
+    expect(earlier.ok).toBe(true);
+    const later = await client.execute("list_procedures", {});
+    expect(later.ok).toBe(false);
+    if (later.ok) return;
+    const projected = projectAnalysisError(later.error);
+    expect(projected.code).toBe("execution_failure");
+    expect(projected.details?.diagnostics).toMatchObject({
+      stdout: { text: issueOutput },
+    });
+  });
+
+  it("keeps cancellation primary even when the current operation reports an OOME", async () => {
+    const projected = await projectFailure("cancelled", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: failureOutput(issueOutput),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected.code).toBe("cancelled");
+  });
+
+  it("does not reinterpret a bridge-reported OOME as a local process failure", async () => {
+    const projected = await projectFailure("remote", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: failureOutput(issueOutput),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected.code).not.toBe("resource_constraint");
   });
 });

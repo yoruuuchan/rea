@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { execFileBoundedOutput } from "../process/ExecFileBoundedOutput.js";
 import { execFileOutput } from "../process/ExecFileOutput.js";
 import { downloadHopperPackage } from "./HopperDownload.js";
-import { hashStableFile } from "../filesystem/StableFileHash.js";
 import { err, type Result } from "../domain/result.js";
 import {
   HOPPER_RELEASES_URL,
@@ -432,10 +431,15 @@ export const systemLinuxHopperInstallHost = (
           !linuxSharedLibrariesAvailable(`${linked.stdout}\n${linked.stderr}`)
         )
           return "runtime_dependencies";
-        return (await hashStableFile(path)).sha256 === expectedSha256
+        return (await publisher.hashLauncher(path)).sha256 === expectedSha256
           ? "ready"
           : "unsupported_hopper_build";
       } catch (cause: unknown) {
+        if (
+          cause instanceof HopperReleaseError &&
+          cause.reason === "cleanup_failed"
+        )
+          throw cause;
         // best-effort cleanup: optional launcher probing; unreadable means missing.
         void cause;
         return "missing";

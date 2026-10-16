@@ -15,6 +15,7 @@ import {
 } from "../../domain/go/goBinary.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_go_binary";
 const architectureForSubject = (architecture: string) => {
@@ -64,8 +65,6 @@ export class GoBinaryService {
       );
     const inspected = await this.provider.inspect(input.data, options);
     if (!inspected.ok) return inspected;
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
     const report = goBinarySchema.safeParse(inspected.value);
     if (!report.success || report.data.artifact.path !== input.data.path)
       return err(
@@ -76,35 +75,39 @@ export class GoBinaryService {
       );
     const value = report.data;
     const architecture = architectureForSubject(value.architecture);
-    return ok(
-      createEvidence(
-        {
-          path: value.artifact.path,
-          sha256: value.artifact.sha256,
-          format: value.format === "macho" ? "mach-o" : value.format,
-          ...(architecture === undefined ? {} : { architecture }),
-        },
-        this.provider.identity,
-        {
-          operation: OPERATION,
-          parameters: input.data,
-          result: value,
-          confidence: "observed",
-          limitations: value.limitations,
-          locations: [
-            { kind: "artifact-path", path: value.artifact.path },
-            ...(value.build_info === null
-              ? []
-              : [
-                  {
-                    kind: "file-offset-range" as const,
-                    start: value.build_info.header_offset,
-                    end: value.build_info.header_offset + 32,
-                  },
-                ]),
-          ],
-        },
+    return completeProviderEvidence(
+      ok(
+        createEvidence(
+          {
+            path: value.artifact.path,
+            sha256: value.artifact.sha256,
+            format: value.format === "macho" ? "mach-o" : value.format,
+            ...(architecture === undefined ? {} : { architecture }),
+          },
+          this.provider.identity,
+          {
+            operation: OPERATION,
+            parameters: input.data,
+            result: value,
+            confidence: "observed",
+            limitations: value.limitations,
+            locations: [
+              { kind: "artifact-path", path: value.artifact.path },
+              ...(value.build_info === null
+                ? []
+                : [
+                    {
+                      kind: "file-offset-range" as const,
+                      start: value.build_info.header_offset,
+                      end: value.build_info.header_offset + 32,
+                    },
+                  ]),
+            ],
+          },
+        ),
       ),
+      OPERATION,
+      options,
     );
   }
 }

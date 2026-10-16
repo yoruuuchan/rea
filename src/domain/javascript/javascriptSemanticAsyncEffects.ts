@@ -13,6 +13,7 @@ import {
   type JavaScriptSemanticAnalysisState,
   type JavaScriptSemanticBindingState,
 } from "./javascriptSemanticState.js";
+import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
 import { traverseJavaScriptAst } from "./javascriptSemanticTraversal.js";
 import { range } from "./javascriptStaticAnalysisHelpers.js";
 import {
@@ -75,6 +76,10 @@ interface TimerCandidate {
     readonly projectionPath: readonly (string | number | null)[];
     readonly resolution: "complete" | "partial";
   }[];
+  readonly handleRead: {
+    readonly origins: readonly t.Node[];
+    readonly complete: boolean;
+  } | null;
 }
 
 interface TimerCollectionInput {
@@ -219,6 +224,38 @@ const collectTimer = (input: TimerCollectionInput): void => {
     ancestors,
     state,
   );
+  const handle =
+    kind === "cancel" && t.isIdentifier(node.arguments[0])
+      ? resolveSemanticBindingState(
+          state,
+          node.arguments[0],
+          node.arguments[0].name,
+        )
+      : undefined;
+  const handleRead =
+    handle === undefined || !t.isIdentifier(node.arguments[0])
+      ? null
+      : (() => {
+          const snapshot = semanticBindingAtRead(
+            handle,
+            node.arguments[0],
+            state.parentsByNode,
+          );
+          // A const handle has the same value inside a later closure even
+          // when the source positions belong to different function bodies.
+          const stableClosureCapture =
+            !handle.mutable &&
+            handle.initializers.length === 1 &&
+            handle.referenceInitializers.length === 0;
+          const origins = [
+            ...snapshot.binding.initializers,
+            ...snapshot.binding.referenceInitializers,
+          ];
+          return {
+            origins: origins.map(({ node: origin }) => origin),
+            complete: snapshot.status === "ordered" || stableClosureCapture,
+          };
+        })();
   output.push({
     node,
     method,
@@ -236,32 +273,29 @@ const collectTimer = (input: TimerCollectionInput): void => {
             ),
           )
         : [],
+    handleRead,
   });
 };
 
 const resolveTimers = (
   candidates: readonly TimerCandidate[],
 ): JavaScriptSemanticTimerOperation[] => {
-  const schedulesByBinding = new Map<string, TimerCandidate[]>();
-  for (const candidate of candidates) {
-    if (candidate.kind !== "schedule") continue;
-    const ids = [
-      ...(candidate.handleBindingId === null
-        ? []
-        : [candidate.handleBindingId]),
-      ...candidate.projectedResultBindings.map(({ bindingId }) => bindingId),
-    ];
-    for (const id of ids) {
-      const existing = schedulesByBinding.get(id) ?? [];
-      existing.push(candidate);
-      schedulesByBinding.set(id, existing);
-    }
-  }
+  const schedules = new Map<t.Node, TimerCandidate>(
+    candidates
+      .filter(({ kind }) => kind === "schedule")
+      .map((candidate) => [candidate.node, candidate] as const),
+  );
   return candidates.map((candidate) => {
+    // Unordered reads retain possible initializers as candidate edges. Only an
+    // ordered or immutable read can establish one complete cancellation link.
     const linked =
-      candidate.kind === "cancel" && candidate.handleBindingId !== null
-        ? (schedulesByBinding.get(candidate.handleBindingId) ?? [])
-        : [];
+      candidate.handleRead?.origins.flatMap((origin) => {
+        const schedule = schedules.get(origin);
+        return schedule === undefined ? [] : [schedule];
+      }) ?? [];
+    const incompleteOrigins =
+      candidate.handleRead !== null &&
+      candidate.handleRead.origins.length !== linked.length;
     return {
       timerId: timerId(candidate),
       kind: candidate.kind,
@@ -279,11 +313,13 @@ const resolveTimers = (
         candidate.kind === "schedule"
           ? "complete"
           : linked.length === 1 &&
+              candidate.handleRead?.complete &&
+              !incompleteOrigins &&
               !linked[0]?.projectedResultBindings.some(
                 ({ bindingId }) => bindingId === candidate.handleBindingId,
               )
             ? "complete"
-            : linked.length > 1
+            : linked.length > 0
               ? "partial"
               : "unresolved",
     };

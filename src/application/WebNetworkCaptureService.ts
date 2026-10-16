@@ -20,6 +20,7 @@ import {
   captureSensitiveValues,
   webNetworkCaptureSchema,
 } from "../domain/webNetworkCapture.js";
+import { completeProviderEvidence } from "./ProviderOperationExecution.js";
 
 const OPERATION = "inspect_web_network_capture";
 
@@ -74,8 +75,6 @@ export class WebNetworkCaptureService {
       );
     const loaded = await this.port.inspect(input, options);
     if (!loaded.ok) return failure(loaded.error);
-    if (options?.signal?.aborted)
-      return failure(new AnalysisCancelledError(OPERATION));
     const report = webNetworkCaptureSchema.safeParse(loaded.value);
     if (!report.success)
       return failure(
@@ -159,45 +158,55 @@ export class WebNetworkCaptureService {
       record_ordinals: selected,
       sensitive_value_count: input.sensitive_values.length,
     });
-    return ok(
-      createEvidence(
-        safeSha256 === null
-          ? undefined
-          : {
-              path: safePath,
-              sha256: safeSha256,
-              format: "file",
-            },
-        value.decoder,
-        {
-          operation: OPERATION,
-          parameters,
-          result: {
-            ...safeValue,
-            artifact: { ...value.artifact, path: safePath, sha256: safeSha256 },
-            records,
-            limitations:
-              safeSha256 === null
-                ? [...limitations, subjectUnavailableReason]
-                : limitations,
-          },
-          ...(safeValue.format !== "qlog"
-            ? {}
+    return completeProviderEvidence(
+      ok(
+        createEvidence(
+          safeSha256 === null
+            ? undefined
             : {
-                analysisProfile: createAnalysisProfile(value.decoder, {
-                  qlog_profile: safeValue.qlog.profile,
-                  clock: safeValue.qlog.clock,
-                  scope: safeValue.qlog.scope,
+                path: safePath,
+                sha256: safeSha256,
+                format: "file",
+              },
+          value.decoder,
+          {
+            operation: OPERATION,
+            parameters,
+            result: {
+              ...safeValue,
+              artifact: {
+                ...value.artifact,
+                path: safePath,
+                sha256: safeSha256,
+              },
+              records,
+              limitations:
+                safeSha256 === null
+                  ? [...limitations, subjectUnavailableReason]
+                  : limitations,
+            },
+            ...(safeValue.format !== "qlog"
+              ? {}
+              : {
+                  analysisProfile: createAnalysisProfile(value.decoder, {
+                    qlog_profile: safeValue.qlog.profile,
+                    clock: safeValue.qlog.clock,
+                    scope: safeValue.qlog.scope,
+                  }),
                 }),
-              }),
-          confidence: "observed",
-          authority: "historical-reference",
-          limitations,
-          ...(safeSha256 === null ? { subjectUnavailableReason } : {}),
-          locations:
-            safePath === "" ? [] : [{ kind: "artifact-path", path: safePath }],
-        },
+            confidence: "observed",
+            authority: "historical-reference",
+            limitations,
+            ...(safeSha256 === null ? { subjectUnavailableReason } : {}),
+            locations:
+              safePath === ""
+                ? []
+                : [{ kind: "artifact-path", path: safePath }],
+          },
+        ),
       ),
+      OPERATION,
+      options,
     );
   }
 }

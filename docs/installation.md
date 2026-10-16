@@ -179,6 +179,8 @@ as well, so it is broader than this Claude-only migration.
 history under `CLAUDE_CONFIG_DIR`. Setup follows the same
 variable: it writes the registration to `$CLAUDE_CONFIG_DIR/.claude.json` and
 the skill to `$CLAUDE_CONFIG_DIR/skills`.
+For REA setup, an empty `CLAUDE_CONFIG_DIR` is treated as unset: registration
+goes to `~/.claude.json` and the skill goes to `~/.claude/skills`.
 
 ```bash
 CLAUDE_CONFIG_DIR=~/.claude-rea npx rea-agents setup --client claude_code

@@ -10,6 +10,8 @@ import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { prepareProcessOwnershipInspection } from "../process/ProcessOwnershipObservation.js";
 import type {
@@ -55,6 +57,7 @@ export class KunaTargetCommands {
     readonly releaseRun: KunaRunRelease | undefined;
   }[] = [];
   readonly #roots: PrivateRuntimeRoot[] = [];
+  readonly #fileHandles = new Map<OwnedFileHandle, string>();
   #workspace: Promise<Result<Workspace, AnalysisError>> | undefined;
   #closing = false;
 
@@ -78,6 +81,11 @@ export class KunaTargetCommands {
     return this.#own(this.#run(request));
   }
 
+  /** Retain a hash owner whose readiness error has been projected by a session. */
+  retainHashCleanup(failure: OwnedRegularFileCleanupFailure): void {
+    this.#fileHandles.set(failure.owner, failure.path);
+  }
+
   #own<T>(work: Promise<T>): Promise<T> {
     this.#active.add(work);
     const release = () => this.#active.delete(work);
@@ -90,9 +98,12 @@ export class KunaTargetCommands {
     if (this.#closing || this.lifetime.signal.aborted)
       return Promise.resolve(err(new AnalysisCancelledError("kuna:workspace")));
     return this.#own(
-      this.#ensureWorkspace().then((workspace) =>
-        workspace.ok ? ok(null) : workspace,
-      ),
+      (async () => {
+        const pending = await this.#retryFileHandles();
+        if (pending !== undefined) return err(pending);
+        const workspace = await this.#ensureWorkspace();
+        return workspace.ok ? ok(null) : workspace;
+      })(),
     );
   }
 
@@ -102,6 +113,8 @@ export class KunaTargetCommands {
     const { releaseRun, ...options } = request;
     let retained = false;
     try {
+      const pending = await this.#retryFileHandles();
+      if (pending !== undefined) return err(pending);
       const workspace = await this.#ensureWorkspace();
       if (!workspace.ok) return workspace;
       const outcome = await runKunaCommand({
@@ -120,6 +133,11 @@ export class KunaTargetCommands {
         retained = true;
         return err(outcome.error);
       }
+      if (outcome.kind === "failed" && outcome.fileCleanup !== undefined)
+        this.#fileHandles.set(
+          outcome.fileCleanup.owner,
+          outcome.fileCleanup.path,
+        );
       return outcome.kind === "ok"
         ? ok({ ...outcome.snapshot, input: workspace.value.input })
         : err(outcome.error);
@@ -140,8 +158,10 @@ export class KunaTargetCommands {
       }
     }
     const failures = this.#retained.map(({ error }) => error);
+    const fileFailure = await this.#retryFileHandles();
+    if (fileFailure !== undefined) failures.push(fileFailure);
     const workspace = await this.#workspace;
-    if (this.#retained.length === 0) {
+    if (this.#retained.length === 0 && fileFailure === undefined) {
       if (workspace?.ok === true) {
         this.#roots.push(workspace.value.root);
         this.#workspace = undefined;
@@ -177,6 +197,32 @@ export class KunaTargetCommands {
                 .join("; "),
             },
           ),
+        );
+  }
+
+  async #retryFileHandles(): Promise<ProviderCleanupError | undefined> {
+    const failures: ProviderCleanupError[] = [];
+    for (const [owner, path] of this.#fileHandles) {
+      try {
+        await owner.close();
+        this.#fileHandles.delete(owner);
+      } catch (cause: unknown) {
+        failures.push(
+          new ProviderCleanupError(
+            KUNA_PROVIDER_ID,
+            [path],
+            { reason: cause instanceof Error ? cause.message : String(cause) },
+            { cause },
+          ),
+        );
+      }
+    }
+    return failures.length === 0
+      ? undefined
+      : new ProviderCleanupError(
+          KUNA_PROVIDER_ID,
+          failures.flatMap((failure) => failure.cleanupResources),
+          { reason: failures.map((failure) => failure.message).join("; ") },
         );
   }
 

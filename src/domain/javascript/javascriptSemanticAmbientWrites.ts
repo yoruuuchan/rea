@@ -289,27 +289,28 @@ export function* indexJavaScriptAmbientWritesSteps(
 }
 
 /**
- * Recognize an ambient name or direct global-object property without a visible
+ * Recognize an ambient property path, optionally through a global object, without a visible
  * source-local overwrite. This is a syntax-local identity fact, not proof that
  * the runtime's globals have never been patched by other code.
  */
 export const isUnmodifiedGlobalReference = (
   callee: t.Node,
   state: JavaScriptSemanticAnalysisState,
-  name: string,
+  name: string | readonly [string, ...string[]],
 ): boolean => {
-  const node = unwrapJavaScriptExpression(callee).node;
-  if (state.ambientWrites.covers(["global", name])) return false;
-  if (isUnshadowedGlobal(node, state, name)) return true;
-  if (
-    !t.isMemberExpression(node) ||
-    semanticStaticPropertyKey(node.property, node.computed) !== name
-  )
-    return false;
-  const root = unwrapJavaScriptExpression(node.object).node;
+  const path: readonly [string, ...string[]] =
+    typeof name === "string" ? [name] : name;
+  if (state.ambientWrites.covers(["global", ...path])) return false;
+  const { root, members } = electronMemberPath(callee);
+  const matches = (expected: readonly string[]) =>
+    members.length === expected.length &&
+    members.every((key, index) => key === expected[index]);
+  if (isUnshadowedGlobal(root, state, path[0]) && matches(path.slice(1)))
+    return true;
   const namespace = globalObjectName(root, state);
   return (
     namespace !== undefined &&
+    matches(path) &&
     !state.ambientWrites.covers(["global", namespace])
   );
 };

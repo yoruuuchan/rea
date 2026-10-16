@@ -5,10 +5,19 @@ import type {
   InspectElectronPageInput,
   ListElectronTargetsInput,
 } from "../../domain/javascript/electronObservation.js";
-import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisCapabilityUnavailableError,
+  AnalysisOutputError,
+} from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { createElectronEvidence } from "./ElectronEvidence.js";
+import {
+  electronPageInspectionSchema,
+  electronTargetListSchema,
+} from "../../domain/javascript/electronObservation.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 /** List local file pages exposed by the explicitly selected endpoint. */
 export const listElectronTargets = async (
@@ -18,17 +27,31 @@ export const listElectronTargets = async (
 ): Promise<Result<Evidence, AnalysisError>> => {
   const ready = requireProvider(provider, "list_electron_targets");
   if (!ready.ok) return ready;
+  if (options.signal?.aborted)
+    return err(new AnalysisCancelledError("list_electron_targets"));
   const result = await ready.value.listTargets(input, options);
-  return result.ok
-    ? ok(
-        createElectronEvidence(
-          "list_electron_targets",
-          input,
-          result.value,
-          ready.value.identity(),
-        ),
-      )
-    : result;
+  if (!result.ok) return result;
+  const report = electronTargetListSchema.safeParse(result.value);
+  if (!report.success)
+    return err(
+      new AnalysisOutputError(
+        "list_electron_targets",
+        "Electron provider returned a malformed target list.",
+        { cause: report.error },
+      ),
+    );
+  return completeProviderEvidence(
+    ok(
+      createElectronEvidence(
+        "list_electron_targets",
+        input,
+        report.data,
+        ready.value.identity(),
+      ),
+    ),
+    "list_electron_targets",
+    options,
+  );
 };
 
 /** Inspect one local file page from the explicitly selected endpoint. */
@@ -39,17 +62,61 @@ export const inspectElectronPage = async (
 ): Promise<Result<Evidence, AnalysisError>> => {
   const ready = requireProvider(provider, "inspect_electron_page");
   if (!ready.ok) return ready;
+  if (options.signal?.aborted)
+    return err(new AnalysisCancelledError("inspect_electron_page"));
   const result = await ready.value.inspectPage(input, options);
-  return result.ok
-    ? ok(
-        createElectronEvidence(
-          "inspect_electron_page",
-          input,
-          result.value,
-          ready.value.identity(),
-        ),
-      )
-    : result;
+  if (!result.ok) {
+    if (
+      result.error.partialObservation !== undefined &&
+      !("evidence_id" in result.error.partialObservation) &&
+      "target" in result.error.partialObservation &&
+      "dom" in result.error.partialObservation &&
+      "capture_window" in result.error.partialObservation
+    ) {
+      const report = electronPageInspectionSchema.safeParse(
+        result.error.partialObservation,
+      );
+      if (!report.success) {
+        if (result.error instanceof AnalysisCancelledError)
+          return err(
+            new AnalysisOutputError(
+              "inspect_electron_page",
+              "Electron provider retained a malformed completed page inspection.",
+              { cause: report.error },
+            ),
+          );
+        return result;
+      }
+      result.error.partialObservation = createElectronEvidence(
+        "inspect_electron_page",
+        input,
+        report.data,
+        ready.value.identity(),
+      );
+    }
+    return result;
+  }
+  const report = electronPageInspectionSchema.safeParse(result.value);
+  if (!report.success)
+    return err(
+      new AnalysisOutputError(
+        "inspect_electron_page",
+        "Electron provider returned a malformed page inspection.",
+        { cause: report.error },
+      ),
+    );
+  return completeProviderEvidence(
+    ok(
+      createElectronEvidence(
+        "inspect_electron_page",
+        input,
+        report.data,
+        ready.value.identity(),
+      ),
+    ),
+    "inspect_electron_page",
+    options,
+  );
 };
 
 const requireProvider = (

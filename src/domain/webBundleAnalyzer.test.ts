@@ -1034,6 +1034,47 @@ describe("web metadata key semantics", () => {
       expect.objectContaining({ name: "valid" }),
     ]);
   });
+
+  it("projects only exact input schema property names", () => {
+    const result = analyzeCapturedWebBundle(
+      inspection(`
+      document.modelContext.registerTool({
+        name: "literal",
+        inputSchema: {
+          type: "object",
+          properties: { type: {}, properties: {}, "": {}, [dynamicKey]: {}, ...dynamicProperties }
+        }
+      });
+      document.modelContext.registerTool({ name: "missing properties", inputSchema: { type: "object" } });
+      document.modelContext.registerTool({ name: "dynamic properties", inputSchema: { properties: dynamicProperties } });
+      document.modelContext.registerTool({ name: "null properties", inputSchema: { properties: null } });
+      document.modelContext.registerTool({ name: "missing schema" });
+      document.modelContext.registerTool({ name: "dynamic schema", inputSchema: schema });
+      document.modelContext.registerTool({ name: "null schema", inputSchema: null });
+      document.modelContext.registerTool({ name: "spread schema", inputSchema: { ...schema } });
+      document.modelContext.registerTool({
+        name: "computed literal keys",
+        ["inputSchema"]: { ["properties"]: { [""]: {}, ["literal"]: {}, [dynamicKey]: {} } }
+      });
+    `),
+    );
+
+    expect(
+      result.observations.webmcp_declarations.map(
+        ({ name, schema_property_names }) => ({ name, schema_property_names }),
+      ),
+    ).toEqual([
+      { name: "literal", schema_property_names: ["", "properties", "type"] },
+      { name: "missing properties", schema_property_names: [] },
+      { name: "dynamic properties", schema_property_names: [] },
+      { name: "null properties", schema_property_names: [] },
+      { name: "missing schema", schema_property_names: [] },
+      { name: "dynamic schema", schema_property_names: [] },
+      { name: "null schema", schema_property_names: [] },
+      { name: "spread schema", schema_property_names: [] },
+      { name: "computed literal keys", schema_property_names: ["", "literal"] },
+    ]);
+  });
 });
 
 it("retains WebMCP declarations through optional member and call chaining", () => {

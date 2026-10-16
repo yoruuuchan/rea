@@ -63,6 +63,11 @@ export abstract class BinarySessionRecords {
     this.#records = records;
   }
 
+  /** Snapshot staging retained after a failed resource cleanup attempt. */
+  protected get hasPendingWriteResources(): boolean {
+    return this.#writeResources.hasPending;
+  }
+
   /** Observe changes to the mutable current analysis snapshot resource. */
   onAnalysisSnapshotChanged(listener: () => void | Promise<void>): () => void {
     this.#snapshotListeners.add(listener);

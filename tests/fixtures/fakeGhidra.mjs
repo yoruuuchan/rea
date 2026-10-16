@@ -47,6 +47,7 @@ else {
     const state = {
       buffer: { value: "" },
       pings: { value: 0 },
+      emittedOome: false,
       mode,
       token,
       runId,
@@ -106,6 +107,28 @@ const onSocketData = (socket, server, chunk, state) => {
 const handleRequest = (socket, server, request, state) => {
   if (request.method === "ping") {
     handlePing(socket, request, state);
+    return;
+  }
+  if (
+    state.mode === "old_oom_then_malformed" &&
+    request.method === "list_documents" &&
+    !state.emittedOome
+  ) {
+    state.emittedOome = true;
+    process.stderr.write(
+      "ERROR Abort due to Headless analyzer error: Java heap space (HeadlessAnalyzer) java.lang.OutOfMemoryError:\n",
+      () => setTimeout(() => handleRequest(socket, server, request, state), 10),
+    );
+    return;
+  }
+  if (
+    state.mode === "old_oom_then_malformed" &&
+    request.method === "list_procedures" &&
+    state.emittedOome
+  ) {
+    process.stderr.write("Current operation diagnostic: 雪\n", () =>
+      setTimeout(() => socket.write("{invalid\n"), 10),
+    );
     return;
   }
   if (state.mode === "remote_error" && request.method === "list_procedures") {

@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { TextReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import { writeOrderedZip } from "../../fixtures/artifactEntryOrder.js";
 import { inventoryArtifact } from "../../fixtures/artifactInventory.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { cliTest } from "../../support/cli/cliFixture.js";
 
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { ZipArtifactReader } from "../../../src/artifacts/ZipArtifactReader.js";
@@ -15,6 +16,8 @@ import {
   artifactExtractionResultSchema,
   artifactInventoryResultSchema,
 } from "../../../src/domain/artifactGraph.js";
+import { artifactInspectionResultSchema } from "../../../src/domain/artifactInspection.js";
+import { parseEvidence } from "../../../src/domain/evidence.js";
 
 it("completes an empty ZIP extraction with an empty identity", async () => {
   const root = await createTestTempDirectory("rea-empty-artifact-extraction-");
@@ -262,65 +265,108 @@ it("binds ZIP opens to the emitted entry metadata", async () => {
   }
 });
 
-it("retains duplicate ZIP members without replacing their source identities", async () => {
-  const root = await createTestTempDirectory("rea-zip-duplicate-identity-");
-  const path = join(root, "duplicates.zip");
-  const writer = new ZipWriter(new Uint8ArrayWriter());
-  await writer.add("x.txt", new TextReader("first bytes\n"), { level: 0 });
-  await writer.add("y.txt", new TextReader("later bytes\n"), { level: 0 });
-  const bytes = Buffer.from(await writer.close());
-  // zip.js refuses to produce duplicate names. Rename the second local and
-  // central-directory records without changing their data, sizes, or CRCs.
-  for (const [signature, headerSize] of [
-    [Buffer.from([0x50, 0x4b, 0x03, 0x04]), 30],
-    [Buffer.from([0x50, 0x4b, 0x01, 0x02]), 46],
-  ] as const) {
-    const first = bytes.indexOf(signature);
-    const second = bytes.indexOf(signature, first + 4);
-    if (first < 0 || second <= first)
-      throw new Error("Expected both ZIP member headers");
-    expect(
-      bytes.subarray(second + headerSize, second + headerSize + 5).toString(),
-    ).toBe("y.txt");
-    bytes.write("x.txt", second + headerSize);
-  }
-  await writeFile(path, bytes);
-
-  const reader = new ZipArtifactReader(path, "zip");
-  try {
-    const iterator = reader.entries()[Symbol.asyncIterator]();
-    const first = await iterator.next();
-    if (first.done) throw new Error("Expected the first ZIP member");
-    const second = await iterator.next();
-    if (second.done) throw new Error("Expected the second ZIP member");
-    expect(first.value.path).toBe(second.value.path);
-    expect(first.value.adapterKey).not.toBe(second.value.adapterKey);
-    expect((await iterator.next()).done).toBe(true);
-    for (const [entry, expected] of [
-      [first.value, "first bytes\n"],
-      [second.value, "later bytes\n"],
+cliTest(
+  "retains duplicate ZIP members without replacing their source identities",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-zip-duplicate-identity-");
+    const path = join(root, "duplicates.zip");
+    const writer = new ZipWriter(new Uint8ArrayWriter());
+    await writer.add("x.txt", new TextReader("first bytes\n"), { level: 0 });
+    await writer.add("y.txt", new TextReader("later bytes\n"), { level: 0 });
+    const bytes = Buffer.from(await writer.close());
+    // zip.js refuses to produce duplicate names. Rename the second local and
+    // central-directory records without changing their data, sizes, or CRCs.
+    for (const [signature, headerSize] of [
+      [Buffer.from([0x50, 0x4b, 0x03, 0x04]), 30],
+      [Buffer.from([0x50, 0x4b, 0x01, 0x02]), 46],
     ] as const) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of await reader.open({ ...entry }))
-        chunks.push(Buffer.from(chunk));
-      expect(Buffer.concat(chunks).toString()).toBe(expected);
+      const first = bytes.indexOf(signature);
+      const second = bytes.indexOf(signature, first + 4);
+      if (first < 0 || second <= first)
+        throw new Error("Expected both ZIP member headers");
+      expect(
+        bytes.subarray(second + headerSize, second + headerSize + 5).toString(),
+      ).toBe("y.txt");
+      bytes.write("x.txt", second + headerSize);
     }
-  } finally {
-    await reader.close();
-  }
+    await writeFile(path, bytes);
 
-  const target = await parseBinaryTarget(path);
-  if (!target.ok) throw target.error;
-  await withArtifactClient(target.value, async (client) => {
-    const result = await client.execute("inventory_artifact", {});
-    if (!result.ok) throw result.error;
+    const reader = new ZipArtifactReader(path, "zip");
+    try {
+      const iterator = reader.entries()[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      if (first.done) throw new Error("Expected the first ZIP member");
+      const second = await iterator.next();
+      if (second.done) throw new Error("Expected the second ZIP member");
+      expect(first.value.path).toBe(second.value.path);
+      expect(first.value.adapterKey).not.toBe(second.value.adapterKey);
+      expect((await iterator.next()).done).toBe(true);
+      for (const [entry, expected] of [
+        [first.value, "first bytes\n"],
+        [second.value, "later bytes\n"],
+      ] as const) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of await reader.open({ ...entry }))
+          chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks).toString()).toBe(expected);
+      }
+    } finally {
+      await reader.close();
+    }
+
+    const inspected = await cli.run({
+      arguments: ["inspect-artifact", path, "--json"],
+    });
+    expect(inspected.exitCode, inspected.stdout + inspected.stderr).toBe(0);
+    const inspection = artifactInspectionResultSchema.parse(
+      parseEvidence(inspected.json).normalized_result,
+    );
+    const inventoryEvidence = inspection.substeps[0]?.evidence;
+    if (inventoryEvidence === undefined)
+      throw new Error("CLI inspection did not retain ZIP inventory Evidence");
+    const cliInventory = artifactInventoryResultSchema.parse(
+      inventoryEvidence.normalized_result,
+    );
+    const duplicateOccurrences = cliInventory.occurrences.filter(
+      ({ logical_path }) => logical_path === "x.txt",
+    );
+    expect(duplicateOccurrences).toHaveLength(2);
     expect(
-      artifactInventoryResultSchema
-        .parse(result.value.result)
-        .occurrences.filter(({ logical_path }) => logical_path === "x.txt"),
-    ).toHaveLength(2);
-  });
-});
+      new Set(duplicateOccurrences.map(({ occurrence_id }) => occurrence_id))
+        .size,
+    ).toBe(2);
+    expect(
+      new Set(duplicateOccurrences.map(({ artifact_id }) => artifact_id)).size,
+    ).toBe(2);
+
+    const temporary = join(root, "cli-temporary");
+    await mkdir(temporary);
+    for (const integrityPolicy of ["fail", "record-and-continue"] as const) {
+      const result = await cli.run({
+        arguments: [
+          "extract-artifact",
+          path,
+          "--integrity-policy",
+          integrityPolicy,
+          "--json",
+        ],
+        environment: { TMPDIR: temporary, TEMP: temporary, TMP: temporary },
+      });
+      expect(result.exitCode, result.stdout + result.stderr).toBe(1);
+      expect(result.json).toMatchObject({
+        code: "artifact_operation_failed",
+        message: expect.stringContaining(
+          'Artifact extraction path collision: "x.txt"',
+        ),
+        details: { operation: "extract_artifact", reason: "path" },
+      });
+      expect(result.stdout).not.toContain(
+        "integrity_policy=record-and-continue",
+      );
+      await expect(readdir(temporary)).resolves.toEqual([]);
+    }
+  },
+);
 
 it("can enumerate case-distinct ZIP members again without losing entry identity", async () => {
   const root = await createTestTempDirectory("rea-zip-entry-replay-");

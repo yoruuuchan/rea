@@ -15,6 +15,7 @@ import {
 } from "../../domain/native/recordedCrash.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_recorded_crash";
 
@@ -80,8 +81,6 @@ export class RecordedCrashService {
     const outputOptions = diagnostics.success
       ? { capturedOutput: diagnostics.data }
       : undefined;
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION, outputOptions));
     const report = recordedCrashSchema.safeParse(inspected.value);
     if (
       !report.success ||
@@ -97,29 +96,34 @@ export class RecordedCrashService {
         ),
       );
     const value = report.data;
-    return ok(
-      createEvidence(
-        {
-          path: value.artifact.path,
-          format: "elf",
-          architecture:
-            RECORDED_LINUX_CORE_PROFILES[value.architecture]
-              .evidenceArchitecture,
-          sha256: value.artifact.sha256,
-        },
-        this.provider.identity,
-        {
-          operation: OPERATION,
-          parameters: input.data,
-          result: value,
-          // The decoded report is the only representation; do not repeat it.
-          rawResult: null,
-          confidence:
-            value.debugger.status === "available" ? "derived" : "observed",
-          limitations: value.limitations,
-          locations: [{ kind: "artifact-path", path: value.artifact.path }],
-        },
+    return completeProviderEvidence(
+      ok(
+        createEvidence(
+          {
+            path: value.artifact.path,
+            format: "elf",
+            architecture:
+              RECORDED_LINUX_CORE_PROFILES[value.architecture]
+                .evidenceArchitecture,
+            sha256: value.artifact.sha256,
+          },
+          this.provider.identity,
+          {
+            operation: OPERATION,
+            parameters: input.data,
+            result: value,
+            // The decoded report is the only representation; do not repeat it.
+            rawResult: null,
+            confidence:
+              value.debugger.status === "available" ? "derived" : "observed",
+            limitations: value.limitations,
+            locations: [{ kind: "artifact-path", path: value.artifact.path }],
+          },
+        ),
       ),
+      OPERATION,
+      options,
+      outputOptions,
     );
   }
 }

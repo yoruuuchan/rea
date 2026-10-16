@@ -2,20 +2,52 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 
 import {
+  OwnedRegularFileCleanupFailure,
   openRegularFile,
   RegularFileChangedError,
   sameRegularFileState,
 } from "./RegularFile.js";
+import { OwnedFileHandle } from "./OwnedFileHandle.js";
+
+export type StableFileHashResult = {
+  readonly sha256: string;
+  readonly bytes: number;
+};
+
+/** Hashing finished or failed, but the owned descriptor close was rejected. */
+export class StableFileHashCleanupFailure extends OwnedRegularFileCleanupFailure {
+  constructor(
+    path: string,
+    primaryCause: unknown,
+    readonly hasPrimaryCause: boolean,
+    cleanupCause: unknown,
+    owner: OwnedFileHandle,
+    readonly completedHash: StableFileHashResult | undefined,
+  ) {
+    super(
+      path,
+      hasPrimaryCause ? primaryCause : cleanupCause,
+      cleanupCause,
+      owner,
+      `Stable file hashing could not confirm descriptor close: ${path}`,
+    );
+    this.name = "StableFileHashCleanupFailure";
+  }
+}
 
 /** Hash one regular file from its admitted descriptor and verify its path state. */
 export const hashStableFile = async (
   path: string,
   signal?: AbortSignal,
-): Promise<{ readonly sha256: string; readonly bytes: number }> => {
+): Promise<StableFileHashResult> => {
   const handle = await openRegularFile(path, {
     symlinks: "follow",
     signal,
   });
+  const owner = new OwnedFileHandle(handle);
+  let primaryCause: unknown;
+  let hasPrimaryCause = false;
+  let completedHash: StableFileHashResult | undefined;
   try {
     const initial = await handle.stat();
     if (!Number.isSafeInteger(initial.size) || initial.size < 0)
@@ -48,8 +80,25 @@ export const hashStableFile = async (
       !sameRegularFileState(initial, currentPath)
     )
       throw new RegularFileChangedError(path);
-    return { sha256: hash.digest("hex"), bytes: position };
-  } finally {
-    await handle.close();
+    completedHash = { sha256: hash.digest("hex"), bytes: position };
+  } catch (cause: unknown) {
+    primaryCause = cause;
+    hasPrimaryCause = true;
   }
+  try {
+    await owner.close();
+  } catch (cleanupCause: unknown) {
+    throw new StableFileHashCleanupFailure(
+      path,
+      primaryCause,
+      hasPrimaryCause,
+      cleanupCause,
+      owner,
+      completedHash,
+    );
+  }
+  if (hasPrimaryCause) throw primaryCause;
+  if (completedHash === undefined)
+    throw new Error("Stable file hashing completed without a digest");
+  return completedHash;
 };

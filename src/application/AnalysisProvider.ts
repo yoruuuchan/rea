@@ -290,4 +290,8 @@ export interface AnalysisProviderCandidate extends AnalysisProvider {
   inspectAvailability(): ProviderAvailability;
   inspectReadinessSnapshot?(): AnalysisProviderReadinessSnapshot;
   inspectTargetSupport(target: BinaryTarget): ProviderTargetSupport;
+  /** Report retained candidate-owned cleanup without starting work or retrying it. */
+  hasPendingOwnedResources?(): boolean;
+  /** Release candidate-owned resources that may exist without a client. */
+  closeOwnedResources?(): Promise<Result<null, AnalysisError>>;
 }

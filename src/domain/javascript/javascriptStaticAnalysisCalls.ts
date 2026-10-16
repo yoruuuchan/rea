@@ -102,17 +102,22 @@ export const inspectCall = (
       specifier:
         workerConstructor === undefined || worker === undefined
           ? undefined
-          : workerUrlSpecifier(worker, bindings),
+          : moduleUrlSpecifier(worker, bindings),
     });
-  // Service worker script URLs are also relative to the document base URL.
+  // Service worker strings also use the document base URL. The complete called
+  // path must retain its platform identity, including the register method.
   if (
-    name === "serviceWorker.register" ||
-    name.endsWith(".serviceWorker.register")
+    !t.isNewExpression(node) &&
+    isUnmodifiedGlobalReference(node.callee, bindings, [
+      "navigator",
+      "serviceWorker",
+      "register",
+    ])
   )
     addReference(context, {
       node,
       kind: "service-worker",
-      specifier: undefined,
+      specifier: moduleUrlSpecifier(node, bindings),
     });
   inspectEndpointCall(node, name, first, context);
   inspectStorageCall(node, name, first, context);
@@ -151,11 +156,11 @@ export const inspectCall = (
     });
 };
 
-const workerUrlSpecifier = (
-  worker: t.NewExpression,
+const moduleUrlSpecifier = (
+  call: JavaScriptCallLike,
   bindings: JavaScriptSemanticAnalysisState,
 ): string | undefined => {
-  const argumentExpression = argumentNode(worker.arguments[0]);
+  const argumentExpression = argumentNode(call.arguments[0]);
   if (argumentExpression === undefined) return undefined;
   const node = unwrapJavaScriptExpression(argumentExpression).node;
   if (!t.isNewExpression(node)) return undefined;

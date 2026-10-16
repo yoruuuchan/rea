@@ -34,6 +34,7 @@ import type {
   WebSourceLocationArtifactPort,
   WebSourceMapPort,
 } from "./WebSourceLocationPorts.js";
+import { completeProviderEvidence } from "./ProviderOperationExecution.js";
 
 const OPERATION = "trace_web_source_location";
 const artifactsSchema = selectedWebScriptArtifactsSchema.extend({
@@ -126,8 +127,6 @@ export class WebSourceLocationService {
     if (!traced.ok) return traced;
     const report = verifyReport(input, map.file.sha256, traced.value);
     if (!report.ok) return report;
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
     const limitations = [
       ...LIMITATIONS,
       codecBudgetLimitation(report.value.runtime),
@@ -147,37 +146,41 @@ export class WebSourceLocationService {
       limitations,
     });
     if (!normalized.success) return invalidOutput(normalized.error.message);
-    return ok(
-      createEvidence(
-        {
-          path: data.sourceFile.path,
-          sha256: data.sourceFile.sha256,
-          format: "file",
-        },
-        {
-          id: "rea-web-source-location",
-          name: "REA captured source-map point trace",
-          version: "1",
-        },
-        {
-          operation: OPERATION,
-          parameters: jsonObjectSchema.parse(input),
-          result: normalized.data,
-          rawResult: { source_map_text: map.text },
-          confidence: "derived",
-          authority: "historical-reference",
-          limitations,
-          locations: [
-            data.sourceFile.path,
-            data.manifestFile.path,
-            map.file.path,
-          ].map((path) => ({ kind: "artifact-path", path })),
-          evidenceLinks:
-            data.manifest.source_evidence_id === null
-              ? []
-              : [data.manifest.source_evidence_id],
-        },
+    return completeProviderEvidence(
+      ok(
+        createEvidence(
+          {
+            path: data.sourceFile.path,
+            sha256: data.sourceFile.sha256,
+            format: "file",
+          },
+          {
+            id: "rea-web-source-location",
+            name: "REA captured source-map point trace",
+            version: "1",
+          },
+          {
+            operation: OPERATION,
+            parameters: jsonObjectSchema.parse(input),
+            result: normalized.data,
+            rawResult: { source_map_text: map.text },
+            confidence: "derived",
+            authority: "historical-reference",
+            limitations,
+            locations: [
+              data.sourceFile.path,
+              data.manifestFile.path,
+              map.file.path,
+            ].map((path) => ({ kind: "artifact-path", path })),
+            evidenceLinks:
+              data.manifest.source_evidence_id === null
+                ? []
+                : [data.manifest.source_evidence_id],
+          },
+        ),
       ),
+      OPERATION,
+      options,
     );
   }
 }

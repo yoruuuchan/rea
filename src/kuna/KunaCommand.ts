@@ -16,7 +16,12 @@ import {
   OwnedCommandFailure,
   runOwnedCommand,
 } from "../process/OwnedCommand.js";
-import { hashStableFile } from "../filesystem/StableFileHash.js";
+import {
+  hashStableFile,
+  StableFileHashCleanupFailure,
+} from "../filesystem/StableFileHash.js";
+import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import type {
   OwnedProviderProcessSpawnOptions,
   ProviderProcessSnapshot,
@@ -63,7 +68,11 @@ export interface KunaCommandRequest {
  */
 export type KunaCommandOutcome =
   | { readonly kind: "ok"; readonly snapshot: ProviderProcessSnapshot }
-  | { readonly kind: "failed"; readonly error: AnalysisError }
+  | {
+      readonly kind: "failed";
+      readonly error: AnalysisError;
+      readonly fileCleanup?: OwnedRegularFileCleanupFailure;
+    }
   | {
       readonly kind: "retained";
       readonly error: ProviderCleanupError;
@@ -124,6 +133,38 @@ export const runKunaCommand = async (
         }),
       };
   } catch (cause: unknown) {
+    if (cause instanceof OwnedRegularFileCleanupFailure) {
+      const primary = request.signal.aborted
+        ? new AnalysisCancelledError(request.operation, { cause: cause.cause })
+        : new ProviderAdapterError(KUNA_PROVIDER_ID, request.operation, {
+            cause: cause.cause,
+            userMessage: `Cannot verify ${installation.executable}: ${message(cause.cause)}`,
+          });
+      const cleanup = new ProviderCleanupError(
+        KUNA_PROVIDER_ID,
+        [cause.path],
+        {
+          reason:
+            cause.cleanupCause instanceof Error
+              ? cause.cleanupCause.message
+              : String(cause.cleanupCause),
+          ...(cause instanceof StableFileHashCleanupFailure &&
+          cause.completedHash !== undefined
+            ? { completed_hash: cause.completedHash }
+            : {}),
+        },
+        { operation: request.operation, cause: cause.cleanupCause },
+      );
+      return {
+        kind: "failed",
+        error: analysisErrorWithCleanupFailure(
+          primary,
+          cleanup,
+          request.operation,
+        ),
+        fileCleanup: cause,
+      };
+    }
     return {
       kind: "failed",
       error: request.signal.aborted

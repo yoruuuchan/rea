@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import { ProviderProcessSupervisor } from "./ProviderProcess.js";
+import { redactCapturedTransportCredential } from "./ProviderDiagnosticRedaction.js";
 
 it("exit does not establish complete output when a producer closes its streams later", async () => {
   const producer = Object.assign(new EventEmitter(), {
@@ -65,6 +66,101 @@ it("reads an observed exit without materializing stream diagnostics", () => {
     supervisor.dispose();
   }
 });
+
+it("scopes output checkpoints to raw bytes on one supervisor and epoch", () => {
+  const first = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const second = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const owner = new ProviderProcessSupervisor(
+    { process: first, ownsProcessLifetime: false },
+    { maxDiagnosticBytes: 128 },
+  );
+  const other = new ProviderProcessSupervisor({
+    process: second,
+    ownsProcessLifetime: false,
+  });
+  try {
+    first.stdout.write(Buffer.from("prior: 🧭\n", "utf8"));
+    const checkpoint = owner.checkpointOutput();
+    first.stdout.write(Buffer.from("current: é\n", "utf8"));
+    first.stderr.write(Buffer.from([0xff, 0x61]));
+    const scoped = owner.snapshotOutputSince(checkpoint);
+    expect(scoped.complete).toBe(true);
+    expect(scoped.snapshot.stdout.text).toBe("current: é\n");
+    expect(scoped.snapshot.stdout.bytes).toBe(
+      Buffer.byteLength("current: é\n"),
+    );
+    expect(scoped.snapshot.stderr).toEqual({
+      text: "\ufffda",
+      bytes: 2,
+      observedBytes: 2,
+      invalidUtf8: true,
+    });
+    expect(other.snapshotOutputSince(checkpoint).complete).toBe(false);
+    owner.resetOutput();
+    expect(owner.snapshotOutputSince(checkpoint).complete).toBe(false);
+  } finally {
+    owner.dispose();
+    other.dispose();
+    first.stdout.destroy();
+    first.stderr.destroy();
+    second.stdout.destroy();
+    second.stderr.destroy();
+  }
+});
+
+it.each(["stdout", "stderr"] as const)(
+  "redacts a budget-cut credential in scoped %s after prior output",
+  (stream) => {
+    const producer = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: () => false,
+    });
+    const supervisor = new ProviderProcessSupervisor(
+      { process: producer, ownsProcessLifetime: false },
+      { maxDiagnosticBytes: 40 },
+    );
+    try {
+      producer.stdout.write("p".repeat(32));
+      const checkpoint = supervisor.checkpointOutput();
+      const token = "private-transport-token";
+      producer[stream].write(token);
+      const scoped = supervisor.snapshotOutputSince(checkpoint);
+      expect(scoped.complete).toBe(false);
+      expect(scoped.snapshot.outputIncomplete).toBe(true);
+      expect(scoped.snapshot[stream]).toMatchObject({
+        bytes: 8,
+        observedBytes: Buffer.byteLength(token),
+        text: token.slice(0, 8),
+      });
+      expect(
+        redactCapturedTransportCredential(
+          scoped.snapshot[stream],
+          token,
+          "[REDACTED]",
+        ),
+      ).toBe("[REDACTED]");
+    } finally {
+      supervisor.dispose();
+      producer.stdout.destroy();
+      producer.stderr.destroy();
+    }
+  },
+);
 
 it("observes an exit that completed before supervision", () => {
   const producer = Object.assign(new EventEmitter(), {

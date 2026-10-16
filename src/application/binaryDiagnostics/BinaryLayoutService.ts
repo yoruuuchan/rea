@@ -14,6 +14,7 @@ import {
 } from "../../domain/native/binaryLayout.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_binary_layout";
 
@@ -79,8 +80,6 @@ export class BinaryLayoutService {
     const outputOptions = diagnostics.success
       ? { capturedOutput: diagnostics.data }
       : undefined;
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION, outputOptions));
     const report = binaryLayoutSchema.safeParse(inspected.value);
     if (!report.success || report.data.artifact.path !== input.data.path)
       return err(
@@ -91,26 +90,31 @@ export class BinaryLayoutService {
         ),
       );
     const value = report.data;
-    return ok(
-      createEvidence(
-        {
-          path: value.artifact.path,
-          format: "elf",
-          architecture: "x86_64",
-          sha256: value.artifact.sha256,
-        },
-        this.provider.identity,
-        {
-          operation: OPERATION,
-          parameters: input.data,
-          result: value,
-          // The decoded report is the only representation; do not repeat it.
-          rawResult: null,
-          confidence: "observed",
-          limitations: value.limitations,
-          locations: [{ kind: "artifact-path", path: value.artifact.path }],
-        },
+    return completeProviderEvidence(
+      ok(
+        createEvidence(
+          {
+            path: value.artifact.path,
+            format: "elf",
+            architecture: "x86_64",
+            sha256: value.artifact.sha256,
+          },
+          this.provider.identity,
+          {
+            operation: OPERATION,
+            parameters: input.data,
+            result: value,
+            // The decoded report is the only representation; do not repeat it.
+            rawResult: null,
+            confidence: "observed",
+            limitations: value.limitations,
+            locations: [{ kind: "artifact-path", path: value.artifact.path }],
+          },
+        ),
       ),
+      OPERATION,
+      options,
+      outputOptions,
     );
   }
 }
