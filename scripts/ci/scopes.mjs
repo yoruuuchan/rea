@@ -44,6 +44,7 @@ export const SCOPES = {
     "tests/boundary/mcp/gdbCancellationMcp.test.ts",
     "tests/boundary/mcp/debuggerCancellationMcp.test.ts",
     "tests/boundary/mcp/rizinDebuggerCancellationMcp.test.ts",
+    "tests/boundary/mcp/rizinPendingOutput.test.ts",
     "tests/boundary/mcp/reverseEngineeringPartialMcp.test.ts",
     "tests/boundary/mcp/workflowSnapshotReplayMcp.test.ts",
     "tests/boundary/mcp/reverseEngineeringEnvironmentMcp.test.ts",

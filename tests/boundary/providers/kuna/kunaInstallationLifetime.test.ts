@@ -1,31 +1,21 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const gates = vi.hoisted(() => {
-  let releaseHashClose!: () => void;
-  let releaseShebangRead!: () => void;
-  let hashCloseEntered!: () => void;
-  let shebangReadEntered!: () => void;
-  const hashClose = new Promise<void>((resolve) => {
-    releaseHashClose = resolve;
-  });
-  const shebangRead = new Promise<void>((resolve) => {
-    releaseShebangRead = resolve;
-  });
-  const hashCloseStarted = new Promise<void>((resolve) => {
-    hashCloseEntered = resolve;
-  });
-  const shebangReadStarted = new Promise<void>((resolve) => {
-    shebangReadEntered = resolve;
-  });
+  const createGate = () => {
+    let enter!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { started, hold, enter, release };
+  };
   return {
-    hashClose,
-    hashCloseStarted,
-    shebangRead,
-    shebangReadStarted,
-    releaseHashClose,
-    releaseShebangRead,
-    hashCloseEntered,
-    shebangReadEntered,
+    createGate,
+    hashClose: createGate(),
+    shebangRead: createGate(),
     opens: 0,
   };
 });
@@ -49,15 +39,15 @@ vi.mock("../../../../src/filesystem/RegularFile.js", async (importOriginal) => {
             handle.stat(...statArgs),
           read: async (...readArgs: Parameters<typeof handle.read>) => {
             if (index === 1) {
-              gates.shebangReadEntered();
-              await gates.shebangRead;
+              gates.shebangRead.enter();
+              await gates.shebangRead.hold;
             }
             return handle.read(...readArgs);
           },
           close: async () => {
             if (index === 0) {
-              gates.hashCloseEntered();
-              await gates.hashClose;
+              gates.hashClose.enter();
+              await gates.hashClose.hold;
             }
             await handle.close();
           },
@@ -73,14 +63,22 @@ import { inspectKunaInstallation } from "../../../../src/kuna/KunaInstallation.j
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { writeFakeKuna } from "./fakeKuna.js";
 
-afterEach(() => {
-  gates.releaseHashClose();
-  gates.releaseShebangRead();
+beforeEach(() => {
+  gates.opens = 0;
+  gates.hashClose = gates.createGate();
+  gates.shebangRead = gates.createGate();
 });
 
-it.skipIf(process.platform === "win32")(
-  "keeps installation inspection inside the resource owner's lifetime through shebang reading",
-  async () => {
+afterEach(() => {
+  gates.hashClose.release();
+  gates.shebangRead.release();
+});
+
+it
+  .skipIf(process.platform === "win32")
+  .each(["hash-close", "shebang-read"] as const)(
+  "keeps installation cleanup waiting for its active phase when cancelled during %s",
+  async (phase) => {
     const root = await createTestTempDirectory("rea-kuna-inspection-lifetime-");
     const executable = await writeFakeKuna(root);
     const scope = new ArtifactResourceScope();
@@ -105,32 +103,38 @@ it.skipIf(process.platform === "win32")(
     );
     let cleanup: Promise<void> | undefined;
     try {
-      await gates.hashCloseStarted;
+      await gates.hashClose.started;
       cleanup = scope.retryCleanup();
-      controller.abort();
-      gates.releaseHashClose();
-      const reachedShebang = await Promise.race([
-        gates.shebangReadStarted.then(() => true),
-        inspection.then(
-          () => false,
-          () => false,
-        ),
-      ]);
-      expect(reachedShebang).toBe(true);
-
       let cleanupFinished = false;
       void cleanup.then(() => {
         cleanupFinished = true;
       });
       await Promise.resolve();
       expect(cleanupFinished).toBe(false);
+      if (phase === "hash-close") controller.abort();
+      gates.hashClose.release();
+      const reachedShebang = await Promise.race([
+        gates.shebangRead.started.then(() => true),
+        inspection.then(
+          () => false,
+          () => false,
+        ),
+      ]);
+      expect(reachedShebang).toBe(phase === "shebang-read");
+      if (phase === "shebang-read") {
+        controller.abort();
+        await Promise.resolve();
+        expect(cleanupFinished).toBe(false);
+      }
 
-      gates.releaseShebangRead();
-      await expect(inspection).rejects.toMatchObject({ name: "AbortError" });
+      gates.shebangRead.release();
+      await expect(inspection).rejects.toBe(controller.signal.reason);
       await expect(cleanup).resolves.toBeUndefined();
+      expect(gates.opens).toBe(phase === "hash-close" ? 1 : 2);
+      expect(scope.hasPending).toBe(false);
     } finally {
-      gates.releaseHashClose();
-      gates.releaseShebangRead();
+      gates.hashClose.release();
+      gates.shebangRead.release();
       await inspectionOutcome;
       await cleanup;
       await scope.close();

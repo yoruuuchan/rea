@@ -57,7 +57,10 @@ import { err, ok, type Result } from "../domain/result.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { jsonObjectSchema } from "../domain/jsonValue.js";
 import { hashStableFile } from "../filesystem/StableFileHash.js";
-import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCancelled,
+  RegularFileCleanupFailure,
+} from "../filesystem/OwnedRegularFile.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { createEvidence } from "../domain/evidence.js";
 import {
@@ -145,9 +148,11 @@ const STDERR_EXCERPT_BYTES = 512;
 const UNPARSED_LINES_REPORTED = 10;
 
 /** Carry the exact digest owner through caller-specific partial-result mapping. */
-class AdbDigestCleanupFailure extends Error {
+class AdbDigestFailure extends Error {
   constructor(
-    readonly fileFailure: RegularFileCleanupFailure<AdbFileDigest>,
+    readonly fileFailure:
+      | RegularFileCleanupFailure<AdbFileDigest>
+      | RegularFileCancelled<AdbFileDigest>,
     readonly bindCleanupError: (error: AnalysisError) => void,
   ) {
     super(fileFailure.message, { cause: fileFailure });
@@ -174,9 +179,15 @@ const hashAdbFile = async (
       },
     });
   } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure)
-      throw new AdbDigestCleanupFailure(
-        cause as RegularFileCleanupFailure<AdbFileDigest>,
+    if (
+      cause !== signal?.reason &&
+      (cause instanceof RegularFileCleanupFailure ||
+        cause instanceof RegularFileCancelled)
+    )
+      throw new AdbDigestFailure(
+        cause as
+          | RegularFileCleanupFailure<AdbFileDigest>
+          | RegularFileCancelled<AdbFileDigest>,
         (error) => {
           closeLease?.bindCleanupError(error);
         },
@@ -187,7 +198,7 @@ const hashAdbFile = async (
   }
 };
 
-const adbDigestCleanupError = (
+const adbDigestError = (
   cause: unknown,
   operation: string,
   signal: AbortSignal | undefined,
@@ -195,7 +206,7 @@ const adbDigestCleanupError = (
     | AdbAcquiredFilePartialObservation
     | AdbPackagePullPartialObservation,
 ): AnalysisError | undefined => {
-  if (!(cause instanceof AdbDigestCleanupFailure)) return undefined;
+  if (!(cause instanceof AdbDigestFailure)) return undefined;
   const digestFailure = cause.fileFailure;
   const digestOutcome = digestFailure.outcome;
   if (digestOutcome.kind === "completed")
@@ -203,6 +214,11 @@ const adbDigestCleanupError = (
       partialObservation,
       digestOutcome.value,
     );
+  if (digestFailure instanceof RegularFileCancelled)
+    return new AnalysisCancelledError(operation, {
+      cause: digestFailure.reason,
+      partialObservation,
+    });
   const resource = `${digestFailure.path} (ADB digest handle)`;
   const reason =
     digestFailure.cleanupCause instanceof Error
@@ -2290,9 +2306,7 @@ export class AdbProvider {
         });
       } catch (cause: unknown) {
         const digestFailure =
-          cause instanceof AdbDigestCleanupFailure
-            ? cause.fileFailure
-            : undefined;
+          cause instanceof AdbDigestFailure ? cause.fileFailure : undefined;
         const completedDigest =
           digestFailure?.outcome.kind === "completed"
             ? digestFailure.outcome.value
@@ -2328,13 +2342,15 @@ export class AdbProvider {
                 message:
                   completedDigest === undefined
                     ? `The pulled file remains at ${localPath}, but its digest and descriptor cleanup are unconfirmed.`
-                    : `The pulled file digest is known, but its descriptor cleanup is unconfirmed: ${localPath}`,
+                    : digestFailure instanceof RegularFileCancelled
+                      ? `The pulled file digest and descriptor cleanup are confirmed; the request was cancelled: ${localPath}`
+                      : `The pulled file digest is known, but its descriptor cleanup is unconfirmed: ${localPath}`,
               },
             ],
             coverage: "partial",
           },
         };
-        const cleanupError = adbDigestCleanupError(
+        const cleanupError = adbDigestError(
           cause,
           operation,
           signal,
@@ -2460,7 +2476,7 @@ export class AdbProvider {
           digest_status: "unknown",
         },
       };
-      const cleanupError = adbDigestCleanupError(
+      const cleanupError = adbDigestError(
         cause,
         operation,
         signal,
@@ -3287,12 +3303,7 @@ export class AdbProvider {
         const cleanupError =
           retainedObservation === undefined
             ? undefined
-            : adbDigestCleanupError(
-                cause,
-                operation,
-                signal,
-                retainedObservation,
-              );
+            : adbDigestError(cause, operation, signal, retainedObservation);
         if (cleanupError !== undefined) return err(cleanupError);
         if (cause instanceof AnalysisCancelledError) {
           if (retainedObservation !== undefined)

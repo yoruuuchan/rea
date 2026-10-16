@@ -272,11 +272,12 @@ const callPartialFridaLoadError = async (
   const failure =
     partial === "evidence"
       ? new FridaScriptLoadCancelledError(script)
-      : new AnalysisCancelledError("load_frida_script", {
-          ...(partial === "non-evidence"
+      : new AnalysisCancelledError(
+          "load_frida_script",
+          partial === "non-evidence"
             ? { partialObservation: nonEvidencePartialObservation() }
-            : {}),
-        });
+            : {},
+        );
   const provider: FridaInstrumentationPort = {
     async listDevices() {
       return unusedFridaPortMethod();

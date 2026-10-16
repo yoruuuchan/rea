@@ -59,7 +59,7 @@ describe("catalog-wide MCP input admission", () => {
         expect(TOOL_CONTRACTS.length).toBeGreaterThan(0);
         for (const contract of TOOL_CONTRACTS) {
           const input = {
-            ...(contract.examples[0]?.input ?? {}),
+            ...contract.examples[0]?.input,
             __rea_unknown_admission_probe__: true,
           };
           expect(contract.inputSchema.safeParse(input).success).toBe(false);

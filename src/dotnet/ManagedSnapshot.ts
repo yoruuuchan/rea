@@ -4,8 +4,8 @@ import type { FileHandle } from "node:fs/promises";
 
 import { MANAGED_STATIC_PROVIDER } from "../application/InvestigationProviders.js";
 import { classifyBinaryTargetFilesystemFailure } from "../application/BinaryTargetResolver.js";
-import { withRegularFile } from "../application/RegularFileRead.js";
 import {
+  withRegularFile,
   RegularFileCleanupFailure,
   type RegularFileReadOptions,
 } from "../application/RegularFileRead.js";
@@ -87,18 +87,21 @@ export const hashManagedSource = async (
         throw managedSnapshotCapacityError(operation);
       const digest = createHash("sha256");
       let byteLength = 0;
-      const stream = handle.createReadStream({
-        autoClose: false,
-        ...(signal === undefined ? {} : { signal }),
-      });
-      for await (const chunk of stream) {
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      for (;;) {
         signal?.throwIfAborted();
-        if (!Buffer.isBuffer(chunk))
-          throw new TypeError("Managed source stream returned non-buffer data");
-        if (chunk.length > MAX_MANAGED_SNAPSHOT_BYTES - byteLength)
+        const { bytesRead } = await handle.read(
+          chunk,
+          0,
+          Math.min(chunk.length, MAX_MANAGED_SNAPSHOT_BYTES - byteLength + 1),
+          null,
+        );
+        signal?.throwIfAborted();
+        if (bytesRead === 0) break;
+        if (bytesRead > MAX_MANAGED_SNAPSHOT_BYTES - byteLength)
           throw managedSnapshotCapacityError(operation);
-        byteLength += chunk.length;
-        digest.update(chunk);
+        byteLength += bytesRead;
+        digest.update(chunk.subarray(0, bytesRead));
       }
       return { byteLength, sha256: digest.digest("hex") };
     },
@@ -122,6 +125,9 @@ const normalizeManagedReadFailure = (
   operation: string,
   signal?: AbortSignal,
 ): unknown => {
+  // An exact caller reason is opaque, even if it resembles a cleanup record.
+  if (signal?.aborted === true && cause === signal.reason)
+    return normalizeReadFailure(cause, fallbackPath, operation, signal);
   const cleanupError = managedCleanupError(
     cause,
     fallbackPath,
@@ -176,15 +182,19 @@ const normalizeReadFailure = (
   path: string,
   operation: string,
   signal?: AbortSignal,
-): unknown =>
-  cause instanceof RegularFileChangedError
-    ? new EvidenceIntegrityError(
-        `Managed source changed while ${operation} was reading ${path}.`,
-        { cause },
-      )
-    : cause instanceof AnalysisError
-      ? cause
-      : (classifyBinaryTargetFilesystemFailure(path, cause) ??
-        (signal?.aborted === true
-          ? new AnalysisCancelledError(operation, { cause })
-          : cause));
+): unknown => {
+  if (signal?.aborted === true && cause === signal.reason)
+    return new AnalysisCancelledError(operation, { cause });
+  if (cause instanceof RegularFileChangedError)
+    return new EvidenceIntegrityError(
+      `Managed source changed while ${operation} was reading ${path}.`,
+      { cause },
+    );
+  if (cause instanceof AnalysisError) return cause;
+  return (
+    classifyBinaryTargetFilesystemFailure(path, cause) ??
+    (signal?.aborted === true
+      ? new AnalysisCancelledError(operation, { cause })
+      : cause)
+  );
+};

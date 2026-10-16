@@ -250,6 +250,11 @@ const serveSourceMap = (
   response: ServerResponse,
   options: FakeOptions,
 ): boolean => {
+  if (
+    options.hangSourceMap === true &&
+    request.url?.startsWith("/app.js.map") === true
+  )
+    return true;
   if (options.sourceMapBody === undefined) return false;
   if (request.url?.startsWith("/app.js.map") === true) {
     if (options.sourceMapRedirect !== undefined)

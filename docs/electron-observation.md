@@ -107,8 +107,13 @@ scenario controls; their attempted and observed outcomes remain in the
 timeline. The active hook blocks and records external shell/navigation,
 permission, download, popup, updater, and OS-integration effects. The timeline
 is explicitly partial when attachment starts after application activity. The
-startup has a 60-second deadline. Actions wait until completion or request
-cancellation; a click whose target never appears remains pending until cancelled.
+startup, including the initial state snapshot, has a 60-second deadline.
+Actions wait until completion or request cancellation; a click whose target
+never appears, or a `wait` without `window_index` in an app that opens no
+window, remains pending until cancelled. After cancellation, the final state
+read has 5 seconds before REA keeps the initial snapshot instead; the
+cancellation keeps the caller's reason and records that expiry in its
+diagnostics.
 CLI SIGINT/SIGTERM requests cancellation and awaits owned-process cleanup.
 Window IDs, URLs, and cached titles come from one main-process Electron snapshot,
 so a crashed renderer does not require a successful renderer-side title query.

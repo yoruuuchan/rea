@@ -275,6 +275,7 @@ it.each([
   "tests/boundary/providers/RizinDebugSessionReviewRegressions.test.ts",
   "tests/boundary/mcp/gdbCancellationMcp.test.ts",
   "tests/boundary/mcp/rizinDebuggerCancellationMcp.test.ts",
+  "tests/boundary/mcp/rizinPendingOutput.test.ts",
   "tests/composition/reverseEngineeringAdmission.test.ts",
   "tests/support/reverseEngineeringMcpHarness.ts",
   "tests/support/reverseEngineeringCompositionEdgeCases.ts",

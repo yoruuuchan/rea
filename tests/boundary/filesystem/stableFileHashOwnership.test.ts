@@ -10,7 +10,10 @@ import * as regularFile from "../../../src/filesystem/RegularFile.js";
 import { RegularFileAdmissionFailure } from "../../../src/filesystem/RegularFile.js";
 import { hashStableFile } from "../../../src/filesystem/StableFileHash.js";
 import { LinuxHopperPublisher } from "../../../src/application/LinuxHopperPublisher.js";
-import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCancelled,
+  RegularFileCleanupFailure,
+} from "../../../src/filesystem/OwnedRegularFile.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import type { VerifiedLinuxHopperPackage } from "../../../src/application/LinuxHopperPublisher.js";
 
@@ -123,6 +126,51 @@ it("closes a normally hashed file without adopting an owner", async () => {
     hashStableFile(path, { retainFailedClose }),
   ).resolves.toMatchObject({ bytes: 11 });
   expect(retainFailedClose).not.toHaveBeenCalled();
+});
+
+it("retains a completed digest when cancellation follows successful close", async () => {
+  const root = await createTestTempDirectory("rea-stable-hash-cancel-");
+  const path = join(root, "input.bin");
+  const bytes = Buffer.from("owned bytes");
+  await writeFile(path, bytes);
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled during close");
+  const retainFailedClose = vi.fn();
+  const nativeClose = OwnedFileHandle.prototype.close;
+  let observed: OwnedFileHandle | undefined;
+  const close = vi
+    .spyOn(OwnedFileHandle.prototype, "close")
+    .mockImplementationOnce(async function (this: OwnedFileHandle) {
+      observed = this;
+      await nativeClose.call(this);
+      controller.abort(reason);
+    });
+  try {
+    const failure: unknown = await hashStableFile(path, {
+      signal: controller.signal,
+      retainFailedClose,
+    }).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(RegularFileCancelled);
+    if (!(failure instanceof RegularFileCancelled))
+      throw new Error(
+        "Expected completed file observations under cancellation",
+      );
+    expect(failure.path).toBe(path);
+    expect(failure.reason).toBe(reason);
+    expect(failure.owner).toBe(observed);
+    expect(failure.outcome).toEqual({
+      kind: "completed",
+      value: {
+        bytes: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+    });
+    expect(observed?.handle.fd).toBe(-1);
+    expect(retainFailedClose).not.toHaveBeenCalled();
+  } finally {
+    close.mockRestore();
+    await observed?.close();
+  }
 });
 
 it("adopts a descriptor from an admission failure and preserves both causes", async () => {

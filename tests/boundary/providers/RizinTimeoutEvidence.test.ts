@@ -40,6 +40,7 @@ it("preserves every field of partial Rizin timeout Evidence", () => {
     "The command timed out before its completion marker; retained output is partial and completion is unknown.",
     "The owned debugger session was stopped because output correlation could no longer be guaranteed.",
     "The command is unrestricted and may access local files, the shell, network, or mutate the target.",
+    "Interrupted output may include an incomplete completion-marker prefix; it is retained because it cannot be distinguished from command diagnostics.",
     "Launch provenance records the original and resolved startup paths; it does not establish the current target after unrestricted debugger commands.",
   ]);
 });
