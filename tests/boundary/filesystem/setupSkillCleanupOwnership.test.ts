@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdir,
   open as fsOpen,
@@ -68,6 +69,58 @@ const failFirstCloses = (path: string) => {
 };
 
 describe("skill regular-file cleanup ownership", () => {
+  it.each(["first", "recovery", "verification"] as const)(
+    "retains a failed %s backup read until setup host disposal",
+    async (stage) => {
+      const home = await createTestTempDirectory(
+        "rea-setup-skill-backup-close-",
+      );
+      const [destination] = skillDestinations(home, [], {}, "linux");
+      if (destination === undefined)
+        throw new Error("Shared skill root missing");
+      const manifest = join(destination.path, "SKILL.md");
+      const original = "stale managed skill\n";
+      const firstBackup = `${manifest}.rea.backup`;
+      const backup =
+        stage === "recovery"
+          ? `${firstBackup}.${createHash("sha256").update(original).digest("hex")}.recovery`
+          : firstBackup;
+      await mkdir(dirname(manifest), { recursive: true });
+      await writeFile(manifest, original);
+      if (stage === "recovery")
+        await writeFile(firstBackup, "historical skill\n");
+      if (stage !== "verification") await writeFile(backup, original);
+      const close = failFirstCloses(backup);
+      const host = systemSetupHost(
+        { platform: "linux", homeDirectory: home } as DoctorHost,
+        { HOME: home },
+      );
+
+      try {
+        const result = await host.installSkill([]);
+        expect(result).toMatchObject({ ok: false, error: { stage: "backup" } });
+        expect(close.attempts.length).toBeGreaterThan(0);
+        expect(new Set(close.attempts).size).toBe(1);
+        const opensBeforeAdmission = openMock.mock.calls.length;
+        expect((await host.installSkill([])).ok).toBe(false);
+        expect(openMock).toHaveBeenCalledTimes(opensBeforeAdmission);
+        expect(new Set(close.attempts).size).toBe(1);
+        expect(await actualFs.readFile(manifest, "utf8")).toBe(original);
+        expect(await host.close?.()).toContain(backup);
+        const attemptsBeforeClose = close.attempts.length;
+        close.release();
+        expect(await host.close?.()).toBeUndefined();
+        expect(close.attempts.length).toBeGreaterThan(attemptsBeforeClose);
+        expect(close.attempts[0]?.fd).toBe(-1);
+      } finally {
+        close.release();
+        await host.close?.();
+        // Reclaim the real test descriptor even when the retention regression fails.
+        for (const handle of new Set(close.attempts)) await handle.close();
+      }
+    },
+  );
+
   it("retains a failed setup skill read until setup host disposal", async () => {
     const home = await createTestTempDirectory("rea-setup-skill-close-");
     const [destination] = skillDestinations(home, [], {}, "linux");

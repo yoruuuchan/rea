@@ -37,7 +37,7 @@ describe.skipIf(process.platform !== "darwin")(
           arguments: ["inspect-macho", library, "--json"],
           environment: { REA_LOG_LEVEL: "silent" },
         });
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, result.stdout + result.stderr).toBe(0);
         const inspected = evidenceSchema.parse(result.json).normalized_result;
         expect(inspected.dependencies).toMatchObject({
           items: [

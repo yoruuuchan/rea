@@ -18,11 +18,20 @@ type StartupSettlement<Value> =
 export class SharedStartupAttempt<Value> {
   readonly #controller = new AbortController();
   readonly promise: Promise<Value>;
+  readonly #signal: AbortSignal;
   #waiters = 0;
   #settlement: StartupSettlement<Value> = { status: "pending" };
 
-  constructor(start: (signal: AbortSignal) => Promise<Value>) {
-    this.promise = start(this.#controller.signal);
+  constructor(
+    start: (signal: AbortSignal) => Promise<Value>,
+    /** An owning operation's cancellation is independent of individual waiters. */
+    ownerSignal?: AbortSignal,
+  ) {
+    this.#signal =
+      ownerSignal === undefined
+        ? this.#controller.signal
+        : AbortSignal.any([ownerSignal, this.#controller.signal]);
+    this.promise = start(this.#signal);
     void this.promise.then(
       (value) => {
         this.#settlement = { status: "completed", value };
@@ -35,7 +44,7 @@ export class SharedStartupAttempt<Value> {
 
   /** Signal consumed by the startup producer, never by an individual waiter. */
   get signal(): AbortSignal {
-    return this.#controller.signal;
+    return this.#signal;
   }
 
   /** Completion includes the producer's final cleanup, not just its abort. */

@@ -1327,9 +1327,10 @@ describe("cancellation during profile resolution", () => {
     const [first] = await createBinarySessionTargets();
     const provider = createCacheProvider([]);
     const controller = new AbortController();
+    const failure = new Error("Profile resolution failed before cancellation");
     provider.resolveAnalysisProfile = () => {
-      controller.abort();
-      return Promise.reject(new Error("Profile resolution cancelled"));
+      controller.abort({ caller: "late profile rejection" });
+      return Promise.reject(failure);
     };
     const session = createTestBinarySession(provider);
     try {
@@ -1337,7 +1338,11 @@ describe("cancellation during profile resolution", () => {
         session.open(first, { signal: controller.signal }),
       ).resolves.toMatchObject({
         ok: false,
-        error: { _tag: "AnalysisCancelledError", operation: "open_binary" },
+        error: {
+          _tag: "ProviderAdapterError",
+          operation: "resolve_analysis_profile",
+          cause: failure,
+        },
       });
       // Allow Node to report any rejection abandoned by the cancellation path.
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -1347,35 +1352,66 @@ describe("cancellation during profile resolution", () => {
     }
   });
 
-  it("cancels profile resolution even when the provider ignores its signal", async () => {
+  it("joins a signal-ignoring profile producer before cancellation and session close settle", async () => {
     const [first] = await createBinarySessionTargets();
     const provider = createCacheProvider([]);
+    if (provider.resolveAnalysisProfile === undefined)
+      throw new Error("Expected the fixture profile resolver");
+    const resolveProfile = provider.resolveAnalysisProfile.bind(provider);
+    const admitted = createDeferred<void>();
+    const release = createDeferred<void>();
     let observedSignal: AbortSignal | undefined;
     let created = 0;
-    provider.resolveAnalysisProfile = (_target, options) => {
+    provider.resolveAnalysisProfile = async (target, options) => {
       observedSignal = options?.signal;
-      return new Promise<never>(() => undefined);
+      admitted.resolve();
+      await release.promise;
+      return resolveProfile(target);
     };
     provider.createClient = () => {
-      created += 1;
+      created++;
       return new ControllableAnalysisClient();
     };
     const session = createTestBinarySession(provider);
     const controller = new AbortController();
-    const opening = session.open(first, { signal: controller.signal });
-    while (observedSignal === undefined)
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(observedSignal).toBe(controller.signal);
-
-    controller.abort();
-
-    await expect(opening).resolves.toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisCancelledError", operation: "open_binary" },
+    const reason = { caller: "profile cancellation" };
+    let openSettled = false;
+    const opening = session
+      .open(first, { signal: controller.signal })
+      .then((result) => {
+        openSettled = true;
+        return result;
+      });
+    await admitted.promise;
+    controller.abort(reason);
+    let closeSettled = false;
+    const closing = session.close().then((result) => {
+      closeSettled = true;
+      return result;
     });
-    expect(created).toBe(0);
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(observedSignal?.reason).toBe(reason);
+      expect(openSettled).toBe(false);
+      expect(closeSettled).toBe(false);
+      expect(session.status()).toMatchObject({ cleanup_pending: true });
+      release.resolve();
+      await expect(opening).resolves.toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisCancelledError", cause: reason },
+      });
+      expect(await closing).toEqual(resultOk(null));
+      expect(created).toBe(0);
+      expect(session.status()).toMatchObject({ cleanup_pending: false });
+    } finally {
+      release.resolve();
+      await Promise.all([opening, closing]);
+      await session.close();
+    }
   });
+});
 
+describe("cancellation during client transitions", () => {
   it("cancels a call while it waits for a transition", async () => {
     const [first] = await createBinarySessionTargets();
     const health = createDeferred<ReturnType<typeof ok>>();

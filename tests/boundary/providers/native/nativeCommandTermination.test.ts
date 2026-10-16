@@ -224,9 +224,11 @@ it("keeps the ownership helper prerequisite when xcrun cannot be supervised", as
 
   expect(result.ok).toBe(false);
   if (result.ok) return;
+  expect(result.error.preparationFailure).toBe(inspection);
   expect(result.error).toMatchObject({
     tool: "file",
     reason: "io",
+    preparationFailure: inspection,
     detail: inspection.message,
     cause: { tool: "xcrun", detail: inspection.message, cause: inspection },
   });

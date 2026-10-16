@@ -12,7 +12,6 @@ import { AnalysisCancelledError } from "./analysisErrorCore.js";
 export class BrowserObservationError extends AnalysisError {
   readonly _tag = "BrowserObservationError";
   override cleanupIncomplete: boolean;
-  override readonly cleanupResources: readonly string[];
   override readonly userCategory: "cancelled" | undefined;
   override readonly userMessage: string | undefined;
 
@@ -26,9 +25,10 @@ export class BrowserObservationError extends AnalysisError {
       options?.detail ?? observationFailureMessage(operation, reason);
     this.cleanupIncomplete =
       this.cleanup !== undefined || reason === "cleanup_failed";
-    this.cleanupResources =
+    this.setCleanupResources(
       this.cleanup?.resources ??
-      (reason === "cleanup_failed" ? ["browser_transport"] : []);
+        (reason === "cleanup_failed" ? ["browser_transport"] : []),
+    );
     this.userCategory =
       reason === "cancelled" ||
       options?.cause instanceof AnalysisCancelledError ||

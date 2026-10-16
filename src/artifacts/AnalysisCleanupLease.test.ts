@@ -51,12 +51,19 @@ it("resolves an aggregate only after every bound owner releases", async () => {
     ["first resource", "second resource"],
     {},
   );
-  const first = new AnalysisCleanupLease(async () => undefined);
-  const second = new AnalysisCleanupLease(async () => undefined);
+  const first = new AnalysisCleanupLease(
+    async () => undefined,
+    ["first resource"],
+  );
+  const second = new AnalysisCleanupLease(
+    async () => undefined,
+    ["second resource"],
+  );
   new AnalysisCleanupLeaseGroup(error, [first, second]);
 
   await first.release();
   expect(error.cleanupIncomplete).toBe(true);
+  expect(error.cleanupResources).toEqual(["second resource"]);
   await second.release();
   expect(error.cleanupIncomplete).toBe(false);
 });

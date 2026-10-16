@@ -1,3 +1,6 @@
+import { missingJavaProbe } from "./GhidraInstallation.fixture.js";
+import { ok as javaProbeOk } from "../domain/result.js";
+import type { GhidraJavaObservation } from "./GhidraJavaProbe.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runDoctor, type DoctorHost } from "../application/Doctor.js";
@@ -19,15 +22,16 @@ const installationHost = (
 ): GhidraInstallationHost => ({
   readText: () => "application.version=12.1.4\napplication.java.min=21\n",
   executable: () => true,
-  probeJava: () => ({
-    osArch: "amd64",
-    osName: platform === "win32" ? "Windows 11" : "Linux",
-    version: "21.0.11",
-    major: 21,
-    home: "/usr/lib/jvm/jdk-21",
-    bits: 64,
-    runtime: "jdk",
-  }),
+  probeJava: () =>
+    javaProbeOk<GhidraJavaObservation>({
+      osArch: "amd64",
+      osName: platform === "win32" ? "Windows 11" : "Linux",
+      version: "21.0.11",
+      major: 21,
+      home: "/usr/lib/jvm/jdk-21",
+      bits: 64,
+      runtime: "jdk",
+    }),
   ...overrides,
 });
 
@@ -130,15 +134,16 @@ describe("Ghidra doctor integration", () => {
       inspection(
         { installDir: INSTALL },
         {
-          probeJava: () => ({
-            osArch: "amd64",
-            osName: "Linux",
-            version: "17.0.12",
-            major: 17,
-            home: "/usr/lib/jvm/jdk-17",
-            bits: 64,
-            runtime: "jdk",
-          }),
+          probeJava: () =>
+            javaProbeOk<GhidraJavaObservation>({
+              osArch: "amd64",
+              osName: "Linux",
+              version: "17.0.12",
+              major: 17,
+              home: "/usr/lib/jvm/jdk-17",
+              bits: 64,
+              runtime: "jdk",
+            }),
         },
       ),
       "ghidra-java",
@@ -364,7 +369,7 @@ describe("Windows native doctor failure diagnostics", () => {
           installDir: "C:\\tools\\ghidra_12.1.4_PUBLIC",
           platform: "win32",
         },
-        { probeJava: () => undefined },
+        { probeJava: () => missingJavaProbe },
       ),
     );
     expect(projected.available).toBe(false);

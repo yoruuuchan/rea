@@ -114,6 +114,11 @@ window, remains pending until cancelled. After cancellation, the final state
 read has 5 seconds before REA keeps the initial snapshot instead; the
 cancellation keeps the caller's reason and records that expiry in its
 diagnostics.
+Blocked synchronous shell APIs keep their return contracts:
+`showItemInFolder` returns `undefined` and `writeShortcutLink` returns `false`.
+Their `shell-attempt` events record the blocked phase and argument shapes;
+neither result means the requested host operation occurred. The existing
+`openExternal` and `openPath` blocks continue to reject their promises.
 CLI SIGINT/SIGTERM requests cancellation and awaits owned-process cleanup.
 Window IDs, URLs, and cached titles come from one main-process Electron snapshot,
 so a crashed renderer does not require a successful renderer-side title query.
@@ -126,6 +131,46 @@ path. A configured path or working IPC handler does not prove preload execution.
 If cleanup cannot be verified, the error retains collected observations in
 `details.partial_observation` and marks their application cleanup `unverified`.
 Cleanup uncertainty does not authorize signaling unrelated processes.
+
+Main-process IPC recording keeps original-function removal for `on` and `once`
+registrations and records a fired `once` callback once. Native Node.js owns
+removal order and traversal, including listeners registered by removal observers;
+the hook translates only its own recording wrappers at the removal boundary.
+Wrapper metadata uses weak keys and does not retain removed registrations.
+Wrapper metadata operations, private collection methods and traversal constructors are captured
+before target startup; later replacement of their global bindings does not
+change listener registration or removal.
+
+An `on` listener's application-defined `.apply` receives the original argument-list
+object unchanged. Borrowing the exposed method preserves its dynamic receiver.
+Because that method owns argument interpretation and may not
+invoke the callback, the hook records a bounded `ipc-observation-gap` timeline
+entry with the registered channel rather than an IPC invocation. Its empty
+`argument_shapes` means unobserved arguments, not a zero-argument callback;
+callback execution and result remain unknown. Coverage and retention include
+these gaps even when their individual records are dropped. Normal native
+dispatch continues to record actual invocation frames. Evidence snapshots copy
+retained arrays and counters without invoking application iterators or Array
+species.
+
+Listener-chain recognition distinguishes owned, unowned and unknown metadata.
+Data links may be inherited; absence is established only after completing the
+bounded prototype lookup. Exhausting either walk, encountering a getter or seeing a Proxy leaves
+ownership unknown. The hook preserves native registration without adding another
+recording wrapper and retains a `listener-chain` observation gap after successful
+registration. This gap does not prove IPC delivery. An existing inner recording
+wrapper can still report its actual invocation; otherwise callback activity
+remains unobserved. Setter-only properties have a known undefined read.
+Data-descriptor parsing is shared with removal normalization.
+
+This does not establish complete JavaScript function introspection equivalence.
+Caller-defined `.listener` properties can change the identity exposed by
+`listeners()` and meta-events; accessors and Proxy metadata are not followed for
+wrapper recognition. Re-registering a raw recording wrapper on another channel
+retains the original registration's channel attribution.
+Mutating `.listener` on a raw recording wrapper can also prevent removal through
+application decorators; the reproduced identity conflict is tracked in
+[#4513](https://github.com/morluto/rea/issues/4513).
 
 ### Target fuse prerequisites
 

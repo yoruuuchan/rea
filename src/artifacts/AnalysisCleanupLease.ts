@@ -6,7 +6,15 @@ export class AnalysisCleanupLease {
   #errors: WeakRef<AnalysisError>[] = [];
   readonly #groups = new Set<AnalysisCleanupLeaseGroup>();
 
-  constructor(private readonly cleanup: () => Promise<void>) {}
+  readonly cleanupResources: readonly string[] | undefined;
+
+  constructor(
+    private readonly cleanup: () => Promise<void>,
+    resources?: readonly string[],
+  ) {
+    this.cleanupResources =
+      resources === undefined ? undefined : [...resources];
+  }
 
   async release(): Promise<void> {
     if (this.#released) return;
@@ -55,7 +63,21 @@ export class AnalysisCleanupLeaseGroup {
     this.#error = new WeakRef(error);
     this.#pending = new Set(owners);
     if (this.#pending.size === 0) return;
+    error.bindCleanupResourceOwner(this);
     for (const owner of this.#pending) owner.bindCleanupGroup(this);
+  }
+
+  /** Unlabelled owners keep attribution unknown; never match resources by text. */
+  get cleanupResources(): readonly string[] | undefined {
+    if (
+      [...this.#pending].some((owner) => owner.cleanupResources === undefined)
+    )
+      return undefined;
+    return [
+      ...new Set(
+        [...this.#pending].flatMap((owner) => owner.cleanupResources ?? []),
+      ),
+    ];
   }
 
   get hasLiveError(): boolean {

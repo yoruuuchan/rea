@@ -144,7 +144,10 @@ export class CdpTargetSessionOwner {
       connection,
       operation,
       resource,
-      cleanupLease: new AnalysisCleanupLease(() => connection.close()),
+      cleanupLease: new AnalysisCleanupLease(
+        () => connection.close(),
+        [resource],
+      ),
       active: true,
       settled,
       settle,

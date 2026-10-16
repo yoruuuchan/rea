@@ -4,6 +4,7 @@ import type { FileHandle } from "node:fs/promises";
 import type { Socket } from "node:net";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
 
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
@@ -760,7 +761,7 @@ export class GhidraClient {
           providerVersion: this.#options.providerVersion,
           profileDigest: this.#options.profileDigest,
         },
-        { signal: deadline.signal },
+        { signal: deadline.signal, resourceScope: this.#fileResources },
       )
       .catch((cause: unknown) =>
         err(this.#failure("start", "Ghidra launcher failed", cause)),
@@ -778,7 +779,15 @@ export class GhidraClient {
         });
         this.#startupOutputCheckpoint = this.#process.checkpointOutput();
       }
-      const failure = deadline.signal.aborted
+      const producerFailure =
+        launched.error instanceof GhidraLaunchError
+          ? launched.error.primaryFailure
+          : undefined;
+      const interrupted =
+        launched.error instanceof AnalysisCancelledError ||
+        producerFailure instanceof AnalysisCancelledError ||
+        (producerFailure === undefined && deadline.signal.aborted);
+      const failure = interrupted
         ? this.#interruptionFailure(deadline, launched.error)
         : launched.error instanceof GhidraSessionError
           ? launched.error

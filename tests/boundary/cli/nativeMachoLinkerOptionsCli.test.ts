@@ -38,7 +38,7 @@ describe.skipIf(process.platform !== "darwin")(
           arguments: ["inspect-macho", object, "--json"],
           environment: { REA_LOG_LEVEL: "silent" },
         });
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, result.stdout + result.stderr).toBe(0);
         const { load_commands: loadCommands } = evidenceSchema.parse(
           result.json,
         ).normalized_result;

@@ -1,3 +1,4 @@
+import { OwnedCommandFailure } from "../../../../src/process/OwnedCommand.js";
 import { createHash } from "node:crypto";
 import { DarwinProcessOwnershipInspectionError } from "../../../../src/process/DarwinProcessRunTokenReader.js";
 import { EventEmitter } from "node:events";
@@ -22,6 +23,7 @@ import { parseLipoOutput } from "../../../../src/native/parsers/lipo.js";
 import { parseCodeSignature } from "../../../../src/native/parsers/codesign.js";
 import { prepareProcessOwnershipInspection } from "../../../../src/process/ProcessOwnershipObservation.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
+import { ProviderCleanupError } from "../../../../src/domain/providerCleanupError.js";
 import { ProviderProcessSupervisor } from "../../../../src/process/ProviderProcess.js";
 
 import {
@@ -347,8 +349,13 @@ describe("native command failure capture and limits", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(projectAnalysisError(result.error).details).toMatchObject({
-      diagnostics: { reason: "io", detail: inspection.message },
+      diagnostics: {
+        phase: "process-preparation",
+        reason: "io",
+        detail: inspection.message,
+      },
     });
+    expect(result.error.capturedOutput).toBeUndefined();
   });
 
   it("retains output written before cancellation and reaps the stalled command", async () => {
@@ -1159,3 +1166,83 @@ class CountingRunner implements NativeCommandRunner {
     return Promise.resolve(err(new NativeCommandFailure(tool, "unavailable")));
   }
 }
+
+it("does not reopen a resolved preparation cleanup marker or invent absent compiler output facts", async () => {
+  const marker = new ProviderCleanupError(
+    "process-ownership",
+    ["owned helper root"],
+    { reason: "controlled close failure" },
+  );
+  const capturedOutput = {
+    stdout: "compiler output",
+    stderr: "�",
+    stderr_bytes: 1,
+    truncated: false,
+  };
+  const inspection = new DarwinProcessOwnershipInspectionError(
+    "controlled preparation failure",
+    { capturedOutput, cleanupFailure: marker },
+  );
+  marker.resolveCleanup();
+  const failure = new NativeCommandFailure("swift-demangle", "io", null, {
+    cause: inspection,
+  });
+  const runner: NativeCommandRunner = { run: async () => err(failure) };
+  const client = new NativeMacOSProvider({}, runner, "darwin").createClient(
+    machoTarget("/fixture"),
+  );
+  try {
+    const result = await client.execute("demangle_swift", {
+      symbols: ["fixture"],
+    });
+    if (result.ok) throw new Error("Expected preparation failure");
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.capturedOutput).toEqual(capturedOutput);
+    expect(result.error.capturedOutput).not.toHaveProperty("stdout_bytes");
+    expect(result.error.capturedOutput).not.toHaveProperty("exit_code");
+  } finally {
+    await client.close();
+  }
+});
+
+it("retains an owned preparation cleanup marker when the command deadline expires", async () => {
+  const marker = new ProviderCleanupError(
+    "process-ownership",
+    ["owned helper root"],
+    { reason: "controlled cleanup failure" },
+  );
+  const reason = new Error("command deadline");
+  const inspection = new DarwinProcessOwnershipInspectionError(
+    "cancelled preparation",
+    { cancellation: { reason }, cleanupFailure: marker },
+  );
+  const owned = new OwnedCommandFailure(
+    "timeout",
+    "command preparation timed out",
+    null,
+    null,
+    { cause: inspection, preparationFailure: inspection },
+  );
+  const failure = new NativeCommandFailure("swift-demangle", "timeout", null, {
+    cause: owned,
+  });
+  const runner: NativeCommandRunner = { run: async () => err(failure) };
+  const client = new NativeMacOSProvider({}, runner, "darwin").createClient(
+    machoTarget("/fixture"),
+  );
+  try {
+    const result = await client.execute("demangle_swift", {
+      symbols: ["fixture"],
+    });
+    if (result.ok) throw new Error("Expected preparation timeout");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisTimeoutError",
+      cleanupIncomplete: true,
+    });
+    expect(result.error.cause).toBe(reason);
+    marker.resolveCleanup();
+    expect(result.error.cleanupIncomplete).toBe(false);
+  } finally {
+    await client.close();
+  }
+});

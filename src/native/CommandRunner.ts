@@ -48,6 +48,9 @@ export class NativeCommandFailure extends Error {
   readonly cleanupOwner: ProviderProcessSupervisor | undefined;
   readonly cleanupFailures: readonly NativeCommandCleanupFailure[];
   readonly detail: string | null;
+  readonly preparationFailure:
+    | DarwinProcessOwnershipInspectionError
+    | undefined;
 
   constructor(
     readonly tool: string,
@@ -67,7 +70,14 @@ export class NativeCommandFailure extends Error {
     super(`Native command ${tool} failed: ${reason}`, options);
     this.cleanupOwner = options?.cleanupOwner;
     this.cleanupFailures = options?.cleanupFailures ?? [];
-    this.detail = options?.detail ?? null;
+    this.preparationFailure =
+      options?.cause instanceof DarwinProcessOwnershipInspectionError
+        ? options.cause
+        : options?.cause instanceof NativeCommandFailure ||
+            options?.cause instanceof OwnedCommandFailure
+          ? options.cause.preparationFailure
+          : undefined;
+    this.detail = options?.detail ?? this.preparationFailure?.message ?? null;
   }
 }
 
@@ -477,14 +487,15 @@ const captureProcess = async (
       );
     }
     return err(
-      new NativeCommandFailure(tool, "io", null, {
-        cause,
-        // Process supervision needs the Darwin ownership helper; its typed
-        // message names the compiler or SDK prerequisite to fix.
-        ...(cause instanceof DarwinProcessOwnershipInspectionError
-          ? { detail: cause.message }
-          : {}),
-      }),
+      new NativeCommandFailure(
+        tool,
+        cause instanceof DarwinProcessOwnershipInspectionError &&
+          cause.cancellation !== undefined
+          ? "cancelled"
+          : "io",
+        null,
+        { cause },
+      ),
     );
   }
 };

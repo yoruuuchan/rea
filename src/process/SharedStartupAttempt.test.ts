@@ -70,3 +70,35 @@ it("does not lose an unexpected producer rejection after its final caller cancel
   reject?.(cause);
   await expect(waiting).rejects.toBe(cause);
 });
+
+it.each(["caller", "owner"])(
+  "preserves %s interruption when owning cancellation and closure occur together",
+  async (first) => {
+    const completed = createDeferred<string>();
+    const controller = new AbortController();
+    const reason = { caller: "operation owner" };
+    const attempt = new SharedStartupAttempt(
+      () => completed.promise,
+      controller.signal,
+    );
+    const waiting = attempt.wait();
+    if (first === "caller") {
+      controller.abort(reason);
+      attempt.close();
+    } else {
+      attempt.close();
+      expect(attempt.signal.aborted).toBe(true);
+      expect(attempt.signal.reason).toBe(STARTUP_OWNER_CLOSED);
+      controller.abort(reason);
+    }
+    expect(attempt.signal.reason).toBe(
+      first === "caller" ? reason : STARTUP_OWNER_CLOSED,
+    );
+    expect(attempt.settled).toBe(false);
+    completed.resolve("finalized");
+    await expect(waiting).resolves.toEqual({
+      status: "completed",
+      value: "finalized",
+    });
+  },
+);

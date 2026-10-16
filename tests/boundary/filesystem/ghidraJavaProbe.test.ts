@@ -1,3 +1,4 @@
+import type { SpawnSyncReturns } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -17,6 +18,24 @@ vi.mock("node:child_process", async (importOriginal) => ({
 }));
 
 afterEach(() => mockSpawnSync.mockReset());
+
+/** Match the production probe's raw-byte spawn contract at this fixture boundary. */
+const probeOutput = (
+  stderrText: string,
+  error?: Error,
+): SpawnSyncReturns<Buffer> => {
+  const stdout = Buffer.alloc(0);
+  const stderr = Buffer.from(stderrText, "utf8");
+  return {
+    pid: 1,
+    output: [null, stdout, stderr],
+    stdout,
+    stderr,
+    status: error === undefined ? 0 : null,
+    signal: null,
+    ...(error === undefined ? {} : { error }),
+  };
+};
 
 it.each([
   { major: 17, fullJdk: true, vmName: "Java HotSpot(TM) 64-Bit Server VM" },
@@ -47,11 +66,11 @@ it.each([
       );
     }
     const version = `${String(major)}.0.11`;
-    mockSpawnSync.mockReturnValue({
-      stdout: "",
-      stderr: `    java.version = ${version}\n    java.home = ${reportedHome}\n    sun.arch.data.model = 64\n${vmName === undefined ? "" : `    java.vm.name = ${vmName}\n`}`,
-      status: 0,
-    });
+    mockSpawnSync.mockReturnValue(
+      probeOutput(
+        `    java.version = ${version}\n    java.home = ${reportedHome}\n    sun.arch.data.model = 64\n${vmName === undefined ? "" : `    java.vm.name = ${vmName}\n`}`,
+      ),
+    );
 
     const inspection = inspectGhidraInstallation({
       environment: {},
@@ -83,7 +102,7 @@ it.each([
         "-Dsun.stdout.encoding=UTF-8",
         "-Dsun.stderr.encoding=UTF-8",
       ]),
-      expect.objectContaining({ encoding: "utf8" }),
+      expect.objectContaining({ encoding: "buffer" }),
     );
   },
 );
@@ -127,11 +146,11 @@ it.each([
     join(installDir, "Ghidra", "application.properties"),
     `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=17\n`,
   );
-  mockSpawnSync.mockReturnValue({
-    stdout: "",
-    stderr: `    java.version = 21.0.11\n    java.home = ${reportedHome}\n${property}`,
-    status: 0,
-  });
+  mockSpawnSync.mockReturnValue(
+    probeOutput(
+      `    java.version = 21.0.11\n    java.home = ${reportedHome}\n${property}`,
+    ),
+  );
 
   const inspection = inspectGhidraInstallation({
     environment: {},
@@ -172,11 +191,11 @@ it("keeps a known 32-bit Java report classified as unsupported", async () => {
     join(installDir, "Ghidra", "application.properties"),
     `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=17\n`,
   );
-  mockSpawnSync.mockReturnValue({
-    stdout: "",
-    stderr: `    java.version = 21.0.11\n    java.home = ${reportedHome}\n    sun.arch.data.model = 32\n`,
-    status: 0,
-  });
+  mockSpawnSync.mockReturnValue(
+    probeOutput(
+      `    java.version = 21.0.11\n    java.home = ${reportedHome}\n    sun.arch.data.model = 32\n`,
+    ),
+  );
 
   const inspection = inspectGhidraInstallation({
     environment: {},
@@ -202,14 +221,12 @@ it("bounds the Java version probe and reports an over-budget probe as a failed J
   );
   // A chatty or hostile JVM that overruns the capture budget: spawnSync reports
   // ENOBUFS, which the probe already treats as a failed observation.
-  mockSpawnSync.mockReturnValue({
-    stdout: "",
-    stderr: "java.version = 21.0.11\n",
-    status: null,
-    error: Object.assign(new Error("spawnSync /java ENOBUFS"), {
-      code: "ENOBUFS",
-    }),
-  });
+  mockSpawnSync.mockReturnValue(
+    probeOutput(
+      "java.version = 21.0.11\n",
+      Object.assign(new Error("spawnSync /java ENOBUFS"), { code: "ENOBUFS" }),
+    ),
+  );
 
   const inspection = inspectGhidraInstallation({
     environment: {},
@@ -227,6 +244,17 @@ it("bounds the Java version probe and reports an over-budget probe as a failed J
   expect(inspection.javaHome).toBe(configuredHome);
   expect(inspection.checks.find(({ name }) => name === "java")).toMatchObject({
     status: "failed",
-    code: "runtime_missing",
+    code: "runtime_unavailable",
+  });
+  expect(
+    ghidraInstallationDiagnostics(inspection).java_probe_failure,
+  ).toMatchObject({
+    code: "runtime_unavailable",
+    process_error_code: "ENOBUFS",
+    output: {
+      stderr: "java.version = 21.0.11\n",
+      truncated: true,
+      signal: null,
+    },
   });
 });

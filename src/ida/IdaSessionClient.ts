@@ -105,7 +105,6 @@ interface UpstreamSession {
 /** A failed cleanup retains its private workspace and reports the remaining resource. */
 class IdaCleanupError extends ProviderAdapterError {
   override readonly cleanupIncomplete = true;
-  override readonly cleanupResources: readonly string[];
   constructor(
     path: string,
     cause: unknown,
@@ -146,7 +145,7 @@ class IdaCleanupError extends ProviderAdapterError {
             }),
       },
     });
-    this.cleanupResources = [path];
+    this.setCleanupResources([path]);
   }
 }
 

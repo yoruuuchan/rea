@@ -70,9 +70,13 @@ import {
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRootUnavailableError.js";
 import {
-  execFileBytes,
-  execFileOutputFailure,
-} from "../process/ExecFileOutput.js";
+  adbArguments,
+  runAdb,
+  runAdbCapture,
+  packageChangeRefusal,
+  probeAdbPathExistence,
+  type AdbRunLimits,
+} from "./AdbCommand.js";
 import {
   AdbConfigurationFailure,
   adbConfigurationAvailability,
@@ -102,7 +106,6 @@ import {
   parseBugreportCopiedPath,
   parseDumpsysPackageOutput,
   parseFeatureListOutput,
-  packageChangeFailureReason,
   parsePackageChangeOutput,
   parseProcessListOutput,
   parsePngDimensions,
@@ -144,7 +147,6 @@ const SCREEN_TIMEOUT_MS = 60_000;
 const SCREEN_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const BUGREPORT_TIMEOUT_MS = 600_000;
 const BUGREPORT_MAX_OUTPUT_BYTES = 1024 * 1024;
-const STDERR_EXCERPT_BYTES = 512;
 const UNPARSED_LINES_REPORTED = 10;
 
 /** Carry the exact digest owner through caller-specific partial-result mapping. */
@@ -170,7 +172,7 @@ const hashAdbFile = async (
     return await hashStableFile(path, {
       ...(signal === undefined ? {} : { signal }),
       retainFailedClose: (handle) => {
-        closeLease = new AnalysisCleanupLease(() => handle.close());
+        closeLease = new AnalysisCleanupLease(() => handle.close(), [path]);
         resources.retain({
           kind: "lease",
           resource: `${path} (ADB digest handle)`,
@@ -326,7 +328,10 @@ const syncStagedAdbFile = async (
   }
   const resource = `${path} (ADB staged-output handle)`;
   const stagedOwner = owner;
-  const closeLease = new AnalysisCleanupLease(() => stagedOwner.close());
+  const closeLease = new AnalysisCleanupLease(
+    () => stagedOwner.close(),
+    [resource],
+  );
   const released = await resources.release({
     kind: "lease",
     resource,
@@ -359,150 +364,6 @@ const syncStagedAdbFile = async (
     throw reported;
   }
   if (primary !== undefined) throw primary;
-};
-
-/** adb joins shell operands into a remote POSIX command; quote at that boundary. */
-const quoteShellOperand = (value: string): string =>
-  /^[A-Za-z0-9_./:=@+,-]+$/u.test(value)
-    ? value
-    : "'" + value.replaceAll("'", "'\\''") + "'";
-
-const adbArguments = (
-  serial: string | undefined,
-  arguments_: readonly string[],
-): readonly string[] => {
-  const operands =
-    arguments_[0] === "shell"
-      ? ["shell", ...arguments_.slice(1).map(quoteShellOperand)]
-      : [...arguments_];
-  return serial === undefined ? operands : ["-s", serial, ...operands];
-};
-
-interface AdbRunLimits {
-  readonly timeoutMs: number;
-  readonly maxOutputBytes: number;
-}
-
-/** Run one bounded adb invocation and keep its exact failure shape. */
-const runAdbCapture = async (
-  operation: string,
-  targetPath: string,
-  binary: string,
-  arguments_: readonly string[],
-  limits: AdbRunLimits,
-  signal: AbortSignal | undefined,
-): Promise<Result<{ stdout: Buffer; stderr: Buffer }, AnalysisError>> => {
-  if (signal?.aborted === true)
-    return err(new AnalysisCancelledError(operation, { cause: signal.reason }));
-  try {
-    return ok(
-      await execFileBytes(binary, arguments_, {
-        timeout: limits.timeoutMs,
-        maxBuffer: limits.maxOutputBytes,
-        stopSignal: "SIGTERM",
-        ...(signal === undefined ? {} : { signal }),
-      }),
-    );
-  } catch (cause) {
-    if (signal?.aborted || execFileOutputFailure(cause)?.code === "ABORT_ERR")
-      return err(new AnalysisCancelledError(operation, { cause }));
-    const failure = execFileOutputFailure(cause);
-    if (failure === undefined)
-      return err(
-        new AnalysisProtocolError(`adb failed for ${operation}`, { cause }),
-      );
-    if (failure.outputTruncated)
-      return err(
-        new AnalysisResourceConstraintError(
-          operation,
-          "memory",
-          `adb output exceeded the ${String(limits.maxOutputBytes)}-byte capture budget`,
-          { max_output_bytes: limits.maxOutputBytes },
-          { cause },
-        ),
-      );
-    const excerpt = failure.stderr.trim().slice(0, STDERR_EXCERPT_BYTES);
-    if (/unauthorized/iu.test(excerpt))
-      return err(
-        new AnalysisUnsupportedTargetError(operation, targetPath, excerpt, {
-          cause,
-        }),
-      );
-    if (
-      /device[^\n]*not found|device offline|still authorizing|more than one device/iu.test(
-        excerpt,
-      )
-    )
-      return err(
-        new AnalysisUnsupportedTargetError(operation, targetPath, excerpt, {
-          cause,
-        }),
-      );
-    if (
-      /No such file or directory|Permission denied|read: Permission denied/iu.test(
-        excerpt,
-      )
-    )
-      return err(
-        new AnalysisUnsupportedTargetError(operation, targetPath, excerpt, {
-          cause,
-        }),
-      );
-    if (failure.killed)
-      return err(
-        new AnalysisTimeoutError(operation, limits.timeoutMs, { cause }),
-      );
-    return err(
-      new AnalysisProtocolError(
-        excerpt === ""
-          ? `adb exited with code ${String(failure.code)} for ${operation}`
-          : excerpt,
-        { cause },
-      ),
-    );
-  }
-};
-
-/** Decode textual adb protocols after the shared byte capture and error boundary. */
-const runAdb = async (
-  ...arguments_: Parameters<typeof runAdbCapture>
-): Promise<
-  Result<{ stdout: string; stderr: string; stdoutBytes: number }, AnalysisError>
-> => {
-  const captured = await runAdbCapture(...arguments_);
-  if (!captured.ok) return captured;
-  return ok({
-    stdout: captured.value.stdout.toString("utf8"),
-    stderr: captured.value.stderr.toString("utf8"),
-    // Byte count of the captured output before UTF-8 decoding, so malformed
-    // sequences replaced by U+FFFD still report their true captured size.
-    stdoutBytes: captured.value.stdout.byteLength,
-  });
-};
-
-/**
- * adb exits nonzero when the device refuses a package change, printing the
- * `Failure [...]` verdict to stderr (install) or stdout (uninstall). Read the
- * refusal from that failed run so it is not reported as unreadable output.
- */
-const packageChangeRefusal = (
-  operation: string,
-  serial: string,
-  error: AnalysisError,
-): Result<never, AnalysisError> | undefined => {
-  if (!(error instanceof AnalysisProtocolError)) return undefined;
-  const failure = execFileOutputFailure(error.cause);
-  if (failure === undefined) return undefined;
-  const reason = packageChangeFailureReason(
-    `${failure.stdout}\n${failure.stderr}`,
-  );
-  return reason === null
-    ? undefined
-    : err(
-        new AnalysisUnsupportedTargetError(operation, serial, reason, {
-          cause: error,
-        }),
-      );
 };
 
 const clientIdentityResult = (
@@ -605,7 +466,10 @@ const publishScreenExclusively = async (
   // the visible file despite later cancellation so its receipt remains known.
   const ownedOutput = new OwnedFileHandle(output);
   const handleResource = `${outputPath} (ADB publication handle)`;
-  const closeOnly = new AnalysisCleanupLease(() => ownedOutput.close());
+  const closeOnly = new AnalysisCleanupLease(
+    () => ownedOutput.close(),
+    [handleResource],
+  );
   const removeOutput = async (
     expected: Awaited<ReturnType<typeof output.stat>>,
   ): Promise<void> => {
@@ -2529,28 +2393,16 @@ export class AdbProvider {
           operation,
           signal,
         );
-        // `test -e` exits nonzero with no adb diagnosis when the path is absent.
-        // Any other probe failure leaves existence unknown, so it is reported as
-        // such rather than treated as absence or followed by a push.
-        const existsProbe = await runAdb(
+        const existsProbe = await probeAdbPathExistence(
           operation,
+          input.serial,
           input.device_path,
           selection.binary,
-          adbArguments(input.serial, [
-            "shell",
-            "test",
-            "-e",
-            input.device_path,
-          ]),
           { timeoutMs: SETTINGS_TIMEOUT_MS, maxOutputBytes: 1024 },
           signal,
         );
-        if (
-          !existsProbe.ok &&
-          !(existsProbe.error instanceof AnalysisProtocolError)
-        )
-          return existsProbe;
-        const deviceExists = existsProbe.ok;
+        if (!existsProbe.ok) return existsProbe;
+        const deviceExists = existsProbe.value;
         if (deviceExists && !input.overwrite)
           return err(
             new AnalysisOutputError(

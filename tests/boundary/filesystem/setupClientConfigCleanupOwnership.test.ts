@@ -11,6 +11,7 @@ import {
 } from "../../../src/application/SetupHost.js";
 import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
 import { configureDetectedClients } from "../../../src/application/SetupClients.js";
+import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
 import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -112,6 +113,35 @@ it("retains invalid UTF-8 diagnostics and the uninstall read owner when close fa
       detail: expect.stringContaining("not valid UTF-8"),
     });
     expect(await readFile(path)).toEqual(original);
+    expect(closeAttempts).toHaveLength(2);
+    await expectCloseReclaimsHandle(host, closeAttempts, release);
+  } finally {
+    await cleanupHeldHandle(host, release);
+  }
+});
+
+it("stops uninstall and retains the backup read owner when its close fails", async () => {
+  const home = await createTestTempDirectory("rea-uninstall-backup-close-");
+  const path = join(home, "client.json");
+  const client = { name: "cursor", format: "json", configPath: path } as const;
+  await writeFile(path, '{"keep":"before setup"}\n');
+  expect(
+    await configureClientConfiguration(client, {}, ["rea", "mcp"]),
+  ).toMatchObject({ status: "configured" });
+  const configured = await readFile(path, "utf8");
+  const { closeAttempts, release } = holdReadHandle(
+    `${path}.rea.backup`,
+    "held backup handle",
+  );
+  const host = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  try {
+    expect(await host.removeClient(client)).toEqual({
+      name: "cursor",
+      status: "failed",
+      detail:
+        "Configuration could not be backed up, so no change was made. Check file permissions, then rerun uninstall.",
+    });
+    expect(await readFile(path, "utf8")).toBe(configured);
     expect(closeAttempts).toHaveLength(2);
     await expectCloseReclaimsHandle(host, closeAttempts, release);
   } finally {

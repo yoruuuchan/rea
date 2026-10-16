@@ -153,8 +153,10 @@ and during shutdown.
 - **Mutations are explicit.** `push_adb_file`, `install_adb_package`, and
   `uninstall_adb_package` declare `mutatesTarget` and never run implicitly:
   pushes check for existing device files before transfer and refuse them
-  unless `overwrite` is set. The check is not atomic, so a different process
-  can create the path before `adb push` writes it. When available, the device's
+  unless `overwrite` is set. A failed or unexpected existence probe stops
+  transfer even with `overwrite`; only a clean `test -e` exit of 1 with no
+  output is interpreted as absence. The check is not atomic, so a different
+  process can create the path before `adb push` writes it. When available, the device's
   `sha256sum` verifies the transfer; installs preserve the
   device's `Failure [...]` reason verbatim.
 - **Producer identity stays attached.** Every result embeds the producing

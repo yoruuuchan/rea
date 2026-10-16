@@ -1,3 +1,5 @@
+import { DarwinProcessOwnershipInspectionError } from "../../../src/process/DarwinProcessRunTokenReader.js";
+import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
@@ -535,4 +537,68 @@ it("preserves original command failure together with failed cleanup resource ide
     resources: expect.arrayContaining([request.runId]),
     snapshot: { exitCode: 2 },
   });
+});
+
+it("retains the preparation owner alongside an independent command deadline", async () => {
+  const marker = new ProviderCleanupError(
+    "process-ownership",
+    ["owned helper root"],
+    { reason: "controlled cleanup failure" },
+  );
+  let preparation: DarwinProcessOwnershipInspectionError | undefined;
+  const failure = await runOwnedCommand(
+    command("process.exit(0)"),
+    { timeoutMs: 20, diagnosticBytes: 1024 },
+    {
+      launcher: async (input) => {
+        try {
+          await delay(80, undefined, { signal: input.signal });
+        } catch {
+          preparation = new DarwinProcessOwnershipInspectionError(
+            "cancelled preparation",
+            {
+              cancellation: { reason: input.signal?.reason },
+              cleanupFailure: marker,
+            },
+          );
+          throw preparation;
+        }
+        throw new Error("Unexpected completed preparation");
+      },
+    },
+  ).catch((cause: unknown) => cause);
+  expect(failure).toBeInstanceOf(OwnedCommandFailure);
+  if (!(failure instanceof OwnedCommandFailure))
+    throw new Error("Expected command deadline failure");
+  expect(failure.reason).toBe("timeout");
+  expect(failure.preparationFailure).toBe(preparation);
+  expect(failure.preparationFailure?.cleanupFailure).toBe(marker);
+});
+
+it("keeps a caller-supplied preparation error opaque when it is the exact abort reason", async () => {
+  const controller = new AbortController();
+  const marker = new ProviderCleanupError("caller", ["caller metadata"], {
+    reason: "opaque caller value",
+  });
+  const reason = new DarwinProcessOwnershipInspectionError("caller value", {
+    cleanupFailure: marker,
+  });
+  const failure = await runOwnedCommand(
+    command("process.exit(0)"),
+    { timeoutMs: 2000, diagnosticBytes: 1024 },
+    {
+      signal: controller.signal,
+      launcher: async (input) => {
+        controller.abort(reason);
+        input.signal?.throwIfAborted();
+        throw new Error("Unexpected completed preparation");
+      },
+    },
+  ).catch((cause: unknown) => cause);
+  expect(failure).toBeInstanceOf(OwnedCommandFailure);
+  if (!(failure instanceof OwnedCommandFailure))
+    throw new Error("Expected command cancellation");
+  expect(failure.reason).toBe("cancelled");
+  expect(failure.cause).toBe(reason);
+  expect(failure.preparationFailure).toBeUndefined();
 });

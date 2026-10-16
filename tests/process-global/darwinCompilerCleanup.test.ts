@@ -41,6 +41,9 @@ import {
   createDarwinProcessRunTokenReader,
   DarwinProcessOwnershipInspectionError,
 } from "../../src/process/DarwinProcessRunTokenReader.js";
+import { NativeMacOSProvider } from "../../src/native/NativeMacOSProvider.js";
+import { XcrunCommandRunner } from "../../src/native/CommandRunner.js";
+import { nativeMachoTarget } from "../fixtures/nativeCommands.js";
 import { GhidraClient } from "../../src/ghidra/GhidraClient.js";
 import { GhidraHeadlessLauncher } from "../../src/ghidra/GhidraLauncher.js";
 import { captureProcessScenario } from "../../src/process/capture/ProcessHarness.js";
@@ -284,5 +287,105 @@ it.skipIf(process.platform === "win32")(
     await reader.close();
     expect(result.error.cleanupIncomplete).toBe(false);
     expect(result.error.capturedOutput?.exit_code).toBe(7);
+  },
+);
+
+it.skipIf(process.platform !== "darwin").each([false, true])(
+  "native command preparation preserves compiler output and its foreign cleanup owner with late cancellation %s",
+  async (lateCancellation) => {
+    const { reader } = await fixture();
+    const controller = new AbortController();
+    if (lateCancellation) fault.abort = controller;
+    vi.spyOn(systemProcessOwnershipHost, "prepare").mockImplementation(
+      async (signal) => {
+        await reader.prepare(signal);
+      },
+    );
+    const client = new NativeMacOSProvider(
+      {},
+      new XcrunCommandRunner({}),
+      "darwin",
+    ).createClient(nativeMachoTarget(ghidraFixturePath));
+    try {
+      const result = await client.execute(
+        "list_architectures",
+        {},
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected failed process preparation");
+      expect(result.error._tag).toBe("ProviderAdapterError");
+      expect(result.error).toMatchObject({
+        cleanupIncomplete: true,
+        capturedOutput: {
+          stdout: "owned compiler stdout",
+          stdout_bytes: 21,
+          stderr: "controlled compiler failure\n",
+          stderr_bytes: 28,
+          exit_code: 7,
+        },
+        diagnostics: { phase: "process-preparation", tool: "lipo" },
+      });
+      expect(result.error.cleanupResources).toEqual([...fault.roots]);
+      expect((await client.close()).ok).toBe(true);
+      expect(result.error.cleanupIncomplete).toBe(true);
+      fault.blocked = false;
+      await reader.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+      expect(result.error.capturedOutput?.exit_code).toBe(7);
+    } finally {
+      await client.close();
+    }
+  },
+);
+
+it
+  .skipIf(process.platform !== "darwin")
+  .each([
+    null,
+    "stop native preparation",
+    new Error("stop native preparation"),
+  ] as const)(
+  "native preparation preserves exact cancellation %s with retained helper cleanup",
+  async (reason) => {
+    const { reader, readyPath } = await fixture("active");
+    vi.spyOn(systemProcessOwnershipHost, "prepare").mockImplementation(
+      async (signal) => {
+        await reader.prepare(signal);
+      },
+    );
+    const controller = new AbortController();
+    const client = new NativeMacOSProvider(
+      {},
+      new XcrunCommandRunner({}),
+      "darwin",
+    ).createClient(nativeMachoTarget(ghidraFixturePath));
+    const pending = client.execute(
+      "list_architectures",
+      {},
+      { signal: controller.signal },
+    );
+    try {
+      await vi.waitFor(async () =>
+        expect(await readFile(readyPath, "utf8")).toBe("ready"),
+      );
+      controller.abort(reason);
+      const result = await pending;
+      if (result.ok) throw new Error("Expected cancelled preparation");
+      expect(result.error).toMatchObject({
+        _tag: "AnalysisCancelledError",
+        cleanupIncomplete: true,
+        diagnostics: { phase: "process-preparation", reason: "cancelled" },
+      });
+      expect(result.error.cause).toBe(reason);
+      expect((await client.close()).ok).toBe(true);
+      expect(result.error.cleanupIncomplete).toBe(true);
+      fault.blocked = false;
+      await reader.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+    } finally {
+      controller.abort(reason);
+      await pending;
+      await client.close();
+    }
   },
 );

@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -450,6 +451,26 @@ it("runs active Electron scenarios with selected paths and inferred working dire
   const capturedInputs: unknown[] = [];
   const activeResult =
     createElectronActiveObservationFixtureResult(applicationPath);
+  const capturedEvent = activeResult.timeline.events[0];
+  if (capturedEvent === undefined) throw new Error("IPC fixture was empty");
+  const gaps = ["custom-apply", "listener-chain"].map((event, index) => ({
+    ...capturedEvent,
+    sequence: index + 2,
+    kind: "ipc-observation-gap" as const,
+    event,
+    channel: event === "custom-apply" ? "custom" : "opaque-chain",
+    direction: null,
+    receiver: null,
+    target: "ipcMain.on",
+    argument_shapes: [],
+    result_shape: null,
+  }));
+  activeResult.timeline.events.push(...gaps);
+  activeResult.timeline.observed = 3;
+  activeResult.retention.retained = 3;
+  activeResult.retention.estimated_retained_bytes = 1_536;
+  activeResult.retention.observed_runtime = 2;
+  activeResult.coverage.observed_event_families.push("ipc-observation-gap");
   const provider: ElectronActiveObservationPort = {
     identity: () => ({
       id: "test-electron-active",
@@ -482,6 +503,15 @@ it("runs active Electron scenarios with selected paths and inferred working dire
   await server.connect(serverTransport);
   await client.connect(clientTransport);
 
+  const advertised = (await client.listTools()).tools.find(
+    ({ name }) => name === "capture_electron_scenario",
+  );
+  if (advertised?.outputSchema === undefined)
+    throw new Error("Active Electron output schema was not advertised");
+  const validateOutput = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile(z.record(z.string(), z.unknown()).parse(advertised.outputSchema));
   const captured = await client.callTool({
     name: "capture_electron_scenario",
     arguments: {
@@ -495,10 +525,21 @@ it("runs active Electron scenarios with selected paths and inferred working dire
     },
   });
   expect(captured.isError, JSON.stringify(captured)).not.toBe(true);
+  expect(
+    validateOutput(captured.structuredContent),
+    JSON.stringify(validateOutput.errors),
+  ).toBe(true);
   expect(captured.structuredContent).toMatchObject({
     normalized_result: {
       application: { process_ownership: "provider-owned" },
       ipc: { events: [{ channel: "readiness:echo" }] },
+      timeline: {
+        events: [
+          { kind: "main-handler-invocation" },
+          { kind: "ipc-observation-gap", channel: "custom" },
+          { kind: "ipc-observation-gap", channel: "opaque-chain" },
+        ],
+      },
       coverage: {
         status: "partial_attach",
         pre_capture_activity: "unavailable",

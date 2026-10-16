@@ -1,8 +1,12 @@
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import type {
   AnalysisClient,
   AnalysisClientContext,
   AnalysisProfileResolutionOptions,
+  AnalysisProfileResolution,
   AnalysisProviderCandidate,
   AnalysisProviderReadinessSnapshot,
   CapabilityDescriptor,
@@ -24,7 +28,8 @@ import {
   jsonValueSchema,
   type JsonValue,
 } from "../domain/jsonValue.js";
-import { err, ok } from "../domain/result.js";
+import { err, ok, type Result } from "../domain/result.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { Logger } from "pino";
@@ -78,6 +83,11 @@ const SUPPORTED_ARCHITECTURES = new Set([
 
 /** Ghidra candidate backed by an isolated ephemeral headless import. */
 export class GhidraProvider implements AnalysisProviderCandidate {
+  readonly #inspectionResources = new ArtifactResourceScope();
+  readonly #profileWork = new Set<
+    Promise<Result<AnalysisProfileResolution, AnalysisError>>
+  >();
+  #closing: Promise<Result<null, AnalysisError>> | undefined;
   #installation: GhidraInstallationInspection | undefined;
   private readonly environment: NodeJS.ProcessEnv;
 
@@ -223,7 +233,60 @@ export class GhidraProvider implements AnalysisProviderCandidate {
     };
   }
 
+  hasPendingOwnedResources(): boolean {
+    return this.#profileWork.size > 0 || this.#inspectionResources.hasPending;
+  }
+
+  closeOwnedResources() {
+    this.#closing ??= Promise.resolve()
+      .then(async () => {
+        await Promise.allSettled(this.#profileWork);
+        return this.#closeInspectionResources();
+      })
+      .finally(() => {
+        this.#closing = undefined;
+      });
+    return this.#closing;
+  }
+
+  async #closeInspectionResources() {
+    try {
+      await this.#inspectionResources.retryCleanup();
+      return ok(null);
+    } catch (cause: unknown) {
+      const error = new ProviderCleanupError(
+        "ghidra",
+        cause instanceof ArtifactReaderFailure
+          ? (cause.cleanup?.resources ?? [])
+          : [],
+        { reason: providerFailureText(cause) },
+        { cause },
+      );
+      bindArtifactFileCleanup(cause, error);
+      return err(error);
+    }
+  }
+
   async resolveAnalysisProfile(
+    target: BinaryTarget,
+    options?: AnalysisProfileResolutionOptions,
+  ): Promise<Result<AnalysisProfileResolution, AnalysisError>> {
+    if (this.#closing !== undefined) {
+      const closed = await this.#closing;
+      if (!closed.ok) return closed;
+    }
+    const work = Promise.resolve().then(() =>
+      this.#resolveProfile(target, options),
+    );
+    this.#profileWork.add(work);
+    try {
+      return await work;
+    } finally {
+      this.#profileWork.delete(work);
+    }
+  }
+
+  async #resolveProfile(
     target: BinaryTarget,
     options?: AnalysisProfileResolutionOptions,
   ) {
@@ -232,6 +295,7 @@ export class GhidraProvider implements AnalysisProviderCandidate {
       target,
       GHIDRA_PROVIDER_IDENTITY,
       installation,
+      this.#inspectionResources,
       options?.signal,
       this.config.ghidraLanguageOverride,
       this.config.ghidraDisabledAnalyzers,
@@ -280,12 +344,21 @@ export class GhidraProvider implements AnalysisProviderCandidate {
       this.config,
       target,
       installation.platform,
+      this.#inspectionResources,
       options?.signal,
     );
     if (!extensions.ok) return extensions;
     if (options?.signal?.aborted === true)
-      return err(new AnalysisCancelledError("open_binary"));
-    const seeds = await resolveGhidraAnalysisSeeds(this.config.ghidraSeedFile);
+      return err(
+        new AnalysisCancelledError("open_binary", {
+          cause: options.signal.reason,
+        }),
+      );
+    const seeds = await resolveGhidraAnalysisSeeds(
+      this.config.ghidraSeedFile,
+      this.#inspectionResources,
+      options?.signal,
+    );
     if (!seeds.ok) return seeds;
     if (extensions.value.length === 0 && seeds.value === undefined)
       return resolved;

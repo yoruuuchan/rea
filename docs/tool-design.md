@@ -132,6 +132,14 @@ providers need not expose identical state machines.
   while it remains unresolved. Link the originating cleanup error to its exact
   owner so confirmed release resolves its cleanup marker while preserving the
   earlier diagnostic. Shared CLI/MCP adapters cannot infer that confirmation.
+- Provider profile selection owns every asynchronous candidate through its
+  terminal result and finalization. The registry owns profile-file cleanup,
+  joins all automatic-selection children, and closes those file owners before
+  reporting candidate shutdown. Final caller cancellation joins the selection;
+  an adapter that ignores cancellation remains active and owned until it settles.
+  Block new admission during shutdown and while cleanup remains unresolved;
+  reopen after confirmed retry. Preserve failed results before considering a
+  later signal, and retain every child's attributed cleanup in mixed outcomes.
 - Release child descriptors before removing their containing root. Retain a
   composite owner when either stage fails so retry preserves that ordering.
   A Windows command leader's exit does not establish Job Object closure. Keep

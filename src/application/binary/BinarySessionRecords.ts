@@ -32,8 +32,6 @@ import { AnalysisSnapshotCache } from "./AnalysisSnapshotCache.js";
 import { InvestigationRecords } from "../investigation/InvestigationRecords.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
-import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
-import type { FileCloseResourceOwner } from "../AnalysisProvider.js";
 import { writeAnalysisSnapshot as writeSnapshotFile } from "./AnalysisSnapshotFiles.js";
 
 const SNAPSHOT_MUTATION_RECOVERY =
@@ -57,21 +55,9 @@ export interface WorkflowSnapshotRecordInput {
 export abstract class BinarySessionRecords {
   readonly #records: InvestigationRecords;
   readonly #writeResources = new ArtifactResourceScope();
-  readonly #fileCloseResources = new ArtifactResourceScope();
-  protected readonly fileCloseResourceOwner: FileCloseResourceOwner = {
-    retain: (owner, resource) =>
-      this.#fileCloseResources.retain({
-        kind: "lease",
-        resource,
-        lease: { release: () => owner.close() },
-      }),
-    run: (operation) => this.#fileCloseResources.run(operation),
-  };
 
   protected get hasPendingFileResources(): boolean {
-    return (
-      this.#writeResources.hasPending || this.#fileCloseResources.hasPending
-    );
+    return this.#writeResources.hasPending;
   }
   readonly #snapshot = new AnalysisSnapshotCache();
   #snapshotInvalidated = false;
@@ -146,27 +132,6 @@ export abstract class BinarySessionRecords {
             resources: observation.resources,
           },
         }),
-      );
-    }
-  }
-
-  /** Retry retained descriptors owned by this composed binary session. */
-  async closeFailedFileCloses(): Promise<Result<null, AnalysisError>> {
-    try {
-      await this.#fileCloseResources.retryCleanup();
-      return ok(null);
-    } catch (cause: unknown) {
-      const observation = ArtifactReaderFailure.cleanupObservation(
-        cause,
-        "provider file descriptor",
-      );
-      return err(
-        new ProviderCleanupError(
-          "rea",
-          observation.resources,
-          { reason: observation.reason },
-          { cause, operation: "close_binary" },
-        ),
       );
     }
   }

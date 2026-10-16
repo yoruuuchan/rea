@@ -242,6 +242,7 @@ it("waits for mixed finalization and resolves cleanup only after both exact desc
     fault.blocked.delete(fault.destinations[0]!);
     await destination.cleanupLease.release();
     expect(projected.cleanupIncomplete).toBe(true);
+    expect(projected.cleanupResources).toEqual([path]);
     fault.blocked.clear();
     await resources.close();
     expect(projected.cleanupIncomplete).toBe(false);

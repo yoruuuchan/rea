@@ -1,3 +1,5 @@
+import { ok as javaProbeOk } from "../domain/result.js";
+import type { GhidraJavaObservation } from "./GhidraJavaProbe.js";
 import type { GhidraSeedReport } from "./GhidraAnalysisSeeds.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -50,16 +52,17 @@ const installationHost = (
   architecture: "x64",
   readText: () => "application.version=12.1.4\napplication.java.min=21\n",
   executable: () => true,
-  probeJava: () => ({
-    osArch: "amd64",
-    osName: platform === "win32" ? "Windows 11" : "Linux",
-    version: "21.0.11",
-    major: 21,
-    home: "/usr/lib/jvm/jdk-21",
-    bits: 64,
-    runtime: "jdk",
-    vmName: "OpenJDK 64-Bit Server VM",
-  }),
+  probeJava: () =>
+    javaProbeOk<GhidraJavaObservation>({
+      osArch: "amd64",
+      osName: platform === "win32" ? "Windows 11" : "Linux",
+      version: "21.0.11",
+      major: 21,
+      home: "/usr/lib/jvm/jdk-21",
+      bits: 64,
+      runtime: "jdk",
+      vmName: "OpenJDK 64-Bit Server VM",
+    }),
 });
 
 const provider = (
@@ -208,7 +211,7 @@ describe("Ghidra provider", () => {
       ...installationHost(),
       probeJava: () => {
         probeCount += 1;
-        return {
+        return javaProbeOk<GhidraJavaObservation>({
           osArch: "amd64",
           osName: "Linux",
           version: "21.0.11",
@@ -216,7 +219,7 @@ describe("Ghidra provider", () => {
           home: "/usr/lib/jvm/jdk-21",
           bits: 64,
           runtime: "jdk",
-        };
+        });
       },
     };
     const ghidra = provider(host);
@@ -2292,15 +2295,16 @@ describe("compatible Ghidra builds", () => {
         ...installationHost(),
         readText: () =>
           "application.version=12.1.2\napplication.java.min=21\napplication.java.max=\n",
-        probeJava: () => ({
-          osArch: "amd64",
-          osName: "Linux",
-          version: "27",
-          major: 27,
-          home: "/usr/lib/jvm/java-27-openjdk",
-          bits: 64,
-          runtime: "jdk",
-        }),
+        probeJava: () =>
+          javaProbeOk<GhidraJavaObservation>({
+            osArch: "amd64",
+            osName: "Linux",
+            version: "27",
+            major: 27,
+            home: "/usr/lib/jvm/java-27-openjdk",
+            bits: 64,
+            runtime: "jdk",
+          }),
       },
       () => ({
         start: () =>

@@ -33,7 +33,11 @@ export const projectGhidraDoctorInspection = (
         : {},
     checks: [
       ...selectedChecks(inspection).map((check) =>
-        projectCheck(check, inspection.installDir !== null),
+        projectCheck(
+          check,
+          inspection.installDir !== null,
+          inspection.javaProbeFailure,
+        ),
       ),
       ...(readiness !== undefined
         ? [
@@ -107,11 +111,25 @@ const selectedChecks = (
 const projectCheck = (
   check: GhidraInstallationCheck,
   configured: boolean,
+  javaFailure: GhidraInstallationInspection["javaProbeFailure"],
 ): DoctorProviderCheck => ({
   name: check.name,
   ok: check.status === "passed",
   code: check.status === "failed" ? check.code : null,
   detail: check.detail,
+  ...(check.name === "java" && javaFailure?.output !== undefined
+    ? {
+        details: {
+          output: { ...javaFailure.output },
+          ...(javaFailure.processErrorCode === undefined
+            ? {}
+            : { process_error_code: javaFailure.processErrorCode }),
+          ...(javaFailure.properties === undefined
+            ? {}
+            : { properties: { ...javaFailure.properties } }),
+        },
+      }
+    : {}),
   remediation: check.status === "failed" ? check.remediation : null,
   classification:
     check.name === "platform" || check.name === "architecture"
@@ -120,7 +138,11 @@ const projectCheck = (
           check.status === "failed" &&
           check.code === "runtime_missing"
         ? "missing_dependency"
-        : configured
-          ? "config_drift"
-          : "missing_analysis_engine",
+        : check.name === "java" &&
+            check.status === "failed" &&
+            check.code === "runtime_unavailable"
+          ? "runtime_failure"
+          : configured
+            ? "config_drift"
+            : "missing_analysis_engine",
 });

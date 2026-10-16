@@ -200,12 +200,15 @@ export class BinarySession
       current: this.#active,
       target,
       options,
-      fileCloseResources: this.fileCloseResourceOwner,
       stagedSnapshotMatches: (target, profile) =>
         this.matchesSnapshot(target, profile),
     }).then((resolved) =>
-      isAborted(options.signal)
-        ? err(new AnalysisCancelledError("open_binary"))
+      resolved.ok && isAborted(options.signal)
+        ? err(
+            new AnalysisCancelledError("open_binary", {
+              cause: options.signal?.reason,
+            }),
+          )
         : resolved,
     );
   }
@@ -225,7 +228,6 @@ export class BinarySession
           current: this.#active,
           path,
           options: admitted,
-          fileCloseResources: this.fileCloseResourceOwner,
           stagedSnapshotMatches: (target, profile) =>
             this.matchesSnapshot(target, profile),
         }),
@@ -503,11 +505,9 @@ export class BinarySession
     if (clearRecords) this.clearSessionRecords();
     this.#clearRuntimeAvailability();
     const fileResources = await this.closeWriteResources();
-    const hashResources = await this.closeFailedFileCloses();
     const candidateResources = await this.#providerRouter.closeOwnedResources();
     const resourceFailures = [
       ...(fileResources.ok ? [] : [fileResources.error]),
-      ...(hashResources.ok ? [] : [hashResources.error]),
       ...(candidateResources.ok ? [] : [candidateResources.error]),
     ];
     let resourceFailure = resourceFailures[0];

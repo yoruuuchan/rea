@@ -50,8 +50,13 @@ export const createObjcProtocolReader = (input: {
         : read.pointer(entry);
       if (relative && (flags & 0x40000000) === 0)
         selector = read.pointer(selector);
+      const selectorName = read.string(selector);
+      if (selectorName.length === 0)
+        throw new TypeError(
+          "Objective-C protocol method has an empty selector",
+        );
       output.push({
-        selector: read.string(selector),
+        selector: selectorName,
         method_type: instance ? "instance" : "class",
         address: null,
         is_required: required,

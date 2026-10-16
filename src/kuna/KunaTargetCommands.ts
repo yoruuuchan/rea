@@ -118,7 +118,10 @@ export class KunaTargetCommands {
           reportedTimeoutMs: request.timeoutMs,
           launcher: this.lifetime.launcher,
           retainFailedFileClose: (owner, resource) => {
-            const lease = new AnalysisCleanupLease(() => owner.close());
+            const lease = new AnalysisCleanupLease(
+              () => owner.close(),
+              [resource],
+            );
             this.#resources.retain({ kind: "lease", resource, lease });
             failedHashClose = { owner, lease };
           },

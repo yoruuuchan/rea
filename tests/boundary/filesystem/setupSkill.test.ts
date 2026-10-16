@@ -46,6 +46,31 @@ const expectPermissionMode = async (
 };
 
 describe("skill recovery backup selection", () => {
+  it("reuses a verified existing backup without copying it again", async () => {
+    const home = await createTestTempDirectory("rea-skill-matching-backup-");
+    const [destination] = skillDestinations(home, []);
+    if (destination === undefined) throw new Error("Missing shared skill root");
+    const manifest = join(destination.path, "SKILL.md");
+    const current = "currently installed instructions\n";
+    await mkdir(dirname(manifest), { recursive: true });
+    await writeFile(manifest, current);
+    await writeFile(`${manifest}.rea.backup`, current);
+    const result = await installCanonicalSkill(home, [], {}, process.platform, {
+      mkdir: async (path) =>
+        mkdir(path, { recursive: true }).then(() => undefined),
+      backup: async () => {
+        throw new Error("A matching backup must not be copied again");
+      },
+      write: (path, content, mode) =>
+        writeFileAtomic(path, content, { encoding: "utf8", mode }),
+      remove: async (path) => rm(path, { force: true }),
+    });
+
+    expect(result).toEqual({ ok: true, value: "installed" });
+    expect(await readFile(`${manifest}.rea.backup`, "utf8")).toBe(current);
+    expect(await canonicalSkillNeedsInstall(home, [])).toBe(false);
+  });
+
   it("advertises a current recovery snapshot when the first backup is historical", async () => {
     const home = await createTestTempDirectory("rea-skill-historical-backup-");
     const [destination] = skillDestinations(home, []);

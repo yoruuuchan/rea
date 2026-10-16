@@ -1,4 +1,13 @@
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -9,8 +18,158 @@ import {
   configureClientConfiguration,
   inspectClientConfiguration,
 } from "../../../src/application/SetupClientConfiguration.js";
-import { systemUninstallHost } from "../../../src/application/Uninstall.js";
+import {
+  systemUninstallHost,
+  type UninstallFileSystem,
+} from "../../../src/application/Uninstall.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+
+describe("uninstall backups after edits made since setup", () => {
+  const editedSinceSetup = async (prefix: string) => {
+    const root = await createTestTempDirectory(prefix);
+    const configPath = join(root, "config.json");
+    const client = { name: "cursor", format: "json", configPath } as const;
+    const beforeSetup = '{"keep":"before setup"}\n';
+    await writeFile(configPath, beforeSetup);
+    expect(
+      await configureClientConfiguration(client, {}, ["rea", "mcp"]),
+    ).toMatchObject({ status: "configured" });
+    const configured = JSON.parse(await readFile(configPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const beforeUninstall = `${JSON.stringify({ ...configured, keep: "edited after setup" }, null, 2)}\n`;
+    await writeFile(configPath, beforeUninstall);
+    const recoveryPath = `${configPath}.rea.backup.${createHash("sha256")
+      .update(beforeUninstall, "utf8")
+      .digest("hex")}.recovery`;
+    return {
+      root,
+      configPath,
+      client,
+      beforeSetup,
+      beforeUninstall,
+      recoveryPath,
+    };
+  };
+
+  const fileSystem = (failWrites: "update" | "always"): UninstallFileSystem => {
+    let writes = 0;
+    return {
+      readText: (path) => readFile(path, "utf8"),
+      copy: (source, destination) =>
+        copyFile(source, destination, fsConstants.COPYFILE_EXCL),
+      writeText: async (path, contents) => {
+        writes += 1;
+        if (failWrites === "always" || writes === 1)
+          throw new Error("write failed");
+        await writeFile(path, contents);
+      },
+      stat: (path) => lstat(path),
+      realpath: (path) => realpath(path),
+      remove: (path) => rm(path, { recursive: true }),
+    };
+  };
+
+  it("preserves the pre-uninstall bytes when removal succeeds", async () => {
+    const {
+      root,
+      configPath,
+      client,
+      beforeSetup,
+      beforeUninstall,
+      recoveryPath,
+    } = await editedSinceSetup("rea-uninstall-current-backup-");
+    expect((await systemUninstallHost(root).removeClient(client)).status).toBe(
+      "removed",
+    );
+    expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(
+      beforeSetup,
+    );
+    expect(await readFile(recoveryPath, "utf8")).toBe(beforeUninstall);
+  });
+
+  it.each([
+    [
+      "update",
+      (path: string) =>
+        `Configuration could not be updated. The original was restored and its backup at ${path} was retained. Repair the configuration or restore that backup, then rerun uninstall.`,
+    ],
+    [
+      "always",
+      (path: string) =>
+        `Configuration could not be updated or restored. Restore the backup at ${path} manually, then rerun uninstall.`,
+    ],
+  ] as const)(
+    "names the backup holding the pre-uninstall bytes when %s writes fail",
+    async (failWrites, message) => {
+      const {
+        root,
+        configPath,
+        client,
+        beforeSetup,
+        beforeUninstall,
+        recoveryPath,
+      } = await editedSinceSetup("rea-uninstall-current-backup-failure-");
+      expect(
+        await systemUninstallHost(root, fileSystem(failWrites)).removeClient(
+          client,
+        ),
+      ).toEqual({
+        name: "cursor",
+        status: "failed",
+        detail: message(recoveryPath),
+      });
+      expect(await readFile(configPath, "utf8")).toBe(beforeUninstall);
+      expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(
+        beforeSetup,
+      );
+      expect(await readFile(recoveryPath, "utf8")).toBe(beforeUninstall);
+    },
+  );
+
+  it("blocks removal when the content-addressed backup holds other data", async () => {
+    const { root, configPath, client, beforeUninstall, recoveryPath } =
+      await editedSinceSetup("rea-uninstall-current-backup-occupied-");
+    await writeFile(recoveryPath, "occupied by other data");
+    const result = await systemUninstallHost(root).removeClient(client);
+    expect(result.status).toBe("failed");
+    expect(result.detail).toContain(recoveryPath);
+    expect(await readFile(configPath, "utf8")).toBe(beforeUninstall);
+    expect(await readFile(recoveryPath, "utf8")).toBe("occupied by other data");
+  });
+
+  it.each([
+    ["missing", async () => undefined],
+    [
+      "wrong",
+      (_source: string, destination: string) =>
+        writeFile(destination, "not the current configuration", {
+          flag: "wx",
+        }),
+    ],
+  ] as const)(
+    "blocks removal when the reported copy leaves %s backup bytes",
+    async (_label, copy) => {
+      const { root, configPath, client, beforeUninstall } =
+        await editedSinceSetup("rea-uninstall-current-backup-unverified-");
+      let writes = 0;
+      const result = await systemUninstallHost(root, {
+        ...fileSystem("update"),
+        copy,
+        writeText: async () => {
+          writes += 1;
+        },
+      }).removeClient(client);
+      expect(result.status).toBe("failed");
+      expect(result.detail).toMatch(
+        /^Configuration could not be backed up, so no change was made\. /,
+      );
+      expect(writes).toBe(0);
+      expect(await readFile(configPath, "utf8")).toBe(beforeUninstall);
+    },
+  );
+});
 
 it("accepts a literal UTF-8 replacement character without changing its value", async () => {
   const root = await createTestTempDirectory("rea-client-config-utf8-");

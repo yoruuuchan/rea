@@ -35,12 +35,13 @@ export type ClientConfigurationResult =
     }
   | {
       readonly status: "failed";
-      readonly reason:
-        | "path"
-        | "target_changed"
-        | "backup"
-        | "write"
-        | "readback";
+      readonly reason: "path" | "target_changed" | "backup" | "write";
+    }
+  | {
+      readonly status: "failed";
+      readonly reason: "readback";
+      /** Snapshot of the restored original, when this transaction made one. */
+      readonly backupPath?: string;
     }
   | {
       readonly status: "failed";

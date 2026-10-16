@@ -9,7 +9,7 @@ import { firmwareResultSchemas } from "../../../src/domain/firmware/firmwareAnal
 import { FirmwareAnalysisService } from "../../../src/application/firmware/FirmwareAnalysisService.js";
 import { FirmwareProvider } from "../../../src/firmware/FirmwareProvider.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
-import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
+import { AnalysisError } from "../../../src/domain/analysisErrorBase.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { ToolResultDelivery } from "../../../src/server/toolResult.js";
 import { SafeOutputTree } from "../../../src/artifacts/SafeOutputTree.js";
@@ -171,6 +171,7 @@ it("retains a setup-failed publication tree for provider cleanup retry", async (
   const fixture = await firmwareFixture();
   const createTree = SafeOutputTree.create.bind(SafeOutputTree);
   let cleanupAttempts = 0;
+  let retained: AnalysisError | undefined;
   const create = vi
     .spyOn(SafeOutputTree, "create")
     .mockImplementationOnce(async (outputRoot, platform) => {
@@ -197,19 +198,22 @@ it("retains a setup-failed publication tree for provider cleanup retry", async (
       ok: false,
       error: {
         cleanupIncomplete: true,
-        diagnostics: {
-          previous_error: expect.stringContaining(
-            "injected post-acquisition setup failure",
-          ),
-        },
+        cleanupResources: expect.arrayContaining([fixture.output]),
       },
     });
+    if (result.ok) throw new Error("Expected retained publication cleanup");
+    retained = result.error;
+    expect(projectAnalysisError(retained).code).toBe("cleanup_incomplete");
+    expect(JSON.stringify(projectAnalysisError(retained))).toContain(
+      "injected post-acquisition setup failure",
+    );
     await expect(access(fixture.output)).resolves.toBeUndefined();
   } finally {
     create.mockRestore();
   }
   await fixture.close();
   expect(cleanupAttempts).toBe(2);
+  expect(retained?.cleanupIncomplete).toBe(false);
   await expect(access(fixture.output)).rejects.toMatchObject({
     code: "ENOENT",
   });
@@ -240,6 +244,7 @@ it("returns firmware output after a transient published-directory close failure"
 
 it("retains the complete firmware result when published output cleanup stays uncertain", async () => {
   const fixture = await firmwareFixture();
+  let retained: AnalysisError | undefined;
   const closeFailure = injectPublishedDirectoryCloseFailure(true);
   try {
     const result = await fixture.service.execute("extract_firmware", {
@@ -266,7 +271,8 @@ it("retains the complete firmware result when published output cleanup stays unc
       },
     });
     if (result.ok) throw new Error("Expected unresolved descriptor cleanup");
-    expect(result.error).toBeInstanceOf(ProviderCleanupError);
+    expect(result.error).toBeInstanceOf(AnalysisError);
+    retained = result.error;
     expect(projectAnalysisError(result.error)).toMatchObject({
       code: "cleanup_incomplete",
       details: {
@@ -284,6 +290,7 @@ it("retains the complete firmware result when published output cleanup stays unc
     closeFailure.restore();
   }
   await fixture.close();
+  expect(retained?.cleanupIncomplete).toBe(false);
   expect(await readFile(`${fixture.output}/rootfs/config`, "utf8")).toBe(
     "firmware=true\n",
   );

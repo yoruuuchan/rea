@@ -290,6 +290,12 @@ export interface AnalysisProviderReadinessSnapshot {
 
 /** Deep provider candidate discoverable before one target-bound route is chosen. */
 export interface AnalysisProviderCandidate extends AnalysisProvider {
+  /**
+   * Own inspection through final reads and cleanup. Observe the supplied owner
+   * signal cooperatively; resolve only after finalization settles, retaining any
+   * failed cleanup capability. Registry cancellation and shutdown join this
+   * completion rather than abandoning the promise.
+   */
   resolveAnalysisProfile(
     target: BinaryTarget,
     options?: AnalysisProfileResolutionOptions,

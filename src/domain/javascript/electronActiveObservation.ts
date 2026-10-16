@@ -97,6 +97,7 @@ export const electronActiveTimelineEventSchema = z.strictObject({
   kind: z.enum([
     "main-handler-invocation",
     "main-event-invocation",
+    "ipc-observation-gap",
     "utility-process-fork",
     "utility-process-message",
     "ipc-main-to-renderer",

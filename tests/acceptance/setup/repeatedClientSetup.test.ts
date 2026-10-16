@@ -1,4 +1,5 @@
-import { access, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect } from "vitest";
@@ -77,5 +78,57 @@ cliTest(
     expect(
       await Promise.all(configurations.map((path) => readFile(path, "utf8"))),
     ).toEqual(configured);
+  },
+);
+
+cliTest(
+  "uninstall preserves user edits made after an earlier setup",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-current-uninstall-backup-");
+    const config = join(home, ".cursor", "mcp.json");
+    const original = '{"mcpServers":{"other":{"command":"other-server"}}}\n';
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(config, original);
+    const run = (arguments_: readonly string[]) =>
+      cli.run({
+        arguments: [...arguments_, "--json"],
+        cwd: home,
+        environment: { HOME: home, USERPROFILE: home, TMPDIR: home },
+      });
+    const planned = await run([
+      "setup",
+      "--client",
+      "cursor",
+      "--skill=false",
+      "--dry-run",
+    ]);
+    expect(planned.exitCode, planned.stderr).toBe(0);
+    expect(planned.json).toMatchObject({ status: "planned" });
+    expect(await readFile(config, "utf8")).toBe(original);
+    const installed = await run([
+      "setup",
+      "--client",
+      "cursor",
+      "--skill=false",
+      "--yes",
+    ]);
+    expect(installed.exitCode, installed.stderr).toBe(0);
+    expect(installed.json).toMatchObject({ status: "ready" });
+    const current = (await readFile(config, "utf8")).replace(
+      "other-server",
+      "edited-server",
+    );
+    expect(current).toContain("edited-server");
+    await writeFile(config, current);
+
+    const removed = await run(["uninstall"]);
+    expect(removed.exitCode, removed.stderr).toBe(0);
+    expect(removed.json).toMatchObject({ status: "complete" });
+    const recovery = `${config}.rea.backup.${createHash("sha256").update(current).digest("hex")}.recovery`;
+    expect(await readFile(recovery, "utf8")).toBe(current);
+    expect(await readFile(`${config}.rea.backup`, "utf8")).toBe(original);
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({
+      mcpServers: { other: { command: "edited-server" } },
+    });
   },
 );

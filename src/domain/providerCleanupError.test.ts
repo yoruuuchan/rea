@@ -59,3 +59,40 @@ it.each([false, true])(
     ]);
   },
 );
+
+it.each(["alpha", "beta"])(
+  "projects only unresolved resources through nested cleanup groups when %s closes first",
+  (first) => {
+    const alpha = new ProviderCleanupError("alpha", ["alpha-file"], {});
+    const beta = new ProviderCleanupError("beta", ["beta-file"], {});
+    const third = new ProviderCleanupError("third", ["third-file"], {});
+    const children = new ProviderCleanupError(
+      "rea",
+      ["alpha-file", "beta-file"],
+      {},
+    ).bindCleanupDependencies([alpha, beta]);
+    const outer = new ProviderCleanupError(
+      "rea",
+      ["alpha-file", "beta-file", "third-file"],
+      {},
+    ).bindCleanupDependencies([children, third]);
+    const released = first === "alpha" ? alpha : beta;
+    const remaining = first === "alpha" ? beta : alpha;
+    released.resolveCleanup();
+    expect(outer.cleanupIncomplete).toBe(true);
+    expect(outer.cleanupResources).toEqual([
+      ...remaining.cleanupResources,
+      "third-file",
+    ]);
+    expect(projectAnalysisError(outer)).toMatchObject({
+      code: "cleanup_incomplete",
+      details: { resources: [...remaining.cleanupResources, "third-file"] },
+    });
+    remaining.resolveCleanup();
+    expect(outer.cleanupIncomplete).toBe(true);
+    expect(outer.cleanupResources).toEqual(["third-file"]);
+    third.resolveCleanup();
+    expect(outer.cleanupIncomplete).toBe(false);
+    expect(projectAnalysisError(outer).code).not.toBe("cleanup_incomplete");
+  },
+);

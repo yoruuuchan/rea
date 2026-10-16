@@ -31,9 +31,16 @@ export interface ObjcDispatchReaders {
 const hex = (value: bigint) => `0x${value.toString(16)}`;
 const decoded = { status: "decoded" as const, reason: null };
 
-/** Name of a class defined in this image, from its class_ro_t. */
-const localClassName = (read: ObjcDispatchReaders, address: bigint): string =>
-  read.string(read.pointer((read.pointer(address + 32n) & ~7n) + 24n));
+/** Admit the local class identity once for classes, superclasses and categories. */
+const readLocalClass = (read: ObjcDispatchReaders, address: bigint) => {
+  const ro = read.pointer(address + 32n) & ~7n;
+  const name = read.string(read.pointer(ro + 24n));
+  if (name.length === 0)
+    throw new TypeError(
+      `Objective-C class at ${hex(address)} has an empty name`,
+    );
+  return { ro, name };
+};
 
 /**
  * Resolve a class's superclass: a bind to `_OBJC_CLASS_$_Name` names a class
@@ -50,12 +57,13 @@ const resolveSuperclass = (
   const superclass = read.pointer(address + 8n);
   if (superclass === 0n) return { name: null, address: null };
   try {
-    return { name: localClassName(read, superclass), address: hex(superclass) };
+    return {
+      name: readLocalClass(read, superclass).name,
+      address: hex(superclass),
+    };
   } catch (cause: unknown) {
-    // Superclass resolution failure is recorded; the cause adds no identity.
-    void cause;
     failures.push(
-      `Superclass pointer ${hex(superclass)} of ${className} requires unsupported binding/fixup resolution`,
+      `Superclass pointer ${hex(superclass)} of ${className} could not be decoded: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
     return { name: null, address: hex(superclass) };
   }
@@ -163,6 +171,8 @@ export const decodeObjcDispatchFacets = (input: {
         void cause;
       }
       const selector = read.string(selectorAddress);
+      if (selector.length === 0)
+        throw new TypeError("Objective-C method has an empty selector");
       selectors.push(selector);
       result.objc_dispatch_implementations.push({
         class_name: className,
@@ -260,12 +270,7 @@ export const decodeObjcDispatchFacets = (input: {
   const readClass = (address: bigint, meta = false) => {
     if (address === 0n || visited.has(hex(address)) || !budget.admit()) return;
     visited.add(hex(address));
-    const ro = read.pointer(address + 32n) & ~7n;
-    const name = read.string(read.pointer(ro + 24n));
-    if (name.length === 0)
-      throw new TypeError(
-        `Objective-C class at ${hex(address)} has an empty name`,
-      );
+    const { ro, name } = readLocalClass(read, address);
     const root = (read.u32(ro) & 2) !== 0;
     const superclass = resolveSuperclass(read, address, name, failures);
     if (superclass.name === null && superclass.address === null && !root)
@@ -292,10 +297,13 @@ export const decodeObjcDispatchFacets = (input: {
           void cause;
           failures.push(`Unresolved ivar offset pointer ${hex(encodedOffset)}`);
         }
+        const ivarName = read.string(read.pointer(entry + 8n));
+        if (ivarName.length === 0)
+          throw new TypeError("Objective-C ivar has an empty name");
         const alignment = read.u32(entry + 24n);
         result.objc_ivars.push({
           class_name: name,
-          name: read.string(read.pointer(entry + 8n)),
+          name: ivarName,
           type_encoding: read.string(read.pointer(entry + 16n)),
           offset: value,
           size: read.u32(entry + 28n),
@@ -415,7 +423,7 @@ export const decodeObjcDispatchFacets = (input: {
     admit: () => budget.admit(),
     methods,
     protocols: (list) => protocolReader.list(list),
-    localClassName: (address) => localClassName(read, address),
+    localClassName: (address) => readLocalClass(read, address).name,
   });
   return {
     failures,

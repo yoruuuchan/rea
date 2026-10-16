@@ -1,3 +1,5 @@
+import { ok as javaProbeOk } from "../../../src/domain/result.js";
+import type { GhidraJavaObservation } from "../../../src/ghidra/GhidraJavaProbe.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -101,15 +103,16 @@ const installationHost: GhidraInstallationHost = {
   architecture: "x64",
   readText: () => "application.version=12.1.4\napplication.java.min=21\n",
   executable: () => true,
-  probeJava: () => ({
-    osArch: "amd64",
-    osName: "Linux",
-    version: "21.0.11",
-    major: 21,
-    home: "/fixture/jdk-21",
-    bits: 64,
-    runtime: "jdk",
-  }),
+  probeJava: () =>
+    javaProbeOk<GhidraJavaObservation>({
+      osArch: "amd64",
+      osName: "Linux",
+      version: "21.0.11",
+      major: 21,
+      home: "/fixture/jdk-21",
+      bits: 64,
+      runtime: "jdk",
+    }),
 };
 
 // Only installation discovery and the Java bridge are simulated. Requests use

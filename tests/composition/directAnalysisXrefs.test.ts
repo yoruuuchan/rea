@@ -83,6 +83,8 @@ const fixture = (
     readConfiguration: () => parseConfig({}),
     createBinarySession: createSession,
     createArtifactBinarySession: createSession,
+    createNativeDispatchBinarySession: createSession,
+    createNativeBinarySession: createSession,
     createManagedBinarySession: createSession,
   };
   return { dependencies, closed: () => closed };

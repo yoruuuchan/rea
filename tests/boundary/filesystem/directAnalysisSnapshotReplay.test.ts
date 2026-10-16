@@ -246,6 +246,9 @@ const createSnapshotReplayFixture = async (
         readConfiguration: () => parseConfig({}),
         createBinarySession: () => createTestBinarySession(provider),
         createArtifactBinarySession: () => createTestBinarySession(provider),
+        createNativeDispatchBinarySession: () =>
+          createTestBinarySession(provider),
+        createNativeBinarySession: () => createTestBinarySession(provider),
         createManagedBinarySession: () => createTestBinarySession(provider),
       };
     },
@@ -1002,6 +1005,8 @@ describe("workflow snapshot profile and cancellation binding", () => {
       readConfiguration: () => parseConfig({}),
       createBinarySession: () => session,
       createArtifactBinarySession: () => session,
+      createNativeDispatchBinarySession: () => session,
+      createNativeBinarySession: () => session,
       createManagedBinarySession: () => session,
     };
     const result = await runDirectAnalysis(

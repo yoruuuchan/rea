@@ -1863,24 +1863,29 @@ describe("client configuration filesystem failure reporting", () => {
   it.each([
     [
       "read",
-      "Configuration could not be read. Check file permissions, then rerun uninstall.",
+      () =>
+        "Configuration could not be read. Check file permissions, then rerun uninstall.",
     ],
     [
       "backup",
-      "Configuration could not be backed up, so no change was made. Check file permissions, then rerun uninstall.",
+      () =>
+        "Configuration could not be backed up, so no change was made. Check file permissions, then rerun uninstall.",
     ],
     [
       "update",
-      "Configuration could not be updated. The original was restored and its `.rea.backup` was retained. Repair the configuration or restore the backup, then rerun uninstall.",
+      (config: string) =>
+        `Configuration could not be updated. The original was restored and its backup at ${config}.rea.backup was retained. Repair the configuration or restore that backup, then rerun uninstall.`,
     ],
     [
       "restore",
-      "Configuration could not be updated or restored. Restore its `.rea.backup` manually, then rerun uninstall.",
+      (config: string) =>
+        `Configuration could not be updated or restored. Restore the backup at ${config}.rea.backup manually, then rerun uninstall.`,
     ],
   ] as const)(
     "reports an actionable client %s failure",
-    async (failure, detail) => {
+    async (failure, expectedDetail) => {
       const { home, config } = await uninstallFixture();
+      const detail = expectedDetail(config);
       let writes = 0;
       const fileSystem: UninstallFileSystem = {
         ...testFileSystem,

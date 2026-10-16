@@ -1,3 +1,4 @@
+import { DarwinProcessOwnershipInspectionError } from "./DarwinProcessRunTokenReader.js";
 import type { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -26,6 +27,9 @@ import {
 export class OwnedCommandFailure extends Error {
   readonly cleanupResult: ProcessCleanupFailure | undefined;
   readonly collectionFailure: boolean;
+  readonly preparationFailure:
+    | DarwinProcessOwnershipInspectionError
+    | undefined;
 
   constructor(
     readonly reason: "cancelled" | "timeout" | "output-limit" | "process",
@@ -35,6 +39,7 @@ export class OwnedCommandFailure extends Error {
     options?: ErrorOptions & {
       readonly cleanupResult?: ProcessCleanupFailure;
       readonly collectionFailure?: boolean;
+      readonly preparationFailure?: DarwinProcessOwnershipInspectionError;
     },
     readonly resources: readonly string[] = [],
     readonly cleanupOwner?: ProviderProcessSupervisor,
@@ -42,6 +47,7 @@ export class OwnedCommandFailure extends Error {
     super(message, options);
     this.cleanupResult = options?.cleanupResult;
     this.collectionFailure = options?.collectionFailure ?? false;
+    this.preparationFailure = options?.preparationFailure;
   }
 }
 
@@ -129,6 +135,18 @@ const collectOwnedCommand = async (
       signal,
     });
   } catch (cause: unknown) {
+    // A caller's raw abort reason remains opaque even if it is a typed error.
+    const preparationFailure =
+      cause instanceof DarwinProcessOwnershipInspectionError &&
+      !(signal.aborted && cause === signal.reason)
+        ? cause
+        : undefined;
+    // Preparation owns its physical outcome and any retained helper resources.
+    if (
+      preparationFailure !== undefined &&
+      preparationFailure.cancellation === undefined
+    )
+      throw preparationFailure;
     const interruption = deadline.interruption;
     if (interruption !== undefined)
       throw new OwnedCommandFailure(
@@ -138,7 +156,10 @@ const collectOwnedCommand = async (
           : "Command deadline elapsed during ownership preparation.",
         null,
         null,
-        { cause },
+        {
+          cause,
+          ...(preparationFailure === undefined ? {} : { preparationFailure }),
+        },
       );
     throw cause;
   }

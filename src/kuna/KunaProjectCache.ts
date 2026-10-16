@@ -1048,7 +1048,7 @@ export class KunaProjectCache {
       key,
       staging,
       resource,
-      lease: new AnalysisCleanupLease(async () => owner.close()),
+      lease: new AnalysisCleanupLease(async () => owner.close(), [resource]),
     };
     this.#hashRecords.set(owner, retained);
     this.#retainedHashFiles.set(owner, retained);

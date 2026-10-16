@@ -176,7 +176,7 @@ export const withArtifactRegularFile = async <Value>(
       {
         symlinks,
         retainFailedClose: (owner) => {
-          cleanupLease = new AnalysisCleanupLease(() => owner.close());
+          cleanupLease = new AnalysisCleanupLease(() => owner.close(), [path]);
           resources.retain({
             kind: "lease",
             resource: path,
@@ -218,7 +218,7 @@ export const withArtifactFileHandle = async <Value>(
   operation: (file: FileHandle) => Promise<Value>,
 ): Promise<Value> => {
   const owner = new OwnedFileHandle(file);
-  const cleanupLease = new AnalysisCleanupLease(() => owner.close());
+  const cleanupLease = new AnalysisCleanupLease(() => owner.close(), [path]);
   try {
     return await withOwnedFileHandle(
       path,
