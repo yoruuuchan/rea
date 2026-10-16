@@ -41,7 +41,16 @@ export const captureBrowserScenario = async (
       partial.kind === "browser-scenario-observation"
     ) {
       const report = browserScenarioCaptureSchema.safeParse(partial.capture);
-      if (!report.success) {
+      if (
+        report.success &&
+        report.data.steps.every(({ status }) => status === "completed")
+      ) {
+        captured.error.partialObservation = createBrowserScenarioEvidence(
+          scenario,
+          report.data,
+          provider.identity(),
+        );
+      } else if (!report.success) {
         if (captured.error instanceof AnalysisCancelledError)
           return err(
             new AnalysisOutputError(
@@ -52,11 +61,6 @@ export const captureBrowserScenario = async (
           );
         return captured;
       }
-      captured.error.partialObservation = createBrowserScenarioEvidence(
-        scenario,
-        report.data,
-        provider.identity(),
-      );
     }
     return captured;
   }
@@ -70,15 +74,7 @@ export const captureBrowserScenario = async (
       ),
     );
   return completeProviderEvidence(
-    {
-      ok: true,
-      value: createBrowserScenarioEvidence(
-        scenario,
-        report.data,
-        provider.identity(),
-      ),
-    },
-    OPERATION,
-    options,
+    createBrowserScenarioEvidence(scenario, report.data, provider.identity()),
+    options.signal,
   );
 };

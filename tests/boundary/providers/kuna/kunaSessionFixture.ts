@@ -9,6 +9,7 @@ import { KunaProvider } from "../../../../src/kuna/KunaProvider.js";
 import { cleanupOwnedProcessGroup } from "../../../../src/process/ProcessOwnership.js";
 import { spawnOwnedProviderProcess } from "../../../../src/process/ProviderProcess.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
+import { withKunaFileCloseOwner } from "./kunaFileCloseOwner.js";
 import {
   fakeKunaCalls,
   writeFakeKuna,
@@ -53,7 +54,9 @@ export const session = async (
       ...(singleFunctionRuns === undefined ? {} : { singleFunctionRuns }),
     },
   );
-  const profile = await provider.resolveAnalysisProfile(target);
+  const profile = await withKunaFileCloseOwner((fileCloseResources) =>
+    provider.resolveAnalysisProfile(target, { fileCloseResources }),
+  );
   if (!profile.ok || profile.value.profile === null)
     throw new Error("profile did not resolve");
   const resolved = profile.value.profile;

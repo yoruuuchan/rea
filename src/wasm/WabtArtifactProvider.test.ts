@@ -43,6 +43,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 const outcomeModes = [
   "success",
   "invalid",
+  "invalid-close",
   "malformed",
   "timeout",
   "cancelled",
@@ -57,6 +58,7 @@ type OutcomeMode = (typeof outcomeModes)[number];
 
 const failureTags: Readonly<Record<Exclude<OutcomeMode, "success">, string>> = {
   invalid: "AnalysisInputError",
+  "invalid-close": "AnalysisInputError",
   timeout: "AnalysisTimeoutError",
   cancelled: "AnalysisCancelledError",
   "cancelled-close": "AnalysisCancelledError",
@@ -178,7 +180,7 @@ const assertModeOutcome = (
       ok: false,
       error: { _tag: failureTags[mode] },
     });
-  if (mode === "invalid")
+  if (mode === "invalid" || mode === "invalid-close")
     expect(result).toMatchObject({
       error: { capturedOutput: { stderr: "module.wasm: invalid bytes\n" } },
     });
@@ -413,7 +415,8 @@ const runOwnedArtifactOutcome = async (mode: OutcomeMode): Promise<void> => {
               ? "unexpected decoder output\n"
               : '(module (@custom "test" "payload"))\n'
             : "";
-      const invalid = !version && mode === "invalid";
+      const invalid =
+        !version && (mode === "invalid" || mode === "invalid-close");
       const stderr = invalid
         ? "module.wasm: invalid bytes\n"
         : !version &&
@@ -454,7 +457,8 @@ const runOwnedArtifactOutcome = async (mode: OutcomeMode): Promise<void> => {
           if (mode === "cleanup" && ++cleanupAttempts <= 2)
             throw new Error("Source-owned cleanup uncertainty");
           await root.close();
-          if (mode === "cancelled-close") controller.abort();
+          if (mode === "cancelled-close" || mode === "invalid-close")
+            controller.abort();
         },
       };
     },

@@ -30,7 +30,7 @@ export type GhidraActiveCancellationHandler = () => Promise<
 interface QueuedRequest {
   readonly method: string;
   readonly parameters: JsonValue;
-  readonly signal: AbortSignal | undefined;
+  readonly options: GhidraRequestOptions;
   readonly resolve: (result: GhidraQueuedRequestResult) => void;
   readonly onAbort: (() => void) | undefined;
 }
@@ -72,7 +72,7 @@ export class GhidraRequestQueue {
       entry = {
         method,
         parameters,
-        signal: options.signal,
+        options,
         resolve,
         onAbort,
       };
@@ -102,7 +102,7 @@ export class GhidraRequestQueue {
     const entry = this.#queue.shift();
     if (entry === undefined) return;
     this.#release(entry);
-    if (entry.signal?.aborted === true) {
+    if (entry.options.signal?.aborted === true) {
       entry.resolve(
         err(this.failure("cancelled", "Ghidra request was cancelled")),
       );
@@ -113,7 +113,7 @@ export class GhidraRequestQueue {
     let executionSettled = false;
     let activeCancellation: Promise<Result<null, AnalysisError>> | undefined;
     const onAbort =
-      entry.signal === undefined
+      entry.options.signal === undefined
         ? undefined
         : () => {
             if (executionSettled) return;
@@ -126,12 +126,8 @@ export class GhidraRequestQueue {
             activeCancellation = this.onActiveCancellation();
           };
     if (onAbort !== undefined)
-      entry.signal?.addEventListener("abort", onAbort, { once: true });
-    void this.execute(
-      entry.method,
-      entry.parameters,
-      entry.signal === undefined ? {} : { signal: entry.signal },
-    )
+      entry.options.signal?.addEventListener("abort", onAbort, { once: true });
+    void this.execute(entry.method, entry.parameters, entry.options)
       .then(async (result) => {
         if (activeCancellation !== undefined) {
           const primary = result.ok
@@ -161,8 +157,8 @@ export class GhidraRequestQueue {
         );
       })
       .finally(() => {
-        if (entry.signal !== undefined && onAbort !== undefined)
-          entry.signal.removeEventListener("abort", onAbort);
+        if (entry.options.signal !== undefined && onAbort !== undefined)
+          entry.options.signal.removeEventListener("abort", onAbort);
         this.#active = false;
         if (this.#closedFailure === undefined) this.#drain();
       });
@@ -223,7 +219,7 @@ export class GhidraRequestQueue {
   }
 
   #release(entry: QueuedRequest): void {
-    if (entry.signal !== undefined && entry.onAbort !== undefined)
-      entry.signal.removeEventListener("abort", entry.onAbort);
+    if (entry.options.signal !== undefined && entry.onAbort !== undefined)
+      entry.options.signal.removeEventListener("abort", entry.onAbort);
   }
 }

@@ -97,6 +97,10 @@ it("preserves meaningful provider failure and cancellation before/after executio
     error: {
       _tag: "AnalysisCancelledError",
       capturedOutput: observed.diagnostics,
+      partialObservation: {
+        operation: "inspect_evm_interface",
+        normalized_result: observed,
+      },
     },
   });
   if (!late.ok) {

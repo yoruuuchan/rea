@@ -9,10 +9,31 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, onTestFinished, test } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
+
+const adbTestHooks = vi.hoisted(() => ({
+  afterScreencap: undefined as (() => void) | undefined,
+}));
+
+vi.mock("../process/ExecFileOutput.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../process/ExecFileOutput.js")>();
+  return {
+    ...actual,
+    execFileBytes: async (
+      ...arguments_: Parameters<typeof actual.execFileBytes>
+    ) => {
+      const result = await actual.execFileBytes(...arguments_);
+      if (arguments_[1].includes("exec-out")) adbTestHooks.afterScreencap?.();
+      return result;
+    },
+  };
+});
 
 import { AdbProvider } from "./AdbProvider.js";
+import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { parseEvidence } from "../domain/evidence.js";
 import type { AdbRequest } from "../domain/adb/adbDeviceAnalysis.js";
 
 const it = test.skipIf(process.platform === "win32");
@@ -880,21 +901,22 @@ exit 1`,
   });
 });
 
-it("binds a push digest to the bytes adb consumes after caller-path replacement", async () => {
+it("pushes the same private bytes that its reported digest identifies", async () => {
   const { binary, root } = await writeAdbStub(
     (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$4" = "test" ]; then exit 1; fi
 if [ "$1" = "-s" ] && [ "$3" = "push" ]; then
-  printf 'replacement-payload' > "${stubRoot}/payload.bin"
-  cat "$4" > "${stubRoot}/consumed.bin" || exit 1
+  printf 'replacement' > "${join(stubRoot, "payload.bin")}"
+  cat "$4" > "${join(stubRoot, "consumed-push.bin")}"
   exit 0
 fi
 if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then exit 1; fi
 exit 1`,
   );
   const localFile = join(root, "payload.bin");
-  await writeFile(localFile, "original-payload");
-  const result = await evidenceResult(providerOver(binary), {
+  await writeFile(localFile, "original-push");
+  const digest = createHash("sha256").update("original-push").digest("hex");
+  const pushed = await evidenceResult(providerOver(binary), {
     operation: "push_adb_file",
     input: {
       serial: "emulator-5554",
@@ -903,17 +925,62 @@ exit 1`,
       overwrite: false,
     },
   });
-  const consumedDigest = createHash("sha256")
-    .update(await readFile(join(root, "consumed.bin")))
-    .digest("hex");
-  expect(result).toMatchObject({
-    local_path: localFile,
-    sha256: consumedDigest,
-  });
-  expect(await readFile(localFile, "utf8")).toBe("replacement-payload");
-  expect(await readFile(join(root, "consumed.bin"), "utf8")).toBe(
-    "original-payload",
+  expect(await readFile(join(root, "consumed-push.bin"), "utf8")).toBe(
+    "original-push",
   );
+  expect(await readFile(localFile, "utf8")).toBe("replacement");
+  expect(pushed).toMatchObject({
+    local_path: localFile,
+    bytes: 13,
+    sha256: digest,
+    device_sha256: null,
+    device_digest_source: "unavailable",
+  });
+});
+
+it("retains failed snapshot cleanup with completed push Evidence until close retries", async () => {
+  const { binary, root } = await writeAdbStub(
+    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "test" ]; then exit 1; fi
+if [ "$1" = "-s" ] && [ "$3" = "push" ]; then exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then exit 1; fi
+exit 1`,
+  );
+  const localFile = join(root, "cleanup-payload.bin");
+  await writeFile(localFile, "payload");
+  let closeAttempts = 0;
+  const provider = new AdbProvider({
+    environment: { REA_ADB_PATH: binary },
+    createRuntimeRoot: async (options) => {
+      const runtime = await PrivateRuntimeRoot.create(options);
+      return {
+        path: runtime.path,
+        close: async () => {
+          closeAttempts += 1;
+          if (closeAttempts === 1) throw new Error("controlled cleanup fault");
+          await runtime.close();
+        },
+      };
+    },
+  });
+  const result = await provider.execute({
+    operation: "push_adb_file",
+    input: {
+      serial: "emulator-5554",
+      local_path: localFile,
+      device_path: "/data/local/tmp/cleanup-payload.bin",
+      overwrite: false,
+    },
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("expected snapshot cleanup to be reported");
+  expect(result.error.cleanupResources).toHaveLength(1);
+  expect(result.error.partialObservation).toMatchObject({
+    operation: "push_adb_file",
+    normalized_result: { bytes: 7 },
+  });
+  await provider.close();
+  expect(closeAttempts).toBe(2);
 });
 
 it("reports a digest mismatch after push as a changed artifact", async () => {
@@ -926,7 +993,7 @@ exit 1`,
   );
   const localFile = join(root, "payload.bin");
   await writeFile(localFile, "push-payload");
-  const projected = await refusedBy(providerOver(binary), {
+  const result = await providerOver(binary).execute({
     operation: "push_adb_file",
     input: {
       serial: "emulator-5554",
@@ -935,6 +1002,20 @@ exit 1`,
       overwrite: false,
     },
   });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("expected a changed-artifact result");
+  const evidence = parseEvidence(result.error.partialObservation);
+  expect(evidence).toMatchObject({
+    operation: "push_adb_file",
+    normalized_result: {
+      local_path: localFile,
+      device_path: "/data/local/tmp/payload.bin",
+      bytes: Buffer.byteLength("push-payload"),
+      sha256: createHash("sha256").update("push-payload").digest("hex"),
+      device_digest_source: "device_sha256sum",
+    },
+  });
+  const projected = projectAnalysisError(result.error);
   expect(projected).toMatchObject({ code: "artifact_changed" });
 });
 
@@ -1031,6 +1112,37 @@ exit 1`,
       () => false,
     ),
   ).toBe(true);
+});
+
+it("stops a screen capture aborted after adb returns but before publication", async () => {
+  const { binary, root } = await writeAdbStub(
+    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$3" = "exec-out" ]; then
+  printf '\\211PNG\\r\\n\\032\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\004\\0\\0\\0\\003'
+  exit 0
+fi
+exit 1`,
+  );
+  const output = join(root, "cancelled-capture");
+  const controller = new AbortController();
+  adbTestHooks.afterScreencap = () => controller.abort();
+  try {
+    const result = await providerOver(binary).execute(
+      {
+        operation: "capture_adb_screen",
+        input: { serial: "emulator-5554", output_directory: output },
+      },
+      { signal: controller.signal },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(projectAnalysisError(result.error).code).toBe("cancelled");
+    await expect(readFile(join(output, "screen.png"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    adbTestHooks.afterScreencap = undefined;
+  }
 });
 
 it("lists processes, features, and services through fixed commands", async () => {
@@ -1315,12 +1427,13 @@ exit 1`,
   expect(projected.message).toContain("INSTALL_FAILED_ALREADY_EXISTS");
 });
 
-it("binds an install digest to the bytes adb consumes after caller-path replacement", async () => {
+it("installs the same private APK bytes that its reported digest identifies", async () => {
   const { binary, root } = await writeAdbStub(
     (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$3" = "install" ]; then
-  printf 'replacement-apk' > "${stubRoot}/app.apk"
-  cat "$4" > "${stubRoot}/consumed.bin" || exit 1
+  case "$4" in *.apk) ;; *) printf 'install input needs an APK suffix\\n' >&2; exit 1 ;; esac
+  printf 'replacement-apk' > "${join(stubRoot, "app.apk")}"
+  cat "$4" > "${join(stubRoot, "consumed-app.apk")}"
   printf 'Success\\n'
   exit 0
 fi
@@ -1328,18 +1441,20 @@ exit 1`,
   );
   const apk = join(root, "app.apk");
   await writeFile(apk, "original-apk");
-  const result = await evidenceResult(providerOver(binary), {
+  const digest = createHash("sha256").update("original-apk").digest("hex");
+  const installed = await evidenceResult(providerOver(binary), {
     operation: "install_adb_package",
     input: { serial: "emulator-5554", apk_path: apk, replace: false },
   });
-  const consumedDigest = createHash("sha256")
-    .update(await readFile(join(root, "consumed.bin")))
-    .digest("hex");
-  expect(result).toMatchObject({ apk_path: apk, sha256: consumedDigest });
-  expect(await readFile(apk, "utf8")).toBe("replacement-apk");
-  expect(await readFile(join(root, "consumed.bin"), "utf8")).toBe(
+  expect(await readFile(join(root, "consumed-app.apk"), "utf8")).toBe(
     "original-apk",
   );
+  expect(await readFile(apk, "utf8")).toBe("replacement-apk");
+  expect(installed).toMatchObject({
+    apk_path: apk,
+    bytes: 12,
+    sha256: digest,
+  });
 });
 
 it("uninstalls a package and reports the device's refusal for absent ones", async () => {

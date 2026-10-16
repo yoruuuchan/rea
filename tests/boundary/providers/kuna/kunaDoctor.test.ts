@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { expect, it as test } from "vitest";
 
-import { inspectKunaProvider } from "../../../../src/kuna/KunaDoctor.js";
+import { inspectKunaProviderOwned as inspectKunaProvider } from "./kunaFileCloseOwner.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { writeFakeKuna } from "./fakeKuna.js";
 

@@ -2,6 +2,7 @@ import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { ElectronObservationPort } from "./ElectronObservationPort.js";
 import type { Evidence } from "../../domain/evidence.js";
 import type {
+  ElectronPageInspection,
   InspectElectronPageInput,
   ListElectronTargetsInput,
 } from "../../domain/javascript/electronObservation.js";
@@ -41,16 +42,13 @@ export const listElectronTargets = async (
       ),
     );
   return completeProviderEvidence(
-    ok(
-      createElectronEvidence(
-        "list_electron_targets",
-        input,
-        report.data,
-        ready.value.identity(),
-      ),
+    createElectronEvidence(
+      "list_electron_targets",
+      input,
+      report.data,
+      ready.value.identity(),
     ),
-    "list_electron_targets",
-    options,
+    options.signal,
   );
 };
 
@@ -66,16 +64,13 @@ export const inspectElectronPage = async (
     return err(new AnalysisCancelledError("inspect_electron_page"));
   const result = await ready.value.inspectPage(input, options);
   if (!result.ok) {
+    const partial = result.error.partialObservation;
     if (
-      result.error.partialObservation !== undefined &&
-      !("evidence_id" in result.error.partialObservation) &&
-      "target" in result.error.partialObservation &&
-      "dom" in result.error.partialObservation &&
-      "capture_window" in result.error.partialObservation
+      partial !== undefined &&
+      "kind" in partial &&
+      partial.kind === "electron-page-observation"
     ) {
-      const report = electronPageInspectionSchema.safeParse(
-        result.error.partialObservation,
-      );
+      const report = electronPageInspectionSchema.safeParse(partial.inspection);
       if (!report.success) {
         if (result.error instanceof AnalysisCancelledError)
           return err(
@@ -87,10 +82,19 @@ export const inspectElectronPage = async (
           );
         return result;
       }
+      const inspection = {
+        ...report.data,
+        limitations: [
+          ...report.data.limitations,
+          partial.cleanup === "transport-closed"
+            ? "REA closed its CDP transport; this does not imply target shutdown."
+            : "CDP transport cleanup remains incomplete.",
+        ],
+      } satisfies ElectronPageInspection;
       result.error.partialObservation = createElectronEvidence(
         "inspect_electron_page",
         input,
-        report.data,
+        inspection,
         ready.value.identity(),
       );
     }
@@ -106,16 +110,13 @@ export const inspectElectronPage = async (
       ),
     );
   return completeProviderEvidence(
-    ok(
-      createElectronEvidence(
-        "inspect_electron_page",
-        input,
-        report.data,
-        ready.value.identity(),
-      ),
+    createElectronEvidence(
+      "inspect_electron_page",
+      input,
+      report.data,
+      ready.value.identity(),
     ),
-    "inspect_electron_page",
-    options,
+    options.signal,
   );
 };
 

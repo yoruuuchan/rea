@@ -152,3 +152,11 @@ export const electronPageInspectionSchema = z.object({
 export type ElectronPageInspection = z.infer<
   typeof electronPageInspectionSchema
 >;
+
+/** Completed Electron facts retained when later request finalization fails. */
+export interface ElectronPagePartialObservation {
+  readonly kind: "electron-page-observation";
+  readonly inspection: ElectronPageInspection;
+  /** REA's CDP transport closed; target shutdown is never implied. */
+  readonly cleanup: "transport-closed" | "incomplete";
+}

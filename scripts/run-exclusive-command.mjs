@@ -4,6 +4,11 @@ import spawn from "cross-spawn";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import {
+  createWindowsOwnedCommand,
+  loadWindowsOwnedProcessClass,
+  superviseWindowsOwnedProcess,
+} from "./lib/windows-owned-command.mjs";
 
 const [, , lockName, ...command] = process.argv;
 const lockRoot = resolve(process.cwd(), ".cache", "rea-command-locks");
@@ -11,6 +16,7 @@ const signalExitCodes = { SIGINT: 130, SIGTERM: 143 };
 
 let database;
 let child;
+let windowsOwnership;
 let forceTimer;
 let shutdownSignal;
 
@@ -69,16 +75,44 @@ async function run() {
   }
 }
 
-function runCommand() {
+async function runCommand() {
+  if (process.platform === "win32") {
+    const WindowsOwnedProcess = await loadWindowsOwnedProcessClass();
+    if (shutdownSignal !== undefined) return { code: 1 };
+    child = createWindowsOwnedCommand({
+      WindowsOwnedProcess,
+      command: command[0],
+      arguments: command.slice(1),
+      cwd: process.cwd(),
+      environment: process.env,
+    });
+    windowsOwnership = superviseWindowsOwnedProcess(child, {
+      onCleanupDiagnostic: reportCleanupDiagnostic,
+    });
+    try {
+      child.stdout.pipe(process.stdout);
+      child.stderr.pipe(process.stderr);
+      process.stdin.pipe(child.stdin);
+      const { code } = await windowsOwnership.finished;
+      return { code };
+    } catch (cause) {
+      windowsOwnership.requestCleanup();
+      await windowsOwnership.finished.catch(() => {});
+      throw cause;
+    } finally {
+      process.stdin.unpipe(child.stdin);
+      windowsOwnership = undefined;
+    }
+  }
   return new Promise((resolveResult, reject) => {
+    let spawned = false;
+    let hasChildError = false;
+    let childError;
     child = spawn(command[0], command.slice(1), {
       cwd: process.cwd(),
       env: process.env,
       stdio: "inherit",
     });
-    let spawned = false;
-    let childError;
-    let hasChildError = false;
     child.once("spawn", () => {
       spawned = true;
     });
@@ -87,9 +121,7 @@ function runCommand() {
         hasChildError = true;
         childError = cause;
       }
-      if (!spawned) {
-        reject(childError);
-      }
+      if (!spawned) reject(childError);
     };
     child.on("error", rememberChildError);
     child.once("close", (code) => {
@@ -114,19 +146,32 @@ function handleDisconnect() {
 }
 
 function handleSignal(signal) {
-  if (shutdownSignal !== undefined) return;
+  if (shutdownSignal !== undefined) {
+    if (process.platform === "win32") windowsOwnership?.requestCleanup();
+    return;
+  }
   shutdownSignal = signal;
   if (child === undefined) return;
   if (process.platform === "win32") {
-    // Windows has no POSIX process groups. Stop only the command owned by this
-    // supervisor, and keep the SQLite transaction until its close event.
-    child.kill(signal);
+    windowsOwnership?.requestCleanup();
     return;
   }
   // Establish cancellation before signalling the group. This supervisor is
   // its live leader, so the group identifier cannot be reused during cleanup.
   process.kill(-process.pid, signal);
   forceTimer = setTimeout(() => process.kill(-process.pid, "SIGKILL"), 1_000);
+}
+
+function reportCleanupDiagnostic(diagnostic) {
+  if (diagnostic.type === "cleanup-recovered") {
+    console.error(
+      "Owned Windows command cleanup recovered; observing Job Object close.",
+    );
+    return;
+  }
+  console.error(
+    `Could not clean up the owned Windows command: ${diagnostic.reason}; retrying while retaining the command lock.`,
+  );
 }
 
 function isBusyError(cause) {

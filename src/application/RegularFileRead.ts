@@ -2,12 +2,14 @@ import type { Stats } from "node:fs";
 import { lstat, stat, type FileHandle } from "node:fs/promises";
 
 import {
-  RegularFileAdmissionFailure,
-  openRegularFile,
   sameRegularFileState,
   RegularFileChangedError,
 } from "../filesystem/RegularFile.js";
-import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import {
+  RegularFileCleanupFailure,
+  withOwnedRegularFile,
+  type RegularFileOperationOutcome,
+} from "../filesystem/OwnedRegularFile.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js";
@@ -30,24 +32,9 @@ export class InvalidUtf8FileError extends TypeError {
   }
 }
 
-export type RegularFileReadOutcome<Value> =
-  | { readonly kind: "completed"; readonly value: Value }
-  | { readonly kind: "failed"; readonly cause: unknown };
+export { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 
-/** A close failed after reading; this error transfers the exact handle owner. */
-export class RegularFileCleanupFailure<Value = unknown> extends Error {
-  constructor(
-    readonly path: string,
-    readonly owner: OwnedFileHandle,
-    readonly outcome: RegularFileReadOutcome<Value>,
-    readonly cleanupCause: unknown,
-  ) {
-    super(`Regular file cleanup failed: ${path}`, {
-      cause: outcome.kind === "failed" ? outcome.cause : cleanupCause,
-    });
-    this.name = "RegularFileCleanupFailure";
-  }
-}
+export type RegularFileReadOutcome<Value> = RegularFileOperationOutcome<Value>;
 
 /** Retry a failed close through its retained owner and report any remaining cleanup. */
 export const retryRegularFileCleanup = async <Value>(
@@ -80,73 +67,52 @@ export const withRegularFile = async <Value>(
   path: string,
   read: (handle: FileHandle, stats: Stats) => Promise<Value>,
   options: RegularFileReadOptions = {},
-): Promise<Value> =>
-  options.resources === undefined
-    ? withRegularFileOwned(path, read, options)
-    : options.resources.run(() => withRegularFileOwned(path, read, options));
+): Promise<Value> => withRegularFileOwned(path, read, options);
 
 const withRegularFileOwned = async <Value>(
   path: string,
   read: (handle: FileHandle, stats: Stats) => Promise<Value>,
   options: RegularFileReadOptions,
 ): Promise<Value> => {
-  const { signal } = options;
-  let handle: FileHandle;
-  try {
-    handle = await openRegularFile(path, {
-      symlinks: options.symlinks ?? "follow",
-      signal,
-    });
-  } catch (cause: unknown) {
-    if (!(cause instanceof RegularFileAdmissionFailure)) throw cause;
-    const failure = new RegularFileCleanupFailure(
-      path,
-      cause.owner,
-      { kind: "failed", cause: cause.cause },
-      cause.cleanupCause,
-    );
-    if (options.resources === undefined) throw failure;
-    const retry = await retryRegularFileCleanup(failure, options.resources);
-    if (retry.cleanup !== undefined) throw failure;
-    throw cause.cause;
-  }
-  const owner = new OwnedFileHandle(handle);
-  let outcome: RegularFileReadOutcome<Value>;
-  try {
-    const stats = await handle.stat();
-    signal?.throwIfAborted();
-    const value = await read(handle, stats);
-    signal?.throwIfAborted();
-    const [opened, currentPath] = await Promise.all([
-      handle.stat(),
-      options.symlinks === "reject" ? lstat(path) : stat(path),
-    ]);
-    if (
-      !sameRegularFileState(stats, opened) ||
-      !sameRegularFileState(stats, currentPath)
-    )
-      throw new RegularFileChangedError(path);
-    outcome = { kind: "completed", value };
-  } catch (cause: unknown) {
-    outcome = { kind: "failed", cause };
-  }
-  try {
-    await owner.close();
-  } catch (cleanupCause: unknown) {
-    const failure = new RegularFileCleanupFailure(
-      path,
-      owner,
-      outcome,
-      cleanupCause,
-    );
-    if (options.resources === undefined) throw failure;
-    const retry = await retryRegularFileCleanup(failure, options.resources);
-    if (retry.cleanup !== undefined) throw failure;
-    if (retry.outcome.kind === "failed") throw retry.outcome.cause;
-    return retry.outcome.value;
-  }
-  if (outcome.kind === "failed") throw outcome.cause;
-  return outcome.value;
+  const { signal, resources } = options;
+  const operation = async () => {
+    try {
+      return await withOwnedRegularFile(
+        path,
+        {
+          ...(signal === undefined ? {} : { signal }),
+          symlinks: options.symlinks ?? "follow",
+        },
+        async (handle) => {
+          const stats = await handle.stat();
+          signal?.throwIfAborted();
+          const value = await read(handle, stats);
+          signal?.throwIfAborted();
+          const [opened, currentPath] = await Promise.all([
+            handle.stat(),
+            options.symlinks === "reject" ? lstat(path) : stat(path),
+          ]);
+          if (
+            !sameRegularFileState(stats, opened) ||
+            !sameRegularFileState(stats, currentPath)
+          )
+            throw new RegularFileChangedError(path);
+          return value;
+        },
+      );
+    } catch (cause: unknown) {
+      if (
+        !(cause instanceof RegularFileCleanupFailure) ||
+        resources === undefined
+      )
+        throw cause;
+      const retry = await retryRegularFileCleanup(cause, resources);
+      if (retry.cleanup !== undefined) throw cause;
+      if (retry.outcome.kind === "failed") throw retry.outcome.cause;
+      return retry.outcome.value;
+    }
+  };
+  return resources === undefined ? operation() : resources.run(operation);
 };
 
 /** Admit a regular file without waiting for a pipe, then read its verified handle. */

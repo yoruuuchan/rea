@@ -125,7 +125,7 @@ it.each(['\uFEFF{"servers": {"rea": @}}', '\uFEFF{"setting":\uFEFFtrue}'])(
   },
 );
 
-it("restores original BOM-prefixed JSONC bytes after update and removal", async () => {
+it("preserves BOM-prefixed JSONC values and comments through update and removal", async () => {
   const home = await createTestTempDirectory("rea-client-config-bom-cycle-");
   const client = supportedClients(home, "linux", {}).find(
     (candidate) => candidate.name === "cursor",
@@ -158,7 +158,17 @@ it("restores original BOM-prefixed JSONC bytes after update and removal", async 
     name: "cursor",
     status: "removed",
   });
-  expect(await readFile(client.configPath, "utf8")).toBe(original);
+  const removed = await readFile(client.configPath, "utf8");
+  expect(removed.startsWith("\uFEFF")).toBe(true);
+  expect(removed).toContain("\r\n  // Keep prefix \uFEFF comment.\r\n");
+  expect(removed).toContain("\r\n  // Keep suffix comment.\r\n");
+  expect(removed).toContain("// Keep this unrelated registration.");
+  expect(parseClientConfiguration(removed, client.format).document).toEqual(
+    parseClientConfiguration(original, client.format).document,
+  );
+  expect(await readFile(`${client.configPath}.rea.backup`)).toEqual(
+    Buffer.from(original),
+  );
 });
 
 it.each(["", "\n  \n", "\uFEFF"])(

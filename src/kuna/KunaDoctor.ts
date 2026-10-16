@@ -6,8 +6,9 @@ import type {
   DoctorProviderCheck,
   DoctorProviderInspection,
 } from "../application/Doctor.js";
-import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { readKunaConfiguration } from "./KunaConfiguration.js";
+import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import {
   inspectKunaInstallation,
   type KunaReadinessFailure,
@@ -30,74 +31,53 @@ const REGISTRATION_SETTINGS = [
   "REA_KUNA_JOBS",
 ] as const;
 
-/** Readiness failed and doctor has no lifecycle owner for the hash descriptor. */
-export class KunaDoctorHashCleanupFailure extends Error {
-  constructor(
-    readonly readinessFailure: KunaReadinessFailure,
-    readonly owner: OwnedFileHandle,
-    readonly cleanupCause: unknown,
-  ) {
-    super(
-      `${readinessFailure.reason}; the executable hash descriptor could not be closed`,
-      {
-        cause:
-          readinessFailure.code === "hash_cleanup_failed"
-            ? readinessFailure.hashCleanupFailure
-            : cleanupCause,
-      },
-    );
-    this.name = "KunaDoctorHashCleanupFailure";
-  }
-}
-
 /** Project Kuna readiness into the doctor contract without writing anything. */
 export const inspectKunaProvider = async (
   environment: Readonly<NodeJS.ProcessEnv>,
   platform: NodeJS.Platform = process.platform,
-  adoptFileHandle?: (
-    resource: string,
-    handle: OwnedFileHandle,
-  ) => Promise<boolean>,
+  options: {
+    readonly fileCloseResources: FileCloseResourceOwner;
+  },
 ): Promise<DoctorProviderInspection> => {
-  const installation = await inspectKunaInstallation(environment, {
-    platform,
-  });
+  let installation: Awaited<ReturnType<typeof inspectKunaInstallation>>;
+  try {
+    installation = await inspectKunaInstallation(environment, {
+      platform,
+      fileCloseResources: options.fileCloseResources,
+    });
+  } catch (cause: unknown) {
+    if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
+    return {
+      id: KUNA_PROVIDER_ID,
+      configured: environment.REA_KUNA_COMMAND !== undefined,
+      available: false,
+      providerVersion: null,
+      registrationEnvironment: {},
+      checks: [
+        {
+          name: "installation",
+          ok: false,
+          code: "cleanup_incomplete",
+          detail: `Kuna installation inspection could not confirm file cleanup: ${cause instanceof Error ? cause.message : String(cause)}`,
+          remediation: null,
+          classification: "config_drift",
+          details: { cleanup_incomplete: true },
+        },
+      ],
+    };
+  }
   const configured =
     environment.REA_KUNA_COMMAND !== undefined &&
     environment.REA_KUNA_COMMAND.length > 0;
-  if (!installation.ok) {
-    let cleanupDetail: string | undefined;
-    const hashFailure =
-      installation.error.code === "hash_cleanup_failed"
-        ? installation.error.hashCleanupFailure
-        : undefined;
-    if (hashFailure !== undefined) {
-      if (adoptFileHandle === undefined) {
-        throw new KunaDoctorHashCleanupFailure(
-          installation.error,
-          hashFailure.owner,
-          hashFailure.cleanupCause,
-        );
-      } else {
-        const closed = await adoptFileHandle(
-          hashFailure.path,
-          hashFailure.owner,
-        );
-        if (!closed)
-          cleanupDetail = "Executable hash cleanup is still pending.";
-      }
-    }
+  if (!installation.ok)
     return {
       id: KUNA_PROVIDER_ID,
       configured,
       available: false,
       providerVersion: null,
       registrationEnvironment: {},
-      checks: [
-        installationFailure(installation.error, configured, cleanupDetail),
-      ],
+      checks: [installationFailure(installation.error, configured)],
     };
-  }
   const { value } = installation;
   return {
     id: KUNA_PROVIDER_ID,
@@ -137,15 +117,11 @@ export const inspectKunaProvider = async (
 const installationFailure = (
   failure: KunaReadinessFailure,
   configured: boolean,
-  cleanupDetail?: string,
 ): DoctorProviderCheck => ({
   name: "installation",
   ok: false,
   code: failure.code,
-  detail:
-    cleanupDetail === undefined
-      ? failure.reason
-      : `${failure.reason} ${cleanupDetail}`,
+  detail: failure.reason,
   remediation:
     failure.code === "unsupported_host"
       ? KUNA_UNSUPPORTED_HOST_REMEDIATION

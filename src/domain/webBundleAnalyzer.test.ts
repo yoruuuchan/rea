@@ -1161,6 +1161,27 @@ it("retains direct and literal computed call names", () => {
   ]);
 });
 
+it("requires WebMCP receiver and method names to occupy exact member segments", () => {
+  const result = analyzeCapturedWebBundle(
+    inspection(`
+      navigator.modelContext.registerTool({ name: "navigator" });
+      local.modelContext.registerTool({ name: "exact nested" });
+      const appmodelContext = { registerTool() {} };
+      appmodelContext.registerTool({ name: "receiver suffix" });
+      const app = { analyticsmodelContext: { registerTool() {} } };
+      app.analyticsmodelContext.registerTool({ name: "nested suffix" });
+      window["modelContext.registerTool"]({ name: "dotted property" });
+      window["modelContext"].registerTool({ name: "computed receiver" });
+    `),
+  );
+
+  expect(result.observations.webmcp_declarations).toEqual([
+    expect.objectContaining({ name: "navigator" }),
+    expect.objectContaining({ name: "exact nested" }),
+    expect.objectContaining({ name: "computed receiver" }),
+  ]);
+});
+
 it("recognizes tRPC procedures and named GraphQL operations in captured scripts", () => {
   const result = analyzeCapturedWebBundle(
     inspection(`

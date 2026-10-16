@@ -217,8 +217,12 @@ it("classifies cancellation that arrives during final Electron detach", async ()
       _tag: "AnalysisCancelledError",
       operation: "inspect_electron_page",
       partialObservation: {
-        target: { target_id: "electron-page", file_path: page },
-        dom: { total_nodes: expect.any(Number) },
+        kind: "electron-page-observation",
+        cleanup: "transport-closed",
+        inspection: {
+          target: { target_id: "electron-page", file_path: page },
+          dom: { total_nodes: expect.any(Number) },
+        },
       },
     },
   });

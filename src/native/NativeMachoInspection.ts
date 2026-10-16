@@ -237,7 +237,15 @@ const normalizeMacho = (
     load.commands,
     dwarfdump.stdout,
     artifactPath,
-    selectedArchitecture.name,
+    selectedArchitecture.name === null
+      ? null
+      : {
+          name: selectedArchitecture.name,
+          dwarfdumpName: toolArchitectureName(
+            "dwarfdump",
+            selectedArchitecture.name,
+          ),
+        },
   );
   const provenance = captures.map(toInvocation);
   // A thread-state command carries the entrypoint in architecture-specific

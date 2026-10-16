@@ -2,6 +2,8 @@ import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 import { expect, it, vi } from "vitest";
 
 import type { BrowserScenarioCapturePort } from "../../../src/application/BrowserScenarioCapturePort.js";
+import { createBrowserObservationProvider } from "../../../src/composition/browserObservation.js";
+import { createElectronObservationProvider } from "../../../src/composition/electronObservation.js";
 import { silentLogger } from "../../../src/logger.js";
 import { startMcpTransport } from "../../../src/main/transport.js";
 import type { RuntimeDependencies } from "../../../src/main/types.js";
@@ -12,7 +14,18 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
   const session = createTestBinarySession(() => {
     throw new Error("Unexpected deep provider");
   });
-  const close = vi.fn(async () => undefined);
+  const scenarioClose = vi
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error("Scenario cleanup failed"))
+    .mockResolvedValue(undefined);
+  const browserObservation = createBrowserObservationProvider();
+  const browserClose = vi
+    .spyOn(browserObservation, "close")
+    .mockResolvedValue(undefined);
+  const electronObservation = createElectronObservationProvider();
+  const electronClose = vi
+    .spyOn(electronObservation, "close")
+    .mockResolvedValue(undefined);
   const browserScenarioCapture: BrowserScenarioCapturePort = {
     identity: () => ({
       id: "fake-browser",
@@ -22,7 +35,7 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     captureScenario: async () => {
       throw new Error("Unexpected scenario capture");
     },
-    close,
+    close: scenarioClose,
   };
   const factories: Parameters<RuntimeDependencies["serve"]>[0][] = [];
   const runtime: RuntimeDependencies = {
@@ -40,7 +53,11 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     serverLogger: silentLogger,
     environment: runtime.env,
     delivery: new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE),
-    loadOptionalProviders: async () => ({ browserScenarioCapture }),
+    loadOptionalProviders: async () => ({
+      browserObservation,
+      browserScenarioCapture,
+      electronObservation,
+    }),
   });
   if (!transport.ok) throw new Error("Transport failed");
   const factory = factories[0];
@@ -50,10 +67,21 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     await probe.close();
     const replacement = await factory({ era: "legacy" });
     await replacement.close();
-    expect(close).not.toHaveBeenCalled();
+    expect(browserClose).not.toHaveBeenCalled();
+    expect(scenarioClose).not.toHaveBeenCalled();
+    expect(electronClose).not.toHaveBeenCalled();
 
+    await expect(transport.closeOptionalProviders()).rejects.toMatchObject({
+      errors: [expect.objectContaining({ message: "Scenario cleanup failed" })],
+    });
+    expect(browserClose).toHaveBeenCalledTimes(1);
+    expect(scenarioClose).toHaveBeenCalledTimes(1);
+    expect(electronClose).toHaveBeenCalledTimes(1);
     await transport.closeOptionalProviders();
-    expect(close).toHaveBeenCalledTimes(1);
+    await transport.closeOptionalProviders();
+    expect(browserClose).toHaveBeenCalledTimes(1);
+    expect(scenarioClose).toHaveBeenCalledTimes(2);
+    expect(electronClose).toHaveBeenCalledTimes(1);
   } finally {
     await transport.closeAndroid();
     await session.close();
@@ -64,7 +92,15 @@ it("closes optional providers when MCP server startup throws", async () => {
   const session = createTestBinarySession(() => {
     throw new Error("Unexpected deep provider");
   });
-  const close = vi.fn(async () => undefined);
+  const scenarioClose = vi.fn(async () => undefined);
+  const browserObservation = createBrowserObservationProvider();
+  const browserClose = vi
+    .spyOn(browserObservation, "close")
+    .mockResolvedValue(undefined);
+  const electronObservation = createElectronObservationProvider();
+  const electronClose = vi
+    .spyOn(electronObservation, "close")
+    .mockResolvedValue(undefined);
   const browserScenarioCapture: BrowserScenarioCapturePort = {
     identity: () => ({
       id: "fake-browser",
@@ -74,7 +110,7 @@ it("closes optional providers when MCP server startup throws", async () => {
     captureScenario: async () => {
       throw new Error("Unexpected scenario capture");
     },
-    close,
+    close: scenarioClose,
   };
   const runtime: RuntimeDependencies = {
     env: {},
@@ -91,11 +127,17 @@ it("closes optional providers when MCP server startup throws", async () => {
       serverLogger: silentLogger,
       environment: runtime.env,
       delivery: new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE),
-      loadOptionalProviders: async () => ({ browserScenarioCapture }),
+      loadOptionalProviders: async () => ({
+        browserObservation,
+        browserScenarioCapture,
+        electronObservation,
+      }),
     });
 
     expect(transport).toEqual({ ok: false });
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(browserClose).toHaveBeenCalledTimes(1);
+    expect(scenarioClose).toHaveBeenCalledTimes(1);
+    expect(electronClose).toHaveBeenCalledTimes(1);
   } finally {
     await session.close();
   }

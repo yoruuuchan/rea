@@ -4,7 +4,8 @@ import { stat } from "node:fs/promises";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import {
   AnalysisCancelledError,
   AnalysisResourceConstraintError,
@@ -16,12 +17,9 @@ import {
   OwnedCommandFailure,
   runOwnedCommand,
 } from "../process/OwnedCommand.js";
-import {
-  hashStableFile,
-  StableFileHashCleanupFailure,
-} from "../filesystem/StableFileHash.js";
-import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
-import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { hashStableFile } from "../filesystem/StableFileHash.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import type {
   OwnedProviderProcessSpawnOptions,
   ProviderProcessSnapshot,
@@ -58,6 +56,10 @@ export interface KunaCommandRequest {
   readonly reportedTimeoutMs: number;
   readonly outputBytes: number;
   readonly signal: AbortSignal;
+  readonly retainFailedFileClose: (
+    owner: OwnedFileHandle,
+    resource: string,
+  ) => void;
   readonly launcher?: KunaProcessLauncher | undefined;
 }
 
@@ -71,7 +73,7 @@ export type KunaCommandOutcome =
   | {
       readonly kind: "failed";
       readonly error: AnalysisError;
-      readonly fileCleanup?: OwnedRegularFileCleanupFailure;
+      readonly fileCleanupFailure?: RegularFileCleanupFailure;
     }
   | {
       readonly kind: "retained";
@@ -82,6 +84,48 @@ export type KunaCommandOutcome =
 
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
+
+/** Preserve the operation's typed failure while attaching descriptor cleanup. */
+export const kunaFileCleanupError = (
+  failure: RegularFileCleanupFailure,
+  operation: string,
+  signal?: AbortSignal,
+): AnalysisError => {
+  const cleanup = new ProviderCleanupError(
+    KUNA_PROVIDER_ID,
+    [failure.path],
+    { reason: message(failure.cleanupCause) },
+    { cause: failure, operation },
+  );
+  if (failure.outcome.kind === "completed") return cleanup;
+  const primaryCause = failure.outcome.cause;
+  const primary =
+    primaryCause instanceof AnalysisError
+      ? primaryCause
+      : signal?.aborted === true
+        ? new AnalysisCancelledError(operation, { cause: primaryCause })
+        : new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
+            cause: primaryCause,
+            userMessage: `Kuna ${operation} failed: ${message(primaryCause)}`,
+          });
+  if (primary instanceof AnalysisCancelledError)
+    return new AnalysisCancelledError(operation, {
+      cause: new AggregateError(
+        [primary, cleanup],
+        "Kuna operation was cancelled and descriptor cleanup failed",
+        { cause: primary },
+      ),
+      cleanup: {
+        reason: cleanup.message,
+        resources: [failure.path],
+      },
+      ...(primary.capturedOutput === undefined
+        ? {}
+        : { capturedOutput: primary.capturedOutput }),
+      partialObservation: primary.partialObservation,
+    });
+  return analysisErrorWithCleanupFailure(primary, cleanup, operation);
+};
 
 /** File metadata that, unchanged, lets a verified digest stand without re-hashing. */
 const verifiedExecutables = new Map<
@@ -96,6 +140,7 @@ const verifiedExecutables = new Map<
 const verifyExecutable = async (
   installation: KunaInstallation,
   signal: AbortSignal,
+  retainFailedFileClose: KunaCommandRequest["retainFailedFileClose"],
 ): Promise<string | undefined> => {
   const status = await stat(installation.executable, { bigint: true });
   const identity = [
@@ -108,7 +153,13 @@ const verifyExecutable = async (
   const known = verifiedExecutables.get(installation.executable);
   let sha256 = known?.identity === identity ? known.sha256 : undefined;
   if (sha256 === undefined) {
-    sha256 = (await hashStableFile(installation.executable, signal)).sha256;
+    sha256 = (
+      await hashStableFile(installation.executable, {
+        signal,
+        retainFailedClose: (owner) =>
+          retainFailedFileClose(owner, installation.executable),
+      })
+    ).sha256;
     verifiedExecutables.set(installation.executable, { identity, sha256 });
   }
   return sha256 === installation.sha256 ? undefined : sha256;
@@ -120,7 +171,11 @@ export const runKunaCommand = async (
 ): Promise<KunaCommandOutcome> => {
   const { installation } = request;
   try {
-    const changed = await verifyExecutable(installation, request.signal);
+    const changed = await verifyExecutable(
+      installation,
+      request.signal,
+      request.retainFailedFileClose,
+    );
     if (changed !== undefined)
       return {
         kind: "failed",
@@ -133,36 +188,11 @@ export const runKunaCommand = async (
         }),
       };
   } catch (cause: unknown) {
-    if (cause instanceof OwnedRegularFileCleanupFailure) {
-      const primary = request.signal.aborted
-        ? new AnalysisCancelledError(request.operation, { cause: cause.cause })
-        : new ProviderAdapterError(KUNA_PROVIDER_ID, request.operation, {
-            cause: cause.cause,
-            userMessage: `Cannot verify ${installation.executable}: ${message(cause.cause)}`,
-          });
-      const cleanup = new ProviderCleanupError(
-        KUNA_PROVIDER_ID,
-        [cause.path],
-        {
-          reason:
-            cause.cleanupCause instanceof Error
-              ? cause.cleanupCause.message
-              : String(cause.cleanupCause),
-          ...(cause instanceof StableFileHashCleanupFailure &&
-          cause.completedHash !== undefined
-            ? { completed_hash: cause.completedHash }
-            : {}),
-        },
-        { operation: request.operation, cause: cause.cleanupCause },
-      );
+    if (cause instanceof RegularFileCleanupFailure) {
       return {
         kind: "failed",
-        error: analysisErrorWithCleanupFailure(
-          primary,
-          cleanup,
-          request.operation,
-        ),
-        fileCleanup: cause,
+        error: kunaFileCleanupError(cause, request.operation, request.signal),
+        fileCleanupFailure: cause,
       };
     }
     return {

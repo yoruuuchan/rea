@@ -55,6 +55,17 @@ export type ArtifactCleanupAttempt =
   | { readonly kind: "released" }
   | { readonly kind: "failed"; readonly cause: unknown };
 
+/** Retry failure carrying the exact retained owners that did not release. */
+export class ArtifactResourceRetryFailure extends ArtifactReaderFailure {
+  constructor(
+    readonly failedOwners: readonly ArtifactResourceOwner[],
+    message: string,
+    options: ConstructorParameters<typeof ArtifactReaderFailure>[2],
+  ) {
+    super("unavailable", message, options);
+  }
+}
+
 /** Caller-owned scope that retains failed artifact cleanup for a later close. */
 export class ArtifactResourceScope {
   readonly #pending = new Set<ArtifactResourceOwner>();
@@ -106,6 +117,11 @@ export class ArtifactResourceScope {
     }
   }
 
+  /** Adopt an owner after another boundary's cleanup attempt failed. */
+  retain(owner: ArtifactResourceOwner): void {
+    this.#pending.add(owner);
+  }
+
   /** Retry retained owners without closing resource admission. */
   retryCleanup(): Promise<void> {
     if (this.#draining !== undefined) return this.#draining;
@@ -142,8 +158,8 @@ export class ArtifactResourceScope {
     const resources = [
       ...new Set(observations.flatMap(({ resources }) => resources)),
     ];
-    throw new ArtifactReaderFailure(
-      "unavailable",
+    throw new ArtifactResourceRetryFailure(
+      failures.map(({ owner }) => owner),
       `Artifact cleanup remains incomplete: ${resources.join(", ")}`,
       {
         cause: new AggregateError(

@@ -54,3 +54,40 @@ it("retains primary verification and independent cleanup failures", async () => 
   ]);
   expect(attempted).toEqual(["provider", "fixture"]);
 });
+
+it("keeps a parent fixture when any owned child cleanup remains incomplete", async () => {
+  const primary = new Error("verification failed");
+  const attempted: string[] = [];
+  let parentRemoved = false;
+  let failure: unknown;
+  try {
+    await closeVerifierResources(
+      [
+        async () => {
+          await closeVerifierResources([
+            async () => {
+              attempted.push("client");
+            },
+            async () => {
+              attempted.push("transport");
+              throw new Error("transport close failed");
+            },
+            async () => {
+              attempted.push("file-scope");
+            },
+          ]);
+          parentRemoved = true;
+        },
+      ],
+      primary,
+    );
+  } catch (cause) {
+    failure = cause;
+  }
+
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as AggregateError).errors[0]).toBe(primary);
+  expect((failure as AggregateError).errors[1]).toBeInstanceOf(AggregateError);
+  expect(attempted).toEqual(["client", "transport", "file-scope"]);
+  expect(parentRemoved).toBe(false);
+});

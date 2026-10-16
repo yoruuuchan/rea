@@ -21,7 +21,7 @@ describe("HopperClient restart", () => {
 
     const result = await starting;
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error._tag).toBe("HopperCancelledError");
+    if (!result.ok) expect(result.error._tag).toBe("HopperProtocolError");
   });
 
   it("starts a fresh session after close completes", async () => {

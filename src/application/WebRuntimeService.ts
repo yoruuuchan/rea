@@ -166,19 +166,16 @@ export class WebRuntimeService {
         ),
       );
     return completeProviderEvidence(
-      ok(
-        createEvidence(undefined, this.provider.identity(), {
-          predicateType: `rea.${operation.replaceAll("_", "-")}`,
-          operation,
-          parameters: jsonObjectSchema.parse(input),
-          result,
-          confidence: "observed",
-          authority: "external-service",
-          limitations: result.limitations,
-        }),
-      ),
-      operation,
-      options,
+      createEvidence(undefined, this.provider.identity(), {
+        predicateType: `rea.${operation.replaceAll("_", "-")}`,
+        operation,
+        parameters: jsonObjectSchema.parse(input),
+        result,
+        confidence: "observed",
+        authority: "external-service",
+        limitations: result.limitations,
+      }),
+      options?.signal,
     );
   }
 }

@@ -173,6 +173,12 @@ export interface AnalysisClientContext {
   readonly runId: string;
 }
 
+/** One lifecycle owner for descriptor cleanup and abortable inspection work. */
+export interface FileCloseResourceOwner {
+  retain(owner: { close(): Promise<void> }, resource: string): void;
+  run<T>(operation: () => Promise<T>): Promise<T>;
+}
+
 export interface ProviderIdentity {
   readonly id: string;
   readonly name: string;
@@ -187,6 +193,7 @@ export interface AnalysisProfileResolution {
 /** Cancellation context for side-effect-free provider profile resolution. */
 export interface AnalysisProfileResolutionOptions {
   readonly signal?: AbortSignal;
+  readonly fileCloseResources?: FileCloseResourceOwner;
 }
 
 interface CapabilityEffects {
@@ -290,8 +297,8 @@ export interface AnalysisProviderCandidate extends AnalysisProvider {
   inspectAvailability(): ProviderAvailability;
   inspectReadinessSnapshot?(): AnalysisProviderReadinessSnapshot;
   inspectTargetSupport(target: BinaryTarget): ProviderTargetSupport;
-  /** Report retained candidate-owned cleanup without starting work or retrying it. */
+  /** Observe retained candidate cleanup without starting or retrying work. */
   hasPendingOwnedResources?(): boolean;
-  /** Release candidate-owned resources that may exist without a client. */
+  /** Release candidate resources that are independent of any active client. */
   closeOwnedResources?(): Promise<Result<null, AnalysisError>>;
 }

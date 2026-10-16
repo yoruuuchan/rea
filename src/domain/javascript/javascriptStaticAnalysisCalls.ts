@@ -34,12 +34,16 @@ import type {
 } from "./javascriptStaticAnalysisState.js";
 import {
   resolveSemanticBindingState,
+  semanticStableInitializer,
+  type JavaScriptBindingIndex,
   type JavaScriptSemanticAnalysisState,
 } from "./javascriptSemanticState.js";
 import {
   isUnmodifiedGlobalReference,
   isUnmodifiedImportMetaUrl,
 } from "./javascriptSemanticAmbientWrites.js";
+import { evaluateSemanticExpression } from "./javascriptSemanticValues.js";
+import { semanticTopLevelEffectFollowsCapture } from "./javascriptSemanticMutationInitializers.js";
 import {
   semanticFactoryLoaderMemberAt,
   semanticFactoryRequireLoaderAt,
@@ -119,7 +123,7 @@ export const inspectCall = (
       kind: "service-worker",
       specifier: moduleUrlSpecifier(node, bindings),
     });
-  inspectEndpointCall(node, name, first, context);
+  inspectEndpointCall(node, name, first, context, bindings);
   inspectStorageCall(node, name, first, context);
   if (first === "audio" || first === "video")
     noteMediaElementPreloads(node, accumulator);
@@ -424,6 +428,7 @@ const inspectEndpointCall = (
   name: string,
   first: string | undefined,
   context: FindingContext,
+  bindings: JavaScriptSemanticAnalysisState,
 ): void => {
   const route = STATIC_ROUTE_CALL_NAMES.some(
     (candidate) => name === candidate || name.endsWith(`.${candidate}`),
@@ -435,6 +440,35 @@ const inspectEndpointCall = (
       value: first,
       mechanism: `call:${name}`,
     });
+  if (isKnownNetworkRequest(node, bindings)) {
+    const target = argumentNode(node.arguments[0]);
+    if (target === undefined) return;
+    const literal = stringValue(target);
+    if (literal !== undefined) {
+      addEndpoint(context, {
+        node,
+        kind: "network",
+        value: literal,
+        mechanism: `call:${name}`,
+      });
+      return;
+    }
+    const reference = requestReferenceNode(target);
+    const unwrapped = unwrapJavaScriptExpression(reference).node;
+    if (
+      t.isIdentifier(unwrapped) ||
+      t.isMemberExpression(unwrapped) ||
+      t.isOptionalMemberExpression(unwrapped)
+    ) {
+      context.accumulator.pendingNetworkCalls.push({ node, name });
+      return;
+    }
+    addPartialNetworkEndpoint(context, node, name, target);
+    return;
+  }
+  // A local or shadowed function with a familiar network name is not a known
+  // browser request API. Do not let the literal fallback turn it into one.
+  if (isNetworkRequestSpelling(name)) return;
   const receiverFact = context.openReceiverFacts?.get(node.start ?? -1);
   const endpoint = endpointArgumentHelper(
     name,
@@ -450,6 +484,229 @@ const inspectEndpointCall = (
       mechanism: `call:${name}`,
       ...(endpoint.kind === "candidate" ? { interpretation: "candidate" } : {}),
     });
+};
+
+const isNetworkRequestSpelling = (name: string): boolean =>
+  name === "fetch" ||
+  name === "WebSocket" ||
+  name === "EventSource" ||
+  name === "sendBeacon" ||
+  name === "window.fetch" ||
+  name === "globalThis.fetch" ||
+  name === "self.fetch" ||
+  name === "navigator.sendBeacon";
+
+/** Confirm that the call resolves to a built-in network API at this source site. */
+const isKnownNetworkRequest = (
+  node: JavaScriptCallLike,
+  bindings: JavaScriptSemanticAnalysisState,
+): boolean => {
+  if (
+    (t.isCallExpression(node) || t.isOptionalCallExpression(node)) &&
+    isUnmodifiedGlobalReference(node.callee, bindings, "fetch")
+  )
+    return true;
+  if (
+    t.isNewExpression(node) &&
+    (isUnmodifiedGlobalReference(node.callee, bindings, "WebSocket") ||
+      isUnmodifiedGlobalReference(node.callee, bindings, "EventSource"))
+  )
+    return true;
+  return (
+    (t.isCallExpression(node) || t.isOptionalCallExpression(node)) &&
+    isUnmodifiedGlobalReference(node.callee, bindings, [
+      "navigator",
+      "sendBeacon",
+    ])
+  );
+};
+
+/** Finish queued targets after shared member-mutation facts are indexed. */
+export const finishPartialNetworkEndpoints = (
+  context: FindingContext,
+  bindings: JavaScriptSemanticAnalysisState,
+  index: JavaScriptBindingIndex,
+): void => {
+  for (const { node, name } of context.accumulator.pendingNetworkCalls) {
+    const target = argumentNode(node.arguments[0]);
+    if (target === undefined) continue;
+    const resolved = resolvedRequestTarget(target, node, bindings, index);
+    if (resolved !== undefined)
+      addEndpoint(context, {
+        node,
+        kind: "network",
+        value: resolved,
+        mechanism: `call:${name}`,
+      });
+    else addPartialNetworkEndpoint(context, node, name, target);
+  }
+  context.accumulator.pendingNetworkCalls.length = 0;
+  context.accumulator.endpoints.sort(
+    (left, right) => left.offset - right.offset,
+  );
+};
+
+const addPartialNetworkEndpoint = (
+  context: FindingContext,
+  node: JavaScriptCallLike,
+  name: string,
+  target: t.Node,
+): void =>
+  addEndpoint(context, {
+    node,
+    kind: "network",
+    // Partial values preserve the original expression text, byte for byte.
+    value: sourceSlice(context.source, target),
+    mechanism: `call:${name}`,
+    resolution: "partial",
+  });
+
+const resolvedRequestTarget = (
+  node: t.Node,
+  site: t.Node,
+  bindings: JavaScriptSemanticAnalysisState,
+  index: JavaScriptBindingIndex,
+): string | undefined => {
+  const reference = requestReferenceNode(node);
+  // A toString result is selected before the enclosing request invocation.
+  const expression = unwrapJavaScriptExpression(node).node;
+  const capture = reference === expression ? site : expression;
+  if (referenceMayHaveChangedAtSite(reference, capture, index))
+    return undefined;
+  if (!requestInitializerPrecedesSite(reference, capture, bindings, index))
+    return undefined;
+  const evaluated = evaluateSemanticExpression(node, bindings);
+  if (evaluated.status === "literal" && typeof evaluated.value === "string")
+    return evaluated.value;
+  return urlObjectRequestTarget(node, capture, bindings, index);
+};
+
+const requestInitializerPrecedesSite = (
+  reference: t.Node,
+  site: t.Node,
+  bindings: JavaScriptSemanticAnalysisState,
+  index: JavaScriptBindingIndex,
+): boolean => {
+  const effects = index.effectsForReferenceAt(site, reference);
+  if (effects.bindingId === null) return false;
+  const binding = bindings.bindingsById.get(effects.bindingId);
+  const initializer = semanticStableInitializer(binding, bindings);
+  return (
+    initializer !== undefined &&
+    semanticTopLevelEffectFollowsCapture(
+      initializer.node,
+      site,
+      bindings.parentsByNode,
+    )
+  );
+};
+
+const referenceMayHaveChangedAtSite = (
+  reference: t.Node,
+  site: t.Node,
+  index: JavaScriptBindingIndex,
+): boolean => {
+  const effects = index.effectsForReferenceAt(site, reference);
+  return (
+    !effects.memberEffectsIndexed ||
+    effects.resolution !== "resolved" ||
+    effects.effects.some(({ timing }) => timing !== "after")
+  );
+};
+
+const requestReferenceNode = (node: t.Node): t.Node => {
+  const target = unwrapJavaScriptExpression(node).node;
+  if (
+    (t.isCallExpression(target) || t.isOptionalCallExpression(target)) &&
+    target.arguments.length === 0
+  ) {
+    const callee = unwrapJavaScriptExpression(target.callee).node;
+    if (
+      (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+      semanticStaticPropertyName(callee.property, callee.computed) ===
+        "toString"
+    )
+      return unwrapJavaScriptExpression(callee.object).node;
+  }
+  return target;
+};
+
+/** Resolve an immutable URL object or alias only while shared effects say it is unchanged. */
+const urlObjectRequestTarget = (
+  node: t.Node,
+  site: t.Node,
+  bindings: JavaScriptSemanticAnalysisState,
+  index: JavaScriptBindingIndex,
+  seen = new Set<string>(),
+): string | undefined => {
+  let target = unwrapJavaScriptExpression(node).node;
+  if (
+    (t.isCallExpression(target) || t.isOptionalCallExpression(target)) &&
+    target.arguments.length === 0
+  ) {
+    const callee = unwrapJavaScriptExpression(target.callee).node;
+    if (
+      (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+      semanticStaticPropertyName(callee.property, callee.computed) ===
+        "toString"
+    )
+      target = unwrapJavaScriptExpression(callee.object).node;
+  }
+  if (
+    !t.isIdentifier(target) ||
+    referenceMayHaveChangedAtSite(target, site, index)
+  )
+    return undefined;
+  const effects = index.effectsForReferenceAt(site, target);
+  const binding =
+    effects.bindingId === null
+      ? undefined
+      : bindings.bindingsById.get(effects.bindingId);
+  if (binding === undefined || seen.has(binding.bindingId)) return undefined;
+  seen.add(binding.bindingId);
+  const stable = semanticStableInitializer(binding, bindings);
+  if (
+    stable === undefined ||
+    !semanticTopLevelEffectFollowsCapture(
+      stable.node,
+      site,
+      bindings.parentsByNode,
+    )
+  )
+    return undefined;
+  const initializer = stable.node;
+  if (initializer === undefined) return undefined;
+  const initialized = unwrapJavaScriptExpression(initializer).node;
+  if (t.isIdentifier(initialized))
+    return urlObjectRequestTarget(initialized, site, bindings, index, seen);
+  if (!t.isNewExpression(initialized)) return undefined;
+  if (!isUnmodifiedGlobalReference(initialized.callee, bindings, "URL"))
+    return undefined;
+  if (
+    ["URL", "Object"].some((owner) =>
+      ["toString", "valueOf"].some((method) =>
+        bindings.ambientWrites.covers(["global", owner, "prototype", method]),
+      ),
+    )
+  )
+    return undefined;
+  const input = stringValue(initialized.arguments[0]);
+  if (input === undefined) return undefined;
+  if (initialized.arguments.length === 1) {
+    try {
+      return new URL(input).href;
+    } catch {
+      return undefined;
+    }
+  }
+  if (initialized.arguments.length !== 2) return undefined;
+  const base = stringValue(initialized.arguments[1]);
+  if (base === undefined) return undefined;
+  try {
+    return new URL(input, base).href;
+  } catch {
+    return undefined;
+  }
 };
 
 /** Record tRPC procedures, tRPC link URLs and named GraphQL operations. */
@@ -567,15 +824,21 @@ export const addReference = (
 const addEndpoint = (context: FindingContext, input: EndpointInput): void =>
   addLocatedFinding(context, {
     collection: context.accumulator.endpoints,
-    key: `endpoint\0${input.kind}\0${input.interpretation ?? "literal"}\0${input.value}`,
+    key: `endpoint\0${input.kind}\0${input.interpretation ?? "literal"}\0${input.resolution ?? "exact"}\0${input.value}`,
     node: input.node,
     value: {
       kind: input.kind,
-      value: sanitizeEndpointCandidate(input.value),
+      value:
+        input.resolution === "partial"
+          ? input.value
+          : sanitizeEndpointCandidate(input.value),
       mechanism: input.mechanism,
       ...(input.interpretation === undefined
         ? {}
         : { interpretation: input.interpretation }),
+      ...(input.resolution === undefined
+        ? {}
+        : { resolution: input.resolution }),
       module_key: null,
       location: range(input.node),
     },

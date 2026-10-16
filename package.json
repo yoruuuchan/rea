@@ -383,6 +383,7 @@
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "rolldown": "1.2.12",
+    "tsx": "4.23.15",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
     "typescript-termux": "npm:typescript@5.9.3",

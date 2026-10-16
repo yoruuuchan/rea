@@ -575,6 +575,8 @@ it("retains completed discovery when cleanup fails, then retries before acceptin
       partialObservation: { operation: "inspect_signal_decoders" },
     },
   });
+  if (first.ok) throw new Error("expected retained cleanup failure");
+  expect(first.error.cleanupIncomplete).toBe(true);
   await f.service.inspectDecoders({});
   await f.service.decode({ path: f.path, decoders: "uart" });
   expect(f.calls()).toBe(2);
@@ -585,6 +587,7 @@ it("retains completed discovery when cleanup fails, then retries before acceptin
     });
   f.allowCleanup();
   await f.service.close();
+  expect(first.error.cleanupIncomplete).toBe(false);
 });
 
 it("rejects ambiguous decoder selectors before launch and retains malformed help output", async () => {

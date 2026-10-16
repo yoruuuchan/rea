@@ -4,11 +4,8 @@ import {
   semanticStaticPropertyKey,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
-import {
-  resolveLocalCallables,
-  type LocalCallableResolution,
-} from "./javascriptSemanticCallResolution.js";
 import { semanticCallableResultExpressions } from "./javascriptSemanticCallableResults.js";
+import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
 import {
   semanticArrayIndex,
   type JavaScriptSemanticPropertyPath,
@@ -16,6 +13,7 @@ import {
 import {
   resolveSemanticBindingState,
   type JavaScriptSemanticAnalysisState,
+  type JavaScriptSemanticInitializer,
 } from "./javascriptSemanticState.js";
 
 /** A reference potentially handed to a caller or generator consumer. */
@@ -27,8 +25,72 @@ export interface SemanticReturnedReference {
 interface Candidate {
   readonly node: t.Node;
   readonly path: readonly (string | number | null)[];
-  readonly bindings: ReadonlySet<string>;
+  readonly initializers: ReadonlySet<JavaScriptSemanticInitializer>;
 }
+
+type InitializerContext = ReadonlySet<JavaScriptSemanticInitializer>;
+type CompletedExpansions = WeakMap<
+  t.Node,
+  Map<string, readonly InitializerContext[]>
+>;
+
+interface ExpansionFrame {
+  readonly item: Candidate;
+  readonly node: t.Node;
+  readonly pathKey: string;
+  readonly parent: ExpansionFrame | null;
+  readonly blockers: Set<JavaScriptSemanticInitializer>;
+}
+
+type ExpansionTask =
+  | {
+      readonly kind: "visit";
+      readonly item: Candidate;
+      readonly parent: ExpansionFrame | null;
+    }
+  | { readonly kind: "complete"; readonly frame: ExpansionFrame };
+
+const contextContains = (
+  context: InitializerContext,
+  required: InitializerContext,
+): boolean => {
+  for (const initializer of required)
+    if (!context.has(initializer)) return false;
+  return true;
+};
+
+const propagateBlockers = (
+  blockers: InitializerContext,
+  parent: ExpansionFrame | null,
+): void => {
+  if (parent === null) return;
+  for (const initializer of blockers)
+    if (parent.item.initializers.has(initializer))
+      parent.blockers.add(initializer);
+};
+
+const completeExpansion = (
+  frame: ExpansionFrame,
+  expanded: CompletedExpansions,
+): void => {
+  const paths =
+    expanded.get(frame.node) ??
+    new Map<string, readonly InitializerContext[]>();
+  const contexts = paths.get(frame.pathKey) ?? [];
+  const covered = contexts.find((context) =>
+    contextContains(frame.blockers, context),
+  );
+  if (covered === undefined) {
+    paths.set(frame.pathKey, [
+      ...contexts.filter(
+        (context) => !contextContains(context, frame.blockers),
+      ),
+      frame.blockers,
+    ]);
+    expanded.set(frame.node, paths);
+  }
+  propagateBlockers(covered ?? frame.blockers, frame.parent);
+};
 
 interface ObjectTargetIndex {
   readonly propertyByName: ReadonlyMap<
@@ -50,73 +112,73 @@ interface ObjectTargetUnknown {
 export const createSemanticReturnedReferences = (
   state: JavaScriptSemanticAnalysisState,
 ): ((callee: t.Node) => readonly SemanticReturnedReference[]) => {
-  const callableById = new Map(
-    state.callables.map((callable) => [callable.callableId, callable]),
-  );
-  const bindingCache = new Map<string, LocalCallableResolution>();
   const results = new WeakMap<t.Node, readonly SemanticReturnedReference[]>();
   const objectTargets = new WeakMap<t.ObjectExpression, ObjectTargetIndex>();
   return (callee) => {
     const existing = results.get(callee);
     if (existing !== undefined) return existing;
     const functions = new Set<t.Node>();
-    const resolution = resolveLocalCallables({
-      node: callee,
-      state,
-      callableById,
-      bindingCache,
-      seenBindings: new Set(),
-    });
-    for (const id of resolution.callableIds) {
-      const node = state.callableNodesById.get(id);
-      if (node !== undefined) functions.add(node);
-    }
-    const pending: Candidate[] = [
-      { node: callee, path: [], bindings: new Set() },
+    const work: ExpansionTask[] = [
+      {
+        kind: "visit",
+        item: { node: callee, path: [], initializers: new Set() },
+        parent: null,
+      },
     ];
-    // A shared initializer can be reached through both arms of every alias
-    // diamond. Expand an expression/path again only when its cycle context
-    // permits a binding that an earlier traversal blocked.
-    const expanded = new WeakMap<
-      t.Node,
-      Map<string, readonly ReadonlySet<string>[]>
-    >();
-    for (let cursor = 0; cursor < pending.length; cursor++) {
-      const item = pending[cursor];
-      if (item === undefined) break;
+    // Finish descendants before memoizing an expansion. Only actual external
+    // cycle blockers affect reuse; branch history is not a dependency. An
+    // acyclic expression/path is consequently expanded once across a diamond.
+    const expanded: CompletedExpansions = new WeakMap();
+    while (work.length > 0) {
+      const task = work.pop();
+      if (task === undefined) break;
+      if (task.kind === "complete") {
+        completeExpansion(task.frame, expanded);
+        continue;
+      }
+      const { item, parent } = task;
       const node = unwrapJavaScriptExpression(item.node).node;
       const pathKey = JSON.stringify(item.path);
-      const paths =
-        expanded.get(node) ?? new Map<string, readonly ReadonlySet<string>[]>();
-      const contexts = paths.get(pathKey) ?? [];
-      if (
-        contexts.some((context) =>
-          [...context].every((binding) => item.bindings.has(binding)),
-        )
-      )
+      const covered = expanded
+        .get(node)
+        ?.get(pathKey)
+        ?.find((context) => contextContains(item.initializers, context));
+      if (covered !== undefined) {
+        // Cached cycle dependencies must reach the caller's proof too.
+        propagateBlockers(covered, parent);
         continue;
-      paths.set(pathKey, [
-        ...contexts.filter(
-          (context) =>
-            ![...item.bindings].every((binding) => context.has(binding)),
-        ),
-        item.bindings,
-      ]);
-      expanded.set(node, paths);
+      }
+      const frame: ExpansionFrame = {
+        item,
+        node,
+        pathKey,
+        parent,
+        blockers: new Set(),
+      };
+      work.push({ kind: "complete", frame });
+      const pending: Candidate[] = [];
       if (t.isIdentifier(node)) {
         const binding = resolveSemanticBindingState(state, node, node.name);
-        if (binding === undefined || item.bindings.has(binding.bindingId))
-          continue;
-        const bindings = new Set([...item.bindings, binding.bindingId]);
+        if (binding === undefined) continue;
+        const selected = semanticBindingAtRead(
+          binding,
+          node,
+          state.parentsByNode,
+        ).binding;
         for (const initializer of [
-          ...binding.initializers,
-          ...binding.referenceInitializers,
-        ])
+          ...selected.initializers,
+          ...selected.referenceInitializers,
+        ]) {
+          if (item.initializers.has(initializer)) {
+            frame.blockers.add(initializer);
+            continue;
+          }
           pending.push({
             node: initializer.node,
             path: [...initializer.projection, ...item.path],
-            bindings,
+            initializers: new Set([...item.initializers, initializer]),
           });
+        }
       } else if (
         t.isMemberExpression(node) ||
         t.isOptionalMemberExpression(node)
@@ -202,6 +264,11 @@ export const createSemanticReturnedReferences = (
         }
         if (node.superClass !== null && node.superClass !== undefined)
           pending.push({ ...item, node: node.superClass });
+      }
+      for (let index = pending.length - 1; index >= 0; index--) {
+        const child = pending[index];
+        if (child !== undefined)
+          work.push({ kind: "visit", item: child, parent: frame });
       }
     }
     const output = [...functions].flatMap((node) => {

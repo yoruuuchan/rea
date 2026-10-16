@@ -1,4 +1,5 @@
 import { chmod, lstat, readFile, unlink } from "node:fs/promises";
+import { dirname } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
@@ -111,6 +112,9 @@ if [ "$1" = version ]; then
   exit 0
 fi
 if [ "$1" = -s ] && [ "$3" = install ]; then
+  if [ "$4" = -r ]; then selected="$5"; else selected="$4"; fi
+  cmp "$selected" "$root/app.apk" || exit 1
+  printf '%s\\n' "$selected" >> "$root/snapshots"
   if [ -f "$root/installed" ]; then
     if [ "$4" != -r ]; then
       printf 'Failure [INSTALL_FAILED_ALREADY_EXISTS]\\n'
@@ -184,14 +188,26 @@ exit 1
     expect(await readFile(workspace.path("events"), "utf8")).toBe(
       "fresh-install\nreplacement\nfresh-install\n",
     );
+    const snapshots = (await readFile(workspace.path("snapshots"), "utf8"))
+      .trim()
+      .split("\n");
+    expect(snapshots).toHaveLength(3);
+    expect(new Set(snapshots).size).toBe(3);
+    for (const snapshot of snapshots) {
+      expect(snapshot).not.toBe(apk);
+      await expect(lstat(dirname(snapshot))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+    expect(await readFile(apk, "utf8")).toBe("apk");
     const calls = await readFile(workspace.path("calls"), "utf8");
     expect(calls.split("\n").filter((line) => line !== "")).toEqual([
       "version",
-      `-s emulator-5554 install -r ${apk}`,
+      `-s emulator-5554 install -r ${snapshots[0]}`,
       "version",
-      `-s emulator-5554 install -r ${apk}`,
+      `-s emulator-5554 install -r ${snapshots[1]}`,
       "version",
-      `-s emulator-5554 install ${apk}`,
+      `-s emulator-5554 install ${snapshots[2]}`,
     ]);
   },
 );

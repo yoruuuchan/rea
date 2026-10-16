@@ -12,7 +12,14 @@ const workflowSchema = z.object({
   jobs: z.record(
     z.string(),
     z.object({
-      steps: z.array(z.object({ run: z.string().optional() })).optional(),
+      steps: z
+        .array(
+          z.object({
+            run: z.string().optional(),
+            with: z.object({ name: z.string().optional() }).optional(),
+          }),
+        )
+        .optional(),
     }),
   ),
 });
@@ -74,6 +81,34 @@ describe("curated Windows test lane", () => {
     expect(await explicitPaths("windows")).toContain(
       "tests/boundary/process/packageNpmInvocation.test.ts",
     );
+  });
+
+  it("keeps Windows runner cancellation coverage in the lane", async () => {
+    expect(await explicitPaths("windows")).toEqual(
+      expect.arrayContaining([
+        "tests/process-global/runnerCancellation.test.ts",
+        "tests/process-global/windowsOwnedCommand.test.ts",
+      ]),
+    );
+  });
+
+  it("installs and verifies native command ownership before the source build", async () => {
+    const workflow = workflowSchema.parse(
+      parse(await readFile(WORKFLOW, "utf8")),
+    );
+    const steps = workflow.jobs["windows-curated"]?.steps ?? [];
+    const download = steps.findIndex(
+      (step) => step.with?.name === "windows-native-controls",
+    );
+    const verify = steps.findIndex(
+      (step) => step.run === "npm run verify:windows-native:artifact",
+    );
+    const build = steps.findIndex(
+      (step) => step.run === "npm run build:cached",
+    );
+    expect(download).toBeGreaterThanOrEqual(0);
+    expect(verify).toBeGreaterThan(download);
+    expect(build).toBeGreaterThan(verify);
   });
 });
 

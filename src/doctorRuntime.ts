@@ -42,11 +42,13 @@ export const createSystemDoctorHost = (
       // parser-owned error when IDA itself was explicitly selected.
       return analysisProvider === "ida" ? registration : ok(undefined);
     },
-    providerInspections: async (adoptFileHandle) => [
+    providerInspections: async (fileCloseResources) => [
       await inspectSystemGhidraProvider(environment),
       inspectIdaRegistration(environment.REA_IDA_MCP_CONFIG),
       await inspectJadxProvider(environment),
-      await inspectKunaProvider(environment, process.platform, adoptFileHandle),
+      await inspectKunaProvider(environment, process.platform, {
+        fileCloseResources,
+      }),
     ],
     linuxDemoRuntimeCheck: () => inspectLinuxPrivateDisplay(environment),
   });

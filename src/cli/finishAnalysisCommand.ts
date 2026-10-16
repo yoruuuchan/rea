@@ -34,9 +34,9 @@ export const finishAnalysisCommand = async <
     };
   }
   try {
+    // Resource owners may resolve their retained errors during close. This
+    // adapter cannot infer resolution of a producer's earlier cleanup failure.
     await service.close();
-    if (!result.ok && result.error.cleanupIncomplete)
-      result.error.resolveCleanup();
   } catch (cause) {
     let cleanup: AnalysisError;
     if (cause instanceof AnalysisError) cleanup = cause;

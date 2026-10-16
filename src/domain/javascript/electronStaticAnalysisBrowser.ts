@@ -25,7 +25,10 @@ import {
   staticPath,
   staticPathResolutionContext,
 } from "./javascriptStaticAnalysisHelpers.js";
-import { semanticStaticPropertyKey } from "./javascriptAstValues.js";
+import {
+  semanticStaticPropertyKey,
+  unwrapJavaScriptExpression,
+} from "./javascriptAstValues.js";
 import type { JavaScriptFindingContext } from "./javascriptStaticAnalysisState.js";
 
 /** Inspect BrowserWindow, contextBridge, and utility-process syntax. */
@@ -45,7 +48,11 @@ const inspectBrowserWindow = (
 ): void => {
   const path = electronCalleePath(node.callee, context);
   if (path?.length !== 1 || path[0] !== "BrowserWindow") return;
-  const options = argumentNode(node.arguments[0]);
+  const argument = argumentNode(node.arguments[0]);
+  const options =
+    argument === undefined
+      ? undefined
+      : unwrapJavaScriptExpression(argument).node;
   const collected = collectWindowOptions(context.source, options);
   context.accumulator.unknownFindings += collected.unknown;
   const finding: ElectronBrowserWindowFinding = {
@@ -79,17 +86,18 @@ const collectWindowOptions = (
   readonly unknown: number;
 } => {
   const lookup = objectProperty(options, "webPreferences");
-  if (
-    lookup.status !== "explicit" ||
-    !t.isObjectExpression(lookup.property.value)
-  )
+  const preferences =
+    lookup.status === "explicit"
+      ? unwrapJavaScriptExpression(lookup.property.value).node
+      : undefined;
+  if (lookup.status !== "explicit" || !t.isObjectExpression(preferences))
     return {
       status: lookup.status === "missing" ? "missing" : "dynamic",
       preferences: [],
       preload: { preload_path: null, preload_resolution_context: null },
       unknown: lookup.status === "missing" ? 0 : 1,
     };
-  return collectWebPreferences(source, lookup.property.value);
+  return collectWebPreferences(source, preferences);
 };
 
 const collectWebPreferences = (

@@ -6,7 +6,7 @@ interface ShutdownSignalSource {
 }
 
 interface ShutdownInputSource {
-  once(event: "end" | "close", listener: () => void): unknown;
+  on(event: "end" | "close", listener: () => void): unknown;
   off(event: "end" | "close", listener: () => void): unknown;
 }
 
@@ -27,8 +27,8 @@ export const registerProcessShutdown = (
 ): (() => void) => {
   events.signals.on("SIGINT", handler);
   events.signals.on("SIGTERM", handler);
-  events.stdin.once("end", handler);
-  events.stdin.once("close", handler);
+  events.stdin.on("end", handler);
+  events.stdin.on("close", handler);
   return () => {
     events.signals.off("SIGINT", handler);
     events.signals.off("SIGTERM", handler);

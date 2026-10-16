@@ -70,26 +70,23 @@ export class PeResourcesService {
       );
     const value = report.data;
     return completeProviderEvidence(
-      ok(
-        createEvidence(
-          {
-            path: value.artifact.path,
-            format: "pe",
-            sha256: value.artifact.sha256,
-          },
-          this.provider.identity,
-          {
-            operation,
-            parameters: input.data,
-            result: value,
-            confidence: "observed",
-            limitations: value.limitations,
-            locations: [{ kind: "artifact-path", path: value.artifact.path }],
-          },
-        ),
+      createEvidence(
+        {
+          path: value.artifact.path,
+          format: "pe",
+          sha256: value.artifact.sha256,
+        },
+        this.provider.identity,
+        {
+          operation,
+          parameters: input.data,
+          result: value,
+          confidence: "observed",
+          limitations: value.limitations,
+          locations: [{ kind: "artifact-path", path: value.artifact.path }],
+        },
       ),
-      operation,
-      options,
+      options?.signal,
     );
   }
 }

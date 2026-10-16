@@ -78,22 +78,19 @@ export class EvmInterfaceService {
         ),
       );
     return completeProviderEvidence(
-      ok(
-        createEvidence(execution.subject, execution.provider, {
-          operation: OPERATION,
-          parameters: input.data,
-          result: report.data,
-          ...(execution.rawResult === null
-            ? {}
-            : { rawResult: execution.rawResult }),
-          confidence: "inferred",
-          locations: execution.locations,
-          limitations: execution.limitations,
-        }),
-      ),
-      OPERATION,
-      options,
-      outputOptions,
+      createEvidence(execution.subject, execution.provider, {
+        operation: OPERATION,
+        parameters: input.data,
+        result: report.data,
+        ...(execution.rawResult === null
+          ? {}
+          : { rawResult: execution.rawResult }),
+        confidence: "inferred",
+        locations: execution.locations,
+        limitations: execution.limitations,
+      }),
+      options?.signal,
+      outputOptions?.capturedOutput,
     );
   }
 }

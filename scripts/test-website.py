@@ -308,19 +308,54 @@ class WebsiteMaintenanceChecks(unittest.TestCase):
 
     def test_repository_links_reject_missing_files_and_old_markdown_anchors(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            container = Path(directory)
+            root = container / "repository"
             (root / "website/public").mkdir(parents=True)
             (root / "docs").mkdir()
             (root / "docs/guide.md").write_text("# Guide\n## Set up REA\n")
+            (container / "outside.md").write_text("# Outside\n")
             page = root / "website/README.md"
             page.write_text("[Guide](../docs/guide.md#set-up-rea)\n")
             (root / "website/.venv").mkdir()
             (root / "website/.venv/vendor.md").write_text("[File](missing.md)")
             self.assertEqual(VERIFY.check_repository_links(root), [])
-            page.write_text("[Guide](../docs/guide.md#removed)\n[File](../docs/removed.md)\n")
-            errors = VERIFY.check_repository_links(root)
+            alias = container / "repository-alias"
+            alias.symlink_to(root.resolve(), target_is_directory=True)
+            self.assertEqual(VERIFY.check_repository_links(alias), [])
+            page.write_text(
+                "[Guide](../docs/guide.md#removed)\n"
+                "[File](../docs/removed.md)\n"
+                "[Escape](../../outside.md)\n"
+            )
+            errors = VERIFY.check_repository_links(alias)
             self.assertTrue(any("missing Markdown fragment" in error for error in errors))
             self.assertTrue(any("missing repository target" in error for error in errors))
+            self.assertTrue(
+                any("missing repository target: ../../outside.md" in error for error in errors)
+            )
+
+    def test_site_links_accept_directory_aliases_and_still_reject_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory) / "public"
+            shutil.copytree(ROOT / "website/_site", site)
+            canonical_site = site.resolve()
+            alias = Path(directory) / "public-alias"
+            alias.symlink_to(canonical_site, target_is_directory=True)
+            self.assertEqual(VERIFY.check_site(canonical_site)[3], [])
+            self.assertEqual(VERIFY.check_site(alias)[3], [])
+
+            page = canonical_site / "faq/index.html"
+            page.write_text(
+                page.read_text().replace(
+                    "</main>",
+                    '<a href="https://rea.tools/../../outside/">Escape</a></main>',
+                    1,
+                )
+            )
+            errors = VERIFY.check_site(alias)[3]
+            self.assertTrue(
+                any("reference leaves the website" in error for error in errors)
+            )
 
     def test_repository_links_accept_aliased_roots_and_reject_escaping_links(self):
         with tempfile.TemporaryDirectory() as directory:

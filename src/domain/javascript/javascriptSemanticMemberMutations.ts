@@ -1146,7 +1146,11 @@ const observableMutationPaths = (
     const hasParsedRequireOrigin = binding.initializers.some(
       ({ node }) => semanticRequireOrigin(node, state) !== undefined,
     );
-    if (binding.directOrigins.length > 0 || hasParsedRequireOrigin)
+    if (
+      binding.directOrigins.length > 0 ||
+      hasParsedRequireOrigin ||
+      binding.hostOrigin !== undefined
+    )
       (observer.origins ??= new Set()).add("opaque");
     for (const initializer of binding.initializers) {
       link(
@@ -1176,6 +1180,11 @@ const observableMutationPaths = (
         // Keep class/getter projections distinct so cycle pruning does not
         // discard observable escapes through a shared getter result.
         if (
+          t.isNewExpression(expression) &&
+          semanticClassCandidates(expression.callee, state).length === 0
+        )
+          (observer.origins ??= new Set()).add("opaque");
+        else if (
           t.isObjectExpression(expression) ||
           t.isArrayExpression(expression) ||
           t.isClass(expression) ||

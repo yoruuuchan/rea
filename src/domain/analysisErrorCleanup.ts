@@ -30,7 +30,7 @@ export const analysisErrorWithCleanupFailure = (
         reason: projected.message,
         resources: [
           ...new Set([
-            ...primary.cleanupResources,
+            ...(primary.cleanupIncomplete ? primary.cleanupResources : []),
             ...cleanup.cleanupResources,
           ]),
         ],

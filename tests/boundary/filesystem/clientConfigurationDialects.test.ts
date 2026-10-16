@@ -2,7 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parse as parseJsonc, type ParseError } from "jsonc-parser";
+import {
+  findNodeAtLocation,
+  parse as parseJsonc,
+  parseTree,
+  type ParseError,
+} from "jsonc-parser";
 
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
 import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
@@ -238,6 +243,173 @@ describe("OpenCode JSONC registration edits", () => {
     expect(await readFile(client.configPath, "utf8")).toBe(invalid);
   });
 });
+
+it.each([
+  {
+    name: "a sole registration without a trailing comma",
+    hasBeforeSibling: false,
+    hasAfterSibling: false,
+    hasGapComment: false,
+    afterRegistration: "",
+    expectedComment: undefined,
+  },
+  {
+    name: "a sole registration with a trailing comma",
+    hasBeforeSibling: false,
+    hasAfterSibling: false,
+    hasGapComment: false,
+    afterRegistration: ",",
+    expectedComment: undefined,
+  },
+  {
+    name: "a sole registration with a block comment before its trailing comma",
+    hasBeforeSibling: false,
+    hasAfterSibling: false,
+    hasGapComment: false,
+    afterRegistration: " /* Keep this note. */,",
+    expectedComment: "/* Keep this note. */",
+  },
+  {
+    name: "a sole registration with a line comment before its trailing comma",
+    hasBeforeSibling: false,
+    hasAfterSibling: false,
+    hasGapComment: false,
+    afterRegistration: " // Keep this note.\n  ,",
+    expectedComment: "// Keep this note.",
+  },
+  {
+    name: "a registration with a surviving sibling and block comment before its comma",
+    hasBeforeSibling: true,
+    hasAfterSibling: true,
+    hasGapComment: true,
+    afterRegistration:
+      ' /* Keep this note. */,\n    "after": { "command": "after" }',
+    expectedComment: "/* Keep this note. */",
+  },
+  {
+    name: "a registration with a surviving sibling and line comment before its comma",
+    hasBeforeSibling: true,
+    hasAfterSibling: true,
+    hasGapComment: true,
+    afterRegistration:
+      ' // Keep this note.\n  ,\n    "after": { "command": "after" }',
+    expectedComment: "// Keep this note.",
+  },
+  {
+    name: "a first registration with a surviving sibling and block comment before its comma",
+    hasBeforeSibling: false,
+    hasAfterSibling: true,
+    hasGapComment: false,
+    afterRegistration:
+      ' /* Keep this note. */ ,\n    "after": { "command": "after" }',
+    expectedComment: "/* Keep this note. */",
+  },
+] as const)(
+  "Cursor removes $name and preserves surrounding configuration",
+  async ({
+    hasBeforeSibling,
+    hasAfterSibling,
+    hasGapComment,
+    afterRegistration,
+    expectedComment,
+  }) => {
+    const home = await createTestTempDirectory("rea-cursor-jsonc-remove-");
+    const client = supportedClients(home).find(({ name }) => name === "cursor");
+    if (client === undefined) throw new Error("missing Cursor client");
+    await mkdir(client.markerPath ?? home, { recursive: true });
+
+    const original = `{
+  // Keep unrelated client preferences.
+  "theme": "dark",
+  "mcpServers": {
+${hasBeforeSibling ? '    "before": { "command": "before" },\n' : ""}  }
+}\n`;
+    await writeFile(client.configPath, original);
+    expect(
+      await configureClientConfiguration(client, {}, command),
+    ).toMatchObject({
+      status: "configured",
+      backupPath: `${client.configPath}.rea.backup`,
+    });
+
+    const configured = await readFile(client.configPath, "utf8");
+    let edited = configured;
+    if (hasGapComment) {
+      const root = parseTree(edited, [], { allowTrailingComma: true });
+      const registration =
+        root === undefined
+          ? undefined
+          : findNodeAtLocation(root, [
+              "mcpServers",
+              PRODUCT_IDENTITY.mcpServerKey,
+            ]);
+      const property = registration?.parent;
+      if (property === undefined)
+        throw new Error("configured Cursor registration property is missing");
+      edited =
+        edited.slice(0, property.offset) +
+        "// Keep the comment before the registration.\n    " +
+        edited.slice(property.offset);
+    }
+    const root = parseTree(edited, [], { allowTrailingComma: true });
+    const registration =
+      root === undefined
+        ? undefined
+        : findNodeAtLocation(root, [
+            "mcpServers",
+            PRODUCT_IDENTITY.mcpServerKey,
+          ]);
+    if (registration === undefined)
+      throw new Error("configured Cursor registration is missing");
+    const registrationEnd = registration.offset + registration.length;
+    edited =
+      edited.slice(0, registrationEnd) +
+      afterRegistration +
+      edited.slice(registrationEnd);
+    await writeFile(client.configPath, edited);
+
+    const backup = await readFile(`${client.configPath}.rea.backup`, "utf8");
+    const removed = await systemUninstallHost(home).removeClient(client);
+    expect(removed.status).toBe("removed");
+    const removedText = await readFile(client.configPath, "utf8");
+    const errors: ParseError[] = [];
+    const document = parseJsonc(removedText, errors, {
+      allowTrailingComma: true,
+    }) as Record<string, unknown>;
+    expect(errors).toEqual([]);
+    expect(document.theme).toBe("dark");
+    expect(removedText).toContain("// Keep unrelated client preferences.");
+    if (expectedComment !== undefined)
+      expect(removedText).toContain(expectedComment);
+    if (hasGapComment)
+      expect(removedText).toContain(
+        "// Keep the comment before the registration.",
+      );
+    expect(
+      (document.mcpServers as Record<string, unknown>).rea,
+    ).toBeUndefined();
+    if (hasBeforeSibling)
+      expect(document.mcpServers).toMatchObject({
+        before: { command: "before" },
+      });
+    if (hasAfterSibling)
+      expect(document.mcpServers).toMatchObject({
+        after: { command: "after" },
+      });
+    if (!hasBeforeSibling && !hasAfterSibling)
+      expect(document.mcpServers).toEqual({});
+    expect(await readFile(`${client.configPath}.rea.backup`, "utf8")).toBe(
+      backup,
+    );
+
+    const repeated = await systemUninstallHost(home).removeClient(client);
+    expect(repeated.status).toBe("skipped");
+    expect(await readFile(client.configPath, "utf8")).toBe(removedText);
+    expect(await readFile(`${client.configPath}.rea.backup`, "utf8")).toBe(
+      backup,
+    );
+  },
+);
 
 const parseOpenCode = (text: string): Record<string, unknown> => {
   const errors: ParseError[] = [];

@@ -127,15 +127,12 @@ const runtimeEvidence = (
   options: ExecutionOptions,
 ): Result<Evidence, AnalysisError> => {
   return completeProviderEvidence(
-    ok(
-      createJavaScriptRuntimeObservationEvidence(
-        operation,
-        input,
-        result,
-        provider,
-      ),
+    createJavaScriptRuntimeObservationEvidence(
+      operation,
+      input,
+      result,
+      provider,
     ),
-    operation,
-    options,
+    options.signal,
   );
 };

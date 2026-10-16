@@ -198,6 +198,7 @@ const createBuildCacheFixture = async (): Promise<string> => {
     "scripts/check-dependency-install.mjs",
     "scripts/run-exclusive.mjs",
     "scripts/run-exclusive-command.mjs",
+    "scripts/lib/windows-owned-command.mjs",
     "scripts/generate-skill-metadata.mjs",
     "scripts/clean-build-output.mjs",
     "scripts/generate-package-metadata.mjs",

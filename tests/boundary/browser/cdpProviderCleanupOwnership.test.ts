@@ -105,8 +105,12 @@ it.each([
         cleanupIncomplete: true,
         cleanupResources: expect.arrayContaining(["electron-page"]),
         partialObservation: {
-          target: { target_id: "electron-page", file_path: page },
-          dom: { total_nodes: expect.any(Number) },
+          kind: "electron-page-observation",
+          cleanup: "incomplete",
+          inspection: {
+            target: { target_id: "electron-page", file_path: page },
+            dom: { total_nodes: expect.any(Number) },
+          },
         },
       });
     }

@@ -200,6 +200,7 @@ export class BinarySession
       current: this.#active,
       target,
       options,
+      fileCloseResources: this.fileCloseResourceOwner,
       stagedSnapshotMatches: (target, profile) =>
         this.matchesSnapshot(target, profile),
     }).then((resolved) =>
@@ -224,6 +225,7 @@ export class BinarySession
           current: this.#active,
           path,
           options: admitted,
+          fileCloseResources: this.fileCloseResourceOwner,
           stagedSnapshotMatches: (target, profile) =>
             this.matchesSnapshot(target, profile),
         }),
@@ -337,7 +339,9 @@ export class BinarySession
         ),
       );
     const runId = randomUUID();
-    const client = route.createClient(target, { runId });
+    const client = route.createClient(target, {
+      runId,
+    });
     const run: SessionRun = { client, route, runId };
     const started = await client.execute("health", {}, options);
     if (!started.ok) {
@@ -499,26 +503,31 @@ export class BinarySession
     if (clearRecords) this.clearSessionRecords();
     this.#clearRuntimeAvailability();
     const fileResources = await this.closeWriteResources();
-    const candidates = await this.#providerRouter.closeOwnedResources();
-    let lifecycle: Result<null, AnalysisError>;
-    if (!closed.ok && !fileResources.ok)
-      lifecycle = err(
-        analysisErrorWithCleanupFailure(
-          closed.error,
-          fileResources.error,
+    const hashResources = await this.closeFailedFileCloses();
+    const candidateResources = await this.#providerRouter.closeOwnedResources();
+    const resourceFailures = [
+      ...(fileResources.ok ? [] : [fileResources.error]),
+      ...(hashResources.ok ? [] : [hashResources.error]),
+      ...(candidateResources.ok ? [] : [candidateResources.error]),
+    ];
+    let resourceFailure = resourceFailures[0];
+    for (const next of resourceFailures.slice(1))
+      if (resourceFailure !== undefined)
+        resourceFailure = analysisErrorWithCleanupFailure(
+          resourceFailure,
+          next,
           "close_binary",
-        ),
-      );
-    else lifecycle = closed.ok ? fileResources : closed;
-    if (!lifecycle.ok && !candidates.ok)
+        );
+    if (!closed.ok && resourceFailure !== undefined)
       return err(
         analysisErrorWithCleanupFailure(
-          lifecycle.error,
-          candidates.error,
+          closed.error,
+          resourceFailure,
           "close_binary",
         ),
       );
-    return lifecycle.ok ? candidates : lifecycle;
+    if (!closed.ok) return closed;
+    return resourceFailure === undefined ? ok(null) : err(resourceFailure);
   }
 
   async #retireClient(
@@ -596,7 +605,7 @@ export class BinarySession
       providerOperationHealth: client?.operationHealthSnapshot?.() ?? null,
       cleanupPending:
         this.#pendingCleanup !== undefined ||
-        this.hasPendingWriteResources ||
+        this.hasPendingFileResources ||
         this.#providerRouter.hasPendingOwnedResources(),
     });
   }
@@ -932,7 +941,9 @@ export class BinarySession
   ): Promise<Result<null, AnalysisError>> {
     if (previous === undefined) return ok(null);
     const runId = randomUUID();
-    const client = previous.route.createClient(previous.target, { runId });
+    const client = previous.route.createClient(previous.target, {
+      runId,
+    });
     const run: SessionRun = { client, route: previous.route, runId };
     const started = await client.execute("health", {});
     if (started.ok) {

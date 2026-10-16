@@ -366,9 +366,12 @@ const readClientConfiguration = async (
     original = await fileSystem.readText(transactionPath);
   } catch (cause: unknown) {
     const readFailure =
-      cause instanceof RegularFileCleanupFailure ? cause.cause : cause;
+      cause instanceof RegularFileCleanupFailure &&
+      cause.outcome.kind === "failed"
+        ? cause.outcome.cause
+        : cause;
     return itemRead(
-      isMissing(cause)
+      isMissing(readFailure)
         ? item(client.name, "skipped", "Configuration does not exist.")
         : item(
             client.name,

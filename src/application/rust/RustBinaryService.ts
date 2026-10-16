@@ -71,9 +71,8 @@ export class RustBinaryService {
         ),
       );
     return completeProviderEvidence(
-      ok(evidenceFor(this.provider.identity, input.data, report.data)),
-      OPERATION,
-      options,
+      evidenceFor(this.provider.identity, input.data, report.data),
+      options?.signal,
     );
   }
 }

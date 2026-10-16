@@ -114,6 +114,10 @@ it("cancels before invocation and after an acquired observation", async () => {
     error: {
       _tag: "AnalysisCancelledError",
       capturedOutput: recordedCrashFixture().diagnostics,
+      partialObservation: {
+        operation: "inspect_recorded_crash",
+        normalized_result: recordedCrashFixture(),
+      },
     },
   });
   if (!late.ok) {

@@ -12,6 +12,7 @@ import type {
   CapabilityDescriptor,
   ProviderIdentity,
 } from "../AnalysisProvider.js";
+import type { FileCloseResourceOwner } from "../AnalysisProvider.js";
 import {
   AnalysisProviderRegistry,
   type AnalysisProviderBinding,
@@ -85,8 +86,15 @@ export class SessionProviderRouter {
     target: BinaryTarget,
     providerId?: AnalysisProviderSelector,
     signal?: AbortSignal,
+    fileCloseResources?: FileCloseResourceOwner,
   ): Promise<Result<SessionProviderRoute, AnalysisError>> {
-    const resolutionOptions = signal === undefined ? undefined : { signal };
+    const resolutionOptions =
+      signal === undefined && fileCloseResources === undefined
+        ? undefined
+        : {
+            ...(signal === undefined ? {} : { signal }),
+            ...(fileCloseResources === undefined ? {} : { fileCloseResources }),
+          };
     const selected = await this.registry.select(
       target,
       providerId,

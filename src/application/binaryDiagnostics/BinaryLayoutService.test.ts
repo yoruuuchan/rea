@@ -85,6 +85,10 @@ it("cancels before invocation and after an acquired observation", async () => {
     error: {
       _tag: "AnalysisCancelledError",
       capturedOutput: binaryLayoutFixture().diagnostics,
+      partialObservation: {
+        operation: "inspect_binary_layout",
+        normalized_result: binaryLayoutFixture(),
+      },
     },
   });
   if (!late.ok) {

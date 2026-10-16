@@ -97,33 +97,30 @@ export class RecordedCrashService {
       );
     const value = report.data;
     return completeProviderEvidence(
-      ok(
-        createEvidence(
-          {
-            path: value.artifact.path,
-            format: "elf",
-            architecture:
-              RECORDED_LINUX_CORE_PROFILES[value.architecture]
-                .evidenceArchitecture,
-            sha256: value.artifact.sha256,
-          },
-          this.provider.identity,
-          {
-            operation: OPERATION,
-            parameters: input.data,
-            result: value,
-            // The decoded report is the only representation; do not repeat it.
-            rawResult: null,
-            confidence:
-              value.debugger.status === "available" ? "derived" : "observed",
-            limitations: value.limitations,
-            locations: [{ kind: "artifact-path", path: value.artifact.path }],
-          },
-        ),
+      createEvidence(
+        {
+          path: value.artifact.path,
+          format: "elf",
+          architecture:
+            RECORDED_LINUX_CORE_PROFILES[value.architecture]
+              .evidenceArchitecture,
+          sha256: value.artifact.sha256,
+        },
+        this.provider.identity,
+        {
+          operation: OPERATION,
+          parameters: input.data,
+          result: value,
+          // The decoded report is the only representation; do not repeat it.
+          rawResult: null,
+          confidence:
+            value.debugger.status === "available" ? "derived" : "observed",
+          limitations: value.limitations,
+          locations: [{ kind: "artifact-path", path: value.artifact.path }],
+        },
       ),
-      OPERATION,
-      options,
-      outputOptions,
+      options?.signal,
+      outputOptions?.capturedOutput,
     );
   }
 }

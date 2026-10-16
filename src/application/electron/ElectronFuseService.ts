@@ -64,27 +64,24 @@ export class ElectronFuseService {
     const value = report.data;
     const architecture = subjectArchitecture(value);
     return completeProviderEvidence(
-      ok(
-        createEvidence(
-          {
-            path: value.artifact.resolved_path,
-            sha256: value.artifact.sha256,
-            format: value.artifact.format,
-            ...(architecture === undefined ? {} : { architecture }),
-          },
-          this.provider.identity,
-          {
-            operation: OPERATION,
-            parameters: input.data,
-            result: value,
-            confidence: "observed",
-            limitations: value.limitations,
-            locations: locationsFor(value),
-          },
-        ),
+      createEvidence(
+        {
+          path: value.artifact.resolved_path,
+          sha256: value.artifact.sha256,
+          format: value.artifact.format,
+          ...(architecture === undefined ? {} : { architecture }),
+        },
+        this.provider.identity,
+        {
+          operation: OPERATION,
+          parameters: input.data,
+          result: value,
+          confidence: "observed",
+          limitations: value.limitations,
+          locations: locationsFor(value),
+        },
       ),
-      OPERATION,
-      options,
+      options?.signal,
     );
   }
 }

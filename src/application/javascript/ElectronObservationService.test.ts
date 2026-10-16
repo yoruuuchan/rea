@@ -12,7 +12,7 @@ import {
   electronTargetListSchema,
   inspectElectronPageInputSchema,
 } from "../../domain/javascript/electronObservation.js";
-import { err } from "../../domain/result.js";
+import { err, ok } from "../../domain/result.js";
 import type { ElectronObservationPort } from "./ElectronObservationPort.js";
 import {
   inspectElectronPage,
@@ -71,7 +71,11 @@ const inspection = electronPageInspectionSchema.parse({
 
 it("converts a retained raw Electron inspection into partial Evidence", async () => {
   const failure = new AnalysisCancelledError("inspect_electron_page", {
-    partialObservation: inspection,
+    partialObservation: {
+      kind: "electron-page-observation",
+      inspection,
+      cleanup: "transport-closed",
+    },
   });
   const provider: ElectronObservationPort = {
     identity: () => identity,
@@ -85,7 +89,15 @@ it("converts a retained raw Electron inspection into partial Evidence", async ()
     expect(result.error).toBe(failure);
     expect(parseEvidence(result.error.partialObservation)).toMatchObject({
       operation: "inspect_electron_page",
-      normalized_result: inspection,
+      normalized_result: {
+        ...inspection,
+        limitations: [
+          "REA closed its CDP transport; this does not imply target shutdown.",
+        ],
+      },
+      limitations: expect.arrayContaining([
+        "REA closed its CDP transport; this does not imply target shutdown.",
+      ]),
     });
   }
 });
@@ -95,7 +107,14 @@ it("converts a raw inspection retained by provider cleanup failure", async () =>
     "rea-cdp-electron",
     ["electron-page"],
     { reason: "target detach failed" },
-    { operation: "inspect_electron_page", partialObservation: inspection },
+    {
+      operation: "inspect_electron_page",
+      partialObservation: {
+        kind: "electron-page-observation",
+        inspection,
+        cleanup: "incomplete",
+      },
+    },
   );
   const provider: ElectronObservationPort = {
     identity: () => identity,
@@ -110,7 +129,13 @@ it("converts a raw inspection retained by provider cleanup failure", async () =>
     expect(result.error.cleanupIncomplete).toBe(true);
     expect(parseEvidence(result.error.partialObservation)).toMatchObject({
       operation: "inspect_electron_page",
-      normalized_result: inspection,
+      normalized_result: {
+        ...inspection,
+        limitations: ["CDP transport cleanup remains incomplete."],
+      },
+      limitations: expect.arrayContaining([
+        "CDP transport cleanup remains incomplete.",
+      ]),
     });
   }
 });
@@ -147,4 +172,36 @@ it("returns a typed output error for malformed Electron target output after abor
   );
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.error).toBeInstanceOf(AnalysisOutputError);
+});
+
+it("retains completed target facts when cancellation arrives before Evidence publication", async () => {
+  const controller = new AbortController();
+  const targets = electronTargetListSchema.parse({
+    browser: inspection.browser,
+    targets: [],
+    excluded: { unsupported_url: 0, non_page: 0 },
+    limitations: [],
+  });
+  const provider: ElectronObservationPort = {
+    identity: () => identity,
+    listTargets: async () => {
+      controller.abort();
+      return ok(targets);
+    },
+    inspectPage: async () =>
+      err(new AnalysisCancelledError("inspect_electron_page")),
+  };
+  const result = await listElectronTargets(
+    provider,
+    { cdp_endpoint: input.cdp_endpoint },
+    { signal: controller.signal },
+  );
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(parseEvidence(result.error.partialObservation)).toMatchObject({
+      operation: "list_electron_targets",
+      normalized_result: targets,
+    });
+  }
 });

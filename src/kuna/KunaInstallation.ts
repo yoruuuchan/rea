@@ -1,14 +1,17 @@
 import { constants } from "node:fs";
-import { access, open, realpath, stat } from "node:fs/promises";
+import { access, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { JsonValue } from "../domain/jsonValue.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
+import { hashStableFile } from "../filesystem/StableFileHash.js";
+import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import {
-  hashStableFile,
-  StableFileHashCleanupFailure,
-} from "../filesystem/StableFileHash.js";
-import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
+  RegularFileCleanupFailure,
+  withOwnedRegularFile,
+} from "../filesystem/OwnedRegularFile.js";
 import {
   execFileOutput,
   execFileOutputFailure,
@@ -50,7 +53,7 @@ export interface KunaInstallation {
 }
 
 /** Why the selected Kuna installation cannot be used. */
-interface KunaReadinessFailureBase {
+export interface KunaReadinessFailure {
   readonly code:
     | KunaConfigurationFailure["code"]
     | "executable_missing"
@@ -59,18 +62,41 @@ interface KunaReadinessFailureBase {
   readonly diagnostics: Readonly<Record<string, JsonValue>>;
 }
 
-/** Hash close failure with one owner and any already-completed installation facts. */
-export interface KunaInstallationHashCleanupFailure {
-  readonly code: "hash_cleanup_failed";
-  readonly reason: string;
-  readonly diagnostics: Readonly<Record<string, JsonValue>>;
-  readonly hashCleanupFailure: OwnedRegularFileCleanupFailure;
-  readonly completedInstallation?: KunaInstallation;
+export interface KunaInstallationOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly signal?: AbortSignal;
+  /** Probe deadline; tests shorten it. */
+  readonly probeTimeoutMs?: number;
+  readonly fileCloseResources: FileCloseResourceOwner;
 }
 
-export type KunaReadinessFailure =
-  | KunaReadinessFailureBase
-  | KunaInstallationHashCleanupFailure;
+/** One installation inspection's file owners and their originating errors. */
+export interface KunaFileCloseScope {
+  readonly owner: FileCloseResourceOwner;
+  bindFailure(failure: RegularFileCleanupFailure, error: AnalysisError): void;
+}
+
+/** Adapt retained descriptor owners into leases and bind errors to exact owners. */
+export const createKunaFileCloseScope = (
+  parent: FileCloseResourceOwner,
+): KunaFileCloseScope => {
+  const leases = new Map<
+    Parameters<FileCloseResourceOwner["retain"]>[0],
+    AnalysisCleanupLease
+  >();
+  return {
+    owner: {
+      retain: (owner, resource) => {
+        const lease = new AnalysisCleanupLease(() => owner.close());
+        leases.set(owner, lease);
+        parent.retain({ close: () => lease.release() }, resource);
+      },
+      run: (operation) => parent.run(operation),
+    },
+    bindFailure: (failure, error) =>
+      leases.get(failure.owner)?.bindCleanupError(error),
+  };
+};
 
 /**
  * Environment for every Kuna child. Kuna unpacks its built-in SLEIGH tree into
@@ -89,11 +115,10 @@ export const kunaChildEnvironment = (
 };
 
 const failure = (
-  code: KunaReadinessFailureBase["code"],
+  code: KunaReadinessFailure["code"],
   reason: string,
   diagnostics: Readonly<Record<string, JsonValue>>,
-): Result<never, KunaReadinessFailureBase> =>
-  err({ code, reason, diagnostics });
+): Result<never, KunaReadinessFailure> => err({ code, reason, diagnostics });
 
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -101,12 +126,7 @@ const message = (cause: unknown): string =>
 /** Resolve, version-probe and fingerprint the configured executable. */
 export const inspectKunaInstallation = async (
   environment: Readonly<NodeJS.ProcessEnv>,
-  options: {
-    readonly platform?: NodeJS.Platform;
-    readonly signal?: AbortSignal;
-    /** Probe deadline; tests shorten it. */
-    readonly probeTimeoutMs?: number;
-  } = {},
+  options: KunaInstallationOptions,
 ): Promise<Result<KunaInstallation, KunaReadinessFailure>> => {
   const configuration = readKunaConfiguration(environment, options.platform);
   if (!configuration.ok)
@@ -174,38 +194,25 @@ export const inspectKunaInstallation = async (
     );
 
   let fingerprint: { readonly sha256: string; readonly bytes: number };
-  let script: boolean | undefined;
+  let script: boolean;
   try {
-    script = await startsWithShebang(executable);
-    fingerprint = await hashStableFile(executable, options.signal);
-  } catch (cause: unknown) {
-    if (cause instanceof OwnedRegularFileCleanupFailure)
-      return err({
-        code: "hash_cleanup_failed",
-        reason: `Cannot fingerprint ${executable}: ${message(cause)}`,
-        diagnostics: {
-          command,
+    ({ fingerprint, script } = await options.fileCloseResources.run(
+      async () => {
+        const fingerprint = await hashStableFile(executable, {
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          retainFailedClose: (owner) =>
+            options.fileCloseResources.retain(owner, executable),
+        });
+        const script = await startsWithShebang(
           executable,
-          version,
-          ...(typeof script === "boolean" ? { script } : {}),
-        },
-        hashCleanupFailure: cause,
-        ...(cause instanceof StableFileHashCleanupFailure &&
-        !cause.hasPrimaryCause &&
-        cause.completedHash !== undefined &&
-        script !== undefined
-          ? {
-              completedInstallation: {
-                configuration: configuration.value,
-                executable,
-                version,
-                verified: version === KUNA_VERIFIED_VERSION,
-                ...cause.completedHash,
-                script,
-              },
-            }
-          : {}),
-      });
+          options.fileCloseResources,
+        );
+        options.signal?.throwIfAborted();
+        return { fingerprint, script };
+      },
+    ));
+  } catch (cause: unknown) {
+    if (cause instanceof RegularFileCleanupFailure) throw cause;
     options.signal?.throwIfAborted();
     return failure(
       "executable_missing",
@@ -213,13 +220,6 @@ export const inspectKunaInstallation = async (
       { command, executable },
     );
   }
-
-  if (script === undefined)
-    return failure(
-      "executable_missing",
-      `Cannot inspect Kuna executable ${executable}.`,
-      { command, executable },
-    );
 
   return ok({
     configuration: configuration.value,
@@ -231,13 +231,19 @@ export const inspectKunaInstallation = async (
   });
 };
 
-const startsWithShebang = async (path: string): Promise<boolean> => {
-  const handle = await open(path, "r");
-  try {
-    const prefix = Buffer.alloc(2);
-    const { bytesRead } = await handle.read(prefix, 0, 2, 0);
-    return bytesRead === 2 && prefix.toString("latin1") === "#!";
-  } finally {
-    await handle.close();
-  }
-};
+const startsWithShebang = (
+  path: string,
+  fileCloseResources: FileCloseResourceOwner,
+): Promise<boolean> =>
+  withOwnedRegularFile(
+    path,
+    {
+      symlinks: "follow",
+      retainFailedClose: (owner) => fileCloseResources.retain(owner, path),
+    },
+    async (handle) => {
+      const prefix = Buffer.alloc(2);
+      const { bytesRead } = await handle.read(prefix, 0, 2, 0);
+      return bytesRead === 2 && prefix.toString("latin1") === "#!";
+    },
+  );

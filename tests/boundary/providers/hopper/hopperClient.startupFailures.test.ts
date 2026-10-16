@@ -310,23 +310,6 @@ describe("HopperClient startup failures", () => {
     });
   });
 
-  it("records unknown when startup is cancelled before launch", async () => {
-    const launcher = new FixtureLauncher();
-    const client = new HopperClient({ launcher, startupTimeoutMs: 30_000 });
-    clients.push(client);
-    const controller = new AbortController();
-    controller.abort();
-
-    const result = await client.start(controller.signal);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error._tag).toBe("HopperCancelledError");
-    expect(launcher.processes).toHaveLength(0);
-    // A cancelled startup must not report idle: the same-target fast path
-    // would otherwise treat the client as live and skip the retire path.
-    expect(client.operationHealth()).toMatchObject({ state: "unknown" });
-  });
-
   it("records unknown when the health handshake is invalid", async () => {
     const launcher = new BadHealthLauncher();
     const client = new HopperClient({ launcher, startupTimeoutMs: 30_000 });

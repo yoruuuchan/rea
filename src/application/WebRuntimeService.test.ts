@@ -108,6 +108,9 @@ it("retains completed execution Evidence on late abort and keeps invalid output 
     20_000,
   );
   const controller = new AbortController();
+  const cancellationReason = new Error(
+    "caller cancelled the runtime observation",
+  );
   const completed = await new WebRuntimeService({
     identity: () => ({
       id: "web-runtime",
@@ -115,20 +118,21 @@ it("retains completed execution Evidence on late abort and keeps invalid output 
       version: "1",
     }),
     observeExecution: async () => {
-      controller.abort();
+      controller.abort(cancellationReason);
       return ok(webExecutionFixture(input.target_id, input.observation_ms));
     },
     inspectEventListeners: async () => err(unused),
   }).observe(input, { signal: controller.signal });
-  expect(completed.ok).toBe(false);
-  if (!completed.ok)
-    expect(parseEvidence(completed.error.partialObservation)).toMatchObject({
-      operation: "observe_web_execution",
-      normalized_result: webExecutionFixture(
-        input.target_id,
-        input.observation_ms,
-      ),
-    });
+  if (completed.ok) throw new Error("Expected late cancellation");
+  expect(completed.error._tag).toBe("AnalysisCancelledError");
+  expect(completed.error.cause).toBe(cancellationReason);
+  expect(parseEvidence(completed.error.partialObservation)).toMatchObject({
+    operation: "observe_web_execution",
+    normalized_result: webExecutionFixture(
+      input.target_id,
+      input.observation_ms,
+    ),
+  });
 
   const late = new AbortController();
   const invalid = await new WebRuntimeService({

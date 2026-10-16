@@ -31,7 +31,7 @@ import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
-import { deliverObservationEvidence } from "./observationEvidenceDelivery.js";
+import { deliverEvidenceResult } from "./contractToolHandler.js";
 
 interface BrowserToolRegistration {
   readonly logger: Logger;
@@ -202,10 +202,10 @@ const runBrowserTool = async <Input>(
           progress: mcpProgressReporter(context),
         }),
       );
-      return deliverObservationEvidence(
+      return deliverEvidenceResult(
         options.server,
-        contract,
         result,
+        contract,
         options.recordEvidence,
       );
     },

@@ -6,10 +6,21 @@ import { session } from "./kunaSessionFixture.js";
 
 const SCRIPT = String.raw`
 import assert from "node:assert/strict";
+import { ArtifactResourceScope } from "./dist/artifacts/ArtifactResourceScope.js";
 import { inspectKunaInstallation } from "./dist/kuna/KunaInstallation.js";
 import { KunaTargetCommands } from "./dist/kuna/KunaTargetCommands.js";
 const fixture = JSON.parse(process.env.REA_TEST_KUNA_FIXTURE);
-const installation = await inspectKunaInstallation({ REA_KUNA_COMMAND: fixture.kuna, REA_KUNA_CACHE_DIR: fixture.cacheRoot });
+const fileCloseScope = new ArtifactResourceScope();
+const installation = await inspectKunaInstallation(
+  { REA_KUNA_COMMAND: fixture.kuna, REA_KUNA_CACHE_DIR: fixture.cacheRoot },
+  {
+    fileCloseResources: {
+      retain: (handle, resource) =>
+        fileCloseScope.retain({ kind: "file-handle", handle, resource }),
+      run: (operation) => fileCloseScope.run(operation),
+    },
+  },
+);
 assert.equal(installation.ok, true);
 const controller = new AbortController();
 const commands = new KunaTargetCommands(fixture.target, { signal: controller.signal });
@@ -32,6 +43,7 @@ try {
 } finally {
   controller.abort();
   assert.equal((await commands.close()).ok, true);
+  await fileCloseScope.close();
 }
 `;
 

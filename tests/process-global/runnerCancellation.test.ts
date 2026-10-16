@@ -1,19 +1,27 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  readFile,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { expect, it } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 
-const runnerPath = fileURLToPath(
-  new URL("../../scripts/run-exclusive.mjs", import.meta.url),
-);
 const supervisorPath = fileURLToPath(
   new URL("../../scripts/run-exclusive-command.mjs", import.meta.url),
+);
+
+const runnerPath = fileURLToPath(
+  new URL("../../scripts/run-exclusive.mjs", import.meta.url),
 );
 
 it.runIf(process.platform !== "win32")(
@@ -89,6 +97,183 @@ it.runIf(process.platform !== "win32")(
       await runner.closed;
       // Also clean up when this regression is run against the broken runner.
       if (descendantPid !== undefined) stopIfPresent(descendantPid);
+    }
+  },
+);
+
+it.runIf(process.platform === "win32")(
+  "terminates the owned command after supervisor IPC cancellation",
+  async () => {
+    const directory = await createTestTempDirectory("rea-runner-win-cancel-");
+    const gate = join(directory, "release-child");
+    const started = join(directory, "child-started");
+    const runner = launchSupervisor(directory, gatedCommand(gate, started));
+    onTestFinished(async () => {
+      await writeFile(gate, "release");
+      await runner.closed();
+    });
+    try {
+      await runner.ready;
+      await expect(readFile(started, "utf8")).resolves.toBe("started");
+      runner.child.send("SIGTERM");
+      await expect(runner.closed()).resolves.toMatchObject({ code: 143 });
+      expect(await pathExists(gate)).toBe(false);
+      await expect(
+        launch(directory, 'process.stdout.write("released");').closed,
+      ).resolves.toMatchObject({ code: 0, stdout: "released" });
+    } finally {
+      await writeFile(gate, "release");
+    }
+  },
+);
+
+it.runIf(process.platform === "win32")(
+  "keeps the lock after leader exit and cancels a surviving grandchild by message or disconnect",
+  async () => {
+    await exerciseWindowsGrandchild("message");
+    await exerciseWindowsGrandchild("disconnect");
+  },
+);
+
+async function exerciseWindowsGrandchild(
+  cancellation: "message" | "disconnect",
+): Promise<void> {
+  const directory = await createTestTempDirectory("rea-runner-win-tree-");
+  const activityPath = join(directory, "grandchild-activity.log");
+  const readyPath = join(directory, "grandchild-ready");
+  const leaderExitedPath = join(directory, "leader-exited");
+  const childExitedPath = join(directory, "child-exited");
+  const childErrorPath = join(directory, "child-error");
+  const grandchildExitedPath = join(directory, "grandchild-exited");
+  const grandchildErrorPath = join(directory, "grandchild-error");
+  const gatePath = join(directory, "grandchild-stop");
+  const grandchild = `
+      const fs = require("node:fs");
+      const activity = ${JSON.stringify(activityPath)};
+      const gate = ${JSON.stringify(gatePath)};
+      process.on("exit", (code) => fs.writeFileSync(${JSON.stringify(grandchildExitedPath)}, String(code)));
+      process.on("uncaughtExceptionMonitor", (error) => fs.writeFileSync(${JSON.stringify(grandchildErrorPath)}, String(error)));
+      fs.writeFileSync(${JSON.stringify(readyPath)}, "ready");
+      const write = () => fs.appendFileSync(activity, "active\\n");
+      write();
+      const timer = setInterval(() => {
+        if (fs.existsSync(gate)) {
+          clearInterval(timer);
+          process.exit(0);
+        }
+        write();
+      }, 20);
+    `;
+  const child = `
+      const fs = require("node:fs");
+      const grandchildProcess = require("node:child_process").spawn(
+        process.execPath,
+        ["-e", ${JSON.stringify(grandchild)}],
+        { detached: true, stdio: "ignore" },
+      );
+      grandchildProcess.once("error", (error) => fs.writeFileSync(${JSON.stringify(childErrorPath)}, String(error)));
+      grandchildProcess.unref();
+      process.on("exit", (code) => fs.writeFileSync(${JSON.stringify(childExitedPath)}, String(code)));
+    `;
+  const leader = `
+      const fs = require("node:fs");
+      process.on("exit", () => fs.writeFileSync(${JSON.stringify(leaderExitedPath)}, "exited"));
+      const child = require("node:child_process").spawn(
+        process.execPath,
+        ["-e", ${JSON.stringify(child)}],
+        { detached: true, stdio: "ignore" },
+      );
+      child.unref();
+      const waitForGrandchild = setInterval(() => {
+        if (!fs.existsSync(${JSON.stringify(readyPath)})) return;
+        clearInterval(waitForGrandchild);
+        process.stdout.write("ready");
+      }, 10);
+    `;
+  const runner = launchSupervisor(directory, leader);
+  onTestFinished(async () => {
+    await writeFile(gatePath, "stop");
+    await runner.closed();
+  });
+
+  try {
+    await runner.ready;
+    await expect(readFile(readyPath, "utf8")).resolves.toBe("ready");
+    await vi.waitFor(async () =>
+      expect(await readFile(leaderExitedPath, "utf8")).toBe("exited"),
+    );
+    const activityBefore = await readFile(activityPath, "utf8");
+    await expect
+      .poll(async () => (await readFile(activityPath, "utf8")).length, {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(activityBefore.length);
+    const activityDuring = await readFile(activityPath, "utf8");
+    const contender = await launch(
+      directory,
+      'process.stdout.write("unexpected");',
+    ).closed;
+    const evidence = JSON.stringify({
+      cancellation,
+      supervisorAlive: runner.child.exitCode === null,
+      leaderExited: await pathExists(leaderExitedPath),
+      descendantReady: await pathExists(readyPath),
+      descendantWroteDuringProbe: activityDuring.length > activityBefore.length,
+      descendantExited: await pathExists(grandchildExitedPath),
+      descendantError: await pathExists(grandchildErrorPath),
+      childExited: await pathExists(childExitedPath),
+      childError: await pathExists(childErrorPath),
+      supervisorCode: runner.child.exitCode,
+      supervisorStdout: runner.stdout,
+      supervisorStderr: runner.stderr,
+      contender,
+    });
+    expect(
+      contender,
+      `Windows process-tree ownership evidence: ${evidence}`,
+    ).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("already running"),
+    });
+
+    if (cancellation === "disconnect") runner.child.disconnect();
+    else runner.child.send("SIGTERM");
+    await expect(runner.closed()).resolves.toMatchObject({ code: 143 });
+    const stopped = await readFile(activityPath, "utf8");
+    await delay(100);
+    expect(await readFile(activityPath, "utf8")).toBe(stopped);
+    await expect(
+      launch(directory, 'process.stdout.write("released");').closed,
+    ).resolves.toMatchObject({ code: 0, stdout: "released" });
+  } finally {
+    await writeFile(gatePath, "stop");
+  }
+}
+
+it.runIf(process.platform === "win32")(
+  "stops the owned command after the supervisor IPC disconnects",
+  async () => {
+    const directory = await createTestTempDirectory(
+      "rea-runner-win-disconnect-",
+    );
+    const gate = join(directory, "release-child");
+    const started = join(directory, "child-started");
+    const runner = launchSupervisor(directory, gatedCommand(gate, started));
+    onTestFinished(async () => {
+      await writeFile(gate, "release");
+      await runner.closed();
+    });
+    try {
+      await runner.ready;
+      await expect(readFile(started, "utf8")).resolves.toBe("started");
+      runner.child.disconnect();
+      await expect(runner.closed()).resolves.toMatchObject({ code: 143 });
+      expect(await pathExists(gate)).toBe(false);
+      await expect(
+        launch(directory, 'process.stdout.write("released");').closed,
+      ).resolves.toMatchObject({ code: 0, stdout: "released" });
+    } finally {
+      await writeFile(gate, "release");
     }
   },
 );
@@ -169,6 +354,27 @@ it.runIf(process.platform === "win32")(
     const npm = await execute(directory, "npm", ["--version"]);
     expect(npm).toMatchObject({ code: 0, stderr: "" });
     expect(npm.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/u);
+
+    const npmProject = join(directory, "npm project");
+    await mkdir(npmProject, { recursive: true });
+    await writeFile(
+      join(npmProject, "package.json"),
+      JSON.stringify({
+        scripts: {
+          "print-argv":
+            'node -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))" --',
+        },
+      }),
+    );
+    const shimPayload = 'argument with spaces and "quotes" & ^ % !';
+    const npmArgv = await execute(npmProject, "npm", [
+      "run",
+      "print-argv",
+      "--",
+      shimPayload,
+    ]);
+    expect(npmArgv).toMatchObject({ code: 0, stderr: "" });
+    expect(npmArgv.stdout).toContain(JSON.stringify([shimPayload]));
 
     const turbo = await execute(
       directory,
@@ -283,6 +489,99 @@ function launch(directory: string, command: string) {
   return { child, ready, closed };
 }
 
+function launchSupervisor(directory: string, command: string) {
+  const child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL("../../scripts/run-exclusive-command.mjs", import.meta.url),
+      ),
+      "test",
+      process.execPath,
+      "-e",
+      command,
+    ],
+    { cwd: directory, stdio: ["ignore", "pipe", "pipe", "ipc"] },
+  );
+  if (child.stdout === null || child.stderr === null)
+    throw new Error("runner supervisor streams were not piped");
+  const stdoutStream = child.stdout;
+  const stderrStream = child.stderr;
+  let stdout = "";
+  let stderr = "";
+  let notifyReady: (() => void) | undefined;
+  const ready = withTimeout(
+    new Promise<void>((resolveReady) => {
+      notifyReady = resolveReady;
+    }),
+    "runner supervisor child did not start",
+  );
+  void ready.catch(() => {});
+  stdoutStream.on("data", (chunk) => {
+    stdout += chunk.toString();
+    if (stdout.includes("ready")) notifyReady?.();
+  });
+  stderrStream.on("data", (chunk) => (stderr += chunk.toString()));
+  const exited = new Promise<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  }>((resolveExit, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      notifyReady?.();
+      resolveExit({ code, signal });
+    });
+  });
+  const stdoutClosed = new Promise<void>((resolveClose) => {
+    stdoutStream.once("close", resolveClose);
+  });
+  const stderrClosed = new Promise<void>((resolveClose) => {
+    stderrStream.once("close", resolveClose);
+  });
+  const ipcDisconnected = new Promise<void>((resolveDisconnect) => {
+    child.once("disconnect", resolveDisconnect);
+  });
+  const finished = Promise.all([
+    exited,
+    stdoutClosed,
+    stderrClosed,
+    ipcDisconnected,
+  ]).then(([{ code, signal }]) => ({ code, signal, stdout, stderr }));
+  return {
+    child,
+    ready,
+    closed: () => withTimeout(finished, "runner supervisor did not finish"),
+    get stdout() {
+      return stdout;
+    },
+    get stderr() {
+      return stderr;
+    },
+  };
+}
+
+function gatedCommand(gate: string, started: string): string {
+  return `
+    const fs = require("node:fs");
+    const gate = ${JSON.stringify(gate)};
+    fs.writeFileSync(${JSON.stringify(started)}, "started");
+    process.stdout.write("ready");
+    const poll = setInterval(() => {
+      if (fs.existsSync(gate)) {
+        clearInterval(poll);
+        process.exit(0);
+      }
+    }, 10);
+  `;
+}
+
+function pathExists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
+}
+
 function execute(
   directory: string,
   command: string,
@@ -307,140 +606,34 @@ function execute(
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+  timeoutMs = 5_000,
+): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => reject(new Error(message)), 5_000);
+      timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
     }),
   ]).finally(() => clearTimeout(timeout));
 }
 
-/** True while the directly owned command PID remains signalable. */
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Run the supervisor over IPC to cover Windows cancellation and disconnect. */
-function launchSupervisor(directory: string) {
-  const pidPath = join(directory, "command.pid");
-  const gated = `
-    const fs = require("node:fs");
-    fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
-    process.stdout.write("ready");
-    setInterval(() => {}, 1000);
-  `;
-  const supervisor = spawn(
-    process.execPath,
-    [supervisorPath, "test", process.execPath, "-e", gated],
-    { cwd: directory, stdio: ["ignore", "pipe", "pipe", "ipc"] },
-  );
-  if (supervisor.stdout === null || supervisor.stderr === null) {
-    supervisor.kill("SIGKILL");
-    throw new Error("supervisor output pipes were not created");
-  }
-  const stdoutStream = supervisor.stdout;
-  const stderrStream = supervisor.stderr;
-  let stdout = "";
-  let stderr = "";
-  let notifyReady: (() => void) | undefined;
-  const ready = withTimeout(
-    new Promise<void>((resolveReady) => {
-      notifyReady = resolveReady;
-    }),
-    "supervisor command did not start",
-  );
-  void ready.catch(() => undefined);
-  stdoutStream.on("data", (chunk) => {
-    stdout += chunk.toString();
-    if (stdout.includes("ready")) notifyReady?.();
-  });
-  stderrStream.on("data", (chunk) => (stderr += chunk.toString()));
-  const closed = withTimeout(
-    new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolveClosed, reject) => {
-        supervisor.once("error", reject);
-        supervisor.once("close", (code, signal) =>
-          resolveClosed({ code, signal }),
-        );
-      },
-    ),
-    "supervisor did not finish",
-  );
-  const commandPid = async () =>
-    Number(await readFile(pidPath, "utf8").catch(() => "0"));
-  const stop = async () => {
-    const pid = await commandPid();
-    if (pid > 0) stopIfPresent(pid);
-    if (supervisor.exitCode === null && supervisor.signalCode === null)
-      supervisor.kill("SIGKILL");
-    await closed.catch(() => undefined);
-  };
-  return { supervisor, ready, closed, commandPid, stop, stderr: () => stderr };
-}
-
-it.runIf(process.platform === "win32")(
-  "terminates the owned command and releases the lock after forwarded cancellation",
+it.runIf(process.platform !== "win32")(
+  "retains lock ownership through a post-spawn child error until close",
   async () => {
-    const directory = await createTestTempDirectory("rea-runner-win-ipc-");
-    const runner = launchSupervisor(directory);
-    try {
-      await runner.ready;
-      const pid = await runner.commandPid();
-      expect(pid).toBeGreaterThan(0);
-      expect(isAlive(pid)).toBe(true);
-      runner.supervisor.send("SIGTERM");
-      expect(await runner.closed).toEqual({ code: 143, signal: null });
-      expect(isAlive(pid)).toBe(false);
-      expect(
-        await execute(directory, 'process.stdout.write("lock released");'),
-      ).toMatchObject({ code: 0, stdout: "lock released" });
-    } finally {
-      await runner.stop();
-    }
-  },
-);
-
-it.runIf(process.platform === "win32")(
-  "terminates the owned command and releases the lock after parent disconnect",
-  async () => {
-    const directory = await createTestTempDirectory("rea-runner-win-drop-");
-    const runner = launchSupervisor(directory);
-    try {
-      await runner.ready;
-      const pid = await runner.commandPid();
-      expect(pid).toBeGreaterThan(0);
-      expect(isAlive(pid)).toBe(true);
-      runner.supervisor.disconnect();
-      expect(await runner.closed).toEqual({ code: 143, signal: null });
-      expect(isAlive(pid)).toBe(false);
-      expect(
-        await execute(directory, 'process.stdout.write("lock released");'),
-      ).toMatchObject({ code: 0, stdout: "lock released" });
-    } finally {
-      await runner.stop();
-    }
-  },
-);
-
-it("retains lock ownership through a post-spawn child error until close", async () => {
-  const directory = await createTestTempDirectory("rea-runner-child-error-");
-  const readyPath = join(directory, "command-ready");
-  const gatePath = join(directory, "allow-command-exit");
-  const closedPath = join(directory, "command-closed");
-  const source = await readFile(supervisorPath, "utf8");
-  const crossSpawn = pathToFileURL(
-    createRequire(import.meta.url).resolve("cross-spawn"),
-  ).href;
-  const spawnCall =
-    /child = spawn\(command\[0\], command\.slice\(1\), \{\n\s+cwd: process\.cwd\(\),\n\s+env: process\.env,\n\s+stdio: "inherit",\n\s+\}\);/u;
-  const postSpawnInjection = `child.once("spawn", () => {
+    const directory = await createTestTempDirectory("rea-runner-child-error-");
+    const readyPath = join(directory, "command-ready");
+    const gatePath = join(directory, "allow-command-exit");
+    const closedPath = join(directory, "command-closed");
+    const source = await readFile(supervisorPath, "utf8");
+    const crossSpawn = pathToFileURL(
+      createRequire(import.meta.url).resolve("cross-spawn"),
+    ).href;
+    const spawnCall =
+      /child = spawn\(command\[0\], command\.slice\(1\), \{\n\s+cwd: process\.cwd\(\),\n\s+env: process\.env,\n\s+stdio: "inherit",\n\s+\}\);/u;
+    const postSpawnInjection = `child.once("spawn", () => {
   const waitForReady = setInterval(() => {
     if (!existsSync(${JSON.stringify(readyPath)})) return;
     clearInterval(waitForReady);
@@ -449,19 +642,25 @@ it("retains lock ownership through a post-spawn child error until close", async 
     child.emit("error", new Error("controlled secondary child error"));
   }, 5);
 });`;
-  expect(source).toMatch(spawnCall);
-  const injectedSource = source
-    .replace(
-      'import spawn from "cross-spawn";',
-      `import spawn from ${JSON.stringify(crossSpawn)};\nimport { existsSync } from "node:fs";`,
-    )
-    .replace(spawnCall, (call) => `${call}\n    ${postSpawnInjection}`);
-  expect(injectedSource).toContain(postSpawnInjection);
-  expect(injectedSource).toContain("controlled post-spawn child error");
-  const copiedSupervisor = join(directory, "run-exclusive-command.mjs");
-  await writeFile(copiedSupervisor, injectedSource);
+    expect(source).toMatch(spawnCall);
+    const injectedSource = source
+      .replace(
+        'import spawn from "cross-spawn";',
+        `import spawn from ${JSON.stringify(crossSpawn)};\nimport { existsSync } from "node:fs";`,
+      )
+      .replace(spawnCall, (call) => `${call}\n    ${postSpawnInjection}`);
+    expect(injectedSource).toContain(postSpawnInjection);
+    expect(injectedSource).toContain("controlled post-spawn child error");
+    const copiedSupervisor = join(directory, "run-exclusive-command.mjs");
+    const copiedHelperDirectory = join(directory, "lib");
+    await mkdir(copiedHelperDirectory, { recursive: true });
+    await copyFile(
+      join(process.cwd(), "scripts/lib/windows-owned-command.mjs"),
+      join(copiedHelperDirectory, "windows-owned-command.mjs"),
+    );
+    await writeFile(copiedSupervisor, injectedSource);
 
-  const gatedCommand = `
+    const gatedCommand = `
     const fs = require("node:fs");
     fs.writeFileSync(${JSON.stringify(readyPath)}, "ready");
     process.stdout.write("command-ready\\n");
@@ -472,79 +671,80 @@ it("retains lock ownership through a post-spawn child error until close", async 
       process.stdout.write("command-closed\\n");
     }, 5);
   `;
-  const supervisor = spawn(
-    process.execPath,
-    [copiedSupervisor, "test", process.execPath, "-e", gatedCommand],
-    { cwd: directory, stdio: ["ignore", "pipe", "pipe", "ipc"] },
-  );
-  if (supervisor.stdout === null || supervisor.stderr === null) {
-    supervisor.kill("SIGKILL");
-    throw new Error("supervisor output pipes were not created");
-  }
-  const stdoutStream = supervisor.stdout;
-  const stderrStream = supervisor.stderr;
-  let stdout = "";
-  let stderr = "";
-  const outputWaiters = new Map<string, (() => void)[]>();
-  stdoutStream.on("data", (chunk) => {
-    stdout += chunk.toString();
-    for (const [marker, waiters] of outputWaiters) {
-      if (!stdout.includes(marker)) continue;
-      outputWaiters.delete(marker);
-      for (const notify of waiters) notify();
-    }
-  });
-  stderrStream.on("data", (chunk) => (stderr += chunk.toString()));
-  const waitForOutput = (marker: string) => {
-    if (stdout.includes(marker)) return Promise.resolve();
-    return withTimeout(
-      new Promise<void>((resolveOutput) => {
-        outputWaiters.set(marker, [
-          ...(outputWaiters.get(marker) ?? []),
-          resolveOutput,
-        ]);
-      }),
-      `supervisor did not write ${marker}`,
+    const supervisor = spawn(
+      process.execPath,
+      [copiedSupervisor, "test", process.execPath, "-e", gatedCommand],
+      { cwd: directory, stdio: ["ignore", "pipe", "pipe", "ipc"] },
     );
-  };
-  const exited = withTimeout(
-    new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolveExit, reject) => {
-        supervisor.once("error", reject);
-        supervisor.once("exit", (code, signal) =>
-          resolveExit({ code, signal }),
-        );
-      },
-    ),
-    "supervisor did not exit",
-  );
-  try {
-    await waitForOutput("controlled-post-spawn-error");
-    const contender = await execute(directory, process.execPath, [
-      "-e",
-      'process.stdout.write("lock acquired");',
-    ]);
-    expect(contender).toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: expect.stringContaining("already running"),
+    if (supervisor.stdout === null || supervisor.stderr === null) {
+      supervisor.kill("SIGKILL");
+      throw new Error("supervisor output pipes were not created");
+    }
+    const stdoutStream = supervisor.stdout;
+    const stderrStream = supervisor.stderr;
+    let stdout = "";
+    let stderr = "";
+    const outputWaiters = new Map<string, (() => void)[]>();
+    stdoutStream.on("data", (chunk) => {
+      stdout += chunk.toString();
+      for (const [marker, waiters] of outputWaiters) {
+        if (!stdout.includes(marker)) continue;
+        outputWaiters.delete(marker);
+        for (const notify of waiters) notify();
+      }
     });
-    expect(stdout).not.toContain("command-closed");
-
-    await writeFile(gatePath, "open");
-    await waitForOutput("command-closed");
-    expect(await exited).toEqual({ code: 1, signal: null });
-    expect(stderr).toContain("controlled post-spawn child error");
-    expect(stderr).not.toContain("controlled secondary child error");
-    expect(
-      await execute(directory, process.execPath, [
+    stderrStream.on("data", (chunk) => (stderr += chunk.toString()));
+    const waitForOutput = (marker: string) => {
+      if (stdout.includes(marker)) return Promise.resolve();
+      return withTimeout(
+        new Promise<void>((resolveOutput) => {
+          outputWaiters.set(marker, [
+            ...(outputWaiters.get(marker) ?? []),
+            resolveOutput,
+          ]);
+        }),
+        `supervisor did not write ${marker}`,
+      );
+    };
+    const exited = withTimeout(
+      new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolveExit, reject) => {
+          supervisor.once("error", reject);
+          supervisor.once("exit", (code, signal) =>
+            resolveExit({ code, signal }),
+          );
+        },
+      ),
+      "supervisor did not exit",
+    );
+    try {
+      await waitForOutput("controlled-post-spawn-error");
+      const contender = await execute(directory, process.execPath, [
         "-e",
         'process.stdout.write("lock acquired");',
-      ]),
-    ).toMatchObject({ code: 0, stdout: "lock acquired" });
-  } finally {
-    await writeFile(gatePath, "open");
-    await waitForOutput("command-closed").catch(() => undefined);
-    await exited.catch(() => undefined);
-  }
-});
+      ]);
+      expect(contender).toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: expect.stringContaining("already running"),
+      });
+      expect(stdout).not.toContain("command-closed");
+
+      await writeFile(gatePath, "open");
+      await waitForOutput("command-closed");
+      expect(await exited).toEqual({ code: 1, signal: null });
+      expect(stderr).toContain("controlled post-spawn child error");
+      expect(stderr).not.toContain("controlled secondary child error");
+      expect(
+        await execute(directory, process.execPath, [
+          "-e",
+          'process.stdout.write("lock acquired");',
+        ]),
+      ).toMatchObject({ code: 0, stdout: "lock acquired" });
+    } finally {
+      await writeFile(gatePath, "open");
+      await waitForOutput("command-closed").catch(() => undefined);
+      await exited.catch(() => undefined);
+    }
+  },
+);

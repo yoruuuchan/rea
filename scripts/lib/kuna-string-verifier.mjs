@@ -18,11 +18,15 @@ export const nativeKunaStrings = async ({
   workspace,
   binary,
   retain,
+  fileCloseResources,
 }) => {
-  const installed = await inspectKunaInstallation({
-    REA_KUNA_COMMAND: executable,
-    REA_KUNA_CACHE_DIR: cacheRoot,
-  });
+  const installed = await inspectKunaInstallation(
+    {
+      REA_KUNA_COMMAND: executable,
+      REA_KUNA_CACHE_DIR: cacheRoot,
+    },
+    { fileCloseResources },
+  );
   assert.ok(installed.ok, "Native string oracle could not inspect Kuna");
   const input = await realpath(binary);
   const outcome = await runKunaCommand({
@@ -45,6 +49,8 @@ export const nativeKunaStrings = async ({
     reportedTimeoutMs: installed.value.configuration.projectTimeoutMs,
     outputBytes: 16 * 1024 * 1024,
     signal: new AbortController().signal,
+    retainFailedFileClose: (owner, resource) =>
+      fileCloseResources.retain(owner, resource),
   });
   if (outcome.kind === "retained") retain(outcome);
   if (outcome.kind !== "ok") throw outcome.error;
@@ -80,6 +86,7 @@ export const verifyKunaStrings = async ({
   cacheRoot,
   nativeStrings,
   expectedStrings = [],
+  fileCloseResources,
 }) => {
   const expected = await nativeStrings();
   if (expectedStrings.length > 0)

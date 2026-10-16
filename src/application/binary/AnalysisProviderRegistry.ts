@@ -1,3 +1,4 @@
+import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import {
   analysisProviderIdSchema,
   analysisProviderSelectorSchema,
@@ -7,7 +8,6 @@ import type { AnalysisProfileCommitment } from "../../domain/analysisProfile.js"
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import {
   ProviderSelectionError,
   type ProviderSelectionFailureReason,
@@ -27,6 +27,7 @@ import {
   type AnalysisProviderCandidateEvaluation,
 } from "./AnalysisProviderEvaluation.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
+import type { FileCloseResourceOwner } from "../AnalysisProvider.js";
 
 /** Deterministic discovery truth for one configured deep provider. */
 export interface AnalysisProviderCandidateStatus {
@@ -66,6 +67,7 @@ interface TargetSelectionContext {
   readonly target: BinaryTarget;
   readonly baseline: readonly AnalysisProviderCandidateStatus[];
   readonly signal: AbortSignal | undefined;
+  readonly fileCloseResources?: FileCloseResourceOwner;
 }
 
 /**
@@ -181,7 +183,10 @@ export class AnalysisProviderRegistry {
   async select(
     target: BinaryTarget,
     requestedSelector?: AnalysisProviderSelector,
-    options: { readonly signal?: AbortSignal } = {},
+    options: {
+      readonly signal?: AbortSignal;
+      readonly fileCloseResources?: FileCloseResourceOwner;
+    } = {},
   ): Promise<Result<AnalysisProviderSelection, AnalysisError>> {
     if (signalIsAborted(options.signal))
       return err(new AnalysisCancelledError("open_binary"));
@@ -219,7 +224,14 @@ export class AnalysisProviderRegistry {
       });
     if (selector !== "auto")
       return this.#selectConcrete(
-        { target, baseline, signal: options.signal },
+        {
+          target,
+          baseline,
+          signal: options.signal,
+          ...(options.fileCloseResources === undefined
+            ? {}
+            : { fileCloseResources: options.fileCloseResources }),
+        },
         selector,
         request === undefined ? "environment" : "request",
       );
@@ -227,6 +239,9 @@ export class AnalysisProviderRegistry {
       target,
       baseline,
       signal: options.signal,
+      ...(options.fileCloseResources === undefined
+        ? {}
+        : { fileCloseResources: options.fileCloseResources }),
     });
   }
 
@@ -275,6 +290,7 @@ export class AnalysisProviderRegistry {
       initial,
       target,
       signal,
+      context.fileCloseResources,
     );
     if (!evaluation.ok) return evaluation;
     const evaluated = evaluation.value;
@@ -321,6 +337,7 @@ export class AnalysisProviderRegistry {
                 status,
                 target,
                 signal,
+                context.fileCloseResources,
               )
             : ok({
                 candidate: provider,

@@ -1,6 +1,9 @@
 import * as t from "@babel/types";
 
-import { semanticBranchMayBeSkipped } from "./javascriptSemanticEvaluationOrder.js";
+import {
+  semanticBranchMayBeSkipped,
+  semanticIterationCardinality,
+} from "./javascriptSemanticEvaluationOrder.js";
 
 import {
   failedJavaScriptSemanticIr,
@@ -16,12 +19,14 @@ import {
   collectSemanticReferencesSteps,
   immutableSemanticBindings,
   immutableSemanticScopes,
+  semanticReferenceRole,
 } from "./javascriptSemanticProjection.js";
 import {
   semanticObjectPatternKeys,
   runtimeFunctionParameters,
   semanticStaticPropertyKey,
   semanticWriteTargets,
+  semanticWriteSiteTarget,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import type {
@@ -29,12 +34,15 @@ import type {
   JavaScriptSemanticBindingState,
   JavaScriptSemanticScopeState,
   JavaScriptBindingIndex,
+  JavaScriptSemanticReferenceEffectsAtSite,
 } from "./javascriptSemanticState.js";
 import {
   currentSemanticScope,
   resolveSemanticBindingState,
   semanticResolutionBlocked,
   resolveSemanticBindingFromScope,
+  semanticBindingLookupFromScope,
+  semanticBindingLookupAt,
   semanticBindingId,
   semanticScopeId,
   semanticStableInitializer,
@@ -47,7 +55,11 @@ import {
 import { semanticRequireOrigin } from "./javascriptSemanticRequireOrigin.js";
 import { semanticBundledRequireOrigin } from "./javascriptBundledRequireOrigin.js";
 import { collectSemanticMemberMutationsSteps } from "./javascriptSemanticMemberMutations.js";
-import { indexJavaScriptAmbientWritesSteps } from "./javascriptSemanticAmbientWrites.js";
+import { semanticEffectTiming } from "./javascriptSemanticMutationInitializers.js";
+import {
+  indexJavaScriptAmbientWritesSteps,
+  isUnmodifiedGlobalReference,
+} from "./javascriptSemanticAmbientWrites.js";
 import {
   hasUncertainTypeOnlyModuleSideEffect,
   semanticImportEqualsSpecifier,
@@ -74,7 +86,11 @@ import {
 
 import { isJavaScriptRpcClientFactory } from "./javascriptRpcEndpoints.js";
 import { createSemanticModuleInterop } from "./javascriptModuleInterop.js";
-import { SemanticPropertyPathCoverage } from "./javascriptSemanticPropertyPaths.js";
+import {
+  SemanticPropertyPathCoverage,
+  semanticPropertyPathKeyMatches,
+  type JavaScriptSemanticPropertyPath,
+} from "./javascriptSemanticPropertyPaths.js";
 import { indexCommonJsExportReceiversSteps } from "./javascriptCommonJsExportReceivers.js";
 import type { JavaScriptModuleResolutionMode } from "./javascriptModuleResolutionMode.js";
 
@@ -136,13 +152,131 @@ export const analyzeParsedJavaScriptReferences = (
   return collectSemanticReferences(file.program, state, name);
 };
 
+const indexedAmbientWriteStates =
+  new WeakSet<JavaScriptSemanticAnalysisState>();
+const indexedMemberMutationStates =
+  new WeakSet<JavaScriptSemanticAnalysisState>();
+
+function* indexSemanticAmbientWritesSteps(
+  state: JavaScriptSemanticAnalysisState,
+): Generator<void, void> {
+  if (indexedAmbientWriteStates.has(state)) return;
+  yield* indexJavaScriptAmbientWritesSteps(state.program, state);
+  indexedAmbientWriteStates.add(state);
+}
+
+/** Index alias-aware mutation facts only for consumers that request them. */
+function* indexSemanticMemberMutationFactsSteps(
+  state: JavaScriptSemanticAnalysisState,
+): Generator<void, void> {
+  if (indexedMemberMutationStates.has(state)) return;
+  yield* indexSemanticAmbientWritesSteps(state);
+  yield* collectSemanticMemberMutationsSteps(state.program, state);
+  indexedMemberMutationStates.add(state);
+}
+
+/** Resolve one identifier or member use and summarize its source-site effects. */
+const semanticReferenceEffectsAtSite = (
+  state: JavaScriptSemanticAnalysisState,
+  site: t.Node,
+  referenceNode: t.Node,
+  requestedPath?: JavaScriptSemanticPropertyPath,
+): JavaScriptSemanticReferenceEffectsAtSite => {
+  const { root, path: inferredPath } = semanticReferenceRoot(referenceNode);
+  const memberEffectsIndexed = indexedMemberMutationStates.has(state);
+  if (!t.isIdentifier(root))
+    return {
+      bindingId: null,
+      resolution: "unknown",
+      memberEffectsIndexed,
+      effects: [],
+    };
+  const lookup = semanticBindingLookupAt(state, root, root.name);
+  const binding = "binding" in lookup ? lookup.binding : undefined;
+  const blocked = lookup.kind !== "binding" && lookup.kind !== "ambient";
+  const resolution =
+    lookup.kind === "binding" ? "resolved" : blocked ? "unknown" : "unbound";
+  const path = requestedPath ?? inferredPath;
+  const effects: JavaScriptSemanticReferenceEffectsAtSite["effects"][number][] =
+    [];
+  const retain = (
+    kind: JavaScriptSemanticReferenceEffectsAtSite["effects"][number]["kind"],
+    node: t.Node | undefined,
+    effectPath?: JavaScriptSemanticPropertyPath,
+  ): void => {
+    if (effectPath !== undefined && !semanticPathsOverlap(path, effectPath))
+      return;
+    effects.push({
+      kind,
+      ...(effectPath === undefined ? {} : { path: effectPath }),
+      timing: semanticEffectTiming(site, node, state),
+    });
+  };
+  if (binding !== undefined) {
+    for (const node of state.bindingWrites.get(binding.bindingId) ?? [])
+      retain("binding-write", node);
+    if (indexedMemberMutationStates.has(state)) {
+      for (const effect of binding.memberWrites)
+        retain("member-write", effect.node, effect.path);
+      for (const effect of binding.escapedPaths)
+        retain("escape", effect.node, effect.path);
+    }
+  } else if (lookup.kind === "ambient" || lookup.kind === "uncertain-ambient") {
+    for (const node of state.ambientBindingWrites.get(root.name) ?? [])
+      retain("ambient-write", node);
+  }
+  return {
+    bindingId: binding?.bindingId ?? null,
+    resolution,
+    memberEffectsIndexed,
+    effects,
+  };
+};
+
+const semanticReferenceRoot = (
+  node: t.Node,
+): { readonly root: t.Node; readonly path: JavaScriptSemanticPropertyPath } => {
+  const path: (string | number | null)[] = [];
+  let current = unwrapJavaScriptExpression(node).node;
+  while (
+    t.isMemberExpression(current) ||
+    t.isOptionalMemberExpression(current)
+  ) {
+    const key = semanticStaticPropertyKey(current.property, current.computed);
+    path.unshift(key ?? null);
+    current = unwrapJavaScriptExpression(current.object).node;
+  }
+  return { root: current, path };
+};
+
+const semanticPathsOverlap = (
+  left: JavaScriptSemanticPropertyPath,
+  right: JavaScriptSemanticPropertyPath,
+): boolean => {
+  for (let index = 0; index < Math.min(left.length, right.length); index++) {
+    const leftKey = left[index];
+    const rightKey = right[index];
+    if (leftKey === undefined || rightKey === undefined) return true;
+    const leftMatchesRight =
+      typeof rightKey === "string" || typeof rightKey === "number"
+        ? semanticPropertyPathKeyMatches(leftKey, String(rightKey))
+        : true;
+    const rightMatchesLeft =
+      typeof leftKey === "string" || typeof leftKey === "number"
+        ? semanticPropertyPathKeyMatches(rightKey, String(leftKey))
+        : true;
+    if (!leftMatchesRight && !rightMatchesLeft) return false;
+  }
+  return true;
+};
+
 /** Share the lexical index with bounded, demand-driven boundary analyses. */
 export function* indexJavaScriptBindingsSteps(
   program: t.Program,
 ): Generator<void, JavaScriptSemanticAnalysisState> {
   const state = createState(program);
   yield* collectDefinitionsSteps(program, state);
-  yield* indexJavaScriptAmbientWritesSteps(program, state);
+  yield* indexSemanticAmbientWritesSteps(state);
   return state;
 }
 
@@ -167,8 +301,8 @@ export function* analyzeParsedJavaScriptSemanticsSteps(
 ): Generator<void, JavaScriptSemanticIr> {
   const state = createState(file.program, staticImportResolutionMode);
   yield* collectDefinitionsSteps(file.program, state);
-  yield* indexJavaScriptAmbientWritesSteps(file.program, state);
-  yield* collectSemanticMemberMutationsSteps(file.program, state);
+  yield* indexSemanticAmbientWritesSteps(state);
+  yield* indexSemanticMemberMutationFactsSteps(state);
   const commonJsReceivers = yield* indexCommonJsExportReceiversSteps(state);
   yield* traverseJavaScriptAstSteps(file.program, {
     enter: (node) => collectSemanticModuleLink(node, state, commonJsReceivers),
@@ -262,20 +396,38 @@ export interface JavaScriptReceiverIndex extends JavaScriptBindingIndex {
  */
 export function* indexJavaScriptBindingsWithReceiversSteps(
   program: t.Program,
+  hostContext?: "commonjs-wrapper",
 ): Generator<void, JavaScriptReceiverIndex> {
   const state = createState(program);
+  if (hostContext === "commonjs-wrapper") {
+    const scope = currentSemanticScope(state.scopes);
+    const binding: JavaScriptSemanticBindingState = {
+      ...createBinding(scope, "require", "parameter", false),
+      hostOrigin: "commonjs-wrapper",
+    };
+    scope.bindings.set(binding.name, binding);
+    state.bindingsById.set(binding.bindingId, binding);
+  }
   yield* collectDefinitionsSteps(program, state);
   const receivers = yield* classifyDefinitionReceiversSteps(program, state);
-  let ambientIndexed = false;
   let references: readonly JavaScriptSemanticReference[] | undefined;
   return {
     sourceType: program.sourceType,
     bindings: state,
     receivers,
     *indexAmbientWritesSteps() {
-      if (ambientIndexed) return;
-      yield* indexJavaScriptAmbientWritesSteps(program, state);
-      ambientIndexed = true;
+      yield* indexSemanticAmbientWritesSteps(state);
+    },
+    *indexMemberMutationFactsSteps() {
+      yield* indexSemanticMemberMutationFactsSteps(state);
+    },
+    effectsForReferenceAt(site, referenceNode, propertyPath) {
+      return semanticReferenceEffectsAtSite(
+        state,
+        site,
+        referenceNode,
+        propertyPath,
+      );
     },
     *referencesSteps() {
       references ??= yield* collectSemanticReferencesSteps(program, state);
@@ -713,6 +865,9 @@ const createState = (
     scopesById: new Map([[root.scopeId, root]]),
     scopeByNode: new WeakMap([[program, root]]),
     bindingsById: new Map(),
+    bindingWrites: new Map(),
+    prototypeRequireMutationObserved: false,
+    prototypeEnumerationMayAffect: false,
     callables: [],
     callableNodesById: new Map(),
     moduleLinks: [],
@@ -740,6 +895,7 @@ function* collectDefinitionsSteps(
     readonly scope: JavaScriptSemanticScopeState;
     readonly conditionallySkipped: boolean;
   }[] = [];
+  let needsPrototypeFacts = false;
   const functionBodies: {
     readonly body: t.BlockStatement;
     readonly scope: JavaScriptSemanticScopeState;
@@ -748,6 +904,12 @@ function* collectDefinitionsSteps(
   yield* traverseJavaScriptAstSteps(program, {
     enter: (node, parent, readAncestors) => {
       if (parent !== null) state.parentsByNode.set(node, parent);
+      if (
+        t.isWithStatement(node) ||
+        t.isForInStatement(node) ||
+        t.isForOfStatement(node)
+      )
+        needsPrototypeFacts = true;
       let parentScope = currentSemanticScope(stack);
       if (
         parent !== null &&
@@ -777,6 +939,7 @@ function* collectDefinitionsSteps(
           location: range(parent),
           bindingsComplete: false,
           bindings: new Map(),
+          dynamicWithStatement: parent,
         };
         state.scopes.push(dynamicScope);
         state.scopesById.set(dynamicScope.scopeId, dynamicScope);
@@ -837,6 +1000,8 @@ function* collectDefinitionsSteps(
         stack.pop();
     },
   });
+  if (needsPrototypeFacts)
+    yield* indexPrototypeUncertaintySteps(program, state);
   // All declarations must exist before resolving writes, including hoisted
   // functions and local declarations that shadow an outer binding.
   for (const [
@@ -855,6 +1020,112 @@ function* collectDefinitionsSteps(
         if (t.isIdentifier(identifier))
           copyParameterToBody({ identifier, body, scope, state });
   }
+}
+
+type PrototypeOwner = "Object" | "Array" | "String";
+
+const prototypeOwners = ["Object", "Array", "String"] as const;
+
+/** Preserve uncertainty when source can change or expose a built-in prototype. */
+function* indexPrototypeUncertaintySteps(
+  program: t.Program,
+  state: JavaScriptSemanticAnalysisState,
+): Generator<void, void> {
+  const taint = (owner: PrototypeOwner): void => {
+    if (owner === "Object") state.prototypeRequireMutationObserved = undefined;
+    state.prototypeEnumerationMayAffect = undefined;
+  };
+  const globalOwner = (node: t.Node): PrototypeOwner | undefined => {
+    const value = unwrapJavaScriptExpression(node).node;
+    for (const owner of prototypeOwners) {
+      if (isUnmodifiedGlobalReference(value, state, owner)) return owner;
+      if (
+        t.isIdentifier(value, { name: owner }) &&
+        resolveSemanticBindingState(state, value, owner) === undefined
+      )
+        return owner;
+    }
+    return undefined;
+  };
+  const prototypeOwner = (node: t.Node): PrototypeOwner | undefined => {
+    const value = unwrapJavaScriptExpression(node).node;
+    return (t.isMemberExpression(value) ||
+      t.isOptionalMemberExpression(value)) &&
+      semanticStaticPropertyKey(value.property, value.computed) === "prototype"
+      ? globalOwner(value.object)
+      : undefined;
+  };
+  const objectMethod = (node: t.Node): string | undefined => {
+    const callee = unwrapJavaScriptExpression(node).node;
+    return (t.isMemberExpression(callee) ||
+      t.isOptionalMemberExpression(callee)) &&
+      globalOwner(callee.object) === "Object"
+      ? (semanticStaticPropertyKey(callee.property, callee.computed) ??
+          undefined)
+      : undefined;
+  };
+  const mutators = new Set([
+    "defineProperty",
+    "defineProperties",
+    "setPrototypeOf",
+  ]);
+  yield* traverseJavaScriptAstSteps(program, {
+    enter: (node, parent) => {
+      const write = semanticWriteSiteTarget(node);
+      if (write !== null) {
+        for (const target of semanticWriteTargets(write)) {
+          const value = unwrapJavaScriptExpression(target).node;
+          if (
+            t.isMemberExpression(value) ||
+            t.isOptionalMemberExpression(value)
+          ) {
+            const owner =
+              prototypeOwner(value.object) ?? globalOwner(value.object);
+            if (owner !== undefined) taint(owner);
+          } else {
+            const owner = globalOwner(value);
+            if (owner !== undefined) taint(owner);
+          }
+        }
+      }
+      if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
+        const method = objectMethod(node.callee);
+        const callee = unwrapJavaScriptExpression(node.callee).node;
+        if (
+          t.isMemberExpression(callee) ||
+          t.isOptionalMemberExpression(callee)
+        ) {
+          const owner = prototypeOwner(callee.object);
+          if (owner !== undefined) taint(owner);
+        }
+        for (const [index, argument] of node.arguments.entries()) {
+          const owner = prototypeOwner(argument) ?? globalOwner(argument);
+          if (owner === undefined) continue;
+          // These intrinsics mutate only their first argument. Linking another
+          // object's prototype to this one does not mutate this prototype.
+          if (method !== undefined && mutators.has(method) && index !== 0)
+            continue;
+          taint(owner);
+        }
+      }
+      const owner = prototypeOwner(node) ?? globalOwner(node);
+      if (owner === undefined || parent === null) return;
+      if (
+        (t.isMemberExpression(parent) ||
+          t.isOptionalMemberExpression(parent)) &&
+        parent.object === node
+      )
+        return;
+      if (
+        (t.isCallExpression(parent) || t.isOptionalCallExpression(parent)) &&
+        parent.arguments.includes(node as t.Expression)
+      )
+        return;
+      if (t.isIdentifier(node) && semanticReferenceRole(node, parent) === null)
+        return;
+      taint(owner);
+    },
+  });
 }
 
 const copyParameterToBody = (input: {
@@ -1043,22 +1314,44 @@ const bindAssignment = (
         scope,
         state,
         conditionallySkipped,
+        node,
       );
     else
       for (const identifier of semanticWriteTargets(node.left))
         if (t.isIdentifier(identifier))
-          addAssignment(identifier, node, scope, state, conditionallySkipped);
+          addAssignment(
+            identifier,
+            node,
+            scope,
+            state,
+            conditionallySkipped,
+            node,
+          );
   } else if (t.isUpdateExpression(node)) {
     const argument = unwrapJavaScriptExpression(node.argument).node;
     if (t.isIdentifier(argument))
       addAssignment(argument, node, scope, state, conditionallySkipped);
-  } else if (t.isForOfStatement(node) || t.isForInStatement(node))
+  } else if (t.isForOfStatement(node) || t.isForInStatement(node)) {
+    if (
+      semanticIterationCardinality(
+        node,
+        state.prototypeEnumerationMayAffect,
+      ) === "empty"
+    )
+      return;
     for (const pattern of t.isVariableDeclaration(node.left)
       ? node.left.declarations.map(({ id }) => id)
       : [node.left]) {
       for (const identifier of semanticWriteTargets(pattern))
         if (t.isIdentifier(identifier))
-          addAssignment(identifier, node, scope, state, conditionallySkipped);
+          addAssignment(
+            identifier,
+            node,
+            scope,
+            state,
+            conditionallySkipped,
+            node,
+          );
       if (t.isForOfStatement(node))
         // Keep the loop value unknown, but preserve references yielded into
         // each bound slot so writes/escapes can reach their iterable origins.
@@ -1071,6 +1364,7 @@ const bindAssignment = (
           referenceOnly: true,
         });
     }
+  }
 };
 
 const nestedScope = (
@@ -1455,20 +1749,24 @@ const addAssignment = (
   scope: JavaScriptSemanticScopeState,
   state: JavaScriptSemanticAnalysisState,
   conditionallySkipped: boolean,
+  writeSite?: t.Node,
 ): void => {
-  const binding = resolveSemanticBindingFromScope(
-    scope,
-    identifier.name,
-    state,
-  );
+  const lookup = semanticBindingLookupFromScope(scope, identifier.name, state);
+  if (lookup.kind === "captured") return;
+  const binding = "binding" in lookup ? lookup.binding : undefined;
+  conditionallySkipped ||=
+    lookup.kind !== "binding" && lookup.kind !== "ambient";
   if (binding === undefined) {
     // Unbound identifiers can denote host wrapper bindings (such as require),
     // which are separate from properties written through the global object.
     const writes = state.ambientBindingWrites.get(identifier.name) ?? [];
-    writes.push(identifier);
+    writes.push(writeSite ?? initializer);
     state.ambientBindingWrites.set(identifier.name, writes);
     return;
   }
+  const writes = state.bindingWrites.get(binding.bindingId) ?? [];
+  writes.push(writeSite ?? initializer);
+  state.bindingWrites.set(binding.bindingId, writes);
   binding.mutable = true;
   binding.definitions.push({ kind: "assignment", location: range(identifier) });
   binding.initializers.push({ node: initializer, projection: [] });

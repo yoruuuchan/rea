@@ -40,7 +40,8 @@ const run = async (operation, input) => {
   return result.value.normalized_result;
 };
 
-let primaryFailure;
+let verifierFailed = false;
+let verifierFailure;
 try {
   const client = await run("inspect_adb_client", {});
   if (client !== null) {
@@ -374,26 +375,27 @@ try {
     }
   }
 } catch (cause) {
-  primaryFailure = cause;
+  verifierFailed = true;
+  verifierFailure = cause;
+} finally {
+  try {
+    await closeVerifierResources(
+      [() => provider.close()],
+      verifierFailed ? verifierFailure : undefined,
+    );
+  } catch (cause) {
+    process.stderr.write(`[FAIL] verifier cleanup — ${formatFailure(cause)}\n`);
+    failures += 1;
+  }
 }
-
-let cleanupFailure;
-try {
-  await closeVerifierResources([() => provider.close()], primaryFailure);
-} catch (cause) {
-  cleanupFailure = cause;
-}
-
-if (primaryFailure !== undefined || cleanupFailure !== undefined) {
-  const causes =
-    cleanupFailure instanceof AggregateError
-      ? cleanupFailure.errors
-      : [cleanupFailure ?? primaryFailure];
+if (verifierFailed) {
   process.stderr.write(
-    `ADB device verification failed: ${causes.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join("; ")}\n`,
+    `[FAIL] verifier aborted — ${formatFailure(verifierFailure)}\n`,
   );
-  process.exitCode = 1;
-} else if (failures > 0) {
+  failures += 1;
+}
+
+if (failures > 0) {
   process.stdout.write(`\n${failures} check(s) failed\n`);
   process.exitCode = 1;
 } else {
@@ -420,4 +422,18 @@ function parseArguments(argv) {
     }
   }
   return parsed;
+}
+
+function formatFailure(cause) {
+  if (cause instanceof AggregateError)
+    return `${cause.message}: ${cause.errors.map(formatFailure).join("; ")}`;
+  if (cause instanceof Error) {
+    const resources = cause.cleanupResources ?? cause.resources;
+    const details = Array.isArray(resources)
+      ? ` resources=${resources.join(", ")}`
+      : "";
+    const reason = cause.diagnostics?.reason;
+    return `${cause.name}: ${cause.message}${details}${typeof reason === "string" ? ` reason=${reason}` : ""}`;
+  }
+  return String(cause);
 }

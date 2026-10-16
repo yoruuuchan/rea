@@ -125,6 +125,17 @@ registrations/removals and dispatch, Node timers and cancellation handles, async
 defaults, request construction and response consumers, parse/coercion/
 validation boundaries, and built-in resource acquisition/release.
 
+Local callback candidates do not establish a complete target set when a
+conditional write may leave a parameter, catch binding, or uninitialized
+variable unchanged. These calls retain candidate edges and dynamic uncertainty;
+default traces remain ambiguous with partial coverage. Opt into
+`include_ambiguous_dynamic_edges` to traverse the candidates. Proven preceding
+unconditional assignments, including writes dominating a read in the same
+conditional block, can resolve a target; later writes do not replace an
+earlier read or captured alias. Unproved ordering across branches or function
+activations remains conservative. Returned-reference effects use the same
+read-position facts as call resolution.
+
 Mutation tracking covers explicit member assignments, updates, deletion, and
 loop assignment targets, including the supported local aliases and shared
 nested references. Calls conservatively invalidate exposed mutable references;
@@ -174,8 +185,10 @@ graph and read literal values from `properties.value`, rather than decoding
 role keys or labels. Previously stored graphs and their original IDs remain
 valid inputs.
 
-Endpoint nodes keep the exact endpoint in each observation's `properties.value`;
-semantic request and response nodes keep it in `properties.endpoint`. Endpoint
+Endpoint observations keep their value in `properties.value`. When
+`properties.resolution` is `partial`, that value is the unresolved source
+expression, with an identity distinct from an exact endpoint of the same text.
+Semantic request and response nodes keep their endpoint in `properties.endpoint`. Endpoint
 lookup identities are preserved independently of the primitive-value lattice's
 byte budget. An oversized normalized literal can become unknown while the same
 string remains an exact endpoint for tracing and comparison. Endpoint

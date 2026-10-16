@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile, rmdir } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { toolContract } from "../dist/contracts/toolContracts.js";
-import { hashStableFile } from "../dist/filesystem/StableFileHash.js";
-import { OwnedRegularFileCleanupFailure } from "../dist/filesystem/RegularFile.js";
+import { ArtifactResourceScope } from "../dist/artifacts/ArtifactResourceScope.js";
 import { mcpTextValue } from "./lib/mcp-verifier-results.mjs";
 import { closeVerifierResources } from "./lib/verifier-cleanup.mjs";
+import { hashVerifierFile } from "./lib/verifier-file-resources.mjs";
 
 const options = parseArguments(process.argv.slice(2));
 if (options.help) {
@@ -31,6 +31,7 @@ const expectations =
     : JSON.parse(await readFile(options.expectations, "utf8"));
 // This is a shared test parent, not a leased provider-owned Windows runtime.
 const root = await mkdtemp(join(tmpdir(), "rea-flutter-verifier-"));
+const resources = new ArtifactResourceScope();
 const entrypoint = resolve("scripts/rea.mjs");
 const environment = Object.fromEntries(
   Object.entries(process.env).filter(([, value]) => typeof value === "string"),
@@ -41,17 +42,6 @@ Object.assign(environment, {
   TEMP: root,
 });
 const client = new Client({ name: "flutter-verifier", version: "1" });
-let primaryError;
-const hashOwners = new Map();
-const hashOwned = async (...args) => {
-  try {
-    return await hashStableFile(...args);
-  } catch (cause) {
-    if (cause instanceof OwnedRegularFileCleanupFailure)
-      hashOwners.set(cause.owner, cause.path);
-    throw cause;
-  }
-};
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [entrypoint, "mcp"],
@@ -59,10 +49,11 @@ const transport = new StdioClientTransport({
   stderr: "pipe",
 });
 const execute = promisify(execFile);
+let primaryError;
 try {
   await client.connect(transport);
   const apk = resolve(options.apk);
-  const identity = await hashOwned(apk);
+  const identity = await hashVerifierFile(apk, resources);
   const identified = await run("identify_flutter_build", { path: apk });
   assert.deepEqual(identified.target, { path: apk, ...identity });
   assert.equal(identified.flutter_detected, true);
@@ -189,13 +180,13 @@ try {
     const negative = await run("identify_flutter_build", { path: plain });
     assert.deepEqual(negative.target, {
       path: plain,
-      ...(await hashOwned(plain)),
+      ...(await hashVerifierFile(plain, resources)),
     });
     assert.equal(negative.flutter_detected, false);
     assert.equal(negative.coverage, "complete");
   }
   assert.deepEqual(
-    await hashOwned(apk),
+    await hashVerifierFile(apk, resources),
     identity,
     "Verification must preserve its input",
   );
@@ -203,32 +194,25 @@ try {
   primaryError = cause;
   throw cause;
 } finally {
-  const cleanup = [];
-  for (const [owner, path] of hashOwners) {
-    cleanup.push(async () => {
-      try {
-        await owner.close();
-        hashOwners.delete(owner);
-      } catch (cause) {
-        throw new Error(`Could not close hash file handle for ${path}`, {
-          cause,
-        });
-      }
-    });
-  }
-  cleanup.push(async () => {
-    await closeVerifierResources([
-      () => client.close(),
-      () => transport.close(),
-    ]);
-    assert.deepEqual(
-      await readdir(root),
-      [],
-      `Provider snapshots remain under ${root}`,
-    );
-    await rmdir(root);
-  });
-  await closeVerifierResources(cleanup, primaryError);
+  // Server shutdown retries retained provider cleanup and settles before success.
+  await closeVerifierResources(
+    [
+      async () => {
+        await closeVerifierResources([
+          () => client.close(),
+          () => transport.close(),
+          () => resources.close(),
+        ]);
+        assert.deepEqual(
+          await readdir(root),
+          [],
+          `Provider snapshots remain under ${root}`,
+        );
+        await rm(root, { recursive: true, force: true });
+      },
+    ],
+    primaryError,
+  );
 }
 process.stdout.write(
   "all asserted Flutter CLI/MCP checks passed; unverified facets are reported above\n",

@@ -139,6 +139,12 @@ overview merely because its source artifact is unchanged.
 
 ## Admitted function-analysis semantics
 
+Concurrent callers share one startup while retaining independent cancellation.
+Only the final departing caller abandons startup and waits for its cleanup.
+New attempts wait for that cleanup; failed cleanup retains its original error
+and owned directories until a successful close. Closing the provider reports a
+provider-state failure to live callers rather than cancelling their signals.
+
 | Concern                 | Ghidra contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Decompiler lifetime     | One persistent `DecompInterface` is opened for the imported Program and disposed during bridge shutdown. Native decompilation has no fixed per-function deadline. External functions or functions without bodies return `null`; cancellation and native failure remain distinct.                                                                                                                                                                                                                                                                                                                                           |

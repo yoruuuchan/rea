@@ -34,7 +34,7 @@ import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
-import { deliverObservationEvidence } from "./observationEvidenceDelivery.js";
+import { deliverEvidenceResult } from "./contractToolHandler.js";
 
 interface ElectronToolRegistration {
   readonly artifactResources: ArtifactResourceScope;
@@ -205,10 +205,10 @@ const runElectronTool = async <Input>(
           progress: mcpProgressReporter(context),
         }),
       );
-      return deliverObservationEvidence(
+      return deliverEvidenceResult(
         options.server,
-        contract,
         result,
+        contract,
         options.recordEvidence,
       );
     },

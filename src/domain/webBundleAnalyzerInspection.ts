@@ -11,6 +11,7 @@ import type { JavaScriptOpenReceiverFact } from "./javascript/javascriptSemantic
 import {
   semanticStaticPropertyKey,
   semanticStaticPropertyName,
+  unwrapJavaScriptExpression,
 } from "./javascript/javascriptAstValues.js";
 import {
   calleeName,
@@ -208,11 +209,29 @@ const inspectCall = (
       node,
       accumulator,
     });
-  if (
-    name.endsWith("modelContext.registerTool") ||
-    name === "modelContext.registerTool"
-  )
+  if (isWebMcpRegistrationCallee(node.callee))
     addWebMcpDeclaration(script, node, accumulator);
+};
+
+/** Match exact WebMCP receiver and method properties without flattening keys. */
+const isWebMcpRegistrationCallee = (callee: t.Node): boolean => {
+  const method = unwrapJavaScriptExpression(callee).node;
+  if (!t.isMemberExpression(method) && !t.isOptionalMemberExpression(method))
+    return false;
+  if (
+    semanticStaticPropertyKey(method.property, method.computed) !==
+    "registerTool"
+  )
+    return false;
+
+  const receiver = unwrapJavaScriptExpression(method.object).node;
+  if (t.isIdentifier(receiver, { name: "modelContext" })) return true;
+  return (
+    (t.isMemberExpression(receiver) ||
+      t.isOptionalMemberExpression(receiver)) &&
+    semanticStaticPropertyKey(receiver.property, receiver.computed) ===
+      "modelContext"
+  );
 };
 
 const inspectRouteProperty = (

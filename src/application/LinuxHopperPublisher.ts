@@ -11,11 +11,8 @@ import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { hashStableFile } from "../filesystem/StableFileHash.js";
-import {
-  StableFileHashCleanupFailure,
-  type StableFileHashResult,
-} from "../filesystem/StableFileHash.js";
-import { OwnedRegularFileCleanupFailure } from "../filesystem/RegularFile.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import { verifyDetachedPgpSignature } from "../process/DetachedPgpSignature.js";
 import { execFileOutput } from "../process/ExecFileOutput.js";
@@ -39,7 +36,10 @@ import {
   type LinuxHopperRelease,
   type LinuxPackageFamily,
 } from "./HopperReleaseFeed.js";
-import { withRegularFile } from "./RegularFileRead.js";
+import {
+  RegularFileCleanupFailure as RegularFileReadCleanupFailure,
+  withRegularFile,
+} from "./RegularFileRead.js";
 
 /** Metadata/key inspection budget, independent of the compressed package budget. */
 const RELEASE_METADATA_BYTES = 1024 * 1024;
@@ -129,46 +129,6 @@ export class LinuxHopperPublisher {
     readonly packageFamily: () => Promise<LinuxPackageFamily | undefined>,
   ) {}
 
-  /** Hash a selected launcher while retaining any descriptor cleanup owner. */
-  hashLauncher(path: string): Promise<StableFileHashResult> {
-    return this.#hashStableFile(path);
-  }
-
-  async #hashStableFile(
-    path: string,
-    signal?: AbortSignal,
-  ): Promise<StableFileHashResult> {
-    try {
-      return await hashStableFile(path, signal);
-    } catch (cause: unknown) {
-      if (!(cause instanceof OwnedRegularFileCleanupFailure)) throw cause;
-      const cleanup = await this.#resources.release({
-        kind: "file-handle",
-        resource: path,
-        handle: cause.owner,
-      });
-      if (cleanup.kind === "failed") {
-        pendingCleanup.add(this.#resources);
-        throw new HopperReleaseError(
-          "cleanup_failed",
-          `Hopper publisher retained file descriptor cleanup for ${path}.`,
-          {
-            cause: new AggregateError(
-              [cause, cleanup.cause],
-              "Stable file hash and descriptor cleanup failed",
-              { cause },
-            ),
-          },
-        );
-      }
-      if (cause instanceof StableFileHashCleanupFailure) {
-        if (cause.hasPrimaryCause) throw cause.cause;
-        if (cause.completedHash !== undefined) return cause.completedHash;
-      }
-      throw cause;
-    }
-  }
-
   get cacheRoot(): string {
     const location = linuxHopperReleaseCacheDirectory(this.environment);
     if (!location.ok) throw location.error;
@@ -210,8 +170,33 @@ export class LinuxHopperPublisher {
     signal?: AbortSignal,
     suppliedPublicKey?: string,
   ): Promise<Result<VerifiedLinuxHopperPackage, HopperReleaseError>> {
+    return this.#runOperation(signal, (resources) =>
+      this.#verifyArchive(
+        family,
+        release,
+        archive,
+        signal,
+        suppliedPublicKey,
+        resources,
+      ),
+    );
+  }
+
+  async #verifyArchive(
+    family: LinuxPackageFamily,
+    release: LinuxHopperRelease,
+    archive: string,
+    signal: AbortSignal | undefined,
+    suppliedPublicKey: string | undefined,
+    resources: ArtifactResourceScope,
+  ): Promise<Result<VerifiedLinuxHopperPackage, HopperReleaseError>> {
     try {
-      const bytes = await this.#read(archive, HOPPER_DOWNLOAD_BYTES, signal);
+      const bytes = await this.#read(
+        archive,
+        HOPPER_DOWNLOAD_BYTES,
+        signal,
+        resources,
+      );
       if (
         bytes.length !== Number(release.file_length) ||
         createHash("sha1").update(bytes).digest("hex") !== release.file_hash
@@ -277,12 +262,20 @@ export class LinuxHopperPublisher {
             { cause: verified.error },
           ),
         );
-      const mainExeHash = await this.#withTemporary(async (root) => {
-        // Extract only after authentication, from this operation's private byte snapshot.
-        const snapshot = join(root, "package");
-        await writeFile(snapshot, bytes, { flag: "wx", mode: 0o600 });
-        return this.#packageLauncherHash(family, snapshot, root, signal);
-      });
+      const mainExeHash = await this.#withTemporary(
+        async (root, temporaryResources) => {
+          // Extract only after authentication, from this operation's private byte snapshot.
+          const snapshot = join(root, "package");
+          await writeFile(snapshot, bytes, { flag: "wx", mode: 0o600 });
+          return this.#packageLauncherHash(
+            family,
+            snapshot,
+            root,
+            signal,
+            temporaryResources,
+          );
+        },
+      );
       if (mainExeHash !== release.main_exe_hash)
         return err(
           new HopperReleaseError(
@@ -308,6 +301,17 @@ export class LinuxHopperPublisher {
     verified: VerifiedLinuxHopperPackage,
     archive: string,
     signal?: AbortSignal,
+  ): Promise<Result<void, HopperReleaseError>> {
+    return this.#runOperation(signal, (resources) =>
+      this.#retainVerifiedArchive(verified, archive, signal, resources),
+    );
+  }
+
+  async #retainVerifiedArchive(
+    verified: VerifiedLinuxHopperPackage,
+    archive: string,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
   ): Promise<Result<void, HopperReleaseError>> {
     try {
       signal?.throwIfAborted();
@@ -335,11 +339,16 @@ export class LinuxHopperPublisher {
         },
         async () => {
           signal?.throwIfAborted();
-          await this.#withTemporary(async (stage) => {
+          await this.#withTemporary(async (stage, temporaryResources) => {
             await copyFile(archive, join(stage, "archive"));
             if (
-              (await this.#hashStableFile(join(stage, "archive"), signal))
-                .sha256 !== verified.packageSha256
+              (
+                await this.#hashFileWithResources(
+                  join(stage, "archive"),
+                  signal,
+                  temporaryResources,
+                )
+              ).sha256 !== verified.packageSha256
             )
               throw new HopperReleaseError(
                 "integrity",
@@ -363,6 +372,7 @@ export class LinuxHopperPublisher {
               target,
               verified.release.main_exe_hash,
               signal,
+              resources,
             );
           }, this.cacheRoot);
         },
@@ -377,9 +387,10 @@ export class LinuxHopperPublisher {
     stage: string,
     target: string,
     digest: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
   ): Promise<void> {
-    const existing = await this.#cachedPackage(digest, signal);
+    const existing = await this.#cachedPackage(digest, signal, resources);
     if (existing.ok) return;
     if (existing.error.reason === "cache_missing") {
       await rename(stage, target);
@@ -411,7 +422,7 @@ export class LinuxHopperPublisher {
         throw new Error("The Hopper cache entry changed during repair.");
       await rename(stage, target);
     } catch (cause: unknown) {
-      const replacement = await this.#cachedPackage(digest, signal);
+      const replacement = await this.#cachedPackage(digest, signal, resources);
       if (replacement.ok) return;
       await this.#failedCachePublication(
         target,
@@ -479,12 +490,31 @@ export class LinuxHopperPublisher {
     path: string,
     signal?: AbortSignal,
   ): Promise<Result<VerifiedLinuxHopperLauncher, HopperReleaseError>> {
+    return this.#runOperation(signal, (resources) =>
+      this.#inspectLauncher(path, signal, resources),
+    );
+  }
+
+  async #inspectLauncher(
+    path: string,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
+  ): Promise<Result<VerifiedLinuxHopperLauncher, HopperReleaseError>> {
     try {
-      const observed = await this.#hashStableFile(path, signal);
-      const cached = await this.#cachedPackage(observed.sha256, signal);
+      const observed = await this.#hashFileWithResources(
+        path,
+        signal,
+        resources,
+      );
+      const cached = await this.#cachedPackage(
+        observed.sha256,
+        signal,
+        resources,
+      );
       if (cached.ok) {
         if (
-          (await this.#hashStableFile(path, signal)).sha256 !== observed.sha256
+          (await this.#hashFileWithResources(path, signal, resources))
+            .sha256 !== observed.sha256
         )
           return err(
             new HopperReleaseError(
@@ -516,28 +546,35 @@ export class LinuxHopperPublisher {
             "The selected Hopper launcher does not match an authenticated cached release or the official current Linux demo.",
           ),
         );
-      const verified = await this.#withTemporary(async (root) => {
-        const response = await downloadHopperPackage(
-          selected.value.filename,
-          signal === undefined ? {} : { signal },
-        );
-        if (!response.ok)
-          throw new HopperReleaseError(
-            "download",
-            "The official Hopper package is unavailable for publisher verification.",
+      const verified = await this.#withTemporary(
+        async (root, temporaryResources) => {
+          const response = await downloadHopperPackage(
+            selected.value.filename,
+            signal === undefined ? {} : { signal },
           );
-        const archive = join(root, "archive");
-        await writeFile(archive, response.bytes, { flag: "wx", mode: 0o600 });
-        const verified = await this.verifyArchive(
-          family,
-          selected.value,
-          archive,
-          signal,
-        );
-        if (!verified.ok) throw verified.error;
-        return verified.value;
-      });
-      if ((await this.#hashStableFile(path, signal)).sha256 !== observed.sha256)
+          if (!response.ok)
+            throw new HopperReleaseError(
+              "download",
+              "The official Hopper package is unavailable for publisher verification.",
+            );
+          const archive = join(root, "archive");
+          await writeFile(archive, response.bytes, { flag: "wx", mode: 0o600 });
+          const verified = await this.#verifyArchive(
+            family,
+            selected.value,
+            archive,
+            signal,
+            undefined,
+            temporaryResources,
+          );
+          if (!verified.ok) throw verified.error;
+          return verified.value;
+        },
+      );
+      if (
+        (await this.#hashFileWithResources(path, signal, resources)).sha256 !==
+        observed.sha256
+      )
         return err(
           new HopperReleaseError(
             "integrity",
@@ -562,9 +599,122 @@ export class LinuxHopperPublisher {
     }
   }
 
+  /** Admit once at the publisher boundary; file reads use this operation's child scope. */
+  async #runOperation<T>(
+    signal: AbortSignal | undefined,
+    operation: (
+      resources: ArtifactResourceScope,
+    ) => Promise<Result<T, HopperReleaseError>>,
+  ): Promise<Result<T, HopperReleaseError>> {
+    try {
+      return await this.#resources.run(async () => {
+        const resources = new ArtifactResourceScope();
+        let result: Result<T, HopperReleaseError>;
+        try {
+          result = await operation(resources);
+        } catch (cause: unknown) {
+          result = err(
+            releaseFailure(cause, signal, "verification_unavailable"),
+          );
+        }
+
+        const cleanup = await resources.close().then(
+          () => ({ ok: true as const }),
+          (cause: unknown) => ({ ok: false as const, cause }),
+        );
+        if (!cleanup.ok) {
+          const owner: ArtifactResourceOwner = {
+            kind: "lease",
+            resource: "hopper-publisher-operation-resources",
+            lease: { release: () => resources.close() },
+          };
+          this.#resources.retain(owner);
+          pendingCleanup.add(this.#resources);
+          throw new HopperReleaseError(
+            "cleanup_failed",
+            "Hopper publisher retained operation resource cleanup.",
+            {
+              cause: new AggregateError(
+                result.ok ? [cleanup.cause] : [result.error, cleanup.cause],
+                "Publisher operation and resource cleanup outcomes",
+              ),
+            },
+          );
+        }
+        return result;
+      });
+    } catch (cause: unknown) {
+      return err(releaseFailure(cause, signal, "verification_unavailable"));
+    }
+  }
+
+  /** Hash an installed launcher under this publisher's cleanup lifetime. */
+  async hashLauncher(path: string): Promise<string> {
+    const result = await this.#runOperation(undefined, async (resources) =>
+      ok(
+        (await this.#hashFileWithResources(path, undefined, resources)).sha256,
+      ),
+    );
+    if (!result.ok) throw result.error;
+    return result.value;
+  }
+
+  async #hashFileWithResources(
+    path: string,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
+  ): Promise<Awaited<ReturnType<typeof hashStableFile>>> {
+    let retainedOwner: ArtifactResourceOwner | undefined;
+    try {
+      return await hashStableFile(path, {
+        ...(signal === undefined ? {} : { signal }),
+        retainFailedClose: (handle: OwnedFileHandle) => {
+          retainedOwner = {
+            kind: "file-handle",
+            resource: path,
+            handle,
+          };
+          resources.retain(retainedOwner);
+          if (resources === this.#resources) pendingCleanup.add(resources);
+        },
+      });
+    } catch (cause: unknown) {
+      if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
+      const hashFailure = cause as RegularFileCleanupFailure<
+        Awaited<ReturnType<typeof hashStableFile>>
+      >;
+      const owner =
+        retainedOwner ??
+        ({
+          kind: "file-handle",
+          resource: path,
+          handle: hashFailure.owner,
+        } satisfies ArtifactResourceOwner);
+      const released = await resources.release(owner);
+      if (released.kind === "failed") {
+        if (resources === this.#resources) pendingCleanup.add(resources);
+        throw new HopperReleaseError(
+          "cleanup_failed",
+          `Hopper publisher retained file descriptor cleanup for ${path}.`,
+          {
+            cause: new AggregateError(
+              [cause, released.cause],
+              "Stable file hash and descriptor cleanup failed",
+              { cause },
+            ),
+          },
+        );
+      }
+      if (hashFailure.outcome.kind === "failed")
+        throw hashFailure.outcome.cause;
+      return hashFailure.outcome.value;
+    }
+  }
+
   async #cachedPackage(
     digest: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
   ): Promise<Result<VerifiedLinuxHopperPackage, HopperReleaseError>> {
     try {
       const root = join(this.cacheRoot, digest);
@@ -595,6 +745,7 @@ export class LinuxHopperPublisher {
         join(root, "release.json"),
         RELEASE_METADATA_BYTES,
         signal,
+        resources,
       );
       let value: unknown;
       try {
@@ -626,6 +777,7 @@ export class LinuxHopperPublisher {
         join(root, "public-key.asc"),
         RELEASE_METADATA_BYTES,
         signal,
+        resources,
       );
       let key: string;
       try {
@@ -637,12 +789,13 @@ export class LinuxHopperPublisher {
           { cause },
         );
       }
-      return this.verifyArchive(
+      return this.#verifyArchive(
         parsed.data.family,
         release.value,
         join(root, "archive"),
         signal,
         key,
+        resources,
       );
     } catch (cause: unknown) {
       return err(releaseFailure(cause, signal, "verification_unavailable"));
@@ -672,7 +825,8 @@ export class LinuxHopperPublisher {
     family: LinuxPackageFamily,
     archive: string,
     root: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
   ): Promise<string> {
     const commandOptions = {
       env: this.environment,
@@ -730,14 +884,20 @@ export class LinuxHopperPublisher {
         commandOptions,
       );
     return (
-      await this.#hashStableFile(
+      await this.#hashFileWithResources(
         join(extracted, "opt", "hopper", "bin", "Hopper"),
         signal,
+        resources,
       )
     ).sha256;
   }
 
-  #read(path: string, limit: number, signal?: AbortSignal): Promise<Buffer> {
+  #read(
+    path: string,
+    limit: number,
+    signal: AbortSignal | undefined,
+    resources: ArtifactResourceScope,
+  ): Promise<Buffer> {
     return withRegularFile(
       path,
       async (handle, stats) => {
@@ -754,26 +914,83 @@ export class LinuxHopperPublisher {
           );
         return bytes;
       },
-      { signal, resources: this.#resources, symlinks: "reject" },
-    );
+      { signal, symlinks: "reject", resources },
+    ).catch((cause: unknown) => {
+      if (
+        resources === this.#resources &&
+        cause instanceof RegularFileReadCleanupFailure
+      )
+        pendingCleanup.add(resources);
+      throw cause;
+    });
   }
 
   async #withTemporary<T>(
-    operation: (path: string) => Promise<T>,
+    operation: (path: string, resources: ArtifactResourceScope) => Promise<T>,
     parent?: string,
   ): Promise<T> {
     const root = await PrivateRuntimeRoot.create({
       prefix: "rea-hopper-publisher-",
       ...(parent === undefined ? {} : { parent }),
     });
-    return this.#withOwnedResource(
-      {
-        kind: "private-runtime-root",
-        resource: root.path,
-        root,
+    const temporaryResources = new ArtifactResourceScope();
+    const dependency = {
+      kind: "lease" as const,
+      resource: root.path,
+      lease: {
+        release: async () => {
+          await temporaryResources.close();
+          await root.close();
+        },
       },
-      () => operation(root.path),
+    };
+    let outcome:
+      | { readonly ok: true; readonly value: T }
+      | { readonly ok: false; readonly cause: unknown };
+    try {
+      outcome = {
+        ok: true,
+        value: await operation(root.path, temporaryResources),
+      };
+    } catch (cause: unknown) {
+      outcome = { ok: false, cause };
+    }
+    const released = await temporaryResources.close().then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
     );
+    if (!released.ok) {
+      this.#resources.retain(dependency);
+      pendingCleanup.add(this.#resources);
+      throw new HopperReleaseError(
+        "cleanup_failed",
+        `Hopper publisher verification retained temporary cleanup ownership for ${root.path}.`,
+        {
+          cause: new AggregateError(
+            outcome.ok ? [released.cause] : [outcome.cause, released.cause],
+            "Temporary operation and descendant cleanup outcomes",
+          ),
+        },
+      );
+    }
+    try {
+      await root.close();
+    } catch (cleanupCause: unknown) {
+      this.#resources.retain(dependency);
+      pendingCleanup.add(this.#resources);
+      throw new HopperReleaseError(
+        "cleanup_failed",
+        `Hopper publisher verification retained temporary cleanup ownership for ${root.path}.`,
+        {
+          cause: new AggregateError(
+            outcome.ok ? [cleanupCause] : [outcome.cause, cleanupCause],
+            "Temporary operation and cleanup outcomes",
+          ),
+        },
+      );
+    }
+    if (!outcome.ok) throw outcome.cause;
+    return outcome.value;
   }
 
   async #withOwnedResource<T>(
@@ -787,6 +1004,20 @@ export class LinuxHopperPublisher {
       outcome = { ok: true, value: await operation() };
     } catch (cause: unknown) {
       outcome = { ok: false, cause };
+    }
+    if (this.#resources.hasPending) {
+      this.#resources.retain(owner);
+      pendingCleanup.add(this.#resources);
+      throw new HopperReleaseError(
+        "cleanup_failed",
+        `Hopper publisher verification retained cleanup ownership for ${owner.resource}.`,
+        {
+          cause: new AggregateError(
+            outcome.ok ? [] : [outcome.cause],
+            "Publisher operation and descendant cleanup outcomes",
+          ),
+        },
+      );
     }
     const cleanup = await this.#resources.release(owner);
     if (cleanup.kind === "failed") {
@@ -852,22 +1083,28 @@ const releaseFailure = (
   cause: unknown,
   signal: AbortSignal | undefined,
   fallback: HopperReleaseError["reason"],
-): HopperReleaseError =>
-  cause instanceof HopperReleaseError && cause.reason === "cleanup_failed"
-    ? cause
-    : signal?.aborted === true
-      ? new HopperReleaseError(
-          "cancelled",
-          "Hopper publisher verification was cancelled.",
-          { cause },
-        )
-      : cause instanceof HopperReleaseError
-        ? cause
-        : new HopperReleaseError(
-            fallback,
-            "Hopper publisher verification could not complete.",
-            { cause },
-          );
+): HopperReleaseError => {
+  if (cause instanceof HopperReleaseError && cause.reason === "cleanup_failed")
+    return cause;
+  if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined)
+    return new HopperReleaseError(
+      "cleanup_failed",
+      "Hopper publisher cleanup remains incomplete.",
+      { cause },
+    );
+  if (signal?.aborted === true)
+    return new HopperReleaseError(
+      "cancelled",
+      "Hopper publisher verification was cancelled.",
+      { cause },
+    );
+  if (cause instanceof HopperReleaseError) return cause;
+  return new HopperReleaseError(
+    fallback,
+    "Hopper publisher verification could not complete.",
+    { cause },
+  );
+};
 const launcherIdentity = (
   verified: VerifiedLinuxHopperPackage,
   source: VerifiedLinuxHopperLauncher["source"],

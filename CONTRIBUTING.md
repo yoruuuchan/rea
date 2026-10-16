@@ -225,7 +225,10 @@ manifest. A source checkout does not: `native/windows/build/` is ignored by
 Git, and neither `npm ci` nor `npm run build:cached` (or `npm run build`)
 produces `rea-windows-x64.node` or `manifest.json` in that directory.
 Windows workflows and tests that require native controls need these artifacts;
-without them, those controls are unavailable even after a successful runtime build.
+this includes `run-exclusive` commands, which use the native Job Object to keep
+the artifact lock until every command descendant has exited. Without the
+artifacts, those controls are unavailable even after a successful runtime
+build.
 
 Follow the [Windows native build guide](native/windows/README.md#build) before
 running those workflows from source. The artifact build requires Linux,

@@ -3,6 +3,34 @@ import { describe, expect, it } from "vitest";
 import { analyzeJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
 
 describe("Electron option evidence", () => {
+  it.each([
+    '({ webPreferences: { preload: "./preload.js", sandbox: true } } as const)',
+    '{ webPreferences: ({ preload: "./preload.js", sandbox: true } as const) }',
+    '{ webPreferences: { preload: "./preload.js" as const, sandbox: true } }',
+  ])("unwraps type-only wrappers around inline options: %s", (options) => {
+    const analysis = analyzeJavaScriptStaticSource(`
+      import { BrowserWindow } from "electron";
+      new BrowserWindow(${options});
+    `);
+
+    expect(analysis.parse_error_count).toBe(0);
+    expect(analysis.electron.browser_windows).toMatchObject([
+      {
+        options_status: "object-literal",
+        web_preferences_status: "object-literal",
+        preload_path: "./preload.js",
+        preload_resolution_context: "module-specifier",
+        web_preferences: [
+          {
+            name: "preload",
+            value: { status: "literal", value: "./preload.js" },
+          },
+          { name: "sandbox", value: { status: "literal", value: true } },
+        ],
+      },
+    ]);
+  });
+
   it("keeps the final explicit preload and service name with unrelated keys", () => {
     const analysis = analyzeJavaScriptStaticSource(`
       const { BrowserWindow, utilityProcess } = require("electron");

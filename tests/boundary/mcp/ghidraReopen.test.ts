@@ -248,9 +248,8 @@ const disconnect = async (
     child.on("message", received);
     child.send("disconnect");
   });
-  await expect
-    .poll(async () => (await client.ping({ timeoutMs: 200 })).ok)
-    .toBe(false);
+  const disconnectedPing = await client.ping({ timeoutMs: 200 });
+  expect(disconnectedPing.ok).toBe(false);
   expect(child.exitCode).toBeNull();
   expect(child.signalCode).toBeNull();
 };

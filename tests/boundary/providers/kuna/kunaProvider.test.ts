@@ -16,6 +16,9 @@ import type { BinaryTarget } from "../../../../src/domain/binaryTargetTypes.js";
 import type { JsonValue } from "../../../../src/domain/jsonValue.js";
 import type { KunaProcessLauncher } from "../../../../src/kuna/KunaCommand.js";
 import type { AnalysisError } from "../../../../src/domain/analysisErrorBase.js";
+import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
+import { AnalysisProviderRegistry } from "../../../../src/application/binary/AnalysisProviderRegistry.js";
+import { composeBinarySession } from "../../../../src/application/binary/BinarySessionComposition.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { KunaProvider } from "../../../../src/kuna/KunaProvider.js";
 import { KUNA_FUNCTION_TEXT_BYTES } from "../../../../src/kuna/KunaLimits.js";
@@ -95,6 +98,65 @@ it("discovers configuration without probing and admits only verified targets", a
   ).toMatchObject({
     code: "architecture_unsupported",
   });
+});
+
+it("waits for an aborted pre-session hash before retrying its late close owner", async () => {
+  const fixture = await session("rea-kuna-profile-hash-owner-");
+  const binary = composeBinarySession(
+    new AnalysisProviderRegistry([fixture.provider], "kuna"),
+  );
+  const nativeClose = OwnedFileHandle.prototype.close;
+  let closeCalls = 0;
+  let enteredClose!: () => void;
+  let releaseClose!: () => void;
+  const closeEntered = new Promise<void>((resolve) => {
+    enteredClose = resolve;
+  });
+  const closeGate = new Promise<void>((resolve) => {
+    releaseClose = resolve;
+  });
+  const close = vi
+    .spyOn(OwnedFileHandle.prototype, "close")
+    .mockImplementation(async function (this: OwnedFileHandle) {
+      closeCalls += 1;
+      if (closeCalls === 1) {
+        enteredClose();
+        await closeGate;
+      }
+      if (closeCalls <= 2)
+        throw new Error("injected Kuna profile close failure");
+      return nativeClose.call(this);
+    });
+  try {
+    const controller = new AbortController();
+    const previewWork = binary.previewTarget(fixture.target, {
+      signal: controller.signal,
+    });
+    await closeEntered;
+    controller.abort();
+    const preview = await previewWork;
+    expect(preview).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError" },
+    });
+
+    const closing = binary.close();
+    releaseClose();
+    const firstClose = await closing;
+    expect(firstClose).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: true },
+    });
+    expect(binary.status()).toMatchObject({ cleanup_pending: true });
+
+    close.mockRestore();
+    expect(await binary.close()).toEqual({ ok: true, value: null });
+    expect(binary.status()).toMatchObject({ cleanup_pending: false });
+  } finally {
+    releaseClose();
+    close.mockRestore();
+    await binary.close();
+  }
 });
 
 it("commits the observed Kuna release and digest to the analysis profile", async () => {

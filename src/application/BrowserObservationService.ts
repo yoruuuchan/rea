@@ -242,9 +242,8 @@ const browserEvidence = (
       ),
     );
   return completeProviderEvidence(
-    ok(createBrowserEvidence(operation, input, result, provider)),
-    operation,
-    options,
+    createBrowserEvidence(operation, input, result, provider),
+    options.signal,
   );
 };
 

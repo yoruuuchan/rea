@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { watch } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expect, onTestFinished, test, vi } from "vitest";
 
 import { PcapProvider } from "../../../src/pcap/PcapProvider.js";
@@ -184,11 +184,17 @@ it("inspects a capture with endpoints, DNS, TLS SNI, and HTTP", async () => {
   expect(result.coverage).toBe("complete");
 });
 
-it.each(["capinfos", "tshark"] as const)(
-  "retains parsed output and cleanup ownership when %s cleanup is unresolved",
-  async (stage) => {
+it.each([
+  { stage: "capinfos", denySnapshotClose: false },
+  { stage: "tshark", denySnapshotClose: false },
+  { stage: "capinfos", denySnapshotClose: true },
+  { stage: "tshark", denySnapshotClose: true },
+] as const)(
+  "retires $stage cleanup with its snapshot (snapshot close denied: $denySnapshotClose)",
+  async ({ stage, denySnapshotClose }) => {
     let mayClean = false;
     let producerLaunches = 0;
+    let cleanupAttempts = 0;
     const launcher: PcapCommandLauncher = async (spawn) => {
       const selectedStage = spawn.arguments.includes("-M")
         ? "capinfos"
@@ -204,6 +210,7 @@ it.each(["capinfos", "tshark"] as const)(
       return {
         ...launched,
         cleanup: async () => {
+          cleanupAttempts++;
           const cleaned = await cleanupOwned();
           if (!mayClean) throw new Error("injected retained cleanup failure");
           return cleaned;
@@ -246,18 +253,50 @@ it.each(["capinfos", "tshark"] as const)(
     });
     expect(producerLaunches).toBe(1);
     expect(await readFile(path)).toEqual(Buffer.from("pcap-fixture-bytes"));
-    expect(
-      result.error.cleanupResources.some((resource) =>
-        resource.endsWith("/capture.pcap"),
-      ),
-    ).toBe(true);
+    const snapshotPath = result.error.cleanupResources.find((resource) =>
+      resource.endsWith("/capture.pcap"),
+    );
+    if (snapshotPath === undefined)
+      throw new Error("Missing retained snapshot");
     expect(
       result.error.cleanupResources.some((resource) =>
         resource.startsWith("process-group:"),
       ),
     ).toBe(true);
+    const originatingCause = result.error.cause;
+    const originatingObservation = result.error.partialObservation;
+    const attemptsBeforeClose = cleanupAttempts;
     mayClean = true;
+    if (denySnapshotClose) {
+      const close = PrivateRuntimeRoot.prototype.close;
+      const denied = vi
+        .spyOn(PrivateRuntimeRoot.prototype, "close")
+        .mockImplementation(function (this: PrivateRuntimeRoot) {
+          if (this.path === dirname(snapshotPath))
+            return Promise.reject(new Error("injected snapshot close failure"));
+          return close.call(this);
+        });
+      try {
+        await expect(provider.close()).rejects.toMatchObject({
+          cleanupIncomplete: true,
+        });
+        expect(result.error.cleanupIncomplete).toBe(true);
+        expect(cleanupAttempts).toBe(attemptsBeforeClose + 1);
+        await expect(readFile(snapshotPath)).resolves.toEqual(
+          Buffer.from("pcap-fixture-bytes"),
+        );
+      } finally {
+        denied.mockRestore();
+      }
+    }
     await provider.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.cause).toBe(originatingCause);
+    expect(result.error.partialObservation).toBe(originatingObservation);
+    expect(cleanupAttempts).toBe(attemptsBeforeClose + 1);
+    await expect(readFile(snapshotPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   },
 );
 
@@ -616,6 +655,7 @@ it.each([false, true])(
       spy.mockRestore();
     }
     await provider.close();
+    if (!result.ok) expect(result.error.cleanupIncomplete).toBe(false);
     await expect(
       readFile(join(retained!.path, "capture.pcap")),
     ).rejects.toMatchObject({ code: "ENOENT" });

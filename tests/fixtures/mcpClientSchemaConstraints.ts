@@ -7,13 +7,16 @@ import {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** VS Code Copilot requires truthy items even for Draft 2020-12 tuples. */
+/** VS Code Copilot rejects falsy `items` for any type that admits arrays. */
 export const arrayItemSchemaError = (
   schema: unknown,
   path: string,
 ): string | undefined => {
   if (!isRecord(schema)) return undefined;
-  if (schema.type === "array" && !schema.items)
+  const admitsArrays =
+    schema.type === "array" ||
+    (Array.isArray(schema.type) && schema.type.includes("array"));
+  if (admitsArrays && !schema.items)
     return `${path}: tool parameters array type must have items`;
   for (const [key, value] of Object.entries(schema)) {
     const children =

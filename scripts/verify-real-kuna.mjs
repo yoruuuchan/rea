@@ -26,6 +26,7 @@ import { parseArgs, promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { execFileOutput } from "../dist/process/ExecFileOutput.js";
+import { ArtifactResourceScope } from "../dist/artifacts/ArtifactResourceScope.js";
 import { requireMcpOperationResult } from "./lib/mcp-verifier-results.mjs";
 import { verifyKunaReferences } from "./lib/kuna-reference-verifier.mjs";
 import {
@@ -70,6 +71,12 @@ if (values["compare-ghidra"]) {
   );
 }
 const run = createVerifierRun();
+const fileCloseScope = new ArtifactResourceScope();
+const fileCloseResources = {
+  retain: (owner, resource) =>
+    fileCloseScope.retain({ kind: "file-handle", resource, handle: owner }),
+  run: (operation) => fileCloseScope.run(operation),
+};
 const workspace = await mkdtemp(join(tmpdir(), "rea-kuna-lane-"));
 const cacheRoot = join(workspace, "cache");
 // A server retains its workspace until both provider and transport cleanup
@@ -285,6 +292,7 @@ const verifyKuna = async (
         call: cold.call,
         cacheRoot,
         expectedStrings,
+        fileCloseResources,
         nativeStrings: () =>
           nativeKunaStrings({
             executable: kuna,
@@ -292,6 +300,7 @@ const verifyKuna = async (
             workspace,
             binary: path,
             retain: (owner) => retainedNative.add(owner),
+            fileCloseResources,
           }),
       }),
     });
@@ -315,6 +324,7 @@ const verifyKuna = async (
             binary: path,
             address: targetAddress,
             retain: (outcome) => retainedNative.add(outcome),
+            fileCloseResources,
           }),
       });
       const pseudocode = await cold.call("procedure_pseudo_code", {
@@ -482,6 +492,7 @@ const verifyVariant = async ({ flavor, directory, symbols }, variant) => {
 
 const results = [];
 const failures = [];
+let fileResourcesClean = true;
 try {
   kunaVersion = (
     await execFileOutput(kuna, ["--version"], {
@@ -554,8 +565,15 @@ for (const retained of [...retainedNative]) {
     failures.push(cause);
   }
 }
+try {
+  await fileCloseScope.close();
+} catch (cause) {
+  fileResourcesClean = false;
+  failures.push(cause);
+}
 const lifecycle = await completeVerifierRun(run);
-let cleanupComplete = pendingServers.size === 0 && retainedNative.size === 0;
+let cleanupComplete =
+  pendingServers.size === 0 && retainedNative.size === 0 && fileResourcesClean;
 try {
   assertVerifierCleanupComplete(lifecycle.process_lineage);
 } catch (cause) {

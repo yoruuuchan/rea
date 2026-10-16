@@ -2,7 +2,7 @@ import { setImmediate } from "node:timers/promises";
 
 import { expect, it as test, vi } from "vitest";
 
-import { inspectKunaInstallation } from "../../../../src/kuna/KunaInstallation.js";
+import { inspectKunaInstallationOwned as inspectKunaInstallation } from "./kunaFileCloseOwner.js";
 import { KunaRunSlots } from "../../../../src/kuna/KunaRunSlots.js";
 import { KunaTargetCommands } from "../../../../src/kuna/KunaTargetCommands.js";
 import { spawnOwnedProviderProcess } from "../../../../src/process/ProviderProcess.js";

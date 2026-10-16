@@ -215,6 +215,73 @@ it("advertises exact valid schemas and records inline WASM interface evidence wi
   expect(close).toHaveBeenCalled();
 });
 
+it("records complete WASM Evidence when an MCP request is cancelled during provider work", async () => {
+  const value = wasmArtifactFixture();
+  let releaseProvider: (() => void) | undefined;
+  let providerStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    providerStarted = resolve;
+  });
+  const providerGate = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  const service = new WasmArtifactService({
+    close: () => Promise.resolve(),
+    inspect: async (_input, options) => {
+      providerStarted?.();
+      await providerGate;
+      expect(options?.signal?.aborted).toBe(true);
+      return ok(wasmArtifactExecution(value));
+    },
+  });
+  const inspect = vi.spyOn(service, "inspect");
+  const session = createTestBinarySession(() => {
+    throw new Error("deep provider must not start");
+  });
+  const harness = await createApplicationMcpHarness({
+    session,
+    serverOptions: { wasmArtifact: service },
+  });
+  onTestFinished(harness.close);
+  const controller = new AbortController();
+  const cancellation = harness.client.callTool(
+    {
+      name: "inspect_wasm_artifact",
+      arguments: { path: value.artifact.path },
+    },
+    { signal: controller.signal },
+  );
+  await started;
+  controller.abort(new Error("cancel after provider work starts"));
+  releaseProvider?.();
+  await expect(cancellation).rejects.toThrow();
+  expect(inspect).toHaveBeenCalledOnce();
+  const result = await inspect.mock.results[0]?.value;
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisCancelledError",
+      partialObservation: {
+        operation: "inspect_wasm_artifact",
+        normalized_result: value,
+        confidence: "observed",
+      },
+    },
+  });
+  await harness.client.ping();
+  await vi.waitFor(() => {
+    expect(session.exportEvidenceBundle().records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: "inspect_wasm_artifact",
+          normalized_result: value,
+          confidence: "observed",
+        }),
+      ]),
+    );
+  });
+});
+
 it("attributes rejected WASM paths to their selected fields before provider work", async () => {
   const value = wasmArtifactFixture();
   value.glue = [

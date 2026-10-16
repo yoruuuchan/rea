@@ -159,54 +159,49 @@ export class WebNetworkCaptureService {
       sensitive_value_count: input.sensitive_values.length,
     });
     return completeProviderEvidence(
-      ok(
-        createEvidence(
-          safeSha256 === null
-            ? undefined
-            : {
-                path: safePath,
-                sha256: safeSha256,
-                format: "file",
-              },
-          value.decoder,
-          {
-            operation: OPERATION,
-            parameters,
-            result: {
-              ...safeValue,
-              artifact: {
-                ...value.artifact,
-                path: safePath,
-                sha256: safeSha256,
-              },
-              records,
-              limitations:
-                safeSha256 === null
-                  ? [...limitations, subjectUnavailableReason]
-                  : limitations,
+      createEvidence(
+        safeSha256 === null
+          ? undefined
+          : {
+              path: safePath,
+              sha256: safeSha256,
+              format: "file",
             },
-            ...(safeValue.format !== "qlog"
-              ? {}
-              : {
-                  analysisProfile: createAnalysisProfile(value.decoder, {
-                    qlog_profile: safeValue.qlog.profile,
-                    clock: safeValue.qlog.clock,
-                    scope: safeValue.qlog.scope,
-                  }),
-                }),
-            confidence: "observed",
-            authority: "historical-reference",
-            limitations,
-            ...(safeSha256 === null ? { subjectUnavailableReason } : {}),
-            locations:
-              safePath === ""
-                ? []
-                : [{ kind: "artifact-path", path: safePath }],
+        value.decoder,
+        {
+          operation: OPERATION,
+          parameters,
+          result: {
+            ...safeValue,
+            artifact: {
+              ...value.artifact,
+              path: safePath,
+              sha256: safeSha256,
+            },
+            records,
+            limitations:
+              safeSha256 === null
+                ? [...limitations, subjectUnavailableReason]
+                : limitations,
           },
-        ),
+          ...(safeValue.format !== "qlog"
+            ? {}
+            : {
+                analysisProfile: createAnalysisProfile(value.decoder, {
+                  qlog_profile: safeValue.qlog.profile,
+                  clock: safeValue.qlog.clock,
+                  scope: safeValue.qlog.scope,
+                }),
+              }),
+          confidence: "observed",
+          authority: "historical-reference",
+          limitations,
+          ...(safeSha256 === null ? { subjectUnavailableReason } : {}),
+          locations:
+            safePath === "" ? [] : [{ kind: "artifact-path", path: safePath }],
+        },
       ),
-      OPERATION,
-      options,
+      options?.signal,
     );
   }
 }

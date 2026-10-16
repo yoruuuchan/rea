@@ -15,6 +15,7 @@ import {
   AnalysisSnapshotMismatchError,
 } from "../../domain/evidenceErrors.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { FileCloseResourceOwner } from "../AnalysisProvider.js";
 import { err, type Result } from "../../domain/result.js";
 import type { SessionProviderRoute } from "./SessionProviderRouter.js";
 import { SessionProviderRouter } from "./SessionProviderRouter.js";
@@ -60,6 +61,7 @@ interface ResolveSessionOpenInput {
     target: BinaryTarget,
     profile: AnalysisProfileCommitment | null,
   ) => boolean;
+  readonly fileCloseResources?: FileCloseResourceOwner;
 }
 
 interface ResolveSessionTargetInput {
@@ -71,6 +73,7 @@ interface ResolveSessionTargetInput {
     target: BinaryTarget,
     profile: AnalysisProfileCommitment | null,
   ) => boolean;
+  readonly fileCloseResources?: FileCloseResourceOwner;
 }
 
 /** Parse a target, resolve its provider route, and validate snapshot binding. */
@@ -106,7 +109,12 @@ export const resolveSessionTarget = async (
   const resolvedRoute =
     sameTarget && options.providerId === undefined && current !== undefined
       ? ({ ok: true, value: current.route } as const)
-      : await router.resolve(target, options.providerId, options.signal);
+      : await router.resolve(
+          target,
+          options.providerId,
+          options.signal,
+          input.fileCloseResources,
+        );
   if (!resolvedRoute.ok) return resolvedRoute;
   return validateResolvedSessionTarget({
     ...input,

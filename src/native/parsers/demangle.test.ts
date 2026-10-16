@@ -59,6 +59,43 @@ describe("parseDemangledSymbols", () => {
     ).toEqual([...Array<string>(8).fill("invalid"), "unchanged"]);
   });
 
+  it("keeps the demangler's adjusted spelling of an undecoded name out of demangled", () => {
+    const inputs = [
+      "__T0Bogus",
+      "__$sBogus",
+      "___stack_chk_fail",
+      "strlen",
+      "Symbol",
+      "entry",
+      "__T04main3FooV",
+      "s4main3FooV",
+    ];
+    const output = [
+      "_T0Bogus",
+      "_$sBogus",
+      "__stack_chk_fail",
+      "$strlen",
+      "$Symbol",
+      "$entry",
+      "main.Foo",
+      "main.Foo",
+    ].join("\n");
+    expect(parseDemangledSymbols(inputs, `${output}\n`)).toEqual([
+      { input: "__T0Bogus", output: "_T0Bogus", status: "invalid" },
+      { input: "__$sBogus", output: "_$sBogus", status: "invalid" },
+      {
+        input: "___stack_chk_fail",
+        output: "__stack_chk_fail",
+        status: "unchanged",
+      },
+      { input: "strlen", output: "$strlen", status: "unchanged" },
+      { input: "Symbol", output: "$Symbol", status: "unchanged" },
+      { input: "entry", output: "$entry", status: "unchanged" },
+      { input: "__T04main3FooV", output: "main.Foo", status: "demangled" },
+      { input: "s4main3FooV", output: "main.Foo", status: "demangled" },
+    ]);
+  });
+
   it("parses mixed batches preserving ordering", () => {
     const inputs = ["$s4main4testyyF", "_printf", "$sInvalidMangle"];
     const output = "main.test() -> ()\n_printf\n$sInvalidMangle\n";

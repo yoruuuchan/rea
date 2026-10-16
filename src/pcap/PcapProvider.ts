@@ -127,6 +127,15 @@ export interface PcapProviderOptions {
   readonly launcher?: PcapCommandLauncher;
 }
 
+interface RetainedPcapCommand {
+  readonly snapshot: PcapSnapshot | undefined;
+  readonly resources: readonly string[];
+  readonly reason: string;
+  readonly capturedOutput: PcapCommandCleanup["capturedOutput"];
+  ownerReleased: boolean;
+  failure: ProviderCleanupError | undefined;
+}
+
 /** Inspect saved captures through bounded, owned tool processes and one stable input copy. */
 export class PcapProvider {
   readonly #resources = new ArtifactAnalysisResources(
@@ -142,14 +151,10 @@ export class PcapProvider {
   private readonly environment: Readonly<Record<string, string | undefined>>;
   private readonly launcher: PcapCommandLauncher | undefined;
   private readonly snapshots = new Set<PcapSnapshot>();
+  private readonly snapshotFailures = new Map<PcapSnapshot, AnalysisError>();
   private readonly commands = new Map<
     ProviderProcessSupervisor,
-    {
-      snapshot: PcapSnapshot | undefined;
-      resources: readonly string[];
-      reason: string;
-      capturedOutput: PcapCommandCleanup["capturedOutput"];
-    }
+    RetainedPcapCommand
   >();
 
   constructor(options: PcapProviderOptions = {}) {
@@ -167,6 +172,7 @@ export class PcapProvider {
     inputPath?: string,
   ) {
     let cleanup: PcapCommandCleanup | undefined;
+    let retainedCommand: RetainedPcapCommand | undefined;
     const output = await runPcapCommand({
       operation,
       command,
@@ -186,17 +192,20 @@ export class PcapProvider {
         : { nativeBound: this.nativeBound }),
       ...(this.launcher === undefined ? {} : { launcher: this.launcher }),
       retain: (owner, resources, reason, capturedOutput) => {
-        this.commands.set(owner, {
+        retainedCommand = {
           snapshot,
           resources,
           reason,
           capturedOutput,
-        });
+          ownerReleased: false,
+          failure: undefined,
+        };
+        this.commands.set(owner, retainedCommand);
         cleanup = { reason, resources, capturedOutput };
       },
     });
-    if (inputPath === undefined && cleanup !== undefined)
-      throw new ProviderCleanupError(
+    if (inputPath === undefined && cleanup !== undefined) {
+      const failure = new ProviderCleanupError(
         "pcap",
         cleanup.resources,
         {
@@ -210,6 +219,9 @@ export class PcapProvider {
         },
         { operation },
       );
+      if (retainedCommand !== undefined) retainedCommand.failure = failure;
+      throw failure;
+    }
     return output;
   }
 
@@ -318,7 +330,7 @@ export class PcapProvider {
     try {
       if (
         [...this.commands.values()].some(
-          (command) => command.snapshot === snapshot,
+          (command) => command.snapshot === snapshot && !command.ownerReleased,
         )
       )
         throw new Error(
@@ -326,6 +338,8 @@ export class PcapProvider {
         );
       await snapshot.close();
       this.snapshots.delete(snapshot);
+      this.snapshotFailures.get(snapshot)?.resolveCleanup();
+      this.snapshotFailures.delete(snapshot);
       return undefined;
     } catch (cause) {
       return new ProviderCleanupError(
@@ -344,20 +358,34 @@ export class PcapProvider {
     } catch (cause) {
       failures.push(cause);
     }
-    for (const owner of this.commands.keys()) {
+    for (const [owner, command] of this.commands) {
+      if (command.ownerReleased) continue;
       try {
         const result = await owner.stop();
         if (result.status === "incomplete") failures.push(result.reason);
         else if (result.status === "not-owned")
           failures.push("Command ownership remains unresolved");
-        else this.commands.delete(owner);
+        else {
+          command.ownerReleased = true;
+          if (command.snapshot === undefined) {
+            command.failure?.resolveCleanup();
+            this.commands.delete(owner);
+          }
+        }
       } catch (cause) {
         failures.push(cause);
       }
     }
     for (const snapshot of this.snapshots) {
       const failure = await this.discard(snapshot);
-      if (failure !== undefined) failures.push(failure);
+      if (failure !== undefined) {
+        failures.push(failure);
+      } else {
+        for (const [owner, command] of this.commands) {
+          if (command.snapshot !== snapshot) continue;
+          this.commands.delete(owner);
+        }
+      }
     }
     if (failures.length > 0)
       throw new ProviderCleanupError(
@@ -500,32 +528,36 @@ export class PcapProvider {
       const capturedOutput = result.ok
         ? undefined
         : result.error.capturedOutput;
-      result = err(
-        new ProviderCleanupError(
-          "pcap",
-          [...new Set([snapshot.path, ...pendingCommand.resources])],
-          {
-            reason: pendingCommand.reason,
-            previous_error: result.ok
-              ? null
-              : projectAnalysisError(result.error),
-            ...(capturedOutput === undefined &&
-            pendingCommand.capturedOutput.stdout === "" &&
-            pendingCommand.capturedOutput.stderr === ""
-              ? {}
-              : {
-                  captured_output: {
-                    ...(capturedOutput ?? pendingCommand.capturedOutput),
-                  },
-                }),
-          },
-          {
-            operation: request.operation,
-            ...(partialObservation === undefined ? {} : { partialObservation }),
-          },
-        ),
+      const cleanupFailure = new ProviderCleanupError(
+        "pcap",
+        [...new Set([snapshot.path, ...pendingCommand.resources])],
+        {
+          reason: pendingCommand.reason,
+          previous_error: result.ok ? null : projectAnalysisError(result.error),
+          ...(capturedOutput === undefined &&
+          pendingCommand.capturedOutput.stdout === "" &&
+          pendingCommand.capturedOutput.stderr === ""
+            ? {}
+            : {
+                captured_output: {
+                  ...(capturedOutput ?? pendingCommand.capturedOutput),
+                },
+              }),
+        },
+        {
+          operation: request.operation,
+          ...(partialObservation === undefined ? {} : { partialObservation }),
+        },
       );
+      result = err(cleanupFailure);
     }
+    if (
+      snapshot !== undefined &&
+      this.snapshots.has(snapshot) &&
+      !result.ok &&
+      result.error.cleanupIncomplete
+    )
+      this.snapshotFailures.set(snapshot, result.error);
     return result;
   }
 

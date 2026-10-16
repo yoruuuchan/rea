@@ -426,10 +426,13 @@ For `.node` bindings, member names mean “requested by JavaScript syntax.” A
 resolved add-on path does not convert them into verified native exports. Native
 symbol verification remains a separate deep-analysis claim.
 
-Endpoint observations preserve useful local diagnostics, including query values
-and fragments, while removing only URL username/password credentials. Artifact
-paths, digests, parse locations, and analysis metadata remain actionable
-because REA is local-only.
+Exact endpoint values preserve useful local diagnostics, including query values
+and fragments, while removing URL username/password credentials when the value
+parses as a URL. When a recognized request target cannot be resolved exactly,
+the endpoint's partial resolution retains the original source expression with
+its call-site provenance. This does not establish that the request executed.
+Artifact paths, digests, parse locations, and analysis metadata remain
+actionable because REA is local-only.
 
 ## Safety boundary
 

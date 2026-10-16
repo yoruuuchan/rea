@@ -9,26 +9,25 @@ import type {
   ProviderTargetSupport,
 } from "../application/AnalysisProvider.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
-import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import {
   createAnalysisProfile,
   type AnalysisProfileCommitment,
 } from "../domain/analysisProfile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok } from "../domain/result.js";
-import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
-import { ProviderCleanupError } from "../domain/providerCleanupError.js";
-import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
-import { StableFileHashCleanupFailure } from "../filesystem/StableFileHash.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
-import type { KunaProcessLauncher } from "./KunaCommand.js";
+import {
+  kunaFileCleanupError,
+  type KunaProcessLauncher,
+} from "./KunaCommand.js";
 import {
   readKunaConfiguration,
   type KunaConfiguration,
 } from "./KunaConfiguration.js";
 import {
+  createKunaFileCloseScope,
   inspectKunaInstallation,
-  type KunaInstallation,
 } from "./KunaInstallation.js";
 import { KunaProjectCache } from "./KunaProjectCache.js";
 import {
@@ -53,7 +52,6 @@ const VERIFIED_ARCHITECTURES: ReadonlySet<string> = new Set([
  */
 export class KunaProvider implements AnalysisProviderCandidate {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
-  readonly #readinessFileOwners = new Map<OwnedFileHandle, string>();
   readonly #platform: NodeJS.Platform;
   readonly #launcher: KunaProcessLauncher | undefined;
   readonly #singleFunctionRuns: number | undefined;
@@ -171,83 +169,35 @@ export class KunaProvider implements AnalysisProviderCandidate {
   ) {
     if (options?.signal?.aborted === true)
       return err(new AnalysisCancelledError("kuna:profile"));
-    const pending = await this.#closeReadinessOwners();
-    if (!pending.ok) return pending;
-    const installation = await inspectKunaInstallation(this.#environment, {
-      platform: this.#platform,
-      ...(options?.signal === undefined ? {} : { signal: options.signal }),
-    });
-    let value: KunaInstallation;
-    if (!installation.ok) {
-      const readiness = installation.error;
-      const hashFailure =
-        readiness.code === "hash_cleanup_failed"
-          ? readiness.hashCleanupFailure
-          : undefined;
-      if (hashFailure !== undefined) {
-        this.#readinessFileOwners.set(hashFailure.owner, hashFailure.path);
-        try {
-          await hashFailure.owner.close();
-          this.#readinessFileOwners.delete(hashFailure.owner);
-        } catch (cleanupCause: unknown) {
-          const cleanup = new ProviderCleanupError(
-            KUNA_PROVIDER_ID,
-            [hashFailure.path],
-            {
-              reason:
-                cleanupCause instanceof Error
-                  ? cleanupCause.message
-                  : String(cleanupCause),
-              ...(hashFailure instanceof StableFileHashCleanupFailure &&
-              hashFailure.completedHash !== undefined
-                ? { completed_hash: hashFailure.completedHash }
-                : {}),
-            },
-            { operation: "open_binary", cause: cleanupCause },
-          );
-          const primary = options?.signal?.aborted
-            ? new AnalysisCancelledError("kuna:profile", {
-                cause: hashFailure.cause,
-              })
-            : hashFailure instanceof StableFileHashCleanupFailure &&
-                hashFailure.hasPrimaryCause
-              ? new ProviderAdapterError(KUNA_PROVIDER_ID, "open_binary", {
-                  cause: hashFailure.cause,
-                  userMessage: readiness.reason,
-                })
-              : kunaUnavailable("open_binary", readiness.reason);
-          return err(
-            analysisErrorWithCleanupFailure(primary, cleanup, "open_binary"),
-          );
-        }
-        if (
-          hashFailure instanceof StableFileHashCleanupFailure &&
-          hashFailure.hasPrimaryCause
-        ) {
-          if (options?.signal?.aborted)
-            return err(
-              new AnalysisCancelledError("kuna:profile", {
-                cause: hashFailure.cause,
-              }),
-            );
-          return err(
-            new ProviderAdapterError(KUNA_PROVIDER_ID, "open_binary", {
-              cause: hashFailure.cause,
-              userMessage: readiness.reason,
-            }),
-          );
-        }
-        const completedInstallation =
-          readiness.code === "hash_cleanup_failed"
-            ? readiness.completedInstallation
-            : undefined;
-        if (completedInstallation === undefined)
-          return err(kunaUnavailable("open_binary", installation.error.reason));
-        value = completedInstallation;
-      } else {
-        return err(kunaUnavailable("open_binary", installation.error.reason));
-      }
-    } else value = installation.value;
+    let installation: Awaited<ReturnType<typeof inspectKunaInstallation>>;
+    const fileCloseResources = options?.fileCloseResources;
+    if (fileCloseResources === undefined)
+      return err(
+        kunaUnavailable(
+          "kuna:profile",
+          "Kuna profile inspection requires a durable file resource owner",
+        ),
+      );
+    const fileCloseScope = createKunaFileCloseScope(fileCloseResources);
+    try {
+      installation = await inspectKunaInstallation(this.#environment, {
+        platform: this.#platform,
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        fileCloseResources: fileCloseScope.owner,
+      });
+    } catch (cause: unknown) {
+      if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
+      const error = kunaFileCleanupError(
+        cause,
+        "kuna:profile",
+        options?.signal,
+      );
+      fileCloseScope.bindFailure(cause, error);
+      return err(error);
+    }
+    if (!installation.ok)
+      return err(kunaUnavailable("open_binary", installation.error.reason));
+    const { value } = installation;
     return ok({
       profile: createAnalysisProfile(
         { ...KUNA_PROVIDER_IDENTITY, version: value.version },
@@ -277,54 +227,13 @@ export class KunaProvider implements AnalysisProviderCandidate {
     });
   }
 
-  /** Release candidate resources even when no target client was opened. */
-  async closeOwnedResources() {
-    const readiness = await this.#closeReadinessOwners();
-    const cache = await this.#cache?.close();
-    if (readiness.ok && (cache === undefined || cache.ok)) return ok(null);
-    if (!readiness.ok && (cache === undefined || cache.ok)) return readiness;
-    if (readiness.ok && cache !== undefined && !cache.ok) return cache;
-    const failures = [
-      ...(readiness.ok ? [] : [readiness.error]),
-      ...(cache === undefined || cache.ok ? [] : [cache.error]),
-    ];
-    return err(
-      new ProviderCleanupError(
-        KUNA_PROVIDER_ID,
-        failures.flatMap((failure) => failure.cleanupResources),
-        { reason: failures.map((failure) => failure.message).join("; ") },
-        { cause: new AggregateError(failures) },
-      ),
-    );
+  /** Shared cache cleanup belongs to the candidate, not a retired client. */
+  closeOwnedResources() {
+    return this.#cache?.close() ?? Promise.resolve(ok(null));
   }
 
-  /** Report retained file cleanup without probing readiness or retrying owners. */
   hasPendingOwnedResources(): boolean {
-    return (
-      this.#readinessFileOwners.size > 0 ||
-      this.#cache?.hasPendingCleanup === true
-    );
-  }
-
-  async #closeReadinessOwners() {
-    const failures: { readonly path: string; readonly cause: unknown }[] = [];
-    for (const [owner, path] of this.#readinessFileOwners) {
-      try {
-        await owner.close();
-        this.#readinessFileOwners.delete(owner);
-      } catch (cause: unknown) {
-        failures.push({ path, cause });
-      }
-    }
-    if (failures.length === 0) return ok(null);
-    return err(
-      new ProviderCleanupError(
-        KUNA_PROVIDER_ID,
-        failures.map(({ path }) => path),
-        { reason: "Kuna executable hash descriptors remain open" },
-        { operation: "open_binary", cause: new AggregateError(failures) },
-      ),
-    );
+    return this.#cache?.hasPendingCleanup === true;
   }
 
   createClient(

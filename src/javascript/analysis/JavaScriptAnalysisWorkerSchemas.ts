@@ -329,6 +329,7 @@ export const javaScriptWorkerStaticAnalysisSchema = z
         value: z.string(),
         mechanism: z.string(),
         interpretation: z.literal("candidate").exactOptional(),
+        resolution: z.literal("partial").exactOptional(),
       }),
     ),
     storage: z.array(

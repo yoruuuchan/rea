@@ -74,3 +74,54 @@ it("keeps ambiguous endpoint candidates inferred through artifact graph projecti
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("preserves partial and exact endpoint identity through graph projection", async () => {
+  const root = await createTestTempDirectory(
+    "rea-js-endpoint-partial-identity-",
+  );
+  await writeFile(
+    join(root, "app.js"),
+    'fetch(target); fetch("target"); function other(target) { fetch(target); }',
+  );
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    const analysis = analyzeJavaScriptArtifactFiles(files);
+    const graph = buildJavaScriptArtifactGraph(snapshot, files, analysis);
+    const endpoints = graph.nodes.filter(({ kind }) => kind === "endpoint");
+    const partialNodes = endpoints.filter(({ observations }) =>
+      observations.some(
+        ({ properties }) => properties.resolution === "partial",
+      ),
+    );
+    const partial = partialNodes[0];
+    const exact = endpoints.find(({ observations }) =>
+      observations.some(
+        ({ properties }) =>
+          properties.value === "target" && properties.resolution === undefined,
+      ),
+    );
+
+    expect(partialNodes).toHaveLength(2);
+    expect(new Set(partialNodes.map(({ node_id }) => node_id)).size).toBe(2);
+    expect(exact).toBeDefined();
+    expect(partial?.node_id).not.toBe(exact?.node_id);
+    expect(partial?.observations[0]).toMatchObject({
+      properties: {
+        endpoint_kind: "network",
+        value: "target",
+        mechanism: "call:fetch",
+        resolution: "partial",
+      },
+      evidence: {
+        authority: "ast-static-analysis",
+        state: "observed",
+        limitations: [expect.stringContaining("not an exact literal")],
+      },
+    });
+  } finally {
+    await reader.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

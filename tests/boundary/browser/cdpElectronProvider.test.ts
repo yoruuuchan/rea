@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { CdpElectronProvider } from "../../../src/browser/CdpElectronProvider.js";
+import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
 import {
   inspectElectronPageInputSchema,
   listElectronTargetsInputSchema,
@@ -30,6 +31,44 @@ afterEach(async () => {
 });
 
 describe("CdpElectronProvider target access", () => {
+  it("retains a completed page observation when cancellation arrives during final detach", async () => {
+    const root = await electronFixture();
+    const controller = new AbortController();
+    const browser = await startFakeCdpBrowser({
+      electronFileUrl: pathToFileURL(join(root, "index.html")).href,
+      commandEvents: ({ method }) => {
+        if (method === "Target.detachFromTarget") controller.abort();
+        return undefined;
+      },
+    });
+    browsers.push(browser);
+
+    const result = await new CdpElectronProvider().inspectPage(
+      inspectElectronPageInputSchema.parse({
+        cdp_endpoint: browser.endpoint,
+        target_id: "electron-page",
+        observation_ms: 0,
+      }),
+      { signal: controller.signal },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected late cancellation");
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.partialObservation).toMatchObject({
+      kind: "electron-page-observation",
+      cleanup: "transport-closed",
+      inspection: { target: { file_path: join(root, "index.html") } },
+    });
+    expect(browser.commands.map(({ method }) => method)).toContain(
+      "Target.detachFromTarget",
+    );
+    const closeDeadline = Date.now() + 1_000;
+    while (browser.activeConnectionCount() !== 0 && Date.now() < closeDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(browser.activeConnectionCount()).toBe(0);
+  });
+
   it("returns every in-scope resource beyond the former collection ceiling", async () => {
     const root = await electronFixture();
     const index = join(root, "index.html");

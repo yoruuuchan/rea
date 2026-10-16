@@ -13,8 +13,11 @@ import { expect, it, onTestFinished } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { PcapProvider } from "../../../src/pcap/PcapProvider.js";
+import type { PcapCommandLauncher } from "../../../src/pcap/PcapCommand.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import type { PcapRequest } from "../../../src/domain/pcap/pcapAnalysis.js";
+import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
+import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
 
 const isWindows = process.platform === "win32";
 const hasNativeBound = process.platform === "linux" || isWindows;
@@ -57,6 +60,52 @@ it("inspects both tools through cross-platform stubs", async () => {
     capinfos_source: "environment",
     capinfos_version: expect.stringContaining("4.6.6") as unknown,
   });
+});
+
+it("resolves a retained tool-probe error after its process owner closes", async () => {
+  let mayClean = false;
+  let launches = 0;
+  const launcher: PcapCommandLauncher = async (spawn) => {
+    const launched = await spawnOwnedProviderProcess(spawn);
+    launches++;
+    if (launches !== 1) return launched;
+    const cleanup =
+      launched.cleanup ?? (() => cleanupOwnedProcessGroup(launched.ownership));
+    return {
+      ...launched,
+      cleanup: async () => {
+        const result = await cleanup();
+        if (!mayClean) throw new Error("injected tool-probe cleanup failure");
+        return result;
+      },
+    };
+  };
+  const provider = new PcapProvider({
+    environment: {
+      REA_TSHARK_COMMAND: tsharkStub,
+      REA_CAPINFOS_COMMAND: capinfosStub,
+    },
+    launcher,
+  });
+  onTestFinished(async () => {
+    mayClean = true;
+    await provider.close();
+  });
+
+  const result = await provider.execute({
+    operation: "inspect_pcap_client",
+    input: {},
+  });
+  if (result.ok) throw new Error("Expected retained tool-probe cleanup");
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.diagnostics).toMatchObject({
+    reason: "injected tool-probe cleanup failure",
+  });
+
+  mayClean = true;
+  await provider.close();
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(launches).toBe(1);
 });
 
 it.runIf(hasNativeBound)(

@@ -181,7 +181,14 @@ export class CdpElectronProvider implements ElectronObservationPort {
       result.ok && options.signal?.aborted === true
         ? new AnalysisCancelledError("inspect_electron_page", {
             cause: options.signal.reason,
-            partialObservation: result.value,
+            partialObservation: {
+              kind: "electron-page-observation",
+              inspection: result.value,
+              cleanup:
+                cleanupFailure === undefined
+                  ? "transport-closed"
+                  : "incomplete",
+            },
           })
         : undefined;
     if (cleanupFailure !== undefined) {
@@ -209,7 +216,11 @@ export class CdpElectronProvider implements ElectronObservationPort {
           {
             operation: "inspect_electron_page",
             cause: cleanupFailure,
-            partialObservation: result.value,
+            partialObservation: {
+              kind: "electron-page-observation",
+              inspection: result.value,
+              cleanup: "incomplete",
+            },
           },
         ),
       );

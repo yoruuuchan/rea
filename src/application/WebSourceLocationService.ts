@@ -147,40 +147,37 @@ export class WebSourceLocationService {
     });
     if (!normalized.success) return invalidOutput(normalized.error.message);
     return completeProviderEvidence(
-      ok(
-        createEvidence(
-          {
-            path: data.sourceFile.path,
-            sha256: data.sourceFile.sha256,
-            format: "file",
-          },
-          {
-            id: "rea-web-source-location",
-            name: "REA captured source-map point trace",
-            version: "1",
-          },
-          {
-            operation: OPERATION,
-            parameters: jsonObjectSchema.parse(input),
-            result: normalized.data,
-            rawResult: { source_map_text: map.text },
-            confidence: "derived",
-            authority: "historical-reference",
-            limitations,
-            locations: [
-              data.sourceFile.path,
-              data.manifestFile.path,
-              map.file.path,
-            ].map((path) => ({ kind: "artifact-path", path })),
-            evidenceLinks:
-              data.manifest.source_evidence_id === null
-                ? []
-                : [data.manifest.source_evidence_id],
-          },
-        ),
+      createEvidence(
+        {
+          path: data.sourceFile.path,
+          sha256: data.sourceFile.sha256,
+          format: "file",
+        },
+        {
+          id: "rea-web-source-location",
+          name: "REA captured source-map point trace",
+          version: "1",
+        },
+        {
+          operation: OPERATION,
+          parameters: jsonObjectSchema.parse(input),
+          result: normalized.data,
+          rawResult: { source_map_text: map.text },
+          confidence: "derived",
+          authority: "historical-reference",
+          limitations,
+          locations: [
+            data.sourceFile.path,
+            data.manifestFile.path,
+            map.file.path,
+          ].map((path) => ({ kind: "artifact-path", path })),
+          evidenceLinks:
+            data.manifest.source_evidence_id === null
+              ? []
+              : [data.manifest.source_evidence_id],
+        },
       ),
-      OPERATION,
-      options,
+      options?.signal,
     );
   }
 }
