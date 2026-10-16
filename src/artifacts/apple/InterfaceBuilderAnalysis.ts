@@ -37,7 +37,8 @@ import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js"
 
 import { decodeXmlPlistText } from "../../domain/propertyListXmlText.js";
 import {
-  binaryPlistNumberLiterals,
+  decodeBinaryPlistNumbers,
+  scanBinaryPlistNumberLiterals,
   xmlPlistNumberLiterals,
 } from "./PlistNumberLiterals.js";
 import type { PlistNumberLiterals } from "../../domain/apple/plistNumbers.js";
@@ -749,9 +750,14 @@ const decodePlist = (
   readonly numberLiterals: PlistNumberLiterals;
 } => {
   const binary = hasBinaryPlistSignature(bytes);
+  const binaryNumberMetadata = binary
+    ? scanBinaryPlistNumberLiterals(bytes)
+    : undefined;
   const { value, omittedPrototypeKeys } = binary
     ? {
-        value: parseBinary(bytes),
+        value: parseBinary(
+          decodeBinaryPlistNumbers(bytes, binaryNumberMetadata!),
+        ),
         omittedPrototypeKeys: binaryPrototypeKeyObserved ? null : 0,
       }
     : parseXmlWithinDecodeBudget(xmlText ?? decodeXmlPlistText(bytes));
@@ -761,7 +767,7 @@ const decodePlist = (
     omittedPrototypeKeys,
     unknownDateCount: projected.unknownDateCount,
     numberLiterals: binary
-      ? binaryPlistNumberLiterals(bytes)
+      ? binaryNumberMetadata!.literals
       : xmlPlistNumberLiterals(xmlText ?? decodeXmlPlistText(bytes)),
   };
 };

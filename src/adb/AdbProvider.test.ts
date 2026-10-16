@@ -1280,6 +1280,26 @@ it("inspects the display and window focus", async () => {
   );
 });
 
+// Older builds print `wm density` as a bare number; the display projection
+// must keep it as the physical density (morluto/rea#3942).
+it("keeps a bare numeric wm density as the physical density", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "wm:size": "Physical size: 1080x2340\n",
+      "wm:density": "420\n",
+    }),
+  );
+  const display = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_display",
+    input: { serial: "emulator-5554" },
+  });
+  expect(display).toMatchObject({
+    physical_size: { width: 1080, height: 2340 },
+    physical_density: 420,
+    override_density: null,
+  });
+});
+
 it("reads Android 16 focus declarations from displays when windows omits them", async () => {
   const { binary } = await writeAdbStub(
     shellStub({

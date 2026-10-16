@@ -85,7 +85,10 @@ const seedMatches = (
   if (seed.kind === "property")
     return node.kind === "property-slot" && node.properties.name === seed.name;
   if (seed.kind === "endpoint")
-    return node.kind === "request" && node.properties.endpoint === seed.value;
+    return (
+      (node.kind === "request" || node.kind === "response") &&
+      node.properties.endpoint === seed.value
+    );
   if (seed.kind === "event")
     return (
       ["event", "listener"].includes(node.kind) &&

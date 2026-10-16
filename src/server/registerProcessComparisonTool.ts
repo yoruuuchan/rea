@@ -152,6 +152,9 @@ export const registerProcessComparisonTool = (
               right_evidence_id: rightRecord.evidence_id,
               left_normalization: leftCapture.normalization,
               right_normalization: rightCapture.normalization,
+              ...(input.max_capture_age_ms === undefined
+                ? {}
+                : { max_capture_age_ms: input.max_capture_age_ms }),
               ...(input.trace_spec === undefined
                 ? {}
                 : { trace_spec: jsonValueSchema.parse(input.trace_spec) }),

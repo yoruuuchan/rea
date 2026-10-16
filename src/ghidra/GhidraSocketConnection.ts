@@ -1,11 +1,11 @@
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { createConnection, type Socket } from "node:net";
 
 import { err, ok, type Result } from "../domain/result.js";
 import type { ProviderStartupDeadline } from "../process/ProviderDeadline.js";
 import {
   GhidraSessionError,
-  type GhidraSessionErrorOptions,
-  type GhidraSessionFailureKind,
+  type GhidraSessionFailureFactory,
 } from "./GhidraSessionError.js";
 import {
   type GhidraConnectTarget,
@@ -23,13 +23,9 @@ interface GhidraSocketHandlers {
 /** Inputs needed to poll and attach one authenticated bridge socket. */
 export interface GhidraSocketConnectOptions {
   readonly endpoint: GhidraEndpoint;
+  readonly resourceScope: ArtifactResourceScope;
   readonly deadline: ProviderStartupDeadline;
-  readonly failure: (
-    kind: GhidraSessionFailureKind,
-    message: string,
-    cause?: unknown,
-    options?: Pick<GhidraSessionErrorOptions, "timeoutMs" | "remoteCode">,
-  ) => GhidraSessionError;
+  readonly failure: GhidraSessionFailureFactory;
   readonly isClosed: () => boolean;
   readonly processExited: () => boolean;
   readonly startupTimeoutMs: number;
@@ -70,8 +66,18 @@ export const connectGhidraSocket = async (
       return err(
         options.failure("process", "Ghidra exited before bridge startup"),
       );
-    const observed = await observeGhidraEndpoint(options.endpoint);
-    if (!observed.ok) return observed;
+    const observed = await observeGhidraEndpoint(options.endpoint, {
+      signal: options.deadline.signal,
+      resourceScope: options.resourceScope,
+    });
+    if (!observed.ok) {
+      if (
+        observed.error.kind !== "cancelled" ||
+        options.deadline.interruption === undefined
+      )
+        return observed;
+      return err(interruptionFailure(options, observed.error));
+    }
     if (observed.value === null) {
       if ((await options.deadline.wait(50)) === "aborted")
         return err(interruptionFailure(options));
@@ -135,6 +141,7 @@ const connectGhidraSocketOnce = (
             "cancelled",
             "Ghidra bridge connection was cancelled",
             { endpoint: target },
+            { cause: signal.reason, cancellation: { reason: signal.reason } },
           ),
         ),
       );
@@ -147,9 +154,17 @@ const connectGhidraSocketOnce = (
 
 const interruptionFailure = (
   options: GhidraSocketConnectOptions,
-): GhidraSessionError =>
-  options.deadline.interruption === "cancelled"
-    ? options.failure("cancelled", "Ghidra startup was cancelled")
-    : options.failure("timeout", "Ghidra startup deadline elapsed", undefined, {
-        timeoutMs: options.startupTimeoutMs,
-      });
+  cause?: GhidraSessionError,
+): GhidraSessionError => {
+  const failure =
+    options.deadline.interruption === "cancelled"
+      ? options.failure("cancelled", "Ghidra startup was cancelled", cause, {
+          cancellation: { reason: options.deadline.signal.reason },
+        })
+      : options.failure("timeout", "Ghidra startup deadline elapsed", cause, {
+          timeoutMs: options.startupTimeoutMs,
+        });
+  return cause?.cleanupFailure === undefined
+    ? failure
+    : failure.withCleanupFailure(cause.cleanupFailure);
+};

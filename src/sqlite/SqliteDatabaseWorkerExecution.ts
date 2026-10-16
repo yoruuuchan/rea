@@ -1,3 +1,8 @@
+import {
+  bindArtifactFileCleanup,
+  ArtifactFileCleanupFailure,
+  artifactFileCancellationCause,
+} from "../artifacts/ArtifactFileOperation.js";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -176,13 +181,30 @@ export const executeSqliteDatabaseWorker = async (request: {
         ? { cleanup: cause.cleanup }
         : {}),
     };
-    if (request.signal?.aborted)
-      throw new AnalysisCancelledError(operation, options);
-    throw new AnalysisOutputError(
+    if (
+      cause instanceof ArtifactReaderFailure &&
+      (cause.reason === "cancelled" ||
+        (cause instanceof ArtifactFileCleanupFailure &&
+          cause.fileCleanupFailure.outcome.kind === "completed" &&
+          request.signal?.aborted))
+    ) {
+      const error = new AnalysisCancelledError(operation, {
+        ...options,
+        cause:
+          cause.reason === "cancelled"
+            ? artifactFileCancellationCause(cause)
+            : request.signal?.reason,
+      });
+      bindArtifactFileCleanup(cause, error);
+      throw error;
+    }
+    const error = new AnalysisOutputError(
       operation,
       `Owned SQLite worker reply is missing or malformed: ${cause instanceof Error ? cause.message : String(cause)}`,
       options,
     );
+    bindArtifactFileCleanup(cause, error);
+    throw error;
   }
   if (!reply.ok) throw rejectedReply(reply, capturedOutput);
   return reply.inspection;

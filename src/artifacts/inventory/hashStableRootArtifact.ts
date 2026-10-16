@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { readFileHandleChunks } from "../../filesystem/readFileHandleChunks.js";
+import { readArtifactFileChunks } from "../readArtifactFileChunks.js";
 import { OwnedFileHandle } from "../../filesystem/OwnedFileHandle.js";
 
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
@@ -101,7 +101,7 @@ export const hashStableRootArtifactHandle = async (
   const digest = await hashReadable(
     // Read at most the admitted extent plus one byte to detect growth without
     // following an actively appended file indefinitely.
-    readFileHandleChunks(handle, { start: 0, end: initial.size }),
+    readArtifactFileChunks(handle, { start: 0, end: initial.size, signal }),
     signal,
   );
   abortIfNeeded(signal);
@@ -115,5 +115,6 @@ export const hashStableRootArtifactHandle = async (
       "integrity",
       `Root artifact changed during inventory: ${path}`,
     );
+  abortIfNeeded(signal);
   return digest;
 };

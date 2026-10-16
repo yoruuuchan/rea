@@ -3,6 +3,7 @@ import type {
   ElfFamilyMetadata,
   HeaderArchitecture,
   MipsElfMetadata,
+  RawOnlyArchitecture,
   PeCodeViewRecord,
   RiscvElfMetadata,
   PowerPcElfMetadata,
@@ -545,7 +546,7 @@ const machArchitecture = (cpu: number): HeaderArchitecture | undefined => {
 
 const elfArchitecture = (
   machine: number,
-): Exclude<BinaryArchitecture, "6502"> | undefined => {
+): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
   switch (machine) {
     case 3:
       return "x86";

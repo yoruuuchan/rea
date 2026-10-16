@@ -18,6 +18,7 @@ import type {
 } from "../../../src/application/frida/FridaInstrumentationPort.js";
 import type { EvidenceWriter } from "../../../src/application/investigation/InvestigationRecordPort.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
+import { expandToolAvailability } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import type { AnalysisPartialObservation } from "../../../src/domain/analysisErrorBase.js";
 import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../../../src/domain/evidenceErrors.js";
@@ -226,6 +227,80 @@ const connectedFixture = async () => {
     );
   return { ...native, manager, session, server, client, start, load };
 };
+
+it("declares non-destructive session mutation when status retains Evidence", async () => {
+  const { client, start } = await connectedFixture();
+  const id = await start();
+  const bundle = async () => {
+    const response = await client.callTool({
+      name: "get_evidence_bundle",
+      arguments: {},
+    });
+    expect(response.isError).not.toBe(true);
+    return evidenceBundleSchema.parse(
+      toolContract("get_evidence_bundle").outputSchema.parse(
+        response.structuredContent,
+      ).result,
+    );
+  };
+  expect((await bundle()).records).toHaveLength(0);
+  const response = await client.callTool({
+    name: "frida_session_status",
+    arguments: { session_id: id },
+  });
+  expect(response.isError).not.toBe(true);
+  const evidence = toolContract("frida_session_status").outputSchema.parse(
+    response.structuredContent,
+  );
+  expect(evidence).toMatchObject({
+    operation: "frida_session_status",
+    parameters: { session_id: id },
+    normalized_result: {
+      session_id: id,
+      state: "paused",
+      mode: "spawn",
+      scripts: [],
+      messages: [],
+      messages_truncated: false,
+    },
+  });
+  expect((await bundle()).records).toEqual([evidence]);
+
+  const tools = (await client.listTools()).tools;
+  expect(
+    tools.find((tool) => tool.name === "frida_session_status")?.annotations,
+  ).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  const inventory = await client.callTool({
+    name: "binary_session",
+    arguments: {},
+  });
+  expect(inventory.isError).not.toBe(true);
+  const available = expandToolAvailability(
+    toolContract("binary_session").outputSchema.parse(
+      inventory.structuredContent,
+    ).result.tool_availability,
+  );
+  expect(
+    available.find((tool) => tool.name === "frida_session_status"),
+  ).toMatchObject({
+    effects: {
+      mutatesSession: true,
+      mutatesTarget: false,
+      executesForeignCode: false,
+      mayDiscardData: false,
+    },
+    annotations: { read_only: false, destructive: false },
+  });
+
+  const missing = await client.callTool({
+    name: "frida_session_status",
+    arguments: { session_id: "00000000-0000-4000-8000-000000000000" },
+  });
+  expect(parseMcpToolError(missing)).toMatchObject({
+    error: { code: "invalid_request" },
+  });
+  expect((await bundle()).records).toEqual([evidence]);
+});
 
 type PartialRecording = "acknowledged" | "failed" | "unavailable";
 type PartialObservation = "evidence" | "non-evidence" | "unavailable";

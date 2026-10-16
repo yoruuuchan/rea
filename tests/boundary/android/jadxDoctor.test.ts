@@ -33,6 +33,7 @@ it("publishes REA_JADX_MCP_JAR as registration environment when the configured J
         ok: true,
         code: null,
         classification: "config_drift",
+        details: { operation_timeout_ms: 120_000 },
       },
     ],
   });
@@ -212,6 +213,54 @@ it("publishes validated JVM resource overrides in the registration environment",
     REA_JADX_HEAP_MIB: "4096",
     REA_JADX_ACTIVE_PROCESSOR_COUNT: "8",
   });
+});
+
+it("publishes and reports a validated operation deadline", async () => {
+  const root = await createTestTempDirectory("rea-jadx-doctor-deadline-");
+  const jar = join(root, "jadx-headless-mcp.jar");
+  const javaHome = await createFakeJdk(root);
+  await writeJadxJarInventory(jar);
+
+  const inspection = await inspectJadxProvider({
+    REA_JADX_MCP_JAR: jar,
+    JAVA_HOME: javaHome,
+    REA_JADX_OPERATION_TIMEOUT_MS: "900000",
+  });
+
+  expect(inspection.registrationEnvironment).toEqual({
+    REA_JADX_MCP_JAR: jar,
+    JAVA_HOME: javaHome,
+    REA_JADX_OPERATION_TIMEOUT_MS: "900000",
+  });
+  expect(inspection.checks[0]).toMatchObject({
+    ok: true,
+    details: { operation_timeout_ms: 900_000 },
+  });
+});
+
+it("guides deadline correction when REA_JADX_OPERATION_TIMEOUT_MS is invalid", async () => {
+  const root = await createTestTempDirectory("rea-jadx-doctor-bad-deadline-");
+  const jar = join(root, "jadx-headless-mcp.jar");
+  const javaHome = await createFakeJdk(root);
+  await writeJadxJarInventory(jar);
+
+  const inspection = await inspectJadxProvider({
+    REA_JADX_MCP_JAR: jar,
+    JAVA_HOME: javaHome,
+    REA_JADX_OPERATION_TIMEOUT_MS: "2147483648",
+  });
+
+  expect(inspection.available).toBe(false);
+  expect(inspection.registrationEnvironment).toEqual({});
+  expect(inspection.checks[0]).toMatchObject({
+    ok: false,
+    code: "open_options_invalid",
+    classification: "config_drift",
+  });
+  expect(inspection.checks[0]?.remediation).toContain(
+    "REA_JADX_OPERATION_TIMEOUT_MS",
+  );
+  expect(inspection.checks[0]?.remediation).not.toContain("REA_JADX_MCP_JAR");
 });
 
 it("guides JDK selection when the Java runtime is older than 17", async () => {

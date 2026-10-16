@@ -1,8 +1,11 @@
 import {
   access,
+  chmod,
   mkdir,
   readFile,
+  readdir,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -18,6 +21,7 @@ import {
   inspectClientConfiguration,
 } from "../../../src/application/SetupClientConfiguration.js";
 import { detectClients } from "../../../src/application/SetupHost.js";
+import { failedConfigurationMessage } from "../../../src/application/SetupClients.js";
 import {
   supportedClients,
   type SetupClient,
@@ -166,31 +170,128 @@ describe("Windows Claude Desktop configuration location", () => {
     });
   });
 
-  it("reports an unrecognized Claude package instead of falling back to AppData", async () => {
-    const { home, env, appDataConfig } = await windowsProfile();
-    const foreign = join(env.LOCALAPPDATA, "Packages", "Claude_abcdefghjkmnp");
-    await mkdir(foreign, { recursive: true });
-    await writeJson(appDataConfig, { mcpServers: {} });
+  it.each([
+    "Claude_abcdefghjkmnp",
+    "AnthropicPBC.Claude_fnn82j28hfe8t",
+    "ANTHROPICPBC.CLAUDE_FNN82J28HFE8T",
+  ])(
+    "reports unresolved package %s consistently across the registration lifecycle",
+    async (family) => {
+      const { home, env, appDataConfig } = await windowsProfile();
+      const foreign = join(env.LOCALAPPDATA, "Packages", family);
+      await mkdir(foreign, { recursive: true });
+      const appDataOriginal = { mcpServers: { rea: reaEntry } };
+      const deploymentConfig = join(env.LOCALAPPDATA, "Claude-3p", CONFIG);
+      const deploymentOriginal = {
+        deploymentMode: "3p",
+        mcpServers: { other: { command: "other" } },
+      };
+      await writeJson(appDataConfig, appDataOriginal);
+      await writeJson(deploymentConfig, deploymentOriginal);
 
-    const client = claudeDesktop(home, env);
+      const client = claudeDesktop(home, env);
 
-    expect(client.configPath).toBe(foreign);
-    expect(client.configPathError).toContain("unrecognized publisher");
-    expect(client.configPathError).toContain(CLAUDE_DESKTOP_PACKAGE_FAMILY);
-    expect(
-      (await detectClients(home, "win32", env)).map(({ name }) => name),
-    ).not.toContain("claude_desktop");
-    const status = (
-      await readClientRegistrationStatuses(home, "unused", {
-        platform: "win32",
-        environment: env,
-      })
-    ).find(({ client: name }) => name === "claude_desktop");
-    expect(status).toMatchObject({ state: "invalid", config_path: foreign });
-    await expect(
-      inspectClientConfiguration(client, {}, command),
-    ).resolves.toMatchObject({ status: "invalid" });
+      expect(client.configPath).toBe(foreign);
+      expect(client.configPathError).toContain(
+        "unrecognized Claude Desktop package identity or deployment",
+      );
+      expect(client.configPathError).toContain(CLAUDE_DESKTOP_PACKAGE_FAMILY);
+      expect(
+        (await detectClients(home, "win32", env)).map(({ name }) => name),
+      ).not.toContain("claude_desktop");
+      const status = (
+        await readClientRegistrationStatuses(home, "unused", {
+          platform: "win32",
+          environment: env,
+        })
+      ).find(({ client: name }) => name === "claude_desktop");
+      expect(status).toMatchObject({ state: "invalid", config_path: foreign });
+      await expect(
+        inspectClientConfiguration(client, {}, command),
+      ).resolves.toMatchObject({ status: "invalid" });
+      await expect(
+        configureClientConfiguration(client, {}, command),
+      ).resolves.toEqual({ status: "failed", reason: "path" });
+      const uninstall = await runUninstall(
+        false,
+        systemUninstallHost(home, undefined, env, "win32"),
+      );
+      expect(uninstall.status).toBe("failed");
+      expect(uninstall.items).toContainEqual(
+        expect.objectContaining({ name: "claude_desktop", status: "failed" }),
+      );
+      expect(await readJson(appDataConfig)).toEqual(appDataOriginal);
+      expect(await readJson(deploymentConfig)).toEqual(deploymentOriginal);
+      expect(await readdir(dirname(appDataConfig))).toEqual([CONFIG]);
+      expect(await readdir(dirname(deploymentConfig))).toEqual([CONFIG]);
+    },
+  );
+});
+
+it("preserves explicit AppData root whitespace throughout setup, doctor and uninstall", async () => {
+  const { home, env, appDataConfig: otherConfig } = await windowsProfile();
+  const selected = {
+    APPDATA: `${env.APPDATA} `,
+    LOCALAPPDATA: `${env.LOCALAPPDATA} `,
+  };
+  const appDataConfig = join(selected.APPDATA, "Claude", CONFIG);
+  const privateConfig = join(
+    selected.LOCALAPPDATA,
+    "Packages",
+    CLAUDE_DESKTOP_PACKAGE_FAMILY,
+    "LocalCache",
+    "Roaming",
+    "Claude",
+    CONFIG,
+  );
+  const original = { mcpServers: { other: { command: "other-server" } } };
+  const otherOriginal = {
+    mcpServers: { rea: reaEntry },
+    preferences: { preserve: true },
+  };
+  await writeJson(otherConfig, otherOriginal);
+  await writeJson(appDataConfig, original);
+  let client = claudeDesktop(home, selected);
+  expect(client.configPath).toBe(appDataConfig);
+  await expect(
+    configureClientConfiguration(client, {}, command),
+  ).resolves.toEqual({
+    status: "configured",
+    backupPath: `${appDataConfig}.rea.backup`,
   });
+  await writeJson(privateConfig, original);
+  client = claudeDesktop(home, selected);
+  expect(client.configPath).toBe(privateConfig);
+  expect(client.msixPackage?.virtualizedRoots).toEqual([
+    selected.APPDATA,
+    selected.LOCALAPPDATA,
+  ]);
+  await expect(
+    configureClientConfiguration(client, {}, command),
+  ).resolves.toEqual({
+    status: "configured",
+    backupPath: `${privateConfig}.rea.backup`,
+  });
+  const status = (
+    await readClientRegistrationStatuses(home, "unused", {
+      platform: "win32",
+      environment: selected,
+    })
+  ).find(({ client: name }) => name === "claude_desktop");
+  expect(status).toMatchObject({
+    state: "aligned",
+    config_path: privateConfig,
+  });
+  const uninstall = await runUninstall(
+    false,
+    systemUninstallHost(home, undefined, selected, "win32"),
+  );
+  expect(uninstall.status).toBe("complete");
+  expect(await readJson(appDataConfig)).toEqual(original);
+  expect(await readJson(privateConfig)).toEqual(original);
+  expect(await readJson(otherConfig)).toEqual(otherOriginal);
+  expect(await readJson(`${appDataConfig}.rea.backup`)).toEqual(original);
+  expect(await readJson(`${privateConfig}.rea.backup`)).toEqual(original);
 });
 
 describe("MSIX Claude Desktop registration lifecycle", () => {
@@ -317,6 +418,46 @@ describe("MSIX Claude Desktop registration lifecycle", () => {
       code: "ENOENT",
     });
   });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "keeps an inaccessible private-copy recheck unknown and blocks backup and write",
+    async () => {
+      const { home, env, appDataConfig, privateConfig } =
+        await windowsProfile();
+      const privateDirectory = dirname(privateConfig);
+      await writeJson(join(privateDirectory, "Preferences"), {});
+      await writeJson(appDataConfig, { preferences: { theme: "light" } });
+      const original = await readFile(appDataConfig);
+      const client = claudeDesktop(home, env);
+      expect(client.configPath).toBe(appDataConfig);
+      expect(client.msixPackage?.processView).toBe("direct");
+      expect(
+        await inspectClientConfiguration(client, {}, command),
+      ).toMatchObject({ status: "update" });
+      const mode = (await stat(privateDirectory)).mode & 0o777;
+      await chmod(privateDirectory, 0);
+      try {
+        const result = await configureClientConfiguration(client, {}, command);
+        expect(result).toMatchObject({
+          status: "failed",
+          reason: "target_unavailable",
+          failure: {
+            kind: "inspect",
+            path: privateConfig,
+            detail: expect.stringContaining("EACCES"),
+          },
+        });
+        if (result.status !== "failed")
+          throw new Error("Expected a blocked update");
+        expect(failedConfigurationMessage(result)).toContain(privateConfig);
+        expect(failedConfigurationMessage(result)).toContain("Repair access");
+        expect(await readFile(appDataConfig)).toEqual(original);
+        expect(await readdir(dirname(appDataConfig))).toEqual([CONFIG]);
+      } finally {
+        await chmod(privateDirectory, mode);
+      }
+    },
+  );
 });
 
 describe("MSIX Claude Desktop uninstall", () => {

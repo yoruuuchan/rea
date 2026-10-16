@@ -4,7 +4,10 @@ import { WebSocket, WebSocketServer } from "ws";
 import { expect, it, onTestFinished, vi } from "vitest";
 
 import { CdpTargetSessionOwner } from "../../../src/browser/CdpTargetSessionOwner.js";
-import type { CdpConnection } from "../../../src/browser/CdpConnection.js";
+import { CdpConnection } from "../../../src/browser/CdpConnection.js";
+import { CdpBrowserProvider } from "../../../src/browser/CdpBrowserProvider.js";
+import { inspectWebPageInputSchema } from "../../../src/domain/browserObservation.js";
+import { AnalysisError } from "../../../src/domain/analysisErrorBase.js";
 import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 import { startFakeCdpBrowser } from "../../fixtures/fakeCdpBrowser.js";
 
@@ -155,4 +158,121 @@ it("accepts asynchronous terminate success only after the close event", async ()
   }
   await owner.close();
   await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+});
+
+it("clears returned inspection and shutdown cleanup status only after socket release", async () => {
+  const browser = await startFakeCdpBrowser();
+  const provider = new CdpBrowserProvider();
+  const originalClose = CdpConnection.prototype.close;
+  let denied = true;
+  const closing = vi
+    .spyOn(CdpConnection.prototype, "close")
+    .mockImplementation(function (this: CdpConnection) {
+      return denied
+        ? Promise.reject(new Error("controlled transport close failure"))
+        : originalClose.call(this);
+    });
+  onTestFinished(async () => {
+    closing.mockRestore();
+    await provider.close();
+    await browser.close();
+  });
+  const result = await provider.inspectPage(
+    inspectWebPageInputSchema.parse({
+      cdp_endpoint: browser.endpoint,
+      allowed_origins: [browser.allowedOrigin],
+      target_id: "allowed-page",
+      observation_ms: 0,
+    }),
+  );
+  if (result.ok) throw new Error("Expected retained socket cleanup failure");
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.partialObservation).toBeDefined();
+  const observation = result.error.partialObservation;
+  const retry = await provider.close().catch((cause: unknown) => cause);
+  expect(retry).toBeInstanceOf(AnalysisError);
+  if (!(retry instanceof AnalysisError))
+    throw new Error("Missing retry failure");
+  expect(retry.cleanupIncomplete).toBe(true);
+  expect(browser.activeConnectionCount()).toBe(1);
+  denied = false;
+  await provider.close();
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(0));
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(retry.cleanupIncomplete).toBe(false);
+  expect(result.error.partialObservation).toBe(observation);
+  expect(browser.commands.map(({ method }) => method)).not.toContain(
+    "Browser.close",
+  );
+  expect(browser.commands.map(({ method }) => method)).not.toContain(
+    "Target.closeTarget",
+  );
+});
+
+it("keeps retry aggregates incomplete until every reported socket is released", async () => {
+  const browser = await startFakeCdpBrowser();
+  const owner = new CdpTargetSessionOwner();
+  const first = await owner.connect(
+    browser.browserWebSocketUrl,
+    "inspect_web_page",
+    {},
+    "first-socket",
+  );
+  const second = await owner.connect(
+    browser.browserWebSocketUrl,
+    "inspect_web_page",
+    {},
+    "second-socket",
+  );
+  const active = await owner.connect(
+    browser.browserWebSocketUrl,
+    "inspect_web_page",
+    {},
+    "active-peer",
+  );
+  const originalClose = CdpConnection.prototype.close;
+  const denied = new Set([first, second]);
+  const closing = vi
+    .spyOn(CdpConnection.prototype, "close")
+    .mockImplementation(function (this: CdpConnection) {
+      return denied.has(this)
+        ? Promise.reject(new Error("controlled mixed close failure"))
+        : originalClose.call(this);
+    });
+  onTestFinished(async () => {
+    closing.mockRestore();
+    await owner.finish(active);
+    await owner.close();
+    await browser.close();
+  });
+  const errors = await Promise.all(
+    [first, second].map((connection) =>
+      owner.finish(connection).catch((cause: unknown) => cause),
+    ),
+  );
+  const aggregate = await owner.retryPending().catch((cause: unknown) => cause);
+  if (
+    !(aggregate instanceof AnalysisError) ||
+    !errors.every((error) => error instanceof AnalysisError)
+  )
+    throw new Error("Missing typed cleanup errors");
+  expect(aggregate.cleanupResources).toEqual(["first-socket", "second-socket"]);
+  denied.delete(first);
+  const mixed = await owner.retryPending().catch((cause: unknown) => cause);
+  if (!(mixed instanceof AnalysisError))
+    throw new Error("Missing mixed retry error");
+  expect(errors.map((error) => error.cleanupIncomplete)).toEqual([false, true]);
+  expect(aggregate.cleanupIncomplete).toBe(true);
+  expect(mixed.cleanupResources).toEqual(["second-socket"]);
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(2));
+  denied.clear();
+  await owner.retryPending();
+  expect(errors.map((error) => error.cleanupIncomplete)).toEqual([
+    false,
+    false,
+  ]);
+  expect(aggregate.cleanupIncomplete).toBe(false);
+  expect(mixed.cleanupIncomplete).toBe(false);
+  await vi.waitFor(() => expect(browser.activeConnectionCount()).toBe(1));
+  await owner.finish(active);
 });

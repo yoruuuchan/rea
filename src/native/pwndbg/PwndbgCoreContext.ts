@@ -1,3 +1,8 @@
+import {
+  bindArtifactFileCleanup,
+  ArtifactFileCleanupFailure,
+  artifactFileCancellationCause,
+} from "../../artifacts/ArtifactFileOperation.js";
 import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -17,6 +22,7 @@ import {
   type RecordedCrash,
 } from "../../domain/native/recordedCrash.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
+import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
@@ -186,19 +192,40 @@ export const inspectPwndbgCore = async ({
       );
       reply = replySchema.parse(JSON.parse(raw.bytes.toString("utf8")));
     } catch (cause: unknown) {
-      if (options?.signal?.aborted)
-        throw new AnalysisCancelledError(OPERATION, {
-          cause,
+      if (
+        cause instanceof ArtifactReaderFailure &&
+        (cause.reason === "cancelled" ||
+          (cause instanceof ArtifactFileCleanupFailure &&
+            cause.fileCleanupFailure.outcome.kind === "completed" &&
+            options?.signal?.aborted))
+      ) {
+        const error = new AnalysisCancelledError(OPERATION, {
+          cause:
+            cause.reason === "cancelled"
+              ? artifactFileCancellationCause(cause)
+              : options?.signal?.reason,
           capturedOutput: recordedCrashStageOutput(diagnostics, output),
+          ...(cause instanceof ArtifactReaderFailure &&
+          cause.cleanup !== undefined
+            ? { cleanup: cause.cleanup }
+            : {}),
         });
-      throw new AnalysisOutputError(
+        bindArtifactFileCleanup(cause, error);
+        throw error;
+      }
+      const error = new AnalysisOutputError(
         OPERATION,
         `Core-only debugger reply failed: ${cause instanceof Error ? cause.message : String(cause)}`,
         {
           cause,
+          ...(cause instanceof ArtifactReaderFailure
+            ? { cleanup: cause.cleanup }
+            : {}),
           capturedOutput: recordedCrashStageOutput(diagnostics, output),
         },
       );
+      bindArtifactFileCleanup(cause, error);
+      throw error;
     }
     if (!reply.ok) {
       if (reply.reason === "unavailable" || reply.reason === "unsupported")

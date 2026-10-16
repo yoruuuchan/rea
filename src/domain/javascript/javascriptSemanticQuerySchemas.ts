@@ -41,7 +41,7 @@ export const javaScriptSemanticQuerySeedSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("property"),
-    name: z.string().min(1),
+    name: z.string(),
   }),
   z.strictObject({
     kind: z.literal("endpoint"),

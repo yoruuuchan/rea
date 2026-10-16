@@ -158,7 +158,7 @@ describe("process CLI evidence validation", () => {
     const projected = projectProcessCliError(
       new ProcessCaptureError("cleanup incomplete", {
         reason: "cleanup_incomplete",
-        cleanupResources: ["owned_process_group"],
+        cleanup: { reason, resources: ["owned_process_group"] },
         cleanupReport: {
           owned_process_group: { state: "unverified", reason },
           terminal_renderer: { state: "cleaned", reason: null },

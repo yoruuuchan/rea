@@ -910,7 +910,10 @@ export const captureProcessScenario = async (
           : new ProcessCaptureError("process capture lifecycle failed", {
               cause,
               reason: "cleanup_incomplete",
-              cleanupResources: ["process_capture_lifecycle"],
+              cleanup: {
+                reason: "process capture lifecycle failed",
+                resources: ["process_capture_lifecycle"],
+              },
               ...(executionFailure === undefined ? {} : { executionFailure }),
             }),
       );

@@ -11,13 +11,17 @@ import pino from "pino";
 import type { Logger } from "pino";
 import type { ProgressUpdate } from "../../../../src/application/ProgressReporter.js";
 
-import { ok } from "../../../../src/domain/result.js";
+import { err, ok } from "../../../../src/domain/result.js";
+import * as GhidraTransport from "../../../../src/ghidra/GhidraTransport.js";
 import { GhidraClient } from "../../../../src/ghidra/GhidraClient.js";
 import { ProviderRunLineage } from "../../../../src/process/ProviderRunLineage.js";
 import { PrivateRuntimeRoot } from "../../../../src/process/PrivateRuntimeRoot.js";
 import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
 import { GHIDRA_PROCESS_DIAGNOSTIC_BYTES } from "../../../../src/ghidra/GhidraDiagnostics.js";
-import { GhidraHeadlessLauncher } from "../../../../src/ghidra/GhidraLauncher.js";
+import {
+  GhidraHeadlessLauncher,
+  GhidraLaunchError,
+} from "../../../../src/ghidra/GhidraLauncher.js";
 import type { GhidraDiagnostic } from "../../../../src/ghidra/GhidraClientTypes.js";
 import type {
   GhidraLaunchSession,
@@ -1258,7 +1262,7 @@ describe("GhidraClient process output drain before startup failure", () => {
     });
   });
 
-  it("keeps caller cancellation primary when cancellation wins during output drain", async () => {
+  it("preserves an observed process exit when cancellation interrupts diagnostic drain", async () => {
     const { launcher, finishOutput } = preExitedProcessLauncher({
       output: oomeOutput,
       closeOutput: true,
@@ -1279,7 +1283,11 @@ describe("GhidraClient process output drain before startup failure", () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.kind).toBe("cancelled");
+    expect(result.error.kind).toBe("process");
+    expect(result.error.diagnostics).toMatchObject({
+      exit_code: 73,
+      output_incomplete: true,
+    });
   });
 });
 
@@ -1481,6 +1489,7 @@ describe.skipIf(process.platform === "win32")(
           environment: process.env,
           javaHome: join(root, "jdk"),
           analyzeHeadlessPath: "/unused/ghidra/support/analyzeHeadless",
+          configurationDirectoryName: "ghidra_12.1.4_PUBLIC",
           bridgeScriptPath: "/unused/rea/ReaGhidraBridge.java",
           spawnProcess: async ({ runId }) => {
             const spawned = spawn(
@@ -1596,4 +1605,164 @@ it("bounds retries when loopback preauthentication keeps failing", async () => {
   await expect(waitForChildExit(launcher.processes[0]!, 5_000)).resolves.toBe(
     true,
   );
+});
+
+it.each([null, "caller stopped", new Error("caller stopped")])(
+  "preserves exact active and queued request cancellation reasons %j",
+  async (reason) => {
+    const launcher = new FixtureLauncher("hang_tools");
+    const client = clientFor(launcher);
+    await expect(client.start()).resolves.toMatchObject({ ok: true });
+    const activeController = new AbortController();
+    const active = client.callTool(
+      "procedure_pseudo_code",
+      { document: null, procedure: "fixture_main" },
+      { signal: activeController.signal },
+    );
+    await vi.waitFor(() =>
+      expect(launcher.requests).toContain("procedure_pseudo_code"),
+    );
+    const queuedController = new AbortController();
+    const queued = client.callTool(
+      "procedure_info",
+      {},
+      { signal: queuedController.signal },
+    );
+    queuedController.abort(reason);
+    const queuedResult = await queued;
+    activeController.abort(reason);
+    const activeResult = await active;
+    for (const result of [queuedResult, activeResult]) {
+      if (result.ok) throw new Error("Expected request cancellation");
+      expect(result.error.kind).toBe("cancelled");
+      expect(result.error.cancellation?.reason).toBe(reason);
+    }
+    expect(await waitForExit(launcher.processes[0])).toBe(true);
+    await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
+
+it("preserves the observed protocol failure when cancellation interrupts request diagnostic drain", async () => {
+  const controller = new AbortController();
+  let abortScheduled = false;
+  const logger = pino(
+    {
+      level: "warn",
+      hooks: {
+        logMethod(args, method) {
+          const fields = args[0];
+          if (
+            typeof fields === "object" &&
+            fields !== null &&
+            "method" in fields &&
+            fields.method === "list_procedures" &&
+            !abortScheduled
+          ) {
+            abortScheduled = true;
+            setImmediate(() => controller.abort(null));
+          }
+          method.apply(this, args);
+        },
+      },
+    },
+    { write: () => {} },
+  );
+  const launcher = new FixtureLauncher("old_oom_then_malformed");
+  const client = clientFor(launcher, { logger });
+  await expect(client.start()).resolves.toMatchObject({ ok: true });
+  await expect(client.callTool("list_documents", {})).resolves.toMatchObject({
+    ok: true,
+  });
+  const result = await client.callTool(
+    "list_procedures",
+    {},
+    { signal: controller.signal },
+  );
+  expect(abortScheduled).toBe(true);
+  if (result.ok) throw new Error("Expected protocol failure");
+  expect(result.error.kind).toBe("protocol");
+  expect(result.error.diagnostics).toMatchObject({
+    failure_output: { complete: false },
+  });
+  expect(await waitForExit(launcher.processes[0])).toBe(true);
+  await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it.each([null, "caller stopped", new Error("caller stopped")])(
+  "retains the exact reason during startup endpoint polling %j",
+  async (reason) => {
+    const observed = vi.spyOn(GhidraTransport, "observeGhidraEndpoint");
+    onTestFinished(() => observed.mockRestore());
+    const launcher = new FixtureLauncher("silent");
+    const client = clientFor(launcher, { startupTimeoutMs: 10000 });
+    const controller = new AbortController();
+    const pending = client.start(controller.signal);
+    await vi.waitFor(() => expect(observed).toHaveBeenCalled());
+    controller.abort(reason);
+    const result = await pending;
+    if (result.ok) throw new Error("Expected startup cancellation");
+    expect(result.error.kind).toBe("cancelled");
+    expect(result.error.cancellation?.reason).toBe(reason);
+    expect(await waitForExit(launcher.processes[0])).toBe(true);
+    await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
+
+it("preserves a handshake protocol error observed before the final startup caller cancels", async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  const logger = pino(
+    {
+      level: "warn",
+      hooks: {
+        logMethod(args, method) {
+          const fields = args[0];
+          if (
+            typeof fields === "object" &&
+            fields !== null &&
+            "method" in fields &&
+            fields.method === "ping" &&
+            !cancelled
+          ) {
+            cancelled = true;
+            controller.abort(null);
+          }
+          method.apply(this, args);
+        },
+      },
+    },
+    { write: () => {} },
+  );
+  const launcher = new FixtureLauncher("malformed");
+  const client = clientFor(launcher, { logger });
+  const result = await client.start(controller.signal);
+  expect(cancelled).toBe(true);
+  if (result.ok) throw new Error("Expected handshake protocol failure");
+  expect(result.error.kind).toBe("protocol");
+  expect(await waitForExit(launcher.processes[0])).toBe(true);
+  await expect(access(launcher.runtimeRoots[0] ?? "")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("redacts the transport credential when refreshing startup diagnostics", async () => {
+  let token = "";
+  const client = clientFor({
+    launch: async (session) => {
+      token = session.token;
+      return err(new GhidraLaunchError(`Launcher refused ${token}`));
+    },
+  });
+  const result = await client.start();
+  if (result.ok) throw new Error("Expected launcher refusal");
+  expect(token.length).toBeGreaterThan(0);
+  expect(result.error.message).toContain("[REDACTED]");
+  expect(result.error.message).not.toContain(token);
+  expect(JSON.stringify(result.error.diagnostics)).not.toContain(token);
 });

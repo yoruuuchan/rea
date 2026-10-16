@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { SafeOutputTree } from "../../../src/artifacts/SafeOutputTree.js";
 import { absoluteCallerPath } from "../../../src/filesystem/callerPath.js";
-import { snapshotFirmware } from "../../../src/firmware/FirmwareFiles.js";
+import { FirmwareFileAccess } from "../../../src/firmware/FirmwareFiles.js";
 import { associateWasmGlue } from "../../../src/wasm/WasmGlueAdapter.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -37,7 +37,7 @@ describe.skipIf(process.platform === "win32")(
       const work = await createTestTempDirectory("rea-firmware-snapshot-");
       // Concatenate: path.join would collapse `link/..` itself.
       const path = `${root}/link/../image.bin`;
-      const snapshot = await snapshotFirmware(
+      const snapshot = await new FirmwareFileAccess().snapshot(
         { operation: "inspect_firmware_regions", input: { path } },
         work,
         new AbortController().signal,

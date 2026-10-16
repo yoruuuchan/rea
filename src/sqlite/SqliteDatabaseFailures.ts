@@ -1,4 +1,9 @@
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import {
+  ArtifactFileCleanupFailure,
+  bindArtifactFileCleanup,
+  artifactFileCancellationCause,
+} from "../artifacts/ArtifactFileOperation.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import {
   AnalysisError,
@@ -49,25 +54,32 @@ export const sqliteDatabaseFailure = (
   const operation = "inspect_sqlite_database";
   if (cause instanceof AnalysisError) return cause;
   if (cause instanceof ArtifactReaderFailure) {
-    if (cause.cleanup !== undefined)
-      return new ProviderCleanupError(
+    if (cause.cleanup !== undefined) {
+      const physicalRead =
+        cause instanceof ArtifactFileCleanupFailure
+          ? cause.fileCleanupFailure.outcome
+          : undefined;
+      const previous =
+        physicalRead?.kind === "failed"
+          ? sqliteDatabaseFailure(physicalRead.cause, path, phase)
+          : signal?.aborted
+            ? new AnalysisCancelledError(operation, { cause: signal.reason })
+            : physicalRead?.kind === "completed" || cause.cause === undefined
+              ? undefined
+              : sqliteDatabaseFailure(cause.cause, path, phase);
+      const error = new ProviderCleanupError(
         SQLITE_PROVIDER_IDENTITY.id,
         cause.cleanup.resources,
         {
           reason: cause.cleanup.reason,
           previous_error:
-            cause.cause === undefined
-              ? null
-              : projectAnalysisError(
-                  signal?.aborted
-                    ? new AnalysisCancelledError(operation, {
-                        cause: cause.cause,
-                      })
-                    : sqliteDatabaseFailure(cause.cause, path, phase),
-                ),
+            previous === undefined ? null : projectAnalysisError(previous),
         },
         { operation, cause },
       );
+      bindArtifactFileCleanup(cause, error);
+      return error;
+    }
     if (cause.reason === "io" && cause.cause !== undefined)
       return sqliteDatabaseFailure(cause.cause, path, phase, signal);
     if (cause.reason === "integrity")
@@ -75,7 +87,9 @@ export const sqliteDatabaseFailure = (
         cause,
       });
     if (cause.reason === "cancelled")
-      return new AnalysisCancelledError(operation, { cause });
+      return new AnalysisCancelledError(operation, {
+        cause: artifactFileCancellationCause(cause),
+      });
     return new AnalysisInputError(operation, { cause }, [
       {
         path: ["path"],

@@ -78,7 +78,10 @@ import { comparePngScreenshots } from "./PngVisualDiff.js";
 
 import { CDP_BROWSER_PROVIDER_IDENTITY } from "./providerIdentities.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
-import { CdpTargetSessionOwner } from "./CdpTargetSessionOwner.js";
+import {
+  CdpTargetSessionOwner,
+  bindCdpTransportCleanup,
+} from "./CdpTargetSessionOwner.js";
 const CLEANUP_DOMAINS = [
   "Network",
   "Debugger",
@@ -421,10 +424,13 @@ const withTargetSession = async <
 
   if (cleanupFailure !== undefined) {
     if (!outcome.ok && outcome.error instanceof AnalysisError)
-      throw analysisErrorWithCleanupFailure(
-        outcome.error,
+      throw bindCdpTransportCleanup(
         cleanupFailure,
-        operation,
+        analysisErrorWithCleanupFailure(
+          outcome.error,
+          cleanupFailure,
+          operation,
+        ),
       );
     if (!outcome.ok)
       throw new AggregateError(
@@ -432,17 +438,20 @@ const withTargetSession = async <
         `CDP operation ${operation} failed and cleanup remains incomplete.`,
         { cause: outcome.error },
       );
-    throw new ProviderCleanupError(
-      "rea-cdp-browser",
-      cleanupFailure.cleanupResources,
-      { cleanup_error: cleanupFailure.message },
-      {
-        operation,
-        cause: cleanupFailure,
-        ...(partialObservation === undefined
-          ? {}
-          : { partialObservation: partialObservation(outcome.value) }),
-      },
+    throw bindCdpTransportCleanup(
+      cleanupFailure,
+      new ProviderCleanupError(
+        "rea-cdp-browser",
+        cleanupFailure.cleanupResources,
+        { cleanup_error: cleanupFailure.message },
+        {
+          operation,
+          cause: cleanupFailure,
+          ...(partialObservation === undefined
+            ? {}
+            : { partialObservation: partialObservation(outcome.value) }),
+        },
+      ),
     );
   }
   if (!outcome.ok) throw outcome.error;

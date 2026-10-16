@@ -63,10 +63,13 @@ export class RegularFileCleanupFailure<Value = unknown> extends Error {
   }
 }
 
-export interface OwnedRegularFileOptions {
+export interface OwnedFileOperationOptions {
   readonly signal?: AbortSignal;
-  readonly symlinks?: "follow" | "reject";
   readonly retainFailedClose?: (owner: OwnedFileHandle) => void;
+}
+
+export interface OwnedRegularFileOptions extends OwnedFileOperationOptions {
+  readonly symlinks?: "follow" | "reject";
 }
 
 /** Run an operation while one admitted descriptor and its cleanup owner stay together. */
@@ -89,7 +92,22 @@ export const withOwnedRegularFile = async <Value>(
       retention,
     );
   });
-  const owner = new OwnedFileHandle(handle);
+  return withOwnedFileHandle(
+    path,
+    new OwnedFileHandle(handle),
+    options,
+    operation,
+  );
+};
+
+/** Own an already admitted descriptor through its operation and final close. */
+export const withOwnedFileHandle = async <Value>(
+  path: string,
+  owner: OwnedFileHandle,
+  options: OwnedFileOperationOptions,
+  operation: (handle: FileHandle) => Promise<Value>,
+): Promise<Value> => {
+  const handle = owner.handle;
   let outcome: RegularFileOperationOutcome<Value>;
   try {
     outcome = { kind: "completed", value: await operation(handle) };

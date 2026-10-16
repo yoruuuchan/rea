@@ -36,7 +36,7 @@ msgstr "逆向工程的思考。"
 #, python-brace-format
 msgctxt "page:blog/index.html"
 msgid "Game reconstruction{ph0}Essay"
-msgstr "游戏重建{ph0}论文"
+msgstr "游戏重建{ph0}随笔"
 
 #: website/public/blog/index.html:219
 msgctxt "page:blog/index.html"
@@ -48,7 +48,7 @@ msgctxt "page:blog/index.html"
 msgid ""
 "What manual RE and reconstructing TH08, TH095 and TH04 taught me about "
 "agents, verification and knowledge that compounds across projects."
-msgstr "什么手动重新和重建TH08，TH095和TH04教我关于编程助手，验证和知识，跨项目的化合物。"
+msgstr "手工逆向，以及重建TH08，TH095和TH04的经历，让我理解了编程助手、验证，以及如何在项目之间积累知识。"
 
 #: website/public/blog/index.html:210 website/public/blog/index.html:225
 msgctxt "page:blog/index.html"
@@ -58,7 +58,7 @@ msgstr "阅读文章"
 #: website/public/blog/index.html:228
 msgctxt "page:blog/index.html"
 msgid "By N0zoM1z0 · 10 October 2026"
-msgstr "通过N0zoM1z0*10十月2026"
+msgstr "作者 N0zoM1z0 · 2026 年 10 月 10 日"
 
 #. {ph0}: <span aria-hidden="true">
 #. {ph1}: </span>
@@ -133,7 +133,7 @@ msgctxt "shared"
 msgid ""
 "REA — Find out how software works. Reverse engineering with your coding "
 "agent."
-msgstr "REA-了解软件的工作原理。 逆向工程与你的编程助手."
+msgstr "REA — 了解软件如何工作。和你的编程助手一起做逆向工程。"
 
 #: website/public/blog/index.html:110
 #: website/public/blog/reverse-engineering-models/index.html:110
@@ -628,7 +628,7 @@ msgid ""
 " explanation and tests it; a mismatch gives it something specific to "
 "investigate."
 msgstr ""
-"这让对照检查成为工作的核心。我把这些基准称为{ph0}校验基准（oracle）{ph1}。代码对比可以检查重建函数是否复现原始指令；运行时检查可以确认已走过的路径是否到达预期状态。助手提出解释，再验证它。发现不匹配，就有了具体的调查方向。"
+"这让对照检查成为整个工作的核心。我把这些基准称为{ph0}校验基准{ph1}。代码对比可以判断重建的函数是否复现了原始指令；运行时检查可以判断实际走过的路径是否到达了预期状态。编程助手提出一种解释并加以验证；一旦对不上，它就有了具体的调查方向。"
 
 #: website/public/blog/touhou-reconstruction/index.html:456
 msgctxt "page:blog/touhou-reconstruction/index.html"
@@ -1376,7 +1376,7 @@ msgctxt "page:blog/touhou-reconstruction/index.html"
 msgid ""
 "I now look at an unfamiliar program and ask: {ph0}what access, feedback and "
 "accumulated knowledge would let an agent work on this reliably?{ph1}"
-msgstr "现在看到一个陌生程序，我会问：{ph0}怎样的工具访问、反馈和知识积累，能让助手可靠地推进这个项目？{ph1}"
+msgstr "现在看到一个陌生的程序，我会问：{ph0}要提供什么样的访问途径、反馈和知识积累，编程助手才能可靠地处理它？{ph1}"
 
 #: website/public/blog/touhou-reconstruction/index.html:937
 msgctxt "page:blog/touhou-reconstruction/index.html"
@@ -1384,7 +1384,7 @@ msgid ""
 "That question makes me consider projects I would previously have left alone."
 " Each one can improve the way we approach the next. I want to keep exploring"
 " how far that can take us."
-msgstr "这个问题让我考虑以前会放弃的项目。每个项目都能改善下一个项目的工作方式。我想继续探索，这能带我们走多远。"
+msgstr "这个问题让我重新考虑那些原本会搁置的项目。每一个都能改善我们处理下一个项目的方式。我想继续探索这条路能把我们带多远。"
 
 #: website/public/blog/touhou-reconstruction/index.html:945
 msgctxt "page:blog/touhou-reconstruction/index.html"
@@ -1637,8 +1637,8 @@ msgid ""
 "speed. {ph0}REA returned the running script;{ph1} we used its rule to build "
 "this mini-game with {ph2}adjustable speed.{ph3}"
 msgstr ""
-"要重新创建游戏的加速，首先找到控制其速度的规则。 {ph0} REA返回运行脚本;{ph1} 我们用它的规则来构建这个迷你游戏。 "
-"{ph2}速度可调。{ph3}"
+"要复现游戏的加速效果，先找到控制速度的规则。{ph0}REA 返回"
+"了正在运行的脚本；{ph1}我们用它的规则做了这个{ph2}速度可调{ph3}的小游戏。"
 
 #: website/public/examples/dino-lab/index.html:212
 #: website/public/examples/dino-lab/index.html:211
@@ -1681,7 +1681,7 @@ msgstr "{ph0}试试分析{ph1}"
 #: website/public/examples/dino-lab/index.html:222
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Play and change the speed"
-msgstr "播放和改变速度"
+msgstr "游玩并调整速度"
 
 #: website/public/examples/dino-lab/index.html:223
 msgctxt "page:examples/dino-lab/index.html"
@@ -1689,7 +1689,7 @@ msgid ""
 "Press Play, then jump over the cactus. Move the speed slider to try a slower"
 " or faster game; it switches to a fixed speed. Select the recovered rule to "
 "start at 6 and gradually accelerate again."
-msgstr "按播放，然后跳过仙人掌。 移动速度滑块尝试更慢或更快的游戏;它切换到固定的速度。 选择恢复的规则从6开始，然后再次逐渐加速。"
+msgstr "点击「开始」，然后跳过仙人掌。拖动速度滑块可以试玩更慢或更快的游戏；也可以切换为固定速度。选择还原后的规则，从 6 开始再次逐步加速。"
 
 #: website/public/examples/dino-lab/index.html:229
 msgctxt "page:examples/dino-lab/index.html"
@@ -1729,19 +1729,19 @@ msgstr "原始规则：从6开始，然后向13增加。"
 #: website/public/examples/dino-lab/index.html:285
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Move the slider to set your own speed. Space or Jump clears a cactus."
-msgstr "移动滑块来设置自己的速度。 空间或跳跃清除仙人掌。"
+msgstr "移动滑块设置速度。按空格键或点「跳跃」即可越过仙人掌。"
 
 #: website/public/examples/dino-lab/index.html:290
 msgctxt "page:examples/dino-lab/index.html"
 msgid ""
 "Enable JavaScript to play the reconstruction. The code and explanation above"
 " remain readable."
-msgstr "启用JavaScript播放重建。 上面的代码和解释仍然是可读的。"
+msgstr "启用 JavaScript 即可游玩重建版。上方的代码和说明仍可阅读。"
 
 #: website/public/examples/dino-lab/index.html:298
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Read the script REA returned"
-msgstr "读取脚本REA返回"
+msgstr "阅读 REA 返回的脚本"
 
 #. {ph0}: <a href="https://wayou.github.io/t-rex-runner/" >
 #. {ph1}: </a >
@@ -1754,7 +1754,7 @@ msgid ""
 " returned the loaded {ph2}, including this branch in the game’s update "
 "function:"
 msgstr ""
-"我们检查过 {ph0}wayou的Chromium派生浏览器版{ph1} 与REA。 它返回加载 {ph2}，将此分支包含在游戏的更新功能中:"
+"我们用 REA 检查了 {ph0}wayou 基于 Chromium 的浏览器版本{ph1}。它返回了已加载的 {ph2}，其中包含游戏更新函数里的这个分支："
 
 #. {ph0}: <code>SPEED: 6</code>
 #. {ph1}: <code>ACCELERATION: 0.001</code>
@@ -1765,7 +1765,7 @@ msgctxt "page:examples/dino-lab/index.html"
 msgid ""
 "The settings are {ph0}, {ph1} and {ph2}. The game runs this branch on an "
 "update without a collision."
-msgstr "设置是 {ph0}, {ph1} 和 {ph2}. 游戏在没有碰撞的更新上运行此分支。"
+msgstr "设置为 {ph0}、{ph1} 和 {ph2}。在没有发生碰撞的那次更新中，游戏会执行这个分支。"
 
 #: website/public/examples/dino-lab/index.html:320
 msgctxt "page:examples/dino-lab/index.html"
@@ -1786,8 +1786,8 @@ msgid ""
 "collision checks are new code for this teaching game; its simulation "
 "advances at 60 updates per second."
 msgstr ""
-"迷你游戏使用此功能进行自动加速。 移动滑块提供了一个固定的速度代替. "
-"绘图，跳跃物理和矩形碰撞检查是这个教学游戏的新代码;它的模拟以每秒60次更新的速度前进。"
+"这个迷你游戏用这个函数实现自动加速。拖动滑块则改为固定速度。绘"
+"图、跳跃物理和矩形碰撞检测是这个教学游戏中新写的代码；它的模拟以每秒 60 次更新的速度推进。"
 
 #. {ph0}: <a href="../../assets/dino-speed.js" download >
 #. {ph1}: </a >
@@ -1810,17 +1810,17 @@ msgid ""
 "We called the original game’s update function with obstacles and automatic "
 "scheduling disabled. Compare those recorded speeds with a replay of the "
 "recovered rule."
-msgstr "我们称原来的游戏的更新功能与障碍和自动调度禁用。 将这些记录的速度与恢复规则的重播进行比较。"
+msgstr "我们在禁用障碍物和自动调度的情况下调用了原游戏的更新函数。把这些记录下来的速度与重放还原出的规则所得的结果做个比较。"
 
 #: website/public/examples/dino-lab/index.html:363
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Updates"
-msgstr "更新资料"
+msgstr "更新次数"
 
 #: website/public/examples/dino-lab/index.html:364
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Original game"
-msgstr "原创游戏"
+msgstr "原版游戏"
 
 #: website/public/examples/dino-lab/index.html:365
 msgctxt "page:examples/dino-lab/index.html"
@@ -1837,7 +1837,7 @@ msgctxt "page:examples/dino-lab/index.html"
 msgid ""
 "Values rounded to three decimals. The branch checks before adding, so the "
 "final increment can take speed just above 13."
-msgstr "四舍五入为三位小数的值。 分支在添加之前进行检查，因此最终增量可以采用略高于13的速度。"
+msgstr "数值保留三位小数。该分支在加法前先做判断，因此最终的增量可能让速度略高于 13。"
 
 #: website/public/examples/dino-lab/index.html:401
 msgctxt "page:examples/dino-lab/index.html"
@@ -1850,7 +1850,7 @@ msgstr "自己试试分析"
 #, python-brace-format
 msgctxt "page:examples/dino-lab/index.html"
 msgid "{ph0}Set up REA{ph1} with your coding agent."
-msgstr "{ph0}设立 REA{ph1} 用你的编程助手。"
+msgstr "{ph0}配置 REA{ph1}，配合你的编程助手使用。"
 
 #. {ph0}: <a href="../../guides/browser/#prepare" >
 #. {ph1}: </a >
@@ -1936,7 +1936,7 @@ msgctxt "page:examples/dino-lab/index.html"
 msgid ""
 "Read the dinosaur game’s speed rule with REA, rebuild it, then change the "
 "speed and play."
-msgstr "阅读恐龙游戏的速度规则与REA，重建它，然后改变速度和发挥。"
+msgstr "用 REA 读出恐龙游戏的速度规则，重建它，然后修改速度并试玩。"
 
 #: website/public/examples/dino-lab/index.html:220
 msgctxt "page:examples/dino-lab/index.html"
@@ -1948,7 +1948,7 @@ msgctxt "page:examples/dino-lab/index.html"
 msgid ""
 "Dinosaur mini-game. Use the Jump button or press Space while the game is "
 "focused."
-msgstr "恐龙迷你游戏。 使用跳跃按钮或按空格键，而游戏是重点。"
+msgstr "恐龙迷你游戏。游戏处于焦点状态时，点击「跳跃」按钮或按空格键。"
 
 #: website/public/examples/dino-lab/index.html:326
 msgctxt "page:examples/dino-lab/index.html"
@@ -2804,7 +2804,7 @@ msgctxt "page:first-investigation/index.html"
 msgid ""
 "{ph0}How DX-Ball calculates sound panning{ph1}{ph2}Read the original "
 "instructions and the reconstruction’s checks.{ph3}"
-msgstr "{ph0}DX-Ball 如何计算声音左右位置{ph1}{ph2}查看原始指令，以及重建结果的验证。{ph3}"
+msgstr "{ph0}DX-Ball 如何计算声像定位{ph1}{ph2}阅读原始指令，以及重建结果的校验。{ph3}"
 
 #. {ph0}: <a href="../faq/#troubleshooting" >
 #. {ph1}: </a >
@@ -3402,7 +3402,7 @@ msgstr "复制Linux的fnm安装命令"
 #: website/public/get-started/index.html:383
 msgctxt "page:get-started/index.html"
 msgid "Copy Node.js 24 commands for Linux"
-msgstr "复制 Node.js 24命令 Linux"
+msgstr "复制 Linux 的 Node.js 24 命令"
 
 #: website/public/get-started/index.html:210
 #: website/public/get-started/index.html:209
@@ -3467,7 +3467,7 @@ msgctxt "page:guides/browser/index.html"
 msgid ""
 "Use a small browser app to connect an action, its network request and the "
 "JavaScript that builds a download."
-msgstr "使用小型浏览器应用程序连接操作，其网络请求和构建下载的JavaScript。"
+msgstr "用一个小型的浏览器应用，把一个操作、对应的网络请求，以及生成下载文件的 JavaScript 联系起来。"
 
 #: website/public/guides/browser/index.html:209
 msgctxt "page:guides/browser/index.html"
@@ -3496,7 +3496,7 @@ msgstr "{ph0}打开浏览器{ph1}"
 #, python-brace-format
 msgctxt "page:guides/browser/index.html"
 msgid "{ph0}Ask your agent{ph1}"
-msgstr "{ph0}问问你的编程助手{ph1}"
+msgstr "{ph0}向编程助手提问{ph1}"
 
 #. {ph0}: <a href="#capture">
 #. {ph1}: </a>
@@ -3504,7 +3504,7 @@ msgstr "{ph0}问问你的编程助手{ph1}"
 #, python-brace-format
 msgctxt "page:guides/browser/index.html"
 msgid "{ph0}Capture from CLI{ph1}"
-msgstr "{ph0}从CLI捕获 {ph1}"
+msgstr "{ph0}使用 CLI 捕获{ph1}"
 
 #. {ph0}: <a href="#result">
 #. {ph1}: </a>
@@ -3512,7 +3512,7 @@ msgstr "{ph0}从CLI捕获 {ph1}"
 #, python-brace-format
 msgctxt "page:guides/browser/index.html"
 msgid "{ph0}Read the request and script{ph1}"
-msgstr "{ph0}阅读请求和脚本{ph1}"
+msgstr "{ph0}读取请求和脚本{ph1}"
 
 #: website/public/guides/browser/index.html:220
 msgctxt "page:guides/browser/index.html"
@@ -3566,7 +3566,7 @@ msgctxt "page:guides/browser/index.html"
 msgid ""
 "{ph0}02 · REA{ph1}{ph2}Record the request{ph3}{ph4}Capture the request URL, "
 "response status and JSON structure from the selected page.{ph5}"
-msgstr "{ph0}02*REA {ph1}{ph2}记录请求{ph3}{ph4}从所选页面捕获请求URL，响应状态和JSON结构。{ph5}"
+msgstr "{ph0}02 · REA{ph1}{ph2}记录请求{ph3}{ph4}从所选页面捕获请求 URL、响应状态和 JSON 结构。{ph5}"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -3588,12 +3588,12 @@ msgstr ""
 #: website/public/guides/browser/index.html:260
 msgctxt "page:guides/browser/index.html"
 msgid "Start the capture before clicking Export notes."
-msgstr "在单击导出注释之前开始捕获。"
+msgstr "在点击 Export notes 之前开始捕获。"
 
 #: website/public/guides/browser/index.html:266
 msgctxt "page:guides/browser/index.html"
 msgid "Open Chrome with remote debugging"
-msgstr "使用远程调试打开Chrome"
+msgstr "以远程调试方式启动 Chrome"
 
 #: website/public/guides/browser/index.html:267
 msgctxt "page:guides/browser/index.html"
@@ -3633,7 +3633,7 @@ msgstr "REA连接到这个现有的浏览器。 你可以控制页面，执行�
 #: website/public/guides/browser/index.html:299
 msgctxt "page:guides/browser/index.html"
 msgid "Ask your agent to watch one action"
-msgstr "让你的编程助手看一个动作"
+msgstr "让编程助手观察一个操作"
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
@@ -3680,7 +3680,7 @@ msgid ""
 "Your agent discovers the page target, starts an observation window, and "
 "reads the resulting evidence. It can then inspect the script behind the "
 "export."
-msgstr "你的编程助手发现页面目标，启动观察窗口，并读取生成的证据。 然后，它可以检查导出后面的脚本。"
+msgstr "你的编程助手会发现页面目标，启动观察窗口并读取采集到的证据。随后它可以查看导出功能背后的脚本。"
 
 #: website/public/guides/browser/index.html:335
 msgctxt "page:guides/browser/index.html"
@@ -3727,7 +3727,7 @@ msgid ""
 "The captured result includes the selected page, network activity during that"
 " window, and the shape of the JSON response. Earlier requests are outside "
 "this capture."
-msgstr "捕获的结果包括所选页面、该窗口期间的网络活动以及JSON响应的形状。 较早的请求在此捕获之外。"
+msgstr "捕获的结果包括所选页面、该窗口期间的网络活动以及 JSON 响应的结构。更早的请求不在本次捕获范围内。"
 
 #: website/public/guides/browser/index.html:386
 msgctxt "page:guides/browser/index.html"
@@ -3747,7 +3747,7 @@ msgstr "捕获的事实"
 #: website/public/guides/browser/index.html:395
 msgctxt "page:guides/browser/index.html"
 msgid "Value"
-msgstr "数值"
+msgstr "值"
 
 #: website/public/guides/browser/index.html:400
 msgctxt "page:guides/browser/index.html"
@@ -3757,7 +3757,7 @@ msgstr "请求"
 #: website/public/guides/browser/index.html:404
 msgctxt "page:guides/browser/index.html"
 msgid "Response"
-msgstr "回应"
+msgstr "响应"
 
 #: website/public/guides/browser/index.html:408
 msgctxt "page:guides/browser/index.html"
@@ -3783,7 +3783,7 @@ msgstr "响应结构"
 #, python-brace-format
 msgctxt "page:guides/browser/index.html"
 msgid "{ph0} with {ph1} and {ph2} fields"
-msgstr "{ph0} 与 {ph1} 和 {ph2} 字段"
+msgstr "{ph0}，包含 {ph1} 和 {ph2} 字段"
 
 #: website/public/guides/browser/index.html:423
 msgctxt "page:guides/browser/index.html"
@@ -3807,7 +3807,7 @@ msgid ""
 "The download is constructed in the page using the JSON response. The CSV "
 "formatting step comes from the script; the network capture establishes that "
 "this click requested {ph0}."
-msgstr "下载是使用JSON响应在页面中构建的。 CSV格式化步骤来自脚本;网络捕获建立此单击请求 {ph0}."
+msgstr "下载文件是在页面中用 JSON 响应构建的。CSV 格式化这一步来自脚本；网络捕获可以证明这次点击请求了 {ph0}。"
 
 #. {ph0}: <code>notes.json</code>
 #: website/public/guides/browser/index.html:473
@@ -3816,7 +3816,7 @@ msgctxt "page:guides/browser/index.html"
 msgid ""
 "Find the script that requests {ph0}. How does it escape titles containing "
 "commas or quotation marks?"
-msgstr "查找请求的脚本 {ph0}. 它如何转义包含逗号或引号的标题？"
+msgstr "找出请求 {ph0} 的脚本。它如何转义包含逗号或引号的标题？"
 
 #. {ph0}: <a href="../javascript/">
 #. {ph1}: </a>
@@ -3826,7 +3826,7 @@ msgctxt "page:guides/browser/index.html"
 msgid ""
 "For an installed JavaScript or Electron app, continue with the "
 "{ph0}application workflow{ph1} to follow files and process boundaries."
-msgstr "对于已安装的JavaScript或Electron应用程序，请继续 {ph0}应用程序工作流程{ph1} 要遵循文件和进程边界。"
+msgstr "对于已安装的 JavaScript 或 Electron 应用，请继续使用{ph0}应用分析流程{ph1}，以追踪文件与进程边界。"
 
 #: website/public/guides/browser/index.html:6
 msgctxt "page:guides/browser/index.html"
@@ -3838,7 +3838,7 @@ msgctxt "page:guides/browser/index.html"
 msgid ""
 "Observe a Notes export with REA: select a browser page, capture a click, "
 "inspect the request and follow the export script."
-msgstr "观察一个笔记导出与 REA：选择浏览器页面，捕获单击，检查请求并遵循导出脚本。"
+msgstr "用 REA 观察一次笔记导出：选择浏览器页面，捕获一次点击，检查请求并追踪导出脚本。"
 
 #: website/public/guides/browser/index.html:208
 msgctxt "page:guides/browser/index.html"
@@ -3903,7 +3903,7 @@ msgctxt "page:guides/index.html"
 msgid ""
 "Analyze a native function, an Electron export or a browser request. Each "
 "guide includes a prompt, code and results."
-msgstr "分析本机函数、Electron导出或浏览器请求。 每个指南包括提示，代码和结果。"
+msgstr "分析原生函数、Electron 导出流程或浏览器请求。每个指南都包含提示词、代码和结果。"
 
 #: website/public/guides/index.html:206
 msgctxt "page:guides/index.html"
@@ -3918,7 +3918,7 @@ msgstr "设置REA"
 #: website/public/guides/index.html:209
 msgctxt "page:guides/index.html"
 msgid "Connect your coding agent or use REA from the terminal."
-msgstr "连接你的编程助手或使用 REA 从终端。"
+msgstr "连接你的编程助手，或在终端中使用 REA。"
 
 #: website/public/guides/index.html:210
 msgctxt "page:guides/index.html"
@@ -3933,7 +3933,7 @@ msgstr "原生二进制"
 #: website/public/guides/index.html:216
 msgctxt "page:guides/index.html"
 msgid "Recover a sound-pan calculation"
-msgstr "恢复左/右声音位置的计算"
+msgstr "还原声像定位的计算"
 
 #: website/public/guides/index.html:217
 msgctxt "page:guides/index.html"
@@ -3962,7 +3962,7 @@ msgctxt "page:guides/index.html"
 msgid ""
 "A small Notes app spreads one feature across the renderer, preload and main "
 "process. Use REA to connect the API, IPC channel and file writer."
-msgstr "一个小Notes应用程序在渲染器，预加载和主进程中传播一个功能。 使用REA连接API，IPC通道和文件编写器。"
+msgstr "一个小 Notes 应用把同一个功能分散在渲染进程、预加载脚本和主进程三处。用 REA 把 API、IPC 通道和写文件的代码关联起来。"
 
 #: website/public/guides/index.html:244
 msgctxt "page:guides/index.html"
@@ -3975,7 +3975,7 @@ msgstr "JavaScript&Electron指南"
 #, python-brace-format
 msgctxt "page:guides/index.html"
 msgid "For a larger packaged app, follow {ph0}Notion's clipboard bridge{ph1}."
-msgstr "对于更大的打包应用程序，请遵循 {ph0} Notion的剪贴板桥{ph1}."
+msgstr "对于更大的打包应用，请看{ph0}Notion 的剪贴板衔接逻辑{ph1}。"
 
 #: website/public/guides/index.html:254
 msgctxt "page:guides/index.html"
@@ -3992,7 +3992,7 @@ msgctxt "page:guides/index.html"
 msgid ""
 "Open a working Notes example, capture an export request and find the code "
 "that turns its response into a download."
-msgstr "打开工作笔记示例，捕获导出请求并找到将其响应转换为下载的代码。"
+msgstr "打开一个可以正常运行的 Notes 示例，捕获导出请求，并找到把响应转为下载文件的代码。"
 
 #: website/public/guides/index.html:266
 msgctxt "page:guides/index.html"
@@ -4009,7 +4009,7 @@ msgctxt "page:guides/index.html"
 msgid ""
 "Learn REA through short worked examples: a native calculation, an Electron "
 "CSV export and a browser request."
-msgstr "通过简短的示例学习REA：本机计算，Electron CSV导出和浏览器请求。"
+msgstr "通过简短示例学习 REA：一次原生计算、Electron CSV 导出和浏览器请求。"
 
 #: website/public/guides/index.html:286
 msgctxt "page:guides/index.html"
@@ -4036,14 +4036,14 @@ msgstr "{ph0}首页{ph1} / {ph2}指南{ph3} / JavaScript & Electron"
 #, python-brace-format
 msgctxt "page:guides/javascript/index.html"
 msgid "Trace an Electron{ph0}CSV export."
-msgstr "追踪安 Electron{ph0}CSV 导出。"
+msgstr "追踪 Electron 应用的{ph0}CSV 导出流程。"
 
 #: website/public/guides/javascript/index.html:202
 msgctxt "page:guides/javascript/index.html"
 msgid ""
 "Follow a button click from the page API, through Electron IPC, to the CSV "
 "file writer."
-msgstr "按照一个按钮点击从页面API，通过Electron IPC，到CSV文件编写器。"
+msgstr "沿着一次按钮点击，从页面 API 出发，经过 Electron IPC，直到 CSV 文件写入函数。"
 
 #: website/public/guides/javascript/index.html:209
 msgctxt "page:guides/javascript/index.html"
@@ -4111,7 +4111,7 @@ msgstr ""
 #: website/public/guides/javascript/index.html:228
 msgctxt "page:guides/javascript/index.html"
 msgid "The CSV export across Electron processes"
-msgstr "该 CSV 跨导出 Electron 过程"
+msgstr "跨 Electron 进程的 CSV 导出"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -4128,7 +4128,7 @@ msgctxt "page:guides/javascript/index.html"
 msgid ""
 "{ph0}Renderer → preload{ph1}{ph2}{ph3}{ph4}{ph5}{ph6} calls the API exposed "
 "by {ph7}.{ph8}"
-msgstr "{ph0}渲染器→预加载{ph1}{ph2}{ph3}{ph4}{ph5}{ph6} 调用由 {ph7}.{ph8}"
+msgstr "{ph0}渲染进程 → preload{ph1}{ph2}{ph3}{ph4}{ph5}{ph6} 调用 {ph7} 暴露的 API。{ph8}"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -4143,7 +4143,7 @@ msgctxt "page:guides/javascript/index.html"
 msgid ""
 "{ph0}Between processes{ph1}{ph2}{ph3}{ph4}{ph5}The preload invokes an IPC "
 "channel: a named message to the main process.{ph6}"
-msgstr "{ph0}进程之间{ph1}{ph2}{ph3}{ph4}{ph5}预加载调用IPC通道：主进程的命名消息。{ph6}"
+msgstr "{ph0}进程之间{ph1}{ph2}{ph3}{ph4}{ph5}preload 调用一条 IPC 通道——即发往主进程的一条具名消息。{ph6}"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -4167,7 +4167,7 @@ msgstr "{ph0}主进程{ph1}{ph2}导出处理函数{ph3}{ph4}{ph5}处理这个通
 #, python-brace-format
 msgctxt "page:guides/javascript/index.html"
 msgid "{ph0} formats the notes → {ph1} writes {ph2}."
-msgstr "{ph0} 格式化注释→ {ph1} 写道 {ph2}."
+msgstr "{ph0} 格式化笔记 → {ph1} 写入 {ph2}。"
 
 #: website/public/guides/javascript/index.html:261
 msgctxt "page:guides/javascript/index.html"
@@ -4175,7 +4175,7 @@ msgid ""
 "REA matches the literal IPC call to its handler and identifies the exposed "
 "API. The path is inferred from code; a runtime capture can check what "
 "executes."
-msgstr "REA将字面IPC调用与其处理程序相匹配，并标识公开的API。 路径是从代码中推断出来的；运行时捕获可以检查执行的内容。"
+msgstr "REA 将字面 IPC 调用与处理函数配对，并识别出被暴露的 API。调用路径由代码推断；运行时捕获可以检查实际执行的内容。"
 
 #: website/public/guides/javascript/index.html:269
 msgctxt "page:guides/javascript/index.html"
@@ -4190,7 +4190,7 @@ msgctxt "page:guides/javascript/index.html"
 msgid ""
 "{ph0}Connect your agent to REA{ph1} and give it the app directory or ASAR "
 "file:"
-msgstr "{ph0}将你的编程助手连接到 REA{ph1} 并给它的应用程序目录或 ASAR 档案:"
+msgstr "{ph0}将你的编程助手连接到 REA{ph1}，并把应用目录或 ASAR 文件路径给它："
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
@@ -4241,7 +4241,7 @@ msgid ""
 "REA reads the application files and builds a map of entrypoints, modules and"
 " process boundaries. Your agent uses that map to narrow the investigation to"
 " the export feature."
-msgstr "REA读取应用程序文件并构建入口点，模块和流程边界的映射。 你的编程助手使用该映射将调查范围缩小到导出功能。"
+msgstr "REA 读取应用文件，构建入口点、模块和进程边界的映射。你的编程助手用这张图把调查范围收窄到导出功能。"
 
 #: website/public/guides/javascript/index.html:308
 msgctxt "page:guides/javascript/index.html"
@@ -4328,7 +4328,7 @@ msgid ""
 "agent can follow a literal string, API name or IPC channel with REA's "
 "feature tracing tools."
 msgstr ""
-"对于你自己的应用程序，请对其目录或ASARpath使用相同的命令。 编程助手可以使用REA的功能跟踪工具跟随文字字符串，API名称或IPC通道。"
+"对于你自己的应用，用相同的命令加上它的目录或 ASAR 路径。编程助手可以用 REA 的功能追踪工具追踪字面字符串、API 名称或 IPC 通道。"
 
 #: website/public/guides/javascript/index.html:454
 msgctxt "page:guides/javascript/index.html"
@@ -4374,7 +4374,7 @@ msgctxt "page:guides/javascript/index.html"
 msgid ""
 "{ph0}Observe a browser export{ph1}{ph2}Capture a real click and see which "
 "request it makes.{ph3}"
-msgstr "{ph0}观察浏览器导出{ph1}{ph2}捕获一个真正的点击，看看它提出了哪个请求。{ph3}"
+msgstr "{ph0}观察浏览器导出{ph1}{ph2}捕获一次真实点击，看看它发起了哪个请求。{ph3}"
 
 #. {ph0}: <a href="../native/">
 #. {ph1}: </a >
@@ -4386,7 +4386,7 @@ msgctxt "page:guides/javascript/index.html"
 msgid ""
 "{ph0}Follow a native function{ph1}{ph2}Continue into a binary when a feature"
 " depends on native code.{ph3}"
-msgstr "{ph0}遵循原生函数{ph1}{ph2}当特性依赖于原生代码时,继续进入二进制文件.{ph3}"
+msgstr "{ph0}追踪一个原生函数{ph1}{ph2}当某项功能依赖原生代码时，继续进入二进制文件。{ph3}"
 
 #: website/public/guides/javascript/index.html:6
 msgctxt "page:guides/javascript/index.html"
@@ -4399,7 +4399,7 @@ msgid ""
 "Trace a Notes CSV export through a renderer API, preload and IPC handler "
 "with REA. Includes downloadable example files and a verified analysis "
 "result."
-msgstr "通过具有REA的渲染器API，预加载和IPC处理程序跟踪Notes CSV导出。 包括可下载的示例文件和经过验证的分析结果。"
+msgstr "用 REA 沿着渲染器 API、preload 和 IPC 处理函数追踪 Notes 的 CSV 导出。包含可下载的示例文件和经过验证的分析结果。"
 
 #: website/public/guides/javascript/index.html:208
 msgctxt "page:guides/javascript/index.html"
@@ -4503,14 +4503,14 @@ msgstr "{ph0}使用你自己的二进制文件{ph1}"
 #: website/public/guides/native/index.html:219
 msgctxt "page:guides/native/index.html"
 msgid "Calculate left/right sound panning"
-msgstr "计算左/右立体声声音定位"
+msgstr "计算左右声像"
 
 #: website/public/guides/native/index.html:220
 msgctxt "page:guides/native/index.html"
 msgid ""
 "In DX-Ball, a brick hit supplies a horizontal screen position. The sound "
 "code turns it into a left/right panning value."
-msgstr "在DX-Ball中，砖击提供水平屏幕位置。 声音代码将其转换为左/右平移值。"
+msgstr "在 DX-Ball 中，砖块碰撞提供一个水平屏幕坐标，声音代码把它转换为左右声像值。"
 
 #. {ph0}: <code>0x00406400</code>
 #. {ph1}: <code>__ftol()</code>
@@ -4521,12 +4521,12 @@ msgid ""
 "The starting function, {ph0}, has a short decompiler result: a call to "
 "{ph1}. REA also returns its instructions and callers, which give the agent a"
 " way to investigate the missing arithmetic."
-msgstr "启动函数, {ph0}，有一个简短的反编译器结果：调用 {ph1}. REA 还返回其指令和调用者，这给编程助手一种方法来调查丢失的算术。"
+msgstr "起始函数 {ph0} 的反编译结果很短：一次对 {ph1} 的调用。REA 还会返回它的指令和调用者，让编程助手得以调查缺失的算术运算。"
 
 #: website/public/guides/native/index.html:231
 msgctxt "page:guides/native/index.html"
 msgid "New to these terms?"
-msgstr "新的这些条款？"
+msgstr "这些术语还不熟悉？"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -4579,7 +4579,7 @@ msgctxt "page:guides/native/index.html"
 msgid ""
 "{ph0}Constants:{ph1} fixed numbers stored in the program, read as raw bytes "
 "and decoded."
-msgstr "{ph0}常量:{ph1} 固定数字存储在程序中，读取为原始字节和解码。"
+msgstr "{ph0}常量：{ph1} 存储在程序中的固定数值，以原始字节读取并解码。"
 
 #: website/public/guides/native/index.html:258
 msgctxt "page:guides/native/index.html"
@@ -4676,8 +4676,8 @@ msgid ""
 "install it. On macOS, open Hopper once and choose demo mode or activate a "
 "license before your first analysis."
 msgstr ""
-"{ph0} Hopper {ph1} （macOS或Linux）：REA的安装程序检测到它或提供安装它。 "
-"在macOS上，打开一次Hopper，然后选择演示模式或在第一次分析之前激活许可证。"
+"{ph0}Hopper{ph1}（macOS 或 Linux）：REA 的安装与配置流程会"
+"检测到它，或提示你安装。在 macOS 上，先打开一次 Hopper，选择演示模式或在首次分析前激活许可证。"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -4688,8 +4688,8 @@ msgid ""
 "{ph0}Ghidra{ph1} (macOS or Linux; experimental on Windows): free, but needs "
 "an existing Ghidra 12.1.x installation and a 64-bit JDK 21 or newer."
 msgstr ""
-"{ph0} Ghidra {ph1} "
-"（macOS或Linux;在Windows上进行实验）：免费，但需要现有的Ghidra12.1。x安装和64位JDK21或更高版本。"
+"{ph0}Ghidra{ph1}（macO"
+"S 或 Linux；在 Windows 上为实验性）：免费，但需要已安装的 Ghidra 12.1.x，以及 64 位 JDK 21 或更新版本。"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -4698,7 +4698,7 @@ msgstr ""
 msgctxt "page:guides/native/index.html"
 msgid ""
 "{ph0}IDA{ph1} (Windows): for an existing IDA setup with an MCP registration."
-msgstr "{ph0} IDA {ph1} (Windows)：用于具有MCP注册的现有IDA设置。"
+msgstr "{ph0}IDA{ph1}（Windows）：适用于已完成 MCP 注册的现有 IDA 配置。"
 
 #. {ph0}: <a href="../../get-started/#native">
 #. {ph1}: </a>
@@ -4706,7 +4706,7 @@ msgstr "{ph0} IDA {ph1} (Windows)：用于具有MCP注册的现有IDA设置。"
 #, python-brace-format
 msgctxt "page:guides/native/index.html"
 msgid "See {ph0}Set up native analysis{ph1} for the steps."
-msgstr "见 {ph0}设置原生分析{ph1} 为步骤。"
+msgstr "具体步骤参见{ph0}配置原生分析{ph1}。"
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
@@ -4750,8 +4750,8 @@ msgid ""
 "executable. REA doesn't include DX-Ball, so use your own copy, or ask the "
 "same kind of question about another small Windows program you have."
 msgstr ""
-"示例 prompt。把本地 DX-Ball 1.07 可执行文件的路径交给助手。REA 不附带游戏，需要用自己的副本，也可以换成手里的其他小型 "
-"Windows 程序，问同类问题。"
+"示例提示词。把本地 DX-Ball 1.07 可执"
+"行文件的路径交给编程助手。REA 不附带 DX-Ball，请使用你自己的副本；也可以就你手上的另一个小型 Windows 程序问同样的问题。"
 
 #: website/public/guides/native/index.html:364
 msgctxt "page:guides/native/index.html"
@@ -4848,7 +4848,7 @@ msgid ""
 "With a scale of 1.0, screen positions 0, 320 and 640 map to −500, 0 and 500 "
 "before integer conversion. The calculation puts the center of the screen at "
 "the center of the stereo field."
-msgstr "比例为1.0时，屏幕位置0、320和640在整数转换之前映射到-500、0和500。 计算将屏幕的中心置于立体场的中心。"
+msgstr "比例为 1.0 时，屏幕坐标 0、320 和 640 在整数转换前映射到 -500、0 和 500。这一计算把屏幕正中放在立体声场的中心。"
 
 #: website/public/guides/native/index.html:444
 msgctxt "page:guides/native/index.html"
@@ -4864,7 +4864,7 @@ msgstr "编程助手使用REA的发现来编写C.单独的检查将3,205个输�
 #, python-brace-format
 msgctxt "page:guides/native/index.html"
 msgid "{ph0}See the full investigation and assembly-to-C comparison{ph1}"
-msgstr "{ph0}查看完整的调查和组装到C的比较{ph1}"
+msgstr "{ph0}查看完整调查过程和汇编与 C 的对比{ph1}"
 
 #: website/public/guides/native/index.html:456
 msgctxt "page:guides/native/index.html"
@@ -4882,8 +4882,8 @@ msgid ""
 "questions include “How is this file parsed?” or “Which function handles this"
 " menu action?”"
 msgstr ""
-"{ph0}连接原生分析提供程序{ph1}，然后给你的编程助手一个本地可执行文件或库和一个要调查的函数。 "
-"有用的起始问题包括\"如何解析此文件？\"或\"哪个函数处理此菜单操作？”"
+"{ph0}连接原生分析提供程序{ph1}，然后给"
+"编程助手一个本地可执行文件或库，并指定要调查的功能。有用的起始问题包括“如何解析这个文件？”或“哪个函数处理这个菜单操作？”"
 
 #: website/public/guides/native/index.html:464
 msgctxt "page:guides/native/index.html"
@@ -4920,14 +4920,14 @@ msgstr "把伪代码与指令、引用一起阅读。结果中尚未解析的调
 #: website/public/guides/native/index.html:6
 msgctxt "page:guides/native/index.html"
 msgid "Native Binary Analysis — REA"
-msgstr "原生二元分析-REA"
+msgstr "原生二进制分析 — REA"
 
 #: website/public/guides/native/index.html:7
 msgctxt "page:guides/native/index.html"
 msgid ""
 "Recover a native calculation with REA: inspect instructions, follow a "
 "caller, read constants and check reconstructed C."
-msgstr "使用REA恢复本机计算：检查指令，遵循调用者，读取常量并检查重构的C。"
+msgstr "用 REA 还原一段原生计算：检查指令、追踪调用者、读取常量并检查重建的 C。"
 
 #: website/public/guides/native/index.html:207
 msgctxt "page:guides/native/index.html"
@@ -5008,7 +5008,7 @@ msgstr "{ph0}试试REA {ph1}"
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}Go deeper{ph1}"
-msgstr "{ph0}更深入{ph1}"
+msgstr "{ph0}深入了解{ph1}"
 
 #: website/public/index.html:226
 msgctxt "page:index.html"
@@ -5106,7 +5106,7 @@ msgctxt "page:index.html"
 msgid ""
 "“{ph0}0x5b? 0x5c?{ph1} Two jumps to the same place. Which operators are "
 "these?”"
-msgstr "“{ph0}0x5b？0x5c？{ph1}两个跳转去了同一个位置。它们对应哪些运算符？”"
+msgstr "“{ph0}0x5b? 0x5c?{ph1} 两处跳转到同一个目标。它们对应哪些运算符？”"
 
 #: website/public/index.html:440
 msgctxt "page:index.html"
@@ -5195,7 +5195,7 @@ msgstr "{ph0}你需要读懂指令、追踪调用，再还原计算过程。{ph1
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Example prompt · Calculator"
-msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}示例 prompt · 计算器"
+msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}示例提示词 · 计算器"
 
 #: website/public/index.html:534
 msgctxt "page:index.html"
@@ -5584,7 +5584,7 @@ msgstr "下载 Notes 示例，追踪 CSV 导出，再修改一个输入来验证
 #: website/public/index.html:1082
 msgctxt "page:index.html"
 msgid "Try the guided example"
-msgstr "跟着示例开始"
+msgstr "跟着引导示例做一遍"
 
 #: website/public/index.html:1099
 msgctxt "page:index.html"
@@ -5667,7 +5667,7 @@ msgstr "复制安装命令"
 #: website/public/index.html:361
 msgctxt "page:index.html"
 msgid "Follow the manual Calculator analysis"
-msgstr "按照手动计算器分析"
+msgstr "跟随手工完成的计算器分析"
 
 #: website/public/index.html:517
 msgctxt "page:index.html"
@@ -5719,7 +5719,7 @@ msgstr "{ph0}首页{ph1} / {ph2}案例展示{ph3} /安卓"
 #: website/public/showcase/aegis/index.html:201
 msgctxt "page:showcase/aegis/index.html"
 msgid "Case study · Aegis Authenticator"
-msgstr "案例研究 · Aegis验证器"
+msgstr "案例研究 · Aegis Authenticator"
 
 #. {ph0}: <br />
 #: website/public/showcase/aegis/index.html:202
@@ -5807,7 +5807,7 @@ msgstr ""
 #: website/public/showcase/aegis/index.html:249
 msgctxt "page:showcase/aegis/index.html"
 msgid "In this case study"
-msgstr "在本个案研究中"
+msgstr "在本案例研究中"
 
 #. {ph0}: <a href="#ask">
 #. {ph1}: </a>
@@ -5839,7 +5839,7 @@ msgstr "{ph0}用REA查找代码 {ph1}"
 #, python-brace-format
 msgctxt "page:showcase/aegis/index.html"
 msgid "{ph0}Read the calculation{ph1}"
-msgstr "{ph0}阅读计算{ph1}"
+msgstr "{ph0}读懂这段计算{ph1}"
 
 #. {ph0}: <a href="#verify">
 #. {ph1}: </a>
@@ -6292,7 +6292,7 @@ msgctxt "page:showcase/aegis/index.html"
 msgid ""
 "Android analysis needs a full JDK 17 or later. Select it with {ph0} or "
 "{ph1}. This case used JDK 21."
-msgstr "Android分析需要完整的JDK17或更高版本。 选择它与 {ph0} 或 {ph1}. 本案例使用了JDK21。"
+msgstr "Android 分析需要完整的 JDK 17 或更高版本。通过设置 {ph0} 或 {ph1} 来选择它。本案例使用了 JDK 21。"
 
 #: website/public/showcase/aegis/index.html:731
 msgctxt "page:showcase/aegis/index.html"
@@ -6428,14 +6428,14 @@ msgstr "{ph0}首页{ph1} / {ph2}案例展示{ph3} /CTF"
 #: website/public/showcase/ctf/index.html:200
 msgctxt "page:showcase/ctf/index.html"
 msgid "Case study · DownUnderCTF 2023"
-msgstr "案例研究·Downunderctf2023"
+msgstr "案例研究 · DownUnderCTF 2023"
 
 #. {ph0}: <br />
 #: website/public/showcase/ctf/index.html:201
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "Find the flag in{ph0}a CTF binary."
-msgstr "找到国旗{ph0}一个CTF二进制文件。"
+msgstr "在一个 CTF 二进制文件中{ph0}找到 flag。"
 
 #. {ph0}: <code>Correct!</code>
 #: website/public/showcase/ctf/index.html:202
@@ -6444,12 +6444,12 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "Use REA to inspect a small flag checker, turn its rules into equations and "
 "find an input that makes the original program print {ph0}."
-msgstr "使用方法 REA 要检查一个小的flag 检查器，将其规则转换为方程，并找到一个使原始程序打印的输入 {ph0}."
+msgstr "用 REA 分析这个小型 flag 检查器，把它的规则转成方程，找出能让原程序打印 {ph0} 的输入。"
 
 #: website/public/showcase/ctf/index.html:207
 msgctxt "page:showcase/ctf/index.html"
 msgid "masked squares flag checker · Easy · Linux x86-64"
-msgstr "蒙面方格旗检查器 · 容易·Linuxx86-64"
+msgstr "掩码方格 flag 检查器 · 简单 · Linux x86-64"
 
 #: website/public/showcase/ctf/index.html:210
 msgctxt "page:showcase/ctf/index.html"
@@ -6459,7 +6459,7 @@ msgstr "查看原始挑战"
 #: website/public/showcase/ctf/index.html:218
 msgctxt "page:showcase/ctf/index.html"
 msgid "From a binary to a checked answer"
-msgstr "从二进制到检查答案"
+msgstr "从二进制文件到经过验证的答案"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -6491,8 +6491,8 @@ msgid ""
 "returns the instructions and data behind each check. The agent turns them "
 "into equations.{ph5}"
 msgstr ""
-"{ph0}02 · 提取规则{ph1}{ph2}36个字符·26个总和{ph3}{ph4}REA 返回每个检查后面的指令和数据。 "
-"剂将它们转化为方程。{ph5}"
+"{ph0}02 · 提取规则{ph1}{ph2}36 个字符 · "
+"26 个求和式{ph3}{ph4}REA 返回每项检查背后的指令和数据。编程助手把它们转化为方程。{ph5}"
 
 #. {ph0}: <span class="flow-label">
 #. {ph1}: </span >
@@ -6508,14 +6508,14 @@ msgid ""
 " script solves the equations. REA captures the original program accepting "
 "the result.{ph5}"
 msgstr ""
-"{ph0}03 · 解决并运行{ph1}{ph2}恢复旗→正确！{ph3}{ph4}一个Python脚本解决方程. REA "
-"捕获接受结果的原始程序。{ph5}"
+"{ph0}03 · 求解并运行{ph1}{ph2}还原出"
+"的 flag → 正确！{ph3}{ph4}一个 Python 脚本解出这些方程。REA 捕获到原程序接受该结果。{ph5}"
 
 #: website/public/showcase/ctf/index.html:245
 msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "The challenge is by joseph, published in DownUnderCTF's official repository."
-msgstr "挑战是由约瑟夫，发表在DownUnderCTF的官方代码仓库。"
+msgstr "该挑战由 joseph 编写，发布在 DownUnderCTF 的官方仓库中。"
 
 #: website/public/showcase/ctf/index.html:253
 msgctxt "page:showcase/ctf/index.html"
@@ -6536,7 +6536,7 @@ msgstr "{ph0}查找检查代码{ph1}"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}Read one mask{ph1}"
-msgstr "{ph0}读一个面具{ph1}"
+msgstr "{ph0}读一个掩码{ph1}"
 
 #. {ph0}: <a href="#code">
 #. {ph1}: </a>
@@ -6544,7 +6544,7 @@ msgstr "{ph0}读一个面具{ph1}"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}Assembly to readable code{ph1}"
-msgstr "{ph0}汇编到可读代码{ph1}"
+msgstr "{ph0}从汇编到可读代码{ph1}"
 
 #. {ph0}: <a href="#solve">
 #. {ph1}: </a>
@@ -6583,7 +6583,7 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "The handout is a 15 KB executable. It asks for a flag, then prints {ph0} or "
 "{ph1}. Start with a simple request to your agent."
-msgstr "讲义是一个15KB可执行文件。 它要求一面旗帜，然后打印 {ph0} 或 {ph1}. 从一个简单的请求开始给你的编程助手。"
+msgstr "题目附件是一个 15 KB 的可执行文件。它要求输入一个 flag，然后打印 {ph0} 或 {ph1}。先向你的编程助手发出一个简单的请求。"
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>
@@ -6630,24 +6630,24 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "An example prompt, with the downloaded challenge available locally and a "
 "native analysis provider connected."
-msgstr "一个示例提示，下载的质询在本地可用，并连接了原生分析提供程序。"
+msgstr "一个示例提示，题目已下载到本地，并连接了原生分析提供程序。"
 
 #: website/public/showcase/ctf/index.html:302
 msgctxt "page:showcase/ctf/index.html"
 msgid "Follow the input prompt to its function"
-msgstr "按照输入提示到其函数"
+msgstr "从输入提示追踪到对应函数"
 
 #: website/public/showcase/ctf/index.html:331
 msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "The reference gives the agent a place to investigate, even though the "
 "executable's original function names have been removed."
-msgstr "引用为编程助手提供了一个调查的地方，即使可执行文件的原始函数名已被删除。"
+msgstr "这条引用为编程助手提供了调查入口，即使可执行文件的原始函数名已被移除。"
 
 #: website/public/showcase/ctf/index.html:338
 msgctxt "page:showcase/ctf/index.html"
 msgid "Read the checker and its two helpers"
-msgstr "阅读检查器和它的两个助手"
+msgstr "阅读检查器及其两个辅助函数"
 
 #. {ph0}: <code>0x18</code>
 #. {ph1}: <code>0x270</code>
@@ -6659,20 +6659,20 @@ msgid ""
 "sums the selected codes and compares the result with a stored number. Its "
 "{ph0}-byte steps across {ph1} bytes give 26 masks."
 msgstr ""
-"第一个循环复制36个字符代码。 检查循环解码掩码，对所选代码求和，并将结果与存储的数字进行比较。 其 {ph0}-字节跨步 {ph1} "
-"字节给出26个掩码。"
+"第一个循环复制36个字符代码。"
+" 检查循环解码掩码，对所选代码求和，并将结果与存储的数字进行比较。 它以 {ph0} 字节为步长跨越 {ph1} 字节，得到 26 个掩码。"
 
 #: website/public/showcase/ctf/index.html:374
 msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "These are selected results from a fresh REA analysis. The local target path "
 "is shortened for display; addresses refer to REA's imported image."
-msgstr "这些是来自新鲜REA分析的选择结果。 本地目标路径缩短显示;地址参考REA的导入图像。"
+msgstr "以下是从一次全新 REA 分析中选取的结果。本地目标路径为显示而做了缩短；地址对应 REA 导入的内存映像。"
 
 #: website/public/showcase/ctf/index.html:382
 msgctxt "page:showcase/ctf/index.html"
 msgid "One check reveals one character"
-msgstr "一张检查显示一个字符"
+msgstr "一次检查揭示一个字符"
 
 #: website/public/showcase/ctf/index.html:383
 msgctxt "page:showcase/ctf/index.html"
@@ -6680,7 +6680,7 @@ msgid ""
 "The checker arranges the input in a 6×6 grid. A mask chooses which cells "
 "contribute to a sum. Its compact encoding uses negative numbers to skip "
 "cells and positive numbers to select them."
-msgstr "检查器将输入排列在6×6网格中。 掩码选择哪些单元格对总和做出贡献。 它的紧凑编码使用负数跳过单元格和正数来选择它们。"
+msgstr "检查器把输入排列在 6×6 网格中。掩码决定哪些单元格参与求和。它的紧凑编码用负数跳过单元格，用正数选中它们。"
 
 #. {ph0}: <a href="../../assets/figures/ctf-mask-equation.svg" >
 #. {ph1}: </a >
@@ -6707,8 +6707,8 @@ msgid ""
 "means −21. The target is a little-endian integer. Together, these bytes tell"
 " the agent that {ph2}, so that character is {ph3}."
 msgstr ""
-"指示 {ph0} 将掩码字节读取为有符号值。 这就是为什么 {ph1} 表示-21. 目标是一个小端整数。 这些字节一起告诉编程助手 "
-"{ph2}，所以该字符是 {ph3}."
+"指令 {ph0} 会把掩码字节按有符号值读取。这就是 {ph1} "
+"表示 −21 的原因。目标是一个小端整数。这些字节一起告诉编程助手 {ph2}，因此该字符是 {ph3}。"
 
 #: website/public/showcase/ctf/index.html:441
 msgctxt "page:showcase/ctf/index.html"
@@ -6720,7 +6720,7 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "Select a step to connect the summing helper and its caller to the same rule "
 "in C."
-msgstr "选择一个步骤将求和帮助程序及其调用者连接到C中的同一规则。"
+msgstr "选择一个步骤，把求和辅助函数及其调用方对应到 C 中的同一条规则。"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
@@ -6752,7 +6752,7 @@ msgstr "{ph0}03{ph1} 添加"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}04{ph1} Advance"
-msgstr "{ph0}04{ph1} 前进，前进"
+msgstr "{ph0}04{ph1} 前进"
 
 #. {ph0}: <span>
 #. {ph1}: </span>
@@ -6760,17 +6760,17 @@ msgstr "{ph0}04{ph1} 前进，前进"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}05{ph1} Compare"
-msgstr "{ph0}05{ph1} 比较一下"
+msgstr "{ph0}05{ph1} 比较"
 
 #: website/public/showcase/ctf/index.html:496
 msgctxt "page:showcase/ctf/index.html"
 msgid "REA · selected original instructions"
-msgstr "REA  · 选定的原始说明"
+msgstr "REA · 选取的原始指令"
 
 #: website/public/showcase/ctf/index.html:520
 msgctxt "page:showcase/ctf/index.html"
 msgid "Readable C · one-check summary"
-msgstr "可读的C · 一检查摘要"
+msgstr "可读的 C · 单次检查摘要"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -6779,7 +6779,7 @@ msgstr "可读的C · 一检查摘要"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}01 · Start at zero.{ph1} {ph2} holds the running sum."
-msgstr "{ph0}01 · 从零开始。{ph1} {ph2} 持有运行总和。"
+msgstr "{ph0}01 · 从零开始。{ph1} {ph2} 保存当前的累加和。"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -6789,7 +6789,7 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "{ph0}02 · Check the mask cell.{ph1} A zero value skips the character; a "
 "nonzero value includes it."
-msgstr "{ph0}02 · 检查掩码单元格。{ph1} 零值跳过字符;非零值包括它。"
+msgstr "{ph0}02 · 检查掩码单元格。{ph1} 零值表示跳过该字符，非零值表示将其计入。"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -6809,7 +6809,7 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "{ph0}04 · Move to the next cell.{ph1} The original loop advances four bytes "
 "per integer and visits six rows of six cells."
-msgstr "{ph0}04 · 移动到下一个单元格。{ph1} 原始循环每个整数前进四个字节，并访问六个单元格的六行。"
+msgstr "{ph0}04 · 移动到下一个单元格。{ph1} 原始循环每处理一个整数前进 4 字节，遍历 6 行、每行 6 个单元格。"
 
 #. {ph0}: <strong>
 #. {ph1}: </strong>
@@ -6821,14 +6821,14 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "{ph0}05 · Compare with the stored target.{ph1} The caller receives the sum "
 "in {ph2}. A mismatch jumps to {ph3}."
-msgstr "{ph0}05 · 与存储的目标进行比较。{ph1} 调用方在 {ph2}. 不匹配跳转到 {ph3}."
+msgstr "{ph0}05 · 与存储的目标值比较。{ph1} 调用方在 {ph2} 中得到总和，不匹配则跳转到 {ph3}。"
 
 #: website/public/showcase/ctf/index.html:573
 msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "The instructions come from the summing helper and its caller. The C is an "
 "explanatory summary with descriptive names and a flattened 36-cell loop."
-msgstr "指令来自求和助手及其调用者。 C是一个具有描述性名称和扁平36个单元格循环的解释性摘要。"
+msgstr "指令来自求和辅助函数及其调用方。C 版本是一份说明性摘要：使用有意义的命名，并将二维遍历改写为遍历 36 个单元格的单层循环。"
 
 #: website/public/showcase/ctf/index.html:581
 msgctxt "page:showcase/ctf/index.html"
@@ -6842,7 +6842,7 @@ msgid ""
 "character codes and requires a total of 1441. The overlapping selections "
 "give equations that a small Python script can solve together."
 msgstr ""
-"大多数掩码选择几个单元格。 例如，第一次检查添加了16个字符代码，总共需要1441个。 重叠的选择给出了一个小的Python脚本可以一起求解的方程。"
+"大多数掩码会选中多个单元格。例如，第一次检查累加 16 个字符编码，要求总和等于 1441。这些相互重叠的选择构成方程，一个小型 Python 脚本即可一并求解。"
 
 #: website/public/showcase/ctf/index.html:590
 msgctxt "page:showcase/ctf/index.html"
@@ -6859,8 +6859,8 @@ msgid ""
 "underscores and braces. The complete download includes all 26 masks and "
 "targets."
 msgstr ""
-"Z3是一个求解器，可以找到满足这些方程的值。 此摘录使用提取的检查，并假定 {ph0} 用字母，数字，下划线和大括号标记。 "
-"完整的下载包括所有26个面具和目标。"
+"Z3 是一个求解器，可以找到满足这些方程的值。此节选使用提取出"
+"的检查，并假定 flag 以 {ph0} 为前缀，包含字母、数字、下划线和大括号。完整下载包含全部 26 个掩码及其目标值。"
 
 #: website/public/showcase/ctf/index.html:624
 msgctxt "page:showcase/ctf/index.html"
@@ -6882,7 +6882,7 @@ msgid ""
 "flag. Changing one selected character from {ph0} to {ph1} makes the first "
 "sum 1440 instead of 1441, and the program rejects it."
 msgstr ""
-"REA的进程捕获记录接受已解决标志的原始可执行文件。 更改一个选定的字符 {ph0} 到 {ph1} 使第一和1440而不是1441，并且程序拒绝它。"
+"REA 的进程捕获记录了原始可执行文件接受已求得 flag 的过程。把某个被选中的字符从 {ph0} 改成 {ph1}，第一个总和就从 1441 变成 1440，程序随之拒绝该输入。"
 
 #: website/public/showcase/ctf/index.html:641
 msgctxt "page:showcase/ctf/index.html"
@@ -6902,12 +6902,12 @@ msgstr "退出代码"
 #: website/public/showcase/ctf/index.html:648
 msgctxt "page:showcase/ctf/index.html"
 msgid "Solver's flag"
-msgstr "解算者之旗"
+msgstr "求解器得到的 flag"
 
 #: website/public/showcase/ctf/index.html:653
 msgctxt "page:showcase/ctf/index.html"
 msgid "One character changed"
-msgstr "一个角色改变了"
+msgstr "改动一个字符"
 
 #: website/public/showcase/ctf/index.html:661
 msgctxt "page:showcase/ctf/index.html"
@@ -6929,7 +6929,7 @@ msgctxt "page:showcase/ctf/index.html"
 msgid ""
 "The recovered value also matches the flag in the organizers' published "
 "challenge metadata, checked after solving the binary."
-msgstr "恢复的值还与组织者发布的挑战元数据中的标志相匹配，在解决二进制后检查。"
+msgstr "解出该二进制文件的 flag 后核对：还原出的值也与主办方公布的题目元数据中的 flag 一致。"
 
 #: website/public/showcase/ctf/index.html:683
 msgctxt "page:showcase/ctf/index.html"
@@ -6943,8 +6943,8 @@ msgid ""
 "with Ghidra 12.1.4 on Linux x64. The binary is a stripped x86-64 ELF, 15,248"
 " bytes."
 msgstr ""
-"在2026年10月8日使用REA4.1.0和Ghidra12.1.4在Linux x64上进行新的分析和两个过程捕获。 "
-"二进制文件是一个剥离的x86-64ELF，15,248字节。"
+"2026 年 10 月 8 日完成了全新分析，并做了两次进程捕获，使用 REA "
+"4.1.0 与 Ghidra 12.1.4，运行于 Linux x64。该二进制文件是一个去符号的 x86-64 ELF，大小为 15,248 字节。"
 
 #: website/public/showcase/ctf/index.html:695
 msgctxt "page:showcase/ctf/index.html"
@@ -6952,7 +6952,7 @@ msgid ""
 "The string references, functions and constants were inspected before reading"
 " the organizers' source or solution. The Python solver and the diagram were "
 "built from those REA results."
-msgstr "在阅读组织者的源代码或解决方案之前，对字符串引用，函数和常量进行了检查。 Python求解器和图表是根据REA结果构建的。"
+msgstr "在阅读主办方的源码或解答之前，先用 REA 检查了字符串引用、函数和常量。Python 求解器与图示都是根据这些 REA 结果构建的。"
 
 #. {ph0}: <a
 #. href="https://github.com/DownUnderCTF/Challenges_2023_Public/blob/b48f83db2984bc7fa2ec7879a32d7efb1be8d333/rev/masked-
@@ -7004,12 +7004,12 @@ msgstr "脚本打印候选标志；将其粘贴到程序的提示符处。 解�
 #: website/public/showcase/ctf/index.html:759
 msgctxt "page:showcase/ctf/index.html"
 msgid "Set up REA with your coding agent"
-msgstr "设置REA与你的编程助手"
+msgstr "配置 REA 以配合你的编程助手"
 
 #: website/public/showcase/ctf/index.html:6
 msgctxt "page:showcase/ctf/index.html"
 msgid "CTF Reverse Engineering: DownUnderCTF Flag Checker — REA"
-msgstr "CTF逆向工程：DownUnderCTFflag 检查器-REA"
+msgstr "CTF 逆向工程：DownUnderCTF flag 检查器 — REA"
 
 #: website/public/showcase/ctf/index.html:7
 msgctxt "page:showcase/ctf/index.html"
@@ -7017,7 +7017,7 @@ msgid ""
 "Use REA to solve DownUnderCTF's masked squares flag checker. Find the "
 "checking functions, extract the masks and compare a recovered flag with the "
 "original program."
-msgstr "使用REA来解决DownUnderCTF的掩码方块flag 检查器。 找到检查函数，提取掩码并将恢复的标志与原始程序进行比较。"
+msgstr "用 REA 破解 DownUnderCTF 的掩码方格 flag 检查器。找出检查函数，提取掩码，并把还原出的 flag 与原始程序比对。"
 
 #: website/public/showcase/ctf/index.html:252
 msgctxt "page:showcase/ctf/index.html"
@@ -7027,7 +7027,7 @@ msgstr "在本页"
 #: website/public/showcase/ctf/index.html:263
 msgctxt "page:showcase/ctf/index.html"
 msgid "CTF flag-checker case study"
-msgstr "CTFflag 检查个案研究"
+msgstr "CTF flag 检查器案例研究"
 
 #: website/public/showcase/ctf/index.html:278
 msgctxt "page:showcase/ctf/index.html"
@@ -7055,7 +7055,7 @@ msgstr "遵循CTF检查"
 #: website/public/showcase/ctf/index.html:497
 msgctxt "page:showcase/ctf/index.html"
 msgid "Copy CTF assembly"
-msgstr "复制CTF装配"
+msgstr "复制 CTF 汇编代码"
 
 #: website/public/showcase/ctf/index.html:521
 msgctxt "page:showcase/ctf/index.html"
@@ -7862,7 +7862,7 @@ msgstr "跳转到内容"
 #, python-brace-format
 msgctxt "page:showcase/index.html"
 msgid "{ph0}Home{ph1} / Showcases"
-msgstr "{ph0}首页{ph1} /陈列柜"
+msgstr "{ph0}首页{ph1} / 案例展示"
 
 #: website/public/showcase/index.html:198
 msgctxt "page:showcase/index.html"
@@ -7874,7 +7874,7 @@ msgctxt "page:showcase/index.html"
 msgid ""
 "Android, games, Electron and a CTF challenge, with code, figures and checked"
 " results."
-msgstr "安卓，游戏，Electron和CTF挑战，与代码，数字和检查结果。"
+msgstr "安卓、游戏、Electron 与一个 CTF 挑战，附代码、图示和已验证的结果。"
 
 #: website/public/showcase/index.html:206
 msgctxt "page:showcase/index.html"
@@ -7884,7 +7884,7 @@ msgstr "Android · APK 分析"
 #: website/public/showcase/index.html:208
 msgctxt "page:showcase/index.html"
 msgid "How an authenticator generates a login code"
-msgstr "验证器如何生成登录验证码"
+msgstr "身份验证器如何生成登录验证码"
 
 #: website/public/showcase/index.html:209
 msgctxt "page:showcase/index.html"
@@ -7915,7 +7915,7 @@ msgid ""
 "Inspect an easy DownUnderCTF challenge with REA. Find its checking "
 "functions, turn masks and sums into equations, then verify the solved flag "
 "with the original program."
-msgstr "使用REA检查一个简单的DownUnderCTF挑战。 找到它的检查函数，将掩码和和转换为方程，然后用原始程序验证已求解的标志。"
+msgstr "用 REA 检查一个简单的 DownUnderCTF 挑战。找出它的检查函数，把掩码和总和转成方程，再用原始程序验证求得的 flag。"
 
 #: website/public/showcase/index.html:238
 msgctxt "page:showcase/index.html"
@@ -7939,8 +7939,8 @@ msgid ""
 "instructions, caller references and numeric constants lead to a small C "
 "function, checked against the original behavior and all 63 compiled bytes."
 msgstr ""
-"从1996年的Windows游戏中恢复左/右声音位置的计算。  "
-"REA的指令，调用者引用和数字常量导致一个小的C函数，对照原始行为和所有63个编译字节进行检查。"
+"从 1996 年的一款 Windows 游戏中还原声像计算。REA 的指令、调用方"
+"引用和数值常量共同指向一个很小的 C 函数，并与原始行为以及全部 63 个已编译字节逐一核对。"
 
 #: website/public/showcase/index.html:257
 msgctxt "page:showcase/index.html"
@@ -7964,8 +7964,8 @@ msgid ""
 " wrappers to the system clipboard, then see how a small HTML marker keeps "
 "rich block data connected to a copy."
 msgstr ""
-"通过跟踪面向页面的API Notion包装好了 JavaScript. "
-"跟随它的IPC包装到系统剪贴板，然后看看一个小的HTML标记如何保持丰富的块数据连接到复制。"
+"在 Notion 打包后的 JavaScript 中追踪一个"
+"面向页面的 API。顺着它的 IPC 包装函数追到系统剪贴板，再看一个小的 HTML 标记如何让富内容块数据与这次复制关联起来。"
 
 #: website/public/showcase/index.html:275
 msgctxt "page:showcase/index.html"
@@ -7988,7 +7988,7 @@ msgid ""
 "Inspect the original 16-bit angle helper with REA. Match its multiply, "
 "divide and coordinate operations to readable C++, then see how they produce "
 "a ring aimed at the player."
-msgstr "用REA检查原始的16位角度助手。 将其乘法，除法和坐标操作匹配到可读的C++，然后看看它们如何产生一个针对玩家的环形弹幕。"
+msgstr "用 REA 检查原始的 16 位角度辅助函数，把其中的乘法、除法和坐标运算对应到可读的 C++ 代码，然后看看它们如何生成一个朝向玩家的环形弹幕。"
 
 #: website/public/showcase/index.html:293
 msgctxt "page:showcase/index.html"
@@ -8005,7 +8005,7 @@ msgctxt "page:showcase/index.html"
 msgid ""
 "The guides walk through a native calculation, an Electron export and a "
 "browser request. Each starts with a prompt and a concrete target."
-msgstr "本指南介绍了本机计算、Electron导出和浏览器请求。 每个都以提示和具体目标开始。"
+msgstr "这些指南分别讲解一次原生代码计算、一次 Electron 导出和一次浏览器请求，每一步都从一个提示词和一个具体目标开始。"
 
 #: website/public/showcase/index.html:303
 msgctxt "page:showcase/index.html"
@@ -8023,8 +8023,8 @@ msgid ""
 "Follow REA investigations through code, figures and demos: an Android "
 "authenticator, DX-Ball, Notion, TH04 and a DownUnderCTF flag checker."
 msgstr ""
-"跟我来 REA 通过代码、数字和演示进行调查：Android身份验证器, DX-Ball, Notion, TH04 "
-"和一个DownUnderCTFflag 检查器。"
+"跟着 REA 的调查走一遍代码、图示与演示：一个 Androi"
+"d 身份验证器、DX-Ball、Notion、TH04 和一个 DownUnderCTF flag 检查器。"
 
 #: website/public/showcase/index.html:321
 msgctxt "page:showcase/index.html"
@@ -8049,7 +8049,7 @@ msgstr "{ph0}首页{ph1} / {ph2}案例展示{ph3} / Notion"
 #: website/public/showcase/notion/index.html:200
 msgctxt "page:showcase/notion/index.html"
 msgid "Case study · Electron"
-msgstr "个案研究*Electron"
+msgstr "案例研究 · Electron"
 
 #. {ph0}: <br />
 #: website/public/showcase/notion/index.html:201
@@ -8063,12 +8063,12 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "Trace a clipboard call from Notion's page API, through the preload and main "
 "process, to Electron's clipboard writer."
-msgstr "跟踪剪贴板调用从Notion的页面API，通过预加载和主进程，到Electron的剪贴板编写器。"
+msgstr "从 Notion 的页面 API 出发，经预加载脚本和主进程，一路追踪到 Electron 写入剪贴板的接口。"
 
 #: website/public/showcase/notion/index.html:206
 msgctxt "page:showcase/notion/index.html"
 msgid "Notion Desktop 7.6.1 · JavaScript · REA"
-msgstr "Notion桌面7.6.1·JavaScript*REA"
+msgstr "Notion Desktop 7.6.1 · JavaScript · REA"
 
 #: website/public/showcase/notion/index.html:210
 msgctxt "page:showcase/notion/index.html"
@@ -8238,7 +8238,7 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "An example prompt with Notion's local application package available to your "
 "coding agent."
-msgstr "一个示例提示与Notion的本地应用程序包可供你的编程助手."
+msgstr "一个示例提示，配合本地 Notion 应用包供你的编程助手使用。"
 
 #: website/public/showcase/notion/index.html:297
 msgctxt "page:showcase/notion/index.html"
@@ -8284,8 +8284,8 @@ msgid ""
 "agent something precise to look for in the main bundle. The four excerpts "
 "below show the route it connects."
 msgstr ""
-"助手打开这些位置，在组装的 API 中找到剪贴板成员，再读取 {ph0}。调用处传入 "
-"{ph1}，让助手知道要在主进程代码中搜索哪个名称。下面四段代码展示这条调用链。"
+"编程助手打开这些位置，在重建出的 API 中找到剪贴板成员，再读取 {ph0"
+"}。调用处传入 {ph1}，让编程助手知道要在主进程代码中搜索哪个名称。下面四段代码展示这条调用链。"
 
 #: website/public/showcase/notion/index.html:335
 msgctxt "page:showcase/notion/index.html"
@@ -8302,7 +8302,7 @@ msgstr "从打包的JavaScript简化，具有可读的变量名称。 不相关�
 #: website/public/showcase/notion/index.html:342
 msgctxt "page:showcase/notion/index.html"
 msgid "Start at the API exposed to the page"
-msgstr "从公开到页面的API开始"
+msgstr "从暴露给页面的 API 开始"
 
 #. {ph0}: <code>invokerInMain</code>
 #: website/public/showcase/notion/index.html:364
@@ -8311,7 +8311,7 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "This member supplies the channel name. The implementation of {ph0} tells us "
 "how the request leaves the page's process."
-msgstr "此成员提供通道名称。 的实施 {ph0} 告诉我们请求如何离开页面的进程。"
+msgstr "此成员提供通道名称。{ph0} 的实现告诉我们请求如何离开页面进程。"
 
 #: website/public/showcase/notion/index.html:371
 msgctxt "page:showcase/notion/index.html"
@@ -8341,12 +8341,12 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "The main process uses another wrapper. Its {ph0} method registers an {ph1} "
 "receiver for that channel."
-msgstr "主进程使用另一个包装器。 其 {ph0} 方法注册一个 {ph1} 那个频道的接收器。"
+msgstr "主进程使用另一个包装器。它的 {ph0} 方法为该通道注册一个 {ph1} 接收器。"
 
 #: website/public/showcase/notion/index.html:430
 msgctxt "page:showcase/notion/index.html"
 msgid "Find the write and its sender check"
-msgstr "查找写入及其发件人检查"
+msgstr "查找写入调用及其发送方校验"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/notion/index.html:453
@@ -8378,7 +8378,7 @@ msgstr ""
 #: website/public/showcase/notion/index.html:471
 msgctxt "page:showcase/notion/index.html"
 msgid "HTML links to saved block data"
-msgstr "保存的块数据的HTML链接"
+msgstr "HTML 关联到已保存的内容块数据"
 
 #: website/public/showcase/notion/index.html:495
 msgctxt "page:showcase/notion/index.html"
@@ -8408,7 +8408,7 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "On paste, Notion looks for the HTML ID and checks it against the saved copy."
 " Matching IDs restore the block data."
-msgstr "在粘贴时，Notion查找HTML ID并根据保存的复制进行检查。 匹配的Id恢复所述块数据。"
+msgstr "粘贴时，Notion 会查找 HTML 中的 ID，并与保存的副本比对。ID 一致即可恢复内容块数据。"
 
 #: website/public/showcase/notion/index.html:509
 msgctxt "page:showcase/notion/index.html"
@@ -8430,7 +8430,7 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "Notion parses Markdown into block data. This example shows how a table "
 "becomes header and data rows."
-msgstr "Notion将Markdown解析为块数据。 此示例显示表如何成为标题和数据行。"
+msgstr "Notion 将 Markdown 解析为内容块数据。此示例展示一张表格如何变成表头行和数据行。"
 
 #: website/public/showcase/notion/index.html:523
 msgctxt "page:showcase/notion/index.html"
@@ -8442,7 +8442,7 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "Recorded output from an extracted Markdown parser. The table becomes rows "
 "and cells."
-msgstr "从提取的Markdown解析器记录输出。 表变为行和单元格。"
+msgstr "来自抽取出的 Markdown 解析器的记录输出。表格变成行和单元格。"
 
 #: website/public/showcase/notion/index.html:551
 msgctxt "page:showcase/notion/index.html"
@@ -8533,8 +8533,8 @@ msgid ""
 " Markdown and AI/chat parsers have separate entry points and intermediate "
 "formats."
 msgstr ""
-"Markdown 示例使用解析器模块 {ph0}。保存的模块测试显示，页面和聊天过滤器都会保留这张表格。粘贴／导入、结构化标记和 "
-"AI／聊天解析器各自有不同入口与中间格式。"
+"Markdown 示例使用解析器模块 {ph0}。"
+"保存的模块测试显示，页面和聊天过滤器都会保留这张表格。粘贴／导入、结构化 Markdown 和 AI／聊天解析器各自有不同入口与中间格式。"
 
 #. {ph0}: <a href="../../guides/javascript/" >
 #. {ph1}: </a >
@@ -8558,12 +8558,12 @@ msgctxt "page:showcase/notion/index.html"
 msgid ""
 "{ph0}DX-Ball reconstruction{ph1}{ph2}Follow native instructions to a checked"
 " C function.{ph3}"
-msgstr "{ph0}DX-Ball 重建工程{ph1}{ph2}按照原生说明检查c函数。{ph3}"
+msgstr "{ph0}DX-Ball 重建{ph1}{ph2}沿原生指令找到一个经过验证的 C 函数。{ph3}"
 
 #: website/public/showcase/notion/index.html:6
 msgctxt "page:showcase/notion/index.html"
 msgid "Notion Electron Reverse Engineering: Clipboard — REA"
-msgstr "Notion Electron逆向工程：Clipboard-REA"
+msgstr "Notion Electron 逆向工程：剪贴板 — REA"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/notion/index.html:7
@@ -8613,7 +8613,7 @@ msgstr "复制Notion剪贴板接收器摘录"
 #: website/public/showcase/notion/index.html:491
 msgctxt "page:showcase/notion/index.html"
 msgid "Restoring rich clipboard data on paste"
-msgstr "在粘贴上还原丰富的剪贴板数据"
+msgstr "粘贴时还原富剪贴板数据"
 
 #: website/public/showcase/notion/index.html:635
 msgctxt "page:showcase/notion/index.html"
@@ -8682,7 +8682,7 @@ msgctxt "page:showcase/th04/index.html"
 msgid ""
 "{ph0}01 · Original game{ph1}{ph2}MAIN.EXE{ph3}{ph4}The PC-98 executable and "
 "its bullet-angle helper.{ph5}"
-msgstr "{ph0}01 · 原创游戏{ph1}{ph2}主要。EXE文件{ph3}{ph4}该 PC-98 可执行文件及其子弹角助手。{ph5}"
+msgstr "{ph0}01 · 原版游戏{ph1}{ph2}MAIN.EXE{ph3}{ph4}该 PC-98 可执行文件及其弹幕角度辅助函数。{ph5}"
 
 # Reviewed for clear case-study reasoning and evidence.
 #. {ph0}: <span class="flow-label">
@@ -8779,7 +8779,7 @@ msgstr "{ph0}汇编到C++{ph1}"
 #, python-brace-format
 msgctxt "page:showcase/th04/index.html"
 msgid "{ph0}Checking the source{ph1}"
-msgstr "{ph0}检查来源{ph1}"
+msgstr "{ph0}检查源码{ph1}"
 
 #. {ph0}: <a href="#project">
 #. {ph1}: </a>
@@ -8890,7 +8890,7 @@ msgctxt "page:showcase/th04/index.html"
 msgid ""
 "These lines select the pattern before difficulty and performance tuning. "
 "{ph0}Read the attack's source{ph1}."
-msgstr "这些线在难度和性能调整之前选择模式。 {ph0}阅读攻击的来源{ph1}."
+msgstr "这几行代码在难度与性能调整之前选定弹幕图案。{ph0}阅读该攻击的源码{ph1}。"
 
 #: website/public/showcase/th04/index.html:360
 msgctxt "page:showcase/th04/index.html"
@@ -8943,7 +8943,7 @@ msgstr ""
 #: website/public/showcase/th04/index.html:423
 msgctxt "page:showcase/th04/index.html"
 msgid "Find where the pattern turns toward the player"
-msgstr "找到模式转向玩家的位置"
+msgstr "找到弹幕转向玩家的那一段"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/th04/index.html:444
@@ -9106,7 +9106,7 @@ msgstr "汇编节选展示自机狙环形分支、瞄准计算和最终存储。
 #: website/public/showcase/th04/index.html:613
 msgctxt "page:showcase/th04/index.html"
 msgid "Read the maintained ring and aim source"
-msgstr "阅读维护的环和瞄准源"
+msgstr "阅读维护中的环形弹幕与瞄准源码"
 
 #. {ph0}: <a
 #. href="https://github.com/N0zoM1z0/th04/blob/0d72e9801a5c14c10384efcbb6734ceccb74ee63/src/main/bullet/add_impl.hpp#L4"
@@ -9126,12 +9126,12 @@ msgctxt "page:showcase/th04/index.html"
 msgid ""
 "{ph0}Ring macro{ph1} · {ph2}Aim and velocity source{ph3} · {ph4}Angle "
 "representation{ph5}"
-msgstr "{ph0}环宏{ph1} · {ph2}目标和速度源{ph3} · {ph4}角度表示{ph5}"
+msgstr "{ph0}环形弹幕宏{ph1} · {ph2}瞄准与速度源码{ph3} · {ph4}角度表示{ph5}"
 
 #: website/public/showcase/th04/index.html:662
 msgctxt "page:showcase/th04/index.html"
 msgid "Checking the maintained source"
-msgstr "检查维护的源"
+msgstr "检查维护中的源码"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/th04/index.html:663
@@ -9173,7 +9173,7 @@ msgstr "两个单独的构建产生相同的匹配字节。 记录的输入哈�
 #, python-brace-format
 msgctxt "page:showcase/th04/index.html"
 msgid "Recorded on 3 October 2026. {ph0}Read the compiler checks{ph1}."
-msgstr "2026年10月3日录得。 {ph0}阅读编译器检查{ph1}."
+msgstr "记录于 2026 年 10 月 3 日。{ph0}阅读编译器检查{ph1}。"
 
 #: website/public/showcase/th04/index.html:692
 msgctxt "page:showcase/th04/index.html"
@@ -9195,14 +9195,14 @@ msgstr "{ph0},156,258字节,DOS MZ"
 #: website/public/showcase/th04/index.html:701
 msgctxt "page:showcase/th04/index.html"
 msgid "Helper entry"
-msgstr "佣工入境"
+msgstr "辅助函数入口"
 
 #. {ph0}: <code>0x2cfc8</code>
 #: website/public/showcase/th04/index.html:702
 #, python-brace-format
 msgctxt "page:showcase/th04/index.html"
 msgid "{ph0} in REA's loaded image"
-msgstr "{ph0} 在REA的加载图像"
+msgstr "{ph0}（位于 REA 的加载映像中）"
 
 #: website/public/showcase/th04/index.html:705
 msgctxt "page:showcase/th04/index.html"
@@ -9220,12 +9220,12 @@ msgstr "{ph0}，返回 {ph1}"
 #: website/public/showcase/th04/index.html:712
 msgctxt "page:showcase/th04/index.html"
 msgid "Recorded code inspection"
-msgstr "记录代码检查"
+msgstr "已记录的代码检查"
 
 #: website/public/showcase/th04/index.html:713
 msgctxt "page:showcase/th04/index.html"
 msgid "REA 4.1.0 · 7 October 2026"
-msgstr "REA4.1.0*2026年10月7日"
+msgstr "Notion Desktop 7.6.1 · JavaScript · REA"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/th04/index.html:718
@@ -9307,7 +9307,7 @@ msgctxt "page:showcase/th04/index.html"
 msgid ""
 "{ph0}Bullet-generation source{ph1}{ph2}The complete helper, other pattern "
 "types and template tuning.{ph3}"
-msgstr "{ph0}子弹生成源{ph1}{ph2}完整的助手，其他模式类型和模板调整。{ph3}"
+msgstr "{ph0}弹幕生成源码{ph1}{ph2}完整的辅助函数、其他弹幕类型与模板调整。{ph3}"
 
 #. {ph0}: <a
 #. href="https://github.com/N0zoM1z0/th04/blob/0d72e9801a5c14c10384efcbb6734ceccb74ee63/docs/DOS_BUILD.md"
@@ -9340,7 +9340,7 @@ msgstr "{ph0}当前项目状态{ph1}{ph2}DOS验证和单独的原生x64移植版
 #: website/public/showcase/th04/index.html:6
 msgctxt "page:showcase/th04/index.html"
 msgid "TH04 Reverse Engineering: DOS Bullet Patterns — REA"
-msgstr "TH04逆向工程：DOS子弹模式-REA"
+msgstr "TH04 逆向工程：DOS 弹幕图案 — REA"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/th04/index.html:7
@@ -9370,7 +9370,7 @@ msgstr "复制TH04示例提示"
 msgctxt "page:showcase/th04/index.html"
 msgid ""
 "TH04 fixed and aimed bullet rings; scroll horizontally on smaller screens"
-msgstr "TH04固定和瞄准子弹环;在较小的屏幕上水平滚动"
+msgstr "TH04 固定环形与自机狙环形弹幕；在小屏幕上可横向滚动"
 
 # Reviewed for clear case-study reasoning and evidence.
 #: website/public/showcase/th04/index.html:313
@@ -9392,7 +9392,7 @@ msgstr "复制 TH04 发射模板"
 #: website/public/showcase/th04/index.html:462
 msgctxt "page:showcase/th04/index.html"
 msgid "Follow the TH04 aimed-ring calculation"
-msgstr "按照TH04-环计算"
+msgstr "跟着 TH04 自机狙环形弹幕的计算过程走一遍"
 
 #: website/public/showcase/th04/index.html:512
 msgctxt "page:showcase/th04/index.html"
@@ -9433,7 +9433,7 @@ msgstr "代码已选中，请用键盘快捷键复制。"
 #, python-brace-format
 msgctxt "runtime"
 msgid "REA on GitHub ({count})"
-msgstr "REA在GitHub（{count})"
+msgstr "REA 在 GitHub 上（{count}）"
 
 #: website/public/assets/dino-demo.js:77
 #, python-brace-format
@@ -9572,7 +9572,7 @@ msgstr "在电脑前思考的分析师"
 #: website/public/assets/figures/ctf-mask-equation.svg:24
 msgctxt "figure:ctf-mask-equation.svg"
 msgid "One check reveals one character"
-msgstr "一张检查显示一个字符"
+msgstr "一次检查揭示一个字符"
 
 #: website/public/assets/figures/ctf-mask-equation.svg:3
 msgctxt "figure:ctf-mask-equation.svg"
@@ -9605,7 +9605,7 @@ msgstr "只有一个单元格贡献这一总和"
 #: website/public/assets/figures/ctf-mask-equation.svg:35
 msgctxt "figure:ctf-mask-equation.svg"
 msgid "Position 21 in the flag must contain 7."
-msgstr "标志中的位置21必须包含7。"
+msgstr "flag 中的第 21 位必须是 7。"
 
 #: website/public/assets/figures/ctf-mask-equation.svg:37
 msgctxt "figure:ctf-mask-equation.svg"
@@ -9620,7 +9620,7 @@ msgstr "26个掩码给出26个方程。"
 #: website/public/assets/figures/ctf-mask-equation.svg:39
 msgctxt "figure:ctf-mask-equation.svg"
 msgid "Solve them together to find the flag."
-msgstr "解决他们一起找到标志。"
+msgstr "把它们放在一起求解，就能得到 flag。"
 
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:2
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:20
@@ -9636,8 +9636,8 @@ msgid ""
 "converted to an integer. Maintained C is checked in 3,205 original-x86 cases"
 " and a separate 63-byte compiler replay."
 msgstr ""
-"REA为一个DX-Ball函数提供指令、调用方和字节读取证据。 堆栈输入乘以1.5625，偏移500，缩放并转换为整数。 "
-"在3,205个原始-x86案例和单独的63字节编译器重放中检查维护的C。"
+"REA 为一个 DX-Ball 函数提供指令、调用方和字节读取证据。堆栈输"
+"入乘以 1.5625，偏移 500，缩放后转换为整数。维护的 C 源码通过 3,205 个原始 x86 用例和一个独立的 63 字节编译器重放进行了检验。"
 
 # Reviewed for technical meaning and concise diagram labels.
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:39
@@ -9673,7 +9673,7 @@ msgstr "还原的函数"
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:47
 msgctxt "figure:dx-ball-sound-pan-investigation.svg"
 msgid "Maintained C"
-msgstr "可维护的 C"
+msgstr "维护的 C 源码"
 
 # Reviewed for technical meaning and concise diagram labels.
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:48
@@ -9715,7 +9715,7 @@ msgstr "VC4.0 编译"
 #: website/public/assets/figures/dx-ball-sound-pan-investigation.svg:55
 msgctxt "figure:dx-ball-sound-pan-investigation.svg"
 msgid "63 matching bytes"
-msgstr "63 字节匹配"
+msgstr "63 字节完全匹配"
 
 #: website/public/assets/figures/rea-investigation-flow.svg:2
 #: website/public/assets/figures/rea-investigation-flow.svg:22
@@ -9729,7 +9729,7 @@ msgid ""
 "Ask a question about a local target. REA inspects and traces through local "
 "analysis adapters, returns evidence, and supports follow-up questions as "
 "your agent explains, implements and tests."
-msgstr "问一个关于当地目标的问题。 REA通过本地分析适配器检查和跟踪，返回证据，并在你的编程助手解释，实施和测试时支持后续问题。"
+msgstr "针对本地目标提问。REA 通过本地分析适配器进行检查和追踪，返回证据，并在你的编程助手解释、实现和测试的过程中支持后续提问。"
 
 # Reviewed for technical meaning and concise diagram labels.
 #: website/public/assets/figures/rea-investigation-flow.svg:31
@@ -9817,7 +9817,7 @@ msgstr "继续提问"
 #: website/public/assets/figures/th04-bullet-ring.svg:2
 msgctxt "figure:th04-bullet-ring.svg"
 msgid "TH04: spacing and aiming a ring of bullets"
-msgstr "TH04：间隔和瞄准一圈子弹"
+msgstr "TH04：子弹环的间距与瞄准"
 
 #: website/public/assets/figures/th04-bullet-ring.svg:3
 msgctxt "figure:th04-bullet-ring.svg"
@@ -9827,8 +9827,8 @@ msgid ""
 "of forty turns all sixteen directions together; the first bullet points at "
 "the player. Template rotation is zero."
 msgstr ""
-"一个完整的顺时针旋转有256个角度单位. 十六颗子弹从零，十六，三十二，到240角度开始。 "
-"添加一个四十的示例玩家方向将所有十六个方向旋转在一起;第一个子弹指向玩家。 模板旋转为零。"
+"一圈顺时针旋转共 256 个角度单位。十六颗子弹分别从 0、16、32 直"
+"到 240 角度开始。以 40 为示例玩家方向，把这十六个方向整体旋转；第一颗子弹指向玩家。模板旋转为零。"
 
 #: website/public/assets/figures/th04-bullet-ring.svg:24
 msgctxt "figure:th04-bullet-ring.svg"
@@ -9860,7 +9860,7 @@ msgstr "原点"
 #: website/public/assets/figures/th04-bullet-ring.svg:105
 msgctxt "figure:th04-bullet-ring.svg"
 msgid "Player"
-msgstr "球员"
+msgstr "玩家"
 
 #: website/public/assets/figures/th04-bullet-ring.svg:110
 msgctxt "figure:th04-bullet-ring.svg"
@@ -10182,7 +10182,7 @@ msgstr "REA →编程助手·方法和调用者"
 #: website/public/showcase/aegis/index.html:518
 msgctxt "page:showcase/aegis/index.html"
 msgid "REA · selected decompiled Java"
-msgstr "REA · 精选反编译Java"
+msgstr "REA · 选定的反编译 Java"
 
 #: website/public/showcase/aegis/index.html:548
 msgctxt "page:showcase/aegis/index.html"
@@ -10202,7 +10202,7 @@ msgstr "下载Aegis APK"
 #: website/public/showcase/aegis/index.html:725
 msgctxt "page:showcase/aegis/index.html"
 msgid "Download Android analysis provider"
-msgstr "下载 Android 分析后端"
+msgstr "下载 Android 分析提供程序"
 
 #: website/public/showcase/ctf/index.html:305
 #: website/public/showcase/ctf/index.html:341
@@ -10218,7 +10218,7 @@ msgstr "REA →编程助手 · 选定结果"
 #: website/public/showcase/ctf/index.html:353
 msgctxt "page:showcase/ctf/index.html"
 msgid "REA → agent · selected instructions"
-msgstr "REA →编程助手 · 选择说明"
+msgstr "REA → 编程助手 · 选定指令"
 
 #: website/public/showcase/ctf/index.html:416
 msgctxt "page:showcase/ctf/index.html"
@@ -10228,7 +10228,7 @@ msgstr "编程助手→ REA  · read_bytes"
 #: website/public/showcase/ctf/index.html:423
 msgctxt "page:showcase/ctf/index.html"
 msgid "REA → agent · seventh entries"
-msgstr "REA →编程助手·第七项"
+msgstr "REA → 编程助手 · 结果中的第七个条目"
 
 #: website/public/showcase/ctf/index.html:691
 msgctxt "page:showcase/ctf/index.html"
@@ -10314,7 +10314,7 @@ msgstr "二进制"
 #: website/public/showcase/index.html:234
 msgctxt "page:showcase/index.html"
 msgid "Checking code"
-msgstr "检查 flag 的代码"
+msgstr "校验 flag 的代码"
 
 #: website/public/showcase/index.html:235
 msgctxt "page:showcase/index.html"
@@ -10334,7 +10334,7 @@ msgstr "可执行文件"
 #: website/public/showcase/index.html:253
 msgctxt "page:showcase/index.html"
 msgid "REA findings"
-msgstr "REA调查结果"
+msgstr "REA 分析结论"
 
 #: website/public/showcase/index.html:254
 msgctxt "page:showcase/index.html"
@@ -10446,12 +10446,12 @@ msgstr "REA →编程助手·指令摘录"
 #: website/public/showcase/th04/index.html:427
 msgctxt "page:showcase/th04/index.html"
 msgid "Same function result · aim excerpt"
-msgstr "相同的函数结果 · 目标摘录"
+msgstr "同一函数的结果 · 瞄准部分摘录"
 
 #: website/public/showcase/th04/index.html:436
 msgctxt "page:showcase/th04/index.html"
 msgid "Corresponding maintained C++"
-msgstr "对应维护的C++"
+msgstr "对应的维护版 C++"
 
 #: website/public/showcase/th04/index.html:616
 msgctxt "page:showcase/th04/index.html"
@@ -10578,7 +10578,7 @@ msgstr ""
 #, python-brace-format
 msgctxt "page:examples/dino-lab/index.html"
 msgid "Reconstruction · {ph0}"
-msgstr "重建工程 · {ph0}"
+msgstr "还原结果 · {ph0}"
 
 #. {ph0}: <span translate="no">Node.js</span>
 #: website/public/faq/index.html:221
@@ -10620,7 +10620,7 @@ msgstr ""
 #, python-brace-format
 msgctxt "page:first-investigation/index.html"
 msgid "{ph0}Page · {ph1}{ph2}{ph3}Export notes{ph4}{ph5}Calls {ph6}.{ph7}"
-msgstr "{ph0}页面 · {ph1}{ph2}{ph3}Export notes（导出笔记）{ph4}{ph5}调用 {ph6}。{ph7}"
+msgstr "{ph0}页面 · {ph1}{ph2}{ph3}Export notes{ph4}{ph5}调用 {ph6}。{ph7}"
 
 #. {ph0}: <span class="flow-label" >
 #. {ph1}: <span translate="no">preload.js</span>
@@ -10762,7 +10762,7 @@ msgid ""
 "Download the example and unzip it. The archive contains the complete {ph0} "
 "folder. Analyze it with {ph1} and npm; Electron is not needed for this "
 "example."
-msgstr "下载示例并解压缩。 存档包含完整的 {ph0} 文件夹。 分析它与 {ph1} 和 npm; Electron 本例不需要。"
+msgstr "下载示例并解压。压缩包内含完整的 {ph0} 文件夹。用 {ph1} 和 npm 分析它；本例不需要 Electron。"
 
 #. {ph0}: <span translate="no">Node.js</span>
 #. {ph1}: <a href="get-started/">
@@ -10796,7 +10796,7 @@ msgstr ""
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "REA · loaded {ph0} · selected lines"
-msgstr "REA · 已加载 {ph0} · 代码节选"
+msgstr "REA · 已加载 {ph0} · 选定行"
 
 #. {ph0}: <span class="flow-label" >
 #. {ph1}: <span translate="no">calc.exe</span>
@@ -10854,14 +10854,14 @@ msgstr "tab_browser_view/{ph0}  · IPC 辅助函数"
 #, python-brace-format
 msgctxt "page:showcase/notion/index.html"
 msgid "main/{ph0} · handler helper"
-msgstr "主要/{ph0}  · 处理程序助手"
+msgstr "main/{ph0} · 处理器辅助函数"
 
 #. {ph0}: <span translate="no">index.js</span>
 #: website/public/showcase/notion/index.html:433
 #, python-brace-format
 msgctxt "page:showcase/notion/index.html"
 msgid "main/{ph0} · clipboard receiver"
-msgstr "主要/{ph0}  · 剪贴板接收器"
+msgstr "main/{ph0} · 剪贴板接收函数"
 
 #: website/public/assets/theme.js:52
 msgctxt "runtime"
@@ -10885,8 +10885,8 @@ msgid ""
 "capture Evidence, or connect Everywhere's MCP server to inspect captured "
 "traffic with your agent."
 msgstr ""
-"要检查 HTTP 请求和响应正文，请使用{ph0}Fiddler Everywhere：SAZ 捕获、MCP 和公开技能{ph1}。导出 SAZ ? "
-"HAR 1.2 可在 REA 中离线获取捕获 Evidence，也可以连接 Everywhere 的 MCP 服务器，让智能体检查已捕获的流量。"
+"要检查 HTTP 请求和响应正文，请使"
+"用{ph0}Fiddler Everywhere：SAZ 捕获、MCP 和公开技能{ph1}。导出 SAZ 或 HAR 1.2，即可离线获取捕获 Evidence 交给 REA；也可以连接 Everywhere 的 MCP 服务器，让编程助手检查已捕获的流量。"
 
 #. {ph0}: <br />
 #: website/public/blog/index.html:203
@@ -10957,7 +10957,7 @@ msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid ""
 "{ph0}Model capability changes the hypotheses an agent can find.{ph1} Later "
 "sessions have solved problems that earlier work left unresolved."
-msgstr "{ph0}模型能力会影响 agent 能提出哪些假设。{ph1} 后来的工作解决了早期尝试未能解决的问题。"
+msgstr "{ph0}模型能力会影响编程助手能提出哪些假设。{ph1} 后来的会话解决了此前工作未能解决的问题。"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
@@ -10977,7 +10977,7 @@ msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid ""
 "{ph0}Give repository knowledge a fair comparison.{ph1} A smaller model with "
 "good retrieval may already know enough to make progress."
-msgstr "{ph0}也要公平评估代码仓库里的知识。{ph1} 较小的模型配合良好的检索，可能已经掌握了足以推进工作的知识。"
+msgstr "{ph0}也要给代码仓库里的知识一个公平的对照。{ph1} 较小的模型配上良好的检索，可能已经掌握足够的知识推进工作。"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
@@ -10987,7 +10987,7 @@ msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid ""
 "{ph0}Train the next useful experiment, and test its oracle.{ph1} The value "
 "of feedback depends on what the checker actually verifies."
-msgstr "{ph0}训练模型选择下一个有价值的实验，同时检验它使用的验证器。{ph1} 反馈是否有用，取决于验证器究竟检查了什么。"
+msgstr "{ph0}训练模型选择下一个有价值的实验，同时检验它使用的校验基准。{ph1} 反馈是否有用，取决于校验基准究竟检查了什么。"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
@@ -10997,7 +10997,7 @@ msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid ""
 "{ph0}Measure accepted reconstruction against time and cost.{ph1} That is the"
 " result I want from the whole agent."
-msgstr "{ph0}结合时间和成本，评估通过验证的重建成果。{ph1} 这是我希望从整个 agent 工作流中获得的结果。"
+msgstr "{ph0}结合时间和成本，评估通过验证的重建成果。{ph1} 这是我希望从整个编程助手工作流中获得的结果。"
 
 #: website/public/blog/reverse-engineering-models/index.html:244
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11050,7 +11050,7 @@ msgstr "{ph0}逆向工程与强化学习{ph1}"
 #, python-brace-format
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "{ph0}When the oracle is wrong{ph1}"
-msgstr "{ph0}当验证器出错时{ph1}"
+msgstr "{ph0}当校验基准出错时{ph1}"
 
 #. {ph0}: <a href="#comparison">
 #. {ph1}: </a>
@@ -11066,7 +11066,7 @@ msgstr "{ph0}值得做的对照实验{ph1}"
 #, python-brace-format
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "{ph0}What kind of agent?{ph1}"
-msgstr "{ph0}这意味着怎样的 agent？{ph1}"
+msgstr "{ph0}这意味着怎样的编程助手？{ph1}"
 
 #: website/public/blog/reverse-engineering-models/index.html:261
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11082,8 +11082,8 @@ msgid ""
 " I have changed models, the repositories have kept a record of what each "
 "session managed to recover."
 msgstr ""
-"从 2026 年 8 月开始，我一直在探索：如果给 agent "
-"访问程序的能力，以及验证自身工作的手段，它能独立完成多少逆向工作？我的经验主要来自游戏重建，尤其是东方系列。随着我更换模型，代码仓库记录了每次工作还原出的内容。"
+"从 2026 年 8 月开始，我一直在探索：如果给编程助手访问程序的能力，以及验证自身工作的手段，它能独立完成多少逆向工作？我的经验主要来自游戏重建，尤其是东方系列"
+"。随着我更换模型，代码仓库记录了每次工作还原出的内容。"
 
 #: website/public/blog/reverse-engineering-models/index.html:270
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11098,7 +11098,7 @@ msgstr ""
 #: website/public/blog/reverse-engineering-models/index.html:277
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "The temporary values had to stay alive together"
-msgstr "临时值需要同时保持有效"
+msgstr "临时值必须同时存活"
 
 #: website/public/blog/reverse-engineering-models/index.html:278
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11163,7 +11163,7 @@ msgid ""
 "lifetime hypothesis gave the agent a new direction; compiler feedback helped"
 " it refine that hypothesis into a source arrangement that matched."
 msgstr ""
-"我感兴趣的是，发现与验证如何共同推进工作。生命周期的假设给 agent 指明了新方向；编译器的反馈又帮助它逐步调整源码，直到找到匹配的写法。"
+"我感兴趣的是，发现与验证如何共同推进工作。生命周期的假设给编程助手指明了新方向；编译器的反馈又帮助它逐步调整源码，直到找到匹配的写法。"
 
 #: website/public/blog/reverse-engineering-models/index.html:321
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11218,8 +11218,8 @@ msgid ""
 "agent can keep trying local variations for a long time before finding a "
 "better way to express the surrounding work."
 msgstr ""
-"{ph0}换一种表达方式，打开了更有价值的搜索空间。{ph1} 这两个例子让我认真看待通用模型的能力：agent "
-"可能花很长时间尝试局部变化，才找到一种更好的整体写法。"
+"{ph0}换一种表达方式，打开了更有价值的搜索空间。{ph"
+"1} 这两个例子让我认真看待通用模型的能力：编程助手可能花很长时间尝试局部变化，才找到一种更好的整体写法。"
 
 #: website/public/blog/reverse-engineering-models/index.html:354
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11362,7 +11362,7 @@ msgid ""
 "failed in the same context. The starting point improves without changing the"
 " model's weights."
 msgstr ""
-"检索这些记录后，agent 可以从已知结果出发，看看我们是如何得到它的，也可以避开在相同条件下已经失败的方案。模型的参数没有改变，工作的起点却提高了。"
+"检索这些记录后，编程助手可以从已知结果出发，看看我们是如何得到它的，也可以避开在相同条件下已经失败的方案。模型的参数没有改变，工作的起点却提高了。"
 
 #. {ph0}: <a
 #. href="https://github.com/N0zoM1z0/th09/commit/1eb843383941d00065622a9e353146c4bb96979e"
@@ -11420,8 +11420,8 @@ msgid ""
 "against the program. Even when the candidate fails, the result can narrow "
 "the remaining possibilities and suggest a more useful next experiment."
 msgstr ""
-"反馈之后如何决策，是我最想研究的部分。在 agent "
-"驱动的重建中，模型提出解释，再用程序来验证。即使候选方案失败了，结果也可能缩小剩余的可能性，提示下一步更值得尝试什么。"
+"反馈之后如何决策，是我最想研究的部分。在编程助手驱动的重建中，模型提出解释，再用程序来验证。即使候选方案失败了，结果也可能"
+"缩小剩余的可能性，提示下一步更值得尝试什么。"
 
 #: website/public/blog/reverse-engineering-models/index.html:487
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11483,14 +11483,14 @@ msgstr "让碰撞检查的值拥有独立存储"
 #: website/public/blog/reverse-engineering-models/index.html:527
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "A clean rebuild confirms the complete match."
-msgstr "干净的重新构建确认了整个函数的匹配。"
+msgstr "一次干净的重建确认了完全匹配。"
 
 #: website/public/blog/reverse-engineering-models/index.html:532
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid ""
 "Selected experiments from the attack-function reconstruction above, grouped "
 "by what they taught us."
-msgstr "选自前面攻击函数的重建实验，按每次得到的认识整理。"
+msgstr "上面攻击函数重建中精选的几个实验，按它们带给我们的启发分类。"
 
 #: website/public/blog/reverse-engineering-models/index.html:536
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11500,8 +11500,8 @@ msgid ""
 " next decision. Keeping ineffective variations matters too: they tell a "
 "later agent which hypotheses have already been tested in that context."
 msgstr ""
-"保存这个过程的训练记录，比单独保存最终源码能教会模型更多东西。它把每个改动、观察到的结果和下一步决策联系起来。无效的尝试也值得保留：后来的 agent "
-"可以据此知道，在这个上下文中，哪些假设已经检验过。"
+"保存这个过程的训练记录，比单独保存最终源码能教会模型更"
+"多东西。它把每个改动、观察到的结果和下一步决策联系起来。无效的尝试也值得保留：后来的编程助手可以据此知道，在这个上下文中，哪些假设已经检验过。"
 
 #. {ph0}: <strong >
 #. {ph1}: </strong >
@@ -11515,8 +11515,8 @@ msgid ""
 " be able to revisit the source representation or inspect the evidence again."
 msgstr ""
 "{ph0}我希望模型学会如何利用反馈。{ph1} "
-"结果没有变化，可能意味着该重新考虑这个改动；差异发生变化，则可能指向另一个原因。当局部修改不再提供有效信息时，agent "
-"应该可以重新考虑源码的整体表达，或者回头检查证据。"
+"结果"
+"没有变化，可能意味着该重新考虑这个改动；差异发生变化，则可能指向另一个原因。当局部修改不再提供有效信息时，编程助手应该可以重新考虑源码的整体表达，或者回头检查证据。"
 
 #: website/public/blog/reverse-engineering-models/index.html:552
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11541,8 +11541,8 @@ msgid ""
 "produce quick, repeatable feedback. The agent can compile a candidate, "
 "inspect the mismatch and use that observation to choose its next step."
 msgstr ""
-"范围明确的重建任务，为研究这些选择提供了一个实际环境。目标和编译器版本固定之后，许多源码实验都能快速给出可重复的反馈。agent "
-"可以编译候选源码、检查差异，再根据观察选择下一步。"
+"范围明确的重建任务，为研究这些选择提供了一个实际环境。"
+"目标和编译器版本固定之后，许多源码实验都能快速给出可重复的反馈。编程助手可以编译候选源码、检查差异，再根据观察选择下一步。"
 
 #: website/public/blog/reverse-engineering-models/index.html:569
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11586,7 +11586,7 @@ msgid ""
 "useful correction, it had to work out what to measure."
 msgstr ""
 "不过，要得到这样一个定义明确的任务，有时得先确定函数负责哪些资源，或者设计新的方法观察程序运行时的行为。在 TH08 "
-"中，{ph0}一次碰撞差异最终追溯到原版处理浮点计算的方式{ph1}。agent 必须先弄清楚该测量什么，才能验证有价值的修正。"
+"中，{ph0}一次碰撞差异最终追溯到原版处理浮点计算的方式{ph1}。编程助手必须先弄清楚该测量什么，才能验证有价值的修正。"
 
 #: website/public/blog/reverse-engineering-models/index.html:598
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11599,7 +11599,7 @@ msgstr "这提示了能力全面的模型的另一个作用：先把问题变得
 #: website/public/blog/reverse-engineering-models/index.html:606
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "When the oracle is wrong"
-msgstr "当验证器出错时"
+msgstr "当校验基准出错时"
 
 #: website/public/blog/reverse-engineering-models/index.html:607
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11608,8 +11608,8 @@ msgid ""
 "model learns. I call the reference or checker an oracle. Even if it gives a "
 "repeatable answer, we still need to understand what that answer covers."
 msgstr ""
-"一旦用某项检查来训练模型，它的覆盖范围就会成为学习环境的一部分。我把这种参考标准或验证器称为 "
-"oracle。即使它能给出可重复的答案，我们也必须知道，这个答案覆盖了什么。"
+"一旦用某项检查来训练模型，它的覆盖范围就会成为学习环境的一部分。我把这种参考标准或校验基准"
+"称为 oracle。即使它能给出可重复的答案，我们也必须知道，这个答案覆盖了什么。"
 
 #: website/public/blog/reverse-engineering-models/index.html:613
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11652,8 +11652,8 @@ msgid ""
 " observed failure was in the check itself. But using that check as a reward "
 "would have made the same blind spot part of the learning environment."
 msgstr ""
-"{ph0}如果用旧检查的结果作为奖励，模型可能学会生成错误的重建源码。{ph1} 我们没有用这个验证器训练 RL "
-"模型；实际观察到的是检查本身的漏洞。但如果把它用作奖励，同一个盲点也会进入学习环境。"
+"{ph0}如果用旧检查的结果作为奖励，模型可能学会生成错误的重建源码。{ph1} 我们没有用这个校验基准"
+"训练 RL 模型；实际观察到的是检查本身的漏洞。但如果把它用作奖励，同一个盲点也会进入学习环境。"
 
 #. {ph0}: <a href="https://arxiv.org/html/2609.05370v1" >
 #. {ph1}: </a >
@@ -11690,7 +11690,7 @@ msgid ""
 "{ph0}Improving the learner and improving its oracle belong to the same "
 "research problem.{ph1} As the learner gets better at optimizing the feedback"
 " we give it, understanding that feedback becomes more important too."
-msgstr "{ph0}改进模型和改进它的验证器，属于同一个研究问题。{ph1} 模型越擅长优化我们给它的反馈，我们就越需要理解反馈本身。"
+msgstr "{ph0}改进模型和改进它的校验基准，属于同一个研究问题。{ph1} 模型越擅长优化我们给它的反馈，我们就越需要理解反馈本身。"
 
 #: website/public/blog/reverse-engineering-models/index.html:670
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11796,7 +11796,7 @@ msgstr ""
 #: website/public/blog/reverse-engineering-models/index.html:739
 msgctxt "page:blog/reverse-engineering-models/index.html"
 msgid "What kind of agent does this suggest?"
-msgstr "这意味着怎样的 agent？"
+msgstr "这意味着怎样的编程助手？"
 
 #: website/public/blog/reverse-engineering-models/index.html:740
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11807,9 +11807,9 @@ msgid ""
 " results stop making sense, the broader agent could return to the target "
 "evidence or investigate the measurement itself."
 msgstr ""
-"如果不同模型在不同阶段各有所长，一种有价值的安排可能是：让能力全面的 agent "
-"可以调用专用模型。当任务变成一种熟悉的编译器搜索时，它可以请专用模型提出候选方案。如果结果开始说不通，通用 agent "
-"可以回头检查目标证据，或者调查测量本身。"
+"如果不同模型在不同阶段各有所长，一种有价值的安排"
+"可能是：让能力全面的编程助手可以调用专用模型。当任务变成一种熟悉的编译器搜索时，它可以请专用模型提出候选方案"
+"。如果结果开始说不通，通用编程助手可以回头检查目标证据，或者调查测量本身。"
 
 #: website/public/blog/reverse-engineering-models/index.html:748
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -11818,7 +11818,7 @@ msgid ""
 "the investigation develops. The agent keeps the freedom to change direction "
 "that made the earlier breakthroughs possible."
 msgstr ""
-"在这样的安排中，专用模型成为 agent 随着调查进展可以选择的工具。agent 仍然拥有改变方向的自由，而这正是前面那些突破发生的重要条件。"
+"在这样的安排中，专用模型成为编程助手可以随着调查推进自行选择的工具。编程助手仍保留改变方向的自由，正是这种自由让前面那些突破成为可能。"
 
 #: website/public/blog/reverse-engineering-models/index.html:753
 msgctxt "page:blog/reverse-engineering-models/index.html"
@@ -12045,7 +12045,7 @@ msgstr "Android · APK 分析"
 #: website/public/index.html:1037
 msgctxt "page:index.html"
 msgid "How an authenticator generates a login code"
-msgstr "验证器如何生成登录验证码"
+msgstr "身份验证器如何生成登录验证码"
 
 #: website/public/index.html:1042
 msgctxt "page:index.html"
@@ -12161,7 +12161,7 @@ msgctxt "page:get-started/index.html"
 msgid ""
 "Commands go in the terminal. Prompts labeled “Your coding agent” go in the "
 "agent's chat."
-msgstr "命令粘贴到终端；标着“你的编程助手”的提问粘贴到助手的聊天框。"
+msgstr "命令粘贴到终端；标着“你的编程助手”的提示词粘贴到助手的聊天框。"
 
 #. {ph0}: <a href="https://nodejs.org/en/download" >
 #. {ph1}: </a >
@@ -12212,7 +12212,7 @@ msgctxt "page:get-started/index.html"
 msgid ""
 "Your agent is the AI you talk to. REA supplies the inspection tools it uses."
 " Pick one client below; open its instructions if you haven't used it before."
-msgstr "你和编程助手对话，它调用 REA 来分析软件。从下面选一个客户端；第一次使用就展开它的安装步骤。"
+msgstr "你对话的编程助手就是 AI。REA 为它提供所用的检查工具。从下面选一个客户端；没用过就先看它的说明。"
 
 #: website/public/get-started/index.html:443
 msgctxt "page:get-started/index.html"
@@ -12404,7 +12404,7 @@ msgstr "把这段话复制给编程助手："
 #: website/public/get-started/index.html:808
 msgctxt "page:get-started/index.html"
 msgid "For one specific client, add its setup ID:"
-msgstr "如果只配置一个指定客户端，附上它的 setup ID："
+msgstr "指定某一个客户端时，附上它的 setup ID："
 
 #. {ph0}: <code>y</code>
 #: website/public/get-started/index.html:823
@@ -12422,7 +12422,7 @@ msgctxt "page:get-started/index.html"
 msgid ""
 "MCP is the connection that lets your agent call REA. The skill gives it a "
 "workflow for investigating software."
-msgstr "MCP 让编程助手能够调用 REA；skill 则告诉它分析软件时该怎样使用这些工具。"
+msgstr "MCP 让编程助手能够调用 REA；skill 则为它提供分析软件的工作流程。"
 
 #: website/public/get-started/index.html:838
 msgctxt "page:get-started/index.html"
@@ -12461,8 +12461,8 @@ msgid ""
 "button. Your agent can inspect its code without installing or launching "
 "Electron."
 msgstr ""
-"示例是一个包含六个文件的 Electron 应用，带有{ph0}Export notes（导出笔记）{ph1}按钮。助手无需安装或启动 Electron"
-" 就能检查代码。"
+"示例是一个包含六个文件的 Electron "
+"应用，带有{ph0}Export notes{ph1}按钮。编程助手无需安装或启动 Electron 就能检查它的代码。"
 
 #: website/public/get-started/index.html:892
 msgctxt "page:get-started/index.html"
@@ -12558,7 +12558,7 @@ msgctxt "page:get-started/index.html"
 msgid ""
 "Choose the section for your target. A provider is the local analysis tool "
 "REA uses for that kind of software."
-msgstr "按目标类型展开下面的步骤。Provider 指 REA 分析这类软件时使用的本地工具。"
+msgstr "按你的目标选择对应小节。Provider 指 REA 分析这类软件时使用的本地工具。"
 
 #: website/public/get-started/index.html:984
 msgctxt "page:get-started/index.html"
@@ -13194,7 +13194,7 @@ msgid ""
 "Linux arm64 installation, build the native decompiler for your computer "
 "before continuing."
 msgstr ""
-"把两个路径换成你已有的安装位置。如果刚在 macOS 或 Linux arm64 上解压 Ghidra，先为这台电脑编译原生反编译器，再继续下面的步骤。"
+"把两个路径换成你已有的安装位置。如果是全新安装在 macOS 或 Linux arm64 上，请先为这台电脑编译原生反编译器，再继续下面的步骤。"
 
 #: website/public/get-started/index.html:1172
 msgctxt "page:get-started/index.html"
@@ -13248,7 +13248,7 @@ msgstr "然后检查 Ghidra，并为客户端保存这些路径："
 #, python-brace-format
 msgctxt "page:index.html"
 msgid "Why does Calculator give 220 for {ph0}?"
-msgstr "为什么计算器中的 {ph0} 得到 220？"
+msgstr "为什么计算器对 {ph0} 给出 220？"
 
 #. {ph0}: <a href="#what-is-re">
 #. {ph1}: </a>
@@ -13353,7 +13353,7 @@ msgctxt "page:index.html"
 msgid ""
 "Follow Notion's packaged JavaScript to the system clipboard and see how a "
 "copy preserves rich block data."
-msgstr "从 Notion 打包的 JavaScript 追踪到系统剪贴板，看看复制如何保留丰富的区块数据。"
+msgstr "从 Notion 打包的 JavaScript 追踪到系统剪贴板，看看复制操作如何保留富文本区块数据。"
 
 #: website/public/index.html:1060
 msgctxt "page:index.html"
@@ -13372,7 +13372,7 @@ msgctxt "page:index.html"
 msgid ""
 "These guides cover setup and a first investigation for each kind of "
 "software."
-msgstr "这些指南介绍各类软件的环境配置和第一次调查。"
+msgstr "这些指南介绍各类软件的安装配置和第一次调查。"
 
 #. {ph0}: <a href="#calculator">
 #. {ph1}: </a>
@@ -13633,7 +13633,7 @@ msgstr "{ph0}GitHub issues{ph1} — 报告问题或提出功能需求。"
 #: website/public/index.html:294
 msgctxt "page:index.html"
 msgid "Setup for your platform:"
-msgstr "按你的平台设置："
+msgstr "选择适合你的平台的安装方式："
 
 #. {ph0}: <a href="get-started/#curl-installation" >
 #. {ph1}: <span translate="no">curl</span>
@@ -13697,7 +13697,7 @@ msgid ""
 "Use REA with my configured provider to inspect {ph0}. List its functions and"
 " strings, then explain the part that handles user input with references to "
 "the code."
-msgstr "使用 REA 和我已配置的分析工具检查 {ph0}。列出其中的函数和字符串，然后说明处理用户输入的部分，并给出代码引用。"
+msgstr "用 REA 通过我已配置的分析引擎检查 {ph0}。列出它的函数和字符串，然后结合代码引用说明处理用户输入的那部分。"
 
 #: website/public/blog/index.html:120 website/public/blog/index.html:239
 #: website/public/blog/reverse-engineering-models/index.html:120

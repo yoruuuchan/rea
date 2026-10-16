@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +28,8 @@ import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/
 import { z } from "zod";
 
 import { ELECTRON_IDENTITY_LIMITATION } from "../../../src/domain/javascript/javascriptElectronMemberWrites.js";
+import { javaScriptSemanticTraceResultSchema } from "../../../src/domain/javascript/javascriptSemanticTraceSchemas.js";
+import type { JavaScriptSemanticQueryInput } from "../../../src/domain/javascript/javascriptSemanticQuerySchemas.js";
 
 const execute = promisify(execFile);
 const requireFixture = createRequire(import.meta.url);
@@ -873,6 +875,110 @@ describe("application workflow CLI parity", () => {
     });
   }, 20_000);
 });
+
+it("traces all endpoint carriers and their response consumers through CLI and MCP", async () => {
+  const root = await createTestTempDirectory("rea-endpoint-response-trace-");
+  const endpoint = "https://example.invalid/v1/data";
+  const source = `export async function load() {
+    const response = await fetch(${JSON.stringify(endpoint)});
+    return await response.json();
+  }`;
+  const sourcePath = join(root, "app.js");
+  await writeFile(sourcePath, source);
+  const application = parseEvidence(
+    await runCli(["analyze-javascript-application", root, "--json"]),
+  );
+  const graph = javascriptApplicationAnalysisResultSchema.parse(
+    application.normalized_result,
+  ).semantic_graph;
+  const carriers = graph.nodes.filter(
+    ({ properties }) => properties.endpoint === endpoint,
+  );
+  expect(carriers.map(({ kind }) => kind).toSorted()).toEqual([
+    "request",
+    "response",
+  ]);
+  const response = carriers.find(({ kind }) => kind === "response");
+  if (response === undefined) throw new Error("Expected matching response");
+  const consumer = graph.relations.find(
+    ({ source_node_id, relation }) =>
+      source_node_id === response.node_id && relation === "consumed-by",
+  );
+  expect(consumer).toMatchObject({ resolution: "resolved" });
+  const client = await connectedMcpClient();
+  const trace = async (seed: JavaScriptSemanticQueryInput["seed"]) => {
+    const input = {
+      application,
+      query: { seed, direction: "forward-influence" },
+    };
+    const cliEvidence = parseEvidence(
+      await runCliWithRequestFile(root, "trace-javascript-semantics", input),
+    );
+    const mcpResponse = await client.callTool({
+      name: "trace_javascript_semantics",
+      arguments: input,
+    });
+    expect(mcpResponse.isError).not.toBe(true);
+    expect(parseEvidence(mcpResponse.structuredContent)).toEqual(cliEvidence);
+    const result = javaScriptSemanticTraceResultSchema.parse(
+      cliEvidence.normalized_result,
+    );
+    expect(result.source_evidence_id).toBe(application.evidence_id);
+    expect(result.source_graph_id).toBe(graph.graph_id);
+    return result;
+  };
+  const selected = await trace({ kind: "endpoint", value: endpoint });
+  expect(selected.seed_node_ids).toEqual(
+    carriers.map(({ node_id }) => node_id).toSorted(),
+  );
+  const exactNodes = new Map<string, (typeof selected.nodes)[number]>();
+  const exactRelations = new Map<string, (typeof selected.relations)[number]>();
+  for (const carrier of carriers) {
+    const exact = await trace({
+      kind: "semantic-node",
+      node_id: carrier.node_id,
+    });
+    for (const node of exact.nodes) exactNodes.set(node.node_id, node);
+    for (const relation of exact.relations)
+      exactRelations.set(relation.relation_id, relation);
+  }
+  expect(new Map(selected.nodes.map((node) => [node.node_id, node]))).toEqual(
+    exactNodes,
+  );
+  expect(
+    new Map(
+      selected.relations.map((relation) => [relation.relation_id, relation]),
+    ),
+  ).toEqual(exactRelations);
+  expect(selected.nodes.map(({ kind }) => kind).toSorted()).toEqual([
+    "call-site",
+    "request",
+    "response",
+  ]);
+  expect(selected.relations).toEqual([consumer]);
+  expect(selected).toMatchObject({
+    status: "ambiguous",
+    summary: {
+      total_seed_matches: 2,
+      traversed_nodes: 3,
+      traversed_relations: 1,
+    },
+    coverage: { status: "partial" },
+  });
+  expect(graph.coverage.status).toBe("unknown");
+  const absent = await trace({
+    kind: "endpoint",
+    value: `${endpoint}/missing`,
+  });
+  expect(absent).toMatchObject({
+    status: "partial",
+    seed_node_ids: [],
+    nodes: [],
+    relations: [],
+    coverage: { status: "partial" },
+  });
+  expect(await readFile(sourcePath, "utf8")).toBe(source);
+}, 20_000);
 
 describe("rest parameter semantic trace CLI", () => {
   it("traces each ordinary rest argument to its parameter through public application Evidence", async () => {

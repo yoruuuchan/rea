@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 
 import { CutterBridgeService } from "../../../src/cutter/CutterBridgeService.js";
+import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
 
 const cutterInput = {
   session_id: "27d3e3f1-f1e5-49ae-91ec-95af1f343a5a",
@@ -404,3 +405,112 @@ it("shares one cleanup attempt when commands retry the same receipt together", a
   expect(confirms).toBe(1);
   expect(dispatches).toBe(3);
 });
+
+it.each([
+  { phase: "before", reason: { code: "EACCES" } },
+  {
+    phase: "before",
+    reason: new ProviderCleanupError("caller-owned", ["opaque caller value"], {
+      reason: "caller metadata",
+    }),
+  },
+  {
+    phase: "during",
+    reason: new ProviderCleanupError("caller-owned", ["opaque caller value"], {
+      reason: "caller metadata",
+    }),
+  },
+  {
+    phase: "during",
+    reason: { cleanupIncomplete: true, resource: "caller resource" },
+  },
+])(
+  "models opaque discovery cancellation $phase the port call",
+  async ({ phase, reason }) => {
+    const controller = new AbortController();
+    let calls = 0;
+    const service = new CutterBridgeService({
+      listSessions: async () => {
+        calls += 1;
+        controller.abort(reason);
+        return {
+          sessions: [],
+          bridge_directory: "/private/bridge",
+          discovery_status: "no_live_bridge_found",
+          bridge_directory_security: "private_verified",
+        };
+      },
+      execute: async () => {
+        throw new Error("Unexpected command dispatch");
+      },
+    });
+    if (phase === "before") controller.abort(reason);
+    const result = await service.listSessions({ signal: controller.signal });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError", cleanupIncomplete: false },
+    });
+    if (result.ok) throw new Error("Expected cancellation");
+    expect(result.error.cause).toBe(reason);
+    expect(calls).toBe(phase === "before" ? 0 : 1);
+  },
+);
+
+it.each(["descriptor-first", "command-first"])(
+  "resolves mixed cleanup only after both owners: %s",
+  async (order) => {
+    const { ProviderCleanupError } =
+      await import("../../../src/domain/providerCleanupError.js");
+    const { AnalysisError } =
+      await import("../../../src/domain/analysisErrorBase.js");
+    const descriptorFailure = new ProviderCleanupError(
+      "cutter",
+      ["descriptor-fixture"],
+      { reason: "controlled descriptor close failure" },
+    );
+    let terminal = false;
+    const releaseDescriptors = async () => {
+      if (descriptorFailure.cleanupIncomplete) throw descriptorFailure;
+    };
+    const close = vi.fn(releaseDescriptors);
+    const service = new CutterBridgeService({
+      listSessions: async () => ({
+        sessions: [],
+        bridge_directory: "/fixture",
+        discovery_status: "no_live_bridge_found",
+        bridge_directory_security: "private_verified",
+      }),
+      confirmCommandCompletion: async () => ({ ok: true, value: terminal }),
+      retryDescriptorCleanup: releaseDescriptors,
+      close,
+      execute: async () => ({
+        requestId: "4b18ce4d-bf31-456e-ae31-e8c547b2f9db",
+        output: null,
+        currentFile: null,
+        documentGeneration: 7,
+        identityStatus: "partial",
+        cutterVersion: null,
+        executionState: "unknown",
+        error: "missing-reply",
+        message: "completion remains unknown",
+        outputTruncated: false,
+      }),
+    });
+    const dispatched = await service.execute(cutterInput);
+    if (dispatched.ok) throw new Error("Expected uncertain command");
+    const mixed = await service.close().catch((cause: unknown) => cause);
+    if (!(mixed instanceof AnalysisError))
+      throw new Error("Expected typed mixed cleanup");
+    expect(mixed.cleanupIncomplete).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+    if (order === "descriptor-first") descriptorFailure.resolveCleanup();
+    else terminal = true;
+    await expect(service.close()).rejects.toBeInstanceOf(AnalysisError);
+    expect(mixed.cleanupIncomplete).toBe(true);
+    descriptorFailure.resolveCleanup();
+    terminal = true;
+    await service.close();
+    expect(dispatched.error.cleanupIncomplete).toBe(false);
+    expect(mixed.cleanupIncomplete).toBe(false);
+  },
+);

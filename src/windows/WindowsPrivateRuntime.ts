@@ -36,6 +36,22 @@ const transientRuntimeCleanupSchema = z.object({
   code: z.literal("ERR_REA_WINDOWS_NATIVE"),
   win32Code: z.union([z.literal(32), z.literal(33)]),
 });
+const snapshotCancellationSchema = z.object({
+  code: z.literal("ERR_REA_WINDOWS_NATIVE"),
+  win32Code: z.literal(995),
+});
+
+/** A native snapshot acknowledged cancellation, with the caller reason retained. */
+export class WindowsSnapshotCancelledError extends Error {
+  constructor(
+    readonly reason: unknown,
+    cause: unknown,
+  ) {
+    super("Windows snapshot cancelled", { cause });
+    this.name = "WindowsSnapshotCancelledError";
+  }
+}
+
 const RUNTIME_CLEANUP_ATTEMPTS = 10;
 const RUNTIME_CLEANUP_RETRY_DELAY_MS = 100;
 
@@ -114,6 +130,13 @@ export class WindowsPrivateRuntime {
     if (signal?.aborted === true) cancel();
     try {
       return snapshotSchema.parse(await pending);
+    } catch (cause: unknown) {
+      if (
+        signal?.aborted === true &&
+        snapshotCancellationSchema.safeParse(cause).success
+      )
+        throw new WindowsSnapshotCancelledError(signal.reason, cause);
+      throw cause;
     } finally {
       signal?.removeEventListener("abort", cancel);
       if (this.#pending === pending) this.#pending = undefined;

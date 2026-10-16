@@ -471,6 +471,85 @@ describe("Ghidra installation rejection diagnostics", () => {
   });
 });
 
+describe("Ghidra configuration directory identity", () => {
+  it.each([
+    [
+      "application.version=12.1.4\napplication.release.name=PUBLIC\n",
+      "ghidra_12.1.4_PUBLIC",
+    ],
+    [
+      "application.version=12.1.2-2.1\napplication.release.name=DEV\n",
+      "ghidra_12.1.2-2.1_DEV",
+    ],
+    [
+      "application.version=12.1.4\napplication.release.name=pub\\\n lic\n",
+      "ghidra_12.1.4_PUBLIC",
+    ],
+    ["application.version=12.1.4\n", null],
+    ["application.release.name=PUBLIC\n", null],
+    ["application.version=12.1.4\napplication.release.name=\n", null],
+    ["application.version=12.1.4\napplication.release.name=../outside\n", null],
+    [
+      "application.version=12.1.4\napplication.release.name=..\\\\outside\n",
+      null,
+    ],
+    ["application.version=../12.1.4\napplication.release.name=PUBLIC\n", null],
+    [
+      "application.version=12.1.4+build\napplication.release.name=PUBLIC\n",
+      null,
+    ],
+    ["application.version=12.1.4\napplication.release.name=\\uNOTHEX\n", null],
+  ])("derives a safe release coordinate from %j", (content, expected) => {
+    expect(ghidraApplicationProperties(content)).toMatchObject({
+      configurationDirectoryName: expected,
+    });
+  });
+
+  it.each([
+    ["12.1.0", "ghidra_12.1_PUBLIC"],
+    ["012.01.000", "ghidra_12.1_PUBLIC"],
+    ["12.1.0-BETA", "ghidra_12.1-BETA_PUBLIC"],
+    ["12.1.0-", "ghidra_12.1_PUBLIC"],
+  ])(
+    "uses Ghidra's canonical configuration version while retaining %s",
+    (raw, expected) => {
+      expect(
+        ghidraApplicationProperties(
+          `application.version=${raw}\napplication.release.name=PUBLIC\n`,
+        ),
+      ).toMatchObject({
+        providerVersion: raw,
+        configurationDirectoryName: expected,
+      });
+    },
+  );
+
+  it.each([
+    [
+      "application.version=12.1.4\napplication.release.name=PUBLIC\napplication.java.min=21\n",
+      "ghidra_12.1.4_PUBLIC",
+    ],
+    ["application.version=12.1.4\napplication.java.min=21\n", null],
+  ])(
+    "preserves the inspected identity independently of the installation basename",
+    (content, expected) => {
+      const inspection = inspectGhidraInstallation(
+        {
+          environment: {},
+          installDir: INSTALL,
+          platform: "linux",
+          architecture: "x64",
+        },
+        host({ readText: () => content }),
+      );
+      expect(inspection).toMatchObject({
+        status: "available",
+        configurationDirectoryName: expected,
+      });
+    },
+  );
+});
+
 describe("Ghidra release line and JDK bounds", () => {
   it("uses Java Properties last-key, delimiter, escape, and continuation rules", () => {
     const properties = ghidraApplicationProperties(
@@ -486,6 +565,7 @@ describe("Ghidra release line and JDK bounds", () => {
     );
     expect(properties).toEqual({
       providerVersion: "12.1.4",
+      configurationDirectoryName: null,
       javaMinimum: { status: "major", major: 21 },
       javaMaximum: { status: "absent" },
       parseError: null,

@@ -584,22 +584,6 @@ const hardLinksUnsupported = (cause: unknown): boolean =>
 const describeAdbFailure = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
-const cleanupLeasesForRetryFailure = (
-  cause: unknown,
-): readonly AnalysisCleanupLease[] | undefined => {
-  if (!(cause instanceof ArtifactResourceRetryFailure)) return undefined;
-  const leases = new Set<AnalysisCleanupLease>();
-  for (const owner of cause.failedOwners) {
-    if (
-      owner.kind !== "lease" ||
-      !(owner.lease instanceof AnalysisCleanupLease)
-    )
-      return undefined;
-    leases.add(owner.lease);
-  }
-  return leases.size > 0 ? [...leases] : undefined;
-};
-
 interface ScreenPublicationCloseFailure {
   readonly cause: unknown;
   readonly resource: string;
@@ -1046,7 +1030,10 @@ export class AdbProvider {
           const leases =
             (cause instanceof AnalysisError
               ? this.#outputDirectoryRetryLeases.get(cause)
-              : undefined) ?? cleanupLeasesForRetryFailure(cause);
+              : undefined) ??
+            (cause instanceof ArtifactResourceRetryFailure
+              ? cause.cleanupLeases
+              : undefined);
           if (leases === undefined) allFailuresHaveExactLeaseOwners = false;
           for (const lease of leases ?? []) failedLeases.add(lease);
         }
@@ -1390,7 +1377,10 @@ export class AdbProvider {
           [cause],
           this.#cleanupResources(cause, "ADB provider-owned resource"),
         );
-        const leases = cleanupLeasesForRetryFailure(cause);
+        const leases =
+          cause instanceof ArtifactResourceRetryFailure
+            ? cause.cleanupLeases
+            : undefined;
         if (leases !== undefined) new AnalysisCleanupLeaseGroup(error, leases);
         return err(error);
       }

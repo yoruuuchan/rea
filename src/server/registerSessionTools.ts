@@ -314,7 +314,10 @@ export const registerSessionTools = (
               {
                 cause,
                 reason: "cleanup_incomplete",
-                cleanupResources: ["process_capture_resources"],
+                cleanup: {
+                  reason: "process capture cleanup remains incomplete",
+                  resources: ["process_capture_resources"],
+                },
                 executionFailure:
                   cause instanceof Error
                     ? cause.message || cause.name

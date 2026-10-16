@@ -445,7 +445,7 @@ const inspectCanonicalSkill = async (
       }
     }
     if (clientIds !== undefined || rootHasFiles || rootIssues.length > 0) {
-      installedDestination = true;
+      installedDestination ||= rootHasFiles;
       canonical = canonical && rootCanonical;
       issues.push(...rootIssues);
     }
@@ -646,7 +646,6 @@ export const readInstalledSkillIdentity = async (
     ? inspection.value.manifest
     : inspection.error.manifest;
   const issues = inspection.ok ? [] : inspection.error.issues;
-  if (content === undefined && issues.length === 0) return undefined;
   const toolCount =
     content === undefined
       ? undefined

@@ -1351,3 +1351,55 @@ const stopNodeChild = async (child: ChildProcess) => {
   child.kill("SIGKILL");
   await exited;
 };
+
+it.skipIf(process.platform === "win32").each([
+  {
+    name: "invalid UTF-8",
+    stdout: "owned compiler stdout",
+    stderrHex: "ff",
+    stderrBytes: 1,
+    truncated: false,
+  },
+  {
+    name: "bounded stdout",
+    stdout: "x".repeat(12000),
+    stderrHex: "61",
+    stderrBytes: 1,
+    truncated: true,
+  },
+])(
+  "retains original output facts for $name compiler failures",
+  async ({ stdout, stderrHex, stderrBytes, truncated }) => {
+    const directory = await createTestTempDirectory(
+      "rea-compiler-output-facts-",
+    );
+    const executable = join(directory, "compiler");
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(stdout)}); process.stderr.write(Buffer.from(${JSON.stringify(stderrHex)}, "hex")); process.exitCode=7;\n`,
+      { mode: 0o755 },
+    );
+    const reader = createDarwinProcessRunTokenReader({
+      compiler: { kind: "xcrun", executable },
+    });
+    try {
+      const failure = await preparationFailure(reader);
+      expect(failure.compilerOutcome?.stderrBytes).toBe(stderrBytes);
+      expect(failure.capturedOutput).toEqual({
+        stdout: stdout.slice(0, 8192),
+        stderr: Buffer.from(stderrHex, "hex").toString("utf8"),
+        stdout_bytes: Buffer.byteLength(stdout),
+        stderr_bytes: stderrBytes,
+        truncated,
+        exit_code: 7,
+        signal: null,
+      });
+      const normalized = normalizeCaptureFailure(failure, undefined);
+      if (!(normalized instanceof ProcessCaptureError))
+        throw new Error("Expected capture failure");
+      expect(normalized.capturedOutput).toEqual(failure.capturedOutput);
+    } finally {
+      await reader.close();
+    }
+  },
+);

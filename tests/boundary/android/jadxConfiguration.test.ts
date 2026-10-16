@@ -387,3 +387,45 @@ it("tags unavailable diagnostics with the boundary failure kind", async () => {
   if (availability.status !== "unavailable") throw new Error("unreachable");
   expect(availability.diagnostics["failure_kind"]).toBe("jar");
 });
+
+it("reports the effective operation deadline and rejects unusable values", async () => {
+  const root = await createTestTempDirectory("rea-jadx-deadline-");
+  const jar = join(root, "jadx-headless-mcp.jar");
+  const javaHome = await createFakeJdk(root);
+  await writeJadxJarInventory(jar);
+  const environment = { REA_JADX_MCP_JAR: jar, JAVA_HOME: javaHome };
+  for (const [value, expected] of [
+    [undefined, 120_000],
+    ["1", 1],
+    ["900000", 900_000],
+    ["2147483647", 2_147_483_647],
+  ] as const)
+    await expect(
+      inspectJadxAvailability({
+        ...environment,
+        ...(value === undefined
+          ? {}
+          : { REA_JADX_OPERATION_TIMEOUT_MS: value }),
+      }),
+    ).resolves.toMatchObject({
+      status: "available",
+      diagnostics: { operation_timeout_ms: expected },
+    });
+  // Node clamps timer delays above the signed 32-bit range to 1 ms.
+  for (const value of ["", "0", "-1", "1.5", "1e3", " 5", "abc", "2147483648"])
+    await expect(
+      inspectJadxAvailability({
+        ...environment,
+        REA_JADX_OPERATION_TIMEOUT_MS: value,
+      }),
+    ).resolves.toMatchObject({
+      status: "unavailable",
+      code: "open_options_invalid",
+      reason: expect.stringContaining("REA_JADX_OPERATION_TIMEOUT_MS"),
+      diagnostics: {
+        setting: "REA_JADX_OPERATION_TIMEOUT_MS",
+        value,
+        failure_kind: "operation_timeout",
+      },
+    });
+});

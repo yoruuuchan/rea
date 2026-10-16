@@ -258,6 +258,23 @@ The separate GitHub Pages host uses only the manual
 **Settings → Pages → Build and deployment → Source** must be set to
 **GitHub Actions** before deploying there.
 
+### Translation corrections
+
+README editions and website editions have separate translation sources:
+
+- Find the language's `readme` path in the
+  [language inventory](website/locales/languages.json) and edit that file.
+  Locale codes and README suffixes can differ. Use the
+  [English README](README.md) to check commands, requirements, and analysis claims.
+- Edit `msgstr` values in `website/locales/<language>/messages.po` for website
+  text. Follow the [website translation guide](website/locales/README.md) for
+  the Python environment, catalog validation, and local preview. Preserve source
+  strings, contexts, placeholders, commands, paths, and recorded evidence.
+
+Before submitting a website translation, run the catalog and website checks in
+that guide. Translated HTML in `website/_site/` is generated; edit the PO catalog
+rather than the generated pages.
+
 ## Development feedback and PR verification
 
 For routine merges, wait for the required checks to pass for the current PR

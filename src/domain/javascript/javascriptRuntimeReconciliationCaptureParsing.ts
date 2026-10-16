@@ -12,6 +12,7 @@ import {
 import {
   classifyBrowserCompleteness,
   type BrowserCompleteness,
+  type BrowserExclusion,
 } from "../browserCompleteness.js";
 import {
   electronPageInspectionSchema,
@@ -350,9 +351,11 @@ const normalizeV8Inspection = (
     })),
   },
   workers: [],
+  // Route exclusions as CdpCaptureCompleteness does: denied locations are
+  // policy filtered, while invalid protocol values leave scripts unavailable.
   completeness: classifyBrowserCompleteness({
     policyFilteredSections: new Set(
-      excludedV8Scripts(result) > 0 ? ["scripts"] : [],
+      result.scripts.excluded.unsupported_location > 0 ? ["scripts"] : [],
     ),
     attachLimitedSections: new Set([
       "frames",
@@ -361,17 +364,15 @@ const normalizeV8Inspection = (
       "workers",
     ]),
     truncatedSections: new Set(result.capture.truncated ? ["scripts"] : []),
-    unavailableSections: new Set(["frames", "script_sources", "workers"]),
-    excluded:
-      excludedV8Scripts(result) === 0
-        ? []
-        : [
-            {
-              section: "scripts",
-              reason: "out_of_target_scope",
-              count: excludedV8Scripts(result),
-            },
-          ],
+    unavailableSections: new Set([
+      "frames",
+      "script_sources",
+      "workers",
+      ...(result.scripts.excluded.invalid_protocol_value > 0
+        ? (["scripts"] as const)
+        : []),
+    ]),
+    excluded: v8ScriptExclusions(result),
     droppedEvents: {
       scripts: result.capture.events_dropped,
       network_requests: 0,
@@ -401,11 +402,32 @@ const runtimeLocation = (
   return { url: location.specifier };
 };
 
-const excludedV8Scripts = (result: JavaScriptRuntimeObservation): number =>
-  Object.values(result.scripts.excluded).reduce(
-    (total, count) => total + count,
-    0,
-  );
+const v8ScriptExclusions = (
+  result: JavaScriptRuntimeObservation,
+): BrowserExclusion[] => {
+  const { unsupported_location, invalid_protocol_value } =
+    result.scripts.excluded;
+  return [
+    ...(unsupported_location > 0
+      ? [
+          {
+            section: "scripts",
+            reason: "out_of_target_scope",
+            count: unsupported_location,
+          } as const,
+        ]
+      : []),
+    ...(invalid_protocol_value > 0
+      ? [
+          {
+            section: "scripts",
+            reason: "invalid_protocol_value",
+            count: invalid_protocol_value,
+          } as const,
+        ]
+      : []),
+  ];
+};
 
 const assertRuntimeParameters = (
   evidence: Evidence,

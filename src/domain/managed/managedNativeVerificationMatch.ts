@@ -100,11 +100,13 @@ export const collectNativeSymbols = (
   return { symbols, accepted, unsupported };
 };
 
-const sameSymbolName = (expected: string, native: NativeSymbol): boolean =>
-  expected ===
-  (native.source === "macho-export" && native.name.startsWith("_")
+const normalizedSymbolName = (native: NativeSymbol): string =>
+  native.source === "macho-export" && native.name.startsWith("_")
     ? native.name.slice(1)
-    : native.name);
+    : native.name;
+
+const sameSymbolName = (expected: string, native: NativeSymbol): boolean =>
+  expected === normalizedSymbolName(native);
 
 const normalizeModule = (value: string): string =>
   basename(value)
@@ -203,7 +205,7 @@ const matchPinvoke = (
     managed.import_scope_name.trim().length > 0;
   const exact = candidates.find(
     (symbol) =>
-      managed.import_name === symbol.name &&
+      managed.import_name === normalizedSymbolName(symbol) &&
       moduleCompatible(managed.import_scope_name, symbol),
   );
   const decorated = candidates.find((symbol) =>

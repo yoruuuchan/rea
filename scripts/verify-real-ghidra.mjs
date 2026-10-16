@@ -489,6 +489,7 @@ async function verifyTarget(targetPath, variant, expectedTarget = null) {
 
   const client = new GhidraClient({
     launcher: new GhidraHeadlessLauncher({
+      configurationDirectoryName: installation.configurationDirectoryName,
       environment: process.env,
       analyzeHeadlessPath: installation.analyzeHeadlessPath,
       ...(process.env.JAVA_HOME === undefined

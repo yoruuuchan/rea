@@ -519,6 +519,61 @@ describe("malformed Apple dispatch metadata", () => {
     ).toMatchObject({ status: "partial", examined: 3 });
   });
 
+  it("retains valid Swift class vtable siblings when one descriptor has an empty class name", () => {
+    const bytes = Buffer.alloc(4096);
+    const base = 0x100000000n;
+    const u32 = (at: number, n: number) => bytes.writeUInt32LE(n, at);
+    const ptr = (at: number, n: number) =>
+      bytes.writeBigUInt64LE(base + BigInt(n), at);
+    const rel = (at: number, n: number) => bytes.writeInt32LE(n - at, at);
+    u32(0, 0xfeedfacf);
+    u32(4, 0x0100000c);
+    u32(12, 2);
+    u32(16, 1);
+    u32(20, 152);
+    u32(32, 0x19);
+    u32(36, 152);
+    bytes.write("__TEXT", 40);
+    ptr(56, 0);
+    bytes.writeBigUInt64LE(4096n, 64);
+    bytes.writeBigUInt64LE(4096n, 80);
+    u32(88, 5);
+    u32(92, 5);
+    u32(96, 1);
+    bytes.write("__swift5_types", 104);
+    bytes.write("__TEXT", 120);
+    ptr(136, 0x200);
+    bytes.writeBigUInt64LE(12n, 144);
+    u32(152, 0x200);
+    const entries: readonly (readonly [number, number, number, number])[] = [
+      [0x200, 0x300, 0x500, 0x800],
+      [0x204, 0x380, 0x520, 0x810],
+      [0x208, 0x400, 0x540, 0x820],
+    ];
+    for (const [field, descriptor, name, implementation] of entries) {
+      rel(field, descriptor);
+      u32(descriptor, 0x80000010);
+      rel(descriptor + 8, name);
+      u32(descriptor + 28, 1);
+      u32(descriptor + 44, 0);
+      u32(descriptor + 48, 1);
+      u32(descriptor + 52, 0);
+      rel(descriptor + 56, implementation);
+    }
+    bytes.write("EarlierClass\0", 0x500);
+    bytes.write("LaterClass\0", 0x540);
+
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    expect(result.swift_dispatch_slots.map(({ owner }) => owner)).toEqual([
+      "EarlierClass",
+      "LaterClass",
+    ]);
+    const coverage = result.coverage.find(
+      ({ facet }) => facet === "swift_class_vtable_descriptors",
+    );
+    expect(coverage).toMatchObject({ status: "partial", examined: 3 });
+  });
+
   it("rejects malformed command and section boundaries", () => {
     const bytes = fixture();
     bytes.writeUInt32LE(7, 36);

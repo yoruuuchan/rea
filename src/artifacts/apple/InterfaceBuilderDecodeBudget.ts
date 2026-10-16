@@ -277,7 +277,10 @@ export const estimateBinaryPlistExpansion = (
   // Metadata covers the full object table; projected values may repeat through references.
   const objectBytes = numberProjection ? 144 : 16;
   const expandedNodeBytes = numberProjection ? 224 : 96;
-  let estimate = bytes.length * 2 + objectCount * objectBytes;
+  // Number projection may require a same-sized parser-compatible input copy
+  // for wide integers. Reserve for it before the caller allocates that copy.
+  let estimate =
+    bytes.length * (numberProjection ? 3 : 2) + objectCount * objectBytes;
   let binaryPrototypeKeyObserved = false;
   if (estimate > maxBytes)
     throw fail("expansion", `binary plist object table exceeds ${budget}`);

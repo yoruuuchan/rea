@@ -14,6 +14,7 @@ import types
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _install_host_stubs():
@@ -22,7 +23,8 @@ def _install_host_stubs():
     sys.modules["cutter"] = cutter
     qtcore = types.ModuleType("PySide6.QtCore")
     qtcore.QObject = type("QObject", (), {})
-    qtcore.Signal = lambda *_args: object()
+    qtcore.Signal = lambda *_args: types.SimpleNamespace(connect=lambda _handler: None)
+    qtcore.QCoreApplication = types.SimpleNamespace(applicationVersion=lambda: "Cutter test host")
     pyside = types.ModuleType("PySide6")
     pyside.QtCore = qtcore
     sys.modules["PySide6"] = pyside
@@ -219,6 +221,103 @@ def run_serve_mode():
     finally:
         server.stop()
         server.join(timeout=3)
+
+
+class DocumentIdentityTest(unittest.TestCase):
+    def test_document_config_drives_generation_and_command_admission(self):
+        first = "/tmp/Cutter 雪 #1?.elf"
+        second = "/tmp/another document.elf"
+        configuration = {"file.path": first}
+        core = types.SimpleNamespace(
+            getConfig=configuration.__getitem__,
+        )
+        commands = []
+        with patch.object(bridge.cutter, "core", lambda: core, create=True), patch.object(
+            bridge.cutter, "cmd", lambda command: commands.append(command) or "observed", create=True
+        ):
+            dispatcher = bridge._RequestDispatcher()
+            self.assertEqual(dispatcher.current_file, first)
+            self.assertEqual(dispatcher.generation, 0)
+
+            def handle(**values):
+                request = {**values, "_event": threading.Event(), "_cancelled": threading.Event()}
+                reply = {}
+                dispatcher._handle(request, reply)
+                self.assertTrue(request["_event"].is_set())
+                return reply
+
+            same = handle(kind="status")
+            self.assertEqual(same["current_file"], first)
+            self.assertEqual(same["document_generation"], 0)
+            configuration["file.path"] = second
+            changed = handle(kind="status")
+            self.assertEqual(changed["current_file"], second)
+            self.assertEqual(changed["document_generation"], 1)
+            stale = handle(kind="command", request_id=str(uuid.uuid4()), expected_generation=0, command="iI")
+            self.assertEqual(stale["error"], "active-document-generation-changed")
+            self.assertEqual(stale["execution_state"], "not_started")
+            self.assertEqual(commands, [])
+            current = handle(kind="command", request_id=str(uuid.uuid4()), expected_generation=1, command="iI")
+            self.assertEqual(current["output"], "observed")
+            self.assertEqual(current["document_generation"], 1)
+            self.assertEqual(commands, ["iI"])
+
+    def test_absent_or_unreadable_document_config_remains_unknown(self):
+        class UnreadableCore:
+            def getConfig(self, _key):
+                raise RuntimeError("document config unavailable")
+
+        for core in [
+            types.SimpleNamespace(getConfig=lambda _key: ""),
+            types.SimpleNamespace(getConfig=lambda _key: None),
+            types.SimpleNamespace(getConfig=lambda _key: object()),
+            types.SimpleNamespace(),
+            UnreadableCore(),
+        ]:
+            with self.subTest(core=type(core).__name__), patch.object(
+                bridge.cutter, "core", lambda: core, create=True
+            ):
+                self.assertIsNone(bridge._RequestDispatcher._read_current_file())
+
+
+class HostVersionTest(unittest.TestCase):
+    def test_host_version_reaches_status_and_command_without_backend_attribution(self):
+        backend_reads = []
+        core = types.SimpleNamespace(
+            getConfig=lambda _key: None,
+            getVersionInformation=lambda: backend_reads.append(True) or "Rizin 0.9.1",
+        )
+        application = sys.modules["PySide6.QtCore"].QCoreApplication
+        with patch.object(bridge.cutter, "core", lambda: core, create=True), patch.object(
+            application, "applicationVersion", return_value="2.5.0-HEAD-fixture"
+        ), patch.object(bridge.cutter, "cmd", lambda _command: "observed", create=True):
+            dispatcher = bridge._RequestDispatcher()
+            self.assertEqual(dispatcher.cutter_version, "2.5.0-HEAD-fixture")
+            for values in [
+                {"kind": "status"},
+                {"kind": "command", "request_id": str(uuid.uuid4()), "expected_generation": 0, "command": "iI"},
+            ]:
+                request = {**values, "_event": threading.Event(), "_cancelled": threading.Event()}
+                reply = {}
+                dispatcher._handle(request, reply)
+                self.assertTrue(request["_event"].is_set())
+                self.assertEqual(reply["cutter_version"], "2.5.0-HEAD-fixture")
+            self.assertEqual(backend_reads, [])
+
+    def test_unavailable_host_version_stays_unknown_without_backend_fallback(self):
+        core = types.SimpleNamespace(
+            getConfig=lambda _key: None,
+            getVersionInformation=lambda: "Rizin 0.9.1",
+        )
+        application = sys.modules["PySide6.QtCore"].QCoreApplication
+        with patch.object(bridge.cutter, "core", lambda: core, create=True):
+            for value in ["", None, object()]:
+                with self.subTest(value=type(value).__name__), patch.object(
+                    application, "applicationVersion", return_value=value
+                ):
+                    self.assertIsNone(bridge._RequestDispatcher().cutter_version)
+            with patch.object(application, "applicationVersion", side_effect=RuntimeError("host unavailable")):
+                self.assertIsNone(bridge._RequestDispatcher().cutter_version)
 
 
 class ProtocolProducerTest(unittest.TestCase):

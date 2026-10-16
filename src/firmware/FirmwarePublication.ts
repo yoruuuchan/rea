@@ -1,14 +1,20 @@
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
+import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { firmwareFailure } from "./FirmwareFailures.js";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
 import { SafeOutputTree } from "../artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../artifacts/SafeOutputTreeCreationFailure.js";
-import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisOutputError,
+  AnalysisCancelledError,
+} from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { firmwareResultSchemas } from "../domain/firmware/firmwareAnalysis.js";
-import { hashFirmwareFile, type FirmwareEntry } from "./FirmwareFiles.js";
+import type { FirmwareFileAccess, FirmwareEntry } from "./FirmwareFiles.js";
 import type { normalizeUnblobReport } from "./FirmwareReports.js";
 import type { extractionGap } from "../domain/firmware/firmwareAnalysis.js";
 
@@ -81,6 +87,9 @@ const gapSortKey = (gap: ExtractionGap): string =>
 
 /** Publish verified regular files, preserving links as metadata and rolling back failed writes. */
 export const publishFirmwareExtraction = async (context: {
+  files: FirmwareFileAccess;
+  workspacePath: string;
+  deadline: AbortSignal;
   outputDirectory: string;
   entries: readonly FirmwareEntry[];
   normalized: ReturnType<typeof normalizeUnblobReport>;
@@ -89,7 +98,11 @@ export const publishFirmwareExtraction = async (context: {
   maxDepth: number;
   engine: z.infer<typeof firmwareResultSchemas.extract_firmware>["engine"];
   signal: AbortSignal;
-  retainCleanup: (tree: SafeOutputTree) => void;
+  retainCleanup: (
+    tree: SafeOutputTree,
+    lease: AnalysisCleanupLease,
+    failure: AnalysisError,
+  ) => void;
 }) => {
   let tree: SafeOutputTree | undefined;
   let result:
@@ -122,7 +135,7 @@ export const publishFirmwareExtraction = async (context: {
       }
       const logicalPath = `$output/${entry.relativePath}`;
       const reported = context.normalized.files.get(logicalPath);
-      const sha256 = await hashFirmwareFile(entry.path, context.signal);
+      const sha256 = await context.files.hash(entry.path, context.signal);
       if (
         (reported?.sha256 !== null &&
           reported?.sha256 !== undefined &&
@@ -134,12 +147,7 @@ export const publishFirmwareExtraction = async (context: {
           "extract_firmware",
           `Extracted bytes disagree with provider report: ${entry.relativePath}`,
         );
-      await tree.write(
-        entry.relativePath,
-        createReadStream(entry.path),
-        { sha256, bytes: entry.size },
-        context.signal,
-      );
+      await context.files.publish(entry, sha256, tree, context.signal);
       files.push({
         relative_path: entry.relativePath,
         path: join(tree.outputRoot, entry.relativePath),
@@ -172,15 +180,31 @@ export const publishFirmwareExtraction = async (context: {
       ),
       published_bytes: files.reduce((sum, file) => sum + file.size, 0),
     });
-    context.signal.throwIfAborted();
+    if (context.signal.aborted)
+      throw new AnalysisCancelledError("extract_firmware", {
+        cause: context.signal.reason,
+      });
     await tree.commit(context.signal);
     return result;
   } catch (cause: unknown) {
     if (cause instanceof SafeOutputTreeCreationFailure) tree = cause.tree;
+    const ownedTree = tree;
+    const treeLease =
+      ownedTree === undefined
+        ? undefined
+        : new AnalysisCleanupLease(async () => {
+            await ownedTree.rollback();
+          });
+    const primary = firmwareFailure(
+      cause,
+      "unblob",
+      "extract_firmware",
+      context.deadline,
+      treeLease,
+    );
     try {
-      await tree?.rollback();
+      await treeLease?.release();
     } catch (cleanupCause: unknown) {
-      if (tree !== undefined) context.retainCleanup(tree);
       const publishedResult =
         tree?.published === true && result !== undefined
           ? {
@@ -188,9 +212,9 @@ export const publishFirmwareExtraction = async (context: {
               result: jsonValueSchema.parse(result),
             }
           : undefined;
-      throw new ProviderCleanupError(
+      const cleanup = new ProviderCleanupError(
         "unblob",
-        [context.outputDirectory],
+        [context.outputDirectory, context.workspacePath],
         {
           reason:
             cleanupCause instanceof Error
@@ -207,9 +231,18 @@ export const publishFirmwareExtraction = async (context: {
             : { partialObservation: publishedResult }),
         },
       );
+      if (tree !== undefined && treeLease !== undefined)
+        context.retainCleanup(tree, treeLease, cleanup);
+      if (publishedResult !== undefined)
+        primary.retainPartialObservation(publishedResult);
+      throw analysisErrorWithCleanupFailure(
+        primary,
+        cleanup,
+        "extract_firmware",
+      ).bindCleanupDependencies([primary, cleanup]);
     }
     if (tree?.published === true && result !== undefined) return result;
-    throw cause;
+    throw primary;
   }
 };
 

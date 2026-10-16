@@ -7,6 +7,7 @@ import type { ArtifactReader } from "./ArtifactReader.js";
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import type { SafeOutputTree } from "./SafeOutputTree.js";
 import type { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
+import { AnalysisCleanupLease } from "./AnalysisCleanupLease.js";
 
 /** One artifact resource and the capability that owns its cleanup. */
 export type ArtifactResourceOwner =
@@ -57,12 +58,22 @@ export type ArtifactCleanupAttempt =
 
 /** Retry failure carrying the exact retained owners that did not release. */
 export class ArtifactResourceRetryFailure extends ArtifactReaderFailure {
+  readonly cleanupLeases: readonly AnalysisCleanupLease[] | undefined;
   constructor(
     readonly failedOwners: readonly ArtifactResourceOwner[],
     message: string,
     options: ConstructorParameters<typeof ArtifactReaderFailure>[2],
   ) {
     super("unavailable", message, options);
+    const leases = failedOwners.flatMap((owner) =>
+      owner.kind === "lease" && owner.lease instanceof AnalysisCleanupLease
+        ? [owner.lease]
+        : [],
+    );
+    this.cleanupLeases =
+      leases.length > 0 && leases.length === failedOwners.length
+        ? [...new Set(leases)]
+        : undefined;
   }
 }
 

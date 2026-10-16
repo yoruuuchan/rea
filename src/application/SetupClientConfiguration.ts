@@ -230,11 +230,23 @@ const persistClientConfiguration = async ({
 }: ClientConfigurationUpdate): Promise<ClientConfigurationResult> => {
   // The plan chose this file; an MSIX package may have switched to its
   // private copy since, for example when it quit.
-  if (
-    client.msixPackage !== undefined &&
-    (await packageReadTargetChanged(client.msixPackage, client.configPath))
-  )
-    return { status: "failed", reason: "target_changed" };
+  if (client.msixPackage !== undefined) {
+    const target = await packageReadTargetChanged(
+      client.msixPackage,
+      client.configPath,
+    );
+    if (!target.ok)
+      return {
+        status: "failed",
+        reason: "target_unavailable",
+        failure: {
+          kind: "inspect",
+          path: target.error.path,
+          detail: target.error.detail,
+        },
+      };
+    if (target.value) return { status: "failed", reason: "target_changed" };
+  }
   const backupPath =
     original === undefined ? undefined : `${client.configPath}.rea.backup`;
   let recoveryBackupPath: string | undefined;

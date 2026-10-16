@@ -1,20 +1,25 @@
-import { expect, it as test, vi } from "vitest";
+import { SdkErrorCode } from "@modelcontextprotocol/client";
+import { expect, it as test, onTestFinished, vi } from "vitest";
 import { access, readFile, truncate, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { AndroidAnalysisService } from "../../../src/application/android/AndroidAnalysisService.js";
 import { JadxProvider } from "../../../src/android/JadxProvider.js";
 import { JadxSession } from "../../../src/android/JadxSession.js";
 import { androidResultSchemas } from "../../../src/domain/android/androidAnalysis.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { snapshotAndroidEngine } from "../../../src/android/AndroidTargetSnapshot.js";
 import { hashStableFile } from "../../../src/filesystem/StableFileHash.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
+import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
 import {
   createJadxProtocolFixture as setup,
   verifyJadxFixtureCleanup as verifyCleanup,
 } from "../../fixtures/android/jadx.js";
 import { writeJadxJarInventory } from "../../fixtures/android/jadxJar.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const it = test.skipIf(process.platform === "win32");
 
@@ -666,6 +671,147 @@ it("cancels active and queued requests, cleans ownership and never launches a qu
   });
   await provider.close();
   await verifyCleanup(launches);
+});
+
+it("ends each queued stalled operation at the caller-selected deadline and cleans ownership", async () => {
+  const { service, apk, launches, provider } = await setup(
+    "stall",
+    undefined,
+    undefined,
+    { REA_JADX_OPERATION_TIMEOUT_MS: "1500" },
+  );
+  const started = performance.now();
+  // The second request waits behind the first; its deadline starts at the
+  // queue front, so it gets its own engine launch and runtime reply.
+  const outcomes = await Promise.all([
+    service.execute("inspect_android_package", { path: apk }),
+    service.execute("inspect_android_package", { path: apk }),
+  ]);
+  expect(performance.now() - started).toBeLessThan(20_000);
+  for (const outcome of outcomes) {
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisTimeoutError",
+        timeoutMs: 1500,
+        partialObservation: {
+          calls: [expect.objectContaining({ operation: "rea_jvm_status" })],
+        },
+      },
+    });
+    if (outcome.ok) throw new Error("Expected the selected deadline");
+    expect(projectAnalysisError(outcome.error)).toMatchObject({
+      code: "provider_timeout",
+      details: { timeout_ms: 1500 },
+    });
+  }
+  expect(launches).toHaveLength(2);
+  // The deadline path itself releases ownership before provider shutdown.
+  await verifyCleanup(launches);
+  await provider.close();
+});
+
+it("completes an operation under the largest accepted deadline", async () => {
+  const { service, apk, provider, launches } = await setup(
+    "normal",
+    undefined,
+    undefined,
+    { REA_JADX_OPERATION_TIMEOUT_MS: "2147483647" },
+  );
+  const outcome = await service.execute("inspect_android_package", {
+    path: apk,
+  });
+  expect(outcome.ok).toBe(true);
+  await provider.close();
+  await verifyCleanup(launches);
+});
+
+it.each(["", "2147483648"])(
+  "rejects REA_JADX_OPERATION_TIMEOUT_MS=%j before probing or launching Java",
+  async (value) => {
+    const { service, apk, launches, javaProbeCount } = await setup(
+      "normal",
+      undefined,
+      undefined,
+      { REA_JADX_OPERATION_TIMEOUT_MS: value },
+    );
+    const outcome = await service.execute("inspect_android_package", {
+      path: apk,
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisCapabilityUnavailableError",
+        reason: expect.stringContaining("REA_JADX_OPERATION_TIMEOUT_MS"),
+      },
+    });
+    expect(launches).toHaveLength(0);
+    // The fake JDK records each module-listing probe; none may have run.
+    await expect(javaProbeCount()).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+it("bounds each upstream call by the selected deadline instead of a fixed limit", async () => {
+  // Provider workflows cannot reach the former fixed 120-second call limit in
+  // a test, so exercise the session boundary that owns each upstream call.
+  const { apk } = await setup();
+  const target = await parseBinaryTarget(apk);
+  if (!target.ok) throw target.error;
+  const workspace = await createTestTempDirectory("rea-jadx-call-deadline-");
+  const pids: number[] = [];
+  const session = new JadxSession(
+    {
+      command: process.execPath,
+      arguments: [],
+      cwd: workspace,
+      hostEnvironment: process.env,
+      signal: new AbortController().signal,
+    },
+    async (options) => {
+      const spawned = await spawnOwnedProviderProcess({
+        ...options,
+        command: process.execPath,
+        arguments: [
+          fileURLToPath(
+            new URL("../../fixtures/android/jadx-mcp.mjs", import.meta.url),
+          ),
+        ],
+        expectedCommand: process.execPath,
+        env: { ...options.env, REA_FAKE_JADX_MODE: "stall" },
+      });
+      if (spawned.process.pid !== undefined) pids.push(spawned.process.pid);
+      return spawned;
+    },
+  );
+  onTestFinished(() => session.close());
+  try {
+    const started = performance.now();
+    await expect(
+      session.execute({
+        request: { operation: "inspect_android_package", input: { path: apk } },
+        target: target.value,
+        snapshot: apk,
+        jarHash: "0".repeat(64),
+        bridgeHash: "0".repeat(64),
+        signal: new AbortController().signal,
+        timeoutMs: 300,
+      }),
+    ).rejects.toMatchObject({
+      code: SdkErrorCode.RequestTimeout,
+      data: { timeout: 300 },
+    });
+    expect(performance.now() - started).toBeLessThan(10_000);
+    expect(session.partialObservation()?.calls).toEqual([
+      expect.objectContaining({ operation: "rea_jvm_status" }),
+    ]);
+  } finally {
+    await session.close();
+  }
+  expect(pids).toHaveLength(1);
+  for (const pid of pids)
+    expect(() => process.kill(-pid, 0)).toThrowError(
+      expect.objectContaining({ code: "ESRCH" }),
+    );
 });
 
 it("reports missing explicit tools without trying to install or launch them", async () => {

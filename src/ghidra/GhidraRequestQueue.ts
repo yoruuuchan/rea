@@ -1,10 +1,11 @@
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { err, type Result } from "../domain/result.js";
 import type { GhidraRequestOptions } from "./GhidraClientTypes.js";
 import {
   GhidraSessionError,
-  type GhidraSessionFailureKind,
+  type GhidraSessionFailureFactory,
 } from "./GhidraSessionError.js";
 
 /** Result settled by one queued Ghidra Program request. */
@@ -15,13 +16,6 @@ export type GhidraRequestExecutor = (
   parameters: JsonValue,
   options: GhidraRequestOptions,
 ) => Promise<GhidraQueuedRequestResult>;
-/** Bind queue failures to the owning client's live diagnostics. */
-export type GhidraQueueFailureFactory = (
-  kind: GhidraSessionFailureKind,
-  message: string,
-  cause?: unknown,
-) => GhidraSessionError;
-
 /** Stop the provider session when an admitted operation is cancelled. */
 export type GhidraActiveCancellationHandler = () => Promise<
   Result<null, AnalysisError>
@@ -43,7 +37,7 @@ export class GhidraRequestQueue {
 
   constructor(
     private readonly execute: GhidraRequestExecutor,
-    private readonly failure: GhidraQueueFailureFactory,
+    private readonly failure: GhidraSessionFailureFactory,
     private readonly onActiveCancellation: GhidraActiveCancellationHandler,
   ) {}
 
@@ -56,19 +50,14 @@ export class GhidraRequestQueue {
     if (this.#closedFailure !== undefined)
       return Promise.resolve(err(this.#closedFailure));
     if (options.signal?.aborted === true)
-      return Promise.resolve(
-        err(this.failure("cancelled", "Ghidra request was cancelled")),
-      );
+      return Promise.resolve(err(this.#cancelled(options.signal)));
     return new Promise((resolve) => {
       let entry: QueuedRequest;
       const onAbort =
         options.signal === undefined
           ? undefined
           : () =>
-              this.#rejectQueued(
-                entry,
-                err(this.failure("cancelled", "Ghidra request was cancelled")),
-              );
+              this.#rejectQueued(entry, err(this.#cancelled(options.signal)));
       entry = {
         method,
         parameters,
@@ -103,65 +92,97 @@ export class GhidraRequestQueue {
     if (entry === undefined) return;
     this.#release(entry);
     if (entry.options.signal?.aborted === true) {
-      entry.resolve(
-        err(this.failure("cancelled", "Ghidra request was cancelled")),
-      );
+      entry.resolve(err(this.#cancelled(entry.options.signal)));
       this.#drain();
       return;
     }
     this.#active = true;
-    let executionSettled = false;
-    let activeCancellation: Promise<Result<null, AnalysisError>> | undefined;
-    const onAbort =
-      entry.options.signal === undefined
-        ? undefined
-        : () => {
-            if (executionSettled) return;
-            this.failQueued(
-              this.failure(
-                "process",
-                "Ghidra session closed after active request cancellation",
-              ),
-            );
-            activeCancellation = this.onActiveCancellation();
-          };
-    if (onAbort !== undefined)
-      entry.options.signal?.addEventListener("abort", onAbort, { once: true });
-    void this.execute(entry.method, entry.parameters, entry.options)
-      .then(async (result) => {
-        if (activeCancellation !== undefined) {
-          const primary = result.ok
-            ? this.failure("cancelled", "Ghidra request was cancelled")
-            : result.error;
-          try {
-            const cleanup = await activeCancellation;
-            if (!cleanup.ok)
-              result = err(this.#withCleanupFailure(primary, cleanup.error));
-          } catch (cause: unknown) {
-            result = err(this.#withUnexpectedCleanupRejection(primary, cause));
-          }
-        }
-        executionSettled = true;
-        entry.resolve(result);
-      })
-      .catch((cause: unknown) => {
-        executionSettled = true;
-        entry.resolve(
-          err(
-            this.failure(
-              "protocol",
-              "Ghidra serial request execution rejected unexpectedly",
-              cause,
-            ),
-          ),
-        );
-      })
+    void this.#executeEntry(entry)
+      .then(entry.resolve)
       .finally(() => {
-        if (entry.options.signal !== undefined && onAbort !== undefined)
-          entry.options.signal.removeEventListener("abort", onAbort);
         this.#active = false;
         if (this.#closedFailure === undefined) this.#drain();
       });
+  }
+
+  async #executeEntry(
+    entry: QueuedRequest,
+  ): Promise<GhidraQueuedRequestResult> {
+    let cancellation:
+      | {
+          readonly failure: GhidraSessionError;
+          readonly cleanup: Promise<
+            | {
+                readonly kind: "returned";
+                readonly value: Result<null, AnalysisError>;
+              }
+            | { readonly kind: "rejected"; readonly cause: unknown }
+          >;
+        }
+      | undefined;
+    const onAbort = (): void => {
+      this.failQueued(
+        this.failure(
+          "process",
+          "Ghidra session closed after active request cancellation",
+        ),
+      );
+      cancellation = {
+        failure: this.#cancelled(entry.options.signal),
+        // Capture rejection immediately, including a synchronous callback throw.
+        // Execution and finalization may settle in either order.
+        cleanup: Promise.resolve()
+          .then(() => this.onActiveCancellation())
+          .then(
+            (value) => ({ kind: "returned", value }),
+            (cause: unknown) => ({ kind: "rejected", cause }),
+          ),
+      };
+    };
+    entry.options.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      let result: GhidraQueuedRequestResult;
+      try {
+        result = await this.execute(
+          entry.method,
+          entry.parameters,
+          entry.options,
+        );
+      } catch (cause: unknown) {
+        result = err(
+          cause instanceof GhidraSessionError
+            ? cause
+            : this.failure(
+                "protocol",
+                "Ghidra serial request execution rejected unexpectedly",
+                cause,
+              ),
+        );
+      }
+      if (cancellation === undefined) return result;
+      const primary = result.ok ? cancellation.failure : result.error;
+      const cleanup = await cancellation.cleanup;
+      if (cleanup.kind === "rejected")
+        return err(
+          this.#withUnexpectedCleanupRejection(primary, cleanup.cause),
+        );
+      return err(
+        cleanup.value.ok
+          ? primary
+          : primary.withCleanupFailure(cleanup.value.error),
+      );
+    } finally {
+      entry.options.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  #cancelled(signal: AbortSignal | undefined): GhidraSessionError {
+    return this.failure(
+      "cancelled",
+      "Ghidra request was cancelled",
+      signal?.reason,
+      signal === undefined ? {} : { cancellation: { reason: signal.reason } },
+    );
   }
 
   #rejectQueued(entry: QueuedRequest, result: GhidraQueuedRequestResult): void {
@@ -172,50 +193,25 @@ export class GhidraRequestQueue {
     entry.resolve(result);
   }
 
-  #withCleanupFailure(
-    primary: GhidraSessionError,
-    cleanupFailure: AnalysisError,
-  ): GhidraSessionError {
-    return new GhidraSessionError(
-      primary.kind,
-      primary.message,
-      primary.diagnostics,
-      {
-        ...(primary.cause === undefined ? {} : { cause: primary.cause }),
-        ...(primary.timeoutMs === undefined
-          ? {}
-          : { timeoutMs: primary.timeoutMs }),
-        ...(primary.remoteCode === undefined
-          ? {}
-          : { remoteCode: primary.remoteCode }),
-        cleanupFailure,
-      },
-    );
-  }
-
   #withUnexpectedCleanupRejection(
     primary: GhidraSessionError,
     cause: unknown,
   ): GhidraSessionError {
     const described = this.failure(primary.kind, primary.message, cause);
     const rejection = described.diagnostics.failure_cause;
-    return new GhidraSessionError(
-      primary.kind,
-      primary.message,
+    const cleanupFailure = new ProviderCleanupError(
+      "ghidra",
+      ["Ghidra cancellation cleanup"],
       {
-        ...primary.diagnostics,
+        reason: "Cancellation cleanup rejected before release was confirmed",
         unexpected_cleanup_rejection: rejection ?? { type: typeof cause },
       },
-      {
-        ...(primary.cause === undefined ? {} : { cause: primary.cause }),
-        ...(primary.timeoutMs === undefined
-          ? {}
-          : { timeoutMs: primary.timeoutMs }),
-        ...(primary.remoteCode === undefined
-          ? {}
-          : { remoteCode: primary.remoteCode }),
-      },
+      { cause },
     );
+    return primary.withCleanupFailure(cleanupFailure, {
+      ...primary.diagnostics,
+      unexpected_cleanup_rejection: rejection ?? { type: typeof cause },
+    });
   }
 
   #release(entry: QueuedRequest): void {

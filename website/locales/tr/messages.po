@@ -139,7 +139,7 @@ msgid ""
 "REA — Find out how software works. Reverse engineering with your coding "
 "agent."
 msgstr ""
-"REA - Yazılımın nasıl çalıştığını öğrenin. Kodlama aracınızla tersine "
+"REA - Yazılımın nasıl çalıştığını öğrenin. Kodlama ajanınızla tersine "
 "mühendislik yapın."
 
 #: website/public/blog/index.html:110
@@ -2977,7 +2977,7 @@ msgstr "1. Aracınızı REA'ya bağlayın"
 #, python-brace-format
 msgctxt "page:first-investigation/index.html"
 msgid "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Your coding agent"
-msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Kodlama aracınız"
+msgstr "{ph0}{ph1}{ph2}{ph3}{ph4}{ph5}{ph6}{ph7}Kodlama ajanınız"
 
 #: website/public/first-investigation/index.html:237
 #: website/public/first-investigation/index.html:259
@@ -3019,7 +3019,7 @@ msgid ""
 "Electron."
 msgstr ""
 "Örnek, {ph0}Notları Dışa Aktar{ph1} düğmesine sahip altı dosyadan oluşan bir"
-" Electron uygulamasıdır. Aracınız, Electron'YU yüklemeden veya başlatmadan "
+" Electron uygulamasıdır. Ajanınız, Electron'u yüklemeden veya başlatmadan "
 "kodunu inceleyebilir."
 
 #: website/public/first-investigation/index.html:310
@@ -3028,7 +3028,7 @@ msgid ""
 "Your agent downloads the files and gives the unpacked folder to REA for "
 "inspection."
 msgstr ""
-"Aracınız dosyaları indirir ve paketlenmemiş klasörü inceleme için REA'YA "
+"Ajanınız dosyaları indirir ve paketlenmemiş klasörü inceleme için REA'YA "
 "verir."
 
 #. {ph0}: <a class="button" href="../examples/notes-example.zip"
@@ -3048,7 +3048,7 @@ msgid ""
 "If your agent can’t download files, unzip this archive yourself. Give it the"
 " path to the {ph0} folder and the same export question."
 msgstr ""
-"Temsilciniz dosya indiremiyorsa, bu arşivi kendiniz açın. {ph0} klasörünün "
+"Ajanınız dosya indiremiyorsa, bu arşivi kendiniz açın. {ph0} klasörünün "
 "yolunu ve aynı dışa aktarma sorusunu verin."
 
 #: website/public/first-investigation/index.html:329
@@ -3073,8 +3073,9 @@ msgid ""
 "and writes {ph1} in the user’s Downloads folder. The columns are {ph2} and "
 "{ph3}."
 msgstr ""
-"Düğme bir {ph0} mesajı gönderir. Ana işlem notları CSV olarak biçimlendirir "
-"ve {ph1}. Sütunlar {ph2} ve {ph3}."
+"Düğme bir {ph0} mesajı gönderir. Ana süreç notları CSV olarak biçimlendirir "
+"ve {ph1} dosyasını kullanıcının İndirilenler klasörüne yazar. Sütunlar {ph2} "
+"ve {ph3}."
 
 #: website/public/first-investigation/index.html:340
 msgctxt "page:first-investigation/index.html"
@@ -3685,9 +3686,9 @@ msgid ""
 "applications and DLLs on fixed local NTFS drives. Use an existing Ghidra "
 "12.1.x installation and a 64-bit JDK 21 or newer:"
 msgstr ""
-"Windows x64, yerel x86 ve x64 PE uygulamaları ve sabit yerel NTFS "
-"sürücülerindeki dll'ler için deneysel, salt okunur desteğe sahiptir. Mevcut "
-"bir Ghidra 12.1 kullanın.x kurulum ve 64 bit JDK 21 veya daha yenisi:"
+"Windows x64, sabit yerel NTFS sürücülerindeki native x86 ve x64 PE "
+"uygulamaları ve DLL'ler için deneysel, salt okunur desteğe sahiptir. Mevcut "
+"bir Ghidra 12.1.x kurulumu ve 64 bit JDK 21 veya daha yeni bir sürüm kullanın:"
 
 #: website/public/get-started/index.html:1144
 msgctxt "page:get-started/index.html"
@@ -5060,9 +5061,9 @@ msgid ""
 "{ph1}. REA also returns its instructions and callers, which give the agent a"
 " way to investigate the missing arithmetic."
 msgstr ""
-"Başlangıç işlevi {ph0}olan 0x00406400, kısa bir ayrıştırıcı sonucuna "
-"sahiptir: {ph1} çağrısı.  REA ayrıca aracıya eksik aritmetiği araştırmanın "
-"bir yolunu veren talimatlarını ve arayanlarını da döndürür."
+"Başlangıç işlevi {ph0}, kısa bir decompiler sonucu verir: {ph1} çağrısı. "
+"REA ayrıca talimatlarını ve çağıranlarını döndürür; bunlar ajanın eksik "
+"aritmetiği araştırmasına yardımcı olur."
 
 #: website/public/guides/native/index.html:231
 msgctxt "page:guides/native/index.html"
@@ -5416,7 +5417,7 @@ msgid ""
 "actual values; the instruction order tells the agent how they are used."
 msgstr ""
 "Aritmetik bu adreslere başvurur. Baytları okumak gerçek değerleri sağlar; "
-"talimat sırası aracıya bunların nasıl kullanıldığını söyler."
+"talimatların sırası ajana bunların nasıl kullanıldığını gösterir."
 
 #: website/public/guides/native/index.html:430
 msgctxt "page:guides/native/index.html"
@@ -6256,7 +6257,7 @@ msgid ""
 "Map modules, routes, IPC and native dependencies from an application folder "
 "or ASAR archive."
 msgstr ""
-"Modülleri, rotaları, ıpc'yi ve yerel bağımlılıkları bir uygulama klasöründen"
+"Modülleri, rotaları, IPC'yi ve native bağımlılıkları bir uygulama klasöründen"
 " veya ASAR arşivinden eşleyin."
 
 #: website/public/index.html:1112
@@ -6670,8 +6671,8 @@ msgid ""
 "The key is fixed, public {ph0}RFC 6238 test data{ph1}. The demo implements "
 "the calculation recovered from the APK."
 msgstr ""
-"Anahtar sabit, genel {ph0}RFC 6238 test verileridir{ph1}. Demo, APK'dan "
-"kurtarılan hesaplamayı uygular."
+"Anahtar sabit ve herkese açıktır: {ph0}RFC 6238 test verileri{ph1}. Demo, "
+"APK'dan çıkarılan hesaplamayı uygular."
 
 #: website/public/showcase/aegis/index.html:387
 msgctxt "page:showcase/aegis/index.html"
@@ -7247,7 +7248,7 @@ msgstr "{ph0}Bir maske oku{ph1}"
 #, python-brace-format
 msgctxt "page:showcase/ctf/index.html"
 msgid "{ph0}Assembly to readable code{ph1}"
-msgstr "{ph0}Okunabilir koda derleme{ph1}"
+msgstr "{ph0}Assembly kodundan okunabilir koda{ph1}"
 
 #. {ph0}: <a href="#solve">
 #. {ph1}: </a>
@@ -8706,7 +8707,7 @@ msgstr "CTF vaka çalışmasını okuyun"
 #: website/public/showcase/index.html:242
 msgctxt "page:showcase/index.html"
 msgid "Native · Reconstruction"
-msgstr "Yerli * Yeniden Yapılanma"
+msgstr "Yerel makine kodu · Yeniden yapılandırma"
 
 #: website/public/showcase/index.html:244
 msgctxt "page:showcase/index.html"
@@ -9158,8 +9159,8 @@ msgid ""
 "The main process uses another wrapper. Its {ph0} method registers an {ph1} "
 "receiver for that channel."
 msgstr ""
-"Ana işlem başka bir sarmalayıcı kullanır. {ph0} yöntemi bir ıpcMain "
-"kaydeder{ph1}."
+"Ana süreç başka bir sarmalayıcı kullanır. {ph0} yöntemi, bu kanal için bir "
+"{ph1} alıcısı kaydeder."
 
 #: website/public/showcase/notion/index.html:430
 msgctxt "page:showcase/notion/index.html"
@@ -9499,7 +9500,7 @@ msgstr ""
 #: website/public/showcase/th04/index.html:207
 msgctxt "page:showcase/th04/index.html"
 msgid "PC-98 · 16-bit DOS · C++ and assembly"
-msgstr "PC-98 * 16 bit DOS * C ++ ve derleme"
+msgstr "PC-98 · 16 bit DOS · C++ ve assembly"
 
 #: website/public/showcase/th04/index.html:208
 msgctxt "page:showcase/th04/index.html"
@@ -13242,7 +13243,7 @@ msgstr "Notion örnek olay incelemesini okuyun"
 #: website/public/index.html:1058
 msgctxt "page:index.html"
 msgid "Native · Reconstruction"
-msgstr "Yerli * Yeniden Yapılanma"
+msgstr "Yerel makine kodu · Yeniden yapılandırma"
 
 #: website/public/index.html:1059
 msgctxt "page:index.html"
@@ -13679,7 +13680,7 @@ msgid ""
 "Electron."
 msgstr ""
 "Örnek, {ph0}Notları Dışa Aktar{ph1} düğmesine sahip altı dosyadan oluşan bir"
-" Electron uygulamasıdır. Aracınız, Electron'YU yüklemeden veya başlatmadan "
+" Electron uygulamasıdır. Ajanınız, Electron'u yüklemeden veya başlatmadan "
 "kodunu inceleyebilir."
 
 #: website/public/get-started/index.html:892
@@ -13761,7 +13762,7 @@ msgid ""
 "If your agent can’t download files, unzip this archive yourself. Give it the"
 " path to the {ph0} folder and the same export question."
 msgstr ""
-"Temsilciniz dosya indiremiyorsa, bu arşivi kendiniz açın. {ph0} klasörünün "
+"Ajanınız dosya indiremiyorsa, bu arşivi kendiniz açın. {ph0} klasörünün "
 "yolunu ve aynı dışa aktarma sorusunu verin."
 
 #. {ph0}: <code>/absolute/path/to/app</code>
@@ -13793,7 +13794,7 @@ msgstr ""
 msgctxt "page:get-started/index.html"
 msgid "Native executables and libraries · Hopper, Ghidra or IDA"
 msgstr ""
-"Yerel makine kodlu çalıştırılabilir dosyalar ve kütüphaneler · Hopper, "
+"Yerel makine kodu içeren çalıştırılabilir dosyalar ve kütüphaneler · Hopper, "
 "Ghidra veya IDA"
 
 #: website/public/get-started/index.html:987
@@ -14699,8 +14700,8 @@ msgid ""
 "Selected assembly from the installed Calculator DLL. The thoughts and reply "
 "illustrate the findings. {ph0}Continue with the Calculator example ↓{ph1}"
 msgstr ""
-"Yüklü Hesap Makinesi dll'sinden seçilen derleme. Düşünceler ve cevaplar "
-"bulguları göstermektedir. Hesap {ph0}Makinesi örneğine devam edin ↓{ph1}"
+"Yüklü Hesap Makinesi DLL'sinden seçilen assembly. Düşünceler ve yanıt, "
+"bulguları gösterir. {ph0}Hesap Makinesi örneğiyle devam edin ↓{ph1}"
 
 #. {ph0}: <span class="terminal-dots" aria-hidden="true" >
 #. {ph1}: <i>

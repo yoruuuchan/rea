@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { serveCli } from "./cliServeHarness.js";
+import {
+  spawnOwnedProviderProcess,
+  ProviderProcessSupervisor,
+} from "../../../src/process/ProviderProcess.js";
 
 const SESSION_ID = "27d3e3f1-f1e5-49ae-91ec-95af1f343a5a";
 const listen = async (
@@ -46,6 +50,72 @@ describe("Cutter CLI commands", () => {
       bridge_directory: directory,
     });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "awaits discovery cancellation on SIGINT and returns its typed outcome with exit130",
+    async () => {
+      directory = await mkdtemp(join(tmpdir(), "rea-cutter-cli-cancel-"));
+      const sockets = new Set<import("node:net").Socket>();
+      let accepted = 0;
+      server = createServer((socket) => {
+        accepted += 1;
+        sockets.add(socket);
+        socket.on("error", () => undefined);
+        socket.on("close", () => sockets.delete(socket));
+        socket.resume();
+      });
+      const port = await listen(server);
+      for (let index = 0; index < 9; index += 1) {
+        const id = randomUUID();
+        await writeFile(
+          join(directory, `cutter-${process.pid}-${id}.json`),
+          JSON.stringify({
+            session_id: id,
+            pid: process.pid,
+            host: "127.0.0.1",
+            port,
+            token: "cli-discovery-test-transport-token",
+            document_generation: 0,
+            current_file: null,
+            cutter_version: null,
+            identity_status: "partial",
+          }),
+          { mode: 0o600 },
+        );
+      }
+      const launched = await spawnOwnedProviderProcess({
+        command: process.execPath,
+        arguments: ["scripts/rea.mjs", "list-cutter-sessions", "--json"],
+        runId: randomUUID(),
+        hostEnvironment: {
+          ...process.env,
+          REA_CUTTER_BRIDGE_DIR: directory,
+          REA_LOG_LEVEL: "silent",
+        },
+      });
+      const supervisor = new ProviderProcessSupervisor({
+        ...launched,
+        ownsProcessLifetime: true,
+      });
+      try {
+        await expect.poll(() => accepted, { timeout: 5_000 }).toBe(8);
+        launched.process.kill("SIGINT");
+        expect(await supervisor.waitForExit(5_000)).toBe(true);
+        expect(await supervisor.waitForOutputClose(1_000)).toBe(true);
+        expect(launched.process.exitCode).toBe(130);
+        expect(launched.process.signalCode).toBeNull();
+        expect(JSON.parse(supervisor.snapshot().stdout.text)).toMatchObject({
+          code: "cancelled",
+        });
+        await expect.poll(() => sockets.size).toBe(0);
+        expect(accepted).toBe(8);
+      } finally {
+        for (const socket of sockets) socket.destroy();
+        const stopped = await supervisor.stop();
+        expect(stopped.status).not.toBe("incomplete");
+      }
+    },
+  );
 
   it("reports an unavailable selected session for a command", async () => {
     directory = await mkdtemp(join(tmpdir(), "rea-cutter-cli-test-"));

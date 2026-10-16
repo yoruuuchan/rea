@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 import xml.etree.ElementTree as ET
 
@@ -561,6 +562,15 @@ class WebsiteTranslationChecks(unittest.TestCase):
                     parser = VERIFY.HtmlReferences()
                     parser.feed(translated)
                     self.assertEqual(parser.lang, "en" if parser.translation_fallback else code)
+                    font_stylesheets = [
+                        node.attrs["href"] for node in Document(translated).nodes
+                        if node.tag == "link" and node.attrs.get("rel") == "stylesheet"
+                        and urlsplit(node.attrs.get("href", "")).netloc == "fonts.googleapis.com"
+                    ]
+                    self.assertEqual(len(font_stylesheets), int(parser.lang == "ko"))
+                    if font_stylesheets:
+                        self.assertIn("family=Noto+Sans+KR:wght@100..900", font_stylesheets[0])
+                        self.assertIn("&display=swap", font_stylesheets[0])
                     if code != "en" and not parser.translation_fallback:
                         self.assertEqual(parser.direction, language["dir"])
                     if parser.translation_fallback:

@@ -2930,7 +2930,7 @@ html[dir="rtl"] .brand-name {
   }
 }
 
-/* Select local fonts with the appropriate CJK glyph forms. */
+/* Select fonts with the appropriate CJK glyph forms. */
 :lang(ja) {
   --font-sans:
     var(--font-latin), "Hiragino Sans", "Hiragino Kaku Gothic ProN",
@@ -2957,11 +2957,11 @@ html[dir="rtl"] .brand-name {
 }
 :lang(ko) {
   --font-sans:
-    var(--font-latin), "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR",
-    "Noto Sans CJK KR", sans-serif;
+    "Noto Sans KR", "Noto Sans CJK KR", "Apple SD Gothic Neo", "Malgun Gothic",
+    var(--font-latin), sans-serif;
   --font-mono:
-    var(--font-code), "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR",
-    "Noto Sans CJK KR", monospace;
+    var(--font-code), "Noto Sans KR", "Noto Sans CJK KR", "Apple SD Gothic Neo",
+    "Malgun Gothic", monospace;
 }
 :lang(en) {
   --font-sans: var(--font-latin), sans-serif;

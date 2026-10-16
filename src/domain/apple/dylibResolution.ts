@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AnalysisCancelledError } from "../analysisErrorCore.js";
 
 import {
   compatibleSlice,
@@ -516,7 +517,10 @@ const traceProcess = async (
     context.byInstallName.set(rootSlice.install_name, context.root);
   const pending = [context.root];
   while (pending.length > 0) {
-    signal?.throwIfAborted();
+    if (signal?.aborted)
+      throw new AnalysisCancelledError("trace_dylib_resolution", {
+        cause: signal.reason,
+      });
     const loader = pending.pop() ?? "";
     const current = context.loaded.get(loader);
     if (current === undefined) continue;

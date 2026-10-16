@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { inspectManagedArtifactBytes } from "./ManagedArtifactInspector.js";
 import { inspectManagedMembersBytes } from "./ManagedMemberInspector.js";
+import { readManagedPeLayout } from "./ManagedPeReader.js";
 import { inspectManagedNativeBoundariesBytes } from "./ManagedNativeBoundaryInspector.js";
 import {
   buildManagedPeFixture,
@@ -88,3 +89,77 @@ describe("managed artifact failure classification", () => {
     });
   });
 });
+
+describe.each([0, 0x200])(
+  "stream-name file offsets with %i bytes of padding",
+  (padding) => {
+    it.each([
+      {
+        label: "non-printable name",
+        value: 0x1f,
+        length: 1,
+        detail: "Metadata stream name is not printable ASCII",
+      },
+      {
+        label: "unterminated name",
+        value: 0x41,
+        length: 32,
+        detail: "Metadata stream name is missing a bounded terminator",
+      },
+    ])(
+      "reports the artifact location for $label",
+      ({ value, length, detail }) => {
+        const original = buildManagedPeFixture();
+        const section =
+          original.readUInt32LE(0x3c) +
+          24 +
+          original.readUInt16LE(original.readUInt32LE(0x3c) + 20);
+        const rawOffset = original.readUInt32LE(section + 20);
+        // Relocate the raw section while preserving RVAs and its internal layout.
+        const bytes = Buffer.concat([
+          original.subarray(0, rawOffset),
+          Buffer.alloc(padding),
+          original.subarray(rawOffset),
+        ]);
+        bytes.writeUInt32LE(rawOffset + padding, section + 20);
+        const baseline = inspectManagedArtifactBytes(
+          bytes,
+          managedPeFixtureTarget(bytes),
+        );
+        expect(baseline.coverage).toEqual({ state: "complete", issues: [] });
+
+        const pe = readManagedPeLayout(bytes);
+        if (pe.cli === null) throw new Error("Fixture omitted CLI metadata");
+        const root = pe.rvaToOffset(
+          pe.cli.metadata.rva,
+          pe.cli.metadata.size,
+          "cli.metadata",
+        );
+        const versionLength = bytes.readUInt32LE(root + 12);
+        const nameOffset =
+          root + Math.ceil((16 + versionLength) / 4) * 4 + 4 + 8;
+        bytes.fill(value, nameOffset, nameOffset + length);
+        const target = managedPeFixtureTarget(bytes);
+        const artifact = inspectManagedArtifactBytes(bytes, target);
+        const members = inspectManagedMembersBytes(bytes, target);
+
+        expect(artifact.classification.status).toBe("malformed");
+        expect(artifact.coverage.issues).toEqual([
+          expect.objectContaining({
+            code: "invalid-stream",
+            scope: "metadata.stream-name",
+            detail,
+            offset: nameOffset,
+          }),
+        ]);
+        expect(artifact.classification.evidence).toContainEqual(
+          expect.objectContaining({
+            code: "metadata-not-admitted",
+            file_offset: nameOffset,
+          }),
+        );
+        expect(members.coverage.issues).toEqual(artifact.coverage.issues);
+      },
+    );
+  },
+);

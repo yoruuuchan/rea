@@ -44,6 +44,15 @@ export type ClientConfigurationResult =
     }
   | {
       readonly status: "failed";
+      readonly reason: "target_unavailable";
+      readonly failure: {
+        readonly kind: "inspect";
+        readonly path: string;
+        readonly detail: string;
+      };
+    }
+  | {
+      readonly status: "failed";
       readonly reason: "rollback";
       readonly backupPath?: string;
       readonly failure: {

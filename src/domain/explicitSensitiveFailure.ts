@@ -168,6 +168,9 @@ export const redactExplicitFailure = (
         ...(error.remediationAction === undefined
           ? {}
           : { remediationAction: text(error.remediationAction) }),
+        ...(error.retryable === undefined
+          ? {}
+          : { retryable: error.retryable }),
       },
     );
   if (error instanceof ProviderCleanupError)

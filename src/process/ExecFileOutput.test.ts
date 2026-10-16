@@ -105,10 +105,18 @@ describe("execFileOutput", () => {
       }),
     ).rejects.toMatchObject({ killed: true });
   });
+});
 
-  it.skipIf(process.platform === "win32")(
-    "stops an aborted process with the caller's signal and settles after it exits",
-    async () => {
+describe("execFileOutput cancellation lifecycle", () => {
+  it
+    .skipIf(process.platform === "win32")
+    .each([
+      null,
+      "stop after readiness",
+      new Error("stop after readiness"),
+    ] as const)(
+    "stops an aborted process with exact %s reason and settles after it exits",
+    async (reason) => {
       const directory = await createTestTempDirectory("rea-exec-stop-");
       const ready = join(directory, "ready");
       const stopped = join(directory, "stopped");
@@ -134,11 +142,18 @@ describe("execFileOutput", () => {
         }),
       );
       const readyObserved = await waitForFile(ready);
-      controller.abort();
+      controller.abort(reason);
       const outcome = await execution;
 
       expect(readyObserved).toBe(true);
-      expect(outcome?.cause).toMatchObject({ name: "AbortError" });
+      expect(outcome?.cause).toMatchObject({
+        name: "AbortError",
+        _tag: "ExecFileOutputCancelledError",
+      });
+      if (!(outcome?.cause instanceof Error))
+        throw new Error("Expected cancellation failure");
+      expect(outcome.cause.cause).toBe(reason);
+      expect(execFileOutputFailure(outcome.cause)).toBeDefined();
       expect(outcome?.stoppedBeforeSettling).toBe("SIGINT");
     },
   );
@@ -313,3 +328,71 @@ describe("execFileOutput failure metadata", () => {
     });
   });
 });
+
+describe("execFileOutput cancellation provenance", () => {
+  it.each([null, "caller stopped", new Error("caller stopped")] as const)(
+    "retains producer cancellation and exact %s reason",
+    async (reason) => {
+      const controller = new AbortController();
+      controller.abort(reason);
+      const failure: unknown = await execFileOutput(
+        "/must-not-start-after-cancellation",
+        [],
+        {
+          signal: controller.signal,
+          stopSignal: "SIGTERM",
+        },
+      ).catch((cause: unknown) => cause);
+      expect(failure).toMatchObject({
+        _tag: "ExecFileOutputCancelledError",
+        code: "ABORT_ERR",
+        name: "AbortError",
+      });
+      if (!(failure instanceof Error))
+        throw new Error("Expected owned cancellation");
+      expect(failure.cause).toBe(reason);
+    },
+  );
+  it("keeps a completed command failure when its consumer later aborts", async () => {
+    const controller = new AbortController();
+    const failure: unknown = await execFileOutput(
+      process.execPath,
+      ["-e", "process.exitCode=7"],
+      {
+        signal: controller.signal,
+        stopSignal: "SIGTERM",
+      },
+    ).catch((cause: unknown) => {
+      controller.abort(null);
+      return cause;
+    });
+    expect(failure).toMatchObject({ code: 7 });
+    expect(failure).not.toHaveProperty("_tag", "ExecFileOutputCancelledError");
+  });
+});
+
+it.each([
+  null,
+  "native callback stopped",
+  new Error("native callback stopped"),
+] as const)(
+  "normalizes Node callback cancellation with exact %s reason",
+  async (reason) => {
+    const controller = new AbortController();
+    controller.abort(reason);
+    const failure: unknown = await execFileOutput(
+      process.execPath,
+      ["-e", "process.exit(0)"],
+      {
+        signal: controller.signal,
+      },
+    ).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({
+      _tag: "ExecFileOutputCancelledError",
+      code: "ABORT_ERR",
+    });
+    if (!(failure instanceof Error))
+      throw new Error("Expected Node callback cancellation");
+    expect(failure.cause).toBe(reason);
+  },
+);

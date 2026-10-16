@@ -341,7 +341,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
           cause instanceof ArtifactReaderFailure ? cause.cleanup : undefined;
         if (options?.signal?.aborted)
           throw new AnalysisCancelledError(OPERATION, {
-            cause,
+            cause: options.signal.reason,
             capturedOutput,
             ...(cleanup === undefined ? {} : { cleanup }),
           });

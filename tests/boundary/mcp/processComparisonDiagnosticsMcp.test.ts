@@ -59,10 +59,11 @@ const right = captureEvidence("right", {
   working_directory: "/work/reconstruction",
 });
 
-const connect = async () => {
-  const session = createTestBinarySession(() => {
+const connect = async (
+  session = createTestBinarySession(() => {
     throw new Error("Process comparison must not launch a provider");
-  });
+  }),
+) => {
   const server = createServer({ kind: "session", session });
   const client = new Client({ name: "process-comparison-test", version: "1" });
   onTestFinished(async () => {
@@ -337,6 +338,42 @@ it("names the stale capture that exceeds max_capture_age_ms", async () => {
       },
     },
   });
+});
+
+it("retains a selected max_capture_age_ms requirement in comparison Evidence parameters", async () => {
+  const session = createTestBinarySession(() => {
+    throw new Error("Process comparison must not launch a provider");
+  });
+  const client = await connect(session);
+  const unconstrained = await client.callTool({
+    name: "compare_process_captures",
+    arguments: {
+      left: captureEvidence("left"),
+      right: captureEvidence("right"),
+    },
+  });
+  const selected = await client.callTool({
+    name: "compare_process_captures",
+    arguments: {
+      left: captureEvidence("left"),
+      right: captureEvidence("right"),
+      max_capture_age_ms: Number.MAX_SAFE_INTEGER,
+    },
+  });
+  expect(unconstrained.isError).not.toBe(true);
+  expect(selected.isError).not.toBe(true);
+  const before = parseEvidence(unconstrained.structuredContent);
+  const after = parseEvidence(selected.structuredContent);
+  expect(before.parameters).not.toHaveProperty("max_capture_age_ms");
+  expect(after.parameters).toHaveProperty(
+    "max_capture_age_ms",
+    Number.MAX_SAFE_INTEGER,
+  );
+  expect(after.evidence_id).not.toBe(before.evidence_id);
+  expect(session.evidenceById(after.evidence_id)?.parameters).toHaveProperty(
+    "max_capture_age_ms",
+    Number.MAX_SAFE_INTEGER,
+  );
 });
 
 it("reports CLI trace specification issues like the MCP trace_spec input", async () => {

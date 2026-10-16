@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 import {
   inventoryFirmwareOutput,
-  readFirmwareReport,
+  FirmwareFileAccess,
 } from "../../../src/firmware/FirmwareFiles.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -27,7 +27,7 @@ it.each([
       ]),
     );
     await expect(
-      readFirmwareReport(path, "inspect_firmware_regions"),
+      new FirmwareFileAccess().report(path, "inspect_firmware_regions"),
     ).rejects.toMatchObject({
       _tag: "AnalysisOutputError",
       reason: "Tool report is not valid complete JSON",
@@ -40,9 +40,9 @@ it("preserves valid Unicode and a literal replacement character in producer JSON
   const path = join(root, "report.json");
   const report = { description: "固件 🧩 \ufffd", path: "/输入/firmware.bin" };
   await writeFile(path, JSON.stringify(report));
-  expect(await readFirmwareReport(path, "inspect_firmware_regions")).toEqual(
-    report,
-  );
+  expect(
+    await new FirmwareFileAccess().report(path, "inspect_firmware_regions"),
+  ).toEqual(report);
 });
 
 it("orders extracted firmware paths by code point independently of host locale", async () => {

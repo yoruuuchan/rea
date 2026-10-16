@@ -1,4 +1,9 @@
 import {
+  bindArtifactFileCleanup,
+  ArtifactFileCleanupFailure,
+  artifactFileCancellationCause,
+} from "../../artifacts/ArtifactFileOperation.js";
+import {
   pwntoolsDecoderFailure,
   pwntoolsUnavailable,
   capturedPwntoolsOutput,
@@ -322,16 +327,40 @@ export class PwntoolsDecoder<
         );
         reply = replySchema.parse(JSON.parse(file.bytes.toString("utf8")));
       } catch (cause: unknown) {
-        if (options?.signal?.aborted)
-          throw new AnalysisCancelledError(OPERATION, {
-            cause,
+        if (
+          cause instanceof ArtifactReaderFailure &&
+          (cause.reason === "cancelled" ||
+            (cause instanceof ArtifactFileCleanupFailure &&
+              cause.fileCleanupFailure.outcome.kind === "completed" &&
+              options?.signal?.aborted))
+        ) {
+          const error = new AnalysisCancelledError(OPERATION, {
+            cause:
+              cause.reason === "cancelled"
+                ? artifactFileCancellationCause(cause)
+                : options?.signal?.reason,
             capturedOutput,
+            ...(cause instanceof ArtifactReaderFailure &&
+            cause.cleanup !== undefined
+              ? { cleanup: cause.cleanup }
+              : {}),
           });
-        throw new AnalysisOutputError(
+          bindArtifactFileCleanup(cause, error);
+          throw error;
+        }
+        const error = new AnalysisOutputError(
           OPERATION,
           `Owned pwntools decoder reply failed for ${input.path}: ${cause instanceof z.ZodError ? cause.issues[0]?.message + " at " + (cause.issues[0]?.path.map(String).join(".") ?? "root") : cause instanceof Error ? cause.message : String(cause)}`,
-          { cause, capturedOutput },
+          {
+            cause,
+            capturedOutput,
+            ...(cause instanceof ArtifactReaderFailure
+              ? { cleanup: cause.cleanup }
+              : {}),
+          },
         );
+        bindArtifactFileCleanup(cause, error);
+        throw error;
       }
       if (!reply.ok) {
         if (reply.reason === "unsupported-target")

@@ -21,14 +21,16 @@ type ExecFileOutputOptions = Omit<
 /** How long a stopped process may take to exit before it is killed. */
 const STOP_GRACE_MS = 5_000;
 
-const abortError = (signal: AbortSignal): Error => {
-  const error = new Error("The operation was aborted", {
-    cause: signal.reason,
-  });
-  error.name = "AbortError";
-  Reflect.set(error, "code", "ABORT_ERR");
-  return error;
-};
+/** Cancellation observed by the command owner, with the caller's exact reason. */
+export class ExecFileOutputCancelledError extends Error {
+  readonly _tag = "ExecFileOutputCancelledError";
+  readonly code = "ABORT_ERR";
+
+  constructor(reason: unknown) {
+    super("The operation was aborted", { cause: reason });
+    this.name = "AbortError";
+  }
+}
 
 /**
  * A command stopped at its timeout can still exit cleanly, so the timeout is
@@ -133,7 +135,7 @@ export const execFileBytes = (
       return;
     }
     if (stopSignal !== undefined && signal?.aborted === true) {
-      reject(abortError(signal));
+      reject(new ExecFileOutputCancelledError(signal.reason));
       return;
     }
     let stopped: "abort" | "timeout" | undefined;
@@ -162,10 +164,12 @@ export const execFileBytes = (
         clearTimeout(grace);
         const failure =
           stopped === "abort" && signal !== undefined
-            ? abortError(signal)
+            ? new ExecFileOutputCancelledError(signal.reason)
             : stopped === "timeout" && timeout !== undefined
               ? timeoutError(command, timeout, error)
-              : error;
+              : error?.name === "AbortError" && error.code === "ABORT_ERR"
+                ? new ExecFileOutputCancelledError(error.cause)
+                : error;
         if (failure !== null) {
           Reflect.set(failure, "stdout", stdout.toString("utf8"));
           Reflect.set(failure, "stderr", stderr.toString("utf8"));

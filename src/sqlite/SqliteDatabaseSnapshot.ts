@@ -9,7 +9,10 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { SQLITE_PROVIDER_IDENTITY } from "../domain/sqlite/sqliteDatabase.js";
-import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import {
+  withArtifactFileHandle,
+  assertArtifactReadActive,
+} from "../artifacts/ArtifactFileOperation.js";
 import {
   readStableArtifact,
   type StableArtifactFileSystem,
@@ -180,61 +183,51 @@ const verifyInactiveJournal = async (
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     ),
   );
-  const owner = new OwnedFileHandle(file);
-  let failure: unknown;
-  try {
-    if (!sameState(before, await file.stat({ bigint: true })))
-      throw new ArtifactReaderFailure(
-        "integrity",
-        `SQLite journal changed before open: ${path}`,
-      );
-    // TRUNCATE commits leave an empty file; PERSIST commits zero the complete
-    // 28-byte fixed header. A new active journal may zero only its magic bytes.
-    const header = Buffer.alloc(28);
-    let bytesRead = 0;
-    if (before.size > 0n) {
-      while (bytesRead < header.length) {
-        signal?.throwIfAborted();
-        const read = await file.read(
-          header,
-          bytesRead,
-          header.length - bytesRead,
-          bytesRead,
+  await withArtifactFileHandle(
+    path,
+    file,
+    resourceScope,
+    signal,
+    async (file) => {
+      if (!sameState(before, await file.stat({ bigint: true })))
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `SQLite journal changed before open: ${path}`,
         );
-        if (read.bytesRead === 0) break;
-        bytesRead += read.bytesRead;
+      // TRUNCATE commits leave an empty file; PERSIST commits zero the complete
+      // 28-byte fixed header. A new active journal may zero only its magic bytes.
+      const header = Buffer.alloc(28);
+      let bytesRead = 0;
+      if (before.size > 0n) {
+        while (bytesRead < header.length) {
+          assertArtifactReadActive(signal);
+          const read = await file.read(
+            header,
+            bytesRead,
+            header.length - bytesRead,
+            bytesRead,
+          );
+          if (read.bytesRead === 0) break;
+          bytesRead += read.bytesRead;
+        }
       }
-    }
-    if (!sameState(before, await file.stat({ bigint: true })))
-      throw new ArtifactReaderFailure(
-        "integrity",
-        `SQLite journal changed during inspection: ${path}`,
-      );
-    if (
-      before.size !== 0n &&
-      (bytesRead !== header.length || header.some((byte) => byte !== 0))
-    )
-      throw new ArtifactReaderFailure(
-        phase === "initial" ? "format" : "integrity",
-        phase === "initial"
-          ? `Rollback journal may require recovery: ${path}. Supply a clean offline snapshot; only empty journals or a fully zeroed header are supported.`
-          : `Rollback journal became active or malformed during database acquisition: ${path}`,
-      );
-  } catch (cause: unknown) {
-    failure = cause;
-    throw cause;
-  } finally {
-    const cleanup = await resourceScope.release({
-      kind: "file-handle",
-      resource: path,
-      handle: owner,
-    });
-    if (cleanup.kind === "failed")
-      throw ArtifactReaderFailure.withCleanup(
-        failure ?? cleanup.cause,
-        ArtifactReaderFailure.cleanupObservation(cleanup.cause, path),
-      );
-  }
+      if (!sameState(before, await file.stat({ bigint: true })))
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `SQLite journal changed during inspection: ${path}`,
+        );
+      if (
+        before.size !== 0n &&
+        (bytesRead !== header.length || header.some((byte) => byte !== 0))
+      )
+        throw new ArtifactReaderFailure(
+          phase === "initial" ? "format" : "integrity",
+          phase === "initial"
+            ? `Rollback journal may require recovery: ${path}. Supply a clean offline snapshot; only empty journals or a fully zeroed header are supported.`
+            : `Rollback journal became active or malformed during database acquisition: ${path}`,
+        );
+    },
+  );
 };
 
 // Absence is a caller value to correct, not malformed path or content.

@@ -308,6 +308,10 @@ it("retains reply-read cancellation and retries the failed reply descriptor clos
   descriptorCleanup.denied = false;
   await selected.provider.close();
   expect(handle.fd).toBe(-1);
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(projectAnalysisError(result.error)).toMatchObject({
+    code: "cancelled",
+  });
   for (const root of selected.roots)
     await expect(access(root.path)).rejects.toMatchObject({ code: "ENOENT" });
 });

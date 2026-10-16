@@ -253,3 +253,67 @@ it("matches package manifests by exact or unique canonical directory identity", 
     `${decomposedTwin}/exact-decomposed.js`,
   ]);
 });
+
+it("resolves extensionless imports and requires to .mts and .cts files and directory indexes", () => {
+  const files = [
+    [
+      "src/index.ts",
+      'import "./esm";\nimport "./pkg-esm";\nimport cjs = require("./cjs");\nimport pkgCjs = require("./pkg-cjs");\n',
+    ],
+    ["src/esm.mts", "export const esm = 1;\n"],
+    ["src/pkg-esm/index.mts", "export const pkgEsm = 2;\n"],
+    ["src/cjs.cts", "module.exports = { cjs: 3 };\n"],
+    ["src/pkg-cjs/index.cts", "module.exports = { pkgCjs: 4 };\n"],
+  ] as const;
+  const read: ReferenceSourceRead = {
+    root: "/selected/source",
+    entries: files.map(([path, content]) => ({
+      status: "read",
+      kind: "file",
+      path,
+      bytes: Buffer.from(content),
+      size: Buffer.byteLength(content),
+    })),
+    bytesRead: files.reduce(
+      (sum, [, content]) => sum + Buffer.byteLength(content),
+      0,
+    ),
+    limitations: [],
+  };
+  const parsed = parseReferenceSourceEntries(
+    read,
+    new Set(files.map(([path]) => path)),
+  );
+  expect(parsed.relationships).toEqual(
+    expect.arrayContaining([
+      {
+        from_path: "src/index.ts",
+        to: "src/esm.mts",
+        kind: "imports",
+        resolution: "internal",
+        parse_state: "parsed",
+      },
+      {
+        from_path: "src/index.ts",
+        to: "src/pkg-esm/index.mts",
+        kind: "imports",
+        resolution: "internal",
+        parse_state: "parsed",
+      },
+      {
+        from_path: "src/index.ts",
+        to: "src/cjs.cts",
+        kind: "requires",
+        resolution: "internal",
+        parse_state: "parsed",
+      },
+      {
+        from_path: "src/index.ts",
+        to: "src/pkg-cjs/index.cts",
+        kind: "requires",
+        resolution: "internal",
+        parse_state: "parsed",
+      },
+    ]),
+  );
+});

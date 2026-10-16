@@ -71,7 +71,12 @@ export const kunaQueryFailureForCaller = (
       source.resource,
       source.reason,
       source.reportedLimits,
-      options,
+      {
+        ...options,
+        ...(source.retryable === undefined
+          ? {}
+          : { retryable: source.retryable }),
+      },
     );
   if (source instanceof AnalysisOutputError)
     return new AnalysisOutputError(operation, source.reason, {

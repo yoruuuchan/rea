@@ -585,16 +585,22 @@ describe("dyld load order", () => {
     ]);
   });
 
-  it("stops when cancelled", async () => {
-    const controller = new AbortController();
-    controller.abort();
-    await expect(
-      traceDylibLoading(memoryView({ [MAIN]: executable() }), {
-        roots: [MAIN],
-        signal: controller.signal,
-      }),
-    ).rejects.toThrow();
-  });
+  it.each([undefined, null, "caller reason"])(
+    "stops with the exact caller cancellation reason: %s",
+    async (reason) => {
+      const controller = new AbortController();
+      controller.abort(reason);
+      await expect(
+        traceDylibLoading(memoryView({ [MAIN]: executable() }), {
+          roots: [MAIN],
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        _tag: "AnalysisCancelledError",
+        cause: controller.signal.reason,
+      });
+    },
+  );
 });
 
 describe("loader-relative dylib resolution", () => {

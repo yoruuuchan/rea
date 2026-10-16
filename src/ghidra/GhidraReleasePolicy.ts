@@ -8,6 +8,7 @@ interface GhidraReleaseVersion {
   readonly major: number;
   readonly minor: number;
   readonly patch: number;
+  readonly suffix: string;
 }
 
 /** How an observed Ghidra release relates to this adapter's bridge. */
@@ -108,7 +109,22 @@ const parseGhidraRelease = (raw: string): GhidraReleaseVersion | undefined => {
   if (match === null || major === undefined || minor === undefined)
     return undefined;
   const patch = match[3] === undefined ? 0 : integerGroup(match[3]);
-  return patch === undefined ? undefined : { major, minor, patch };
+  return patch === undefined
+    ? undefined
+    : { major, minor, patch, suffix: match[4] ?? "" };
+};
+
+/**
+ * The version spelling Ghidra's `ApplicationVersion.toString` uses in its
+ * settings directory: numeric components normalized, a zero patch and an
+ * empty tag omitted. A build-metadata (`+`) suffix has no such spelling.
+ */
+export const ghidraConfigurationVersion = (raw: string): string | undefined => {
+  const version = parseGhidraRelease(raw);
+  if (version === undefined || version.suffix.startsWith("+")) return undefined;
+  const patch = version.patch === 0 ? "" : `.${String(version.patch)}`;
+  const suffix = version.suffix === "-" ? "" : version.suffix;
+  return `${String(version.major)}.${String(version.minor)}${patch}${suffix}`;
 };
 
 const integerGroup = (value: string | undefined): number | undefined => {

@@ -387,3 +387,88 @@ describe("PE resource section virtual extent", () => {
     });
   });
 });
+
+describe("PE resource ownership boundaries", () => {
+  const singleResource = () =>
+    peResourceFixture(false, [
+      { type: 10, name: 1, language: 1033, payload: Buffer.from("DATA") },
+    ]);
+  const secondSection = (
+    fixture: ReturnType<typeof peResourceFixture>,
+    virtualSize: number,
+    rva: number,
+    rawSize: number,
+  ): Buffer => {
+    fixture.bytes.writeUInt16LE(2, 0x86);
+    const section = fixture.sectionAt + 40;
+    fixture.bytes.writeUInt32LE(virtualSize, section + 8);
+    fixture.bytes.writeUInt32LE(rva, section + 12);
+    fixture.bytes.writeUInt32LE(rawSize, section + 16);
+    if (rawSize === 0) return fixture.bytes;
+    fixture.bytes.writeUInt32LE(fixture.bytes.length, section + 20);
+    return Buffer.concat([fixture.bytes, Buffer.alloc(rawSize)]);
+  };
+
+  it("keeps locations and digests unchanged for a zero-extent section inside the resource interval", async () => {
+    const baseline = peResourcesSchema.parse(
+      await parse(singleResource().bytes),
+    );
+    const fixture = singleResource();
+    const bytes = secondSection(fixture, 0, 0x2001, 0);
+
+    const result = peResourcesSchema.parse(await parse(bytes));
+    expect(result.coverage).toMatchObject({ status: "complete" });
+    expect(result.resources[0]?.payload).toEqual(
+      baseline.resources[0]?.payload,
+    );
+  });
+
+  it("still rejects a positive-extent section inside the resource interval", async () => {
+    const fixture = singleResource();
+    const bytes = secondSection(fixture, 4, 0x2001, 0);
+    await expect(parse(bytes)).rejects.toMatchObject({
+      reason: "format",
+      message: "Resource interval intersects overlapping virtual sections.",
+    });
+  });
+
+  it("keeps a header-backed payload whose interval contains a zero-extent section", async () => {
+    const fixture = singleResource();
+    fixture.bytes.writeUInt32LE(0x100, fixture.dataOffsets[0]);
+    fixture.bytes.writeUInt32LE(4, (fixture.dataOffsets[0] ?? 0) + 4);
+    const bytes = secondSection(fixture, 0, 0x102, 0);
+
+    const result = peResourcesSchema.parse(await parse(bytes));
+    expect(result.resources[0]?.payload).toMatchObject({
+      rva: 0x100,
+      location: { offset: 0x100, bytes: 4 },
+      sha256: createHash("sha256")
+        .update(bytes.subarray(0x100, 0x104))
+        .digest("hex"),
+    });
+  });
+
+  it("rejects an empty header payload whose RVA starts a file-backed section", async () => {
+    const fixture = singleResource();
+    fixture.bytes.writeUInt32LE(0x100, fixture.dataOffsets[0]);
+    fixture.bytes.writeUInt32LE(0, (fixture.dataOffsets[0] ?? 0) + 4);
+    const bytes = secondSection(fixture, 4, 0x100, 4);
+    await expect(parse(bytes)).rejects.toMatchObject({
+      reason: "format",
+      message: "Ambiguous resource header RVA mapping.",
+    });
+  });
+
+  it("retains an empty header payload that no section owns", async () => {
+    const fixture = singleResource();
+    fixture.bytes.writeUInt32LE(0x100, fixture.dataOffsets[0]);
+    fixture.bytes.writeUInt32LE(0, (fixture.dataOffsets[0] ?? 0) + 4);
+
+    const result = peResourcesSchema.parse(await parse(fixture.bytes));
+    expect(result.resources[0]?.payload).toMatchObject({
+      rva: 0x100,
+      location: { offset: 0x100, bytes: 0 },
+      sha256: createHash("sha256").digest("hex"),
+    });
+  });
+});

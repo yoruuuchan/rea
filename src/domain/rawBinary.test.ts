@@ -151,6 +151,7 @@ describe("raw-binary admission", () => {
       "missing architecture",
       { architecture: undefined, entryPoint: "0x8000000" },
     ],
+    ["mismatched family name", { architecture: "68000", entryPoint: "0x1000" }],
   ])("classifies a %s as caller input", (_name, selection) => {
     const result = admitRawBinary({ ...selection, fileBytes: 4 });
     expect(result.ok).toBe(false);
@@ -167,6 +168,59 @@ describe("raw-binary admission", () => {
       });
       if (!admitted.ok) throw new Error(admitted.error.reason);
       expect(admitted.value.entryPoint).toBe("0x1001");
+    },
+  );
+});
+
+describe("m68k raw-binary admission", () => {
+  it("admits even m68k entries up to the 32-bit address boundary", () => {
+    for (const [entryPoint, fileBytes] of [
+      ["0x0", 8],
+      ["0x1000", 8],
+      ["0xfffffffe", 2],
+    ] as const) {
+      const result = admitRawBinary({
+        architecture: "m68k",
+        entryPoint,
+        fileBytes,
+      });
+      if (!result.ok) throw new Error(result.error.reason);
+      expect(result.value).toEqual({
+        architecture: "m68k",
+        entryPoint,
+        entryPointSource: entryPoint,
+      });
+    }
+  });
+  it.each(["0x1", "0x1001", "0x1003", "0xffffffff"])(
+    "rejects the odd m68k entry %s before provider selection",
+    (entryPoint) => {
+      expect(
+        admitRawBinary({ architecture: "m68k", entryPoint, fileBytes: 2 }),
+      ).toEqual({
+        ok: false,
+        error: {
+          reason: `raw-binary m68k entry_point ${entryPoint} must be 2-byte aligned`,
+          constraint: "load_selection_rejected",
+        },
+      });
+    },
+  );
+  it.each([
+    ["0x100000000", 2],
+    ["0xfffffffe", 4],
+  ])(
+    "rejects an m68k mapping at %s with %i bytes that exceeds 32 bits",
+    (entryPoint, fileBytes) => {
+      expect(
+        admitRawBinary({ architecture: "m68k", entryPoint, fileBytes }),
+      ).toEqual({
+        ok: false,
+        error: {
+          reason: `raw-binary mapping from ${entryPoint} must fit in the m68k address width`,
+          constraint: "load_selection_rejected",
+        },
+      });
     },
   );
 });

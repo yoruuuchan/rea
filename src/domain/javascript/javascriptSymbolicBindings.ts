@@ -312,8 +312,18 @@ export class JavaScriptSymbolicBindings {
       }
       return { kind: "external", path };
     }
-    if (value.kind === "record")
-      return value.values.get(key) ?? symbolicUnknown("missing property");
+    if (value.kind === "record") {
+      const property = value.values.get(key);
+      if (
+        key === "exports" &&
+        property?.kind === "namespace" &&
+        this.#namespaceOwners.has(property.bindingId)
+      ) {
+        // Preserve namespace identity for members, not a known runtime value.
+        return { ...property, runtimeValueUnknown: true };
+      }
+      return property ?? symbolicUnknown("missing property");
+    }
     if (value.kind === "namespace") {
       if (
         this.#mutated.has(value.bindingId) ||
@@ -583,7 +593,26 @@ export class JavaScriptSymbolicBindings {
     }
     if (t.isSequenceExpression(node))
       return this.evaluate(node.expressions.at(-1), env);
-    if (t.isAssignmentExpression(node)) return this.evaluate(node.right, env);
+    if (t.isAssignmentExpression(node)) {
+      if (node.operator === "=") return this.evaluate(node.right, env);
+      if (
+        node.operator === "&&=" ||
+        node.operator === "||=" ||
+        node.operator === "??="
+      )
+        return this.#logicalValue(
+          node.operator === "&&="
+            ? "&&"
+            : node.operator === "||="
+              ? "||"
+              : "??",
+          node.left,
+          node.right,
+          env,
+          true,
+        );
+      return symbolicUnknown("compound assignment result");
+    }
     if (t.isAwaitExpression(node))
       return this.#awaited(this.evaluate(node.argument, env));
     if (t.isUnaryExpression(node)) {
@@ -609,37 +638,57 @@ export class JavaScriptSymbolicBindings {
           ])
         : this.evaluate(truth ? node.consequent : node.alternate, env);
     }
-    if (t.isLogicalExpression(node)) {
-      const left = this.evaluate(node.left, env);
-      const right = symbolicLogicalRight(node.operator, left);
-      if (right !== undefined)
-        return right ? this.evaluate(node.right, env) : left;
-      const leftCondition: SymbolicCondition = {
-        node: node.left,
-        positive:
-          node.operator === "&&"
-            ? false
-            : node.operator === "||"
-              ? true
-              : "not-nullish",
-      };
-      const rightCondition: SymbolicCondition = {
-        node: node.left,
-        positive:
-          node.operator === "&&"
-            ? true
-            : node.operator === "||"
-              ? false
-              : "nullish",
-      };
-      return symbolicUnion([
-        symbolicCondition(left, leftCondition),
-        symbolicCondition(this.evaluate(node.right, env), rightCondition),
-      ]);
-    }
+    if (t.isLogicalExpression(node))
+      return this.#logicalValue(node.operator, node.left, node.right, env);
     if (t.isCallExpression(node) || t.isOptionalCallExpression(node))
       return this.#call(node, env);
     return symbolicUnknown(`unsupported ${node.type}`);
+  }
+
+  #logicalValue(
+    operator: t.LogicalExpression["operator"],
+    leftNode: t.Node,
+    rightNode: t.Node,
+    env: SymbolicEnvironment,
+    assignment = false,
+  ): SymbolicValue {
+    const value = this.evaluate(leftNode, env);
+    let left = value;
+    if (assignment) {
+      // A mutable namespace supplies member identity, not a callable root value.
+      // Assignment results must not resolve their own write through that identity.
+      const alternatives = symbolicUnion(
+        symbolicVariants(value).map((variant) =>
+          variant.kind === "namespace" && variant.runtimeValueUnknown
+            ? this.#withConditions(
+                symbolicUnknown("mutable module exports value"),
+                variant,
+              )
+            : variant,
+        ),
+      );
+      left =
+        value.kind === "union"
+          ? this.#withConditions(alternatives, value)
+          : alternatives;
+    }
+    const right = symbolicLogicalRight(operator, left);
+    if (right !== undefined)
+      return right ? this.evaluate(rightNode, env) : left;
+    const leftCondition: SymbolicCondition = {
+      node: leftNode,
+      positive:
+        operator === "&&" ? false : operator === "||" ? true : "not-nullish",
+    };
+    const rightCondition: SymbolicCondition = {
+      node: leftNode,
+      positive:
+        operator === "&&" ? true : operator === "||" ? false : "nullish",
+    };
+    return symbolicUnion([
+      symbolicCondition(left, leftCondition),
+      symbolicCondition(this.evaluate(rightNode, env), rightCondition),
+    ]);
   }
 
   #identifier(node: t.Identifier, env: SymbolicEnvironment): SymbolicValue {
@@ -1358,11 +1407,9 @@ export class JavaScriptSymbolicBindings {
       !t.isForOfStatement(site) &&
       !t.isForInStatement(site)
     ) {
-      this.#indexWrite(
-        direct,
-        t.isAssignmentExpression(site) ? site.right : site,
-        site,
-      );
+      // Retain the operator so stored writes use the same result semantics as
+      // inline assignments, rather than treating every write as its RHS.
+      this.#indexWrite(direct, site, site);
       return;
     }
     for (const leaf of semanticWriteTargets(target))

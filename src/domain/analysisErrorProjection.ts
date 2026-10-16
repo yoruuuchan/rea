@@ -87,7 +87,7 @@ export const projectAnalysisError = (
         error.retryable) ||
       (code === "resource_constraint" &&
         error instanceof AnalysisResourceConstraintError &&
-        error.resource === "capacity"),
+        (error.retryable ?? error.resource === "capacity")),
     remediation: {
       action: analysisErrorRemediationAction(error),
     },

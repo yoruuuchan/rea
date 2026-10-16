@@ -1,4 +1,3 @@
-import { parseGhidraJavaProperties } from "./GhidraJavaProperties.js";
 import { GHIDRA_BRIDGE_SOURCES } from "./GhidraBridgeSources.js";
 import {
   snapshotGhidraAnalysisSeeds,
@@ -6,7 +5,7 @@ import {
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
 
 import writeFileAtomic from "write-file-atomic";
@@ -18,6 +17,9 @@ import {
   WindowsBatchCommandError,
 } from "../process/WindowsBatchCommand.js";
 
+import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { AnalysisCapturedOutput } from "../domain/analysisErrorBase.js";
@@ -28,6 +30,7 @@ import {
   cleanupOwnedProcessGroup,
   cleanupWindowsProcessTree,
   type ProcessCleanupResult,
+  type ProcessCleanupFailure,
 } from "../process/ProcessOwnership.js";
 import {
   type ProviderProcessLaunch,
@@ -89,27 +92,65 @@ export interface GhidraLauncher {
   ): Promise<Result<GhidraLaunch, GhidraLaunchError | AnalysisCancelledError>>;
 }
 
+/** A rollback attempt failed without releasing its process owner. */
+export type GhidraLaunchRollbackFailure =
+  | { readonly kind: "incomplete"; readonly result: ProcessCleanupFailure }
+  | { readonly kind: "rejected"; readonly cause: unknown };
+
 /** Local launch failure retained as the cause of a provider-neutral error. */
 export class GhidraLaunchError extends Error {
   readonly #partialLaunch: GhidraLaunch | undefined;
   readonly #capturedOutput: AnalysisCapturedOutput | undefined;
   readonly launchSupport: readonly GhidraLaunchSupportDiagnostic[];
+  readonly rollbackFailure: GhidraLaunchRollbackFailure | undefined;
+  readonly cleanupFailure: AnalysisError | undefined;
 
   constructor(
     message: string,
     options?: ErrorOptions & {
       readonly partialLaunch?: GhidraLaunch;
+      readonly rollbackFailure?: GhidraLaunchRollbackFailure;
+      readonly cleanupFailure?: AnalysisError;
       readonly capturedOutput?: AnalysisCapturedOutput;
       readonly launchSupport?: readonly GhidraLaunchSupportDiagnostic[];
     },
   ) {
-    const { partialLaunch, capturedOutput, launchSupport, ...errorOptions } =
-      options ?? {};
+    const {
+      partialLaunch,
+      capturedOutput,
+      launchSupport,
+      rollbackFailure,
+      cleanupFailure,
+      ...errorOptions
+    } = options ?? {};
     super(message, errorOptions);
     this.name = "GhidraLaunchError";
     this.#partialLaunch = partialLaunch;
-    this.#capturedOutput =
-      capturedOutput === undefined ? undefined : { ...capturedOutput };
+    this.rollbackFailure = rollbackFailure;
+    const inherited =
+      errorOptions.cause instanceof DarwinProcessOwnershipInspectionError ||
+      errorOptions.cause instanceof GhidraLaunchError
+        ? errorOptions.cause.cleanupFailure
+        : errorOptions.cause instanceof AnalysisError &&
+            errorOptions.cause.cleanupIncomplete
+          ? errorOptions.cause
+          : undefined;
+    this.cleanupFailure =
+      cleanupFailure === undefined
+        ? inherited
+        : inherited === undefined || inherited === cleanupFailure
+          ? cleanupFailure
+          : analysisErrorWithCleanupFailure(
+              inherited,
+              cleanupFailure,
+            ).bindCleanupDependencies([inherited, cleanupFailure]);
+    const output =
+      capturedOutput ??
+      (errorOptions.cause instanceof DarwinProcessOwnershipInspectionError ||
+      errorOptions.cause instanceof GhidraLaunchError
+        ? errorOptions.cause.capturedOutput
+        : undefined);
+    this.#capturedOutput = output === undefined ? undefined : { ...output };
     this.launchSupport = (launchSupport ?? []).map((output) => ({ ...output }));
   }
 
@@ -134,12 +175,20 @@ export class GhidraLaunchError extends Error {
 const ghidraLaunchCommandOutput = (
   cause: unknown,
 ): AnalysisCapturedOutput | undefined => {
+  if (cause instanceof DarwinProcessOwnershipInspectionError)
+    return cause.capturedOutput;
   const failure = execFileOutputFailure(cause);
   if (failure === undefined) return undefined;
   return {
     stdout: failure.stdout,
     stderr: failure.stderr,
     truncated: failure.outputTruncated,
+    ...(failure.stdoutBytes === undefined
+      ? {}
+      : { stdout_bytes: failure.stdoutBytes }),
+    ...(failure.stderrBytes === undefined
+      ? {}
+      : { stderr_bytes: failure.stderrBytes }),
     exit_code: typeof failure.code === "number" ? failure.code : null,
     signal: failure.signal,
   };
@@ -149,6 +198,8 @@ const ghidraLaunchCommandOutput = (
 export interface GhidraHeadlessLauncherOptions {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly analyzeHeadlessPath: string;
+  /** Release coordinate owned by installation inspection; null must not be guessed. */
+  readonly configurationDirectoryName: string | null;
   readonly javaHome?: string;
   readonly javaVmName?: string;
   readonly bridgeScriptPath: string;
@@ -200,6 +251,10 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
     let configuredMaxHeap: string | undefined;
     const launchSupport: GhidraLaunchSupportDiagnostic[] = [];
     try {
+      if (this.options.configurationDirectoryName === null)
+        throw new GhidraLaunchError(
+          "Ghidra configuration directory identity is unresolved; restore application.version and application.release.name in the selected installation's application.properties.",
+        );
       const psp = this.options.pspExtension;
       if (psp !== undefined) {
         const installedRoot = await realpath(
@@ -228,7 +283,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
       await createGhidraRuntimeDirectories(
         paths,
         platform,
-        await ghidraConfigReleaseDirectory(this.options.analyzeHeadlessPath),
+        this.options.configurationDirectoryName,
       );
       const seedPath =
         this.options.analysisSeeds === undefined
@@ -405,21 +460,34 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         },
       );
       const primary = isAborted(options.signal)
-        ? new AnalysisCancelledError("open_binary", { cause: launchFailure })
+        ? new AnalysisCancelledError("open_binary", {
+            cause: launchFailure,
+            ...(launchFailure.cleanupFailure === undefined
+              ? {}
+              : {
+                  cleanup: {
+                    reason: launchFailure.cleanupFailure.message,
+                    resources: launchFailure.cleanupFailure.cleanupResources,
+                  },
+                }),
+          }).bindCleanupDependencies(
+            launchFailure.cleanupFailure === undefined
+              ? []
+              : [launchFailure.cleanupFailure],
+          )
         : launchFailure;
       if (started === undefined) return err(primary);
 
-      let cleanupFailure: unknown;
-      try {
-        const cleanup = await cleanupStartedProcess(started, platform);
-        if (!cleanup.cleaned)
-          cleanupFailure = new Error(
-            `Ghidra process cleanup was incomplete: ${cleanup.reason}`,
-          );
-      } catch (failure: unknown) {
-        cleanupFailure = failure;
-      }
-      if (cleanupFailure !== undefined) {
+      const cleanupOwner = started;
+      const rollback = await Promise.resolve()
+        .then(() => cleanupStartedProcess(cleanupOwner, platform))
+        .then(
+          (result): Result<null, GhidraLaunchRollbackFailure> =>
+            result.cleaned ? ok(null) : err({ kind: "incomplete", result }),
+          (cause: unknown): Result<null, GhidraLaunchRollbackFailure> =>
+            err({ kind: "rejected", cause }),
+        );
+      if (!rollback.ok) {
         const partialLaunch = ownedGhidraLaunch(
           started,
           paths,
@@ -435,11 +503,20 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
             `${primaryMessage}; process cleanup remains incomplete`,
             {
               cause: new AggregateError(
-                [primary, cleanupFailure],
+                [
+                  primary,
+                  rollback.error.kind === "rejected"
+                    ? rollback.error.cause
+                    : rollback.error.result,
+                ],
                 "Ghidra launch rollback did not release its process",
                 { cause: primary },
               ),
               partialLaunch,
+              rollbackFailure: rollback.error,
+              ...(launchFailure.cleanupFailure === undefined
+                ? {}
+                : { cleanupFailure: launchFailure.cleanupFailure }),
               launchSupport,
               ...(capturedOutput === undefined ? {} : { capturedOutput }),
             },
@@ -754,32 +831,6 @@ const ghidraRuntimePaths = (runtimeRoot: string) => ({
  * that no supported JDK was found. Create the release directory while this
  * process still owns the runtime, leaving Ghidra only a file write inside it.
  */
-const ghidraConfigReleaseDirectory = async (
-  analyzeHeadlessPath: string,
-): Promise<string> => {
-  const installRoot = dirname(dirname(analyzeHeadlessPath));
-  try {
-    const properties = await readFile(
-      join(installRoot, "Ghidra", "application.properties"),
-      "latin1",
-    );
-    const parsed = parseGhidraJavaProperties(properties);
-    if (!parsed.ok) return basename(installRoot);
-    const version = parsed.value.get("application.version");
-    const release = parsed.value.get("application.release.name");
-    return version === undefined ||
-      release === undefined ||
-      release.length === 0
-      ? basename(installRoot)
-      : `ghidra_${version}_${release}`;
-  } catch (cause: unknown) {
-    // An unreadable properties file leaves the release coordinate unknown; the
-    // conventional extraction directory carries the same name.
-    void cause;
-    return basename(installRoot);
-  }
-};
-
 const createGhidraRuntimeDirectories = async (
   paths: ReturnType<typeof ghidraRuntimePaths>,
   platform: NodeJS.Platform,

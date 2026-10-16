@@ -34,13 +34,13 @@ import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import {
   inspectJadxAvailability,
   resolveJadxConfigurationInputs,
+  resolveJadxOperationTimeout,
   validateJadxConfiguration,
 } from "./JadxConfiguration.js";
 import type { JadxLauncher } from "./JadxMcpTransport.js";
 
 import { JadxSession } from "./JadxSession.js";
 
-const OPERATION_TIMEOUT_MS = 120_000;
 const BRIDGE_SOURCE = fileURLToPath(
   new URL("../../bridge/android/ReaJadxBridge.java", import.meta.url),
 );
@@ -65,10 +65,11 @@ const executionError = (context: {
   cause: unknown;
   request: AndroidRequest;
   timeout: AbortSignal;
+  timeoutMs: number;
   signal: AbortSignal | undefined;
   session: JadxSession | undefined;
 }): AnalysisError => {
-  const { cause, request, timeout, signal, session } = context;
+  const { cause, request, timeout, timeoutMs, signal, session } = context;
   if (cause instanceof RegularFileCleanupFailure) {
     const primaryCause =
       cause.outcome.kind === "failed"
@@ -86,7 +87,7 @@ const executionError = (context: {
         : timeout.aborted
           ? new AnalysisTimeoutError(
               request.operation,
-              OPERATION_TIMEOUT_MS,
+              timeoutMs,
               primaryOptions,
             )
           : primaryCause instanceof AnalysisError
@@ -114,7 +115,7 @@ const executionError = (context: {
   if (signal?.aborted === true)
     return new AnalysisCancelledError(request.operation, { cause });
   if (timeout.aborted)
-    return new AnalysisTimeoutError(request.operation, OPERATION_TIMEOUT_MS);
+    return new AnalysisTimeoutError(request.operation, timeoutMs);
   if (cause instanceof AnalysisError) return cause;
   const protocolFailure = session?.transport.failureReason();
   if (protocolFailure !== undefined && protocolFailure !== null)
@@ -440,7 +441,14 @@ export class JadxProvider implements AndroidAnalysisPort {
     request: AndroidRequest,
     options?: ExecutionOptions,
   ): Promise<Outcome> {
-    const timeout = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
+    // The deadline is fixed per provider environment; an unusable value is
+    // refused before any file handle, workspace, or engine is acquired.
+    const timeoutMs = resolveJadxOperationTimeout(
+      this.environment,
+      request.operation,
+    );
+    if (!timeoutMs.ok) return timeoutMs;
+    const timeout = AbortSignal.timeout(timeoutMs.value);
     const signal =
       options?.signal === undefined
         ? timeout
@@ -596,6 +604,7 @@ export class JadxProvider implements AndroidAnalysisPort {
           jarHash: retained.jarHash,
           bridgeHash: retained.bridgeHash,
           signal: activeSignal,
+          timeoutMs: timeoutMs.value,
         }),
       );
       activeSignal.throwIfAborted();
@@ -606,6 +615,7 @@ export class JadxProvider implements AndroidAnalysisPort {
         cause,
         request,
         timeout,
+        timeoutMs: timeoutMs.value,
         signal: options?.signal,
         session,
       });

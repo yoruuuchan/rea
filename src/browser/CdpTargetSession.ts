@@ -4,7 +4,10 @@ import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import type { BrowserObservationOperation } from "../domain/browserObservationErrors.js";
 import { CdpConnection } from "./CdpConnection.js";
-import { CdpTargetSessionOwner } from "./CdpTargetSessionOwner.js";
+import {
+  CdpTargetSessionOwner,
+  bindCdpTransportCleanup,
+} from "./CdpTargetSessionOwner.js";
 import {
   cdpTargetWebSocket,
   discoverCdpBrowserSocket,
@@ -157,7 +160,10 @@ const combineOpenFailure = (
   operation: BrowserObservationOperation,
 ): unknown =>
   primary instanceof AnalysisError && cleanup instanceof AnalysisError
-    ? analysisErrorWithCleanupFailure(primary, cleanup, operation)
+    ? bindCdpTransportCleanup(
+        cleanup,
+        analysisErrorWithCleanupFailure(primary, cleanup, operation),
+      )
     : new AggregateError(
         [primary, cleanup],
         `CDP operation ${operation} failed and its transport cleanup is incomplete.`,

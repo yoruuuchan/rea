@@ -976,6 +976,16 @@ and runtime cleanup. Windows additionally requires the matching native addon;
 its verifier lineage remains explicitly unavailable outside the provider's
 retained Job Object, as in the other Windows lanes.
 
+`npm run verify:ghidra:m68k` needs no assembler: its 22-byte big-endian 68000
+fixture is source-owned annotated hex in the verifier, loaded at `0x1000`. With
+an installed Ghidra 12.1.4 and full JDK on Linux or macOS, it verifies the
+`68000:BE:32:default` BinaryLoader import, real CLI/stdio MCP load-image parity,
+exact source bytes, both functions, the `bsr.b` call reference, decompilation
+through address and file offset, rejection of a misaligned entry and of a mapping
+past `0xffffffff` without replacing the active session, and runtime cleanup.
+Windows Ghidra P0 does not admit m68k, so this is not a Windows lane. The lane
+has been run on macOS; Linux has not been exercised.
+
 `npm run verify:ghidra:raw` uses a generated ARM little-endian headerless image
 through the compiled CLI and stdio MCP server. With the same Ghidra/JDK
 prerequisites, it checks preparation and bridge startup, verified load mappings,

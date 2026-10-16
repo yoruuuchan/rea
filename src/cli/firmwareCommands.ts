@@ -35,6 +35,8 @@ export const registerFirmwareCommands = (
           service,
           operation === "inspect_firmware_regions" ? "binwalk" : "unblob",
           operation,
+          undefined,
+          signal,
         ),
       ),
     );

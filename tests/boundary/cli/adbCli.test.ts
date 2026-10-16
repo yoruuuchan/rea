@@ -1,5 +1,6 @@
 import { chmod, lstat, readFile, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, dirname } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
@@ -101,7 +102,7 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const workspace = await createTestWorkspace("rea-adb-install-state-");
     onTestFinished(() => removeTestWorkspace(workspace.root));
-    const apk = await workspace.write("app.apk", "apk");
+    const apk = await workspace.write("app with spaces.apk", "apk");
     const adb = await workspace.write(
       "adb",
       `#!/bin/sh
@@ -113,7 +114,7 @@ if [ "$1" = version ]; then
 fi
 if [ "$1" = -s ] && [ "$3" = install ]; then
   if [ "$4" = -r ]; then selected="$5"; else selected="$4"; fi
-  cmp "$selected" "$root/app.apk" || exit 1
+  cmp "$selected" "$root/app with spaces.apk" || exit 1
   printf '%s\\n' "$selected" >> "$root/snapshots"
   if [ -f "$root/installed" ]; then
     if [ "$4" != -r ]; then
@@ -195,11 +196,18 @@ exit 1
     expect(new Set(snapshots).size).toBe(3);
     for (const snapshot of snapshots) {
       expect(snapshot).not.toBe(apk);
+      expect(basename(snapshot)).toBe(basename(apk));
       await expect(lstat(dirname(snapshot))).rejects.toMatchObject({
         code: "ENOENT",
       });
     }
     expect(await readFile(apk, "utf8")).toBe("apk");
+    for (const receipt of [freshReplace, existingReplace, freshDefault])
+      expect(receipt.data.normalized_result).toMatchObject({
+        apk_path: apk,
+        bytes: 3,
+        sha256: createHash("sha256").update("apk").digest("hex"),
+      });
     const calls = await readFile(workspace.path("calls"), "utf8");
     expect(calls.split("\n").filter((line) => line !== "")).toEqual([
       "version",

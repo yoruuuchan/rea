@@ -246,6 +246,42 @@ it("matches scalar literal seeds and skips non-scalar literal metadata", () => {
   expect(query("unmatched")).toEqual([]);
 });
 
+it("matches exact endpoint properties on request and response carriers only", () => {
+  const input = semanticFixtureInput();
+  const contexts = new JavaScriptSemanticEvidenceContextRegistry();
+  const endpoint = "https://example.invalid/v1";
+  const response = node("response", "response", { endpoint }, contexts);
+  const other = node(
+    "response",
+    "other-endpoint",
+    { endpoint: `${endpoint}/other` },
+    contexts,
+  );
+  const displayOnly = node("response", endpoint, { endpoint: null }, contexts);
+  input.nodes.push(
+    response,
+    displayOnly,
+    node("response", "missing-endpoint", {}, contexts),
+    other,
+    node("response", "array-endpoint", { endpoint: [endpoint] }, contexts),
+    node("boundary", "unrelated-carrier", { endpoint }, contexts),
+  );
+  const graph = createJavaScriptSemanticGraph(input);
+  const request = input.nodes.find(({ kind }) => kind === "request");
+  if (request === undefined) throw new Error("Expected request carrier");
+  const query = (value: string) =>
+    queryJavaScriptSemanticGraph(graph, {
+      seed: { kind: "endpoint", value },
+      direction: "forward-influence",
+    });
+  expect(query(endpoint).seed_node_ids).toEqual(
+    [request.node_id, response.node_id].toSorted(),
+  );
+  expect(query(`${endpoint}/other`).seed_node_ids).toEqual([other.node_id]);
+  expect(query("response").seed_node_ids).toEqual([]);
+  expect(query(`${endpoint}/missing`).seed_node_ids).toEqual([]);
+});
+
 it("scopes callers unknowns to call relations while preserving graph uncertainty", () => {
   const contexts = new JavaScriptSemanticEvidenceContextRegistry();
   const caller = node("function", "caller", {}, contexts);

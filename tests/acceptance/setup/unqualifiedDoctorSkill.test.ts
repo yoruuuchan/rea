@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect } from "vitest";
 
@@ -80,19 +80,49 @@ cliTest(
       identity: { skill: { state: "stale" } },
     });
 
+    const reference = join(
+      dirname(skill),
+      "references/connection-and-recovery.md",
+    );
+    const retained = await readFile(reference);
+    await rm(skill);
+    for (const arguments_ of [
+      ["doctor", "--skill"],
+      ["doctor", "--client", "claude_code", "--skill"],
+    ]) {
+      const partial = await run(arguments_);
+      expect(partial.exitCode, partial.stdout).toBe(1);
+      expect(partial.json).toMatchObject({
+        healthy: false,
+        identity: {
+          skill: {
+            state: "stale",
+            installed_version: null,
+            installed_tool_count: null,
+          },
+        },
+      });
+      expect(await readFile(reference)).toEqual(retained);
+    }
+
     const emptyHome = await createTestTempDirectory(
       "rea-unqualified-doctor-empty-",
     );
-    const empty = await cli.run({
-      arguments: ["doctor", "--skill", "--json"],
-      cwd: emptyHome,
-      environment: { HOME: emptyHome, USERPROFILE: emptyHome },
-    });
-    expect(empty.exitCode).toBe(1);
-    expect(empty.json).toMatchObject({
-      healthy: false,
-      identity: { skill: { state: "missing" } },
-    });
+    for (const arguments_ of [
+      ["doctor", "--skill"],
+      ["doctor", "--client", "claude_code", "--skill"],
+    ]) {
+      const empty = await cli.run({
+        arguments: [...arguments_, "--json"],
+        cwd: emptyHome,
+        environment: { HOME: emptyHome, USERPROFILE: emptyHome },
+      });
+      expect(empty.exitCode).toBe(1);
+      expect(empty.json).toMatchObject({
+        healthy: false,
+        identity: { skill: { state: "missing" } },
+      });
+    }
 
     const foreignHome = await createTestTempDirectory(
       "rea-unqualified-doctor-foreign-skill-",

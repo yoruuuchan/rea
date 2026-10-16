@@ -1435,39 +1435,34 @@ export const resolveProcessResult = (
           outcome.state === "failed" || outcome.state === "unverified",
       )
       .map(([resource]) => resource);
-    throw new ProcessCaptureError(cleanupFailure, {
+    const cleanupError = new ProcessCaptureError(cleanupFailure, {
       cause: executionFailure,
       reason: "cleanup_incomplete",
-      cleanupResources,
+      cleanup: { reason: cleanupFailure, resources: cleanupResources },
       ...(executionFailureReason === undefined
         ? {}
         : { executionFailure: executionFailureReason }),
       ...(partialObservation === undefined ? {} : { partialObservation }),
       cleanupReport: cleanup,
     });
+    if (executionFailure instanceof ProcessCaptureError)
+      throw executionFailure.withFinalization({
+        ...(executionFailureReason === undefined
+          ? {}
+          : { executionFailure: executionFailureReason }),
+        ...(partialObservation === undefined ? {} : { partialObservation }),
+        cleanupReport: cleanup,
+        cleanupFailure: cleanupError,
+      });
+    throw cleanupError;
   }
   if (executionFailure instanceof ProcessCaptureError) {
-    const retainedExecutionFailure =
-      executionFailure.executionFailure ?? executionFailureReason;
-    const retainedPartialObservation =
-      executionFailure.partialObservation ?? partialObservation;
-    throw new ProcessCaptureError(executionFailure.message, {
-      cause: executionFailure,
-      ...(executionFailure.userMessage === undefined
+    throw executionFailure.withFinalization({
+      ...(executionFailureReason === undefined
         ? {}
-        : { userMessage: executionFailure.userMessage }),
-      ...(executionFailure.userCategory === undefined
-        ? {}
-        : { userCategory: executionFailure.userCategory }),
-      reason: executionFailure.reason,
-      cleanupResources: executionFailure.cleanupResources,
-      ...(retainedExecutionFailure === undefined
-        ? {}
-        : { executionFailure: retainedExecutionFailure }),
-      ...(retainedPartialObservation === undefined
-        ? {}
-        : { partialObservation: retainedPartialObservation }),
-      cleanupReport: executionFailure.cleanupReport ?? cleanup,
+        : { executionFailure: executionFailureReason }),
+      ...(partialObservation === undefined ? {} : { partialObservation }),
+      cleanupReport: cleanup,
     });
   }
   if (executionFailure !== undefined) {

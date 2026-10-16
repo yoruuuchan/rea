@@ -1,4 +1,5 @@
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { artifactFilePrimaryFailure } from "../artifacts/ArtifactFileOperation.js";
 import { fileURLToPath } from "node:url";
 import { GHIDRA_BRIDGE_SOURCES } from "./GhidraBridgeSources.js";
 
@@ -548,7 +549,7 @@ export const createGhidraProviderClient = (input: {
     ...(target.format === "raw-binary"
       ? [
           "Headerless raw-binary analysis uses the caller-supplied architecture and entry address; file offset 0 is mapped at that address. Headers are not discovered from file bytes.",
-          "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502. Big-endian, Thumb-only, Cortex-M, 65C02, 65816, and other processor variants are unsupported in this increment.",
+          "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, Thumb-only, Cortex-M, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported in this increment.",
           "Static analysis does not emulate reset vectors, memory-mapped I/O, or firmware boot sequences.",
         ]
       : []),
@@ -580,6 +581,8 @@ export const createGhidraProviderClient = (input: {
     launcher: new GhidraHeadlessLauncher({
       environment: input.environment,
       analyzeHeadlessPath: prerequisites.value.analyzeHeadlessPath,
+      configurationDirectoryName:
+        prerequisites.value.configurationDirectoryName,
       javaHome: prerequisites.value.javaHome,
       ...(installation.javaVmName === undefined
         ? {}
@@ -986,6 +989,7 @@ export const createGhidraProviderClient = (input: {
 
 interface GhidraClientCoordinates {
   readonly analyzeHeadlessPath: string;
+  readonly configurationDirectoryName: string | null;
   readonly javaHome: string;
   readonly providerVersion: string;
   readonly profile: AnalysisProfileCommitment;
@@ -1026,6 +1030,7 @@ const ghidraClientPrerequisites = (
     return err(new ProviderAdapterError("ghidra", "health"));
   return ok({
     analyzeHeadlessPath: installation.analyzeHeadlessPath,
+    configurationDirectoryName: installation.configurationDirectoryName,
     javaHome: installation.javaHome,
     providerVersion: installation.providerVersion,
     profile,
@@ -1055,7 +1060,7 @@ const projectSessionError = (
         primary,
         failure.cleanupFailure,
         operation,
-      );
+      ).bindCleanupDependencies([primary, failure.cleanupFailure]);
 };
 
 const projectPrimarySessionError = (
@@ -1065,18 +1070,19 @@ const projectPrimarySessionError = (
   health?: ProviderOperationHealth,
 ): AnalysisError => {
   const context = { cause: failure, diagnostics: failure.diagnostics };
-  if (failure.cause instanceof AnalysisAccessDeniedError)
+  const physicalCause = artifactFilePrimaryFailure(failure.cause);
+  if (physicalCause instanceof AnalysisAccessDeniedError)
     return new AnalysisAccessDeniedError(
       operation,
-      failure.cause.path,
-      failure.cause.systemCode,
+      physicalCause.path,
+      physicalCause.systemCode,
       context,
     );
-  if (failure.cause instanceof AnalysisArtifactChangedError)
+  if (physicalCause instanceof AnalysisArtifactChangedError)
     return new AnalysisArtifactChangedError(
       operation,
-      failure.cause.path,
-      failure.cause.reason,
+      physicalCause.path,
+      physicalCause.reason,
       context,
     );
   if (
@@ -1091,7 +1097,13 @@ const projectPrimarySessionError = (
     failure.kind === "cancelled" ||
     (failure.kind === "remote" && failure.remoteCode === "decompile_cancelled")
   )
-    return new AnalysisCancelledError(operation, context);
+    return new AnalysisCancelledError(operation, {
+      ...context,
+      cause:
+        failure.cancellation === undefined
+          ? failure
+          : failure.cancellation.reason,
+    });
   if (failure.kind === "analysis_timeout")
     return new AnalysisTimeoutError(
       operation,

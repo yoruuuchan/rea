@@ -1,4 +1,5 @@
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
 import { boundedUtf8Text } from "../process/boundedUtf8Text.js";
@@ -26,6 +27,7 @@ export type GhidraSessionFailureKind =
 
 /** Additional structured context for a Ghidra session failure. */
 export interface GhidraSessionErrorOptions extends ErrorOptions {
+  readonly cancellation?: { readonly reason: unknown };
   readonly timeoutMs?: number;
   readonly remoteCode?: string;
   readonly cleanupFailure?: AnalysisError;
@@ -37,6 +39,7 @@ export class GhidraSessionError extends Error {
   readonly timeoutMs: number | undefined;
   readonly remoteCode: string | undefined;
   readonly cleanupFailure: AnalysisError | undefined;
+  readonly cancellation: { readonly reason: unknown } | undefined;
 
   constructor(
     readonly kind: GhidraSessionFailureKind,
@@ -50,6 +53,46 @@ export class GhidraSessionError extends Error {
     this.timeoutMs = options.timeoutMs;
     this.remoteCode = options.remoteCode;
     this.cleanupFailure = options.cleanupFailure;
+    this.cancellation = options.cancellation;
+  }
+
+  /** Refresh diagnostics without discarding owned failure or cleanup facts. */
+  withDiagnostics(
+    diagnostics: Readonly<Record<string, JsonValue>>,
+    message = this.message,
+  ): GhidraSessionError {
+    return this.#copy(diagnostics, this.cleanupFailure, message);
+  }
+
+  /** Join cleanup uncertainty, following both exact owners through later retry. */
+  withCleanupFailure(
+    cleanup: AnalysisError,
+    diagnostics = this.diagnostics,
+  ): GhidraSessionError {
+    const combined =
+      this.cleanupFailure === undefined || this.cleanupFailure === cleanup
+        ? cleanup
+        : analysisErrorWithCleanupFailure(
+            this.cleanupFailure,
+            cleanup,
+          ).bindCleanupDependencies([this.cleanupFailure, cleanup]);
+    return this.#copy(diagnostics, combined);
+  }
+
+  #copy(
+    diagnostics: Readonly<Record<string, JsonValue>>,
+    cleanupFailure: AnalysisError | undefined,
+    message = this.message,
+  ): GhidraSessionError {
+    return new GhidraSessionError(this.kind, message, diagnostics, {
+      ...(Object.hasOwn(this, "cause") ? { cause: this.cause } : {}),
+      ...(this.cancellation === undefined
+        ? {}
+        : { cancellation: this.cancellation }),
+      ...(this.timeoutMs === undefined ? {} : { timeoutMs: this.timeoutMs }),
+      ...(this.remoteCode === undefined ? {} : { remoteCode: this.remoteCode }),
+      ...(cleanupFailure === undefined ? {} : { cleanupFailure }),
+    });
   }
 }
 
@@ -61,6 +104,7 @@ const createGhidraSessionError = (failure: {
   readonly cause?: unknown;
   readonly timeoutMs?: number;
   readonly remoteCode?: string;
+  readonly cancellation?: { readonly reason: unknown };
   readonly redact: (value: string, incomplete?: boolean) => string;
 }): GhidraSessionError =>
   new GhidraSessionError(
@@ -78,6 +122,9 @@ const createGhidraSessionError = (failure: {
           }),
     },
     {
+      ...(failure.cancellation === undefined
+        ? {}
+        : { cancellation: failure.cancellation }),
       ...(failure.cause === undefined ? {} : { cause: failure.cause }),
       ...(failure.timeoutMs === undefined
         ? {}
@@ -98,9 +145,12 @@ export const bindGhidraSessionFailure =
     kind: GhidraSessionFailureKind,
     message: string,
     cause?: unknown,
-    options: Pick<GhidraSessionErrorOptions, "timeoutMs" | "remoteCode"> = {},
-  ): GhidraSessionError =>
-    createGhidraSessionError({
+    options: Pick<
+      GhidraSessionErrorOptions,
+      "timeoutMs" | "remoteCode" | "cancellation"
+    > = {},
+  ): GhidraSessionError => {
+    const failure = createGhidraSessionError({
       kind,
       message: redact(message),
       diagnostics: {
@@ -113,6 +163,22 @@ export const bindGhidraSessionFailure =
       ...(cause === undefined ? {} : { cause }),
       ...options,
     });
+    const cleanup =
+      cause instanceof DarwinProcessOwnershipInspectionError ||
+      cause instanceof GhidraLaunchError
+        ? cause.cleanupFailure
+        : cause instanceof AnalysisError && cause.cleanupIncomplete
+          ? cause
+          : undefined;
+    return cleanup === undefined
+      ? failure
+      : failure.withCleanupFailure(cleanup);
+  };
+
+/** Canonical factory contract shared by session lifecycle owners. */
+export type GhidraSessionFailureFactory = ReturnType<
+  typeof bindGhidraSessionFailure
+>;
 
 const describeCause = (
   cause: unknown,
@@ -157,6 +223,7 @@ const describeErrorCause = (
     ...causeCommandOutcome(cause, redact),
     ...causeCompilerOutcome(cause, redact),
     ...causeLaunchOutcome(cause, redact),
+    ...causeLaunchRollback(cause, redact, depth),
     ...nestedErrorCause(cause, redact, depth),
   };
 };
@@ -257,6 +324,101 @@ const boundedCompilerField = (
   return { value: bounded.text, truncated: bounded.truncated };
 };
 
+/** Project the producer's tagged rollback facts independently of the primary cause. */
+const causeLaunchRollback = (
+  cause: Error,
+  redact: (value: string, incomplete?: boolean) => string,
+  depth: number,
+): Record<string, JsonValue> => {
+  if (
+    !(cause instanceof GhidraLaunchError) ||
+    cause.rollbackFailure === undefined
+  )
+    return {};
+  const rollback = cause.rollbackFailure;
+  if (rollback.kind === "rejected")
+    return {
+      rollback_failure: {
+        kind: rollback.kind,
+        ...(depth >= MAX_CAUSE_DEPTH
+          ? { cause_truncated: true }
+          : { cause: describeCause(rollback.cause, redact, depth + 1) }),
+      },
+    };
+  const result = rollback.result;
+  const reason = boundedUtf8Text(
+    redact(result.reason),
+    MAX_CAUSE_MESSAGE_BYTES,
+  );
+  const diagnostic = (value: string | undefined): Record<string, JsonValue> => {
+    if (value === undefined) return {};
+    const bounded = boundedUtf8Text(redact(value), MAX_CAUSE_MESSAGE_BYTES);
+    return {
+      diagnostic: bounded.text,
+      ...(bounded.truncated ? { diagnostic_truncated: true } : {}),
+    };
+  };
+  // Share one member-evidence budget, matching a retained launcher-command stream.
+  // Keep the complete typed result on GhidraLaunchError for the process owner.
+  let remainingBytes = GHIDRA_LAUNCH_COMMAND_OUTPUT_BYTES;
+  const members = <Member>(
+    values: readonly Member[],
+    project: (value: Member) => JsonValue,
+  ): { readonly rows: JsonValue[]; readonly omitted: number } => {
+    const rows: JsonValue[] = [];
+    for (const value of values) {
+      const row = project(value);
+      const bytes =
+        Buffer.byteLength(JSON.stringify(row)) + (rows.length === 0 ? 0 : 1);
+      if (bytes > remainingBytes) break;
+      remainingBytes -= bytes;
+      rows.push(row);
+    }
+    return { rows, omitted: values.length - rows.length };
+  };
+  const failures =
+    result.failures === undefined
+      ? undefined
+      : members(result.failures, (failure) => ({
+          pid: failure.pid,
+          reason: failure.reason,
+          ...diagnostic(failure.diagnostic),
+        }));
+  const unverified =
+    result.unverified === undefined
+      ? undefined
+      : members(result.unverified, (member) => ({
+          pid: member.pid,
+          ...diagnostic(member.diagnostic),
+        }));
+  return {
+    rollback_failure: {
+      kind: rollback.kind,
+      result: {
+        cleaned: false,
+        reason: reason.text,
+        ...(reason.truncated ? { reason_truncated: true } : {}),
+        ...(failures === undefined
+          ? {}
+          : {
+              failures: failures.rows,
+              ...(failures.omitted === 0
+                ? {}
+                : { failures_omitted: failures.omitted }),
+            }),
+        ...(unverified === undefined
+          ? {}
+          : {
+              unverified: unverified.rows,
+              ...(unverified.omitted === 0
+                ? {}
+                : { unverified_omitted: unverified.omitted }),
+            }),
+      },
+    },
+  };
+};
+
 /** Retain a launch failure's launcher command outcome in its cause envelope. */
 const causeLaunchOutcome = (
   cause: Error,
@@ -292,12 +454,12 @@ const causeLaunchOutcome = (
       stdout: stdout.text,
       stderr: stderr.text,
       truncated,
-      ...(truncated
-        ? {
-            stdout_bytes: Buffer.byteLength(output.stdout),
-            stderr_bytes: Buffer.byteLength(output.stderr),
-          }
-        : {}),
+      ...(output.stdout_bytes === undefined
+        ? {}
+        : { stdout_bytes: output.stdout_bytes }),
+      ...(output.stderr_bytes === undefined
+        ? {}
+        : { stderr_bytes: output.stderr_bytes }),
       ...(output.exit_code === undefined
         ? {}
         : { exit_code: output.exit_code }),

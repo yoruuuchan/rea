@@ -164,7 +164,7 @@ export class WabtArtifactProvider implements WasmArtifactPort {
             cause instanceof ArtifactReaderFailure ? cause.cleanup : undefined;
           if (options?.signal?.aborted)
             throw new AnalysisCancelledError(OPERATION, {
-              cause,
+              cause: options.signal.reason,
               ...(cleanup === undefined ? {} : { cleanup }),
             });
           throw new AnalysisArtifactChangedError(

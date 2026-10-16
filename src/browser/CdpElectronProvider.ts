@@ -34,7 +34,10 @@ import { CDP_ELECTRON_PROVIDER_IDENTITY } from "./providerIdentities.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
-import { CdpTargetSessionOwner } from "./CdpTargetSessionOwner.js";
+import {
+  CdpTargetSessionOwner,
+  bindCdpTransportCleanup,
+} from "./CdpTargetSessionOwner.js";
 /** Passive Electron provider for local file pages exposed by loopback CDP. */
 export class CdpElectronProvider implements ElectronObservationPort {
   readonly #owner = new CdpTargetSessionOwner();
@@ -194,34 +197,43 @@ export class CdpElectronProvider implements ElectronObservationPort {
     if (cleanupFailure !== undefined) {
       if (finalCancellation !== undefined)
         return err(
-          analysisErrorWithCleanupFailure(
-            finalCancellation,
+          bindCdpTransportCleanup(
             cleanupFailure,
-            "inspect_electron_page",
+            analysisErrorWithCleanupFailure(
+              finalCancellation,
+              cleanupFailure,
+              "inspect_electron_page",
+            ),
           ),
         );
       if (!result.ok)
         return err(
-          analysisErrorWithCleanupFailure(
-            result.error,
+          bindCdpTransportCleanup(
             cleanupFailure,
-            "inspect_electron_page",
+            analysisErrorWithCleanupFailure(
+              result.error,
+              cleanupFailure,
+              "inspect_electron_page",
+            ),
           ),
         );
       return err(
-        new ProviderCleanupError(
-          CDP_ELECTRON_PROVIDER_IDENTITY.id,
-          cleanupFailure.cleanupResources,
-          { cleanup_error: cleanupFailure.message },
-          {
-            operation: "inspect_electron_page",
-            cause: cleanupFailure,
-            partialObservation: {
-              kind: "electron-page-observation",
-              inspection: result.value,
-              cleanup: "incomplete",
+        bindCdpTransportCleanup(
+          cleanupFailure,
+          new ProviderCleanupError(
+            CDP_ELECTRON_PROVIDER_IDENTITY.id,
+            cleanupFailure.cleanupResources,
+            { cleanup_error: cleanupFailure.message },
+            {
+              operation: "inspect_electron_page",
+              cause: cleanupFailure,
+              partialObservation: {
+                kind: "electron-page-observation",
+                inspection: result.value,
+                cleanup: "incomplete",
+              },
             },
-          },
+          ),
         ),
       );
     }

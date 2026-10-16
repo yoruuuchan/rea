@@ -27,6 +27,14 @@ it.each([
       bytes,
       1024 * 1024,
     ).estimatedBytes;
+    const projected = preflightPropertyListDecode(
+      bytes,
+      1024 * 1024,
+      undefined,
+      { numberProjection: true },
+    ).estimatedBytes;
+    if (_format === "binary")
+      expect(projected).toBeGreaterThanOrEqual(ordinary + bytes.length);
     expect(() =>
       preflightPropertyListDecode(bytes, ordinary, undefined, {
         numberProjection: true,

@@ -9,6 +9,7 @@ import {
   writeFile,
   truncate,
 } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { buffer } from "node:stream/consumers";
@@ -21,6 +22,7 @@ import {
   readValidatedAsarEntry,
 } from "../../../src/artifacts/AsarEntryStream.js";
 import { hashReadable } from "../../../src/artifacts/ArtifactHash.js";
+import { readArtifactFileChunks } from "../../../src/artifacts/readArtifactFileChunks.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const memberBytes = 64 * 1024 * 1024;
@@ -714,12 +716,15 @@ it("preserves filesystem errors raised while consuming a member stream", async (
     errno: -5,
     syscall: "read",
   });
-  const source = Readable.from(
-    (async function* () {
-      yield Buffer.from("partial");
-      throw ioError;
-    })(),
-  );
+  let delivered = false;
+  const read = (async (target: Buffer) => {
+    if (delivered) throw ioError;
+    delivered = true;
+    const partial = Buffer.from("partial");
+    partial.copy(target);
+    return { bytesRead: partial.length, buffer: target };
+  }) as FileHandle["read"];
+  const source = readArtifactFileChunks({ read });
   const output = readValidatedAsarEntry(
     source,
     undefined,

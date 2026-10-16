@@ -7,8 +7,7 @@ import type { PendingOperations } from "../process/PendingOperations.js";
 import type { GhidraRequestOptions } from "./GhidraClientTypes.js";
 import type {
   GhidraSessionError,
-  GhidraSessionErrorOptions,
-  GhidraSessionFailureKind,
+  GhidraSessionFailureFactory,
 } from "./GhidraSessionError.js";
 
 /** Dependencies needed to write one authenticated line and await its reply. */
@@ -21,12 +20,7 @@ export interface GhidraWireOptions {
     Result<JsonValue, GhidraSessionError>
   >;
   readonly logger: Logger;
-  readonly failure: (
-    kind: GhidraSessionFailureKind,
-    message: string,
-    cause?: unknown,
-    options?: Pick<GhidraSessionErrorOptions, "timeoutMs" | "remoteCode">,
-  ) => GhidraSessionError;
+  readonly failure: GhidraSessionFailureFactory;
 }
 
 /** Owns the socket write and pending-reply lifecycle for one bridge session. */
@@ -50,9 +44,7 @@ export class GhidraWire {
         this.#options.failure("process", "Ghidra bridge is unavailable"),
       );
     if (options.signal?.aborted === true)
-      return err(
-        this.#options.failure("cancelled", "Ghidra request was cancelled"),
-      );
+      return err(this.#cancelled(options.signal));
     const id = this.#options.nextId();
     if (options.timeoutMs !== undefined && options.timeoutMs <= 0)
       return err(
@@ -80,8 +72,7 @@ export class GhidraWire {
               ),
           }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-      cancelledValue: () =>
-        err(this.#options.failure("cancelled", "Ghidra request was cancelled")),
+      cancelledValue: () => err(this.#cancelled(options.signal)),
     });
     socket.write(
       `${JSON.stringify({ id, token, method, params })}\n`,
@@ -105,5 +96,13 @@ export class GhidraWire {
       "Ghidra bridge request completed",
     );
     return result;
+  }
+  #cancelled(signal: AbortSignal | undefined): GhidraSessionError {
+    return this.#options.failure(
+      "cancelled",
+      "Ghidra request was cancelled",
+      signal?.reason,
+      signal === undefined ? {} : { cancellation: { reason: signal.reason } },
+    );
   }
 }

@@ -154,6 +154,7 @@ describe.skipIf(process.platform === "win32")(
       const launcher = new GhidraHeadlessLauncher({
         environment: {},
         analyzeHeadlessPath: join(directory, "support/analyzeHeadless"),
+        configurationDirectoryName: "ghidra_12.1.3_PUBLIC",
         javaHome: "/jdk-21",
         bridgeScriptPath: "/packaged/ReaGhidraBridge.java",
         pspExtension: extension,

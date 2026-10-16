@@ -605,6 +605,7 @@ const abortIfNeeded = (signal?: AbortSignal): void => {
     throw new ArtifactReaderFailure(
       "cancelled",
       "Artifact extraction cancelled",
+      { cause: signal.reason },
     );
 };
 

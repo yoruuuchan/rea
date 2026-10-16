@@ -42,6 +42,7 @@ const probeLauncher = (javaHome: string, runtimeRoot: string) =>
     environment: {},
     platform: "darwin",
     analyzeHeadlessPath: join(runtimeRoot, "support", "analyzeHeadless"),
+    configurationDirectoryName: "ghidra_test_PUBLIC",
     javaHome,
     bridgeScriptPath: join(runtimeRoot, "bridge", "ReaGhidraBridge.java"),
   });
@@ -152,6 +153,7 @@ describe("Ghidra launch failure diagnostics", () => {
         environment: {},
         platform: "darwin",
         analyzeHeadlessPath: join(runtimeRoot, "support", "analyzeHeadless"),
+        configurationDirectoryName: "ghidra_test_PUBLIC",
         bridgeScriptPath: join(runtimeRoot, "bridge", "ReaGhidraBridge.java"),
       });
       const launched = await launcher.launch(launchSession(runtimeRoot));

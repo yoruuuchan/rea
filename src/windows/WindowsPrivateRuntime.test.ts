@@ -13,6 +13,7 @@ vi.mock("./WindowsNativeLoader.js", async (importOriginal) => {
 
 import {
   WindowsPrivateRuntime,
+  WindowsSnapshotCancelledError,
   windowsPrivateRuntime,
 } from "./WindowsPrivateRuntime.js";
 
@@ -149,3 +150,29 @@ describe("Windows private runtime cleanup retry", () => {
     await runtime.close();
   });
 });
+
+it.each([995, 5])(
+  "classifies native snapshot code %i independently of a late abort",
+  async (code) => {
+    const controller = new AbortController();
+    const failure = nativeFailure(code);
+    nativeCall.mockImplementation((operation: string) => {
+      if (operation === "runtime_create") return observation;
+      if (operation === "runtime_snapshot") return Promise.reject(failure);
+      return null;
+    });
+    const runtime = WindowsPrivateRuntime.create("C:\\", "rea-");
+    const pending = runtime.snapshot(
+      "C:\\target.bin",
+      "target.bin",
+      controller.signal,
+    );
+    controller.abort(null);
+    const result: unknown = await pending.catch((cause: unknown) => cause);
+    if (code === 995) {
+      expect(result).toBeInstanceOf(WindowsSnapshotCancelledError);
+      expect(result).toMatchObject({ reason: null, cause: failure });
+    } else expect(result).toBe(failure);
+    await runtime.close();
+  },
+);

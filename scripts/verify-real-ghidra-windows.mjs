@@ -110,6 +110,7 @@ if (profile.value.profile.parameters.executable_role !== role)
 const client = new GhidraClient({
   platform: installation.platform,
   launcher: new GhidraHeadlessLauncher({
+    configurationDirectoryName: installation.configurationDirectoryName,
     environment: process.env,
     analyzeHeadlessPath: installation.analyzeHeadlessPath,
     ...(process.env.JAVA_HOME === undefined
