@@ -196,7 +196,7 @@ const results: Readonly<Record<string, unknown>> = {
     serial: "emulator-5554",
     focused_window: "Window{abcdef u0 com.example.app/Main}",
     focused_app: null,
-    observed_lines: ["Window{abcdef u0 com.example.app/Main}"],
+    observed_lines: ["mCurrentFocus=Window{abcdef u0 com.example.app/Main}"],
   },
   read_adb_setting: {
     client: clientIdentity,

@@ -373,19 +373,15 @@ export const createGhidraProviderClient = (input: {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly logger: Logger;
   readonly clientFactory: GhidraProviderClientFactory;
-  readonly target: BinaryTarget;
-  readonly profile?: AnalysisProfileCommitment;
+  readonly admission: GhidraClientAdmission;
   readonly context?: AnalysisClientContext;
   readonly installation: GhidraInstallationInspection;
-}): AnalysisClient => {
-  const { config, logger, clientFactory, target, context, installation } =
-    input;
-  const prerequisites = ghidraClientPrerequisites(
-    target,
-    input.profile,
-    installation,
-  );
-  if (!prerequisites.ok) return unavailableClient(prerequisites.error);
+  readonly signal: AbortSignal;
+}): Result<AnalysisClient, AnalysisError> => {
+  const { config, logger, clientFactory, context, installation } = input;
+  const { target, profile } = input.admission;
+  const prerequisites = ghidraClientPrerequisites(profile, installation);
+  if (!prerequisites.ok) return err(prerequisites.error);
   const committedProfile = prerequisites.value.profile;
   const psp = isGhidraPspTarget(target);
   const pspExtension = psp
@@ -399,7 +395,7 @@ export const createGhidraProviderClient = (input: {
       committedProfile.parameters.language_id !== "Allegrex:LE:32:default" ||
       committedProfile.parameters.loader !== "PspElfLoader")
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -413,7 +409,7 @@ export const createGhidraProviderClient = (input: {
     (committedProfile.parameters.mips_soft_float_storage ===
       GHIDRA_MIPS_SOFT_FLOAT_STORAGE)
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -429,7 +425,7 @@ export const createGhidraProviderClient = (input: {
     (config.ghidraNativeAotJar !== undefined &&
       extensionProfile.data.length === 0)
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -445,7 +441,7 @@ export const createGhidraProviderClient = (input: {
     !seedProfile.success ||
     (config.ghidraSeedFile === undefined) !== (seedProfile.data === undefined)
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -460,7 +456,7 @@ export const createGhidraProviderClient = (input: {
   const pinnedLanguage = ghidraPinnedMipsLanguage(committedProfile.parameters);
   const targetLanguage = ghidraPinnedLanguage(target);
   if (pinnedLanguage !== undefined && targetLanguage === undefined)
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -475,7 +471,7 @@ export const createGhidraProviderClient = (input: {
     pinnedLanguage !== undefined &&
     config.ghidraLanguageOverride !== undefined
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -489,7 +485,7 @@ export const createGhidraProviderClient = (input: {
       config.ghidraLanguageOverride ?? targetLanguage,
     )
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -509,7 +505,7 @@ export const createGhidraProviderClient = (input: {
       config.ghidraDisabledAnalyzers,
     )
   )
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
@@ -525,7 +521,7 @@ export const createGhidraProviderClient = (input: {
     installation.platform,
   );
   if (invalidProfile !== null)
-    return unavailableClient(
+    return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: { reason: invalidProfile },
       }),
@@ -556,9 +552,7 @@ export const createGhidraProviderClient = (input: {
           "Static analysis does not emulate reset vectors, memory-mapped I/O, or firmware boot sequences.",
         ]
       : []),
-    ...(target.kind === "executable" && target.architecture === "mips"
-      ? (target.mips.limitations ?? [])
-      : []),
+    ...(target.architecture === "mips" ? (target.mips.limitations ?? []) : []),
     ...(committedProfile.parameters.mips_abi_basis ===
     "inferred-o32-assumption-v1"
       ? [
@@ -578,6 +572,13 @@ export const createGhidraProviderClient = (input: {
             "macOS sessions require a matching executable Ghidra native decompiler; REA checks for it but does not build native components or change Gatekeeper quarantine state.",
           ]
         : [];
+  if (input.signal.aborted)
+    return err(
+      new AnalysisCancelledError("create_analysis_client", {
+        cause: input.signal.reason,
+        diagnostics: ghidraInstallationDiagnostics(installation),
+      }),
+    );
   const client = clientFactory({
     startupTimeoutMs: config.ghidraStartupTimeoutMs,
     platform: installation.platform,
@@ -774,7 +775,7 @@ export const createGhidraProviderClient = (input: {
     if (!parsed.ok) return parsed;
     return ok(projectExecution(operation, parsed.value, called.value));
   };
-  return {
+  return ok<AnalysisClient>({
     execute: async (operation, parameters, options) => {
       if (extensionFailure !== undefined) return err(extensionFailure);
       if (
@@ -987,7 +988,7 @@ export const createGhidraProviderClient = (input: {
       nativeAotOwner?.close();
       return client.close();
     },
-  };
+  });
 };
 
 interface GhidraClientCoordinates {
@@ -998,11 +999,17 @@ interface GhidraClientCoordinates {
   readonly profile: AnalysisProfileCommitment;
 }
 
-const ghidraClientPrerequisites = (
+export interface GhidraClientAdmission {
+  readonly target: Extract<BinaryTarget, { readonly kind: "executable" }>;
+  readonly profile: AnalysisProfileCommitment;
+}
+
+/** Admit caller inputs and native authority before Java work starts. */
+export const admitGhidraClient = (
   target: BinaryTarget,
   profile: AnalysisProfileCommitment | undefined,
-  installation: GhidraInstallationInspection,
-): Result<GhidraClientCoordinates, AnalysisError> => {
+  platform: NodeJS.Platform,
+): Result<GhidraClientAdmission, AnalysisError> => {
   if (target.kind !== "executable")
     return err(
       new AnalysisCapabilityUnavailableError(
@@ -1011,6 +1018,26 @@ const ghidraClientPrerequisites = (
         `Ghidra cannot import ${target.kind} targets through this adapter.`,
       ),
     );
+  if (platform === "win32") {
+    const readiness = inspectWindowsNativeReadiness(platform);
+    if (!readiness.available)
+      return err(
+        new AnalysisCapabilityUnavailableError(
+          "ghidra",
+          "health",
+          readiness.reason,
+        ),
+      );
+  }
+  if (profile === undefined || profile.provider.id !== "ghidra")
+    return err(new ProviderAdapterError("ghidra", "health"));
+  return ok({ target, profile });
+};
+
+const ghidraClientPrerequisites = (
+  profile: AnalysisProfileCommitment,
+  installation: GhidraInstallationInspection,
+): Result<GhidraClientCoordinates, AnalysisError> => {
   if (installation.status === "unavailable")
     return err(
       new ProviderAdapterError("ghidra", "health", {
@@ -1029,8 +1056,17 @@ const ghidraClientPrerequisites = (
         readiness.reason,
       ),
     );
-  if (profile === undefined || profile.provider.id !== "ghidra")
-    return err(new ProviderAdapterError("ghidra", "health"));
+  if (profile.provider.version !== installation.providerVersion)
+    return err(
+      new ProviderAdapterError("ghidra", "health", {
+        diagnostics: {
+          reason:
+            "The current installation version differs from the selected analysis profile; resolve the profile again.",
+          selected_provider_version: profile.provider.version,
+          current_installation: ghidraInstallationDiagnostics(installation),
+        },
+      }),
+    );
   return ok({
     analyzeHeadlessPath: installation.analyzeHeadlessPath,
     configurationDirectoryName: installation.configurationDirectoryName,
@@ -1039,11 +1075,6 @@ const ghidraClientPrerequisites = (
     profile,
   });
 };
-
-const unavailableClient = (failure: AnalysisError): AnalysisClient => ({
-  execute: () => Promise.resolve(err(failure)),
-  close: () => Promise.resolve(ok(null)),
-});
 
 const projectSessionError = (
   operation: AnalysisOperation,

@@ -894,6 +894,13 @@ the launcher fails before preparing its home/cache/config/temp directories or
 starting Java. The client may already have allocated private runtime/endpoint
 resources and a target snapshot; existing startup-failure cleanup still applies.
 Restore the selected release's properties instead of renaming its installation folder.
+Inspection follows selected properties symlinks, admits only a regular file,
+and caps the metadata payload at 1 MiB under REA's resource budget. A final
+one-byte probe checks for growth. This is not a Java
+Properties format limit. Reads preserve Ghidra's Latin-1 byte mapping and check
+the descriptor and selected name for changes. Permission failures and resource
+refusals remain explicit; failed descriptor cleanup must succeed before that
+owner admits another inspection.
 This coordinate selects only REA's session-private configuration directory, not
 the installation or an existing user configuration directory.
 

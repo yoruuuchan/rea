@@ -8,6 +8,7 @@ import {
   retryRegularFileCleanup,
 } from "../../../src/application/RegularFileRead.js";
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
+import { RegularFileOperationCancelled } from "../../../src/filesystem/RegularFile.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import {
   RegularFileCleanupFailure,
@@ -16,34 +17,76 @@ import {
 } from "../../../src/filesystem/OwnedRegularFile.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-it("keeps a caller-selected cancellation reason opaque", async () => {
-  const root = await createTestTempDirectory("rea-file-caller-reason-");
-  const path = join(root, "input.txt");
-  await writeFile(path, "fixture bytes");
-  const callerOwner = new OwnedFileHandle(await open(path, "r"));
-  await callerOwner.close();
-  const reason = new RegularFileCancelled(
-    "/caller-selected-path",
-    callerOwner,
-    {
-      outcome: { kind: "completed", value: "caller-owned value" },
-      reason: new Error("nested reason"),
-    },
-  );
-  const controller = new AbortController();
-  controller.abort(reason);
-  const resources = new ArtifactResourceScope();
-  const read = vi.fn(async () => "unexpected");
-  try {
-    await expect(
-      withRegularFile(path, read, { signal: controller.signal, resources }),
-    ).rejects.toBe(reason);
-    expect(read).not.toHaveBeenCalled();
-    expect(resources.hasPending).toBe(false);
-  } finally {
-    await resources.close();
-  }
-});
+it.each(
+  (["checkpoint", "completion", "cleanup"] as const).flatMap((kind) =>
+    ["before admission", "during read"].flatMap((stage) =>
+      [
+        { scoped: false, retryClose: false },
+        { scoped: true, retryClose: false },
+        ...(stage === "during read"
+          ? [{ scoped: true, retryClose: true }]
+          : []),
+      ].map((scenario) => ({ kind, stage, ...scenario })),
+    ),
+  ),
+)(
+  "keeps a $kind caller reason opaque $stage with scope=$scoped, close retry=$retryClose",
+  async ({ kind, stage, scoped, retryClose }) => {
+    const root = await createTestTempDirectory("rea-file-caller-reason-");
+    const path = join(root, "input.txt");
+    await writeFile(path, "fixture bytes");
+    const callerOwner = new OwnedFileHandle(await open(path, "r"));
+    const close = vi.spyOn(callerOwner, "close");
+    const nestedReason = new Error("nested reason");
+    const outcome = { kind: "completed", value: "caller-owned value" } as const;
+    const reason =
+      kind === "checkpoint"
+        ? new RegularFileOperationCancelled(nestedReason)
+        : kind === "completion"
+          ? new RegularFileCancelled("/caller-selected-path", callerOwner, {
+              outcome,
+              reason: nestedReason,
+            })
+          : new RegularFileCleanupFailure(
+              "/caller-selected-path",
+              callerOwner,
+              outcome,
+              nestedReason,
+            );
+    const controller = new AbortController();
+    if (stage === "before admission") controller.abort(reason);
+    const resources = scoped ? new ArtifactResourceScope() : undefined;
+    let admitted: FileHandle | undefined;
+    const read = vi.fn(async (handle: FileHandle) => {
+      admitted = handle;
+      await handle.readFile();
+      if (retryClose)
+        vi.spyOn(handle, "close").mockRejectedValueOnce(
+          new Error("transient descriptor close failure"),
+        );
+      controller.abort(reason);
+      controller.signal.throwIfAborted();
+      return "unexpected";
+    });
+    try {
+      await expect(
+        withRegularFile(path, read, {
+          signal: controller.signal,
+          ...(resources === undefined ? {} : { resources }),
+        }),
+      ).rejects.toBe(reason);
+      expect(read).toHaveBeenCalledTimes(stage === "during read" ? 1 : 0);
+      if (admitted !== undefined) expect(admitted.fd).toBe(-1);
+      expect(close).not.toHaveBeenCalled();
+      expect(callerOwner.handle.fd).toBeGreaterThanOrEqual(0);
+      expect(resources?.hasPending ?? false).toBe(false);
+    } finally {
+      await resources?.close();
+      close.mockRestore();
+      await callerOwner.close();
+    }
+  },
+);
 
 it.each([false, true])(
   "preserves a nested read cancellation with the same signal=%s",
@@ -236,7 +279,12 @@ it.each(["completed", "failed"] as const)(
 );
 
 it.each(
-  [null, "caller stopped", new Error("caller stopped")].flatMap((reason) =>
+  [
+    null,
+    "caller stopped",
+    new Error("caller stopped"),
+    new RegularFileOperationCancelled(new Error("nested reason")),
+  ].flatMap((reason) =>
     [false, true].map((retryFails) => ({ reason, retryFails })),
   ),
 )(

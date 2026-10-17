@@ -54,8 +54,11 @@ export class RegularFileAdmissionFailure extends Error {
 /** A regular input no longer matches the extent or identity admitted for reading. */
 export class RegularFileChangedError extends Error {
   readonly code = "ESTALE";
-  constructor(readonly path: string) {
-    super(`Selected input changed while being read: ${path}`);
+  constructor(
+    readonly path: string,
+    options?: ErrorOptions,
+  ) {
+    super(`Selected input changed while being read: ${path}`, options);
     this.name = "RegularFileChangedError";
   }
 }

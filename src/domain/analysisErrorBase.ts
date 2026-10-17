@@ -53,6 +53,8 @@ export interface AnalysisCleanupObservation {
 
 /** Optional provider-neutral context that must survive typed error projection. */
 export interface AnalysisErrorOptions extends ErrorOptions {
+  /** Typed primary retained when a later lifecycle failure composes this error. */
+  readonly cleanupPrimary?: AnalysisError | undefined;
   /** Producer-owned, caller-safe facts retained through every typed projection. */
   readonly diagnostics?: Readonly<Record<string, JsonValue>> | undefined;
   readonly capturedOutput?: AnalysisCapturedOutput | undefined;
@@ -67,6 +69,7 @@ export interface AnalysisCleanupResourceOwner {
 
 /** Base class for expected analysis, provider, and session failures. */
 export abstract class AnalysisError extends Error {
+  readonly #cleanupPrimary: AnalysisError | undefined;
   readonly #cleanupDependencies = new Set<AnalysisError>();
   #cleanupDependents: WeakRef<AnalysisError>[] = [];
   readonly diagnostics: Readonly<Record<string, JsonValue>> | undefined;
@@ -77,6 +80,7 @@ export abstract class AnalysisError extends Error {
   #cleanupResourceOwner: AnalysisCleanupResourceOwner | undefined;
   constructor(message: string, options?: AnalysisErrorOptions) {
     super(message, options);
+    this.#cleanupPrimary = options?.cleanupPrimary;
     this.diagnostics =
       options?.diagnostics === undefined
         ? undefined
@@ -95,6 +99,10 @@ export abstract class AnalysisError extends Error {
   readonly userCategory: "cancelled" | undefined = undefined;
   readonly executionFailure: string | undefined = undefined;
   partialObservation: AnalysisPartialObservation | undefined;
+
+  get cleanupPrimary(): AnalysisError | undefined {
+    return this.#cleanupPrimary;
+  }
   readonly cleanupReport: ProcessCaptureCleanupReport | undefined = undefined;
 
   /** Live dependencies own current resource attribution; cleanup keeps history. */
@@ -184,6 +192,13 @@ export abstract class AnalysisError extends Error {
     return this;
   }
 }
+
+/** Confirmed cleanup reveals the typed primary; unresolved ownership stays visible. */
+export const resolvedAnalysisError = (error: AnalysisError): AnalysisError => {
+  while (!error.cleanupIncomplete && error.cleanupPrimary !== undefined)
+    error = error.cleanupPrimary;
+  return error;
+};
 import type {
   PartialProcessCaptureObservation,
   ProcessCaptureCleanupReport,

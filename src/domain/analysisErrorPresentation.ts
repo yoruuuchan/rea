@@ -31,12 +31,17 @@ import { ProviderSelectionError } from "./providerSelectionError.js";
 import { ProviderAdapterError } from "./providerAdapterError.js";
 import { UnknownRegistryError } from "./unknownRegistryError.js";
 import { providerRetryAction } from "./providerOperationHealth.js";
-import type { AnalysisError, AnalysisErrorTag } from "./analysisErrorBase.js";
+import {
+  resolvedAnalysisError,
+  type AnalysisError,
+  type AnalysisErrorTag,
+} from "./analysisErrorBase.js";
 import type { AnalysisErrorProjection } from "./analysisErrorProjection.js";
 
 export const analysisErrorRemediationAction = (
   error: AnalysisError,
 ): string => {
+  error = resolvedAnalysisError(error);
   if (
     error instanceof ProviderAdapterError &&
     error.remediationAction !== undefined
@@ -138,6 +143,7 @@ export const analysisErrorRemediationAction = (
 export const analysisErrorCategory = (
   error: AnalysisError,
 ): AnalysisErrorProjection["category"] => {
+  error = resolvedAnalysisError(error);
   if (error instanceof AnalysisCapabilityUnavailableError && error.retryable)
     return "unavailable";
   if (
@@ -234,6 +240,7 @@ const STATIC_ERROR_CATEGORIES: Readonly<
 };
 
 export const analysisErrorUserMessage = (error: AnalysisError): string => {
+  error = resolvedAnalysisError(error);
   if (error instanceof AnalysisSnapshotMismatchError) return error.message;
   if (error instanceof AnalysisUnsupportedTargetError) return error.message;
   if (error instanceof AnalysisResourceConstraintError) return error.reason;
