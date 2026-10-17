@@ -22,7 +22,7 @@ export const APKTOOL_TOOL_CONTRACTS = [
     name: "decode_android_resources",
     ...toolContractMetadata("decode_android_resources"),
     description:
-      "Decode one local APK's resources with `apktool d --no-src` in a provider-owned workspace that is removed after projection: the readable AndroidManifest.xml, apktool.yml version and SDK facts, the app's string resources (default or one locale, bounded to 2000 entries), available string locales, and the decoded file count. The target APK is digest with SHA-256 before decoding; smali is skipped because Java-source recovery belongs to the JADX family.",
+      "Decode one local APK's resources with `apktool d --no-src` in a provider-owned workspace that is removed after projection: the readable AndroidManifest.xml, apktool.yml version and SDK facts, the app's string resources (default or one locale, bounded to 2000 entries), selectable string locales, and the decoded file count. The target APK is digest with SHA-256 before decoding; smali is skipped because Java-source recovery belongs to the JADX family.",
     kind: "apktool-provider",
     inputSchema: apktoolInputSchemas.decode_android_resources,
     outputSchema: evidenceResultOf(

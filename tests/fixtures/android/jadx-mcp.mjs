@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
+import { JADX_BRIDGE_IDENTITY } from "../../../src/android/JadxRelease.ts";
 
 // An actual child MCP server exercising the production stdio/process seam.
 // It is a protocol fixture, not evidence of JADX decompiler support.
@@ -8,7 +9,11 @@ const mode = process.env.REA_FAKE_JADX_MODE ?? "normal";
 const server = new McpServer({
   name: mode === "empty-server-identity" ? "" : "rea-jadx-bridge",
   version:
-    mode === "empty-server-identity" ? "" : mode === "version" ? "99.0.0" : "1",
+    mode === "empty-server-identity"
+      ? ""
+      : mode === "version"
+        ? "99.0.0"
+        : JADX_BRIDGE_IDENTITY.version,
 });
 const requestedCount = Number.parseInt(
   process.env.REA_FAKE_JADX_CLASS_COUNT ?? "",
@@ -96,14 +101,22 @@ register("get_android_manifest", () => {
   if (mode === "large-manifest") return text("x".repeat(1024 * 1024));
   return text('<manifest package="fixture"/>');
 });
-register("list_classes", ({ offset, limit }) =>
-  json({
-    total: classes.length,
+register("list_classes", ({ offset, limit, query = "" }) => {
+  const matching = [];
+  let nextOffset = offset;
+  while (nextOffset < classes.length && matching.length < limit) {
+    const name = classes[nextOffset++];
+    if (name.includes(query)) matching.push(name);
+  }
+  return json({
+    scope: "top_level",
+    total_classes: classes.length,
+    next_offset: nextOffset,
     offset,
     limit,
-    items: mode === "empty-page" ? [] : classes.slice(offset, offset + limit),
-  }),
-);
+    items: mode === "empty-page" ? [] : matching,
+  });
+});
 register("get_class_summary", () =>
   json({
     full_name: mode === "wrong-class" ? "fixture.Other" : "fixture.Target",

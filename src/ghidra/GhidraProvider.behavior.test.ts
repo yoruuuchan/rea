@@ -35,6 +35,7 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { parseConfig } from "../config/parseConfig.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { parseExecutableHeader } from "../domain/binaryTarget.js";
+import { elf } from "../domain/binaryTarget.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 import type { GhidraTargetSnapshot } from "./GhidraClient.js";
 import type { GhidraProviderClientFactory } from "./GhidraProviderClient.js";
@@ -281,6 +282,37 @@ describe("Ghidra provider", () => {
     });
     const windows = provider(installationHost("win32"));
     expect(windows.inspectTargetSupport(target).status).toBe("unsupported");
+  });
+  it("admits parsed Hexagon ELF targets through Ghidra profile selection and declines them on Windows", async () => {
+    const parsed = parseExecutableHeader(elf(1, 1, 164), "x64");
+    if (!parsed.ok) throw new Error("Expected valid Hexagon ELF target");
+    const target: BinaryTarget = {
+      path: "/tmp/chre_pal.so",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      ...parsed.value,
+    };
+    const ghidra = provider();
+    expect(ghidra.inspectTargetSupport(target)).toMatchObject({
+      status: "supported",
+    });
+    const resolved = await ghidra.resolveAnalysisProfile(target);
+    expect(resolved.ok && resolved.value).toMatchObject({
+      profile: {
+        parameters: {
+          target_format: "elf",
+          architecture: "hexagon",
+          loader: "auto-from-header",
+          language_id: "auto-from-header",
+          compiler_spec_id: "auto-default",
+        },
+      },
+    });
+    const windows = provider(installationHost("win32"));
+    expect(windows.inspectTargetSupport(target)).toMatchObject({
+      status: "unsupported",
+      code: "target_format_unsupported",
+    });
   });
   it("re-observes the exact installation for each fresh task without launching Ghidra", async () => {
     let probeCount = 0;

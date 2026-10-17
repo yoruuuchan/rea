@@ -4,7 +4,7 @@ import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { digestSchema } from "../../domain/digests.js";
 import {
   JAVASCRIPT_ANALYSIS_RESOURCE_DEFAULTS,
-  JAVASCRIPT_SEMANTIC_NODE_MAXIMUM,
+  JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM,
 } from "../../domain/javascript/javascriptAnalysisResourceControls.js";
 import { javaScriptAnalysisTransferDescriptorSchema } from "./JavaScriptAnalysisTransfer.js";
 
@@ -18,7 +18,8 @@ export const JAVASCRIPT_ANALYSIS_WORKER_DEFAULTS = {
 /** Caller-selected artifact identity, separate from the decoded source-text digest. */
 export const javaScriptWorkerRequestSchema = z.strictObject({
   id: z.uuid(),
-  node_budget: z.number().int().min(0).max(JAVASCRIPT_SEMANTIC_NODE_MAXIMUM),
+  unknown_budget: z.number().int().min(0).max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM),
+  node_budget: z.number().int().min(0).max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM),
   text_sha256: digestSchema,
   file: z.strictObject({
     path: z.string(),

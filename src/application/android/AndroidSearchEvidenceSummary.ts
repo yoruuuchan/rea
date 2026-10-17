@@ -5,11 +5,10 @@ import type { JsonValue } from "../../domain/jsonValue.js";
 import { ok, type Result } from "../../domain/result.js";
 
 /**
- * Complete class-inventory pages dominate raw-call provenance for focused
- * searches: one traversal embeds every examined class name regardless of the
- * match count. The summary keeps the pagination audit inline (totals, page
- * offsets and sizes, elided item counts) and links the retained record that
- * still carries the complete inventory.
+ * Class-search pages duplicate matching names already present in normalized
+ * results; an empty query also returns the complete top-level inventory.
+ * Keep the selection and pagination audit inline and link the retained
+ * record carrying every complete producer reply.
  */
 const elideInventoryText = (text: string): string | undefined => {
   let page: JsonValue;
@@ -68,9 +67,8 @@ const summarizeInventoryCall = (call: JsonValue): JsonValue => {
 /**
  * Retain the complete search Evidence — full raw provider calls included —
  * in the session record, then deliver a bounded summary Evidence inline.
- * Callers without a retaining session keep the complete inline delivery, so
- * complete CLI JSON output is unchanged. Coverage metadata stays truthful in
- * both copies: the examined inventory is never rewritten to matched-only.
+ * Callers without a retaining session receive complete source Evidence inline.
+ * Both copies preserve examined inventory ranges separately from matching rows.
  */
 export const summarizeRetainedAndroidSearch = (
   evidence: Evidence,

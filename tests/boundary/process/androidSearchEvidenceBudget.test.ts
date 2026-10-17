@@ -82,7 +82,7 @@ test("delivers bounded search_android_classes Evidence while retaining the compl
   expect(singleRaw).not.toContain("fixture.Class");
   expect(singleRaw).toContain("items_omitted");
   expect(Buffer.byteLength(JSON.stringify(single))).toBeLessThan(32 * 1024);
-  // The complete inventory stays locally retrievable through the retained record.
+  // Every matching producer row remains in the retained source record.
   const completeId = single.evidence_links[0];
   expect(completeId).toBeDefined();
   expect(completeId).toBe(
@@ -92,8 +92,25 @@ test("delivers bounded search_android_classes Evidence while retaining the compl
   const complete = session.evidenceById(completeId as string);
   expect(complete).toBeDefined();
   expect(complete?.operation).toBe("search_android_classes");
-  expect(rawInventoryNames(complete?.raw_result)).toBe(INVENTORY_CLASS_COUNT);
-  expect(JSON.stringify(complete?.raw_result)).toContain("fixture.Class7094");
+  expect(rawInventoryNames(complete?.raw_result)).toBe(1);
+  expect(JSON.stringify(complete?.raw_result)).toContain("fixture.Target");
+  expect(JSON.stringify(complete?.raw_result)).not.toContain("fixture.Class");
+
+  // Selection precedes paging: a match beyond the first unfiltered page is
+  // still found, and the complete inventory remains explicitly available.
+  const last = await search("Class7094");
+  expect(last.normalized_result).toMatchObject({
+    total_classes: INVENTORY_CLASS_COUNT,
+    matches: ["fixture.Class7094"],
+    coverage: "complete",
+  });
+  const inventory = await search("");
+  const inventorySource = session.evidenceById(
+    inventory.evidence_links[0] as string,
+  );
+  expect(rawInventoryNames(inventorySource?.raw_result)).toBe(
+    INVENTORY_CLASS_COUNT,
+  );
 
   const empty = await search("fixture.Missing");
   expect(
@@ -111,7 +128,7 @@ test("delivers bounded search_android_classes Evidence while retaining the compl
   await verifyJadxFixtureCleanup(launches);
 });
 
-test("keeps the complete search inventory inline without a retaining session", async () => {
+test("keeps complete matching producer rows inline without a retaining session", async () => {
   const { service, apk, launches, provider } = await createJadxProtocolFixture(
     "normal",
     undefined,
@@ -122,9 +139,10 @@ test("keeps the complete search inventory inline without a retaining session", a
     query: "Target",
   });
   if (!result.ok) throw result.error;
-  // Complete CLI JSON output keeps the full raw provider inventory.
-  expect(rawInventoryNames(result.value.raw_result)).toBe(
-    INVENTORY_CLASS_COUNT,
+  // Complete CLI Evidence keeps every matching row, without unrelated names.
+  expect(rawInventoryNames(result.value.raw_result)).toBe(1);
+  expect(JSON.stringify(result.value.raw_result)).not.toContain(
+    "fixture.Class",
   );
   await provider.close();
   await verifyJadxFixtureCleanup(launches);

@@ -24,6 +24,20 @@ import { readArtifactFileChunks } from "./readArtifactFileChunks.js";
 
 interface DirectoryTraversalOptions extends ArtifactTraversalOptions {
   readonly descendInto?: (path: string) => boolean;
+  /** Bound examined children, including omitted special entries. */
+  readonly maximumEntries?: number;
+}
+
+/** Exhausted an examined-entry budget; unrelated I/O and cleanup failures stay distinct. */
+export class DirectoryArtifactTraversalLimit extends ArtifactReaderFailure {
+  constructor(
+    readonly examinedEntries: number,
+    readonly maximumEntries: number,
+  ) {
+    super("limit", "Directory traversal reached its examined-entry budget", {
+      boundary: "capacity",
+    });
+  }
 }
 
 /** Non-symlink-following directory reader. */
@@ -47,6 +61,20 @@ export class DirectoryArtifactReader implements ArtifactReader {
     const root = await this.#resolveRoot();
     const options =
       typeof selection === "function" ? { descendInto: selection } : selection;
+    const maximum = options?.maximumEntries;
+    if (
+      maximum !== undefined &&
+      (!Number.isSafeInteger(maximum) || maximum < 0)
+    )
+      throw new RangeError(
+        "Directory traversal maximumEntries must be a nonnegative safe integer",
+      );
+    let examined = 0;
+    const examine = () => {
+      if (maximum !== undefined && examined >= maximum)
+        throw new DirectoryArtifactTraversalLimit(examined, maximum);
+      examined += 1;
+    };
     const pending = [root];
     while (pending.length > 0) {
       abortIfNeeded(signal);
@@ -60,6 +88,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
         pending,
         signal,
         options,
+        examine,
       ))
         yield entry;
       await withDirectoryIoContext("inspect directory", directory, () =>
@@ -88,8 +117,9 @@ export class DirectoryArtifactReader implements ArtifactReader {
   async *#readDirectory(
     directory: string,
     pending: string[],
-    signal?: AbortSignal,
-    options?: DirectoryTraversalOptions,
+    signal: AbortSignal | undefined,
+    options: DirectoryTraversalOptions | undefined,
+    examine: () => void,
   ): AsyncIterable<ArtifactEntry> {
     const root = await this.#resolveRoot();
     const handle = new OwnedDirectoryHandle(
@@ -111,6 +141,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
         );
         const child = await handle.handle.read();
         if (child === null) break;
+        examine();
         abortIfNeeded(signal);
         const absolute = join(directory, child.name);
         const metadata = await lstat(absolute, { bigint: true }).catch(

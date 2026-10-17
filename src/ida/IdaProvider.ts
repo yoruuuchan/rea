@@ -111,7 +111,8 @@ export class IdaProvider implements AnalysisProviderCandidate {
     };
     if (
       target.kind === "executable" &&
-      isElfMetadataArchitecture(target.architecture)
+      (isElfMetadataArchitecture(target.architecture) ||
+        target.architecture === "hexagon")
     )
       return {
         status: "unsupported",
@@ -121,7 +122,9 @@ export class IdaProvider implements AnalysisProviderCandidate {
             ? "MIPS"
             : target.architecture === "riscv"
               ? "RISC-V"
-              : "PowerPC"
+              : target.architecture === "powerpc"
+                ? "PowerPC"
+                : "Hexagon"
         } lane. Select a supported Ghidra profile instead.`,
         diagnostics,
       };

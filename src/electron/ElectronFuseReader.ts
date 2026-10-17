@@ -1,3 +1,5 @@
+import { readElfFixedHeader } from "../domain/elfFixedHeader.js";
+import { decodePeMachine } from "../domain/peMachine.js";
 import type { ResolvedElectronFuseFile } from "./ElectronFusePath.js";
 import { createHash } from "node:crypto";
 import { lstat, type FileHandle } from "node:fs/promises";
@@ -18,10 +20,11 @@ import {
   RegularFileChangedError,
   sameRegularFileState,
 } from "../filesystem/RegularFile.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import {
-  withOwnedRegularFile,
-  type OwnedRegularFileOptions,
-} from "../filesystem/OwnedRegularFile.js";
+  assertArtifactReadActive,
+  withArtifactRegularFile,
+} from "../artifacts/ArtifactFileOperation.js";
 
 /** Admission and search bounds for one Electron executable. */
 export const ELECTRON_FUSE_LIMITS = {
@@ -83,17 +86,17 @@ export const readElectronFuseImage = async (
     readonly signal?: AbortSignal;
     readonly chunkBytes?: number;
     readonly selection?: ResolvedElectronFuseFile;
-    readonly retainFailedClose?: OwnedRegularFileOptions["retainFailedClose"];
+    readonly resources?: ArtifactResourceScope;
   },
 ): Promise<ElectronFuseImage> => {
   const signal = options?.signal;
-  signal?.throwIfAborted();
+  assertArtifactReadActive(signal);
   const selection = options?.selection;
   const recheckPath = async (candidate: string) => {
-    signal?.throwIfAborted();
+    assertArtifactReadActive(signal);
     try {
       const metadata = await lstat(candidate, { bigint: true });
-      signal?.throwIfAborted();
+      assertArtifactReadActive(signal);
       return metadata;
     } catch (cause: unknown) {
       if (selection !== undefined && isMissingPath(cause))
@@ -142,15 +145,10 @@ export const readElectronFuseImage = async (
     throw new TypeError(
       `chunkBytes must be an integer between 1 and ${ELECTRON_FUSE_LIMITS.chunkBytes}.`,
     );
-  return withOwnedRegularFile(
+  return withArtifactRegularFile(
     path,
-    {
-      symlinks: "reject",
-      ...(signal === undefined ? {} : { signal }),
-      ...(options?.retainFailedClose === undefined
-        ? {}
-        : { retainFailedClose: options.retainFailedClose }),
-    },
+    options?.resources ?? new ArtifactResourceScope(),
+    signal,
     async (owned) => {
       const opened = await owned.stat({ bigint: true });
       if (!sameRegularFileState(before, opened))
@@ -192,7 +190,7 @@ const readerFor =
     signal: AbortSignal | undefined,
   ): ReadAt =>
   async (offset, length) => {
-    signal?.throwIfAborted();
+    assertArtifactReadActive(signal);
     if (length <= 0 || offset < 0 || offset >= size) return new Uint8Array();
     const bounded = Math.min(length, size - offset);
     const buffer = Buffer.alloc(bounded);
@@ -211,15 +209,28 @@ const identifyContainer = async (
 }> => {
   const head = await readAt(0, Math.min(size, 8));
   if (hasMachoMagic(head)) return identifyMacho(readAt, size, head, path);
-  if (isElf(head))
+  if (isElf(head)) {
+    const header = await readAt(0, 64);
+    const parsed = readElfFixedHeader(Buffer.from(header), size);
     return {
       format: "elf",
-      slices: [{ index: 0, fileOffset: 0, size, architecture: null }],
+      slices: [
+        {
+          index: 0,
+          fileOffset: 0,
+          size,
+          architecture: parsed.ok ? parsed.value.architecture : null,
+        },
+      ],
     };
-  if (await isPe(readAt, size))
+  }
+  const pe = await identifyPe(readAt, size);
+  if (pe !== undefined)
     return {
       format: "pe",
-      slices: [{ index: 0, fileOffset: 0, size, architecture: null }],
+      slices: [
+        { index: 0, fileOffset: 0, size, architecture: pe.architecture },
+      ],
     };
   throw new ElectronFuseFormatFailure(
     "unsupported",
@@ -301,7 +312,7 @@ const scanSlices = async (
   const chunk = Buffer.allocUnsafe(chunkBytes);
   let position = 0;
   while (position < size) {
-    signal?.throwIfAborted();
+    assertArtifactReadActive(signal);
     const length = Math.min(chunkBytes, size - position);
     const read = await handle.read(chunk, 0, length, position);
     if (read.bytesRead !== length) throw new RegularFileChangedError(path);
@@ -438,7 +449,7 @@ const readExact = async (
   length: number,
   signal: AbortSignal | undefined,
 ): Promise<Buffer> => {
-  signal?.throwIfAborted();
+  assertArtifactReadActive(signal);
   const buffer = Buffer.alloc(length);
   const read = await handle.read(buffer, 0, length, offset);
   if (read.bytesRead !== length) throw new RegularFileChangedError(path);
@@ -458,11 +469,14 @@ const isFat = (head: Uint8Array): boolean => {
   return FAT_MAGICS.has(magic);
 };
 
-const isPe = async (readAt: ReadAt, size: number): Promise<boolean> => {
-  if (size < 64) return false;
+const identifyPe = async (
+  readAt: ReadAt,
+  size: number,
+): Promise<{ readonly architecture: string | null } | undefined> => {
+  if (size < 64) return undefined;
   const header = await readAt(0, 64);
   if (header.length < 64 || header[0] !== 0x4d || header[1] !== 0x5a)
-    return false;
+    return undefined;
   const offset = Buffer.from(
     header.buffer,
     header.byteOffset,
@@ -474,15 +488,18 @@ const isPe = async (readAt: ReadAt, size: number): Promise<boolean> => {
     offset > ELECTRON_FUSE_LIMITS.maximumPeHeaderOffset ||
     offset > size - 4
   )
-    return false;
-  const signature = await readAt(offset, 4);
-  return (
-    signature.length === 4 &&
-    signature[0] === 0x50 &&
-    signature[1] === 0x45 &&
-    signature[2] === 0 &&
-    signature[3] === 0
-  );
+    return undefined;
+  const bytes = Buffer.from(await readAt(offset, 24));
+  if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x00004550)
+    return undefined;
+  // A signature establishes the existing scan boundary; only a complete COFF
+  // header establishes its machine. Managed OS overrides need separate proof.
+  const machine =
+    bytes.length === 24 ? decodePeMachine(bytes.readUInt16LE(4)) : undefined;
+  return {
+    architecture:
+      machine?.nativeOsOverride === false ? machine.architecture : null,
+  };
 };
 
 const isMissingPath = (cause: unknown): boolean =>

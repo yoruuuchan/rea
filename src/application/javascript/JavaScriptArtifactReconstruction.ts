@@ -145,6 +145,12 @@ export const reconstructJavaScriptArtifact = async (
         `Processing ${String(files.files.length - (files.source_selection?.unselected_files ?? 0))} selected application files`,
       );
       const semanticProjection = createJavaScriptSemanticGraphProjection({
+        ...(input.max_semantic_unknowns === undefined
+          ? {}
+          : { totalUnknowns: input.max_semantic_unknowns }),
+        ...(input.max_semantic_unknowns_per_file === undefined
+          ? {}
+          : { fileUnknowns: input.max_semantic_unknowns_per_file }),
         ...(input.max_semantic_nodes === undefined
           ? {}
           : { totalNodes: input.max_semantic_nodes }),

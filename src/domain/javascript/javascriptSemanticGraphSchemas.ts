@@ -271,6 +271,24 @@ export const JAVASCRIPT_SEMANTIC_UNKNOWN_REASONS = [
   "unsupported-syntax",
 ] as const;
 
+/** Counts examined emission occurrences, including repeats, without retaining discarded IDs. */
+export const javaScriptSemanticUnknownOmissionSchema = z.strictObject({
+  family: z.enum(JAVASCRIPT_SEMANTIC_RELATION_FAMILIES),
+  reason: z.enum(JAVASCRIPT_SEMANTIC_UNKNOWN_REASONS),
+  occurrences: z.number().int().positive(),
+});
+/** At most one summary row for each finite family/reason pair. */
+export const javaScriptSemanticUnknownOmissionsSchema = z
+  .array(javaScriptSemanticUnknownOmissionSchema)
+  .min(1)
+  .max(
+    JAVASCRIPT_SEMANTIC_RELATION_FAMILIES.length *
+      JAVASCRIPT_SEMANTIC_UNKNOWN_REASONS.length,
+  );
+export type JavaScriptSemanticUnknownOmission = z.infer<
+  typeof javaScriptSemanticUnknownOmissionSchema
+>;
+
 /** One unresolved semantic frontier before its ID is derived. */
 export const javaScriptSemanticUnknownInputSchema = z.strictObject({
   node_id: semanticNodeIdSchema.nullable(),
@@ -337,6 +355,8 @@ const familyCoverageSchema = z.strictObject({
 const graphCoverageSchema = z.strictObject({
   status: z.enum(["complete", "partial", "unknown", "unavailable"]),
   truncated: z.boolean(),
+  omitted_unknown_occurrences:
+    javaScriptSemanticUnknownOmissionsSchema.exactOptional(),
   omitted_nodes: z.number().int().min(0).nullable(),
   omitted_relations: z.number().int().min(0).nullable(),
   limits: z.array(

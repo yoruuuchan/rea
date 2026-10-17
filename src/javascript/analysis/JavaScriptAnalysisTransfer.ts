@@ -6,7 +6,11 @@ import { AnalysisResourceConstraintError } from "../../domain/analysisErrorCore.
 
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
 import type { JavaScriptModuleSemanticIr } from "../../domain/javascript/javascriptModuleSemanticIr.js";
-import type { JavaScriptSemanticFileProjection } from "../../domain/javascript/javascriptSemanticFileProjection.js";
+import { JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM } from "../../domain/javascript/javascriptAnalysisResourceControls.js";
+import type {
+  JavaScriptSemanticFileProjection,
+  JavaScriptSemanticProjectionCapacity,
+} from "../../domain/javascript/javascriptSemanticFileProjection.js";
 import { digestSchema } from "../../domain/digests.js";
 import {
   javaScriptWorkerGraphRecordSchema,
@@ -183,7 +187,15 @@ export const writeJavaScriptAnalysisTransfer = async (
   try {
     await append({
       kind: "projection-header",
-      value: { roots: projection.roots, truncated: projection.truncated },
+      value: {
+        roots: projection.roots,
+        nodesTruncated: projection.nodesTruncated,
+        ...(projection.omittedUnknownOccurrences === undefined
+          ? {}
+          : {
+              omittedUnknownOccurrences: projection.omittedUnknownOccurrences,
+            }),
+      },
     });
     for (const record of moduleTransferRecords(module)) await append(record);
     for (const value of projection.evidenceContexts)
@@ -226,7 +238,7 @@ export function readJavaScriptAnalysisTransfer(
   descriptor: Descriptor,
   source: Pick<JavaScriptArtifactFile, "path" | "sha256">,
   signal: AbortSignal | undefined,
-  retainGraph: boolean,
+  capacity: JavaScriptSemanticProjectionCapacity | null,
 ): Promise<{
   readonly module: JavaScriptModuleSemanticIr;
   readonly projection: JavaScriptSemanticFileProjection | null;
@@ -236,11 +248,26 @@ export async function readJavaScriptAnalysisTransfer(
   descriptor: Descriptor,
   source: Pick<JavaScriptArtifactFile, "path" | "sha256">,
   signal?: AbortSignal,
-  retainGraph = true,
+  capacity: JavaScriptSemanticProjectionCapacity | null = {
+    nodes: JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM,
+    unknowns: JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM,
+  },
 ): Promise<{
   readonly module: JavaScriptModuleSemanticIr;
   readonly projection: JavaScriptSemanticFileProjection | null;
 }> {
+  if (
+    capacity !== null &&
+    [capacity.nodes, capacity.unknowns].some(
+      (value) =>
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        value > JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM,
+    )
+  )
+    throw new RangeError(
+      "JavaScript transfer requires valid retained capacities",
+    );
   const expected = javaScriptAnalysisTransferDescriptorSchema.parse(descriptor);
   if ((await stat(path)).size !== expected.bytes)
     throw new TypeError(
@@ -340,7 +367,7 @@ export async function readJavaScriptAnalysisTransfer(
               "JavaScript transfer facts precede their headers",
             );
           if (
-            !retainGraph &&
+            capacity === null &&
             [
               "evidence-context",
               "node",
@@ -389,6 +416,10 @@ export async function readJavaScriptAnalysisTransfer(
                 throw new TypeError(
                   "JavaScript transfer node belongs to a different artifact source",
                 );
+              if (capacity !== null && nodes.length >= capacity.nodes)
+                throw new TypeError(
+                  "JavaScript transfer nodes exceed the offered capacity",
+                );
               nodes.push(record.value);
               break;
             }
@@ -398,6 +429,10 @@ export async function readJavaScriptAnalysisTransfer(
               break;
             case "unknown":
               retainIdentity(record.kind, record.value.unknown_id);
+              if (capacity !== null && unknowns.length >= capacity.unknowns)
+                throw new TypeError(
+                  "JavaScript transfer unknowns exceed the offered capacity",
+                );
               unknowns.push(record.value);
               break;
             case "fingerprint":
@@ -433,15 +468,16 @@ export async function readJavaScriptAnalysisTransfer(
     throw new TypeError("JavaScript analysis transfer is missing its headers");
   return {
     module: { ...moduleHeader, scopes, bindings, callables, moduleLinks },
-    projection: retainGraph
-      ? {
-          ...projectionHeader,
-          evidenceContexts,
-          nodes,
-          relations,
-          unknowns,
-          fingerprints,
-        }
-      : null,
+    projection:
+      capacity !== null
+        ? {
+            ...projectionHeader,
+            evidenceContexts,
+            nodes,
+            relations,
+            unknowns,
+            fingerprints,
+          }
+        : null,
   };
 }

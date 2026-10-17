@@ -44,12 +44,15 @@ const results: Readonly<Record<string, unknown>> = {
 };
 
 it("advertises exact valid Apktool schemas and records inline evidence through MCP", async () => {
+  const requestedLocales: (string | undefined)[] = [];
   const provider: ApktoolResourceAnalysisPort = {
     async inspectAvailability() {
       return { status: "available", code: null, reason: null, diagnostics: {} };
     },
     async close() {},
     async execute(request) {
+      if (request.operation === "decode_android_resources")
+        requestedLocales.push(request.input.locale);
       return ok(createAnalysisExecution(results[request.operation], identity));
     },
   };
@@ -77,6 +80,24 @@ it("advertises exact valid Apktool schemas and records inline evidence through M
   for (const name of operationNames) expect(names, name).toContain(name);
 
   assertAdvertisedMcpContracts(operationNames, tools);
+  const localeSchema = tools.find(
+    (tool) => tool.name === "decode_android_resources",
+  )?.inputSchema.properties?.locale;
+  expect(localeSchema).toMatchObject({ maxLength: 23 });
+  for (const locale of ["b+sr+Latn+RS+REVISED", "b+fil+Latn+419+ABCDEFGH"]) {
+    const reply = await client.callTool({
+      name: "decode_android_resources",
+      arguments: { path: "/targets/probe.apk", locale },
+    });
+    expect(reply.isError).not.toBe(true);
+    expect(parseEvidence(reply.structuredContent).parameters).toMatchObject({
+      locale,
+    });
+  }
+  expect(requestedLocales).toEqual([
+    "b+sr+Latn+RS+REVISED",
+    "b+fil+Latn+419+ABCDEFGH",
+  ]);
 
   const decoded = await client.callTool({
     name: "decode_android_resources",

@@ -451,19 +451,21 @@ it("retains APK identity, original input, raw producer data and normalized obser
   await verifyCleanup(launches);
 });
 
-it("fetches all class pages rather than silently retaining the first upstream page", async () => {
-  const { service, apk, launches, provider } = await setup();
+it("pages matching classes independently of the total APK class count", async () => {
+  const { service, apk, launches, provider } = await setup("large-inventory");
   const outcome = await service.execute("search_android_classes", {
     path: apk,
-    query: "",
+    query: "Class",
   });
   if (!outcome.ok) throw outcome.error;
   const result = androidResultSchemas.search_android_classes.parse(
     outcome.value.normalized_result,
   );
-  expect(result.total_classes).toBe(401);
-  expect(result.matches).toHaveLength(401);
-  expect(result.matches.at(-1)).toBe("fixture.Class399");
+  expect(result.total_classes).toBe(9001);
+  expect(result.matches).toHaveLength(9000);
+  expect(result.matches[0]).toBe("fixture.Class0");
+  expect(result.matches[4096]).toBe("fixture.Class4096");
+  expect(result.matches.at(-1)).toBe("fixture.Class8999");
   await provider.close();
   await verifyCleanup(launches);
 });

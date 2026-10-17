@@ -1,3 +1,4 @@
+import { assertArtifactReadActive } from "../artifacts/ArtifactFileOperation.js";
 import type { BigIntStats } from "node:fs";
 import { lstat, readlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, sep } from "node:path";
@@ -46,7 +47,7 @@ export const resolveElectronFuseTarget = async (
   selectedPath: string,
   signal?: AbortSignal,
 ): Promise<ResolvedElectronFuseTarget> => {
-  signal?.throwIfAborted();
+  assertArtifactReadActive(signal);
   const metadata = await lstat(selectedPath, { bigint: true });
   let file: ResolvedElectronFuseFile;
   if (metadata.isSymbolicLink())
@@ -129,7 +130,7 @@ const resolveDirectorySuffix = async (
   const pending: string[] = [];
   const nodes: ElectronFusePathNode[] = [];
   while (true) {
-    signal?.throwIfAborted();
+    assertArtifactReadActive(signal);
     const name = basename(path);
     // lstat("link/") follows a link; inspect the named component itself.
     if (name !== "") while (path.endsWith(sep)) path = path.slice(0, -1);
@@ -187,7 +188,7 @@ const resolveInside = async (
   let hops = 0;
   let last: "file" | "directory" | undefined;
   while (pending.length > 0) {
-    signal?.throwIfAborted();
+    assertArtifactReadActive(signal);
     const segment = pending.shift() ?? "";
     if (segment === ".") continue;
     if (segment === "..") {

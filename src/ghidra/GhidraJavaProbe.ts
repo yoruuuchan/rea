@@ -12,6 +12,7 @@ import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessR
 import {
   OwnedCommandFailure,
   runOwnedCommand,
+  prepareOwnedCommand,
 } from "../process/OwnedCommand.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
 import { boundedUtf8Text } from "../process/boundedUtf8Text.js";
@@ -150,6 +151,7 @@ const observeGhidraJava = async (
     | Result<GhidraJavaObservation, GhidraJavaProbeFailure>
     | undefined;
   try {
+    await prepareOwnedCommand(options.signal);
     await runOwnedCommand(
       {
         command,

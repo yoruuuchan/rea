@@ -1,6 +1,6 @@
 import type { HeaderArchitecture } from "./binaryTargetTypes.js";
 
-export type PeArchitecture = HeaderArchitecture;
+export type PeArchitecture = Exclude<HeaderArchitecture, "hexagon">;
 
 /** A decoded COFF machine and whether it carried a ReadyToRun OS override. */
 export interface PeMachine {
@@ -25,6 +25,12 @@ const architectureForMachine = (
   }
   return undefined;
 };
+
+/** The optional-header magic a machine's architecture requires: PE32+ for 64-bit, PE32 otherwise. */
+export const peOptionalHeaderMagic = (
+  architecture: PeArchitecture,
+): 0x10b | 0x20b =>
+  architecture === "x86_64" || architecture === "arm64" ? 0x20b : 0x10b;
 
 /**
  * ReadyToRun images compiled for a non-Windows OS store the COFF machine XORed

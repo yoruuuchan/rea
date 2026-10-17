@@ -24,7 +24,7 @@ export const unknownDateLimitation = (count: number): string =>
   `${String(count)} date value(s) are reported as { "$plist_type": "date", "iso8601": null } because the decoder could not represent them, such as XML dates with years beyond 9999 or negative years, or dates outside the JavaScript date range.`;
 
 /**
- * Project a decoded plist into JSON. Data and dates become explicit
+ * Project a decoded plist into JSON. Data, dates and retained big integers become explicit
  * `$plist_type` objects; a non-finite real becomes an explicit unknown
  * because the XML decoder reports NaN and ±infinity alike.
  */
@@ -64,6 +64,8 @@ export const projectPlistValue = (
       unknownRealCount += 1;
       return scalar({ $plist_type: "real", value: null });
     }
+    if (typeof item === "bigint")
+      return scalar({ $plist_type: "integer", decimal: item.toString() });
     if (Array.isArray(item)) {
       const result: JsonValue[] = [];
       for (let index = 0; index < item.length; index++) {

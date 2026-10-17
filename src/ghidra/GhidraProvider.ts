@@ -90,6 +90,7 @@ const SUPPORTED_ARCHITECTURES = new Set([
   "riscv",
   "powerpc",
   "m68k",
+  "hexagon",
 ]);
 
 /** Ghidra candidate backed by an isolated ephemeral headless import. */

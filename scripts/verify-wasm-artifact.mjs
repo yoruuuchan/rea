@@ -26,6 +26,8 @@ import {
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 import { WABT_OPERATION_TIMEOUT_MS } from "./lib/wabt-verifier-timeouts.mjs";
 
+import { verifyWabtCleanup } from "./lib/verify-wabt-cleanup.mjs";
+
 const directory = process.env.REA_WABT_BIN_DIRECTORY;
 if (!isAbsolute(directory ?? "")) {
   if (process.argv.includes("--require-tools"))
@@ -405,6 +407,7 @@ try {
       cases += 2;
     }
   }
+  cases += await verifyWabtCleanup(entrypoint, environment, childTempRoot);
 } catch (cause) {
   failures.push(cause);
 }

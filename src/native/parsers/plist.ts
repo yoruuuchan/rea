@@ -14,6 +14,11 @@ import {
 } from "../../domain/propertyListKeys.js";
 import { err, ok, type Result } from "../../domain/result.js";
 
+import {
+  incompletePlistNumberLimitation,
+  type PlistNumberLiterals,
+} from "../../domain/apple/plistNumbers.js";
+
 const plistObject = z.record(z.string(), z.unknown());
 
 /** Stable bundle metadata projected from one plist value. */
@@ -87,14 +92,15 @@ export const parsePlistJson = (
   output: string,
   xmlConversion?: string,
 ): Result<ParsedPlist, AnalysisOutputError> => {
-  const literals =
-    xmlConversion === undefined ? undefined : xmlNumberLiterals(xmlConversion);
+  let literals: PlistNumberLiterals | undefined;
   let exactIntegerCount = 0;
   let ambiguousNumberCount = 0;
   const classify = (item: number, digits: string): unknown => {
     const exact = BigInt(digits).toString();
-    const integer = literals?.integers.get(item)?.has(exact) === true;
-    const real = literals?.reals.has(item) === true;
+    const integer =
+      literals?.incomplete === false &&
+      literals.integers.get(item)?.has(exact) === true;
+    const real = literals?.incomplete === false && literals.reals.has(item);
     if (integer && !real) {
       exactIntegerCount += 1;
       return { $plist_type: "integer", decimal: digits };
@@ -106,6 +112,10 @@ export const parsePlistJson = (
   };
   let decoded: ReturnType<typeof omitPrototypeKeys>;
   try {
+    literals =
+      xmlConversion === undefined
+        ? undefined
+        : parseXmlPropertyList(xmlConversion).numberLiterals;
     decoded = omitPrototypeKeys(decodePlistJson(output, classify));
   } catch (cause: unknown) {
     return err(
@@ -121,6 +131,9 @@ export const parsePlistJson = (
     value,
     bundle: projectPlistBundle(value),
     limitations: [
+      ...(literals?.incomplete === true
+        ? [incompletePlistNumberLimitation]
+        : []),
       ...numberLimitations(exactIntegerCount, ambiguousNumberCount),
       ...prototypeKeyLimitations(decoded.omittedPrototypeKeys),
     ],
@@ -136,9 +149,11 @@ export const parsePlistXml = (
 ): Result<ParsedPlist, AnalysisOutputError> => {
   let projected: ProjectedPlistValue;
   let omittedPrototypeKeys: number;
+  let literals: PlistNumberLiterals;
   try {
     const decoded = parseXmlPropertyList(output);
     omittedPrototypeKeys = decoded.omittedPrototypeKeys;
+    literals = decoded.numberLiterals;
     projected = projectPlistValue(decoded.value);
   } catch (cause: unknown) {
     return err(
@@ -151,7 +166,6 @@ export const parsePlistXml = (
   }
   // The XML decoder turns <integer> and <real> into numbers before REA sees
   // them, rounding integers beyond the exact range.
-  const literals = xmlNumberLiterals(output);
   let exactIntegerCount = 0;
   let ambiguousNumberCount = 0;
   const value = mapJsonNumbers(projected.value, (item) => {
@@ -159,6 +173,7 @@ export const parsePlistXml = (
     if (decimals === undefined) return item;
     const [decimal] = decimals;
     if (
+      literals.incomplete ||
       decimals.size !== 1 ||
       decimal === undefined ||
       literals.reals.has(item)
@@ -182,39 +197,11 @@ export const parsePlistXml = (
       ...(projected.unknownDateCount === 0
         ? []
         : [unknownDateLimitation(projected.unknownDateCount)]),
+      ...(literals.incomplete ? [incompletePlistNumberLimitation] : []),
       ...numberLimitations(exactIntegerCount, ambiguousNumberCount),
       ...prototypeKeyLimitations(omittedPrototypeKeys),
     ],
   });
-};
-
-/** `<integer>` and `<real>` element literals in plutil's XML conversion. */
-interface XmlNumberLiterals {
-  /** Exact integer literals beyond the safe range, keyed by decoded number. */
-  readonly integers: ReadonlyMap<number, ReadonlySet<string>>;
-  readonly reals: ReadonlySet<number>;
-}
-
-// plutil escapes "<" in keys and strings, so these element literals can be
-// read from the XML text.
-const xmlNumberLiterals = (xml: string): XmlNumberLiterals => {
-  const integers = new Map<number, Set<string>>();
-  for (const [, decimal = ""] of xml.matchAll(
-    /<integer>\s*([+-]?\d+)\s*<\/integer>/gu,
-  )) {
-    const rounded = Number(decimal);
-    if (Number.isSafeInteger(rounded)) continue;
-    integers.set(
-      rounded,
-      (integers.get(rounded) ?? new Set()).add(BigInt(decimal).toString()),
-    );
-  }
-  const reals = new Set(
-    [...xml.matchAll(/<real>([^<]*)<\/real>/gu)].map(([, text = ""]) =>
-      Number.parseFloat(text),
-    ),
-  );
-  return { integers, reals };
 };
 
 const prototypeKeyLimitations = (count: number): string[] =>

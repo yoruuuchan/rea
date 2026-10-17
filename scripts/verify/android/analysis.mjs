@@ -12,6 +12,7 @@ import { JADX_RELEASE } from "../../../dist/android/JadxRelease.js";
 import fixture from "../../fixtures/android/apidemos.json" with { type: "json" };
 import { verifyAndroidCliCancellation } from "./cli-cancellation.mjs";
 import { verifyAndroidMetadata } from "./metadata.mjs";
+import { verifyAndroidClassSearch } from "./class-search.mjs";
 import { verifyAndroidFailureRecovery } from "./failure-recovery.mjs";
 import {
   resolveJadxConfigurationInputs,
@@ -217,6 +218,7 @@ try {
     overloadedEvidence.normalized_result,
   );
   console.log("PASS real overloaded method references through CLI/MCP");
+  await verifyAndroidClassSearch({ client, path, sha256: fixture.sha256 });
 } catch (cause) {
   process.stderr.write(stderr);
   throw cause;

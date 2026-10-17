@@ -1,9 +1,18 @@
+import type {
+  BinaryArchitecture,
+  RawOnlyArchitecture,
+} from "./binaryTargetTypes.js";
 import { err, ok, type Result } from "./result.js";
 
 export interface ElfFixedHeader {
   readonly elfClass: 32 | 64;
   readonly byteOrder: "little" | "big";
   readonly headerSize: number;
+  readonly machine: number;
+  readonly architecture: Exclude<
+    BinaryArchitecture,
+    RawOnlyArchitecture
+  > | null;
 }
 
 /**
@@ -47,9 +56,36 @@ export const readElfFixedHeader = (
   const headerSize = readU16(elfClass === 32 ? 40 : 52);
   if (headerSize < minimumSize || headerSize > totalBytes)
     return err("invalid ELF header size");
+  const machine = readU16(18);
   return ok({
     elfClass,
     byteOrder: littleEndian ? "little" : "big",
     headerSize,
+    machine,
+    architecture: elfArchitecture(machine) ?? null,
   });
+};
+
+const elfArchitecture = (
+  machine: number,
+): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
+  switch (machine) {
+    case 3:
+      return "x86";
+    case 62:
+      return "x86_64";
+    case 8: // EM_MIPS: ISA, ABI and byte order remain separate ELF facts.
+      return "mips";
+    case 20: // EM_PPC; byte order and processor variant remain ELF declarations.
+      return "powerpc";
+    case 40:
+      return "arm";
+    case 164: // EM_HEXAGON: Qualcomm Hexagon DSP (QDSP6).
+      return "hexagon";
+    case 183:
+      return "arm64";
+    case 243: // EM_RISCV: XLEN, byte order and e_flags remain separate ELF facts.
+      return "riscv";
+  }
+  return undefined;
 };

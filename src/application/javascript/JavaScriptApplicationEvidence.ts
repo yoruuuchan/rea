@@ -97,6 +97,12 @@ const parameters = (
   ...(input.max_semantic_nodes_per_file === undefined
     ? {}
     : { max_semantic_nodes_per_file: input.max_semantic_nodes_per_file }),
+  ...(input.max_semantic_unknowns === undefined
+    ? {}
+    : { max_semantic_unknowns: input.max_semantic_unknowns }),
+  ...(input.max_semantic_unknowns_per_file === undefined
+    ? {}
+    : { max_semantic_unknowns_per_file: input.max_semantic_unknowns_per_file }),
   ...(input.source_paths === undefined
     ? {}
     : { source_paths: input.source_paths }),

@@ -331,8 +331,9 @@ complete observation.
   64 MiB of input, 200,000 objects/references and 128 nesting levels.
   XML dictionary entries decoded as `__proto__` are omitted with an explicit
   count because REA results cannot represent that key. XML tag whitespace and
-  comments do not change that handling. Other values and the original archive
-  digest are preserved; key interpretation follows the pinned plist decoder.
+  comments do not change that handling. XML key names combine their text and
+  CDATA segments without trimming or expanding literal CDATA entities. Other
+  values and the original archive digest are preserved.
 - `decode_interface_builder` / `rea decode-interface-builder <app>` reads
   compiled storyboard and nib resources into objects, outlets, actions,
   connections and controller/class names. A full app graph is often several
@@ -586,6 +587,10 @@ digests identify the original serialized bytes.
 ## Keyed archive integer precision
 
 The archive reader observes XML number element types and binary number markers.
+XML values and their number facts are interpreted together from the validated
+DOM. Hexadecimal `<integer>` text, including an optional sign, retains its value;
+`<real>` text and CDATA segments are combined without inferring text from nested
+elements. The XML path does not serialize or reparse character references.
 Integers beyond the exact range of a JSON number are reported with the original
 decimal text as `{ "$plist_type": "integer", "decimal": "<exact digits>" }` when
 that source value can be associated unambiguously. Integral real values remain

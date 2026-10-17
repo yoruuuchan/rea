@@ -1,5 +1,8 @@
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
-import { artifactFileCancellationCause } from "../artifacts/ArtifactFileOperation.js";
+import {
+  artifactFileCancellationCause,
+  bindArtifactFileCleanup,
+} from "../artifacts/ArtifactFileOperation.js";
 import { boundedUtf8Text } from "../process/boundedUtf8Text.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -34,6 +37,16 @@ const outputLimitExcerpt = (snapshot: ProviderProcessSnapshot) => ({
 });
 /** Preserve lifecycle failures and diagnostic bytes instead of returning partial success. */
 export const wabtFailure = (
+  cause: unknown,
+  phase: "configuration" | "artifact" | "producer",
+  path: string,
+): AnalysisError => {
+  const failure = classifyWabtFailure(cause, phase, path);
+  bindArtifactFileCleanup(cause, failure);
+  return failure;
+};
+
+const classifyWabtFailure = (
   cause: unknown,
   phase: "configuration" | "artifact" | "producer",
   path: string,

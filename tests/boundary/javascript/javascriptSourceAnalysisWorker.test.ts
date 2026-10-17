@@ -51,7 +51,7 @@ it("reuses one real owned analyzer while retaining distinct source identities an
       "export function next() { return { observed: 8 }; }",
     );
     for (const [index, file] of [first, second].entries()) {
-      const result = await worker.analyze(file, 100);
+      const result = await worker.analyze(file, { nodes: 100, unknowns: 100 });
       if (!result.ok) throw result.error.error;
       expect(result.value.javascript.parse_status).toBe("complete");
       expect(
@@ -83,7 +83,7 @@ it("reports an actual startup deadline and closes its owned resources before sub
   const file = source("app.mjs", "export const observed = 7;");
   const expired = new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 1 });
   try {
-    const result = await expired.analyze(file, 100);
+    const result = await expired.analyze(file, { nodes: 100, unknowns: 100 });
     if (result.ok)
       throw new Error(
         "A one-millisecond fresh process deadline unexpectedly completed",
@@ -97,7 +97,7 @@ it("reports an actual startup deadline and closes its owned resources before sub
   }
   const next = new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 30_000 });
   try {
-    const result = await next.analyze(file, 100);
+    const result = await next.analyze(file, { nodes: 100, unknowns: 100 });
     if (!result.ok) throw result.error.error;
     expect(result.value.javascript.parse_status).toBe("complete");
   } finally {
@@ -131,14 +131,18 @@ it("preserves a failed owned cleanup retry when the next caller cancels before a
   const next = new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 30_000 });
   try {
     const file = source("app.mjs", "export const observed = 7;");
-    const first = await worker.analyze(file, 100);
+    const first = await worker.analyze(file, { nodes: 100, unknowns: 100 });
     if (!first.ok) throw first.error.error;
     const closing = worker.close();
     await expect(closing).rejects.toBeInstanceOf(ProviderCleanupError);
     await expect(closing).rejects.toMatchObject({
       cause: { message: "Fixture owned cleanup is unavailable" },
     });
-    const interrupted = await next.analyze(file, 100, controller.signal);
+    const interrupted = await next.analyze(
+      file,
+      { nodes: 100, unknowns: 100 },
+      controller.signal,
+    );
     if (interrupted.ok)
       throw new Error("Unreleased ownership must block subsequent analysis");
     expect(controller.signal.aborted).toBe(true);
@@ -147,7 +151,7 @@ it("preserves a failed owned cleanup retry when the next caller cancels before a
     });
     releaseAllowed = true;
     await worker.close();
-    const recovered = await next.analyze(file, 100);
+    const recovered = await next.analyze(file, { nodes: 100, unknowns: 100 });
     if (!recovered.ok) throw recovered.error.error;
     expect(recovered.value.javascript.parse_status).toBe("complete");
   } finally {
@@ -195,7 +199,7 @@ it("ends worker stdin and unreferences process handles when cleanup reports insp
   );
   try {
     const file = source("app.mjs", "export const observed = 7;");
-    const result = await worker.analyze(file, 100);
+    const result = await worker.analyze(file, { nodes: 100, unknowns: 100 });
     if (!result.ok) throw result.error.error;
     const closing = worker.close();
     await expect(closing).rejects.toBeInstanceOf(ProviderCleanupError);
@@ -249,7 +253,7 @@ const worker = new JavaScriptAnalysisWorker({ heapMb: 128, timeoutMs: 10000 }, a
   await writeFile(${JSON.stringify(ownershipPath)}, JSON.stringify(ownership));
   return { ...launched, cleanup: async () => ({ cleaned: false, reason: "fixture inspection unavailable" }) };
 });
-const analyzed = await worker.analyze(${JSON.stringify(source("app.mjs", "export const value = 1;"))}, 100);
+const analyzed = await worker.analyze(${JSON.stringify(source("app.mjs", "export const value = 1;"))}, { nodes: 100, unknowns: 100 });
 if (!analyzed.ok) throw analyzed.error.error;
 try { await worker.close(); throw new Error("cleanup unexpectedly completed"); }
 catch (error) {
@@ -308,7 +312,7 @@ it("formats a real worker's declined semantic budget once", async () => {
   try {
     const result = await worker.analyze(
       source("main.js", "export const observed = 7;"),
-      100,
+      { nodes: 100, unknowns: 100 },
     );
     if (result.ok) throw new Error("expected a declined semantic budget");
     const { error } = result.error;
@@ -350,7 +354,7 @@ it("reports the worker heap limit only when the runtime enforces V8 heap flags",
   try {
     const result = await worker.analyze(
       source("app.mjs", "export const observed = 7;"),
-      100,
+      { nodes: 100, unknowns: 100 },
     );
     if (result.ok) throw new Error("expected a reported resource failure");
     expect(result.error.error).toMatchObject({
@@ -382,7 +386,7 @@ it("rejects a worker heap report that contradicts the launching runtime", async 
   try {
     const result = await worker.analyze(
       source("app.mjs", "export const observed = 7;"),
-      100,
+      { nodes: 100, unknowns: 100 },
     );
     if (result.ok) throw new Error("expected a handshake failure");
     expect(result.error.error._tag).toBe("AnalysisOutputError");
@@ -426,7 +430,7 @@ require("node:readline").createInterface({ input: process.stdin }).once("line", 
     try {
       const result = await worker.analyze(
         source("app.mjs", "export const observed = 7;"),
-        100,
+        { nodes: 100, unknowns: 100 },
       );
       if (result.ok) throw new Error("expected the worker to fail");
       expect(result.error.error).toMatchObject(

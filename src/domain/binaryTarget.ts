@@ -3,7 +3,6 @@ import type {
   ElfFamilyMetadata,
   HeaderArchitecture,
   MipsElfMetadata,
-  RawOnlyArchitecture,
   PeCodeViewRecord,
   RiscvElfMetadata,
   PowerPcElfMetadata,
@@ -12,7 +11,11 @@ import type {
 import { err, ok, type Result } from "./result.js";
 import { readElfFixedHeader } from "./elfFixedHeader.js";
 import { observeMzWindowsHeader, parseDosMzHeader } from "./dosMz.js";
-import { decodePeMachine } from "./peMachine.js";
+import {
+  decodePeMachine,
+  peOptionalHeaderMagic,
+  type PeArchitecture,
+} from "./peMachine.js";
 import {
   classifyFatContainerIdentity,
   readFatContainerHeader,
@@ -37,6 +40,11 @@ export type ExecutableMetadata =
       readonly architecture: "powerpc";
       readonly availableArchitectures: readonly "powerpc"[];
       readonly powerpc: PowerPcElfMetadata;
+    }
+  | {
+      readonly format: "elf";
+      readonly architecture: "hexagon";
+      readonly availableArchitectures: readonly "hexagon"[];
     }
   | {
       readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
@@ -206,11 +214,9 @@ const parseElf = (
 ): Result<ExecutableMetadata, string> => {
   const fixedHeader = readElfFixedHeader(bytes, fileSize);
   if (!fixedHeader.ok) return fixedHeader;
-  const { elfClass, byteOrder } = fixedHeader.value;
+  const { elfClass, byteOrder, architecture } = fixedHeader.value;
   const little = byteOrder === "little";
-  const machine = little ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18);
-  const architecture = elfArchitecture(machine);
-  if (architecture === undefined) return err("unsupported ELF architecture");
+  if (architecture === null) return err("unsupported ELF architecture");
   if (
     architecture === "mips" ||
     architecture === "riscv" ||
@@ -246,6 +252,12 @@ const parseElf = (
           riscv: metadata,
         });
   }
+  if (architecture === "hexagon")
+    return ok({
+      format: "elf",
+      architecture,
+      availableArchitectures: [architecture],
+    });
   return ok({
     format: "elf",
     architecture,
@@ -503,13 +515,11 @@ export const parsePeCodeViewFromBuffer = (
 
 const peManagedStatus = (
   optionalHeader: Buffer,
-  architecture: BinaryArchitecture,
+  architecture: PeArchitecture,
 ): Result<boolean, string> => {
   if (optionalHeader.length < 2) return err("truncated PE optional header");
   const magic = optionalHeader.readUInt16LE(0);
-  const expectedMagic =
-    architecture === "x86_64" || architecture === "arm64" ? 0x20b : 0x10b;
-  if (magic !== expectedMagic)
+  if (magic !== peOptionalHeaderMagic(architecture))
     return err("PE optional-header magic does not match its architecture");
   const directoryOffset = magic === 0x20b ? 112 : 96;
   const directoryCountOffset = directoryOffset - 4;
@@ -540,28 +550,6 @@ const machArchitecture = (cpu: number): HeaderArchitecture | undefined => {
       return "arm";
     case 0x0100000c:
       return "arm64";
-  }
-  return undefined;
-};
-
-const elfArchitecture = (
-  machine: number,
-): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
-  switch (machine) {
-    case 3:
-      return "x86";
-    case 62:
-      return "x86_64";
-    case 8: // EM_MIPS: ISA, ABI and byte order remain separate ELF facts.
-      return "mips";
-    case 20: // EM_PPC; byte order and processor variant remain ELF declarations.
-      return "powerpc";
-    case 40:
-      return "arm";
-    case 183:
-      return "arm64";
-    case 243: // EM_RISCV: XLEN, byte order and e_flags remain separate ELF facts.
-      return "riscv";
   }
   return undefined;
 };

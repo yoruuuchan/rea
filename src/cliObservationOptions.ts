@@ -65,6 +65,11 @@ export const javascriptApplicationOptions = z.object({
     javaScriptAnalysisResourceControlsSchema.shape.max_semantic_nodes,
   maxSemanticNodesPerFile:
     javaScriptAnalysisResourceControlsSchema.shape.max_semantic_nodes_per_file,
+  maxSemanticUnknowns:
+    javaScriptAnalysisResourceControlsSchema.shape.max_semantic_unknowns,
+  maxSemanticUnknownsPerFile:
+    javaScriptAnalysisResourceControlsSchema.shape
+      .max_semantic_unknowns_per_file,
   sourcePath: javaScriptSourcePathsSchema
     .optional()
     .describe(

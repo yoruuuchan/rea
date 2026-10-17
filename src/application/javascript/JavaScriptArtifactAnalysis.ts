@@ -173,7 +173,7 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
       }
       const result = await worker.analyze(
         file,
-        projection.remainingFileNodeBudget(),
+        projection.remainingFileCapacity(),
         signal,
       );
       const facts = result.ok ? result.value : result.error;

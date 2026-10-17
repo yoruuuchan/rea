@@ -1,3 +1,4 @@
+import type { JavaScriptSemanticProjectionCapacity } from "../../domain/javascript/javascriptSemanticFileProjection.js";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,7 +27,7 @@ import {
 export interface JavaScriptSourceWorkerAnalyzer {
   (
     file: JavaScriptArtifactFile,
-    nodeBudget: number,
+    capacity: JavaScriptSemanticProjectionCapacity,
     callbacks: {
       readonly phase: (
         phase: "parse" | "static" | "semantic" | "projection",
@@ -111,7 +112,7 @@ const analyzeJob = async (
         ...request.file,
         text: { included: true, value: source },
       },
-      request.node_budget,
+      { nodes: request.node_budget, unknowns: request.unknown_budget },
       {
         phase: async (phase) => send({ kind: "phase", id: request.id, phase }),
         checkpoint: async (facts) => {

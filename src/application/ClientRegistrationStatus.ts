@@ -7,7 +7,7 @@ import {
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
 import { access } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute } from "node:path";
 
 import { z } from "zod";
 import { valid } from "semver";
@@ -403,27 +403,11 @@ const registrationAligned = ({
     })
   )
     return "aligned";
-  if (
-    currentCommandPath !== undefined &&
-    currentCommandPath.length > 0 &&
-    command.length === 3 &&
-    command[2] === "mcp" &&
-    isAbsolute(command[0] ?? "") &&
-    isAbsolute(command[1] ?? "") &&
-    resolve(command[0] ?? "") === resolve(process.execPath) &&
-    resolve(command[1] ?? "") === currentCommandPath
-  )
-    return "aligned";
-  if (
-    currentCommandPath !== undefined &&
-    currentCommandPath.length > 0 &&
-    command.length === 2 &&
-    command[1] === "mcp" &&
-    isAbsolute(command[0] ?? "") &&
-    resolve(command[0] ?? "") === currentCommandPath
-  )
-    return "aligned";
-  return "stale";
+  // Other owned package references remain stale until pinned to this version.
+  if (clientRegistrationPackageReference(command) !== undefined) return "stale";
+  // The identity owner already established an exact direct launcher match.
+  // A bare command still depends on the client's PATH, so cannot prove alignment.
+  return isAbsolute(command[0] ?? "") ? "aligned" : "stale";
 };
 
 const parseRegistration = (

@@ -136,56 +136,55 @@ const searchClasses = async (
   loaded: z.infer<typeof jadxLoadSchema>,
   engine: Engine,
 ): Promise<JsonValue> => {
-  const classes: string[] = [];
+  const matches: string[] = [];
   const pageSize = 4096;
-  let total: number | undefined;
+  let offset = 0;
   do {
     const page = jadxClassPageSchema.parse(
       await tools.json("list_classes", {
-        offset: classes.length,
+        query: request.input.query,
+        offset,
         limit: pageSize,
       }),
     );
     if (
-      (total !== undefined && total !== page.total) ||
-      page.offset !== classes.length ||
+      page.total_classes !== loaded.class_count ||
+      page.offset !== offset ||
       page.limit !== pageSize ||
-      page.items.length > pageSize
+      page.next_offset < offset ||
+      page.next_offset > loaded.class_count ||
+      page.items.length > pageSize ||
+      page.items.length > page.next_offset - offset ||
+      (request.input.query === "" &&
+        page.items.length !== page.next_offset - offset) ||
+      page.items.some((name) => !name.includes(request.input.query))
     )
       throw new AnalysisOutputError(
         request.operation,
         "JADX class pagination changed identity or counts",
       );
-    total = page.total;
-    classes.push(...page.items);
     if (
-      classes.length > total ||
-      (page.items.length === 0 && classes.length < total)
+      (offset < loaded.class_count && page.next_offset === offset) ||
+      (page.next_offset < loaded.class_count && page.items.length !== pageSize)
     )
       throw new AnalysisOutputError(
         request.operation,
         "JADX class pagination is incomplete",
       );
-  } while (classes.length < total);
-  if (total !== loaded.class_count)
-    throw new AnalysisOutputError(
-      request.operation,
-      "JADX class inventory count differs from the loaded class count",
-    );
+    matches.push(...page.items);
+    offset = page.next_offset;
+  } while (offset < loaded.class_count);
   const occurrences = new Map<string, number>();
-  for (const name of classes)
+  for (const name of matches)
     occurrences.set(name, (occurrences.get(name) ?? 0) + 1);
-  const matchingNames = classes.filter((name) =>
-    name.includes(request.input.query),
-  );
   const duplicateNames = [...occurrences]
-    .filter(([name, count]) => count > 1 && name.includes(request.input.query))
+    .filter(([, count]) => count > 1)
     .map(([name, count]) => ({ name, occurrences: count }));
   return androidResultSchemas.search_android_classes.parse({
     engine,
     query: request.input.query,
-    total_classes: total,
-    matches: matchingNames,
+    total_classes: loaded.class_count,
+    matches,
     duplicate_names: duplicateNames,
     coverage: "complete",
   });

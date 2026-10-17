@@ -1,3 +1,4 @@
+import type { JavaScriptSemanticProjectionCapacity } from "./javascriptSemanticFileProjection.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import type { AnalysisResourceConstraintError } from "../analysisErrorCore.js";
 import type { Result } from "../result.js";
@@ -33,7 +34,7 @@ export interface JavaScriptSourceAnalysisLimits {
 export interface JavaScriptSourceAnalysisPort {
   analyze(
     file: JavaScriptArtifactFile,
-    nodeBudget: number,
+    capacity: JavaScriptSemanticProjectionCapacity,
     signal?: AbortSignal,
   ): Promise<Result<JavaScriptAnalyzedSource, JavaScriptSourceAnalysisFailure>>;
   close(): Promise<void>;

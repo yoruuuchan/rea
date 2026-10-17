@@ -42,6 +42,44 @@ public class ReaJadxMetadataRegression {
     return value;
   }
 
+  private static void verifyClassPages(Method handle, Object bridge, List<String> inventory)
+      throws Exception {
+    int pages = 0;
+    boolean nonzeroOffset = false;
+    for (String query : List.of("", ".", "ApiDemos", "REA_ABSENT_83f1e89d")) {
+      int limit = query.equals("ApiDemos") ? 1 : 17;
+      List<String> expected = inventory.stream().filter(name -> name.contains(query)).toList();
+      List<String> actual = new ArrayList<>();
+      int offset = 0;
+      do {
+        JsonObject input = new JsonObject();
+        input.addProperty("query", query);
+        input.addProperty("offset", offset);
+        input.addProperty("limit", limit);
+        JsonObject page = call(handle, bridge, "list_classes", input);
+        require(page.get("scope").getAsString().equals("top_level"), "Class scope changed");
+        require(page.get("total_classes").getAsInt() == inventory.size(), "Inventory count changed");
+        require(page.get("offset").getAsInt() == offset && page.get("limit").getAsInt() == limit,
+            "Page selection changed");
+        int next = page.get("next_offset").getAsInt();
+        require(next > offset && next <= inventory.size(), "Inventory cursor did not advance");
+        List<String> selected = new ArrayList<>();
+        for (JsonElement name : page.getAsJsonArray("items")) selected.add(name.getAsString());
+        require(selected.size() <= limit, "Matching page exceeded limit");
+        require(selected.equals(inventory.subList(offset, next).stream()
+            .filter(name -> name.contains(query)).toList()), "Page omitted or reordered matching rows");
+        require(next == inventory.size() || selected.size() == limit, "Page stopped before filling");
+        actual.addAll(selected);
+        nonzeroOffset |= offset > 0;
+        offset = next;
+        pages++;
+      } while (offset < inventory.size());
+      require(actual.equals(expected), "Combined class pages differ from the native inventory");
+    }
+    require(nonzeroOffset, "Fixture did not exercise later native class pages");
+    System.out.println("CLASS_SEARCH_REGRESSION_PASS pages=" + pages + " nonzero=true");
+  }
+
   private static Path initializerFixture(String sources, String output) throws Exception {
     Path directory = Path.of(output);
     SmaliOptions options = new SmaliOptions();
@@ -214,6 +252,7 @@ public class ReaJadxMetadataRegression {
       Object bridge = constructor.newInstance(holder);
       Method handle = bridgeType.getDeclaredMethod("handle", String.class, kotlinx.serialization.json.JsonObject.class);
       handle.setAccessible(true);
+      verifyClassPages(handle, bridge, session.getClassFqns());
       JsonObject apiArgs = arguments("io.appium.android.apis.ApiDemos");
       JsonObject apiSummary = call(handle, bridge, "get_class_summary", apiArgs);
       for (var entry : states.entrySet()) require(entry.getKey().getState() == entry.getValue(),

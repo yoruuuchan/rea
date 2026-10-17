@@ -25,4 +25,23 @@ describe("IDA provider target support", () => {
       reason: expect.stringContaining("Ghidra"),
     });
   });
+  it("declines Hexagon targets with a Ghidra-directed reason", () => {
+    const config = parseConfig({});
+    if (!config.ok) throw new Error("expected valid configuration");
+    const provider = new IdaProvider(config.value, {});
+    expect(
+      provider.inspectTargetSupport({
+        path: "/tmp/chre_pal.so",
+        sha256: "a".repeat(64),
+        kind: "executable",
+        format: "elf",
+        architecture: "hexagon",
+        availableArchitectures: ["hexagon"],
+      }),
+    ).toMatchObject({
+      status: "unsupported",
+      code: "architecture_unsupported",
+      reason: expect.stringContaining("Hexagon"),
+    });
+  });
 });

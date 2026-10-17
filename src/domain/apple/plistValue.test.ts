@@ -86,3 +86,20 @@ it("rejects accessors, proxies, holes and symbol keys without invoking user code
     expect(() => projectPlistValue(value)).toThrow(TypeError);
   expect(accessed).toBe(0);
 });
+
+it("keeps retained integer scalars distinct from lookalike dictionaries", () => {
+  const decimal = `1${"0".repeat(400)}`;
+  const observed: object[] = [];
+  const projected = projectPlistValue(
+    [BigInt(decimal), { $plist_type: "integer", decimal }],
+    (value) => observed.push(value),
+  );
+  expect(projected.unknownRealCount).toBe(0);
+  expect(projected.unknownDateCount).toBe(0);
+  expect(Array.isArray(projected.value)).toBe(true);
+  if (!Array.isArray(projected.value)) throw new Error("Expected array");
+  expect(projected.value[0]).toEqual(projected.value[1]);
+  expect(observed).toHaveLength(1);
+  expect(observed[0]).toBe(projected.value[0]);
+  expect(observed[0]).not.toBe(projected.value[1]);
+});

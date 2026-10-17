@@ -211,7 +211,7 @@ it("preserves graph commitments and export shapes when consuming file-local IR",
         projectJavaScriptSemanticFileSteps(
           analyzed.file,
           analyzed.semantic.ir,
-          transferred.remainingFileNodeBudget(),
+          transferred.remainingFileCapacity(),
         ),
       );
       const module = projectJavaScriptModuleSemantics(analyzed.semantic.ir);

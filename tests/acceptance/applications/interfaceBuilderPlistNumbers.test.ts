@@ -17,7 +17,10 @@ const scenarios = [
   "integer collision",
   "integer-real collision",
   "real",
+  "CDATA real",
+  "hexadecimal",
   "mixed XML",
+  "segmented keys",
 ] as const;
 
 cliTest.for(scenarios)(
@@ -35,7 +38,9 @@ cliTest.for(scenarios)(
     );
     await writeFile(
       join(contents, "Info.plist"),
-      build({ CFBundleExecutable: "Fixture" }),
+      scenario === "segmented keys"
+        ? "<plist><dict><key>CFBundle<![CDATA[Executable]]></key><string>Fixture</string></dict></plist>"
+        : build({ CFBundleExecutable: "Fixture" }),
     );
     const source = {
       $archiver: "NSKeyedArchiver",
@@ -54,7 +59,7 @@ cliTest.for(scenarios)(
         { $classname: "UIView", $classes: ["UIView", "NSObject"] },
       ],
     };
-    const bytes =
+    let bytes =
       scenario === "binary"
         ? Buffer.from(buildBinary(source))
         : Buffer.from(
@@ -63,9 +68,13 @@ cliTest.for(scenarios)(
                 "<string>__INTEGER__</string>",
                 scenario === "real"
                   ? "<real>9007199254740992</real>"
-                  : scenario === "mixed XML"
-                    ? "<integer>9007199254740992<!-- split -->3</integer>"
-                    : "<integer>9007199254740993</integer>",
+                  : scenario === "CDATA real"
+                    ? "<real>9007199254<![CDATA[740992]]></real>"
+                    : scenario === "hexadecimal"
+                      ? "<integer>0x20000000000001</integer>"
+                      : scenario === "mixed XML"
+                        ? "<integer>9007199254740992<!-- split -->3</integer>"
+                        : "<integer>9007199254740993</integer>",
               )
               .replace(
                 "<string>__OTHER__</string>",
@@ -86,6 +95,14 @@ cliTest.for(scenarios)(
       bytes[offset] = 0x13;
       bytes.writeBigInt64BE(9007199254740993n, offset + 1);
     }
+    if (scenario === "segmented keys")
+      bytes = Buffer.from(
+        bytes
+          .toString("utf8")
+          .replaceAll("<key>$class</key>", "<key>$cl<![CDATA[ass]]></key>")
+          .replaceAll("<key>children</key>", "<key>chil<![CDATA[dren]]></key>")
+          .replaceAll("<key>safe</key>", "<key>sa<![CDATA[fe]]></key>"),
+      );
     await writeFile(join(resources, "Main.nib"), bytes);
     const output = await cli.run({
       arguments: ["decode-interface-builder", app, "--json"],
@@ -109,7 +126,10 @@ cliTest.for(scenarios)(
       id: 'ib:"Contents/Resources/Main.nib":object:["1"]',
       attributes: {
         large:
-          scenario === "XML" || scenario === "binary"
+          scenario === "XML" ||
+          scenario === "binary" ||
+          scenario === "hexadecimal" ||
+          scenario === "segmented keys"
             ? { $plist_type: "integer", decimal: "9007199254740993" }
             : 9007199254740992,
         safe: 42,
@@ -126,11 +146,16 @@ cliTest.for(scenarios)(
         relation: "contains",
       }),
     );
-    if (scenario === "XML" || scenario === "binary")
+    if (
+      scenario === "XML" ||
+      scenario === "binary" ||
+      scenario === "hexadecimal" ||
+      scenario === "segmented keys"
+    )
       expect(result.limitations).toContainEqual(
         expect.stringContaining("1 unambiguous integer value"),
       );
-    else if (scenario !== "real")
+    else if (scenario !== "real" && scenario !== "CDATA real")
       expect(result.limitations).toContainEqual(
         expect.stringContaining("integer precision loss remains possible"),
       );

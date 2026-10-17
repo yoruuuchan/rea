@@ -1,3 +1,4 @@
+import type { JavaScriptSemanticProjectionCapacity } from "../../domain/javascript/javascriptSemanticFileProjection.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -154,7 +155,7 @@ export class JavaScriptAnalysisWorker {
   /** Analyze inert source; hard worker failure does not terminate this process. */
   async analyze(
     file: JavaScriptArtifactFile,
-    nodeBudget: number,
+    capacity: JavaScriptSemanticProjectionCapacity,
     signal?: AbortSignal,
   ): Promise<
     Result<JavaScriptAnalyzedSource, JavaScriptSourceAnalysisFailure>
@@ -203,7 +204,8 @@ export class JavaScriptAnalysisWorker {
       let offeredResultBudget = 0;
       const request = javaScriptWorkerRequestSchema.parse({
         id,
-        node_budget: nodeBudget,
+        node_budget: capacity.nodes,
+        unknown_budget: capacity.unknowns,
         text_sha256: createHash("sha256").update(file.text.value).digest("hex"),
         file: metadata,
       });
@@ -344,7 +346,7 @@ export class JavaScriptAnalysisWorker {
           descriptor,
           file,
           deadline.signal,
-          retainGraph,
+          retainGraph ? capacity : null,
         );
         module = decoded.module;
         projection = decoded.projection;

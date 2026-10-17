@@ -1125,6 +1125,10 @@ compiler remains distinguishable from a compiler that exited with an error.
 The helper compile deadline defaults to 120,000 ms; set
 `REA_SWIFTC_COMPILE_TIMEOUT_MS` to an integer between 1 and 2,147,483,647 when
 a busy host needs longer.
+On macOS, the Java prerequisite probe waits for this independently bounded
+preparation before starting its five-second command deadline. Caller cancellation
+still interrupts preparation, and failed helper cleanup remains owned for retry.
+Linux process-table preparation remains inside the command deadline.
 Other rejection values retain their primitive value or an explicit type.
 Shutdown warnings include the failure
 kind, message, and diagnostics, while process and temporary-project cleanup

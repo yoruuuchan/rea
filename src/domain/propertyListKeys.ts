@@ -1,5 +1,11 @@
 import { normalizeLineEndings, type Document, type Node } from "@xmldom/xmldom";
-import { parse, parseOpenStep } from "plist";
+import { parseOpenStep } from "plist";
+
+import { decodeXmlPropertyList } from "./propertyListXml.js";
+import {
+  createPlistNumberCollector,
+  type PlistNumberLiterals,
+} from "./apple/plistNumbers.js";
 
 import { MAX_PLIST_DEPTH } from "./apple/plistValue.js";
 import { parseXmlDocument } from "./xmlDocument.js";
@@ -13,15 +19,20 @@ export interface PropertyListWithoutPrototypeKeys {
   readonly omittedPrototypeKeys: number;
 }
 
+/** Value and numeric facts decoded together; OpenStep numeric facts remain unknown. */
+export interface ParsedPropertyList extends PropertyListWithoutPrototypeKeys {
+  readonly numberLiterals: PlistNumberLiterals;
+}
+
 /** Limitation for results whose source plist held `__proto__` entries. */
 export const omittedPrototypeKeysLimitation = (count: number | null): string =>
   count === null
     ? "Dictionary entries keyed __proto__ were omitted because REA results cannot represent that key."
     : `${String(count)} dictionary ${count === 1 ? "entry" : "entries"} keyed __proto__ ${count === 1 ? "was" : "were"} omitted because REA results cannot represent that key.`;
 
-const withoutKey = (
+/** Remove own `__proto__` entries, such as JSON.parse creates, and count them. */
+export const omitPrototypeKeys = (
   value: unknown,
-  key: string,
 ): PropertyListWithoutPrototypeKeys => {
   let omitted = 0;
   const strip = (item: unknown): unknown => {
@@ -35,7 +46,7 @@ const withoutKey = (
       return item;
     return Object.fromEntries(
       Object.entries(item).flatMap(([name, entry]) => {
-        if (name !== key) return [[name, strip(entry)]];
+        if (name !== PROTOTYPE_KEY) return [[name, strip(entry)]];
         omitted += 1;
         return [];
       }),
@@ -44,11 +55,6 @@ const withoutKey = (
   const stripped = strip(value);
   return { value: stripped, omittedPrototypeKeys: omitted };
 };
-
-/** Remove own `__proto__` entries, such as JSON.parse creates, and count them. */
-export const omitPrototypeKeys = (
-  value: unknown,
-): PropertyListWithoutPrototypeKeys => withoutKey(value, PROTOTYPE_KEY);
 
 const XML_ENTITIES: Readonly<Record<string, string>> = {
   amp: "&",
@@ -82,15 +88,12 @@ export const decodeXmlText = (text: string): string =>
   );
 
 /**
- * Decode an XML plist whose dictionaries may use the legal key `__proto__`,
- * which the `plist` decoder rejects outright. Those entries are omitted and
- * counted so callers can report them instead of failing the whole document.
+ * Decode one validated XML DOM into values and numeric source facts.
+ * Entries keyed `__proto__` are omitted and counted at the same boundary.
  */
-export const parseXmlPropertyList = (
-  text: string,
-): PropertyListWithoutPrototypeKeys => {
+export const parseXmlPropertyList = (text: string): ParsedPropertyList => {
   // Preserve the pinned decoder's existing OpenStep autodetection, also used
-  // by app Info.plist resolution. Only XML needs the key-element substitution.
+  // by app Info.plist resolution.
   const first = text.trimStart()[0];
   if (first === "{" || first === "(") {
     // The pinned decoder assigns a `__proto__` key to the object prototype, so
@@ -98,16 +101,17 @@ export const parseXmlPropertyList = (
     // the source instead; the rebuild still drops any prototype it replaced.
     const prototypeKeys = scanOpenStep(text);
     return {
-      value: omitPrototypeKeys(parse(text)).value,
+      value: omitPrototypeKeys(parseOpenStep(text)).value,
+      numberLiterals: createPlistNumberCollector().result(true),
       omittedPrototypeKeys: prototypeKeys,
     };
   }
   // Normalize only the literal line endings the pinned decoder normalizes.
-  // Preserve character references in the source: serializing a DOM would turn
-  // e.g. an encoded carriage return into a literal newline on the second parse.
+  // Decode this DOM directly so character references are never reserialized
+  // into literal line endings and normalized a second time.
   const normalized = normalizeLineEndings(text);
-  // Validate before plist's recovering XML decoder can turn malformed source
-  // into observed values. Reuse the validated DOM for depth and key ownership.
+  // Strict syntax owns well-formedness before value interpretation. Reuse the
+  // same DOM for depth, keys, values and number facts.
   const parsed = parseXmlDocument(normalized, {
     doctype: "allow",
     lineEndings: "preserve",
@@ -115,11 +119,11 @@ export const parseXmlPropertyList = (
   if (!parsed.ok) throw parsed.error;
   const document = parsed.value;
   assertXmlPlistDepthWithinLimit(document);
-  const { substituted, placeholder } = substitutePrototypeKeys(
-    normalized,
-    document,
-  );
-  return withoutKey(parse(substituted), placeholder);
+  const decoded = decodeXmlPropertyList(document);
+  return {
+    ...omitPrototypeKeys(decoded.value),
+    numberLiterals: decoded.numberLiterals,
+  };
 };
 
 interface OpenStepContainer {
@@ -283,12 +287,12 @@ const skipOpenStepScalar = (text: string, start: number): number => {
   return cursor;
 };
 
-/** Elements whose children the pinned plist value decoder visits recursively. */
+/** Elements whose children the plist value decoder visits recursively. */
 const PLIST_CONTAINER_ELEMENTS = new Set(["plist", "dict", "array"]);
 
 /**
  * Reject XML plists nested deeper than the projection supports before any
- * recursive value pass runs. `plist` and the prototype-key traversal recurse once
+ * recursive value pass runs. Value decoding and prototype omission recurse once
  * per nesting level, so a deeply nested document exhausts the call stack
  * before the projection limit can report the resource bound. The failure
  * matches `projectPlistValue` so callers classify it as a limit failure.
@@ -321,42 +325,4 @@ const assertXmlPlistDepthWithinLimit = (document: Document): void => {
     if (PLIST_CONTAINER_ELEMENTS.has(node.nodeName) && node.firstChild !== null)
       pending.push({ node: node.firstChild, depth: depth + 1 });
   }
-};
-
-/** Locate keys with the same XML parser and first-child semantics as plist. */
-const substitutePrototypeKeys = (text: string, document: Document) => {
-  const keys = Array.from(document.getElementsByTagName("key"));
-  const decodedKeys = new Set(keys.map((key) => key.firstChild?.nodeValue));
-  let placeholder = "__rea_prototype_key__";
-  while (decodedKeys.has(placeholder)) placeholder = `_${placeholder}`;
-
-  const omitted = keys
-    .map((key) => key.firstChild)
-    .filter((node) => node?.nodeValue === PROTOTYPE_KEY);
-  if (omitted.length === 0) return { substituted: text, placeholder };
-
-  // xmldom uses one-based locators in document order. Scan forward only to
-  // needed lines instead of retaining an offset for every source newline.
-  let line = 1;
-  let lineStart = 0;
-  const parts: string[] = [];
-  let cursor = 0;
-  for (const node of omitted) {
-    const nodeLine = node?.lineNumber;
-    const column = node?.columnNumber;
-    if (nodeLine === undefined || column === undefined)
-      throw new TypeError("XML plist key has no source location");
-    while (line < nodeLine) {
-      const newline = text.indexOf("\n", lineStart);
-      if (newline === -1)
-        throw new TypeError("XML plist key has an invalid source location");
-      lineStart = newline + 1;
-      line += 1;
-    }
-    const offset = lineStart + column - 1;
-    parts.push(text.slice(cursor, offset), `<![CDATA[${placeholder}]]>`);
-    cursor = offset;
-  }
-  parts.push(text.slice(cursor));
-  return { substituted: parts.join(""), placeholder };
 };

@@ -26,6 +26,7 @@ import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.
 import { err, ok } from "../domain/result.js";
 import { HopperApplicationLauncher } from "./BridgeLauncher.js";
 import {
+  hopperDeclinedArchitectureReason,
   hopperLoaderArgsForTarget,
   resolveHopperAnalysisProfile,
 } from "./HopperAnalysisProfile.js";
@@ -129,17 +130,14 @@ export class HopperProvider implements AnalysisProviderCandidate {
         reason: null,
         diagnostics,
       };
-    if (isElfMetadataArchitecture(target.architecture))
+    if (
+      isElfMetadataArchitecture(target.architecture) ||
+      target.architecture === "hexagon"
+    )
       return {
         status: "unsupported",
         code: "architecture_unsupported",
-        reason: `REA's Hopper adapter does not admit ${
-          target.architecture === "mips"
-            ? "MIPS"
-            : target.architecture === "riscv"
-              ? "RISC-V"
-              : "PowerPC"
-        } targets.`,
+        reason: hopperDeclinedArchitectureReason(target.architecture),
         diagnostics,
       };
     if (target.format === "raw-binary")

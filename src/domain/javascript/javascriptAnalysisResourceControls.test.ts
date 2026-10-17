@@ -7,13 +7,22 @@ it("keeps omitted operational choices absent and validates explicit semantic bud
     javaScriptAnalysisResourceControlsSchema.parse({
       max_semantic_nodes: 750_000,
       max_semantic_nodes_per_file: 700_000,
+      max_semantic_unknowns: 500_000,
+      max_semantic_unknowns_per_file: 400_000,
     }),
   ).toEqual({
     max_semantic_nodes: 750_000,
     max_semantic_nodes_per_file: 700_000,
+    max_semantic_unknowns: 500_000,
+    max_semantic_unknowns_per_file: 400_000,
   });
   for (const value of [0, -1, 1.5, 1_000_001, Infinity, NaN]) {
-    for (const key of ["max_semantic_nodes", "max_semantic_nodes_per_file"])
+    for (const key of [
+      "max_semantic_nodes",
+      "max_semantic_nodes_per_file",
+      "max_semantic_unknowns",
+      "max_semantic_unknowns_per_file",
+    ])
       expect(
         javaScriptAnalysisResourceControlsSchema.safeParse({ [key]: value })
           .success,

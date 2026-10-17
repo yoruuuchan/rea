@@ -11,6 +11,7 @@ export const BINARY_ARCHITECTURES = [
   "riscv",
   "powerpc",
   "m68k",
+  "hexagon",
 ] as const;
 export type BinaryArchitecture = (typeof BINARY_ARCHITECTURES)[number];
 
@@ -62,7 +63,7 @@ export const isElfMetadataArchitecture = (
 /** Recognized family with no ELF metadata member; the header alone is the fact. */
 export type HeaderArchitecture = Exclude<
   BinaryArchitecture,
-  ElfMetadataArchitecture | RawOnlyArchitecture
+  ElfMetadataArchitecture | RawOnlyArchitecture | "hexagon"
 >;
 
 /** Raw ELF facts; family recognition does not establish ISA or ABI support. */
@@ -175,6 +176,14 @@ export type BinaryTarget =
       readonly executableRole?: never;
       readonly managed?: never;
     })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "elf";
+      readonly architecture: "hexagon";
+      readonly availableArchitectures: readonly "hexagon"[];
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
   | (ExecutableTarget & {
       readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
       readonly universalSlice?: never;
@@ -191,14 +200,11 @@ export type BinaryTarget =
   | (BinaryTargetIdentity & {
       readonly kind: "executable";
       readonly format: "raw-binary";
-      readonly architecture: Exclude<
-        BinaryArchitecture,
-        ElfMetadataArchitecture
-      >;
-      readonly availableArchitectures: readonly Exclude<
-        BinaryArchitecture,
-        ElfMetadataArchitecture
-      >[];
+      readonly architecture: HeaderArchitecture | RawOnlyArchitecture;
+      readonly availableArchitectures: readonly (
+        | HeaderArchitecture
+        | RawOnlyArchitecture
+      )[];
       readonly entryPoint: string;
       readonly entryPointSource: string;
       readonly executableRole?: never;

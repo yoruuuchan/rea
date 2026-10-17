@@ -37,6 +37,21 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     },
     close: scenarioClose,
   };
+  const activeClose = vi
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error("Fuse preflight cleanup failed"))
+    .mockResolvedValue(undefined);
+  const electronActiveObservation = {
+    identity: () => ({
+      id: "active-electron",
+      name: "Active Electron",
+      version: "1",
+    }),
+    capture: async () => {
+      throw new Error("Unexpected Electron capture");
+    },
+    close: activeClose,
+  };
   const factories: Parameters<RuntimeDependencies["serve"]>[0][] = [];
   const runtime: RuntimeDependencies = {
     env: {},
@@ -57,6 +72,7 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
       browserObservation,
       browserScenarioCapture,
       electronObservation,
+      electronActiveObservation,
     }),
   });
   if (!transport.ok) throw new Error("Transport failed");
@@ -70,17 +86,23 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
     expect(browserClose).not.toHaveBeenCalled();
     expect(scenarioClose).not.toHaveBeenCalled();
     expect(electronClose).not.toHaveBeenCalled();
+    expect(activeClose).not.toHaveBeenCalled();
 
     await expect(transport.closeOptionalProviders()).rejects.toMatchObject({
-      errors: [expect.objectContaining({ message: "Scenario cleanup failed" })],
+      errors: [
+        expect.objectContaining({ message: "Scenario cleanup failed" }),
+        expect.objectContaining({ message: "Fuse preflight cleanup failed" }),
+      ],
     });
     expect(browserClose).toHaveBeenCalledTimes(1);
     expect(scenarioClose).toHaveBeenCalledTimes(1);
+    expect(activeClose).toHaveBeenCalledTimes(1);
     expect(electronClose).toHaveBeenCalledTimes(1);
     await transport.closeOptionalProviders();
     await transport.closeOptionalProviders();
     expect(browserClose).toHaveBeenCalledTimes(1);
     expect(scenarioClose).toHaveBeenCalledTimes(2);
+    expect(activeClose).toHaveBeenCalledTimes(2);
     expect(electronClose).toHaveBeenCalledTimes(1);
   } finally {
     await transport.closeAndroid();

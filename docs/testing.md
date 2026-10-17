@@ -225,6 +225,21 @@ cover cancellation during final cleanup.
 Use explicit abort reasons and assert their identity at admission and after
 provider completion, alongside retained observations and cleanup state.
 
+Electron fuse regressions cover actual descriptor close denial and retry through
+the built CLI, same-connection MCP recovery, mixed descriptor outcomes, and
+server shutdown. Controlled seams cover cancellation during final close and
+after reader finalization, plus active-provider shutdown during preflight.
+They preserve real filesystem cleanup where possible; mocked launch boundaries
+do not establish real Electron teardown or naturally occurring OS failures.
+
+Active Electron cleanup controls retain independent transport and process-family
+owners, block replacement captures until recovery, and retry only unresolved
+owners. Cover late close acknowledgement and rejection after a wait deadline,
+opaque rejection reasons, cancellation during failed finalization, and missing
+lineage followed by a confirmed passive family census. Windows controls require
+a fresh lineage observation and do not signal cached descendant PIDs after root
+termination. Simulated Windows controls do not establish native Windows behavior.
+
 For atomic writes, exercise cancellation on both sides of the documented commit
 point and preserve any publication receipt. A late interruption does not prove
 that no output was published.
@@ -1539,7 +1554,12 @@ NUL-containing names. It compares exact WAT,
 section output and selected/tool digests through the compiled CLI and real MCP
 SDK, validates advertised schemas, checks identical CLI/MCP Evidence IDs and
 session bundle readback, retains invalid/truncated module diagnostics, preserves
-all inputs and checks workspace cleanup. Pass an installed package's
+all inputs and checks workspace cleanup.
+The lane also injects one cleanup denial for exact private runtime roots and
+input descriptors, checks recovered CLI errors, and verifies retry on the same
+MCP connection after repeated runtime-removal denial. These are controlled
+faults, not naturally occurring permission failures; no WASM target is executed.
+Pass an installed package's
 `scripts/rea.mjs` as the first argument to run the same lane against the package.
 `npm run verify:wasm:package` packs and installs REA into an isolated temporary
 prefix with lifecycle scripts disabled and runs the same required real-tool lane.

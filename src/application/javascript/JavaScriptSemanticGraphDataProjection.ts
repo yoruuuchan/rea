@@ -1,4 +1,3 @@
-import { createJavaScriptSemanticGraphUnknown } from "../../domain/javascript/javascriptSemanticGraph.js";
 import type { JavaScriptSemanticGraphNode } from "../../domain/javascript/javascriptSemanticGraphSchemas.js";
 import type {
   JavaScriptSemanticBoundaryOperation,
@@ -325,19 +324,13 @@ const addDataUnknown = (input: DataUnknownInput): void => {
     detail,
     candidateNodeIds,
   } = input;
-  addSemanticGraphUnknown(
-    context.state,
-    createJavaScriptSemanticGraphUnknown(
-      {
-        node_id: node.node_id,
-        family,
-        relation_kinds: relationKinds,
-        reason: input.reason ?? "ambiguous-target",
-        detail,
-        candidate_node_ids: candidateNodeIds,
-        evidence: unknownSemanticEvidence(context.file, location),
-      },
-      context.state.evidenceContexts,
-    ),
-  );
+  addSemanticGraphUnknown(context.state, {
+    node_id: node.node_id,
+    family,
+    relation_kinds: relationKinds,
+    reason: input.reason ?? "ambiguous-target",
+    detail,
+    candidate_node_ids: candidateNodeIds,
+    evidence: unknownSemanticEvidence(context.file, location),
+  });
 };

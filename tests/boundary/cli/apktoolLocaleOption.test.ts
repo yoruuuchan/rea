@@ -56,6 +56,8 @@ const OWNER_ADMITTED_LOCALES = [
   "zh-rCN",
   "en-419",
   "b+zh+Hans+CN",
+  "b+sr+Latn+RS+REVISED",
+  "b+fil+Latn+419+ABCDEFGH",
 ] as const;
 
 it("forwards every locale the apktool input owner admits", async () => {

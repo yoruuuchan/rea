@@ -8,10 +8,12 @@ export const JAVASCRIPT_ANALYSIS_RESOURCE_DEFAULTS = {
   timeoutMs: 300_000,
   semanticNodes: 100_000,
   semanticNodesPerFile: 20_000,
+  semanticUnknowns: 100_000,
+  semanticUnknownsPerFile: 20_000,
 } as const;
 
-/** Maximum caller-selected node capacity; heap and transfer admission still apply. */
-export const JAVASCRIPT_SEMANTIC_NODE_MAXIMUM = 1_000_000;
+/** Maximum caller-selected retained record capacity; heap and transfer admission still apply. */
+export const JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM = 1_000_000;
 
 /** Project observed execution limits without inventing unmeasured values. */
 export const javaScriptAnalysisCoverageLimits = (
@@ -46,7 +48,7 @@ export const javaScriptAnalysisResourceControlsSchema = z.strictObject({
     .number()
     .int()
     .min(1)
-    .max(JAVASCRIPT_SEMANTIC_NODE_MAXIMUM)
+    .max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM)
     .optional()
     .describe(
       "Maximum retained semantic nodes across the application; defaults to 100000. Worker heap and parent result admission remain enforced.",
@@ -55,10 +57,28 @@ export const javaScriptAnalysisResourceControlsSchema = z.strictObject({
     .number()
     .int()
     .min(1)
-    .max(JAVASCRIPT_SEMANTIC_NODE_MAXIMUM)
+    .max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM)
     .optional()
     .describe(
       "Maximum retained semantic nodes per source file; defaults to 20000, additionally bounded by max_semantic_nodes and memory/transfer limits.",
+    ),
+  max_semantic_unknowns: z
+    .number()
+    .int()
+    .min(1)
+    .max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM)
+    .optional()
+    .describe(
+      "Maximum retained semantic unknown records across the application; defaults to 100000. Omitted emission occurrences are counted by family and reason.",
+    ),
+  max_semantic_unknowns_per_file: z
+    .number()
+    .int()
+    .min(1)
+    .max(JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM)
+    .optional()
+    .describe(
+      "Maximum retained semantic unknown records per source file; defaults to 20000, additionally bounded by max_semantic_unknowns and memory/transfer limits.",
     ),
   max_heap_mb: z
     .number()

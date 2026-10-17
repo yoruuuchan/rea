@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -706,6 +706,54 @@ describe("platform-aware client config paths", () => {
 });
 
 describe("client registration command ownership", () => {
+  it.skipIf(process.platform === "win32").each([
+    ["rea", "rea-agents"],
+    ["rea-agents", "rea"],
+  ])(
+    "recognizes %s through its %s launcher alias",
+    async (registered, current) => {
+      const root = await createTestTempDirectory("rea-launcher-alias-");
+      const script = join(root, "entry.mjs");
+      await writeFile(script, "// owned dispatcher\n");
+      await symlink(script, join(root, registered));
+      await symlink(script, join(root, current));
+      for (const command of [
+        [join(root, registered), "mcp"],
+        [process.execPath, join(root, registered), "mcp"],
+      ]) {
+        expect(
+          classifyClientRegistrationCommand(command, join(root, current)),
+        ).toBe("owned");
+        expect(
+          isOwnedClientRegistrationCommand(command, join(root, current)),
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "does not own a same-named launcher for another script or a dangling link",
+    async () => {
+      const root = await createTestTempDirectory("rea-launcher-foreign-");
+      const owned = join(root, "entry.mjs");
+      const foreign = join(root, "other.mjs");
+      await writeFile(owned, "// owned\n");
+      await writeFile(foreign, "// foreign\n");
+      await symlink(owned, join(root, "rea"));
+      await symlink(foreign, join(root, "rea-agents"));
+      await symlink(join(root, "missing.mjs"), join(root, "missing"));
+      for (const candidate of ["rea-agents", "missing"]) {
+        const command = [join(root, candidate), "mcp"];
+        expect(
+          classifyClientRegistrationCommand(command, join(root, "rea")),
+        ).toBe("foreign");
+        expect(
+          isOwnedClientRegistrationCommand(command, join(root, "rea")),
+        ).toBe(false);
+      }
+    },
+  );
+
   it("recognizes prior exact REA releases while rejecting foreign package commands", () => {
     expect(isOwnedClientRegistrationCommand(["rea", "mcp"], undefined)).toBe(
       true,

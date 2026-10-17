@@ -19,7 +19,6 @@ import kotlin.coroutines.EmptyCoroutineContext;
 import kotlinx.coroutines.BuildersKt;
 import kotlinx.io.CoreKt;
 import kotlinx.io.JvmCoreKt;
-import kotlinx.serialization.json.JsonObject;
 
 /** REA-owned metadata boundary for the unmodified jadx-headless-mcp 0.7.1 JAR. */
 class ReaJadxBridge {
@@ -45,14 +44,14 @@ class ReaJadxBridge {
   private static CallToolResult json(Object value) { return text(JSON.toJson(value), false); }
 
   private static String string(JsonObject args, String name) {
-    JsonElement value = JsonParser.parseString(args.toString()).getAsJsonObject().get(name);
+    JsonElement value = args.get(name);
     if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
       throw new IllegalArgumentException(name + " must be a string");
     return value.getAsString();
   }
 
   private static int integer(JsonObject args, String name, int fallback) {
-    JsonElement value = JsonParser.parseString(args.toString()).getAsJsonObject().get(name);
+    JsonElement value = args.get(name);
     if (value == null) return fallback;
     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
       throw new IllegalArgumentException(name + " must be a nonnegative integer");
@@ -203,7 +202,8 @@ class ReaJadxBridge {
     return new DirectInvokes(sites, exhaustive[0]);
   }
 
-  private CallToolResult handle(String name, JsonObject args) {
+  private CallToolResult handle(String name, kotlinx.serialization.json.JsonObject input) {
+    JsonObject args = JsonParser.parseString(input.toString()).getAsJsonObject();
     if (name.equals("rea_jvm_status")) return json(Map.of(
         "engine_reported_version", BuildInfo.VERSION,
         "max_heap_bytes", Runtime.getRuntime().maxMemory(),
@@ -213,12 +213,25 @@ class ReaJadxBridge {
     JadxSession current = session();
     if (name.equals("list_classes")) {
       List<String> names = current.getClassFqns();
+      String query = args.has("query") ? string(args, "query") : "";
       int offset = integer(args, "offset", 0);
       int limit = integer(args, "limit", 200);
       int start = Math.min(offset, names.size());
-      int end = (int) Math.min((long) start + limit, names.size());
-      return json(Map.of("total", names.size(), "offset", offset, "limit", limit,
-          "items", names.subList(start, end)));
+      int end = start;
+      List<String> items;
+      if (query.isEmpty()) {
+        end = (int) Math.min((long) start + limit, names.size());
+        items = names.subList(start, end);
+      } else {
+        items = new ArrayList<>();
+        while (end < names.size() && items.size() < limit) {
+          String nameInInventory = names.get(end++);
+          if (nameInInventory.contains(query)) items.add(nameInInventory);
+        }
+      }
+      return json(Map.of("total_classes", names.size(), "next_offset", end,
+          "scope", "top_level", "offset", offset, "limit", limit,
+          "items", items));
     }
     ClassSnapshot cls = selected(args);
     if (name.equals("get_class_summary")) return json(cls.summary());
@@ -241,7 +254,7 @@ class ReaJadxBridge {
     if (name.equals("get_xrefs_to_class")) uses = cls.node().getUseIn();
     else {
       List<MethodSnapshot> overloads = methods(cls, args);
-      if (overloads.size() != 1 && !args.containsKey("overload_index"))
+      if (overloads.size() != 1 && !args.has("overload_index"))
         throw new InputFailure("overload_index", "Select one of " + overloads.size() + " method overloads");
       overloadIndex = integer(args, "overload_index", 0);
       if (overloadIndex >= overloads.size())
@@ -291,7 +304,7 @@ class ReaJadxBridge {
         1048576, 0, 90000L, 1, List.of(), List.of(), 64, ResourceMode.FULL));
     ServerCapabilities capabilities = new ServerCapabilities(
         new ServerCapabilities.Tools(null), null, null, null, null, null, null, Map.of());
-    Server server = new Server(new Implementation("rea-jadx-bridge", "1", null, null, null),
+    Server server = new Server(new Implementation("rea-jadx-bridge", "2", null, null, null),
         new ServerOptions(capabilities), "", ignored -> Unit.INSTANCE);
     SessionToolsKt.registerSessionTools(server, holder);
     ManifestToolsKt.registerManifestTools(server, holder);
@@ -305,7 +318,7 @@ class ReaJadxBridge {
     for (String name : new ArrayList<>(server.getTools().keySet()))
       if (!consumed.contains(name)) server.removeTool(name);
     Tool diagnostics = new Tool("rea_jvm_status",
-        new ToolSchema(null, new JsonObject(Map.of()), List.of(), null),
+        new ToolSchema(null, new kotlinx.serialization.json.JsonObject(Map.of()), List.of(), null),
         "Observed worker JVM and metadata scope", null, null, null, null, null, null);
     server.addTool(diagnostics, (connection, request, continuation) -> bridge.handle("rea_jvm_status", request.getArguments()));
     for (String name : List.of("list_classes", "get_class_summary",
@@ -320,13 +333,16 @@ class ReaJadxBridge {
       };
       Map<String, kotlinx.serialization.json.JsonElement> properties = new LinkedHashMap<>();
       for (String field : fields) properties.put(field, tool.getInputSchema().getProperties().get(field));
+      if (name.equals("list_classes")) properties.put("query",
+          new kotlinx.serialization.json.JsonObject(Map.of(
+              "type", kotlinx.serialization.json.JsonElementKt.JsonPrimitive("string"))));
       String description = switch (name) {
-        case "list_classes" -> "Indexed pages of all top-level class names, with offset and limit.";
+        case "list_classes" -> "Pages of case-sensitive matching top-level class names; offset and next_offset are inventory positions, limit bounds matching rows. Omitted or empty query inventories all names.";
         case "get_class_summary" -> "Parsed member metadata for one exact class name; no source generation.";
         case "get_method_body" -> "Source for an exact class and stable same-name overload index; static initializers use smali to preserve folded field initialization.";
         default -> "Complete static using-node inventory for an exact class or selected method overload; one node may contain multiple invoke instructions, and source lines are unresolved.";
       };
-      Tool narrowed = new Tool(name, new ToolSchema(null, new JsonObject(properties),
+      Tool narrowed = new Tool(name, new ToolSchema(null, new kotlinx.serialization.json.JsonObject(properties),
           tool.getInputSchema().getRequired(), null), description, null, null, null, null, null, null);
       server.addTool(narrowed, (connection, request, continuation) -> {
         try { return bridge.handle(name, request.getArguments()); }

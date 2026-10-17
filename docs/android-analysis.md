@@ -103,9 +103,10 @@ that every class or engine operation will load successfully. Discovery limits
 each ZIP metadata read to 8 MiB before allocation; a larger directory reports
 the exhausted read budget and the selected JAR path.
 
-The current metadata bridge is verified on macOS arm64 with OpenJDK 21 and the
-public Appium ApiDemos fixture. The POSIX adapter also supports Linux; the new
-bridge has not yet undergone real verification on Linux/JDK 25.
+The filtered class-page bridge (protocol 2) is verified on Linux x86-64 with
+Temurin 21, public Appium ApiDemos 6.0.18 and NewPipe 0.29.1 APKs. Earlier
+metadata-bridge records covered macOS arm64/OpenJDK 21 and Windows x64/JDK 21;
+this protocol revision has not been rerun on those hosts or Linux/JDK 25.
 Windows x64 uses an owned Job Object with bidirectional stdio, atomic job
 assignment and kill-on-owner-close. Real Windows verification uses JDK 21 and
 the pinned JADX 0.7.1 JAR; see the real verification lane below.
@@ -163,7 +164,10 @@ the same source byte limit and explicit truncation reporting.
   permissions and class/resource counts. Summary fields are extracted by the
   upstream engine and should be checked against the retained XML when needed.
   Signature verification is explicitly `not_performed`.
-- Class search consumes all pages and checks their counts. An empty `query`
+- Class search filters the engine's cached top-level names before transferring
+  pages, then follows contiguous inventory positions without rescanning earlier
+  rows. It checks selection, scope, examined ranges and counts before reporting
+  complete coverage. Complete producer replies stay in Evidence; an empty `query`
   inventories all class-name rows; class names are decompiler representations.
   Repeated names remain repeated in `matches` so the inventory row count and
   producer evidence stay visible. `duplicate_names` identifies matching names

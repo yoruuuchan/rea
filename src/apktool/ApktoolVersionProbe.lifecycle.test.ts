@@ -1,9 +1,10 @@
+import { ApktoolCommandCleanup } from "./ApktoolCommandCleanup.js";
 import { execFile } from "node:child_process";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
@@ -67,8 +68,8 @@ it.skipIf(process.platform === "win32")(
     const started = performance.now();
     const probe = inspectApktoolClient(
       { command: launcher, commandSource: "environment" },
-      controller.signal,
-      process.env,
+      commands,
+      { signal: controller.signal, environment: process.env },
     ).catch((cause: unknown) => cause);
     try {
       expect(
@@ -105,3 +106,9 @@ it.skipIf(process.platform === "win32")(
   },
   30_000,
 );
+
+let commands = new ApktoolCommandCleanup();
+afterEach(async () => {
+  await commands.close();
+  commands = new ApktoolCommandCleanup();
+});

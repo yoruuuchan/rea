@@ -1,3 +1,5 @@
+import { ArtifactFileCleanupFailure } from "../artifacts/ArtifactFileOperation.js";
+import { parseEvidence } from "../domain/evidence.js";
 import { fstatSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
@@ -123,10 +125,14 @@ describe("electron fuse final-close failures", () => {
     );
     armFaults(path, { readFailure, closeFailure });
 
-    const failure = await readElectronFuseImage(path).catch(
+    const caught = await readElectronFuseImage(path).catch(
       (error: unknown) => error,
     );
 
+    expect(caught).toBeInstanceOf(ArtifactFileCleanupFailure);
+    if (!(caught instanceof ArtifactFileCleanupFailure)) throw caught;
+    expect(caught.cleanupLease.released).toBe(false);
+    const failure = caught.fileCleanupFailure;
     // The close rejection must not replace the primary read error.
     expect(failure).toBeInstanceOf(RegularFileCleanupFailure);
     if (!(failure instanceof RegularFileCleanupFailure))
@@ -254,9 +260,14 @@ describe("electron fuse final-close failures", () => {
     // observation instead of being discarded with the report.
     const partial = result.error.partialObservation;
     expect(partial).toBeDefined();
-    const serialized = JSON.stringify(partial);
-    expect(serialized).toContain("Partial observation");
-    expect(serialized).toContain("electron-fuses");
+    expect(parseEvidence(partial)).toMatchObject({
+      provider: { id: "electron-fuses" },
+      subject: { local_path: path },
+      normalized_result: {
+        artifact: { selected_path: path, resolved_path: path },
+        slices: [{ sentinel_count: 1 }],
+      },
+    });
   });
 });
 

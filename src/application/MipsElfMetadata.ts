@@ -83,7 +83,7 @@ export const readMipsElfMetadata = async (
   if (
     fixedHeader.value.elfClass !== 32 ||
     fixedHeader.value.byteOrder !== metadata.byteOrder ||
-    u16(bytes, 18) !== 8 ||
+    fixedHeader.value.machine !== 8 ||
     u16(bytes, 16) !== metadata.type ||
     u32(bytes, 36) !== metadata.flags
   )

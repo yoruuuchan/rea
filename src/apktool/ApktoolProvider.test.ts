@@ -1,14 +1,17 @@
+import { createDeferred } from "../../tests/fixtures/binarySession.js";
+import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
   readFile,
+  stat,
   rm,
   truncate,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, onTestFinished, test } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 
 import { ApktoolProvider } from "./ApktoolProvider.js";
 import { ApktoolResourceAnalysisService } from "../application/apktool/ApktoolResourceAnalysisService.js";
@@ -128,7 +131,7 @@ const decodeStub = (
       (name) =>
         `printf '%s\\n' '<resources><string name="wrong">Wrong</string></resources>' > "$5/res/values-${name}/strings.xml"`,
     )
-    .join("\\n  ");
+    .join("\n  ");
   return () => `if [ "$1" = "--version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "d" ]; then
   ${
@@ -330,6 +333,7 @@ it("ignores Android resource qualifiers when discovering locales", async () => {
     input: { path: apk.path, include_strings: true },
   });
   expect(result.locales).toEqual(["de"]);
+  expect(result.decoded_file_count).toBe(7);
 });
 
 it.each(["car", "night", "v21"])(
@@ -388,7 +392,12 @@ it("reports apktool's own refusal for undecodable targets", async () => {
     operation: "decode_android_resources",
     input: { path: apk.path, include_strings: true },
   });
-  expect(projected).toMatchObject({ code: "unsupported_target" });
+  expect(projected).toMatchObject({
+    code: "unsupported_target",
+    details: { path: apk.path },
+  });
+  expect(projected.message).toContain(apk.path);
+  expect(projected.message).not.toContain(command);
   expect(projected.message).toContain("Could not decode");
 });
 
@@ -622,3 +631,532 @@ it("accepts a BCP47 resource qualifier through the public request schema", async
   const result = await evidenceResult(providerOver(command), request);
   expect(result.strings).toEqual([{ name: "greeting", value: "你好" }]);
 });
+
+it("retains completed Evidence and live cleanup until a denied workspace removal recovers", async () => {
+  const { command, root } = await writeApktoolStub(decodeStub());
+  const apk = await apkFixture(root);
+  let denied = true;
+  let owned: string | undefined;
+  const provider = new ApktoolProvider({
+    environment: { REA_APKTOOL_COMMAND: command },
+    removeWorkspace: async (path) => {
+      owned = path;
+      if (denied) throw new Error("authored removal denial");
+      await rm(path, { recursive: true, force: true });
+    },
+  });
+  try {
+    const result = await provider.execute({
+      operation: "decode_android_resources",
+      input: { path: apk.path, include_strings: true },
+    });
+    if (result.ok) throw new Error("Expected cleanup failure");
+    expect(result.error.cleanupIncomplete).toBe(true);
+    expect(result.error.partialObservation).toMatchObject({
+      operation: "decode_android_resources",
+      subject: { local_path: apk.path, digest: { sha256: apk.sha256 } },
+      normalized_result: {
+        metadata: { package_name: "com.rea.apktool.probe" },
+        strings: [
+          { name: "api_endpoint", value: "https://api.example.com/v1" },
+          { name: "app_name", value: "ApktoolProbe" },
+        ],
+      },
+    });
+    const blocked = await provider.execute({
+      operation: "inspect_apktool_client",
+      input: {},
+    });
+    if (blocked.ok)
+      throw new Error("Expected retained-workspace admission refusal");
+    expect(blocked.error.cleanupIncomplete).toBe(true);
+    expect(blocked.error.cleanupResources).toContain(owned);
+    await expect(provider.close()).rejects.toMatchObject({
+      cleanupIncomplete: true,
+    });
+    denied = false;
+    await provider.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(blocked.error.cleanupIncomplete).toBe(false);
+    expect(result.error.partialObservation).toMatchObject({
+      normalized_result: { target: { sha256: apk.sha256 } },
+    });
+  } finally {
+    denied = false;
+    await provider.close();
+  }
+});
+
+it.each([
+  [false, "2.7.0-dirty", "CVE-2024-21633", undefined],
+  [true, "2.7.0-dirty", "CVE-2024-21633", undefined],
+  [false, "3.0.1", "CVE-2026-39973", undefined],
+  [true, "3.0.1", "CVE-2026-39973", undefined],
+  [
+    false,
+    "3.0.1",
+    "CVE-2026-39973",
+    "<resources><string name=unquoted>bad</string></resources>",
+  ],
+  [
+    true,
+    "3.0.1",
+    "CVE-2026-39973",
+    "<resources><string name=unquoted>bad</string></resources>",
+  ],
+] as const)(
+  "preserves completed Evidence and cancellation during workspace cleanup (denied=%s, version=%s, advisory=%s, XML=%s)",
+  async (deniedInitially, version, advisory, stringsXml) => {
+    const { command, root } = await writeApktoolStub((root) =>
+      decodeStub(stringsXml === undefined ? {} : { stringsXml })(root).replace(
+        VERSION_BLOCK,
+        `printf '%s\\n' '${version}'`,
+      ),
+    );
+    const apk = await apkFixture(root);
+    const controller = new AbortController();
+    const reason = { caller: "during final workspace removal" };
+    let denied = deniedInitially;
+    const provider = new ApktoolProvider({
+      environment: { REA_APKTOOL_COMMAND: command },
+      removeWorkspace: async (path) => {
+        controller.abort(reason);
+        if (denied) throw new Error("authored denial");
+        await rm(path, { recursive: true, force: true });
+      },
+    });
+    try {
+      const result = await provider.execute(
+        {
+          operation: "decode_android_resources",
+          input: { path: apk.path, include_strings: true },
+        },
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected finalization cancellation");
+      const primary = result.error.cleanupPrimary ?? result.error;
+      expect(primary._tag).toBe("AnalysisCancelledError");
+      expect(primary.cause).toBe(reason);
+      expect(result.error.cleanupIncomplete).toBe(deniedInitially);
+      expect(result.error.partialObservation).toMatchObject({
+        operation: "decode_android_resources",
+        normalized_result: { target: { sha256: apk.sha256 } },
+        limitations: expect.arrayContaining([
+          expect.stringContaining(advisory),
+        ]),
+      });
+      if (stringsXml !== undefined)
+        expect(result.error.partialObservation).toMatchObject({
+          limitations: expect.arrayContaining([
+            expect.stringContaining("entry counts are unknown"),
+          ]),
+        });
+      denied = false;
+      await provider.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+    } finally {
+      denied = false;
+      await provider.close();
+    }
+  },
+);
+
+it.each(["decode", "projection"] as const)(
+  "keeps a recorded %s failure primary when cancellation arrives during removal",
+  async (stage) => {
+    const { command, root } = await writeApktoolStub(
+      decodeStub({ failDecode: stage === "decode" }),
+    );
+    const apk = await apkFixture(root);
+    if (stage === "projection") {
+      const bad = join(root, "bad.xml");
+      await writeFile(bad, Buffer.from([0xff]));
+      await writeFile(
+        command,
+        "#!/bin/sh\n" + decodeStub({ stringsFile: bad })(root),
+        { mode: 0o755 },
+      );
+    }
+    const controller = new AbortController();
+    const provider = new ApktoolProvider({
+      environment: { REA_APKTOOL_COMMAND: command },
+      removeWorkspace: async (path) => {
+        controller.abort({ caller: "after decode refusal" });
+        await rm(path, { recursive: true, force: true });
+      },
+    });
+    try {
+      const result = await provider.execute(
+        {
+          operation: "decode_android_resources",
+          input: { path: apk.path, include_strings: true },
+        },
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected decode refusal");
+      expect(controller.signal.aborted).toBe(true);
+      expect(result.error._tag).toBe(
+        stage === "decode"
+          ? "AnalysisUnsupportedTargetError"
+          : "AnalysisProtocolError",
+      );
+      if (stage === "decode")
+        expect(result.error.capturedOutput?.stderr).toContain(
+          "Could not decode the APK",
+        );
+      expect(result.error.partialObservation).toMatchObject({
+        kind: "file-snapshot-hash",
+        path: apk.path,
+        sha256: apk.sha256,
+      });
+    } finally {
+      await provider.close();
+    }
+  },
+);
+
+it("releases successful workspace peers once while retaining a denied peer for retry", async () => {
+  const { command, root } = await writeApktoolStub(decodeStub());
+  const apk = await apkFixture(root);
+  let deniedRoot: string | undefined;
+  let denied = true;
+  const attempts = new Map<string, number>();
+  const provider = new ApktoolProvider({
+    environment: { REA_APKTOOL_COMMAND: command },
+    removeWorkspace: async (path) => {
+      attempts.set(path, (attempts.get(path) ?? 0) + 1);
+      deniedRoot ??= path;
+      if (path === deniedRoot && denied)
+        throw new Error("authored peer denial");
+      await rm(path, { recursive: true, force: true });
+    },
+  });
+  try {
+    const request = {
+      operation: "decode_android_resources" as const,
+      input: { path: apk.path, include_strings: true },
+    };
+    const results = await Promise.all([
+      provider.execute(request),
+      provider.execute(request),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    const retained = results.find((result) => !result.ok);
+    if (retained === undefined || retained.ok)
+      throw new Error("Expected retained peer");
+    expect(attempts.size).toBe(2);
+    await expect(provider.close()).rejects.toMatchObject({
+      cleanupIncomplete: true,
+    });
+    denied = false;
+    await provider.close();
+    expect(retained.error.cleanupIncomplete).toBe(false);
+    for (const [path, count] of attempts)
+      expect(count).toBe(path === deniedRoot ? 3 : 1);
+  } finally {
+    denied = false;
+    await provider.close();
+  }
+});
+
+it("joins a late workspace allocation during shutdown and removes its owned root", async () => {
+  const { command, root } = await writeApktoolStub(decodeStub());
+  const apk = await apkFixture(root);
+  const created = createDeferred<string>();
+  const release = createDeferred<void>();
+  const allocate = PrivateRuntimeRoot.create.bind(PrivateRuntimeRoot);
+  const allocation = vi
+    .spyOn(PrivateRuntimeRoot, "create")
+    .mockImplementationOnce(async (options) => {
+      const runtime = await allocate(options);
+      created.resolve(runtime.path);
+      await release.promise;
+      return runtime;
+    });
+  const provider = providerOver(command);
+  const pending = provider.execute({
+    operation: "decode_android_resources",
+    input: { path: apk.path, include_strings: true },
+  });
+  let closing: Promise<void> | undefined;
+  try {
+    const owned = await created.promise;
+    closing = provider.close();
+    release.resolve();
+    const result = await pending;
+    if (result.ok) throw new Error("Expected shutdown cancellation");
+    expect(result.error._tag).toBe("AnalysisCancelledError");
+    await closing;
+    await expect(stat(owned)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    release.resolve();
+    await pending;
+    allocation.mockRestore();
+    await (closing ?? provider.close());
+  }
+});
+
+it.each(["first-selected.apk", "second-selected.apk"])(
+  "attributes a decode refusal to %s without substituting the launcher",
+  async (name) => {
+    const { command, root } = await writeApktoolStub(
+      decodeStub({ failDecode: true }),
+    );
+    const path = join(root, name);
+    await writeFile(path, "authored target");
+    const provider = providerOver(command);
+    try {
+      const projected = await refusedBy(provider, {
+        operation: "decode_android_resources",
+        input: { path, include_strings: true },
+      });
+      expect(projected).toMatchObject({
+        code: "unsupported_target",
+        details: { path, captured_output: { exit_code: 1 } },
+      });
+      expect(projected.message).toContain(path);
+      expect(projected.message).not.toContain(command);
+    } finally {
+      await provider.close();
+    }
+  },
+);
+
+it("reports launcher disappearance after version admission as a provider failure", async () => {
+  const { command, root } = await writeApktoolStub(
+    () =>
+      `if [ "$1" = "--version" ]; then rm -- "$0"; ${VERSION_BLOCK}; exit 0; fi`,
+  );
+  const apk = await apkFixture(root);
+  const provider = providerOver(command);
+  try {
+    const result = await provider.execute({
+      operation: "decode_android_resources",
+      input: { path: apk.path, include_strings: true },
+    });
+    if (result.ok) throw new Error("Expected missing launcher");
+    expect(result.error).toMatchObject({
+      _tag: "ProviderAdapterError",
+      diagnostics: { target_path: apk.path, selected_command: command },
+    });
+    expect(projectAnalysisError(result.error).code).not.toBe(
+      "unsupported_target",
+    );
+    expect(result.error.cause).toBeDefined();
+  } finally {
+    await provider.close();
+  }
+});
+
+it("discloses qualified and unfamiliar strings tables while preserving exact locale selection (#4612)", async () => {
+  const tables = [
+    "en-rUS-v21",
+    "b+zh+Hans+CN-night",
+    "pt-rBR-sw600dp",
+    "mcc310-fr",
+    "mcc310-mnc004-en-rUS-v21",
+    "fr-land",
+    "night",
+    "v21",
+    "pt-BR",
+    "unknown_CONFIGURATION",
+  ];
+  const { command, root } = await writeApktoolStub(
+    decodeStub({
+      extraValuesDirectories: [
+        ...tables,
+        "fr",
+        "b+sr+Latn",
+        "b+sr+Latn+RS+REVISED",
+        "b+fil+Latn+419+ABCDEFGH",
+      ],
+    }),
+  );
+  const apk = await apkFixture(root);
+  const provider = providerOver(command);
+  try {
+    for (const locale of [
+      undefined,
+      "fr",
+      "b+sr+Latn",
+      "b+sr+Latn+RS+REVISED",
+      "b+fil+Latn+419+ABCDEFGH",
+      "en-rUS",
+    ] as const) {
+      const result = await provider.execute({
+        operation: "decode_android_resources",
+        input: {
+          path: apk.path,
+          include_strings: true,
+          ...(locale === undefined ? {} : { locale }),
+        },
+      });
+      if (!result.ok) throw result.error;
+      expect(result.value.result).toMatchObject({
+        locales: [
+          "b+fil+Latn+419+ABCDEFGH",
+          "b+sr+Latn",
+          "b+sr+Latn+RS+REVISED",
+          "de",
+          "fr",
+        ],
+        locale: locale ?? null,
+        coverage: "complete",
+      });
+      expect(result.value.limitations).toContain(
+        `Other strings tables are not selected by locale; their resource configuration suffixes are preserved without inferring Android runtime matching: ${tables
+          .map((suffix) => JSON.stringify(`values-${suffix}`))
+          .sort()
+          .join(", ")}`,
+      );
+      if (locale === undefined)
+        expect(result.value.result).toMatchObject({
+          strings: [
+            { name: "api_endpoint", value: "https://api.example.com/v1" },
+            { name: "app_name", value: "ApktoolProbe" },
+          ],
+        });
+      else if (locale === "en-rUS") {
+        expect(result.value.result).toMatchObject({ strings: [] });
+        expect(result.value.limitations).toContain(
+          "No strings.xml was found for locale en-rUS",
+        );
+      } else
+        expect(result.value.result).toMatchObject({
+          strings: [{ name: "wrong", value: "Wrong" }],
+        });
+    }
+  } finally {
+    await provider.close();
+  }
+});
+
+it.each([
+  "2.7.0-dirty",
+  "2.9.1",
+  "2.9.2-rc.1",
+  "2.9.2",
+  "2.9.2-dirty",
+  "3.0.0",
+  "3.0.1",
+  "3.0.2-rc.1",
+  "3.0.2",
+  "3.1.0",
+])(
+  "retains reported-version limitations for both operations without refusing %s (#3438)",
+  async (version) => {
+    const { command, root } = await writeApktoolStub((root) =>
+      decodeStub()(root).replace(VERSION_BLOCK, `printf '%s\\n' '${version}'`),
+    );
+    const apk = await apkFixture(root);
+    const provider = providerOver(command);
+    try {
+      const inspect = await provider.execute({
+        operation: "inspect_apktool_client",
+        input: {},
+      });
+      const decode = await provider.execute({
+        operation: "decode_android_resources",
+        input: { path: apk.path, include_strings: true },
+      });
+      if (!inspect.ok) throw inspect.error;
+      if (!decode.ok) throw decode.error;
+      const warnings = inspect.value.limitations.filter((limitation) =>
+        limitation.includes("CVE-2024-21633"),
+      );
+      expect(warnings.length).toBe(
+        ["2.7.0-dirty", "2.9.1", "2.9.2-rc.1"].includes(version) ? 1 : 0,
+      );
+      if (warnings.length > 0) expect(warnings[0]).toContain("CVE-2024-21633");
+      expect(
+        inspect.value.limitations.filter((warning) =>
+          warning.includes("CVE-2026-39973"),
+        ).length,
+      ).toBe(["3.0.0", "3.0.1", "3.0.2-rc.1"].includes(version) ? 1 : 0);
+      expect(
+        inspect.value.limitations.filter((warning) =>
+          warning.includes("GHSA-vgwr-4w3p-xmjv"),
+        ).length,
+      ).toBe(
+        process.platform === "win32" &&
+          [
+            "2.7.0-dirty",
+            "2.9.1",
+            "2.9.2-rc.1",
+            "2.9.2",
+            "2.9.2-dirty",
+          ].includes(version)
+          ? 1
+          : 0,
+      );
+
+      for (const warning of inspect.value.limitations)
+        expect(decode.value.limitations).toContain(warning);
+      expect(inspect.value.result).toMatchObject({
+        client: { apktool_version: version },
+      });
+      expect(decode.value.result).toMatchObject({
+        client: { apktool_version: version },
+        target: { sha256: apk.sha256 },
+        coverage: "complete",
+      });
+    } finally {
+      await provider.close();
+    }
+  },
+);
+
+it.each([
+  [
+    "malformed",
+    '<resources><string name="a">one</string><string name="b">two</resources>',
+    [],
+  ],
+  ["wrong_root", "<manifest/>", []],
+  [
+    "unsupported",
+    '<resources><string name="a"><b>A</b></string><string>unnamed</string><string name="good">ok</string></resources>',
+    [{ name: "good", value: "ok" }],
+  ],
+] as const)(
+  "reports document projection semantics for %s (#4820)",
+  async (kind, stringsXml, strings) => {
+    const { command, root } = await writeApktoolStub(
+      decodeStub({ stringsXml }),
+    );
+    const apk = await apkFixture(root);
+    const provider = providerOver(command);
+    try {
+      const result = await provider.execute({
+        operation: "decode_android_resources",
+        input: { path: apk.path, include_strings: true },
+      });
+      if (!result.ok) throw result.error;
+      expect(result.value.result).toMatchObject({
+        strings,
+        target: { sha256: apk.sha256 },
+        coverage: "partial",
+      });
+      const limitations = result.value.limitations.join("\n");
+      if (kind === "unsupported") {
+        expect(limitations).toContain(
+          "String entries omitted due to unsupported markup or missing names: 2",
+        );
+        expect(limitations).not.toContain("entry counts are unknown");
+      } else {
+        expect(limitations).toContain(
+          'String table "res/values/strings.xml" could not be projected:',
+        );
+        expect(limitations).toContain("entry counts are unknown");
+        expect(limitations).not.toContain("String entries omitted");
+        expect(limitations).toContain(
+          kind === "wrong_root"
+            ? "root must be <resources>"
+            : "XML is not well-formed",
+        );
+      }
+    } finally {
+      await provider.close();
+    }
+  },
+);

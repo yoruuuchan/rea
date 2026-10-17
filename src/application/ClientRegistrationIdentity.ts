@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { valid } from "semver";
 
@@ -115,6 +116,19 @@ const isOwnedPackageReference = (packageReference: string): boolean => {
 /** Check that one parsed command points to REA's MCP entry point. */
 export type ClientRegistrationCommandIdentity = "owned" | "foreign" | "unknown";
 
+/** POSIX bin links can name the same dispatcher without changing stored commands. */
+const sameEntrypointPath = (candidate: string, current: string): boolean => {
+  if (!isAbsolute(candidate) || !isAbsolute(current)) return false;
+  if (resolve(candidate) === current) return true;
+  // Windows package bins are command shims, not links to the dispatcher.
+  if (process.platform === "win32") return false;
+  try {
+    return realpathSync(candidate) === realpathSync(current);
+  } catch {
+    return false;
+  }
+};
+
 /** Classify only what the command and current executable identity establish. */
 export const classifyClientRegistrationCommand = (
   command: readonly string[],
@@ -164,7 +178,7 @@ export const isOwnedClientRegistrationCommand = (
     isAbsolute(command[0] ?? "") &&
     isAbsolute(command[1] ?? "") &&
     resolve(command[0] ?? "") === resolve(process.execPath) &&
-    resolve(command[1] ?? "") === currentCommandPath
+    sameEntrypointPath(command[1] ?? "", currentCommandPath)
   )
     return true;
 
@@ -175,7 +189,7 @@ export const isOwnedClientRegistrationCommand = (
       (isAbsolute(executable) &&
         currentCommandPath !== undefined &&
         currentCommandPath.length > 0 &&
-        resolve(executable) === currentCommandPath)
+        sameEntrypointPath(executable, currentCommandPath))
     )
       return true;
   }

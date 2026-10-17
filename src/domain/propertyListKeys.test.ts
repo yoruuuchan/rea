@@ -4,7 +4,7 @@ import { parse } from "plist";
 import {
   decodeXmlText,
   omitPrototypeKeys,
-  parseXmlPropertyList,
+  parseXmlPropertyList as parseWithNumbers,
 } from "./propertyListKeys.js";
 
 it("preserves unknown named entities that collide with object prototype properties", () => {
@@ -15,6 +15,13 @@ it("preserves unknown named entities that collide with object prototype properti
     "&<>\"'AB",
   );
 });
+
+// Existing key/omission controls assert those facts exactly; numeric facts
+// have separate source-type and ambiguity controls below.
+const parseXmlPropertyList = (text: string) => {
+  const { numberLiterals: _numbers, ...parsed } = parseWithNumbers(text);
+  return parsed;
+};
 
 const plist = (body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0">${body}</plist>`;
@@ -53,9 +60,9 @@ it("keeps __proto__ text in strings, comments, and similar keys", () => {
   });
 });
 
-it("keeps an entity-encoded key that decodes to the placeholder", () => {
+it("keeps a segmented entity-encoded key that decodes to the placeholder", () => {
   const text = plist(
-    "<dict><key>&#95;&#95;rea_prototype_key__</key><string>kept</string><key>__proto__</key><string>x</string></dict>",
+    "<dict><key>&#95;&#95;rea<![CDATA[_prototype_key__]]></key><string>kept</string><key>__proto__</key><string>x</string></dict>",
   );
   expect(parseXmlPropertyList(text)).toEqual({
     value: { __rea_prototype_key__: "kept" },
@@ -83,13 +90,72 @@ it("omits own __proto__ entries that JSON decoding creates", () => {
   });
 });
 
-it("preserves the pinned decoder's first-child key semantics", () => {
+it("omits complete prototype keys split across character-data nodes", () => {
   const text = plist(
     "<dict><key>__pro<![CDATA[to__]]></key><string>kept</string><key>__proto__</key><string>omitted</string></dict>",
   );
   expect(parseXmlPropertyList(text)).toEqual({
-    value: { __pro: "kept" },
+    value: {},
     omittedPrototypeKeys: 1,
+  });
+});
+
+it("preserves literal key text, XML characters and encoded line endings across segments", () => {
+  const text = plist(
+    '<dict><key note="&gt;">pre<![CDATA[&amp;</key>]]><!-- ignored -->&#13;&#x85;&#x2028;]]&gt;post</key><string>a&#13;b</string></dict>',
+  );
+  expect(parseXmlPropertyList(text)).toEqual({
+    value: { "pre&amp;</key>\r\u0085\u2028]]>post": "a\rb" },
+    omittedPrototypeKeys: 0,
+  });
+});
+
+it("does not infer key identity from nested elements", () => {
+  expect(
+    parseXmlPropertyList(
+      plist(
+        "<dict><key>pre<string>nested</string></key><string>kept</string><key>__proto__<string>nested</string></key><string>omitted</string></dict>",
+      ),
+    ),
+  ).toEqual({ value: { pre: "kept" }, omittedPrototypeKeys: 1 });
+});
+
+it.each([
+  ["ab", "a<![CDATA[b]]>", "ab"],
+  ["a<![CDATA[b]]>", "ab", "a<![CDATA[b]]>"],
+  ["ab", "a<!-- comment -->b", "ab"],
+])("retains last-value-wins for mixed spellings %j", (...keys) => {
+  const entries = keys
+    .map(
+      (key, index) =>
+        `<key>${key}</key><integer>${String(index + 1)}</integer>`,
+    )
+    .join("");
+  expect(parseXmlPropertyList(plist(`<dict>${entries}</dict>`))).toEqual({
+    value: { ab: 3 },
+    omittedPrototypeKeys: 0,
+  });
+});
+
+it("keeps empty keys and alias-looking source keys distinct", () => {
+  const entries =
+    "<key/><integer>1</integer><key><!-- ignored --></key><integer>2</integer>" +
+    "<key></key><integer>3</integer><key>__rea_plist_key_0__</key><string>literal</string>" +
+    "<key>ma<?ignored value?><![CDATA[in]]></key><integer>42</integer>";
+  expect(parseXmlPropertyList(plist(`<dict>${entries}</dict>`))).toEqual({
+    value: { "": 3, __rea_plist_key_0__: "literal", main: 42 },
+    omittedPrototypeKeys: 0,
+  });
+});
+
+it.each([
+  "<key>ma<![CDATA[in]]></key>",
+  "<array><key>ma<![CDATA[in]]></key><string>__rea_plist_key_0__</string></array>",
+])("does not alias key elements used as scalar values in %s", (body) => {
+  const text = plist(body);
+  expect(parseXmlPropertyList(text)).toEqual({
+    value: parse(text),
+    omittedPrototypeKeys: 0,
   });
 });
 

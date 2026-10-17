@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ok } from "../domain/result.js";
 
 import {
   parseApktoolYml,
@@ -161,30 +162,37 @@ describe("parseDecodedStrings", () => {
       "</resources>",
       "",
     ].join("\n");
-    expect(parseDecodedStrings(stringsXml)).toEqual({
-      entries: [
-        { name: "api_endpoint", value: "https://api.example.com/v1" },
-        { name: "app_name", value: "ApktoolProbe" },
-        { name: "debug_flag", value: "true" },
-      ],
-      unparsedCount: 0,
-    });
+    expect(parseDecodedStrings(stringsXml)).toEqual(
+      ok({
+        entries: [
+          { name: "api_endpoint", value: "https://api.example.com/v1" },
+          { name: "app_name", value: "ApktoolProbe" },
+          { name: "debug_flag", value: "true" },
+        ],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it("counts entries with nested markup instead of flattening them", () => {
     const stringsXml =
       '<resources><string name="styled">Hello <b>world</b></string><string name="plain">ok</string></resources>';
-    expect(parseDecodedStrings(stringsXml)).toEqual({
-      entries: [{ name: "plain", value: "ok" }],
-      unparsedCount: 1,
-    });
+    expect(parseDecodedStrings(stringsXml)).toEqual(
+      ok({
+        entries: [{ name: "plain", value: "ok" }],
+        unparsedCount: 1,
+      }),
+    );
   });
 
   it("preserves escaped entities verbatim", () => {
     const stringsXml =
       '<resources><string name="escaped">a &amp; b &lt;c&gt;</string></resources>';
-    expect(parseDecodedStrings(stringsXml).entries[0]?.value).toBe(
-      "a &amp; b &lt;c&gt;",
+    expect(parseDecodedStrings(stringsXml)).toEqual(
+      ok({
+        entries: [{ name: "escaped", value: "a &amp; b &lt;c&gt;" }],
+        unparsedCount: 0,
+      }),
     );
   });
 
@@ -193,22 +201,28 @@ describe("parseDecodedStrings", () => {
       parseDecodedStrings(
         '<resources><string name="good">Hello</string><string name="edge">\uFFFD</string></resources>',
       ),
-    ).toEqual({
-      entries: [
-        { name: "good", value: "Hello" },
-        { name: "edge", value: "\uFFFD" },
-      ],
-      unparsedCount: 0,
-    });
+    ).toEqual(
+      ok({
+        entries: [
+          { name: "good", value: "Hello" },
+          { name: "edge", value: "\uFFFD" },
+        ],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it.each([
     "<resources><string name=unquoted>\uFFFD</string></resources>",
     '<resources><string name="broken">\uFFFD</resources>',
   ])("still rejects malformed XML containing U+FFFD: %s", (xml) => {
-    expect(parseDecodedStrings(xml)).toEqual({
-      entries: [],
-      unparsedCount: 1,
+    expect(parseDecodedStrings(xml)).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ApktoolStringsDocumentError",
+        reason: "malformed",
+        cause: { _tag: "XmlDocumentParseError" },
+      },
     });
   });
 
@@ -217,13 +231,15 @@ describe("parseDecodedStrings", () => {
       parseDecodedStrings(
         '<resources><string translatable="false" name="empty"/><string name="paired"></string></resources>',
       ),
-    ).toEqual({
-      entries: [
-        { name: "empty", value: "" },
-        { name: "paired", value: "" },
-      ],
-      unparsedCount: 0,
-    });
+    ).toEqual(
+      ok({
+        entries: [
+          { name: "empty", value: "" },
+          { name: "paired", value: "" },
+        ],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it("ignores comments without mistaking them for nested markup", () => {
@@ -231,10 +247,12 @@ describe("parseDecodedStrings", () => {
       parseDecodedStrings(
         '<resources><!-- <string name="fake">bad</string> --><string name="real">before<!-- note -->after</string></resources>',
       ),
-    ).toEqual({
-      entries: [{ name: "real", value: "beforeafter" }],
-      unparsedCount: 0,
-    });
+    ).toEqual(
+      ok({
+        entries: [{ name: "real", value: "beforeafter" }],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it("does not include a trailing document comment in the last string", () => {
@@ -242,18 +260,25 @@ describe("parseDecodedStrings", () => {
       parseDecodedStrings(
         '<resources><string name="a">one</string></resources><!-- </string> -->',
       ),
-    ).toEqual({
-      entries: [{ name: "a", value: "one" }],
-      unparsedCount: 0,
-    });
+    ).toEqual(
+      ok({
+        entries: [{ name: "a", value: "one" }],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it("preserves source whitespace and entity spelling", () => {
     expect(
       parseDecodedStrings(
         '<resources><string name="raw">  a &amp; b  </string></resources>',
-      ).entries,
-    ).toEqual([{ name: "raw", value: "  a &amp; b  " }]);
+      ),
+    ).toEqual(
+      ok({
+        entries: [{ name: "raw", value: "  a &amp; b  " }],
+        unparsedCount: 0,
+      }),
+    );
   });
 
   it("keeps source slices aligned across CRLF and CR line endings", () => {
@@ -262,27 +287,48 @@ describe("parseDecodedStrings", () => {
         parseDecodedStrings(
           `<resources>${newline}  <string name="raw">x &amp; y</string>${newline}</resources>`,
         ),
-      ).toEqual({
-        entries: [{ name: "raw", value: "x &amp; y" }],
-        unparsedCount: 0,
-      });
+      ).toEqual(
+        ok({
+          entries: [{ name: "raw", value: "x &amp; y" }],
+          unparsedCount: 0,
+        }),
+      );
     }
   });
+});
 
+describe("string document validity and omission counts", () => {
   it("counts a string with no name as unsupported instead of emitting an empty name", () => {
     expect(
       parseDecodedStrings("<resources><string>value</string></resources>"),
-    ).toEqual({ entries: [], unparsedCount: 1 });
+    ).toEqual(ok({ entries: [], unparsedCount: 1 }));
   });
 
-  it("reports malformed XML and unsupported string markup as partial", () => {
+  it("distinguishes malformed XML from counted unsupported string markup", () => {
     expect(
       parseDecodedStrings("<resources><string name='broken'>no</resources>"),
-    ).toEqual({ entries: [], unparsedCount: 1 });
+    ).toMatchObject({
+      ok: false,
+      error: { _tag: "ApktoolStringsDocumentError", reason: "malformed" },
+    });
     expect(
       parseDecodedStrings(
         '<resources><string name="styled">Hello <b>world</b></string></resources>',
       ),
-    ).toEqual({ entries: [], unparsedCount: 1 });
+    ).toEqual(ok({ entries: [], unparsedCount: 1 }));
   });
 });
+
+it.each(["<manifest/>", '<other><string name="a">one</string></other>'])(
+  "keeps a wrong document root separate from an entry count: %s",
+  (xml) => {
+    const parsed = parseDecodedStrings(xml);
+    expect(parsed).toMatchObject({
+      ok: false,
+      error: { _tag: "ApktoolStringsDocumentError", reason: "wrong_root" },
+    });
+    expect(parsed).not.toHaveProperty("value");
+    if (parsed.ok) throw new Error("Expected document failure");
+    expect(parsed.error).not.toHaveProperty("unparsedCount");
+  },
+);

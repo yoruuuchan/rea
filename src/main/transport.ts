@@ -85,6 +85,7 @@ export const startMcpTransport = async (
       optionalProviders.browserObservation,
       optionalProviders.browserScenarioCapture,
       optionalProviders.electronObservation,
+      optionalProviders.electronActiveObservation,
     ].filter((provider) => provider !== undefined),
   );
   let optionalProviderClose: Promise<void> | undefined;

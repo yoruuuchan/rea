@@ -1,3 +1,7 @@
+import {
+  prepareProcessOwnershipInspection,
+  systemProcessOwnershipHost,
+} from "./ProcessOwnershipObservation.js";
 import { DarwinProcessOwnershipInspectionError } from "./DarwinProcessRunTokenReader.js";
 import type { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -93,6 +97,64 @@ interface OwnedCommandLimits {
   readonly stdout?: Writable;
 }
 
+/** Keep independently bounded macOS helper compilation outside a short command deadline.
+ * Other platforms still prepare inside runOwnedCommand: Linux ps has no separate deadline.
+ */
+export const prepareOwnedCommand = async (
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (systemProcessOwnershipHost.platform !== "darwin") return;
+  try {
+    signal?.throwIfAborted();
+    await prepareProcessOwnershipInspection(signal);
+  } catch (cause: unknown) {
+    throwCommandPreparationFailure(
+      cause,
+      signal,
+      signal?.aborted === true ? "cancelled" : undefined,
+    );
+  }
+};
+
+/** Both preparation stages preserve physical failures, opaque cancellation and exact owners. */
+function throwCommandPreparationFailure(
+  cause: unknown,
+  signal: AbortSignal | undefined,
+  interruption: "cancelled" | "timeout" | undefined,
+): never {
+  // A caller's raw abort reason remains opaque even if it is a typed error.
+  const preparationFailure =
+    cause instanceof DarwinProcessOwnershipInspectionError &&
+    !(signal?.aborted === true && cause === signal.reason)
+      ? cause
+      : undefined;
+  // Preparation owns its physical outcome and any retained helper resources.
+  if (
+    preparationFailure !== undefined &&
+    preparationFailure.cancellation === undefined
+  )
+    throw preparationFailure;
+  if (interruption !== undefined)
+    throw new OwnedCommandFailure(
+      interruption,
+      interruption === "cancelled"
+        ? "Command cancelled during ownership preparation."
+        : "Command deadline elapsed during ownership preparation.",
+      null,
+      null,
+      {
+        cause,
+        ...(interruption === "cancelled"
+          ? {
+              cancellation: { reason: signal?.reason },
+            }
+          : {}),
+        ...(preparationFailure === undefined ? {} : { preparationFailure }),
+      },
+    );
+  throw cause;
+}
+
 /** Execute a single owned process with independent cleanup and bounded diagnostic retention. */
 export const runOwnedCommand = async (
   spawn: OwnedProviderProcessSpawnOptions,
@@ -154,38 +216,7 @@ const collectOwnedCommand = async (
       signal,
     });
   } catch (cause: unknown) {
-    // A caller's raw abort reason remains opaque even if it is a typed error.
-    const preparationFailure =
-      cause instanceof DarwinProcessOwnershipInspectionError &&
-      !(signal.aborted && cause === signal.reason)
-        ? cause
-        : undefined;
-    // Preparation owns its physical outcome and any retained helper resources.
-    if (
-      preparationFailure !== undefined &&
-      preparationFailure.cancellation === undefined
-    )
-      throw preparationFailure;
-    const interruption = deadline.interruption;
-    if (interruption !== undefined)
-      throw new OwnedCommandFailure(
-        interruption,
-        interruption === "cancelled"
-          ? "Command cancelled during ownership preparation."
-          : "Command deadline elapsed during ownership preparation.",
-        null,
-        null,
-        {
-          cause,
-          ...(interruption === "cancelled"
-            ? {
-                cancellation: { reason: signal.reason },
-              }
-            : {}),
-          ...(preparationFailure === undefined ? {} : { preparationFailure }),
-        },
-      );
-    throw cause;
+    throwCommandPreparationFailure(cause, signal, deadline.interruption);
   }
   let exceeded = false;
   let processFailure: string | undefined;

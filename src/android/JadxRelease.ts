@@ -9,7 +9,7 @@ export const JADX_RELEASE = Object.freeze({
 /** Identity of REA's metadata bridge, distinct from the producing engine. */
 export const JADX_BRIDGE_IDENTITY = Object.freeze({
   name: "rea-jadx-bridge",
-  version: "1",
+  version: "2",
 });
 
 /** Remediation when `REA_JADX_MCP_JAR` is missing or not an absolute path. */

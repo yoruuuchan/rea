@@ -217,10 +217,9 @@ export const readGoElfImage = (bytes: Buffer): GoBinaryContainer => {
       }
     }
   }
-  const machine = reader.u16(18);
   return {
     format: "elf",
-    architecture: elfArchitecture(machine),
+    architecture: goArchitectureForElfMachine(fixedHeader.value.machine),
     bits,
     byte_order: reader.little ? "little" : "big",
     mappings,
@@ -324,7 +323,8 @@ const elfImageSection = ({
 
 const SHT_NOBITS = 8;
 
-const elfArchitecture = (machine: number): string => {
+/** Go build-info vocabulary, including families outside REA target admission. */
+const goArchitectureForElfMachine = (machine: number): string => {
   const names = new Map([
     [3, "386"],
     [8, "mips"],

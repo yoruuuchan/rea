@@ -14,8 +14,6 @@ const ROUNDED = 9007199254740992;
 
 /** Accepted decoder representations whose supplemental metadata needs care. */
 export const mixedArchiveNumberElements = [
-  "<real>9007199254740992<![CDATA[0]]></real>",
-  "<real><![CDATA[1]]>9007199254740992</real>",
   "<integer>9007199254740992<!-- split -->3</integer>",
   "<integer>9007199254740992<![CDATA[3]]></integer>",
   "<integer><![CDATA[9007199254740992]]>3</integer>",
@@ -27,6 +25,23 @@ export const mixedArchiveNumberElements = [
 
 /** Ordinary dictionaries and malformed numeric references at the same boundary. */
 export const archiveNumberMetadataCases = [
+  ...[
+    {
+      element: "<real>9007199254740992<![CDATA[0]]></real>",
+      value: 90071992547409920,
+    },
+    {
+      element: "<real><![CDATA[1]]>9007199254740992</real>",
+      value: Number("19007199254740992"),
+    },
+  ].map(({ element, value }) => ({
+    name: element,
+    source: { first: "__INTEGER__", other: "__OTHER__" },
+    element,
+    expected: { first: EXACT_INTEGER, other: value },
+    incomplete: false,
+    malformedReference: false,
+  })),
   ...mixedArchiveNumberElements.map((element) => ({
     name: element,
     source: { first: "__INTEGER__", other: "__OTHER__" },

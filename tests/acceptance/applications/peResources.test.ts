@@ -167,6 +167,7 @@ const expectPeMappingOwnershipAcrossAdapters = async (
     });
     expect(response.isError, name).not.toBe(true);
     const mcp = contract.outputSchema.parse(response.structuredContent);
+    expect(mcp.subject).toEqual(evidence.subject);
     expect(mcp.evidence_id).toBe(evidence.evidence_id);
     expect(mcp.normalized_result).toEqual(evidence.normalized_result);
     expect(evidence.normalized_result).toMatchObject({
@@ -220,6 +221,7 @@ const expectPeInventoriesAcrossAdapters = async (
     expect(evidence.subject?.digest).toMatchObject({
       sha256: createHash("sha256").update(fixture.bytes).digest("hex"),
     });
+    expect(evidence.subject?.architecture).toBe(plus ? "x86_64" : "x86");
     expect(report.coverage).toMatchObject({
       status: "complete",
       resources: 5,
@@ -255,6 +257,7 @@ const expectPeInventoriesAcrossAdapters = async (
     });
     expect(response.isError).not.toBe(true);
     const mcp = contract.outputSchema.parse(response.structuredContent);
+    expect(mcp.subject).toEqual(evidence.subject);
     expect(mcp.evidence_id).toBe(evidence.evidence_id);
     expect(mcp.normalized_result).toEqual(evidence.normalized_result);
     const text = response.content.find(({ type }) => type === "text");

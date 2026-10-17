@@ -11,7 +11,6 @@ import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js"
 import {
   decodeBinaryPlistNumbers,
   scanBinaryPlistNumberLiterals,
-  xmlPlistNumberLiterals,
 } from "./PlistNumberLiterals.js";
 import {
   omittedPrototypeKeysLimitation,
@@ -77,6 +76,7 @@ export const decodeKeyedArchiveBytes = (
           value: parseBinary(
             decodeBinaryPlistNumbers(bytes, binaryNumberMetadata!),
           ),
+          numberLiterals: binaryNumberMetadata!.literals,
           omittedPrototypeKeys: binaryExpansion.binaryPrototypeKeyObserved
             ? null
             : 0,
@@ -86,11 +86,7 @@ export const decodeKeyedArchiveBytes = (
     parsed.value,
     selection,
   );
-  const numbers = createPlistNumberProjection(
-    binary
-      ? binaryNumberMetadata!.literals
-      : xmlPlistNumberLiterals(xmlText ?? ""),
-  );
+  const numbers = createPlistNumberProjection(parsed.numberLiterals);
   // Classify the serialized graph before projecting values to typed decimals.
   // Numeric IDs, node kinds, references and pagination retain their original meaning.
   const roots = Object.fromEntries(

@@ -5,6 +5,7 @@ import { expect, it as test, onTestFinished } from "vitest";
 import { z } from "zod";
 import { access } from "node:fs/promises";
 import { ANDROID_TOOL_CONTRACTS } from "../../../src/contracts/android/androidToolContracts.js";
+import { JADX_BRIDGE_IDENTITY } from "../../../src/android/JadxRelease.js";
 import { androidPartialObservationSchema } from "../../../src/domain/android/androidPartialObservation.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
@@ -157,7 +158,7 @@ test.each([
     mode: "tool-error",
     errorCode: "execution_failure",
     serverName: "rea-jadx-bridge",
-    serverVersion: "1",
+    serverVersion: JADX_BRIDGE_IDENTITY.version,
     engineVersion: "0.7.1",
     calls: [
       { operation: "rea_jvm_status" },
@@ -175,7 +176,7 @@ test.each([
     mode: "rpc-disconnect",
     errorCode: "execution_failure",
     serverName: "rea-jadx-bridge",
-    serverVersion: "1",
+    serverVersion: JADX_BRIDGE_IDENTITY.version,
     engineVersion: "0.7.1",
     calls: [{ operation: "rea_jvm_status" }, { operation: "load_apk" }],
     containsAmbientEnvironment: true,
@@ -239,7 +240,7 @@ test.each([
       target: { selected_path: apk, path: apk, format: "apk" },
       provider_facts: {
         bridge_name: "rea-jadx-bridge",
-        bridge_version: "1",
+        bridge_version: JADX_BRIDGE_IDENTITY.version,
         server_name: serverName,
         server_version: serverVersion,
         engine_version: engineVersion,

@@ -106,13 +106,19 @@ export const resolveHopperAnalysisProfile = async (
 
 /** Ghidra owns these lanes; Hopper names the family it declines rather than guessing. */
 const HOPPER_DECLINED_ARCHITECTURE_LABELS: Record<
-  ElfMetadataArchitecture,
+  ElfMetadataArchitecture | "hexagon",
   string
 > = {
   mips: "MIPS",
   riscv: "RISC-V",
   powerpc: "PowerPC",
+  hexagon: "Hexagon",
 };
+
+export const hopperDeclinedArchitectureReason = (
+  architecture: ElfMetadataArchitecture | "hexagon",
+): string =>
+  `REA's Hopper adapter does not admit ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} targets. Select a verified Ghidra ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} profile instead.`;
 
 /** Derive Hopper's complete non-interactive CLI loader selection. */
 export const hopperLoaderArgsForTarget = (
@@ -128,12 +134,12 @@ export const hopperLoaderArgsForTarget = (
   if (target.format === "raw-binary")
     return err(new ProviderAdapterError("hopper", "resolve_analysis_profile"));
   const architecture = target.architecture;
-  if (isElfMetadataArchitecture(architecture))
+  if (isElfMetadataArchitecture(architecture) || architecture === "hexagon")
     return err(
       new AnalysisCapabilityUnavailableError(
         "hopper",
         "resolve_analysis_profile",
-        `REA's Hopper adapter does not admit ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} targets. Select a verified Ghidra ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} profile instead.`,
+        hopperDeclinedArchitectureReason(architecture),
       ),
     );
   const flag = hopperArchitectureFlag(architecture);
