@@ -146,7 +146,12 @@ export class ApktoolWorkspace {
     path: string,
     budget: number,
     signal?: AbortSignal,
-  ): Promise<{ text: string | null; truncated: boolean }> {
+  ): Promise<{
+    text: string | null;
+    truncated: boolean;
+    /** Raw bytes represented by the retained prefix, before UTF-8 decoding. */
+    sourceBytes: number;
+  }> {
     let admitted = false;
     try {
       return await withArtifactRegularFile(
@@ -175,13 +180,15 @@ export class ApktoolWorkspace {
               `Apktool output changed while being read: ${path}`,
             );
           const truncated = length > budget;
+          const sourceBytes = Math.min(length, budget);
           try {
             return {
               text: new TextDecoder("utf-8", { fatal: true }).decode(
-                bytes.subarray(0, Math.min(length, budget)),
+                bytes.subarray(0, sourceBytes),
                 { stream: truncated },
               ),
               truncated,
+              sourceBytes,
             };
           } catch (cause) {
             throw new AnalysisProtocolError(
@@ -198,7 +205,7 @@ export class ApktoolWorkspace {
         "code" in cause &&
         cause.code === "ENOENT"
       )
-        return { text: null, truncated: false };
+        return { text: null, truncated: false, sourceBytes: 0 };
       throw cause;
     }
   }

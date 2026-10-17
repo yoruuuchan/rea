@@ -155,6 +155,93 @@ cliTest.for(["xml", "binary"] as const)(
   },
 );
 
+cliTest.for(["xml", "binary"] as const)(
+  "keeps a negative-zero real distinct from positive zero in a %s keyed archive",
+  async (format, { cli }) => {
+    const root = await createTestTempDirectory("rea-keyed-signed-zero-");
+    const archive = {
+      $archiver: "NSKeyedArchiver",
+      $version: 100000,
+      $top: {
+        negative: { CF$UID: 1 },
+        positive: { CF$UID: 2 },
+        control: { CF$UID: 3 },
+      },
+      $objects: ["$null", 1.5, 0.25, 1.25],
+    };
+    // plist@5 writes -0 and 0 as integers, so encode placeholder reals and
+    // patch them to the zeros an archiver serializes.
+    let bytes: Buffer;
+    if (format === "xml") {
+      const xml = build(archive);
+      expect(xml).toContain("<real>1.5</real>");
+      expect(xml).toContain("<real>0.25</real>");
+      bytes = Buffer.from(
+        xml
+          .replace("<real>1.5</real>", "<real>-0.0</real>")
+          .replace("<real>0.25</real>", "<real>0.0</real>"),
+      );
+    } else {
+      bytes = Buffer.from(buildBinary(archive));
+      for (const [placeholder, zero] of [
+        [1.5, -0],
+        [0.25, 0],
+      ] as const) {
+        const real = Buffer.alloc(9);
+        real[0] = 0x23;
+        real.writeDoubleBE(placeholder, 1);
+        const start = bytes.indexOf(real);
+        expect(start).toBeGreaterThanOrEqual(0);
+        bytes.writeDoubleBE(zero, start + 1);
+      }
+    }
+    const path = join(root, "archive.plist");
+    await writeFile(path, bytes);
+    const output = await cli.run({
+      arguments: ["inspect-keyed-archive", path, "--json"],
+      environment: {
+        HOME: root,
+        USERPROFILE: root,
+        REA_LOG_LEVEL: "silent",
+        REA_ANALYSIS_PROVIDER: "auto",
+      },
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const result = keyedArchiveResultSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    const { call } = await connectLocalToolsMcp({
+      HOME: root,
+      USERPROFILE: root,
+    });
+    const opened = await call("open_binary", { path });
+    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
+    const mcp = await call("inspect_keyed_archive", {});
+    expect(mcp.isError, JSON.stringify(mcp)).not.toBe(true);
+    expect(
+      keyedArchiveResultSchema.parse(
+        parseEvidence(mcp.structuredContent).normalized_result,
+      ),
+    ).toEqual(result);
+    const [, negative, positive, control] = result.objects;
+    expect(negative).toMatchObject({
+      kind: "scalar",
+      status: "observed",
+      value: { $plist_type: "real", value: "-0" },
+    });
+    expect(positive).toMatchObject({ kind: "scalar", status: "observed" });
+    expect(Object.is(positive?.value, 0)).toBe(true);
+    expect(control?.value).toBe(1.25);
+    expect(JSON.stringify(result.objects.map(({ value }) => value))).toBe(
+      '["$null",{"$plist_type":"real","value":"-0"},0,1.25]',
+    );
+    expect(result.limitations).toContain(
+      '1 negative-zero real value(s) are reported as { "$plist_type": "real", "value": "-0" } because a JSON number cannot carry the sign of zero.',
+    );
+    expect(await readFile(path)).toEqual(bytes);
+  },
+);
+
 cliTest(
   "rejects scalar top dictionaries through the public CLI and MCP",
   async ({ cli }) => {

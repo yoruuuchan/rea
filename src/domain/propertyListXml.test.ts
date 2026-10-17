@@ -53,6 +53,21 @@ it("retains partial numeric values with explicit incomplete metadata for unsuppo
   expect(parsed.numberLiterals.incomplete).toBe(true);
 });
 
+it("decodes a signed integer zero as zero and a negative-zero real with its sign", () => {
+  const parsed = parseXmlPropertyList(
+    "<plist><array><integer>-0</integer><integer>-0<!-- partial --></integer><real>-0.0</real><real>0.0</real></array></plist>",
+  );
+  expect(Array.isArray(parsed.value)).toBe(true);
+  if (!Array.isArray(parsed.value)) throw new Error("Expected array");
+  expect(parsed.value.map((item) => Object.is(item, -0))).toEqual([
+    false,
+    false,
+    true,
+    false,
+  ]);
+  expect(parsed.value).toEqual([0, 0, -0, 0]);
+});
+
 it("interprets failures in omitted entries before reporting partial evidence", () => {
   expect(() =>
     parseXmlPropertyList(

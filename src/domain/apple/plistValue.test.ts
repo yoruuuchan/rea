@@ -12,8 +12,31 @@ it("projects an unrepresentable date as unknown and counts it", () => {
       near: { $plist_type: "date", iso8601: "1970-01-01T00:00:00.000Z" },
     },
     unknownRealCount: 0,
+    negativeZeroRealCount: 0,
     unknownDateCount: 1,
   });
+});
+
+it("keeps a negative-zero real distinct from positive zero and counts it", () => {
+  const observed: object[] = [];
+  const projected = projectPlistValue(
+    [-0, 0, 1.25, { $plist_type: "real", value: "-0" }],
+    (wrapper) => observed.push(wrapper),
+  );
+  expect(projected.negativeZeroRealCount).toBe(1);
+  expect(projected.unknownRealCount).toBe(0);
+  expect(Array.isArray(projected.value)).toBe(true);
+  if (!Array.isArray(projected.value)) throw new Error("Expected array");
+  expect(projected.value[0]).toEqual({ $plist_type: "real", value: "-0" });
+  expect(Object.is(projected.value[1], 0)).toBe(true);
+  expect(projected.value[2]).toBe(1.25);
+  // Only the generated wrapper is reported; the lookalike stays a dictionary.
+  expect(projected.value[3]).toEqual(projected.value[0]);
+  expect(observed).toHaveLength(1);
+  expect(observed[0]).toBe(projected.value[0]);
+  expect(JSON.stringify(projected.value)).toBe(
+    '[{"$plist_type":"real","value":"-0"},0,1.25,{"$plist_type":"real","value":"-0"}]',
+  );
 });
 
 it("rejects excessive plist nesting without exhausting the stack", () => {

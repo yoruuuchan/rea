@@ -80,6 +80,30 @@ it("forwards every locale the apktool input owner admits", async () => {
   }
 });
 
+it("forwards repeated --locales to project multiple localized tables", async () => {
+  const result = await invoke([
+    "decode-android-resources",
+    "/targets/app.apk",
+    "--locales",
+    "de",
+    "--locales",
+    "pt-BR",
+    "--json",
+  ]);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.requests).toEqual([
+    {
+      operation: "decode_android_resources",
+      input: {
+        path: "/targets/app.apk",
+        include_strings: true,
+        locales: ["de", "pt-BR"],
+      },
+    },
+  ]);
+});
+
 it("still refuses a locale the apktool input owner refuses", async () => {
   const result = await invoke([
     "decode-android-resources",
@@ -91,4 +115,27 @@ it("still refuses a locale the apktool input owner refuses", async () => {
 
   expect(result.exitCode).not.toBe(0);
   expect(result.requests).toEqual([]);
+});
+
+it("forwards --no-strings with --locale preserving caller options", async () => {
+  const result = await invoke([
+    "decode-android-resources",
+    "/targets/app.apk",
+    "--no-strings",
+    "--locale",
+    "de",
+    "--json",
+  ]);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.requests).toEqual([
+    {
+      operation: "decode_android_resources",
+      input: {
+        path: "/targets/app.apk",
+        include_strings: false,
+        locale: "de",
+      },
+    },
+  ]);
 });

@@ -628,6 +628,12 @@ or a negative year, is reported as `{ "$plist_type": "date", "iso8601": null }`
 with a counted limitation; the rest of the plist or archive is still decoded.
 `inspect_plist` and Interface Builder decoding use the same projection.
 
+A negative-zero real is reported as `{ "$plist_type": "real", "value": "-0" }`
+because a JSON number cannot carry the sign of zero. `inspect_plist` and
+`inspect_keyed_archive` count these values in a limitation, and Interface
+Builder node attributes use the same value. Positive zero and integer zero,
+including an `<integer>-0</integer>` literal, remain the number `0`.
+
 ## Locate a byte signature
 
 Use `search_bytes` after opening a target with Ghidra to locate a known constant

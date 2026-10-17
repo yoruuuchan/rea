@@ -10,12 +10,8 @@ import type {
 } from "../domain/browserScenarioCaptureValues.js";
 import type { BrowserScenarioSessionPort } from "./BrowserScenarioSessionPort.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
-import {
-  AnalysisCancelledError,
-  AnalysisTimeoutError,
-} from "../domain/analysisErrorCore.js";
-import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { BrowserObservationError } from "../domain/browserObservationError.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { PLAYWRIGHT_BROWSER_SCENARIO_PROVIDER_IDENTITY } from "./providerIdentities.js";
 
@@ -136,68 +132,22 @@ export const browserScenarioOperationFailure = (
           OPERATION,
           { cause },
         );
-  const primaryProjection = projectAnalysisError(primary);
-  const cleanupCause =
-    cleanupFailure === undefined
-      ? undefined
-      : cleanupFailure.cause instanceof AnalysisError
-        ? cleanupFailure.cause
-        : new ProviderAdapterError(
-            PLAYWRIGHT_BROWSER_SCENARIO_PROVIDER_IDENTITY.id,
-            "close_browser_scenario",
-            { cause: cleanupFailure.cause },
-          );
-  const cleanupObservation =
-    cleanupFailure === undefined
-      ? undefined
-      : browserScenarioCleanupObservation(cleanupFailure.cause);
-  const retainedOptions = {
-    cause: primary,
-    partialObservation,
-    ...(primary.capturedOutput === undefined
-      ? {}
-      : { capturedOutput: primary.capturedOutput }),
-    ...(primary.cleanup === undefined ? {} : { cleanup: primary.cleanup }),
-  };
-  if (cleanupCause === undefined) {
-    if (primary instanceof AnalysisCancelledError)
-      return new AnalysisCancelledError(primary.operation, retainedOptions);
-    if (primary instanceof AnalysisTimeoutError)
-      return new AnalysisTimeoutError(
-        primary.operation,
-        primary.timeoutMs,
-        retainedOptions,
-      );
-    if (primary instanceof BrowserObservationError)
-      return new BrowserObservationError(primary.operation, primary.reason, {
-        ...retainedOptions,
-        ...(primary.userMessage === undefined
-          ? {}
-          : { detail: primary.userMessage }),
-      });
-  }
-  const cleanup = cleanupObservation ?? primary.cleanup;
-  return new ProviderAdapterError(
-    PLAYWRIGHT_BROWSER_SCENARIO_PROVIDER_IDENTITY.id,
+  primary.retainPartialObservation(partialObservation);
+  if (cleanupFailure === undefined) return primary;
+  const observation = browserScenarioCleanupObservation(cleanupFailure.cause);
+  const cleanup =
+    cleanupFailure.cause instanceof AnalysisError &&
+    cleanupFailure.cause.cleanupIncomplete
+      ? cleanupFailure.cause
+      : new ProviderCleanupError(
+          PLAYWRIGHT_BROWSER_SCENARIO_PROVIDER_IDENTITY.id,
+          observation.resources,
+          { reason: observation.reason },
+          { operation: "close_browser_scenario", cause: cleanupFailure.cause },
+        );
+  return analysisErrorWithCleanupFailure(
+    primary,
+    cleanup,
     OPERATION,
-    {
-      ...retainedOptions,
-      cause:
-        cleanupCause === undefined
-          ? primary
-          : new AggregateError(
-              [primary, cleanupCause],
-              "Browser scenario operation and cleanup both failed",
-              { cause: primary },
-            ),
-      userMessage: primaryProjection.message,
-      ...(cleanup === undefined ? {} : { cleanup }),
-      diagnostics: {
-        primary_error: primaryProjection,
-        ...(cleanupCause === undefined
-          ? {}
-          : { cleanup_error: projectAnalysisError(cleanupCause) }),
-      },
-    },
-  );
+  ).bindCleanupDependencies([primary, cleanup]);
 };

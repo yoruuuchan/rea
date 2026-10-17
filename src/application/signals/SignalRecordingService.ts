@@ -49,7 +49,9 @@ export class SignalRecordingService {
   ): Promise<Result<Evidence, AnalysisError>> {
     const operation = "decode_signal_recording";
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const input = decodeSignalRecordingInputSchema.safeParse(raw);
     if (!input.success)
       return err(
@@ -92,7 +94,9 @@ export class SignalRecordingService {
   ): Promise<Result<Evidence, AnalysisError>> {
     const operation = "inspect_signal_decoders";
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const input = inspectSignalDecodersInputSchema.safeParse(raw);
     if (!input.success)
       return err(
@@ -139,6 +143,7 @@ export class SignalRecordingService {
     return options?.signal?.aborted
       ? err(
           new AnalysisCancelledError(operation, {
+            cause: options.signal.reason,
             partialObservation: evidence,
           }),
         )

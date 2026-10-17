@@ -92,19 +92,33 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   } else {
     let wroteOutput = false;
     const resultOutput = createCliResultOutput(cliArgs, process.stdout);
-    await createCli(process.env, resultOutput).serve(cliArgs, {
-      stdout: (output) => {
-        if (resultOutput?.handled) {
-          if (resultOutput.failed && !stdoutClosed)
-            process.stderr.write(output);
-          return;
-        }
-        if (output.length > 0) wroteOutput = true;
-        writeStdout(output);
-      },
-      // A command failure caused by the closed pipe keeps the pipe's status.
-      exit: (code) => process.exit(stdoutClosed ? SIGPIPE_EXIT_STATUS : code),
-    });
+    try {
+      await createCli(process.env, resultOutput).serve(cliArgs, {
+        stdout: (output) => {
+          if (resultOutput?.handled) {
+            if (resultOutput.failed && !stdoutClosed)
+              process.stderr.write(output);
+            return;
+          }
+          if (output.length > 0) wroteOutput = true;
+          writeStdout(output);
+        },
+        // A command failure caused by the closed pipe keeps the pipe's status.
+        exit: (code) => process.exit(stdoutClosed ? SIGPIPE_EXIT_STATUS : code),
+      });
+    } catch (cause) {
+      if (wroteOutput) throw cause;
+      const recovered = await resultOutput
+        ?.recoverFormattingFailure(cause)
+        .catch((writeFailure) => {
+          // Recovery writes outside Incur's command boundary. A reader that
+          // declined this document keeps the same quiet SIGPIPE outcome.
+          if (!stdoutClosed) throw writeFailure;
+          return true;
+        });
+      if (!recovered) throw cause;
+      process.exitCode = stdoutClosed ? SIGPIPE_EXIT_STATUS : 1;
+    }
     if (!wroteOutput && !resultOutput?.handled)
       writeStdout(renderEmptyFilteredCliOutput(cliArgs) ?? "");
   }

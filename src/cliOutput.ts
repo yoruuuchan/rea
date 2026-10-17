@@ -18,15 +18,25 @@ const VALUED_OUTPUT_FLAGS = new Set([
  */
 export const normalizeCliOutputArguments = (
   arguments_: readonly string[],
-): string[] =>
-  arguments_.flatMap((argument) => {
+): string[] => {
+  const normalized: string[] = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index]!;
+    if (VALUED_OUTPUT_FLAGS.has(argument) && arguments_[index + 1]) {
+      // Incur consumes a nonempty spaced value before looking for more flags.
+      // Its contents belong to that option, even when they look like a flag.
+      normalized.push(argument, arguments_[index + 1]!);
+      index += 1;
+      continue;
+    }
     const separator = argument.indexOf("=");
-    if (separator < 0) return [argument];
     const flag = argument.slice(0, separator);
-    return VALUED_OUTPUT_FLAGS.has(flag)
-      ? [flag, argument.slice(separator + 1)]
-      : [argument];
-  });
+    if (separator >= 0 && VALUED_OUTPUT_FLAGS.has(flag))
+      normalized.push(flag, argument.slice(separator + 1));
+    else normalized.push(argument);
+  }
+  return normalized;
+};
 
 export type CliOutputArgumentValidation =
   | { readonly ok: true }

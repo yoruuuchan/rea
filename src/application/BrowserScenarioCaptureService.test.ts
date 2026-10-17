@@ -76,3 +76,30 @@ it("converts a raw scenario capture retained after cleanup failure", async () =>
     });
   }
 });
+
+it.each([
+  null,
+  { request: "opaque cancellation" },
+  new BrowserObservationError("capture_browser_scenario", "protocol_error"),
+])(
+  "preserves the exact pre-admission caller reason without dispatch: %j",
+  async (reason) => {
+    const caller = new AbortController();
+    caller.abort(reason);
+    let calls = 0;
+    const provider: BrowserScenarioCapturePort = {
+      identity: () => ({ id: "fixture", name: "fixture", version: "1" }),
+      captureScenario: async () => {
+        calls++;
+        throw new Error("Unexpected dispatch");
+      },
+    };
+    const result = await captureBrowserScenario(provider, scenario, {
+      signal: caller.signal,
+    });
+    if (result.ok) throw new Error("Expected cancellation");
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.cause).toBe(reason);
+    expect(calls).toBe(0);
+  },
+);

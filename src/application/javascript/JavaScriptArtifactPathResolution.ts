@@ -1056,11 +1056,15 @@ const parseBarePackageRequest = (
 ): BarePackageRequest | null => {
   const segments = specifier.split("/");
   let packageName = segments[0] ?? "";
-  if (packageName === "") return null;
+  if (packageName === "" || packageName === "@") return null;
   if (specifier.startsWith("@")) {
     const packageSegment = segments[1];
-    if (packageSegment === undefined || packageSegment === "") return null;
-    packageName = `${packageName}/${packageSegment}`;
+    if (packageSegment !== undefined && packageSegment !== "") {
+      packageName = `${packageName}/${packageSegment}`;
+    } else if (moduleKind !== "require") {
+      if (packageSegment === undefined) return null;
+      packageName = `${packageName}/`;
+    }
   }
   // Node's CommonJS exports matcher excludes percent-containing package names.
   // Compare the captured name so a scoped name cannot fall back to its scope.

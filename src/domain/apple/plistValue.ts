@@ -15,6 +15,8 @@ export interface ProjectedPlistValue {
   readonly value: JsonValue;
   /** Reals decoded as NaN, which the decoder also uses for ±infinity. */
   readonly unknownRealCount: number;
+  /** Negative-zero reals, which a JSON number would report as positive zero. */
+  readonly negativeZeroRealCount: number;
   /** Dates the decoder could not represent, reported without a timestamp. */
   readonly unknownDateCount: number;
 }
@@ -23,10 +25,21 @@ export interface ProjectedPlistValue {
 export const unknownDateLimitation = (count: number): string =>
   `${String(count)} date value(s) are reported as { "$plist_type": "date", "iso8601": null } because the decoder could not represent them, such as XML dates with years beyond 9999 or negative years, or dates outside the JavaScript date range.`;
 
+/** The typed scalar that keeps a negative-zero real distinct from positive zero. */
+export const negativeZeroReal = (): Record<string, JsonValue> => ({
+  $plist_type: "real",
+  value: "-0",
+});
+
+/** Limitation for results whose plist held negative-zero reals. */
+export const negativeZeroRealLimitation = (count: number): string =>
+  `${String(count)} negative-zero real value(s) are reported as { "$plist_type": "real", "value": "-0" } because a JSON number cannot carry the sign of zero.`;
+
 /**
  * Project a decoded plist into JSON. Data, dates and retained big integers become explicit
  * `$plist_type` objects; a non-finite real becomes an explicit unknown
- * because the XML decoder reports NaN and ±infinity alike.
+ * because the XML decoder reports NaN and ±infinity alike, and a
+ * negative-zero real keeps its sign, which JSON serialization would drop.
  */
 export const projectPlistValue = (
   value: unknown,
@@ -34,6 +47,7 @@ export const projectPlistValue = (
   onWrappedScalar?: (value: Record<string, JsonValue>) => void,
 ): ProjectedPlistValue => {
   let unknownRealCount = 0;
+  let negativeZeroRealCount = 0;
   let unknownDateCount = 0;
   const scalar = (value: Record<string, JsonValue>): JsonValue => {
     onWrappedScalar?.(value);
@@ -63,6 +77,11 @@ export const projectPlistValue = (
     if (typeof item === "number" && !Number.isFinite(item)) {
       unknownRealCount += 1;
       return scalar({ $plist_type: "real", value: null });
+    }
+    // Integer decoders never yield -0, so a signed zero here is a real.
+    if (typeof item === "number" && Object.is(item, -0)) {
+      negativeZeroRealCount += 1;
+      return scalar(negativeZeroReal());
     }
     if (typeof item === "bigint")
       return scalar({ $plist_type: "integer", decimal: item.toString() });
@@ -94,5 +113,10 @@ export const projectPlistValue = (
     return z.union([z.string(), z.number(), z.boolean(), z.null()]).parse(item);
   };
   const projected = project(value, 0);
-  return { value: projected, unknownRealCount, unknownDateCount };
+  return {
+    value: projected,
+    unknownRealCount,
+    negativeZeroRealCount,
+    unknownDateCount,
+  };
 };

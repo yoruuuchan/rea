@@ -967,15 +967,13 @@ const upsertTomlServerSection = (
   const discardPending = (): void => {
     pending.length = 0;
   };
-  const flushPending = (): void => {
-    kept.push(...pending);
-    pending.length = 0;
+  // Document line counts must not become engine-limited argument counts.
+  const appendLines = (lines: readonly string[]): void => {
+    for (const line of lines) kept.push(line);
   };
-  const lineIndexAt = (offset: number): number => {
-    let line = 0;
-    for (let index = 0; index < lineStarts.length; index += 1)
-      if ((lineStarts[index] ?? 0) <= offset) line = index;
-    return line;
+  const flushPending = (): void => {
+    appendLines(pending);
+    pending.length = 0;
   };
   let lineIndex = 0;
   while (lineIndex < lines.length) {
@@ -1011,7 +1009,14 @@ const upsertTomlServerSection = (
       let statementEnd = valueEnd;
       while (statementEnd < text.length && text[statementEnd] !== "\n")
         statementEnd += 1;
-      const endLine = lineIndexAt(Math.max(statementEnd - 1, lineStart));
+      const lastOffset = Math.max(statementEnd - 1, lineStart);
+      let endLine = lineIndex;
+      // Statements advance through the source; only inspect their own lines.
+      while (
+        endLine + 1 < lineStarts.length &&
+        (lineStarts[endLine + 1] ?? 0) <= lastOffset
+      )
+        endLine += 1;
       if (skipping) {
         discardPending();
         lineIndex = endLine + 1;
@@ -1039,7 +1044,7 @@ const upsertTomlServerSection = (
           : undefined;
       if (disabledLines !== undefined) {
         flushPending();
-        kept.push(...disabledLines);
+        appendLines(disabledLines);
         lineIndex = endLine + 1;
         mode = "none";
         continue;
@@ -1064,7 +1069,7 @@ const upsertTomlServerSection = (
             edited === undefined
               ? text.slice(lineStart, statementEnd)
               : `${prefix}${edited}${suffix}`;
-          kept.push(...replacement.split("\n"));
+          appendLines(replacement.split("\n"));
           inlineServerTable = true;
         } else discardPending();
       } else {

@@ -1,3 +1,4 @@
+import type { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import type { BrowserScenario } from "../domain/browserScenario.js";
 import type { BrowserScenarioAction } from "../domain/browserScenarioValues.js";
 import type {
@@ -33,6 +34,7 @@ export interface BrowserScenarioSessionPort {
     requested: ReadonlySet<SnapshotKind>,
     signal?: AbortSignal,
   ): Promise<BrowserStepArtifacts>;
+  readonly cleanupLease: AnalysisCleanupLease;
   close(): Promise<"terminated-owned-process" | "disconnected-external">;
   redactError(error: unknown): string;
 }
@@ -42,6 +44,6 @@ export type BrowserScenarioSessionOpener = (
   scenario: BrowserScenario,
   options: {
     readonly signal?: AbortSignal;
-    readonly retainCleanup?: (close: () => Promise<unknown>) => void;
+    readonly retainCleanup?: (lease: AnalysisCleanupLease) => void;
   },
 ) => Promise<BrowserScenarioSessionPort>;

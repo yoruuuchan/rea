@@ -6,6 +6,7 @@ import type {
 /** Link one resource's confirmed release to its originating analysis error. */
 export class AnalysisCleanupLease {
   #released = false;
+  #releasePromise: Promise<void> | undefined;
   #errors: WeakRef<AnalysisError>[] = [];
   readonly #groups = new Set<AnalysisCleanupLeaseGroup>();
 
@@ -56,13 +57,22 @@ export class AnalysisCleanupLease {
     }
   }
 
-  async release(): Promise<void> {
-    if (this.#released) return;
-    await this.cleanup();
-    this.#released = true;
-    this.#resolveBoundErrors();
-    for (const group of this.#groups) group.ownerReleased(this);
-    this.#groups.clear();
+  release(): Promise<void> {
+    if (this.#released) return Promise.resolve();
+    if (this.#releasePromise !== undefined) return this.#releasePromise;
+    const attempt = Promise.resolve()
+      .then(async () => {
+        await this.cleanup();
+        this.#released = true;
+        this.#resolveBoundErrors();
+        for (const group of this.#groups) group.ownerReleased(this);
+        this.#groups.clear();
+      })
+      .finally(() => {
+        if (this.#releasePromise === attempt) this.#releasePromise = undefined;
+      });
+    this.#releasePromise = attempt;
+    return attempt;
   }
 
   /** Binding can follow a concurrent retry that already confirmed release. */

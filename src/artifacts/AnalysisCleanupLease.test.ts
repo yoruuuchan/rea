@@ -142,3 +142,39 @@ it.each([false, true])(
     expect(group.cleanupResources).toBeUndefined();
   },
 );
+
+it("shares an in-flight release and permits one new attempt after failure", async () => {
+  const pending: ((failure?: Error) => void)[] = [];
+  let attempts = 0;
+  const lease = new AnalysisCleanupLease(() => {
+    attempts++;
+    return new Promise<void>((resolve, reject) => {
+      pending.push((failure) =>
+        failure === undefined ? resolve() : reject(failure),
+      );
+    });
+  }, ["owned control"]);
+  try {
+    const first = lease.release();
+    const shared = lease.release();
+    const rejected = Promise.allSettled([first, shared]);
+    await Promise.resolve();
+    expect(attempts).toBe(1);
+    const failure = new Error("controlled release failure");
+    pending[0]!(failure);
+    for (const outcome of await rejected)
+      expect(outcome).toEqual({ status: "rejected", reason: failure });
+    expect(lease.released).toBe(false);
+    const retry = lease.release();
+    const sharedRetry = lease.release();
+    await Promise.resolve();
+    expect(attempts).toBe(2);
+    pending[1]!();
+    await Promise.all([retry, sharedRetry]);
+    expect(lease.released).toBe(true);
+    await lease.release();
+    expect(attempts).toBe(2);
+  } finally {
+    for (const settle of pending) settle();
+  }
+});

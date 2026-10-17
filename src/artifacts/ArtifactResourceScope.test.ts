@@ -1,3 +1,6 @@
+import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
+import { ArtifactResourceRetryFailure } from "./ArtifactResourceScope.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { expect, it } from "vitest";
 
 import { err } from "../domain/result.js";
@@ -153,4 +156,42 @@ it("retains a failed source analyzer until shutdown can verify its release", asy
   });
   releaseAllowed = true;
   await scope.close();
+});
+
+it("retains a canonical retry lease for a plain cleanup capability", async () => {
+  const scope = new ArtifactResourceScope();
+  let denied = true;
+  let closes = 0;
+  const owner = {
+    kind: "lease",
+    resource: "plain cleanup owner",
+    lease: {
+      release: async () => {
+        closes++;
+        if (denied) throw new Error("close denied");
+      },
+    },
+  } as const;
+  try {
+    expect(await scope.release(owner)).toMatchObject({ kind: "failed" });
+    const retry: unknown = await scope
+      .retryCleanup()
+      .catch((cause: unknown) => cause);
+    if (!(retry instanceof ArtifactResourceRetryFailure))
+      throw new Error("Expected exact failed owners");
+    expect(retry.cleanupLeases).toHaveLength(1);
+    const failure = new ProviderCleanupError("fixture", [owner.resource], {
+      reason: "close denied",
+    });
+    bindArtifactFileCleanup(retry, failure);
+    expect(failure.cleanupIncomplete).toBe(true);
+    denied = false;
+    await scope.close();
+    expect(failure.cleanupIncomplete).toBe(false);
+    expect(failure.cleanupResources).toEqual([]);
+    expect(closes).toBe(3);
+  } finally {
+    denied = false;
+    await scope.close();
+  }
 });

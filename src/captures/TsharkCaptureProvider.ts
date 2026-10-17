@@ -1,3 +1,4 @@
+import { artifactFileCancellationCause } from "../artifacts/ArtifactFileOperation.js";
 import {
   type InspectPacketFieldsInput,
   packetFieldsCatalogSchema,
@@ -130,7 +131,10 @@ export class TsharkCaptureProvider implements PacketCapturePort {
     let root: ArtifactAnalysisRuntime | undefined;
     let result: Result<AnalysisExecution, AnalysisError>;
     try {
-      if (options?.signal?.aborted) throw new AnalysisCancelledError(operation);
+      if (options?.signal?.aborted)
+        throw new AnalysisCancelledError(operation, {
+          cause: options.signal.reason,
+        });
       await this.#resources.release();
       if (this.platform !== "linux")
         throw new Error(
@@ -419,6 +423,7 @@ export class TsharkCaptureProvider implements PacketCapturePort {
           limitations: execution.limitations,
         }),
       operation,
+      options?.signal,
     );
   }
   #failure(
@@ -442,16 +447,28 @@ export class TsharkCaptureProvider implements PacketCapturePort {
     if (cause instanceof AnalysisError) return cause;
     if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined)
       return this.#resources.cleanupFailure(
-        cause.cleanup,
         cause,
+        (primary) =>
+          this.#failure(
+            primary,
+            phase,
+            path,
+            workspacePath,
+            effectiveLimits,
+            observedOutput,
+            operation,
+            limits,
+          ),
         observedOutput,
         operation,
       );
-    if (
-      (cause instanceof Error && cause.name === "AbortError") ||
-      (cause instanceof ArtifactReaderFailure && cause.reason === "cancelled")
-    )
-      return new AnalysisCancelledError(operation, { cause });
+    if (cause instanceof ArtifactReaderFailure && cause.reason === "cancelled")
+      return new AnalysisCancelledError(operation, {
+        cause: artifactFileCancellationCause(cause),
+        ...(observedOutput === undefined
+          ? {}
+          : { capturedOutput: observedOutput }),
+      });
     if (cause instanceof FieldDiscoveryBudgetError)
       return new AnalysisResourceConstraintError(
         operation,

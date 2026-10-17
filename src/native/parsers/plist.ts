@@ -3,6 +3,8 @@ import { z } from "zod";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import {
+  negativeZeroReal,
+  negativeZeroRealLimitation,
   projectPlistValue,
   unknownDateLimitation,
   type ProjectedPlistValue,
@@ -42,17 +44,22 @@ const INTEGRAL_LITERAL = /^-?\d+$/u;
 
 /**
  * Decode plutil JSON, passing each integral number literal beyond the exact
- * range of a JavaScript number, with its source digits, to `unsafe`.
+ * range of a JavaScript number, with its source digits, to `unsafe`, and
+ * each negative zero to `negativeZero`.
  */
 const decodePlistJson = (
   output: string,
   unsafe: (item: number, digits: string) => unknown,
+  negativeZero: (item: number) => unknown = (item) => item,
 ): unknown => {
   // plutil output can carry a UTF-8 BOM, which JSON.parse rejects outright.
   const text = output.replace(/^\uFEFF/u, "");
   return JSON.parse(
     text,
     (_key: string, item: unknown, context?: { readonly source?: string }) => {
+      // A plist integer has no signed zero, so -0 can only come from a real.
+      if (typeof item === "number" && Object.is(item, -0))
+        return negativeZero(item);
       const source = context?.source;
       return typeof item !== "number" ||
         Number.isSafeInteger(item) ||
@@ -95,6 +102,11 @@ export const parsePlistJson = (
   let literals: PlistNumberLiterals | undefined;
   let exactIntegerCount = 0;
   let ambiguousNumberCount = 0;
+  let negativeZeroRealCount = 0;
+  const signedZero = (): unknown => {
+    negativeZeroRealCount += 1;
+    return negativeZeroReal();
+  };
   const classify = (item: number, digits: string): unknown => {
     const exact = BigInt(digits).toString();
     const integer =
@@ -116,7 +128,7 @@ export const parsePlistJson = (
       xmlConversion === undefined
         ? undefined
         : parseXmlPropertyList(xmlConversion).numberLiterals;
-    decoded = omitPrototypeKeys(decodePlistJson(output, classify));
+    decoded = omitPrototypeKeys(decodePlistJson(output, classify, signedZero));
   } catch (cause: unknown) {
     return err(
       new AnalysisOutputError(
@@ -131,6 +143,7 @@ export const parsePlistJson = (
     value,
     bundle: projectPlistBundle(value),
     limitations: [
+      ...negativeZeroLimitations(negativeZeroRealCount),
       ...(literals?.incomplete === true
         ? [incompletePlistNumberLimitation]
         : []),
@@ -194,6 +207,7 @@ export const parsePlistXml = (
         : [
             `${String(projected.unknownRealCount)} non-finite real value(s) are reported as { "$plist_type": "real", "value": null } because the XML decoder does not distinguish NaN from infinity.`,
           ]),
+      ...negativeZeroLimitations(projected.negativeZeroRealCount),
       ...(projected.unknownDateCount === 0
         ? []
         : [unknownDateLimitation(projected.unknownDateCount)]),
@@ -206,6 +220,9 @@ export const parsePlistXml = (
 
 const prototypeKeyLimitations = (count: number): string[] =>
   count === 0 ? [] : [omittedPrototypeKeysLimitation(count)];
+
+const negativeZeroLimitations = (count: number): string[] =>
+  count === 0 ? [] : [negativeZeroRealLimitation(count)];
 
 const numberLimitations = (
   exactIntegerCount: number,

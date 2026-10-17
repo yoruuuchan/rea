@@ -60,6 +60,39 @@ describe("CLI output argument boundary", () => {
 });
 
 describe("CLI output flag value forms", () => {
+  it.each(["--filter-output", "--format", "--token-limit", "--token-offset"])(
+    "preserves a flag-shaped spaced value owned by %s",
+    (flag) => {
+      expect(
+        normalizeCliOutputArguments([
+          flag,
+          "--format=json",
+          "providers",
+          "--json",
+        ]),
+      ).toEqual([flag, "--format=json", "providers", "--json"]);
+    },
+  );
+
+  workspaceCliTest(
+    "keeps a flag-shaped filter value equivalent in spaced and equals forms",
+    async ({ cli }) => {
+      for (const filter of [
+        ["--filter-output", "--format=json"],
+        ["--filter-output=--format=json"],
+      ]) {
+        const result = await cli.run({
+          arguments: [...filter, "providers", "--json"],
+          timeoutMs: 10_000,
+        });
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual({});
+        expect(result.stderr).toBe("");
+      }
+    },
+    CLI_INTEGRATION_TIMEOUT_MS,
+  );
+
   it("splits only the equals forms of valued output flags", () => {
     expect(
       normalizeCliOutputArguments([

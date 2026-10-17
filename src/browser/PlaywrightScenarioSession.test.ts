@@ -1,3 +1,7 @@
+import { AnalysisCleanupLeaseGroup } from "../artifacts/AnalysisCleanupLease.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { PlaywrightBrowserScenarioProvider } from "./PlaywrightBrowserScenarioProvider.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { EventEmitter } from "node:events";
 
 import { beforeEach, expect, it, vi } from "vitest";
@@ -40,11 +44,11 @@ vi.mock("./CdpTargetSession.js", () => ({
 vi.mock("./PlaywrightScenarioBrowser.js", () => ({
   openPlaywrightScenarioBrowser: mocks.openBrowser,
   failBrowserScenarioOperation: async (
-    cleanup: () => Promise<void>,
+    cleanup: { release(): Promise<void> },
     cause: unknown,
   ) => {
     try {
-      await cleanup();
+      await cleanup.release();
     } catch (cleanupCause: unknown) {
       throw new AggregateError([cause, cleanupCause]);
     }
@@ -139,6 +143,20 @@ const fixture = () => {
   });
   const cleanup = {
     close,
+    release: close,
+    cleanupLease: new AnalysisCleanupLease(
+      async () => {
+        await close();
+      },
+      {
+        get cleanupResources() {
+          return browserClosed ? [] : ["browser_transport"];
+        },
+      },
+    ),
+    get cleanupResources() {
+      return browserClosed ? [] : ["browser_transport"];
+    },
     get browserClosed() {
       return browserClosed;
     },
@@ -194,7 +212,10 @@ it("stops attached navigation without storage and retries rejected policy cleanu
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   const failure = new Error("stopLoading rejected");
   mocks.policySend.mockRejectedValueOnce(failure);
-  await expect(session.close(true)).rejects.toBe(failure);
+  await expect(session.close(true)).rejects.toMatchObject({
+    cause: failure,
+    cleanupIncomplete: true,
+  });
   expect(cleanup.close).not.toHaveBeenCalled();
   await expect(session.close(true)).resolves.toBe("disconnected-external");
   expect(
@@ -246,7 +267,8 @@ it("transfers attached navigation stopping after storage cleanup fails", async (
   mocks.policySend.mockRejectedValueOnce(policyFailure);
 
   await expect(session.close(true)).rejects.toMatchObject({
-    errors: [policyFailure, storageFailure],
+    cause: { errors: [policyFailure, storageFailure] },
+    cleanupIncomplete: true,
   });
   expect(cleanup.close).not.toHaveBeenCalled();
   await expect(session.close()).resolves.toBe("disconnected-external");
@@ -289,7 +311,10 @@ it("transfers a late stop request after storage has already released", async () 
     return policyResponse(method);
   });
 
-  await expect(session.close(false)).rejects.toBe(restorationFailure);
+  await expect(session.close(false)).rejects.toMatchObject({
+    cause: restorationFailure,
+    cleanupIncomplete: true,
+  });
   expect(cleanup.close).not.toHaveBeenCalled();
   cancellation.abort();
   await expect(session.close()).resolves.toBe("disconnected-external");
@@ -320,7 +345,7 @@ it("retains transferred navigation stopping after setup cleanup fails", async ()
     }
     return policyResponse(method);
   });
-  let retainedCleanup: (() => Promise<unknown>) | undefined;
+  let retainedCleanup: AnalysisCleanupLease | undefined;
   const attached = browserScenarioSchema.parse({
     ...scenario,
     browser: {
@@ -346,7 +371,7 @@ it("retains transferred navigation stopping after setup cleanup fails", async ()
   expect(cleanup.close).not.toHaveBeenCalled();
   if (retainedCleanup === undefined)
     throw new Error("failed cleanup was not retained");
-  await expect(retainedCleanup()).resolves.toBeUndefined();
+  await expect(retainedCleanup.release()).resolves.toBeUndefined();
   expect(
     mocks.policySend.mock.calls.filter(
       ([method]) => method === "Page.stopLoading",
@@ -571,7 +596,10 @@ it("retains an owned script identifier after rejected removal", async () => {
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   const failure = new Error("removeScript rejected");
   mocks.policySend.mockRejectedValueOnce(failure);
-  await expect(session.close()).rejects.toBe(failure);
+  await expect(session.close()).rejects.toMatchObject({
+    cause: failure,
+    cleanupIncomplete: true,
+  });
   expect(cleanup.close).not.toHaveBeenCalled();
   await expect(session.close()).resolves.toBe("disconnected-external");
   const removals = mocks.policySend.mock.calls.filter(
@@ -597,7 +625,10 @@ it("retries transport close without detaching an already released policy session
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   const failure = new Error("transport close rejected");
   mocks.policyTransportClose.mockRejectedValueOnce(failure);
-  await expect(session.close()).rejects.toBe(failure);
+  await expect(session.close()).rejects.toMatchObject({
+    cause: failure,
+    cleanupIncomplete: true,
+  });
   await expect(session.close()).resolves.toBe("disconnected-external");
   expect(
     mocks.policySend.mock.calls.filter(
@@ -668,9 +699,14 @@ it("retains a detached policy connection until the main realm is restored", asyn
     .mockResolvedValueOnce("policy_owned")
     .mockResolvedValueOnce(null);
 
-  await expect(session.close(true)).rejects.toThrow(
-    "service-worker policy restoration could not be confirmed",
-  );
+  await expect(session.close(true)).rejects.toMatchObject({
+    cause: {
+      message: expect.stringContaining(
+        "service-worker policy restoration could not be confirmed",
+      ),
+    },
+    cleanupIncomplete: true,
+  });
   expect(cleanup.close).not.toHaveBeenCalled();
   expect(mocks.policyTransportClose).not.toHaveBeenCalled();
   await expect(session.close()).resolves.toBe("disconnected-external");
@@ -776,7 +812,10 @@ it("retains the attached connection when registration restoration fails", async 
     }
     return policyResponse(method);
   });
-  await expect(session.close(true)).rejects.toBe(failure);
+  await expect(session.close(true)).rejects.toMatchObject({
+    cause: failure,
+    cleanupIncomplete: true,
+  });
   expect(cleanup.close).not.toHaveBeenCalled();
   await expect(session.close()).resolves.toBe("disconnected-external");
   expect(
@@ -928,8 +967,10 @@ it("preserves both cleanup failures and retries retained owners", async () => {
   } catch (cause: unknown) {
     failure = cause;
   }
-  expect(failure).toBeInstanceOf(AggregateError);
-  expect((failure as AggregateError).errors).toEqual([
+  expect(failure).toMatchObject({ cleanupIncomplete: true });
+  const physical = (failure as Error).cause;
+  expect(physical).toBeInstanceOf(AggregateError);
+  expect((physical as AggregateError).errors).toEqual([
     detachFailure,
     transportFailure,
   ]);
@@ -937,6 +978,116 @@ it("preserves both cleanup failures and retries retained owners", async () => {
   expect(cleanup.close).toHaveBeenCalledTimes(1);
 
   await expect(session.close()).resolves.toBe("terminated-owned-process");
+  expect(failure).toMatchObject({
+    cleanupIncomplete: false,
+    cleanupResources: [],
+  });
   expect(storage.close).toHaveBeenCalledTimes(2);
   expect(cleanup.close).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the session's exact cleanup lease pending after response timeout until browser acknowledgement", async () => {
+  vi.useFakeTimers();
+  const { cleanup } = fixture();
+  const session = await PlaywrightScenarioSession.open(scenario, {}, {});
+  let acknowledge: () => void = () => {};
+  const late = new Promise<void>((resolve) => {
+    acknowledge = resolve;
+  });
+  cleanup.release = vi.fn(async (finishEvents?: () => Promise<void>) => {
+    await late;
+    await cleanup.close(finishEvents);
+  });
+  try {
+    const pending = session.close().catch((cause: unknown) => cause);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const failure = await pending;
+    expect(failure).toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: ["browser_transport"],
+    });
+    expect(session.cleanupLease.released).toBe(false);
+    acknowledge();
+    await session.cleanupLease.release();
+    expect(failure).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
+    expect(cleanup.close).toHaveBeenCalledTimes(1);
+  } finally {
+    acknowledge();
+    await session.cleanupLease.release();
+    vi.useRealTimers();
+  }
+});
+
+it("retains late opening failure cleanup after cancellation until the exact profile lease recovers", async () => {
+  let finishOpening: () => void = () => {};
+  const terminal = new Promise<void>((resolve) => {
+    finishOpening = resolve;
+  });
+  let profileStarted: () => void = () => {};
+  const profileAttempt = new Promise<void>((resolve) => {
+    profileStarted = resolve;
+  });
+  let denied = true;
+  const lease = new AnalysisCleanupLease(async () => {
+    profileStarted();
+    if (denied) throw new Error("authored profile removal denial");
+  }, ["browser_profile"]);
+  const failure = new ProviderCleanupError("fixture", ["browser_profile"], {
+    reason: "late opening profile cleanup",
+  });
+  new AnalysisCleanupLeaseGroup(failure, [lease]);
+  let launchStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    launchStarted = resolve;
+  });
+  mocks.openBrowser.mockImplementation(
+    async (
+      _scenario: unknown,
+      _env: unknown,
+      options: { retainCleanup?: (lease: AnalysisCleanupLease) => void },
+    ) => {
+      launchStarted();
+      await terminal;
+      options.retainCleanup?.(lease);
+      throw failure;
+    },
+  );
+  const provider = new PlaywrightBrowserScenarioProvider((input, options) =>
+    PlaywrightScenarioSession.open(input, {}, options),
+  );
+  const caller = new AbortController();
+  const reason = { caller: "before late launch rejection" };
+  try {
+    const pending = provider.captureScenario(scenario, {
+      signal: caller.signal,
+    });
+    await started;
+    caller.abort(reason);
+    const result = await pending;
+    if (result.ok) throw new Error("Expected cancelled opening");
+    expect(result.error.cleanupIncomplete).toBe(true);
+    finishOpening();
+    await profileAttempt;
+    await expect(provider.close()).rejects.toMatchObject({
+      cleanupIncomplete: true,
+    });
+    expect(result.error).toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: ["browser_profile"],
+    });
+    denied = false;
+    await provider.close();
+    expect(result.error).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
+    expect(failure.cleanupIncomplete).toBe(false);
+  } finally {
+    denied = false;
+    finishOpening();
+    await provider.close();
+  }
 });

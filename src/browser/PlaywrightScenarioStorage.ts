@@ -1,3 +1,4 @@
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
@@ -103,7 +104,7 @@ type PendingReply = {
 };
 type StorageInstallationOptions = {
   readonly signal?: AbortSignal;
-  readonly retainCleanup?: (close: () => Promise<unknown>) => void;
+  readonly retainCleanup?: (lease: AnalysisCleanupLease) => void;
 };
 type StoragePage = { readonly context: BrowserContext; readonly page: Page };
 export type PlaywrightScenarioStorageCleanup = {
@@ -176,9 +177,12 @@ export class PlaywrightScenarioStorage {
             detached = true;
           }
         };
-        retainCleanup?.(lateCleanup);
+        const cleanup = new AnalysisCleanupLease(lateCleanup, [
+          "browser_storage_transport",
+        ]);
+        retainCleanup?.(cleanup);
         void withPlaywrightExecutionBoundary(
-          lateCleanup,
+          () => cleanup.release(),
           STORAGE_CLEANUP_TIMEOUT_MS,
         ).catch(() => undefined);
       }

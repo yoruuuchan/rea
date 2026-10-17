@@ -1280,6 +1280,173 @@ describe("package exports subpath resolution", () => {
   });
 });
 
+describe("scoped package directory and specifier resolution", () => {
+  it("resolves CommonJS bare scoped package directory to index or package main", () => {
+    const files = fileMap([
+      file("app/src/consumer.js", "root"),
+      file("app/node_modules/@scope/index.js", "root"),
+      file(
+        "app/node_modules/@scope-main/package.json",
+        "root",
+        JSON.stringify({ main: "entry.js" }),
+      ),
+      file("app/node_modules/@scope-main/entry.js", "root"),
+    ]);
+
+    expect(
+      resolve({
+        declaredPath: "@scope",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope/index.js",
+    });
+
+    expect(
+      resolve({
+        declaredPath: "@scope/",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope/index.js",
+    });
+
+    expect(
+      resolve({
+        declaredPath: "@scope-main",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope-main/entry.js",
+    });
+
+    expect(
+      resolve({
+        declaredPath: "@scope-main/",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope-main/entry.js",
+    });
+  });
+
+  it("distinguishes CommonJS scoped exports from ESM loader-owned export and specifier errors", () => {
+    const files = fileMap([
+      file("app/src/consumer.js", "root"),
+      file(
+        "app/node_modules/@scope/package.json",
+        "root",
+        JSON.stringify({
+          exports: {
+            ".": "./selected.js",
+          },
+        }),
+      ),
+      file("app/node_modules/@scope/selected.js", "root"),
+      file("app/node_modules/@scope/index.js", "root"),
+    ]);
+
+    // CommonJS require("@scope") resolves root exports
+    expect(
+      resolve({
+        declaredPath: "@scope",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope/selected.js",
+    });
+
+    // CommonJS require("@scope/") does not match "." subpath exports
+    expect(
+      resolve({
+        declaredPath: "@scope/",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+
+    // ESM import "@scope" without trailing slash is an invalid module specifier
+    expect(
+      resolve({
+        declaredPath: "@scope",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+
+    // ESM import "@scope/" with trailing slash resolves root exports
+    expect(
+      resolve({
+        declaredPath: "@scope/",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "import",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "app/node_modules/@scope/selected.js",
+    });
+
+    // Truly invalid scoped specifiers stay external
+    expect(
+      resolve({
+        declaredPath: "@",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+
+    expect(
+      resolve({
+        declaredPath: "@/",
+        sourcePath: "app/src/consumer.js",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "external",
+      resolved_path: null,
+    });
+  });
+});
+
 describe("package exports subpath encapsulation", () => {
   it("keeps subpaths encapsulated when only a root target is exported", () => {
     const files = fileMap([

@@ -5,6 +5,9 @@ import {
 
 const OPERATION = "capture_browser_scenario" as const;
 
+// Chrome shutdown can take several seconds; expiry bounds the response, not ownership.
+export const PLAYWRIGHT_CLEANUP_CONFIRMATION_TIMEOUT_MS = 30_000;
+
 export const withPlaywrightExecutionBoundary = <Value>(
   work: () => Promise<Value>,
   timeoutMs: number | undefined,
@@ -13,7 +16,9 @@ export const withPlaywrightExecutionBoundary = <Value>(
   if (timeoutMs !== undefined && timeoutMs <= 0)
     return Promise.reject(new AnalysisTimeoutError(OPERATION, timeoutMs));
   if (signal?.aborted === true)
-    return Promise.reject(new AnalysisCancelledError(OPERATION));
+    return Promise.reject(
+      new AnalysisCancelledError(OPERATION, { cause: signal.reason }),
+    );
 
   return new Promise<Value>((resolve, reject) => {
     let settled = false;
@@ -47,7 +52,7 @@ export const withPlaywrightExecutionBoundary = <Value>(
       reject(error);
     };
     const onAbort = (): void => {
-      fail(new AnalysisCancelledError(OPERATION));
+      fail(new AnalysisCancelledError(OPERATION, { cause: signal?.reason }));
     };
     scheduleTimeout();
     signal?.addEventListener("abort", onAbort, { once: true });

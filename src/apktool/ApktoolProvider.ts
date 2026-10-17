@@ -31,9 +31,11 @@ import {
   type AnalysisExecution,
 } from "../application/AnalysisProvider.js";
 import {
-  androidLocaleDirectorySuffix,
+  apktoolResultSchemas,
   type ApktoolRequest,
+  type ApktoolDecodeResult,
 } from "../domain/apktool/apktoolResourceAnalysis.js";
+import { projectApktoolStringTables } from "./ApktoolStringTables.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
@@ -64,7 +66,6 @@ import {
 } from "./ApktoolConfiguration.js";
 import {
   parseApktoolYml,
-  parseDecodedStrings,
   parseManifestPackage,
 } from "./ApktoolDecodeOutput.js";
 
@@ -78,8 +79,6 @@ export const APKTOOL_PROVIDER_IDENTITY = {
 const DECODE_TIMEOUT_MS = 600_000;
 const DECODE_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MANIFEST_MAX_BYTES = 512 * 1024;
-const STRINGS_XML_MAX_BYTES = 8 * 1024 * 1024;
-const MAX_STRINGS = 2_000;
 const MAX_DECODED_ENTRIES_VISITED = 100_000;
 const STDERR_EXCERPT_BYTES = 512;
 
@@ -236,6 +235,13 @@ export interface ApktoolProviderOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly removeWorkspace?: (path: string) => Promise<void>;
 }
+
+type DecodeFacts = Pick<ApktoolDecodeResult, "client" | "target" | "locale"> &
+  Partial<
+    Omit<ApktoolDecodeResult, "metadata" | "client" | "target" | "locale">
+  > & {
+    metadata?: Partial<ApktoolDecodeResult["metadata"]>;
+  };
 
 /**
  * Apktool resource decoding over a caller-selected launcher.
@@ -500,17 +506,12 @@ export class ApktoolProvider {
     operation: "decode_android_resources",
     selection: ApktoolCommandSelection,
     environment: Readonly<NodeJS.ProcessEnv>,
-    client: {
-      command: string;
-      command_source: string;
-      apktool_version: string | null;
-    },
+    client: ApktoolDecodeResult["client"],
     provider: { id: string; name: string; version: string | null },
-    input: {
-      readonly path: string;
-      readonly include_strings: boolean;
-      readonly locale?: string | undefined;
-    },
+    input: Extract<
+      ApktoolRequest,
+      { operation: "decode_android_resources" }
+    >["input"],
     clientLimitations: readonly string[],
     signal: AbortSignal | undefined,
   ): Promise<Result<AnalysisExecution, AnalysisError>> {
@@ -528,6 +529,12 @@ export class ApktoolProvider {
     const owner = { kind: "lease" as const, resource: root, lease };
     this.#artifacts.retain(owner);
     let result: Result<AnalysisExecution, AnalysisError>;
+    let completedDecode: DecodeFacts | undefined;
+    let stoppedAt = "metadata";
+    const limitations: string[] = [
+      ...clientLimitations,
+      "Decoding skips smali (--no-src); Java-source recovery belongs to the JADX family",
+    ];
     try {
       const identity = await resources.snapshotInput(
         input.path,
@@ -563,6 +570,12 @@ export class ApktoolProvider {
       if (!decoded.ok) {
         throw decoded.error;
       }
+      completedDecode = {
+        client,
+        target: { path: input.path, bytes: identity.bytes, sha256 },
+        locale: input.locale ?? null,
+        coverage: "partial",
+      };
       throwIfCancelled(operation, signal);
       const yml = await resources.readText(
         join(workspace, "apktool.yml"),
@@ -575,133 +588,89 @@ export class ApktoolProvider {
         );
       }
       const metadata = parseApktoolYml(yml.text);
+      completedDecode.metadata = {
+        version_name: metadata.versionName,
+        version_code: metadata.versionCode,
+        min_sdk_version: metadata.minSdkVersion,
+        target_sdk_version: metadata.targetSdkVersion,
+      };
+      stoppedAt = "manifest";
       const manifestRead = await resources.readText(
         join(workspace, "AndroidManifest.xml"),
         MANIFEST_MAX_BYTES,
         signal,
       );
       const manifest = manifestRead.text;
+      completedDecode.manifest = manifest;
+      if (manifestRead.truncated) {
+        limitations.push(
+          `manifest is truncated at ${String(MANIFEST_MAX_BYTES)} bytes`,
+        );
+      }
       const packageName =
         manifest === null || manifestRead.truncated
           ? null
           : parseManifestPackage(manifest);
-      const stringsDirectory =
-        input.locale === undefined
-          ? "values"
-          : `values-${androidLocaleDirectorySuffix(input.locale)}`;
-      const stringsRead = input.include_strings
-        ? await resources.readText(
-            join(workspace, "res", stringsDirectory, "strings.xml"),
-            STRINGS_XML_MAX_BYTES,
-            signal,
-          )
-        : { text: null, truncated: false };
-      // Do not parse an incomplete XML document as though its projection were complete.
-      const stringsXml = stringsRead.truncated ? null : stringsRead.text;
-      const stringsProjection =
-        stringsXml === null ? undefined : parseDecodedStrings(stringsXml);
-      const parsedStrings =
-        stringsProjection?.ok === true ? stringsProjection.value : undefined;
-      const documentFailure =
-        stringsProjection?.ok === false ? stringsProjection.error : undefined;
-      const bounded = parsedStrings?.entries.slice(0, MAX_STRINGS) ?? [];
-      const files = await countDecodedFiles(
+      completedDecode.metadata.package_name = packageName;
+      stoppedAt = "inventory";
+      const inventory = await countDecodedFiles(
         resources,
         workspace,
         signal,
         MAX_DECODED_ENTRIES_VISITED,
       );
+      const files = inventory.ok ? inventory.value : inventory.error.partial;
+      completedDecode.locales = [...files.locales];
+      completedDecode.decoded_file_count = files.count;
+      if (files.unreadableStringsTables.length > 0) {
+        limitations.push(
+          `String tables omitted because they are not regular files: ${files.unreadableStringsTables.map((table) => `${JSON.stringify(table.path)} (${table.kind})`).join(", ")}`,
+        );
+      }
+      if (files.otherStringsTables.length > 0) {
+        limitations.push(
+          `Other strings tables are not selected by locale; their resource configuration suffixes are preserved without inferring Android runtime matching: ${files.otherStringsTables.map((table) => JSON.stringify(table)).join(", ")}`,
+        );
+      }
+      if (files.capped) {
+        limitations.push(
+          `Decoded workspace enumeration stopped after ${String(MAX_DECODED_ENTRIES_VISITED)} entries; decoded_file_count and locales may be partial`,
+        );
+      }
+      if (!inventory.ok) throw inventory.error.cause;
       throwIfCancelled(operation, signal);
+      stoppedAt = "string projection";
+
+      const projection = await projectApktoolStringTables(
+        resources,
+        workspace,
+        input,
+        signal,
+      );
+      const projectedStrings = projection.ok
+        ? projection.value
+        : projection.error.partial;
+      limitations.push(...projectedStrings.limitations);
       const coverage =
-        (parsedStrings !== undefined &&
-          parsedStrings.entries.length > MAX_STRINGS) ||
+        projectedStrings.coverage === "partial" ||
         manifestRead.truncated ||
-        stringsRead.truncated ||
-        (parsedStrings !== undefined && parsedStrings.unparsedCount > 0) ||
-        documentFailure !== undefined ||
         files.capped ||
         files.unreadableStringsTables.length > 0
           ? "partial"
           : "complete";
+
+      completedDecode.strings = [...projectedStrings.strings];
+      if (input.locales !== undefined)
+        completedDecode.string_tables = [...projectedStrings.tables];
+      completedDecode.coverage = coverage;
+      if (!projection.ok) throw projection.error.cause;
       result = ok(
         createAnalysisExecution(
-          {
-            client,
-            target: { path: input.path, bytes: identity.bytes, sha256 },
-            metadata: {
-              version_name: metadata.versionName,
-              version_code: metadata.versionCode,
-              min_sdk_version: metadata.minSdkVersion,
-              target_sdk_version: metadata.targetSdkVersion,
-              package_name: packageName,
-            },
-            manifest,
-            strings: bounded,
-            locale: input.locale ?? null,
-            locales: files.locales,
-            decoded_file_count: files.count,
-            coverage,
-          },
+          apktoolResultSchemas.decode_android_resources.parse(completedDecode),
           provider,
           {
             subject: { path: input.path, sha256, format: "apk" },
-            limitations: [
-              ...clientLimitations,
-              "Decoding skips smali (--no-src); Java-source recovery belongs to the JADX family",
-              ...(input.locale !== undefined &&
-              stringsRead.text === null &&
-              input.include_strings
-                ? [`No strings.xml was found for locale ${input.locale}`]
-                : []),
-              ...(input.include_strings &&
-              stringsRead.text === null &&
-              input.locale === undefined
-                ? [
-                    "No default res/values/strings.xml was found in the decoded workspace",
-                  ]
-                : []),
-              ...(documentFailure === undefined
-                ? []
-                : [
-                    `String table ${JSON.stringify(`res/${stringsDirectory}/strings.xml`)} could not be projected: ${documentFailure.message}; entry counts are unknown`,
-                  ]),
-              ...(parsedStrings !== undefined && parsedStrings.unparsedCount > 0
-                ? [
-                    `String entries omitted due to unsupported markup or missing names: ${String(parsedStrings.unparsedCount)}`,
-                  ]
-                : []),
-              ...(parsedStrings !== undefined &&
-              parsedStrings.entries.length > MAX_STRINGS
-                ? [
-                    `strings reports the first ${String(MAX_STRINGS)} of ${String(parsedStrings.entries.length)} entries`,
-                  ]
-                : []),
-              ...(manifestRead.truncated
-                ? [
-                    `manifest is truncated at ${String(MANIFEST_MAX_BYTES)} bytes`,
-                  ]
-                : []),
-              ...(stringsRead.truncated
-                ? [
-                    `strings.xml exceeds the ${String(STRINGS_XML_MAX_BYTES)}-byte projection budget`,
-                  ]
-                : []),
-              ...(files.unreadableStringsTables.length === 0
-                ? []
-                : [
-                    `String tables omitted because they are not regular files: ${files.unreadableStringsTables.map((table) => `${JSON.stringify(table.path)} (${table.kind})`).join(", ")}`,
-                  ]),
-              ...(files.otherStringsTables.length === 0
-                ? []
-                : [
-                    `Other strings tables are not selected by locale; their resource configuration suffixes are preserved without inferring Android runtime matching: ${files.otherStringsTables.map((table) => JSON.stringify(table)).join(", ")}`,
-                  ]),
-              ...(files.capped
-                ? [
-                    `Decoded workspace enumeration stopped after ${String(MAX_DECODED_ENTRIES_VISITED)} entries; decoded_file_count and locales may be partial`,
-                  ]
-                : []),
-            ],
+            limitations,
           },
         ),
       );
@@ -739,6 +708,34 @@ export class ApktoolProvider {
                 operation,
               ).bindCleanupDependencies([primary, failure])
             : primary;
+      if (
+        completedDecode !== undefined &&
+        retained.partialObservation === undefined
+      ) {
+        limitations.push(
+          `Decode observation stopped during ${stoppedAt}; fields not yet observed are omitted`,
+        );
+        const partialExecution = createAnalysisExecution(
+          { ...completedDecode, coverage: "partial" },
+          provider,
+          {
+            subject: {
+              path: input.path,
+              sha256: completedDecode.target.sha256,
+              format: "apk",
+            },
+            limitations,
+          },
+        );
+        retained.retainPartialObservation(
+          createAnalysisExecutionEvidence(
+            operation,
+            input,
+            partialExecution,
+            "observed",
+          ),
+        );
+      }
       if (
         resources.snapshot !== undefined &&
         retained.partialObservation === undefined

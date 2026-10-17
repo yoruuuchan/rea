@@ -75,6 +75,9 @@ class RetrySession implements BrowserScenarioSessionPort {
     },
   });
 
+  get cleanupLease() {
+    return this.cleanup.cleanupLease;
+  }
   constructor(private readonly closeFailures = 1) {}
 
   currentUrl() {
@@ -317,7 +320,12 @@ it("retries a late Playwright open after cancellation before accepting another c
     cancellation.abort();
     const cancelled = await firstCapture;
     if (cancelled.ok) throw new Error("Expected the first capture to cancel.");
-    expect(cancelled.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(cancelled.error.cleanupIncomplete).toBe(true);
+    let primary = cancelled.error.cleanupPrimary;
+    while (primary?.cleanupPrimary !== undefined)
+      primary = primary.cleanupPrimary;
+    expect(primary).toBeInstanceOf(AnalysisCancelledError);
+    expect(primary?.cause).toBe(cancellation.signal.reason);
 
     finishLateOpen(makeContext());
     await closeStarted;
@@ -331,6 +339,10 @@ it("retries a late Playwright open after cancellation before accepting another c
     expect(retried.ok).toBe(true);
     if (retried.ok) expect(retried.value.steps).toHaveLength(2);
     expect(firstCloseAttempts).toBe(2);
+    expect(cancelled.error).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
     expect(launchCount).toBe(2);
     await provider.close();
     expect(launchCount).toBe(2);
@@ -431,7 +443,14 @@ it("preserves cancellation diagnostics while retrying retained cleanup", async (
       details: {
         cleanup: "incomplete",
         diagnostics: {
-          primary_error: { code: "cancelled", category: "cancelled" },
+          primary_error: {
+            code: "cleanup_incomplete",
+            details: {
+              diagnostics: {
+                primary_error: { code: "cancelled", category: "cancelled" },
+              },
+            },
+          },
         },
         partial_observation: { kind: "browser-scenario-observation" },
       },

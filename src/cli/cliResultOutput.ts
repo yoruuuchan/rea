@@ -8,7 +8,10 @@ import {
   parseCliOutputArguments,
   validateCliOutputArguments,
 } from "../cliOutput.js";
-import { cliOperationFailurePayload } from "../cliLogging.js";
+import {
+  cliOperationFailureIdentity,
+  cliOperationFailurePayload,
+} from "../cliLogging.js";
 import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
 import {
   projectAnalysisError,
@@ -34,6 +37,8 @@ export interface CliResultOutput {
   readonly failed: boolean;
   readonly error: AnalysisErrorProjection | undefined;
   write(value: unknown, metadata: CliResultOutputMetadata): Promise<boolean>;
+  /** Recover only before any delegated stdout has been written. */
+  recoverFormattingFailure(cause: unknown): Promise<boolean>;
 }
 
 type CommandMap = NonNullable<ReturnType<typeof Cli.toCommands.get>>;
@@ -121,6 +126,81 @@ export const createCliResultOutput = (
   let handled = false;
   let failed = false;
   let error: AnalysisErrorProjection | undefined;
+  let completed:
+    | {
+        readonly metadata: CliResultOutputMetadata;
+        readonly originalFailure: ReturnType<
+          typeof cliOperationFailureIdentity
+        >;
+      }
+    | undefined;
+  const recoverFormattingFailure = async (cause: unknown): Promise<boolean> => {
+    // A rejected command never reaches write(). Destination failures retain
+    // handled ownership. Only a completed, unwritten result can be replaced.
+    if (
+      completed === undefined ||
+      handled ||
+      !(cause instanceof RangeError) ||
+      cause.message !== "Invalid string length"
+    )
+      return false;
+    const { originalFailure } = completed;
+    error = projectAnalysisError(
+      new AnalysisResourceConstraintError(
+        completed.metadata.command,
+        "memory",
+        `The ${format} result could not fit in a runtime string. The original result was not written.`,
+        {
+          format,
+          formatted_characters: null,
+          max_string_characters: constants.MAX_STRING_LENGTH,
+          ...(originalFailure === undefined
+            ? {}
+            : { original_failure: originalFailure }),
+        },
+        {
+          cause,
+          retryable: false,
+          remediationAction:
+            "Use --format json to stream the complete result, or narrow it with --filter-output. Token limits are applied after formatting and cannot avoid this constraint.",
+        },
+      ),
+    );
+    const document = options.fullOutput
+      ? {
+          ok: false,
+          error,
+          meta: {
+            command: completed.metadata.command,
+            duration: completed.metadata.duration,
+          },
+        }
+      : error;
+    // Recovery must remain actionable even when a token window/count was
+    // requested. Do not apply those controls to this small typed failure.
+    const text = Formatter.format(document, format);
+    handled = true;
+    try {
+      await writeOutputText(destination, `${text}\n`);
+    } catch (writeFailure: unknown) {
+      failed = true;
+      throw writeFailure;
+    }
+    return true;
+  };
+  const write = async (
+    value: unknown,
+    metadata: CliResultOutputMetadata,
+  ): Promise<boolean> => {
+    completed = undefined;
+    if (metadata.format !== format) return false;
+    try {
+      return await writeResult(value, metadata);
+    } catch (cause: unknown) {
+      if (await recoverFormattingFailure(cause)) return true;
+      throw cause;
+    }
+  };
   return {
     get handled() {
       return handled;
@@ -131,127 +211,135 @@ export const createCliResultOutput = (
     get error() {
       return error;
     },
-    async write(value, metadata) {
-      if (metadata.format !== format) return false;
-      const failure = options.fullOutput
-        ? cliOperationFailurePayload(value)
+    write,
+    recoverFormattingFailure,
+  };
+
+  async function writeResult(
+    value: unknown,
+    metadata: CliResultOutputMetadata,
+  ): Promise<boolean> {
+    const failure = options.fullOutput
+      ? cliOperationFailurePayload(value)
+      : undefined;
+    completed = {
+      metadata,
+      originalFailure: cliOperationFailureIdentity(value),
+    };
+    const filtered: unknown = options.filterOutput
+      ? Filter.apply(value, Filter.parse(options.filterOutput))
+      : value;
+    // Leave successful YAML and bare YAML rendering to Incur. The custom
+    // boundary is needed only for a full failure envelope, whose error
+    // sentinel otherwise drops category, remediation, and details.
+    if (format !== "json" && format !== "jsonl" && failure === undefined)
+      return false;
+    if (options.tokenCount) {
+      // Incur/tokenx materialize JSON. Measure its UTF-16 expansion before
+      // allowing that allocation, independently of UTF-8 bytes. Other formats
+      // retain Incur's materializing behavior.
+      const tokenValue = failure ?? filtered;
+      let characters = 0;
+      if (
+        tokenValue !== undefined &&
+        tokenValue !== null &&
+        typeof tokenValue !== "function" &&
+        typeof tokenValue !== "symbol"
+      ) {
+        if (format === "json" || format === "jsonl") {
+          for (const part of jsonOutputParts(
+            tokenValue,
+            format,
+            format === "json",
+          ))
+            characters += part.length;
+          characters = Math.max(0, characters - 1);
+        }
+      }
+      if (characters <= constants.MAX_STRING_LENGTH) {
+        if (failure === undefined) return false;
+        const count = estimateTokenCount(Formatter.format(failure, format));
+        handled = true;
+        try {
+          await writeOutputText(destination, `${count}\n`);
+          return true;
+        } catch (cause: unknown) {
+          failed = true;
+          throw cause;
+        }
+      }
+      error = projectAnalysisError(
+        new AnalysisResourceConstraintError(
+          metadata.command,
+          "memory",
+          "Token counting requires a formatted string larger than the runtime permits.",
+          {
+            formatted_characters: characters,
+            max_string_characters: constants.MAX_STRING_LENGTH,
+          },
+          {
+            remediationAction:
+              "Remove --token-count to stream the complete JSON result, or narrow it with --filter-output.",
+          },
+        ),
+      );
+    }
+    const meta = {
+      command: metadata.command,
+      duration: metadata.duration,
+    };
+    const errorDocument =
+      options.fullOutput && failure !== undefined
+        ? fullFailureEnvelope(
+            failure,
+            meta,
+            format,
+            options.tokenLimit,
+            options.tokenOffset,
+          )
         : undefined;
-      const filtered: unknown = options.filterOutput
-        ? Filter.apply(value, Filter.parse(options.filterOutput))
-        : value;
-      // Leave successful YAML and bare YAML rendering to Incur. The custom
-      // boundary is needed only for a full failure envelope, whose error
-      // sentinel otherwise drops category, remediation, and details.
-      if (format !== "json" && format !== "jsonl" && failure === undefined)
-        return false;
-      if (options.tokenCount) {
-        // Incur/tokenx materialize JSON. Measure its UTF-16 expansion before
-        // allowing that allocation, independently of UTF-8 bytes. Other formats
-        // retain Incur's materializing behavior.
-        const tokenValue = failure ?? filtered;
-        let characters = 0;
-        if (
-          tokenValue !== undefined &&
-          tokenValue !== null &&
-          typeof tokenValue !== "function" &&
-          typeof tokenValue !== "symbol"
-        ) {
-          if (format === "json" || format === "jsonl") {
-            for (const part of jsonOutputParts(
-              tokenValue,
-              format,
-              format === "json",
-            ))
-              characters += part.length;
-            characters = Math.max(0, characters - 1);
-          }
-        }
-        if (characters <= constants.MAX_STRING_LENGTH) {
-          if (failure === undefined) return false;
-          handled = true;
-          try {
-            await writeOutputText(
-              destination,
-              `${estimateTokenCount(Formatter.format(failure, format))}\n`,
-            );
-            return true;
-          } catch (cause: unknown) {
-            failed = true;
-            throw cause;
-          }
-        }
-        error = projectAnalysisError(
-          new AnalysisResourceConstraintError(
-            metadata.command,
-            "memory",
-            "Token counting requires a formatted string larger than the runtime permits.",
-            {
-              formatted_characters: characters,
-              max_string_characters: constants.MAX_STRING_LENGTH,
-            },
-            {
-              remediationAction:
-                "Remove --token-count to stream the complete JSON result, or narrow it with --filter-output.",
-            },
-          ),
+    const document = options.fullOutput
+      ? failure !== undefined
+        ? errorDocument
+        : filtered === undefined
+          ? { ok: true, meta }
+          : { ok: true, data: filtered, meta }
+      : // A selected null is a value; only a selection with no JSON value
+        // falls back to the empty document.
+        filtered === undefined ||
+          typeof filtered === "function" ||
+          typeof filtered === "symbol"
+        ? {}
+        : filtered;
+    // Once writing starts, a failed destination must not receive a second
+    // document from Incur's error formatter.
+    const failureText =
+      failure !== undefined && format !== "json" && format !== "jsonl"
+        ? Formatter.format(document, format)
+        : undefined;
+    handled = true;
+    try {
+      if (failureText !== undefined) {
+        // Incur's error sentinel only carries code/message/retryable. Render
+        // the full caller-visible failure at this output boundary.
+        await writeOutputText(destination, `${failureText}\n`);
+      } else {
+        await writeJsonOutput(
+          error === undefined
+            ? document
+            : options.fullOutput
+              ? { ok: false, error, meta }
+              : error,
+          destination,
+          format as "json" | "jsonl",
         );
       }
-      const meta = {
-        command: metadata.command,
-        duration: metadata.duration,
-      };
-      const errorDocument =
-        options.fullOutput && failure !== undefined
-          ? fullFailureEnvelope(
-              failure,
-              meta,
-              format,
-              options.tokenLimit,
-              options.tokenOffset,
-            )
-          : undefined;
-      const document = options.fullOutput
-        ? failure !== undefined
-          ? errorDocument
-          : filtered === undefined
-            ? { ok: true, meta }
-            : { ok: true, data: filtered, meta }
-        : // A selected null is a value; only a selection with no JSON value
-          // falls back to the empty document.
-          filtered === undefined ||
-            typeof filtered === "function" ||
-            typeof filtered === "symbol"
-          ? {}
-          : filtered;
-      // Once writing starts, a failed destination must not receive a second
-      // document from Incur's error formatter.
-      handled = true;
-      try {
-        if (failure !== undefined && format !== "json" && format !== "jsonl") {
-          // Incur's error sentinel only carries code/message/retryable. Render
-          // the full caller-visible failure at this output boundary.
-          await writeOutputText(
-            destination,
-            `${Formatter.format(document, format)}\n`,
-          );
-        } else {
-          await writeJsonOutput(
-            error === undefined
-              ? document
-              : options.fullOutput
-                ? { ok: false, error, meta }
-                : error,
-            destination,
-            format as "json" | "jsonl",
-          );
-        }
-      } catch (cause: unknown) {
-        failed = true;
-        throw cause;
-      }
-      return true;
-    },
-  };
+    } catch (cause: unknown) {
+      failed = true;
+      throw cause;
+    }
+    return true;
+  }
 };
 
 const fullFailureEnvelope = (

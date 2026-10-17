@@ -1,4 +1,11 @@
+import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { afterEach, expect, it, vi } from "vitest";
+import { mkdir, writeFile, rm, access } from "node:fs/promises";
+import { join } from "node:path";
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import type {
   Browser,
   BrowserContext,
@@ -9,6 +16,7 @@ import type {
 import { browserScenarioSchema } from "../domain/browserScenario.js";
 import {
   attachedScenarioLeaseKey,
+  failBrowserScenarioOperation,
   openPlaywrightScenarioBrowser,
   PlaywrightScenarioBrowserCleanupOwner,
 } from "./PlaywrightScenarioBrowser.js";
@@ -135,6 +143,10 @@ it("keeps attached-target ownership after the cleanup response timeout", async (
       onSettled: (browserClosed) => settled.push(browserClosed),
     });
     const timedOutClose = cleanup.close();
+    let timedOutFailure: unknown;
+    void timedOutClose.catch((cause: unknown) => {
+      timedOutFailure = cause;
+    });
     const timeoutExpectation = expect(timedOutClose).rejects.toMatchObject({
       reason: "cleanup_failed",
       cleanup: { reason: expect.stringContaining("timed out") },
@@ -155,6 +167,10 @@ it("keeps attached-target ownership after the cleanup response timeout", async (
     closeResult.resolve(undefined);
     await cleanup.close();
     expect(settled).toEqual([true]);
+    expect(timedOutFailure).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
   } finally {
     vi.useRealTimers();
   }
@@ -674,4 +690,94 @@ it("serializes concurrent attach across loopback spellings of one browser", asyn
   rejectFirstConnection(new Error("second connection failed"));
   await expect(second).rejects.toThrow("second connection failed");
   expect(endpoints).toEqual(["http://127.0.0.1:9222", "http://[::1]:9222"]);
+});
+
+it("tracks only pending browser cleanup resources and resolves prior errors after exact recovery", async () => {
+  const root = await createTestTempDirectory("rea-browser-cleanup-recovery-");
+  const profile = join(root, "profile");
+  await mkdir(profile);
+  await writeFile(join(profile, "authored-data"), "profile control");
+  let browserDenied = true;
+  let profileDenied = true;
+  let browserCloses = 0;
+  const owner = new PlaywrightScenarioBrowserCleanupOwner({
+    closeBrowser: async () => {
+      browserCloses++;
+      if (browserDenied) throw new Error("controlled transport close failure");
+    },
+    removeProfile: async () => {
+      if (profileDenied) throw new Error("controlled profile removal failure");
+      await rm(profile, { recursive: true });
+    },
+  });
+  try {
+    const first: unknown = await owner.close().catch((cause: unknown) => cause);
+    expect(first).toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: ["browser_transport", "browser_profile"],
+    });
+    browserDenied = false;
+    const second: unknown = await owner
+      .close()
+      .catch((cause: unknown) => cause);
+    expect(owner.browserClosed).toBe(true);
+    for (const error of [first, second])
+      expect(error).toMatchObject({
+        cleanupIncomplete: true,
+        cleanupResources: ["browser_profile"],
+      });
+    await access(profile);
+    profileDenied = false;
+    await owner.close();
+    await expect(access(profile)).rejects.toMatchObject({ code: "ENOENT" });
+    for (const error of [first, second])
+      expect(error).toMatchObject({
+        cleanupIncomplete: false,
+        cleanupResources: [],
+      });
+    expect(browserCloses).toBe(2);
+  } finally {
+    browserDenied = false;
+    profileDenied = false;
+    await owner.close();
+  }
+});
+
+it("bounds an opening failure response while retaining the same late cleanup lease", async () => {
+  vi.useFakeTimers();
+  let acknowledge: () => void = () => {};
+  const late = new Promise<void>((resolve) => {
+    acknowledge = resolve;
+  });
+  const lease = new AnalysisCleanupLease(() => late, ["browser_profile"]);
+  const reason = { caller: "cancelled opening" };
+  const primary = new AnalysisCancelledError("capture_browser_scenario", {
+    cause: reason,
+  });
+  try {
+    const opening = failBrowserScenarioOperation(lease, primary).catch(
+      (cause: unknown) => cause,
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    const failure = await opening;
+    expect(failure).toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: ["browser_profile"],
+    });
+    expect(lease.released).toBe(false);
+    acknowledge();
+    await lease.release();
+    expect(failure).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
+    if (!(failure instanceof AnalysisError))
+      throw new Error("Expected typed cleanup failure");
+    expect(projectAnalysisError(failure)).toMatchObject({ code: "cancelled" });
+    expect(primary.cause).toBe(reason);
+  } finally {
+    acknowledge();
+    await lease.release();
+    vi.useRealTimers();
+  }
 });

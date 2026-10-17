@@ -31,7 +31,9 @@ export const captureBrowserScenario = async (
       ),
     );
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError(OPERATION));
+    return err(
+      new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+    );
   const captured = await provider.captureScenario(scenario, options);
   if (!captured.ok) {
     const partial = captured.error.partialObservation;

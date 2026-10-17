@@ -49,7 +49,9 @@ export class PacketCaptureService {
   ): Promise<Result<Evidence, AnalysisError>> {
     const operation = "inspect_packet_capture";
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const input = inspectPacketCaptureInputSchema.safeParse(raw);
     if (!input.success)
       return err(
@@ -92,7 +94,9 @@ export class PacketCaptureService {
   ): Promise<Result<Evidence, AnalysisError>> {
     const operation = "inspect_packet_fields";
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const input = inspectPacketFieldsInputSchema.safeParse(raw);
     if (!input.success)
       return err(
@@ -139,6 +143,7 @@ export class PacketCaptureService {
     return options?.signal?.aborted
       ? err(
           new AnalysisCancelledError(operation, {
+            cause: options.signal.reason,
             partialObservation: evidence,
           }),
         )

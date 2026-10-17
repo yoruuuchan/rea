@@ -97,6 +97,8 @@ else { if(readFileSync('capture', 'utf8') !== 'recording bytes') throw Error('wr
       return {
         path: root.path,
         close: async () => {
+          if (mode === "close-abort")
+            controller.abort({ request: "cancel during workspace close" });
           if (!mayClean) throw new Error("cleanup fixture failure");
           await root.close();
         },
@@ -248,6 +250,8 @@ it.each([
     );
     if (result.ok) throw new Error("Expected capture analysis failure");
     expect(result.error._tag).toBe(tag);
+    if (mode === "wait")
+      expect(result.error.cause).toBe(f.controller.signal.reason);
     expect(result.error.cleanupIncomplete).toBe(false);
     expect(
       (await readdir(f.directory)).filter((name) =>
@@ -327,7 +331,7 @@ it("retains a completed observation when cancellation arrives at the service bou
       throw new Error("Unexpected field discovery call");
     },
     inspect: async () => {
-      f.controller.abort();
+      f.controller.abort({ request: "cancel at Evidence boundary" });
       return execution;
     },
     close: async () => {},
@@ -335,6 +339,7 @@ it("retains a completed observation when cancellation arrives at the service bou
   const result = await service.inspect(input, { signal: f.controller.signal });
   if (result.ok) throw new Error("Expected late cancellation");
   expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(f.controller.signal.reason);
   expect(result.error.partialObservation).toMatchObject({
     operation: "inspect_packet_capture",
     normalized_result: {
@@ -676,3 +681,36 @@ it("preserves discovery resource ownership through CLI shutdown retries", async 
     await f.service.close();
   }
 });
+
+it.each(
+  [false, true].flatMap((failsClose) =>
+    [false, true].map((discovery) => ({ failsClose, discovery })),
+  ),
+)(
+  "retains completed Evidence and exact cancellation during workspace close: %j",
+  async ({ failsClose, discovery }) => {
+    const f = await fixture("close-abort", failsClose);
+    const result = discovery
+      ? await f.service.inspectFields({}, { signal: f.controller.signal })
+      : await f.service.inspect(
+          { path: f.path, fields: ["ip.addr"] },
+          { signal: f.controller.signal },
+        );
+    if (result.ok) throw new Error("Expected finalization cancellation");
+    const primary = failsClose ? result.error.cleanupPrimary : result.error;
+    expect(primary).toMatchObject({ _tag: "AnalysisCancelledError" });
+    expect(primary?.cause).toBe(f.controller.signal.reason);
+    expect(result.error.partialObservation).toMatchObject({
+      operation: discovery ? "inspect_packet_fields" : "inspect_packet_capture",
+    });
+    expect(result.error.cleanupIncomplete).toBe(failsClose);
+    if (failsClose)
+      await expect(f.service.close()).rejects.toMatchObject({
+        cleanupIncomplete: true,
+      });
+    f.allowCleanup();
+    await f.service.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(primary?.cause).toBe(f.controller.signal.reason);
+  },
+);

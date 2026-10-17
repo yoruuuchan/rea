@@ -51,3 +51,23 @@ describe("withPlaywrightExecutionBoundary", () => {
     ).resolves.toBe("done");
   });
 });
+
+it.each(["before", "during"] as const)(
+  "keeps typed caller reasons opaque when cancelled %s work",
+  async (phase) => {
+    const caller = new AbortController();
+    const reason = new AnalysisTimeoutError("capture_browser_scenario", 123);
+    if (phase === "before") caller.abort(reason);
+    const pending = withPlaywrightExecutionBoundary(
+      () => new Promise<never>(() => {}),
+      undefined,
+      caller.signal,
+    );
+    if (phase === "during") caller.abort(reason);
+    const error: unknown = await pending.catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(AnalysisCancelledError);
+    if (!(error instanceof AnalysisCancelledError))
+      throw new Error("Expected typed cancellation");
+    expect(error.cause).toBe(reason);
+  },
+);
