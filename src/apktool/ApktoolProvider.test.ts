@@ -11,8 +11,12 @@ import { join } from "node:path";
 import { describe, expect, onTestFinished, test } from "vitest";
 
 import { ApktoolProvider } from "./ApktoolProvider.js";
+import { ApktoolResourceAnalysisService } from "../application/apktool/ApktoolResourceAnalysisService.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { apktoolRequestSchema } from "../domain/apktool/apktoolResourceAnalysis.js";
+import {
+  apktoolRequestSchema,
+  apktoolResultSchemas,
+} from "../domain/apktool/apktoolResourceAnalysis.js";
 import type { ApktoolRequest } from "../domain/apktool/apktoolResourceAnalysis.js";
 
 const it = test.skipIf(process.platform === "win32");
@@ -491,10 +495,26 @@ it("uses an owned APK snapshot and framework cache and resolves regional locales
     ),
   );
   const apk = await apkFixture(root);
-  const result = await evidenceResult(providerOver(command), {
-    operation: "decode_android_resources",
-    input: { path: apk.path, include_strings: true, locale: "pt-BR" },
+  const observation = await new ApktoolResourceAnalysisService(
+    providerOver(command),
+  ).execute("decode_android_resources", {
+    path: apk.path,
+    include_strings: true,
+    locale: "pt-BR",
   });
+  if (!observation.ok) throw observation.error;
+  expect(observation.value.subject).toMatchObject({
+    local_path: apk.path,
+    format: "apk",
+    digest: { sha256: apk.sha256 },
+  });
+  expect(observation.value.limitations).not.toContain(
+    "Artifact identity is unavailable for this observation.",
+  );
+  expect(await readFile(apk.path, "utf8")).toBe("changed original");
+  const result = apktoolResultSchemas.decode_android_resources.parse(
+    observation.value.normalized_result,
+  );
   expect(result.target).toMatchObject({
     sha256: apk.sha256,
     bytes: apk.bytes,

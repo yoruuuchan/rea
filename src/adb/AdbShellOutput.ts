@@ -297,10 +297,12 @@ export const parseDumpsysPackageOutput = (
     pkgFlags: null,
   };
   let inPermissions = false;
+  let hasPermissionsSection = false;
   let permissions = 0;
-  let packageIsNull = false;
+  let parsedPackageAvailable: boolean | null = null;
   for (const line of stdout.split(/\r?\n/u)) {
     if (line.trim().startsWith("requested permissions:")) {
+      hasPermissionsSection = true;
       inPermissions = true;
       continue;
     }
@@ -317,8 +319,11 @@ export const parseDumpsysPackageOutput = (
     if (match === null) continue;
     const key = match[1]!;
     const value = match[2]!.trim();
-    if (key === "pkg" && value === "null") packageIsNull = true;
-    else if (key === "versionName" && details.versionName === null)
+    if (key === "pkg" && parsedPackageAvailable === null) {
+      if (value === "null") parsedPackageAvailable = false;
+      else if (value.startsWith("Package{") && value.endsWith("}"))
+        parsedPackageAvailable = true;
+    } else if (key === "versionName" && details.versionName === null)
       details.versionName = value === "" ? null : value;
     else if (key === "versionCode" && details.versionCode === null) {
       const parsed = /^(-?\d+)/u.exec(value);
@@ -338,10 +343,17 @@ export const parseDumpsysPackageOutput = (
     } else if (key === "pkgFlags" && details.pkgFlags === null)
       details.pkgFlags = value === "" ? null : value;
   }
-  return {
-    ...details,
-    requestedPermissions: packageIsNull ? null : permissions,
-  };
+  // `dumpsys` omits this section both for known-empty inventories and when
+  // Package Manager has no parsed package; only the former is a known zero.
+  const requestedPermissions =
+    parsedPackageAvailable === false
+      ? null
+      : hasPermissionsSection
+        ? permissions
+        : parsedPackageAvailable === true
+          ? 0
+          : null;
+  return { ...details, requestedPermissions };
 };
 
 /**

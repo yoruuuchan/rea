@@ -70,7 +70,8 @@ export interface AnalysisCleanupResourceOwner {
 /** Base class for expected analysis, provider, and session failures. */
 export abstract class AnalysisError extends Error {
   readonly #cleanupPrimary: AnalysisError | undefined;
-  readonly #cleanupDependencies = new Set<AnalysisError>();
+  // Undefined means unbound; a bound empty set records confirmed completion.
+  #cleanupDependencies: Set<AnalysisError> | undefined;
   #cleanupDependents: WeakRef<AnalysisError>[] = [];
   readonly diagnostics: Readonly<Record<string, JsonValue>> | undefined;
   readonly capturedOutput: AnalysisCapturedOutput | undefined;
@@ -107,7 +108,7 @@ export abstract class AnalysisError extends Error {
 
   /** Live dependencies own current resource attribution; cleanup keeps history. */
   get cleanupResources(): readonly string[] {
-    if (this.#cleanupDependencies.size === 0)
+    if (this.#cleanupDependencies === undefined)
       return (
         this.#cleanupResourceOwner?.cleanupResources ??
         this.#ownedCleanupResources
@@ -152,13 +153,10 @@ export abstract class AnalysisError extends Error {
 
   /** Keep a composed error incomplete until all explicitly owned source errors resolve. */
   bindCleanupDependencies(dependencies: readonly AnalysisError[]): this {
+    const pending = (this.#cleanupDependencies ??= new Set<AnalysisError>());
     for (const dependency of dependencies) {
-      if (
-        !dependency.cleanupIncomplete ||
-        this.#cleanupDependencies.has(dependency)
-      )
-        continue;
-      this.#cleanupDependencies.add(dependency);
+      if (!dependency.cleanupIncomplete || pending.has(dependency)) continue;
+      pending.add(dependency);
       dependency.#cleanupDependents = [
         ...dependency.#cleanupDependents.filter(
           (reference) => reference.deref() !== undefined,
@@ -166,19 +164,19 @@ export abstract class AnalysisError extends Error {
         new WeakRef(this),
       ];
     }
-    if (this.#cleanupDependencies.size === 0) this.resolveCleanup();
+    if (pending.size === 0) this.resolveCleanup();
     return this;
   }
 
   /** Clear live cleanup status only after its owning resource confirms retry success. */
   resolveCleanup(): this {
     if (
-      [...this.#cleanupDependencies].some(
+      [...(this.#cleanupDependencies ?? [])].some(
         (dependency) => dependency.cleanupIncomplete,
       )
     )
       return this;
-    this.#cleanupDependencies.clear();
+    this.#cleanupDependencies?.clear();
     this.cleanupIncomplete = false;
     for (const reference of this.#cleanupDependents)
       reference.deref()?.resolveCleanup();
@@ -223,6 +221,7 @@ import type {
   AdbAcquiredFilePartialObservation,
   AdbPackagePullPartialObservation,
 } from "./adb/adbDeviceAnalysis.js";
+import type { InspectSignature } from "./native/nativeInspection.js";
 import type { NativeUiObservationResult } from "./native/nativeUiObservation.js";
 import type { BinaryLayout } from "./native/binaryLayout.js";
 import type {
@@ -233,8 +232,15 @@ import type { WebPageInspection } from "./browserObservationSchemas.js";
 import type { WebExecution } from "./webExecution.js";
 import type { WebEventListeners } from "./webEventListeners.js";
 
+import type { NativeLoadImagePartialObservation } from "./native/nativeLoadImage.js";
+import type { NativeAotSnapshotObservation } from "./native/nativeAotSnapshotObservation.js";
+import type { FileSnapshotPartialObservation } from "./fileSnapshotObservation.js";
+
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
+  | NativeLoadImagePartialObservation
+  | NativeAotSnapshotObservation
+  | FileSnapshotPartialObservation
   | PartialProcessCaptureObservation
   | NativeCallPartialObservation
   | FileOffsetPartialObservation
@@ -255,6 +261,7 @@ export type AnalysisPartialObservation =
   | AndroidPartialObservation
   | FirmwarePartialObservation
   | NativeUiObservationResult
+  | InspectSignature
   | ElectronPagePartialObservation
   | AdbActivityStartPartialObservation
   | AdbAcquiredFilePartialObservation

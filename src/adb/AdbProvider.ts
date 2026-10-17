@@ -1537,7 +1537,8 @@ export class AdbProvider {
               pkg_flags: details.pkgFlags,
               requested_permissions_count: details.requestedPermissions,
               coverage:
-                details.versionCode === null && details.versionName === null
+                details.requestedPermissions === null ||
+                (details.versionCode === null && details.versionName === null)
                   ? "partial"
                   : "complete",
             },
@@ -1545,7 +1546,8 @@ export class AdbProvider {
             {
               limitations: [
                 "Fields are a fixed projection of dumpsys package output; version-dependent sections are ignored rather than guessed",
-                "requested_permissions_count counts the listed requested permissions section only",
+                "requested_permissions_count counts the listed requested permissions section; an absent section is zero only when dumpsys confirms a loaded parsed package",
+                "A null requested_permissions_count means dumpsys reported pkg=null or did not establish that an omitted permission section is an empty inventory",
               ],
             },
           ),

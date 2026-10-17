@@ -79,15 +79,8 @@ import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
 import { attestGhidraNativeLoadImage } from "./GhidraLoadImageAttest.js";
-import {
-  NATIVE_AOT_MAX_REPORT_BYTES,
-  NATIVE_AOT_MAX_SOURCE_BYTES,
-  nativeAotSnapshotOverCapacity,
-  parseNativeAotPe,
-  type NativeAotPeResult,
-} from "../domain/native/nativeAotPe.js";
-import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
-import { nativeLoadImageObservationSchema } from "../domain/native/nativeLoadImage.js";
+import type { NativeAotPeResult } from "../domain/native/nativeAotPe.js";
+import { GhidraNativeAotSnapshotOwner } from "./GhidraNativeAotSnapshotOwner.js";
 import {
   GHIDRA_PROVIDER_IDENTITY,
   healthLimitations,
@@ -120,252 +113,11 @@ export type GhidraProviderClientFactory = (
       | "runtimeLineage"
       | "readTargetSnapshot"
       | "hashTargetSnapshot"
+      | "attestDosTargetSnapshot"
     >
   >;
 
 type GhidraProviderClientInstance = ReturnType<GhidraProviderClientFactory>;
-
-type NativeAotSnapshotOwner = {
-  readonly derive: (
-    imageBase: string,
-    operation: AnalysisOperation,
-    callerSignal: AbortSignal | undefined,
-    observations: JsonValue,
-  ) => Promise<Result<NativeAotPeResult, AnalysisError>>;
-  readonly readTypeDetail: (
-    address: string,
-  ) => ReturnType<NativeAotPeResult["readTypeDetail"]>;
-  readonly close: () => void;
-};
-
-/** Own one session's captured PE snapshot and immutable NativeAOT derivation. */
-const createNativeAotSnapshotOwner = (input: {
-  readonly client: GhidraProviderClientInstance;
-  readonly target: BinaryTarget;
-  readonly startupTimeoutMs: number;
-}): NativeAotSnapshotOwner => {
-  const { client, target, startupTimeoutMs } = input;
-  const controller = new AbortController();
-  let identity: string | undefined;
-  let result: NativeAotPeResult | undefined;
-  let pending:
-    | {
-        readonly identity: string;
-        readonly promise: Promise<Result<NativeAotPeResult, AnalysisError>>;
-      }
-    | undefined;
-  let closed = false;
-  let identityConflict = false;
-  let identityConflictObservation:
-    | { readonly imageBase: string; readonly observations: JsonValue }
-    | undefined;
-  const identityError = (
-    operation: AnalysisOperation,
-    reason: string,
-    observedBase: string,
-    observations: JsonValue,
-  ): AnalysisError =>
-    new ProviderAdapterError("ghidra", operation, {
-      diagnostics: {
-        reason,
-        artifact_sha256: target.sha256,
-        bound_image_base:
-          identity === undefined
-            ? null
-            : `0x${identity.slice(target.sha256.length + 1)}`,
-        observed_image_base: observedBase,
-        measured_observation: observations,
-        conflicting_image_base: identityConflictObservation?.imageBase ?? null,
-        conflicting_observation:
-          identityConflictObservation?.observations ?? null,
-      },
-    });
-  const identityConflictFailure = (
-    operation: AnalysisOperation,
-    observedBase: string,
-    observations: JsonValue,
-  ): Result<NativeAotPeResult, AnalysisError> => {
-    return err(
-      identityError(
-        operation,
-        "The Ghidra session reported conflicting loaded image bases; reopen the analysis session to establish a new identity.",
-        observedBase,
-        observations,
-      ),
-    );
-  };
-  const derive = async (
-    imageBase: string,
-    operation: AnalysisOperation,
-    callerSignal: AbortSignal | undefined,
-    observations: JsonValue,
-  ): Promise<Result<NativeAotPeResult, AnalysisError>> => {
-    if (callerSignal?.aborted || closed)
-      return err(new AnalysisCancelledError(operation));
-    if (identityConflict)
-      return identityConflictFailure(operation, imageBase, observations);
-    if (controller.signal.aborted)
-      return err(new AnalysisCancelledError(operation));
-    let normalizedBase: string;
-    try {
-      normalizedBase = BigInt(imageBase).toString(16);
-    } catch (cause: unknown) {
-      return err(
-        new ProviderAdapterError("ghidra", operation, {
-          diagnostics: {
-            reason:
-              "Ghidra returned an invalid loaded image base for NativeAOT identity binding.",
-            artifact_sha256: target.sha256,
-            observed_image_base: imageBase,
-            measured_observation: observations,
-          },
-          cause,
-        }),
-      );
-    }
-    const key = `${target.sha256}:${normalizedBase}`;
-    if (identity !== undefined && identity !== key) {
-      identityConflict = true;
-      identityConflictObservation = { imageBase, observations };
-      result = undefined;
-      controller.abort();
-      return err(
-        identityError(
-          operation,
-          "The Ghidra session reported a different loaded image base after NativeAOT metadata was bound to its captured snapshot; reopen the analysis session to establish a new identity.",
-          imageBase,
-          observations,
-        ),
-      );
-    }
-    identity ??= key;
-    if (result !== undefined) {
-      const settled = await waitForAbortable(
-        Promise.resolve(ok(result)),
-        callerSignal,
-      );
-      if (closed) return err(new AnalysisCancelledError(operation));
-      if (identityConflict)
-        return identityConflictFailure(operation, imageBase, observations);
-      if (controller.signal.aborted)
-        return err(new AnalysisCancelledError(operation));
-      return settled === ABORTED
-        ? err(new AnalysisCancelledError(operation))
-        : settled;
-    }
-    if (pending !== undefined && pending.identity !== key)
-      return err(
-        identityError(
-          operation,
-          "A NativeAOT snapshot derivation is already bound to a different loaded image base.",
-          imageBase,
-          observations,
-        ),
-      );
-    if (pending === undefined) {
-      const promise: Promise<Result<NativeAotPeResult, AnalysisError>> =
-        (async () => {
-          try {
-            if (client.readTargetSnapshot === undefined)
-              return err(
-                new ProviderAdapterError("ghidra", operation, {
-                  diagnostics: {
-                    reason:
-                      "The Ghidra client does not expose its immutable target snapshot for NativeAOT metadata inspection.",
-                  },
-                }),
-              );
-            const snapshot = await client.readTargetSnapshot(
-              NATIVE_AOT_MAX_SOURCE_BYTES,
-              controller.signal,
-            );
-            if (!snapshot.ok)
-              return err(
-                projectSessionError(
-                  operation,
-                  snapshot.error,
-                  startupTimeoutMs,
-                ),
-              );
-            if (closed) return err(new AnalysisCancelledError(operation));
-            if (identityConflict)
-              return identityConflictFailure(
-                operation,
-                imageBase,
-                observations,
-              );
-            if (controller.signal.aborted)
-              return err(new AnalysisCancelledError(operation));
-            const parsed =
-              snapshot.value.kind === "over-capacity"
-                ? {
-                    summary: nativeAotSnapshotOverCapacity(
-                      target.sha256,
-                      snapshot.value.sourceBytesAtLeast,
-                      NATIVE_AOT_MAX_REPORT_BYTES,
-                    ),
-                    readTypeDetail: () => undefined,
-                  }
-                : parseNativeAotPe(
-                    snapshot.value.bytes,
-                    target.sha256,
-                    NATIVE_AOT_MAX_REPORT_BYTES,
-                    imageBase,
-                  );
-            if (closed) return err(new AnalysisCancelledError(operation));
-            if (identityConflict)
-              return identityConflictFailure(
-                operation,
-                imageBase,
-                observations,
-              );
-            if (controller.signal.aborted)
-              return err(new AnalysisCancelledError(operation));
-            return ok(parsed);
-          } catch (cause: unknown) {
-            return err(
-              new ProviderAdapterError("ghidra", operation, {
-                diagnostics: {
-                  reason:
-                    cause instanceof Error
-                      ? cause.message
-                      : "NativeAOT metadata could not be derived from the captured target snapshot.",
-                },
-                cause,
-              }),
-            );
-          }
-        })();
-      const current = { identity: key, promise };
-      pending = current;
-      void promise.then((settled) => {
-        if (pending !== current) return;
-        pending = undefined;
-        if (settled.ok && !closed && !identityConflict) result = settled.value;
-      });
-    }
-    const settled = await waitForAbortable(pending.promise, callerSignal);
-    if (closed) return err(new AnalysisCancelledError(operation));
-    if (identityConflict)
-      return identityConflictFailure(operation, imageBase, observations);
-    if (controller.signal.aborted)
-      return err(new AnalysisCancelledError(operation));
-    return settled === ABORTED
-      ? err(new AnalysisCancelledError(operation))
-      : settled;
-  };
-  return {
-    derive,
-    readTypeDetail: (address) =>
-      result?.readTypeDetail(address, NATIVE_AOT_MAX_REPORT_BYTES),
-    close: () => {
-      closed = true;
-      controller.abort();
-      result = undefined;
-      pending = undefined;
-    },
-  };
-};
 
 /** Build one AnalysisClient for an admitted Ghidra target and profile. */
 export const createGhidraProviderClient = (input: {
@@ -732,10 +484,15 @@ export const createGhidraProviderClient = (input: {
   ];
   const nativeAotOwner =
     target.format === "pe"
-      ? createNativeAotSnapshotOwner({
-          client,
-          target,
-          startupTimeoutMs: config.ghidraStartupTimeoutMs,
+      ? new GhidraNativeAotSnapshotOwner({
+          targetSha256: target.sha256,
+          readSnapshot: client.readTargetSnapshot?.bind(client),
+          projectFailure: (operation, failure) =>
+            projectSessionError(
+              operation,
+              failure,
+              config.ghidraStartupTimeoutMs,
+            ),
         })
       : undefined;
   const projectExecution = (
@@ -774,6 +531,55 @@ export const createGhidraProviderClient = (input: {
     const parsed = parseGhidraInventoryResult(operation, called.value);
     if (!parsed.ok) return parsed;
     return ok(projectExecution(operation, parsed.value, called.value));
+  };
+  const loadImageExecution = async (raw: JsonValue, signal?: AbortSignal) => {
+    const operation = "inspect_native_load_image";
+    const measured = parseGhidraInventoryResult(operation, raw);
+    if (!measured.ok) return measured;
+    let derived: NativeAotPeResult | undefined;
+    if (target.format === "pe") {
+      if (nativeAotOwner === undefined)
+        return err(
+          new ProviderAdapterError("ghidra", operation, {
+            diagnostics: {
+              reason:
+                "The admitted PE session has no read-only NativeAOT snapshot owner.",
+            },
+          }),
+        );
+      const result = await nativeAotOwner.derive(
+        measured.value.image_base,
+        operation,
+        signal,
+        raw,
+      );
+      if (!result.ok) return result;
+      derived = result.value;
+    }
+    const attested = await attestGhidraNativeLoadImage({
+      target,
+      operation,
+      measured: measured.value,
+      client,
+      mapSessionError: (failure) =>
+        projectSessionError(
+          operation,
+          failure,
+          config.ghidraStartupTimeoutMs,
+          lostProviderHealth(),
+        ),
+      nativeAotResult: derived,
+      signal,
+    });
+    return attested.ok
+      ? ok(
+          projectExecution(
+            operation,
+            jsonValueSchema.parse(attested.value),
+            raw,
+          ),
+        )
+      : attested;
   };
   return ok<AnalysisClient>({
     execute: async (operation, parameters, options) => {
@@ -853,6 +659,8 @@ export const createGhidraProviderClient = (input: {
             lostProviderHealth(),
           ),
         );
+      if (operation === "inspect_native_load_image")
+        return loadImageExecution(called.value, options?.signal);
       let normalized: JsonValue;
       let observationLimitations: readonly string[] = [];
       let observationLocations: readonly EvidenceLocation[] = [];
@@ -910,47 +718,6 @@ export const createGhidraProviderClient = (input: {
             });
         }
       }
-      if (operation === "inspect_native_load_image") {
-        let derived: NativeAotPeResult | undefined;
-        if (target.format === "pe") {
-          const observations =
-            nativeLoadImageObservationSchema.parse(normalized);
-          if (nativeAotOwner === undefined)
-            return err(
-              new ProviderAdapterError("ghidra", operation, {
-                diagnostics: {
-                  reason:
-                    "The admitted PE session has no read-only NativeAOT snapshot owner.",
-                },
-              }),
-            );
-          const result = await nativeAotOwner.derive(
-            observations.image_base,
-            operation,
-            options?.signal,
-            normalized,
-          );
-          if (!result.ok) return result;
-          derived = result.value;
-        }
-        const attested = await attestGhidraNativeLoadImage({
-          target,
-          operation,
-          measured: normalized,
-          client,
-          mapSessionError: (failure) =>
-            projectSessionError(
-              operation,
-              failure,
-              config.ghidraStartupTimeoutMs,
-              lostProviderHealth(),
-            ),
-          nativeAotResult: derived,
-          signal: options?.signal,
-        });
-        if (!attested.ok) return attested;
-        normalized = attested.value;
-      }
       return ok(
         projectExecution(
           operation,
@@ -985,8 +752,18 @@ export const createGhidraProviderClient = (input: {
         : [{ provider: committedProfile.provider, observation }];
     },
     close: async () => {
-      nativeAotOwner?.close();
-      return client.close();
+      await nativeAotOwner?.close();
+      const closed = await client.close();
+      const retained = nativeAotOwner?.cleanupFailure;
+      if (retained === undefined) return closed;
+      return closed.ok
+        ? err(retained)
+        : err(
+            analysisErrorWithCleanupFailure(
+              closed.error,
+              retained,
+            ).bindCleanupDependencies([closed.error, retained]),
+          );
     },
   });
 };
@@ -1103,7 +880,13 @@ const projectPrimarySessionError = (
   startupTimeoutMs: number,
   health?: ProviderOperationHealth,
 ): AnalysisError => {
-  const context = { cause: failure, diagnostics: failure.diagnostics };
+  const context = {
+    cause: failure,
+    diagnostics: failure.diagnostics,
+    ...(failure.partialObservation === undefined
+      ? {}
+      : { partialObservation: failure.partialObservation }),
+  };
   const physicalCause = artifactFilePrimaryFailure(failure.cause);
   if (physicalCause instanceof AnalysisAccessDeniedError)
     return new AnalysisAccessDeniedError(

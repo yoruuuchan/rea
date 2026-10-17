@@ -1,3 +1,7 @@
+import { GhidraNativeAotSnapshotOwner } from "./GhidraNativeAotSnapshotOwner.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
+import { resolvedAnalysisError } from "../domain/analysisErrorBase.js";
+import { createDeferred } from "../../tests/fixtures/binarySession.js";
 import { ProviderInspectionScope } from "../providers/ProviderInspectionScope.js";
 import { ok as javaProbeOk } from "../domain/result.js";
 import type { GhidraJavaObservation } from "./GhidraJavaProbe.js";
@@ -14,11 +18,17 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as nativeLoader from "../windows/WindowsNativeLoader.js";
 import { WINDOWS_NATIVE_AUTHORITY_UNAVAILABLE_REASON } from "../process/WindowsAuthority.js";
-import { fixtureDosLoadImage } from "./GhidraLoadImage.fixture.js";
+import {
+  fixtureDosLoadImage,
+  compareDosClientFixture,
+} from "./GhidraLoadImage.fixture.js";
 import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
 import {
   nativeAotPeDigest,
   nativeAotPeFixture,
+  nativeAotPeHeaderIndirectionFixture,
+  nativeAotPeOptionalHeaderFixture,
+  nativeAotPeVirtualSectionFixture,
 } from "../../tests/fixtures/nativeaotPe.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 
@@ -261,6 +271,7 @@ describe("Ghidra provider", () => {
           target_format: "dos-mz",
           architecture: "x86",
           loader: "MzLoader",
+          load_image_evidence: "independent-mz-mapping-relocations-v2",
           language_id: "x86:LE:16:Real Mode",
           compiler_spec_id: "default",
           load_segment: "0x1000",
@@ -599,7 +610,7 @@ describe("Ghidra platform support", () => {
         executable_role: target.executableRole,
         managed: target.managed,
         native_aot_metadata: {
-          contract_revision: "rtr-9.1-x64-pe-read-only-v3",
+          contract_revision: "rtr-9.1-x64-pe-read-only-v5",
           source_bytes: 128 * 1024 * 1024,
           work_units: 64 * 1024 * 1024,
           working_memory_bytes: 64 * 1024 * 1024,
@@ -1493,8 +1504,12 @@ describe("Ghidra measured DOS load-image projection", () => {
         ...(state === "missing-snapshot"
           ? {}
           : {
-              readTargetSnapshot: () =>
-                Promise.resolve(ok({ kind: "captured", bytes: fixture.bytes })),
+              attestDosTargetSnapshot: async (observations) =>
+                compareDosClientFixture(
+                  fixture.bytes,
+                  fixture.sha256,
+                  observations,
+                ),
             }),
       });
       const ghidra = provider(installationHost(), factory);
@@ -1888,7 +1903,8 @@ it("shares one session snapshot across callers while isolating cancellation and 
   });
   expect(snapshotReads).toBe(1);
   await client.close();
-  expect(snapshotSignal?.aborted).toBe(true);
+  // The completed producer needs no stop; active-close joining is covered below.
+  expect(snapshotSignal?.aborted).toBe(false);
 });
 
 it("retries a failed NativeAOT snapshot read without retaining a failed derivation", async () => {
@@ -1942,102 +1958,177 @@ it("retries a failed NativeAOT snapshot read without retaining a failed derivati
   await client.close();
 });
 
-it("rejects all waiters when the loaded image base changes during derivation", async () => {
-  const bytes = nativeAotPeFixture();
-  const observation = fixtureDosLoadImage().observation;
-  let calls = 0;
-  let resolveSnapshot:
-    | ((value: Result<GhidraTargetSnapshot, GhidraSessionError>) => void)
-    | undefined;
-  let markSnapshotStarted: (() => void) | undefined;
-  const snapshotStarted = new Promise<void>((resolve) => {
-    markSnapshotStarted = resolve;
-  });
-  const snapshot = new Promise<
-    Result<GhidraTargetSnapshot, GhidraSessionError>
-  >((resolve) => {
-    resolveSnapshot = resolve;
-  });
-  const factory: GhidraProviderClientFactory = () => ({
-    start: () => Promise.resolve(ok(sessionInfo())),
-    callTool: () => {
-      calls += 1;
-      return Promise.resolve(
-        ok(
-          jsonValueSchema.parse({
-            ...observation,
-            image_base: calls === 1 ? "0x140000000" : "0x150000000",
-          }),
-        ),
-      );
-    },
-    readTargetSnapshot: () => {
-      markSnapshotStarted?.();
-      return snapshot;
-    },
-    close: () => Promise.resolve(ok(null)),
-  });
-  const ghidra = provider(installationHost(), factory);
-  const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
-  const profile = await ghidra.resolveAnalysisProfile(target);
-  if (!profile.ok || profile.value.profile === null)
-    throw new Error("Expected admitted PE profile");
-  const client = ghidra.createClient(target, profile.value.profile);
-  const originalBase = client.execute("inspect_native_load_image", {});
-  await snapshotStarted;
-  const changedBase = await client.execute("inspect_native_load_image", {});
-  expect(changedBase).toMatchObject({
-    ok: false,
-    error: {
-      _tag: "ProviderAdapterError",
-      diagnostics: {
-        observed_image_base: "0x150000000",
-        measured_observation: { image_base: "0x150000000" },
+it.each(["captured", "cancelled-with-facts"] as const)(
+  "rejects all waiters when the loaded image base changes during derivation (%s)",
+  async (outcome) => {
+    const bytes = nativeAotPeFixture();
+    const observation = fixtureDosLoadImage().observation;
+    let calls = 0;
+    let resolveSnapshot:
+      | ((value: Result<GhidraTargetSnapshot, GhidraSessionError>) => void)
+      | undefined;
+    let markSnapshotStarted: (() => void) | undefined;
+    const snapshotStarted = new Promise<void>((resolve) => {
+      markSnapshotStarted = resolve;
+    });
+    const snapshot = new Promise<
+      Result<GhidraTargetSnapshot, GhidraSessionError>
+    >((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const factory: GhidraProviderClientFactory = () => ({
+      start: () => Promise.resolve(ok(sessionInfo())),
+      callTool: () => {
+        calls += 1;
+        return Promise.resolve(
+          ok(
+            jsonValueSchema.parse({
+              ...observation,
+              image_base: calls === 1 ? "0x140000000" : "0x150000000",
+            }),
+          ),
+        );
       },
-    },
-  });
-  resolveSnapshot?.(ok({ kind: "captured", bytes }));
-  await expect(originalBase).resolves.toMatchObject({
-    ok: false,
-    error: {
-      _tag: "ProviderAdapterError",
-      diagnostics: {
-        reason: expect.stringContaining("conflicting loaded image bases"),
-        measured_observation: { image_base: "0x140000000" },
-        conflicting_observation: { image_base: "0x150000000" },
+      readTargetSnapshot: () => {
+        markSnapshotStarted?.();
+        return snapshot;
       },
-    },
+      close: () => Promise.resolve(ok(null)),
+    });
+    const ghidra = provider(installationHost(), factory);
+    const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("Expected admitted PE profile");
+    const client = ghidra.createClient(target, profile.value.profile);
+    const originalBase = client.execute("inspect_native_load_image", {});
+    await snapshotStarted;
+    const changedBase = await client.execute("inspect_native_load_image", {});
+    expect(changedBase).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ProviderAdapterError",
+        diagnostics: {
+          observed_image_base: "0x150000000",
+          measured_observation: { image_base: "0x150000000" },
+        },
+      },
+    });
+    resolveSnapshot?.(
+      outcome === "captured"
+        ? ok({ kind: "captured", bytes })
+        : err(
+            new GhidraSessionError(
+              "cancelled",
+              "Controlled identity stop",
+              {},
+              {
+                cancellation: { reason: "identity conflict" },
+                partialObservation: {
+                  kind: "file-snapshot-hash",
+                  path: "/controlled/snapshot",
+                  sha256: "a".repeat(64),
+                  bytes: 17,
+                },
+              },
+            ),
+          ),
+    );
+    const originalResult = await originalBase;
+    expect(originalResult).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ProviderAdapterError",
+        diagnostics: {
+          reason: expect.stringContaining("conflicting loaded image bases"),
+          measured_observation: { image_base: "0x140000000" },
+          conflicting_observation: { image_base: "0x150000000" },
+        },
+      },
+    });
+    if (outcome === "cancelled-with-facts") {
+      expect(originalResult).toMatchObject({
+        ok: false,
+        error: {
+          partialObservation: { kind: "file-snapshot-hash", bytes: 17 },
+        },
+      });
+    }
+    expect(calls).toBe(2);
+    await client.close();
+  },
+);
+
+it("preserves NativeAOT source facts and cleanup when a later caller contradicts identity", async () => {
+  const partial = {
+    kind: "file-snapshot-hash" as const,
+    path: "/controlled/snapshot",
+    sha256: "a".repeat(64),
+    bytes: 17,
+  };
+  const cleanup = new ProviderCleanupError("ghidra", [partial.path], {
+    reason: "controlled close failure",
   });
-  expect(calls).toBe(2);
-  await client.close();
+  const lease = new AnalysisCleanupLease(async () => {}, [partial.path]);
+  lease.bindCleanupError(cleanup);
+  onTestFinished(() => lease.release());
+  const owner = new GhidraNativeAotSnapshotOwner({
+    targetSha256: partial.sha256,
+    readSnapshot: async () =>
+      err(
+        new GhidraSessionError(
+          "protocol",
+          "Controlled snapshot failure",
+          {},
+          { partialObservation: partial },
+        ).withCleanupFailure(cleanup),
+      ),
+    projectFailure: () => cleanup,
+  });
+  await owner.derive("0x140000000", "inspect_native_load_image", undefined, {
+    image_base: "0x140000000",
+  });
+  const conflict = await owner.derive(
+    "0x150000000",
+    "inspect_native_load_image",
+    undefined,
+    { image_base: "0x150000000" },
+  );
+  if (conflict.ok) throw new Error("Expected conflicting snapshot identity");
+  expect(conflict.error.partialObservation).toEqual(partial);
+  expect(conflict.error.cleanupIncomplete).toBe(true);
+  await lease.release();
+  expect(conflict.error.cleanupIncomplete).toBe(false);
+  await owner.close();
 });
 
-it("cancels an in-flight NativeAOT waiter when its owning session closes", async () => {
+const nativeAotWaiterClient = async () => {
   const bytes = nativeAotPeFixture();
   const observations = fixtureDosLoadImage().observation;
   observations.image_base = "0x140000000";
-  let resolveSnapshot:
-    | ((value: Result<GhidraTargetSnapshot, GhidraSessionError>) => void)
-    | undefined;
-  let snapshotSignal: AbortSignal | undefined;
-  let markSnapshotStarted: (() => void) | undefined;
-  const snapshotStarted = new Promise<void>((resolve) => {
-    markSnapshotStarted = resolve;
-  });
-  const snapshot = new Promise<
-    Result<GhidraTargetSnapshot, GhidraSessionError>
-  >((resolve) => {
-    resolveSnapshot = resolve;
-  });
-  const factory: GhidraProviderClientFactory = () => ({
-    start: () => Promise.resolve(ok(sessionInfo())),
-    callTool: () => Promise.resolve(ok(jsonValueSchema.parse(observations))),
-    readTargetSnapshot: (_maximumBytes, signal) => {
-      snapshotSignal = signal;
-      markSnapshotStarted?.();
-      return snapshot;
+  const started = createDeferred<AbortSignal>();
+  const snapshot =
+    createDeferred<Result<GhidraTargetSnapshot, GhidraSessionError>>();
+  const close = vi.fn(async () => ok(null));
+  const readSnapshot = vi.fn(
+    (_maximum: number | undefined, signal: AbortSignal | undefined) => {
+      if (signal === undefined) throw new Error("Missing owned read signal");
+      started.resolve(signal);
+      return snapshot.promise;
     },
-    close: () => Promise.resolve(ok(null)),
+  );
+  const factory: GhidraProviderClientFactory = () => ({
+    start: async () => ok(sessionInfo()),
+    callTool: async (operation) =>
+      ok(
+        jsonValueSchema.parse(
+          operation === "inspect_native_load_image"
+            ? observations
+            : unavailableNativeAotDatabaseType("0x140002280"),
+        ),
+      ),
+    readTargetSnapshot: readSnapshot,
+    close,
   });
   const ghidra = provider(installationHost(), factory);
   const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
@@ -2045,15 +2136,312 @@ it("cancels an in-flight NativeAOT waiter when its owning session closes", async
   if (!profile.ok || profile.value.profile === null)
     throw new Error("Expected admitted PE profile");
   const client = ghidra.createClient(target, profile.value.profile);
-  const pending = client.execute("inspect_native_load_image", {});
-  await snapshotStarted;
-  await client.close();
-  expect(snapshotSignal?.aborted).toBe(true);
-  resolveSnapshot?.(ok({ kind: "captured", bytes }));
+  onTestFinished(async () => {
+    snapshot.resolve(ok({ kind: "captured", bytes }));
+    await client.close();
+  });
+  return { client, bytes, started, snapshot, close, readSnapshot };
+};
+
+it("joins the in-flight NativeAOT producer before closing its owning client", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const pending = fixture.client.execute("inspect_native_load_image", {});
+  const signal = await fixture.started.promise;
+  let closed = false;
+  const closing = fixture.client.close().then((result) => {
+    closed = true;
+    return result;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(signal.aborted).toBe(true);
+  expect(closed).toBe(false);
+  expect(fixture.close).not.toHaveBeenCalled();
+  fixture.snapshot.resolve(ok({ kind: "captured", bytes: fixture.bytes }));
   await expect(pending).resolves.toMatchObject({
     ok: false,
     error: { _tag: "AnalysisCancelledError" },
   });
+  expect((await closing).ok).toBe(true);
+});
+
+it("joins final NativeAOT waiter cancellation and retains exact producer cleanup", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const caller = new AbortController();
+  const reason = { caller: "final snapshot waiter" };
+  let settled = false;
+  const pending = fixture.client
+    .execute("inspect_native_load_image", {}, { signal: caller.signal })
+    .then((result) => {
+      settled = true;
+      return result;
+    });
+  const signal = await fixture.started.promise;
+  const cleanup = new ProviderCleanupError(
+    "ghidra",
+    ["controlled snapshot descriptor"],
+    { reason: "controlled close failure" },
+  );
+  const lease = new AnalysisCleanupLease(async () => {}, [
+    "controlled snapshot descriptor",
+  ]);
+  lease.bindCleanupError(cleanup);
+  onTestFinished(() => lease.release());
+  caller.abort(reason);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(signal.aborted).toBe(true);
+  expect(signal.reason).toBe(reason);
+  expect(settled).toBe(false);
+  fixture.snapshot.resolve(
+    err(
+      new GhidraSessionError(
+        "cancelled",
+        "Controlled snapshot cancelled",
+        {},
+        { cancellation: { reason }, cause: reason },
+      ).withCleanupFailure(cleanup),
+    ),
+  );
+  const result = await pending;
+  if (result.ok) throw new Error("Expected cancelled snapshot cleanup");
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.cleanupPrimary?.cause).toBe(reason);
+  const refused = await fixture.client.execute("inspect_native_load_image", {});
+  expect(refused.ok).toBe(false);
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(1);
+  await lease.release();
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(resolvedAnalysisError(result.error).cause).toBe(reason);
+});
+
+it.each([null, "caller stopped", new Error("caller stopped")])(
+  "preserves final NativeAOT cancellation reason and late capture (%s)",
+  async (reason) => {
+    const fixture = await nativeAotWaiterClient();
+    const caller = new AbortController();
+    const pending = fixture.client.execute(
+      "inspect_native_load_image",
+      {},
+      { signal: caller.signal },
+    );
+    const signal = await fixture.started.promise;
+    caller.abort(reason);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBe(reason);
+    fixture.snapshot.resolve(ok({ kind: "captured", bytes: fixture.bytes }));
+    const cancelled = await pending;
+    if (cancelled.ok) throw new Error("Expected final caller cancellation");
+    expect(cancelled.error.cause).toBe(reason);
+    expect(cancelled.error.partialObservation).toMatchObject({
+      kind: "native-aot-snapshot",
+      capture: { status: "captured", bytes: fixture.bytes.length },
+    });
+    const retried = await fixture.client.execute(
+      "inspect_native_load_image",
+      {},
+    );
+    expect(retried.ok).toBe(true);
+    expect(fixture.readSnapshot).toHaveBeenCalledTimes(2);
+    await fixture.client.execute("inspect_native_load_image", {});
+    expect(fixture.readSnapshot).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(["caller", "owner"] as const)(
+  "preserves NativeAOT physical failure and retained cleanup across %s cancellation",
+  async (interruption) => {
+    const fixture = await nativeAotWaiterClient();
+    const caller = new AbortController();
+    const pending = fixture.client.execute(
+      "inspect_native_load_image",
+      {},
+      { signal: caller.signal },
+    );
+    await fixture.started.promise;
+    const cleanup = new ProviderCleanupError(
+      "ghidra",
+      ["controlled snapshot descriptor"],
+      { reason: "controlled close failure" },
+    );
+    const lease = new AnalysisCleanupLease(async () => {}, [
+      "controlled snapshot descriptor",
+    ]);
+    lease.bindCleanupError(cleanup);
+    onTestFinished(() => lease.release());
+    const closing =
+      interruption === "owner" ? fixture.client.close() : undefined;
+    if (interruption === "caller") caller.abort("late caller");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    fixture.snapshot.resolve(
+      err(
+        new GhidraSessionError(
+          "protocol",
+          "Controlled independent physical failure",
+          { physical_failure: "read rejected" },
+          {
+            partialObservation: {
+              kind: "file-snapshot-hash",
+              path: "/controlled/snapshot",
+              sha256: "a".repeat(64),
+              bytes: 17,
+            },
+          },
+        ).withCleanupFailure(cleanup),
+      ),
+    );
+    const result = await pending;
+    if (result.ok) throw new Error("Expected retained physical failure");
+    expect(result.error.cleanupIncomplete).toBe(true);
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "cleanup_incomplete",
+      details: {
+        partial_observation: { bytes: 17 },
+        diagnostics: { primary_error: { code: "execution_failure" } },
+      },
+    });
+    if (closing !== undefined) {
+      const closed = await closing;
+      expect(closed.ok).toBe(false);
+    }
+    expect(result.error.cleanupPrimary?.diagnostics).toMatchObject({
+      measured_observation: { image_base: "0x140000000" },
+    });
+    await lease.release();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(resolvedAnalysisError(result.error).diagnostics).toMatchObject({
+      measured_observation: { image_base: "0x140000000" },
+    });
+    expect((await fixture.client.close()).ok).toBe(true);
+  },
+);
+
+it("lets a new NativeAOT caller join a draining attempt before retrying", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const caller = new AbortController();
+  const first = fixture.client.execute(
+    "inspect_native_load_image",
+    {},
+    { signal: caller.signal },
+  );
+  await fixture.started.promise;
+  caller.abort("first caller");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const second = fixture.client.execute("inspect_native_load_image", {});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(1);
+  fixture.snapshot.resolve(ok({ kind: "captured", bytes: fixture.bytes }));
+  expect((await first).ok).toBe(false);
+  expect((await second).ok).toBe(true);
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(2);
+});
+
+it("preserves a draining NativeAOT physical failure before later caller cancellation", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const firstCaller = new AbortController();
+  const first = fixture.client.execute(
+    "inspect_native_load_image",
+    {},
+    { signal: firstCaller.signal },
+  );
+  await fixture.started.promise;
+  firstCaller.abort("first caller");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondCaller = new AbortController();
+  const second = fixture.client.execute(
+    "inspect_native_load_image",
+    {},
+    { signal: secondCaller.signal },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const cleanup = new ProviderCleanupError(
+    "ghidra",
+    ["controlled snapshot descriptor"],
+    { reason: "controlled close failure" },
+  );
+  const lease = new AnalysisCleanupLease(async () => {}, [
+    "controlled snapshot descriptor",
+  ]);
+  lease.bindCleanupError(cleanup);
+  onTestFinished(() => lease.release());
+  // The reader resumes first. Abort after its result settles the shared producer,
+  // while the caller is still awaiting consumption of that completed result.
+  void fixture.snapshot.promise.then(() =>
+    queueMicrotask(() => secondCaller.abort("late second caller")),
+  );
+  fixture.snapshot.resolve(
+    err(
+      new GhidraSessionError(
+        "protocol",
+        "Controlled draining physical failure",
+      ).withCleanupFailure(cleanup),
+    ),
+  );
+  const result = await second;
+  if (result.ok) throw new Error("Expected draining physical failure");
+  expect(secondCaller.signal.aborted).toBe(true);
+  expect(projectAnalysisError(result.error)).toMatchObject({
+    code: "cleanup_incomplete",
+    details: { diagnostics: { primary_error: { code: "execution_failure" } } },
+  });
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(1);
+  expect((await first).ok).toBe(false);
+  await lease.release();
+});
+
+it("retains drained NativeAOT capture facts with the later caller's exact abort reason", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const firstCaller = new AbortController();
+  const first = fixture.client.execute(
+    "inspect_native_load_image",
+    {},
+    { signal: firstCaller.signal },
+  );
+  await fixture.started.promise;
+  firstCaller.abort("first caller");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondCaller = new AbortController();
+  const reason = { caller: "later draining waiter" };
+  const second = fixture.client.execute(
+    "inspect_native_load_image",
+    {},
+    { signal: secondCaller.signal },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  void fixture.snapshot.promise.then(() =>
+    queueMicrotask(() => secondCaller.abort(reason)),
+  );
+  fixture.snapshot.resolve(ok({ kind: "captured", bytes: fixture.bytes }));
+  const result = await second;
+  if (result.ok) throw new Error("Expected draining caller cancellation");
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toMatchObject({
+    kind: "native-aot-snapshot",
+    capture: { status: "captured", bytes: fixture.bytes.length },
+  });
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(1);
+  expect((await first).ok).toBe(false);
+});
+
+it("attributes shared NativeAOT producer failure to each requesting operation", async () => {
+  const fixture = await nativeAotWaiterClient();
+  const image = fixture.client.execute("inspect_native_load_image", {});
+  await fixture.started.promise;
+  const detail = fixture.client.execute("inspect_native_data_type", {
+    address: "0x140002280",
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  fixture.snapshot.resolve(
+    err(new GhidraSessionError("protocol", "Controlled shared failure")),
+  );
+  await expect(image).resolves.toMatchObject({
+    ok: false,
+    error: { operation: "inspect_native_load_image" },
+  });
+  await expect(detail).resolves.toMatchObject({
+    ok: false,
+    error: { operation: "inspect_native_data_type" },
+  });
+  expect(fixture.readSnapshot).toHaveBeenCalledTimes(1);
 });
 
 describe("Ghidra NativeAOT snapshot budget", () => {
@@ -3237,3 +3625,92 @@ it("rejects an absent profile before probing Java and attributes it to the reque
     await ghidra.closeOwnedResources();
   }
 });
+
+it.each([
+  {
+    layout: "crossed header interval",
+    fixture: () => nativeAotPeHeaderIndirectionFixture(0x3fc),
+    basis: "no-rtr-header",
+  },
+  {
+    layout: "short optional header",
+    fixture: () => nativeAotPeOptionalHeaderFixture(56),
+    basis: "unsupported-layout",
+  },
+  {
+    layout: "overlapping virtual sections",
+    fixture: () => nativeAotPeVirtualSectionFixture(0x2000, 0x400),
+    basis: "unsupported-layout",
+  },
+  {
+    layout: "section overlapping headers",
+    fixture: () => nativeAotPeVirtualSectionFixture(0x200, 0x80),
+    basis: "unsupported-layout",
+  },
+])(
+  "retains NativeAOT unsupported-layout facts for a $layout through the provider",
+  async ({ fixture, basis }) => {
+    const bytes = fixture();
+    const observations = fixtureDosLoadImage().observation;
+    observations.image_base = "0x140000000";
+    const readSnapshot = vi.fn(async () =>
+      ok({ kind: "captured" as const, bytes }),
+    );
+    const factory: GhidraProviderClientFactory = () => ({
+      start: () =>
+        Promise.resolve(
+          ok({
+            ...sessionInfo(),
+            target: { ...sessionInfo().target, image_base: "0x140000000" },
+          }),
+        ),
+      callTool: (operation) =>
+        Promise.resolve(
+          ok(
+            jsonValueSchema.parse(
+              operation === "inspect_native_load_image"
+                ? observations
+                : unavailableNativeAotDatabaseType("0x140002280"),
+            ),
+          ),
+        ),
+      readTargetSnapshot: readSnapshot,
+      close: () => Promise.resolve(ok(null)),
+    });
+    const ghidra = provider(installationHost(), factory);
+    const target = { ...peTarget("x86_64"), sha256: nativeAotPeDigest(bytes) };
+    const profile = await ghidra.resolveAnalysisProfile(target);
+    if (!profile.ok || profile.value.profile === null)
+      throw new Error("Expected admitted PE profile");
+    const client = ghidra.createClient(target, profile.value.profile);
+    try {
+      const result = await client.execute("inspect_native_load_image", {});
+      expect(result).toMatchObject({
+        ok: true,
+        value: {
+          result: {
+            observations: {
+              metadata_recovery: [
+                {
+                  status: "not_applicable",
+                  header_address: null,
+                  method_tables: 0,
+                  analysis_artifact_sha256: target.sha256,
+                  coverage: { basis },
+                },
+              ],
+            },
+          },
+        },
+      });
+      const detail = await client.execute("inspect_native_data_type", {
+        address: "0x140002280",
+      });
+      if (!detail.ok) throw detail.error;
+      expect(detail.value.result).not.toHaveProperty("metadata_recovery");
+      expect(readSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      await client.close();
+    }
+  },
+);

@@ -6,10 +6,7 @@ import {
   AnalysisInputError,
   AnalysisUnsupportedTargetError,
 } from "../../domain/analysisErrorCore.js";
-import {
-  projectPlistValue,
-  unknownDateLimitation,
-} from "../../domain/apple/plistValue.js";
+import { unknownDateLimitation } from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
   decodeBinaryPlistNumbers,
@@ -85,12 +82,10 @@ export const decodeKeyedArchiveBytes = (
             : 0,
         }
       : parseXmlPropertyList(xmlText ?? "");
-  const {
-    value: plistValue,
-    unknownRealCount,
-    unknownDateCount,
-  } = projectPlistValue(parsed.value);
-  const graph = projectKeyedArchive(plistValue, selection);
+  const { unknownRealCount, unknownDateCount, ...graph } = projectKeyedArchive(
+    parsed.value,
+    selection,
+  );
   const numbers = createPlistNumberProjection(
     binary
       ? binaryNumberMetadata!.literals

@@ -706,7 +706,7 @@ exit 1`,
   expect(result.total_bytes).toBe(34);
 });
 
-it("handles `pkg=null` by returning null for requested_permissions_count", async () => {
+it("marks coverage partial when `pkg=null` leaves permissions unknown", async () => {
   const { binary } = await writeAdbStub(
     shellStub({
       "dumpsys:package": `Packages:
@@ -724,7 +724,29 @@ it("handles `pkg=null` by returning null for requested_permissions_count", async
   });
   expect(result).toMatchObject({
     requested_permissions_count: null,
-    coverage: "complete",
+    coverage: "partial",
+  });
+});
+
+it("keeps permission counts unknown when package state is not established", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "dumpsys:package": `Packages:
+  Package [com.example] (abcdef):
+    appId=10234
+    codePath=/data/app/com.example
+    versionCode=45 minSdk=24 targetSdk=34
+`,
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_package",
+    input: { serial: "emulator-5554", package: "com.example" },
+  });
+  expect(result).toMatchObject({
+    version_code: "45",
+    requested_permissions_count: null,
+    coverage: "partial",
   });
 });
 
@@ -771,6 +793,7 @@ it.each(["9007199254740993", "-4294967296"])(
       shellStub({
         "dumpsys:package": `Packages:
   Package [com.example] (abcdef):
+    pkg=Package{abcdef com.example}
     versionCode=${versionCode} minSdk=24 targetSdk=34
 `,
       }),
@@ -781,6 +804,7 @@ it.each(["9007199254740993", "-4294967296"])(
     });
     expect(result).toMatchObject({
       version_code: versionCode,
+      requested_permissions_count: 0,
       coverage: "complete",
     });
   },

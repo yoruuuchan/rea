@@ -16,6 +16,26 @@ import {
 import { ProviderCleanupError } from "./providerCleanupError.js";
 import { createEvidence } from "./evidence.js";
 
+it("keeps dependency-owned resources empty after the final owner releases", () => {
+  const file = new ProviderCleanupError("fixture", ["file-owner"], {});
+  const trace = new ProviderCleanupError("fixture", ["trace-owner"], {});
+  const composed = analysisErrorWithCleanupFailure(
+    file,
+    trace,
+  ).bindCleanupDependencies([file, trace]);
+  expect(new Set(composed.cleanupResources)).toEqual(
+    new Set(["file-owner", "trace-owner"]),
+  );
+  file.resolveCleanup();
+  expect(composed.cleanupResources).toEqual(["trace-owner"]);
+  trace.resolveCleanup();
+  expect(composed.cleanupIncomplete).toBe(false);
+  expect(composed.cleanupResources).toEqual([]);
+  expect(new Set(composed.cleanup?.resources)).toEqual(
+    new Set(["file-owner", "trace-owner"]),
+  );
+});
+
 it("keeps primary diagnostics separate from historical cleanup diagnostics with the same keys", () => {
   const primary = new AnalysisInputError("inspect", {
     diagnostics: {

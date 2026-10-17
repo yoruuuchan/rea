@@ -33,11 +33,14 @@ cliTest(
     const result = keyedArchiveResultSchema.parse(
       parseEvidence(output.json).normalized_result,
     );
-    expect(result.objects.map(({ id, value }) => ({ id, value }))).toEqual([
-      { id: 0, value: "$null" },
-      { id: 1, value: { $plist_type: "date", iso8601: null } },
+    expect(
+      result.objects.map(({ id, kind, value }) => ({ id, kind, value })),
+    ).toEqual([
+      { id: 0, kind: "nil", value: "$null" },
+      { id: 1, kind: "scalar", value: { $plist_type: "date", iso8601: null } },
       {
         id: 2,
+        kind: "scalar",
         value: { $plist_type: "date", iso8601: "2020-01-01T00:00:00.000Z" },
       },
     ]);

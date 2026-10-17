@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AnalysisInputError } from "../analysisErrorCore.js";
 import { jsonValueSchema, type JsonValue } from "../jsonValue.js";
 import { localPathStringSchema } from "../localPath.js";
+import { projectPlistValue } from "./plistValue.js";
 
 /**
  * The selected file is intact but is another kind of file, so another tool
@@ -68,8 +69,12 @@ export const keyedArchiveResultSchema = z.strictObject({
 
 const record = (
   value: JsonValue | undefined,
+  wrappedScalars: WeakSet<object>,
 ): Record<string, JsonValue> | undefined =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  !wrappedScalars.has(value)
     ? value
     : undefined;
 /**
@@ -77,8 +82,11 @@ const record = (
  * a numeric value. Any other value means an ordinary dictionary, such as a
  * `$top` that holds a root encoded under the key `UID`.
  */
-const uid = (value: JsonValue | undefined): number | undefined => {
-  const object = record(value);
+const uid = (
+  value: JsonValue | undefined,
+  wrappedScalars: WeakSet<object>,
+): number | undefined => {
+  const object = record(value, wrappedScalars);
   if (object === undefined || Object.keys(object).length !== 1)
     return undefined;
   const marker = Object.hasOwn(object, "UID") ? object.UID : object["CF$UID"];
@@ -95,12 +103,18 @@ const archiverMismatch = (
     : "its $archiver is not a string";
 };
 
-/** Interpret serialized Foundation references without instantiating archive classes. */
+/** Interpret decoded Foundation values without instantiating archive classes. */
 export const projectKeyedArchive = (
   value: unknown,
   selection: { root?: string | undefined; offset: number; limit: number },
 ) => {
-  const archive = record(jsonValueSchema.parse(value));
+  // Classify generated scalar wrappers by their producer identity, never by
+  // a caller-controlled $plist_type field in an ordinary dictionary.
+  const wrappedScalars = new WeakSet<object>();
+  const projected = projectPlistValue(value, (scalar) =>
+    wrappedScalars.add(scalar),
+  );
+  const archive = record(projected.value, wrappedScalars);
   if (archive?.$archiver !== "NSKeyedArchiver")
     throw new KeyedArchiveKindError(
       `Selected property list is not an NSKeyedArchiver archive: ${archiverMismatch(archive)}`,
@@ -111,7 +125,7 @@ export const projectKeyedArchive = (
   const table = archive.$objects;
   if (table.length > 200_000)
     throw new RangeError("Archive exceeds 200000 object-table entries");
-  const top = record(archive.$top);
+  const top = record(archive.$top, wrappedScalars);
   if (top === undefined || Object.keys(top).length === 0)
     throw new TypeError("Keyed archive has no $top roots");
   if (selection.root !== undefined && !Object.hasOwn(top, selection.root))
@@ -140,7 +154,7 @@ export const projectKeyedArchive = (
         throw new RangeError(
           "Archive exceeds 200000 values per object or 128 nesting levels",
         );
-      const target = uid(item.value);
+      const target = uid(item.value, wrappedScalars);
       if (target !== undefined) {
         const index =
           Number.isSafeInteger(target) && target >= 0 ? target : null;
@@ -165,7 +179,7 @@ export const projectKeyedArchive = (
             pending.push({ value: child, path: [...item.path, index] });
         }
       } else {
-        const fields = record(item.value);
+        const fields = record(item.value, wrappedScalars);
         if (fields !== undefined)
           for (const key of Object.keys(fields).sort().reverse()) {
             const child = fields[key];
@@ -193,13 +207,14 @@ export const projectKeyedArchive = (
   );
   const objects = table.map((value, id) => {
     scan(id, [{ value, path: [] }]);
-    const fields = record(value);
-    const classUid = uid(fields?.$class);
+    const fields = record(value, wrappedScalars);
+    const classUid = uid(fields?.$class, wrappedScalars);
     const classId =
       classUid !== undefined && Number.isSafeInteger(classUid) && classUid >= 0
         ? classUid
         : null;
-    const descriptor = classId === null ? undefined : record(table[classId]);
+    const descriptor =
+      classId === null ? undefined : record(table[classId], wrappedScalars);
     const className =
       typeof descriptor?.$classname === "string" ? descriptor.$classname : null;
     const isNil = id === 0 && value === "$null";
@@ -232,6 +247,8 @@ export const projectKeyedArchive = (
   const page = objects.slice(selection.offset, end);
   const ids = new Set(page.map(({ id }) => id));
   return {
+    unknownRealCount: projected.unknownRealCount,
+    unknownDateCount: projected.unknownDateCount,
     roots,
     objects: page,
     references: references.filter(
