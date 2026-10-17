@@ -822,12 +822,14 @@ class NativeMacOSClient implements AnalysisClient {
       json.value,
       ...(xml === undefined ? [] : [xml.value]),
     ].map((item) => invocation(item, plist.value, "$PLIST"));
+    const format = await plistSourceFormat(
+      classified.value.stdout,
+      plist.value,
+      requested,
+    );
+    if (!format.ok) return format;
     const result = inspectPlistSchema.parse({
-      format: /binary property list/iu.test(classified.value.stdout)
-        ? "binary"
-        : /XML|text/iu.test(classified.value.stdout)
-          ? "xml"
-          : "unknown",
+      format: format.value,
       value: parsed.value.value,
       bundle: parsed.value.bundle,
       source_path: plist.value,
@@ -1173,6 +1175,58 @@ const unreadablePlist = (
 const plutilDiagnostic = (stderr: string, path: string): string => {
   const text = stderr.trim();
   return text.startsWith(`${path}: `) ? text.slice(path.length + 2) : text;
+};
+
+/** Bytes examined for leading markup when `file` reports only text. */
+const PLIST_MARKUP_PROBE_BYTES = 4_096;
+
+/**
+ * Preserve explicit source identities. For generic text, recognize XML
+ * markup rather than a lone `<`, which also opens an OpenStep data value.
+ * A prefix without recognizable markup stays unknown.
+ */
+const plistSourceFormat = async (
+  description: string,
+  path: string,
+  requested: string | undefined,
+): Promise<Result<"binary" | "xml" | "json" | "unknown", AnalysisError>> => {
+  if (/binary property list/iu.test(description)) return ok("binary");
+  if (/\bXML\b/iu.test(description)) return ok("xml");
+  if (/\bJSON\b/iu.test(description)) return ok("json");
+  if (!/\btext\b/iu.test(description)) return ok("unknown");
+  try {
+    const handle = await open(path, "r");
+    try {
+      const head = Buffer.alloc(PLIST_MARKUP_PROBE_BYTES);
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      const encoding =
+        head[0] === 0xff && head[1] === 0xfe
+          ? "utf-16le"
+          : head[0] === 0xfe && head[1] === 0xff
+            ? "utf-16be"
+            : "utf-8";
+      const text = new TextDecoder(encoding)
+        .decode(head.subarray(0, bytesRead))
+        .trimStart();
+      return ok(
+        /^<(?:[!?]|(?:plist|dict|array|string|integer|real|data|date|true|false)[\s/>])/u.test(
+          text,
+        )
+          ? "xml"
+          : "unknown",
+      );
+    } finally {
+      await handle.close();
+    }
+  } catch (cause: unknown) {
+    const code =
+      cause instanceof Error && "code" in cause ? cause.code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR")
+      return err(unreadablePlist(path, requested, "no file exists there"));
+    return err(
+      new ProviderAdapterError(IDENTITY.id, "inspect_plist", { cause }),
+    );
+  }
 };
 
 /**

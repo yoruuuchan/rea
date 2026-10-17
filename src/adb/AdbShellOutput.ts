@@ -1,3 +1,8 @@
+import type {
+  AdbWindowFocusContext,
+  AdbWindowFocusObservation,
+} from "../domain/adb/adbDeviceAnalysis.js";
+
 /**
  * Parsers for fixed observation commands REA runs through `adb shell`.
  *
@@ -181,32 +186,75 @@ export const parseWmDensityOutput = (
   return { physical: physical ?? bare, override };
 };
 
-interface WindowFocusDeclaration {
-  readonly value: string | null;
-  readonly rawLine: string;
-}
-
-/** A missing declaration differs from a declared null object reference. */
+/** Own declaration identity and omission before deriving a singular summary. */
 export const parseWindowFocusOutput = (
   stdout: string,
-): {
-  focusedWindow: WindowFocusDeclaration | null;
-  focusedApp: WindowFocusDeclaration | null;
-} => {
-  let focusedWindow: WindowFocusDeclaration | null = null;
-  let focusedApp: WindowFocusDeclaration | null = null;
+): AdbWindowFocusObservation => {
+  const contexts: AdbWindowFocusContext[] = [];
+  const observedLines: string[] = [];
+  let current: AdbWindowFocusContext | undefined;
   for (const line of stdout.split(/\r?\n/u)) {
     const trimmed = line.trim();
-    if (focusedWindow === null && trimmed.startsWith("mCurrentFocus=")) {
-      const value = trimmed.slice("mCurrentFocus=".length).trim();
-      focusedWindow = { value: value === "null" ? null : value, rawLine: line };
+    if (trimmed.startsWith("Display:")) {
+      current = {
+        scope: "display",
+        display_id:
+          /^Display:\s+mDisplayId=(-?[0-9]+)(?:\s|$)/u.exec(trimmed)?.[1] ??
+          null,
+        header_line: line,
+        declarations: [],
+      };
+      contexts.push(current);
+      observedLines.push(line);
+      continue;
     }
-    if (focusedApp === null && trimmed.startsWith("mFocusedApp=")) {
-      const value = trimmed.slice("mFocusedApp=".length).trim();
-      focusedApp = { value: value === "null" ? null : value, rawLine: line };
+    const field = trimmed.startsWith("mCurrentFocus=")
+      ? "mCurrentFocus"
+      : trimmed.startsWith("mFocusedApp=")
+        ? "mFocusedApp"
+        : undefined;
+    if (field === undefined) continue;
+    if (current === undefined) {
+      current = {
+        scope: "unscoped",
+        display_id: null,
+        header_line: null,
+        declarations: [],
+      };
+      contexts.push(current);
     }
+    const value = trimmed.slice(field.length + 1).trim();
+    current.declarations.push({
+      field,
+      value: value === "null" ? null : value,
+      raw_line: line,
+    });
+    observedLines.push(line);
   }
-  return { focusedWindow, focusedApp };
+  const windows =
+    contexts.length === 1
+      ? contexts[0]!.declarations.filter(
+          ({ field }) => field === "mCurrentFocus",
+        )
+      : [];
+  const apps =
+    contexts.length === 1
+      ? contexts[0]!.declarations.filter(({ field }) => field === "mFocusedApp")
+      : [];
+  const declared = contexts.some(({ declarations }) => declarations.length > 0);
+  const summary = !declared
+    ? "unavailable"
+    : contexts.length === 1 && windows.length <= 1 && apps.length <= 1
+      ? "single_context"
+      : "ambiguous";
+  return {
+    focused_window:
+      summary === "single_context" ? (windows[0]?.value ?? null) : null,
+    focused_app: summary === "single_context" ? (apps[0]?.value ?? null) : null,
+    focus_summary: summary,
+    focus_contexts: contexts,
+    observed_lines: observedLines,
+  };
 };
 
 export interface AdbPackageDetails {
@@ -250,6 +298,7 @@ export const parseDumpsysPackageOutput = (
   };
   let inPermissions = false;
   let permissions = 0;
+  let packageIsNull = false;
   for (const line of stdout.split(/\r?\n/u)) {
     if (line.trim().startsWith("requested permissions:")) {
       inPermissions = true;
@@ -268,7 +317,8 @@ export const parseDumpsysPackageOutput = (
     if (match === null) continue;
     const key = match[1]!;
     const value = match[2]!.trim();
-    if (key === "versionName" && details.versionName === null)
+    if (key === "pkg" && value === "null") packageIsNull = true;
+    else if (key === "versionName" && details.versionName === null)
       details.versionName = value === "" ? null : value;
     else if (key === "versionCode" && details.versionCode === null) {
       const parsed = /^(-?\d+)/u.exec(value);
@@ -288,7 +338,10 @@ export const parseDumpsysPackageOutput = (
     } else if (key === "pkgFlags" && details.pkgFlags === null)
       details.pkgFlags = value === "" ? null : value;
   }
-  return { ...details, requestedPermissions: permissions };
+  return {
+    ...details,
+    requestedPermissions: packageIsNull ? null : permissions,
+  };
 };
 
 /**

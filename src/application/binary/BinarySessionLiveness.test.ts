@@ -1,3 +1,7 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
+import { elf } from "../../domain/binaryTarget.fixture.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -235,7 +239,12 @@ it("clears retired runtime availability after cancelled-switch restoration", asy
   const initialRunId = sessionRunId(await session.status());
 
   const controller = new AbortController();
-  const switching = session.open("/bin/ls", { signal: controller.signal });
+  const alternate = join(
+    await createTestTempDirectory("rea-liveness-switch-"),
+    "alternate.elf",
+  );
+  await writeFile(alternate, elf(2, 1, 62));
+  const switching = session.open(alternate, { signal: controller.signal });
   await closing;
   controller.abort();
   releaseClose();

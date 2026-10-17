@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import { lstat, stat, type FileHandle } from "node:fs/promises";
 import {
   assertRegularFileActive,
@@ -18,15 +19,17 @@ export class RegularFileCapacityError extends Error {
   }
 }
 
+interface StableReadOptions {
+  readonly signal?: AbortSignal;
+  readonly symlinks: "follow" | "reject";
+}
+
 /** Read an admitted descriptor completely, checking its extent and selected name. */
 export const readStableFileBytes = async (
   file: FileHandle,
   path: string,
   maximumBytes: number,
-  options: {
-    readonly signal?: AbortSignal;
-    readonly symlinks: "follow" | "reject";
-  },
+  options: StableReadOptions,
 ): Promise<Buffer> => {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0)
     throw new RangeError(
@@ -36,17 +39,72 @@ export const readStableFileBytes = async (
   const before = await file.stat({ bigint: true });
   if (before.size > BigInt(maximumBytes))
     throw new RegularFileCapacityError(path, maximumBytes, before.size);
+  const bytes = await readExtent(
+    file,
+    path,
+    Number(before.size),
+    options.signal,
+  );
   assertRegularFileActive(options.signal);
-  const bytes = Buffer.alloc(Number(before.size));
+  const extra = Buffer.alloc(1);
+  if ((await file.read(extra, 0, 1, bytes.length)).bytesRead !== 0)
+    throw new RegularFileChangedError(path);
+  await assertStableIdentity(file, path, before, options);
+  return bytes;
+};
+
+/** Read only the requested prefix, retaining the validated full file extent. */
+export const readStableFilePrefix = async (
+  file: FileHandle,
+  path: string,
+  maximumBytes: number,
+  options: StableReadOptions,
+): Promise<{ readonly bytes: Buffer; readonly size: bigint }> => {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0)
+    throw new RangeError(
+      "Maximum prefix bytes must be a nonnegative safe integer",
+    );
+  assertRegularFileActive(options.signal);
+  const before = await file.stat({ bigint: true });
+  const length = Number(
+    before.size < BigInt(maximumBytes) ? before.size : BigInt(maximumBytes),
+  );
+  const bytes = await readExtent(file, path, length, options.signal);
+  await assertStableIdentity(file, path, before, options);
+  return { bytes, size: before.size };
+};
+
+const readExtent = async (
+  file: FileHandle,
+  path: string,
+  length: number,
+  signal?: AbortSignal,
+): Promise<Buffer> => {
+  assertRegularFileActive(signal);
+  const bytes = Buffer.alloc(length);
   let offset = 0;
   while (offset < bytes.length) {
-    assertRegularFileActive(options.signal);
-    const read = await file.read(bytes, offset, bytes.length - offset, offset);
+    assertRegularFileActive(signal);
+    const read = await file.read({
+      buffer: bytes,
+      offset,
+      length: bytes.length - offset,
+      position: offset,
+    });
     if (read.bytesRead === 0) throw new RegularFileChangedError(path);
     offset += read.bytesRead;
   }
+  assertRegularFileActive(signal);
+  return bytes;
+};
+
+const assertStableIdentity = async (
+  file: FileHandle,
+  path: string,
+  before: BigIntStats,
+  options: StableReadOptions,
+): Promise<void> => {
   assertRegularFileActive(options.signal);
-  const extra = Buffer.alloc(1);
   const named = async () => {
     try {
       return await (options.symlinks === "follow" ? stat : lstat)(path, {
@@ -65,11 +123,9 @@ export const readStableFileBytes = async (
     }
   };
   if (
-    (await file.read(extra, 0, 1, offset)).bytesRead !== 0 ||
     !sameRegularFileState(before, await file.stat({ bigint: true })) ||
     !sameRegularFileState(before, await named())
   )
     throw new RegularFileChangedError(path);
   assertRegularFileActive(options.signal);
-  return bytes;
 };

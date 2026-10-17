@@ -792,18 +792,19 @@ export class GhidraClient {
         this.#startupOutputCheckpoint = this.#process.checkpointOutput();
       }
       const producerFailure =
-        launched.error instanceof GhidraLaunchError
-          ? launched.error.primaryFailure
-          : undefined;
-      const interrupted =
-        launched.error instanceof AnalysisCancelledError ||
-        producerFailure instanceof AnalysisCancelledError ||
-        (producerFailure === undefined && deadline.signal.aborted);
-      const failure = interrupted
-        ? this.#interruptionFailure(deadline, launched.error)
-        : launched.error instanceof GhidraSessionError
+        launched.error instanceof AnalysisCancelledError
           ? launched.error
-          : this.#failure("start", launched.error.message, launched.error);
+          : launched.error instanceof GhidraLaunchError
+            ? launched.error.primaryFailure
+            : undefined;
+      const failure =
+        producerFailure instanceof AnalysisCancelledError
+          ? this.#interruptionFailure(deadline, launched.error, {
+              reason: producerFailure.cause,
+            })
+          : launched.error instanceof GhidraSessionError
+            ? launched.error
+            : this.#failure("start", launched.error.message, launched.error);
       return this.#startupFailure(failure, deadline);
     }
     this.#launch = launched.value;
@@ -1122,7 +1123,18 @@ export class GhidraClient {
   #interruptionFailure(
     deadline: ProviderStartupDeadline,
     cause?: unknown,
+    cancellation?: { readonly reason: unknown },
   ): GhidraSessionError {
+    if (
+      cancellation !== undefined &&
+      !(
+        deadline.signal.aborted &&
+        cancellation.reason === deadline.signal.reason
+      )
+    )
+      return this.#failure("cancelled", "Ghidra startup was cancelled", cause, {
+        cancellation,
+      });
     if (deadline.signal.reason === STARTUP_OWNER_CLOSED)
       return this.#failure(
         "process",

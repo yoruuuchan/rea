@@ -1,3 +1,4 @@
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
 import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import type {
@@ -39,6 +40,7 @@ export const projectGhidraDoctorInspection = (
           check,
           inspection.installDir !== null,
           inspection.javaProbeFailure,
+          inspection.nativeDecompilerHeaderFailure,
         ),
       ),
       ...(readiness !== undefined
@@ -121,6 +123,7 @@ const projectCheck = (
   check: GhidraInstallationCheck,
   configured: boolean,
   javaFailure: GhidraInstallationInspection["javaProbeFailure"],
+  headerFailure: GhidraInstallationInspection["nativeDecompilerHeaderFailure"],
 ): DoctorProviderCheck => ({
   name: check.name,
   ok: check.status === "passed",
@@ -138,6 +141,9 @@ const projectCheck = (
             : { properties: { ...javaFailure.properties } }),
         },
       }
+    : {}),
+  ...(check.name === "native_decompiler" && headerFailure !== undefined
+    ? { details: { header_failure: projectAnalysisError(headerFailure) } }
     : {}),
   remediation: check.status === "failed" ? check.remediation : null,
   classification:

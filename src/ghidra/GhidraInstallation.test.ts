@@ -1,6 +1,9 @@
 import { createInspectionResources } from "../../tests/fixtures/inspectionResources.js";
 
 import { missingJavaProbe } from "./GhidraInstallation.fixture.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { ProviderAdapterError } from "../domain/providerAdapterError.js";
+import { err } from "../domain/result.js";
 import { ok as javaProbeOk } from "../domain/result.js";
 import {
   parseGhidraJavaOutput,
@@ -17,7 +20,6 @@ import {
   ghidraJavaEnvironment,
   discoverGhidraInstallationOnPath,
   inspectGhidraInstallation,
-  type GhidraExecutableHeaderProbe,
   type GhidraInstallationHost,
 } from "./GhidraInstallation.js";
 import {
@@ -46,10 +48,8 @@ const WINDOWS_PROPERTIES = `${WINDOWS_INSTALL}\\Ghidra\\application.properties`;
 const WINDOWS_HEADLESS = `${WINDOWS_INSTALL}\\support\\analyzeHeadless.bat`;
 const WINDOWS_DECOMPILER = `${WINDOWS_INSTALL}\\Ghidra\\Features\\Decompiler\\os\\win_x86_64\\decompile.exe`;
 
-const headerProbe = (bytes: Buffer): GhidraExecutableHeaderProbe => ({
-  bytes,
-  size: bytes.length,
-});
+const headerProbe = (bytes: Buffer) =>
+  javaProbeOk({ bytes, size: bytes.length });
 
 const JAVA: GhidraJavaObservation = {
   osArch: "amd64",
@@ -1035,7 +1035,9 @@ describe("Ghidra native decompiler admission", () => {
         architecture: "x64" as const,
       },
       executableHeader: (path: string) =>
-        path === LINUX_DECOMPILER ? headerProbe(elf(1, 1, 8)) : undefined,
+        path === LINUX_DECOMPILER
+          ? headerProbe(elf(1, 1, 8))
+          : javaProbeOk(undefined),
     },
     {
       name: "a Linux x86-64 decompiler at the macOS arm64 path",
@@ -1046,7 +1048,9 @@ describe("Ghidra native decompiler admission", () => {
         architecture: "arm64" as const,
       },
       executableHeader: (path: string) =>
-        path === MAC_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
+        path === MAC_DECOMPILER
+          ? headerProbe(elf(2, 1, 62))
+          : javaProbeOk(undefined),
     },
     {
       name: "a macOS arm64 decompiler at the Linux x64 path",
@@ -1059,7 +1063,7 @@ describe("Ghidra native decompiler admission", () => {
       executableHeader: (path: string) =>
         path === LINUX_DECOMPILER
           ? headerProbe(thinMach(0xcffaedfe, 0x0100000c))
-          : undefined,
+          : javaProbeOk(undefined),
     },
   ])("distinguishes $name", async ({ options, executableHeader }) => {
     const result = await inspectGhidraInstallation(
@@ -1091,7 +1095,9 @@ describe("Ghidra native decompiler admission", () => {
       },
       host({
         executableHeader: (path: string) =>
-          path === LINUX_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
+          path === LINUX_DECOMPILER
+            ? headerProbe(elf(2, 1, 62))
+            : javaProbeOk(undefined),
       }),
     );
     expect(result.status).toBe("available");
@@ -1115,7 +1121,7 @@ describe("Ghidra native decompiler compatibility", () => {
         platform: "linux",
         architecture: "x64",
       },
-      host({ executableHeader: () => undefined }),
+      host({ executableHeader: () => javaProbeOk(undefined) }),
     );
     expect(result.status).toBe("available");
     if (result.status !== "available") return;
@@ -1145,7 +1151,7 @@ describe("Ghidra native decompiler compatibility", () => {
             osName: "Mac OS X",
           }),
         executableHeader: (path: string) =>
-          path === MAC_DECOMPILER ? headerProbe(bytes) : undefined,
+          path === MAC_DECOMPILER ? headerProbe(bytes) : javaProbeOk(undefined),
       }),
     );
     expect(result.status).toBe("available");
@@ -1175,7 +1181,9 @@ describe("Ghidra native decompiler compatibility", () => {
             osName: "Mac OS X",
           }),
         executableHeader: (path: string) =>
-          path === MAC_DECOMPILER ? headerProbe(elf(2, 1, 62)) : undefined,
+          path === MAC_DECOMPILER
+            ? headerProbe(elf(2, 1, 62))
+            : javaProbeOk(undefined),
       }),
     );
     expect(result.status).toBe("unavailable");
@@ -1534,5 +1542,75 @@ it.each([
     expect(
       checked.some((candidate) => candidate.includes("/opt/openjdk/")),
     ).toBe(false);
+  },
+);
+
+it("retains a failed header observation as unknown in installation and doctor diagnostics", async () => {
+  const failure = new ProviderAdapterError("ghidra", "ghidra:installation", {
+    userMessage: "controlled header read failure",
+    diagnostics: {
+      path: LINUX_DECOMPILER,
+      stage: "native_decompiler_header",
+      system_code: "EIO",
+    },
+  });
+  const result = await inspectGhidraInstallation(
+    {
+      resourceOwner: inspectionResources.owner,
+      environment: {},
+      installDir: INSTALL,
+      platform: "linux",
+      architecture: "x64",
+    },
+    host({ executableHeader: () => err(failure) }),
+  );
+  expect(result.status).toBe("available");
+  expect(result.nativeDecompilerHeaderFailure).toBe(failure);
+  expect(ghidraInstallationDiagnostics(result)).toMatchObject({
+    native_decompiler_header_failure: {
+      details: {
+        operation: "ghidra:installation",
+        diagnostics: { system_code: "EIO" },
+      },
+    },
+  });
+  expect(
+    projectGhidraDoctorInspection(result).checks.find(
+      ({ name }) => name === "native_decompiler",
+    ),
+  ).toMatchObject({
+    ok: true,
+    detail: expect.stringContaining("header is unknown"),
+    details: {
+      header_failure: { details: { diagnostics: { system_code: "EIO" } } },
+    },
+  });
+});
+
+it.each(["cancelled", "cleanup"] as const)(
+  "propagates header %s instead of treating it as optional unknown compatibility",
+  async (kind) => {
+    const reason = { request: "header interrupted" };
+    const failure =
+      kind === "cancelled"
+        ? new AnalysisCancelledError("ghidra:installation", { cause: reason })
+        : new ProviderAdapterError("ghidra", "ghidra:installation", {
+            cleanup: {
+              resources: [LINUX_DECOMPILER],
+              reason: "controlled close refusal",
+            },
+          });
+    await expect(
+      inspectGhidraInstallation(
+        {
+          resourceOwner: inspectionResources.owner,
+          environment: {},
+          installDir: INSTALL,
+          platform: "linux",
+          architecture: "x64",
+        },
+        host({ executableHeader: () => err(failure) }),
+      ),
+    ).rejects.toBe(failure);
   },
 );

@@ -24,6 +24,7 @@ import {
   runKunaCommand,
   type KunaProcessLauncher,
 } from "./KunaCommand.js";
+import { kunaProjectDeadline } from "./KunaConfiguration.js";
 import type { KunaInstallation } from "./KunaInstallation.js";
 import { KUNA_DIAGNOSTIC_BYTES } from "./KunaLimits.js";
 import {
@@ -214,7 +215,7 @@ export const exportKunaProject = async (
       workspace: request.workspace,
       operation: KUNA_EXPORT_OPERATION,
       timeoutMs: deadline - Date.now(),
-      reportedTimeoutMs: configuration.projectTimeoutMs,
+      deadline: kunaProjectDeadline(configuration),
       outputBytes,
       signal,
       launcher: request.launcher,

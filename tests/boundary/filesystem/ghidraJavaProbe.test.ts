@@ -3,6 +3,7 @@ import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.
 import { createInspectionResources } from "../../fixtures/inspectionResources.js";
 
 import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
@@ -58,6 +59,13 @@ const probeHost =
                 ...spawn,
                 command: process.execPath,
                 arguments: [`${command}.cjs`, ...spawn.arguments],
+                // The controlled Node prerequisite needs Windows runtime state.
+                hostEnvironment: {
+                  SystemRoot: process.env.SystemRoot,
+                  TEMP: tmpdir(),
+                  TMP: tmpdir(),
+                  ...spawn.hostEnvironment,
+                },
               }),
           }),
       };

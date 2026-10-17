@@ -33,6 +33,7 @@ import {
   kunaChildEnvironment,
   type KunaInstallation,
 } from "./KunaInstallation.js";
+import type { KunaDeadline } from "./KunaConfiguration.js";
 import { KUNA_PROVIDER_ID } from "./KunaRelease.js";
 
 /**
@@ -54,9 +55,10 @@ export interface KunaCommandRequest {
   readonly workspace: string;
   /** Operation named by every failure this run reports. */
   readonly operation: string;
+  /** Time left for this run; at most the configured deadline. */
   readonly timeoutMs: number;
-  /** The deadline callers configured, reported when the run times out. */
-  readonly reportedTimeoutMs: number;
+  /** The configured deadline and its setting, reported when the run times out. */
+  readonly deadline: KunaDeadline;
   /** Buffered stderr bytes, plus stdout bytes unless `stdout` consumes them. */
   readonly outputBytes: number;
   /** Parses stdout as it arrives instead of buffering it; see `runOwnedCommand`. */
@@ -83,6 +85,7 @@ export type KunaCommandOutcome =
     }
   | {
       readonly kind: "retained";
+      readonly processResources: readonly string[];
       readonly error: ProviderCleanupError;
       /** The supervisor that can retry stopping the process tree, when one exists. */
       readonly owner: ProviderProcessSupervisor | undefined;
@@ -266,12 +269,10 @@ const commandFailure = (
   if (!(cause instanceof OwnedCommandFailure))
     return {
       kind: "failed",
-      error: request.signal.aborted
-        ? new AnalysisCancelledError(operation, { cause })
-        : new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
-            cause,
-            userMessage: `Cannot run ${request.installation.executable}: ${message(cause)}`,
-          }),
+      error: new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
+        cause,
+        userMessage: `Cannot run ${request.installation.executable}: ${message(cause)}`,
+      }),
     };
   const snapshot = cause.snapshot;
   const capturedOutput =
@@ -297,53 +298,55 @@ const commandFailure = (
     cause,
     ...(capturedOutput === undefined ? {} : { capturedOutput }),
   };
+  let primary: AnalysisError;
+  if (cause.reason === "cancelled")
+    primary = new AnalysisCancelledError(operation, {
+      ...details,
+      cause: cause.cancellation?.reason,
+    });
+  else if (cause.reason === "timeout") {
+    const { setting, ms } = request.deadline;
+    primary = new AnalysisTimeoutError(operation, ms, {
+      ...details,
+      userMessage: `kuna ${subcommand} did not finish within ${setting} (${String(ms)} ms).`,
+      // The same run takes as long again, so only a longer deadline helps.
+      remediationAction: `Raise ${setting} in the environment that starts REA, then restart REA; it reads Kuna settings when it starts.${
+        subcommand === "decompile"
+          ? " Within a session, pseudocode is also read from the project export once it finishes."
+          : ""
+      }`,
+    });
+  }
+  // The same input overflows the same fixed buffer; waiting cannot help.
+  else if (cause.reason === "output-limit")
+    primary = new AnalysisResourceConstraintError(
+      operation,
+      "memory",
+      `kuna ${subcommand} wrote more than ${String(request.outputBytes)} bytes of output.`,
+      { output_limit_bytes: request.outputBytes },
+      {
+        ...details,
+        remediationAction: `REA buffers at most ${String(request.outputBytes)} bytes of kuna ${subcommand} output, so repeating this request for this target fails the same way. Use another provider for it.`,
+      },
+    );
+  else {
+    const exitCode = capturedOutput?.exit_code;
+    primary = new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
+      ...details,
+      userMessage: `kuna ${subcommand} failed${exitCode === undefined || exitCode === null ? "" : ` with exit code ${String(exitCode)}`}: ${capturedOutput?.stderr.trim().split("\n").at(-1) || cause.message}`,
+    });
+  }
   if (cause.cleanupFailure !== null)
     return {
       kind: "retained",
+      processResources: cause.resources,
       error: new ProviderCleanupError(
         KUNA_PROVIDER_ID,
         [...cause.resources, request.workspace],
         { reason: cause.cleanupFailure },
-        { operation, cause },
+        { ...details, operation, cleanupPrimary: primary },
       ),
       owner: cause.cleanupOwner,
     };
-  if (cause.reason === "cancelled")
-    return {
-      kind: "failed",
-      error: new AnalysisCancelledError(operation, details),
-    };
-  if (cause.reason === "timeout")
-    return {
-      kind: "failed",
-      error: new AnalysisTimeoutError(
-        operation,
-        request.reportedTimeoutMs,
-        details,
-      ),
-    };
-  // The same target and executable always produce the same output, so a
-  // fixed buffer it overflows is a memory bound, not a busy admission queue.
-  if (cause.reason === "output-limit")
-    return {
-      kind: "failed",
-      error: new AnalysisResourceConstraintError(
-        operation,
-        "memory",
-        `kuna ${subcommand} wrote more than ${String(request.outputBytes)} bytes of output.`,
-        { output_limit_bytes: request.outputBytes },
-        {
-          ...details,
-          remediationAction: `REA buffers at most ${String(request.outputBytes)} bytes of kuna ${subcommand} output, so repeating this request for this target fails the same way. Use another provider for it.`,
-        },
-      ),
-    };
-  const exitCode = capturedOutput?.exit_code;
-  return {
-    kind: "failed",
-    error: new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
-      ...details,
-      userMessage: `kuna ${subcommand} failed${exitCode === undefined || exitCode === null ? "" : ` with exit code ${String(exitCode)}`}: ${capturedOutput?.stderr.trim().split("\n").at(-1) || cause.message}`,
-    }),
-  };
+  return { kind: "failed", error: primary };
 };

@@ -1,3 +1,4 @@
+import { AnalysisCancelledError } from "../../../../src/domain/analysisErrorCore.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -1765,4 +1766,75 @@ it("redacts the transport credential when refreshing startup diagnostics", async
   expect(result.error.message).toContain("[REDACTED]");
   expect(result.error.message).not.toContain(token);
   expect(JSON.stringify(result.error.diagnostics)).not.toContain(token);
+});
+
+it("preserves a failed launcher result when the final caller aborts before consumption", async () => {
+  const controller = new AbortController();
+  const physical = new GhidraLaunchError("controlled earlier launch failure", {
+    cause: new Error("physical failure"),
+  });
+  const client = clientFor({
+    launch: async (_session, options) => {
+      controller.abort(null);
+      if (options?.signal?.aborted !== true)
+        await new Promise<void>((resolve) =>
+          options?.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+      return err(physical);
+    },
+  });
+  const result = await client.start(controller.signal);
+  expect(result).toMatchObject({
+    ok: false,
+    error: { kind: "start", cause: physical },
+  });
+});
+
+it.each([null, "helper owner stopped"])(
+  "consumes a producer cancellation without an aborted client deadline %j",
+  async (reason) => {
+    const cancellation = new AnalysisCancelledError("open_binary", {
+      cause: reason,
+    });
+    const client = clientFor({
+      launch: async () =>
+        err(
+          new GhidraLaunchError("producer helper cancelled", {
+            primaryFailure: cancellation,
+          }),
+        ),
+    });
+    const result = await client.start();
+    expect(result).toMatchObject({ ok: false, error: { kind: "cancelled" } });
+    if (result.ok) throw new Error("Expected cancellation");
+    expect(result.error.cancellation?.reason).toBe(reason);
+  },
+);
+
+it("preserves a producer failure while its result waits for the startup deadline", async () => {
+  const physical = new GhidraLaunchError(
+    "controlled physical failure before finalization",
+  );
+  const client = clientFor(
+    {
+      launch: async (_session, options) => {
+        if (options?.signal === undefined)
+          throw new Error("Expected owned startup signal");
+        if (!options.signal.aborted)
+          await new Promise<void>((resolve) =>
+            options.signal?.addEventListener("abort", () => resolve(), {
+              once: true,
+            }),
+          );
+        return err(physical);
+      },
+    },
+    { startupTimeoutMs: 500 },
+  );
+  expect(await client.start()).toMatchObject({
+    ok: false,
+    error: { kind: "start", cause: physical },
+  });
 });
