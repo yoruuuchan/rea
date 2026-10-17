@@ -1,10 +1,12 @@
+import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
+import { createInspectionResources } from "../../fixtures/inspectionResources.js";
 import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, it as test } from "vitest";
+import { expect, it as test, onTestFinished } from "vitest";
 
 import {
-  inspectJadxAvailability,
+  inspectJadxAvailability as inspectAvailability,
   resolveJadxConfigurationInputs,
   validateJadxConfiguration,
 } from "../../../src/android/JadxConfiguration.js";
@@ -12,6 +14,20 @@ import { AnalysisCapabilityUnavailableError } from "../../../src/domain/analysis
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { writeOrderedZip } from "../../fixtures/artifactEntryOrder.js";
 import { writeJadxJarInventory } from "../../fixtures/android/jadxJar.js";
+
+const inspectionOwner = () => {
+  const resources = createInspectionResources();
+  onTestFinished(() => resources.close());
+  return resources.owner;
+};
+const inspectJadxAvailability = (
+  environment: Parameters<typeof inspectAvailability>[0],
+  signal?: AbortSignal,
+) =>
+  inspectAvailability(environment, {
+    resourceOwner: inspectionOwner(),
+    signal,
+  });
 
 const it = test.skipIf(process.platform === "win32");
 
@@ -23,7 +39,9 @@ const resolveConfiguration = async (
     environment,
     operation,
   );
-  await validateJadxConfiguration(configuration, environment, operation);
+  await validateJadxConfiguration(configuration, environment, operation, {
+    resourceOwner: inspectionOwner(),
+  });
   return configuration;
 };
 
@@ -248,8 +266,7 @@ it("preserves exact Java probe output and marks max-buffer capture as truncated"
     status: "unavailable",
     code: "version_unresolved",
     diagnostics: {
-      exit_code: null,
-      process_error_code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      process_error_code: null,
       failure: "output_limit",
       output_truncated: true,
     },
@@ -320,7 +337,9 @@ it("cancels an in-flight Java readiness probe", async () => {
       )
       .toBe(true);
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await expect(pending).rejects.toMatchObject({
+      _tag: "AnalysisCancelledError",
+    });
   } finally {
     controller.abort();
     await pending.catch(() => undefined);
@@ -344,7 +363,7 @@ it("reports a killed Java probe as unresolved instead of missing runtime", async
     diagnostics: {
       java_executable: java,
       failure: "probe_terminated",
-      killed: true,
+      killed: null,
       deadline_ms: 10_000,
     },
   });
@@ -429,3 +448,103 @@ it("reports the effective operation deadline and rejects unusable values", async
       },
     });
 });
+
+it("joins a cancelled Java readiness probe until its owned child exits", async () => {
+  const root = await createTestTempDirectory("rea-jadx-probe-finalization-");
+  const javaHome = join(root, "jdk");
+  const java = join(javaHome, "bin", "java");
+  const jar = join(root, "engine.jar");
+  const ready = join(root, "ready");
+  const stopping = join(root, "stopping");
+  const release = join(root, "release");
+  const exiting = join(root, "exiting");
+  await mkdir(join(javaHome, "bin"), { recursive: true });
+  await writeJadxJarInventory(jar);
+  await writeFile(
+    java,
+    `#!${process.execPath}
+const fs = require("node:fs");
+const ready = ${JSON.stringify(ready)};
+const stopping = ${JSON.stringify(stopping)};
+const release = ${JSON.stringify(release)};
+const exiting = ${JSON.stringify(exiting)};
+process.on("SIGTERM", () => { fs.writeFileSync(stopping, "received"); });
+const check = setInterval(() => {
+  if (fs.existsSync(release)) {
+    fs.writeFileSync(exiting, "released");
+    process.stderr.write("final readiness diagnostic");
+    clearInterval(check);
+    clearTimeout(watchdog);
+  }
+}, 10);
+const watchdog = setTimeout(() => { process.exitCode = 99; clearInterval(check); }, 10000);
+fs.writeFileSync(ready, String(process.pid));
+`,
+  );
+  await chmod(java, 0o700);
+  const caller = new AbortController();
+  const pending = inspectJadxAvailability(
+    { JAVA_HOME: javaHome, REA_JADX_MCP_JAR: jar },
+    caller.signal,
+  ).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  const fileExists = (path: string) =>
+    readFile(path, "utf8").then(
+      () => true,
+      () => false,
+    );
+  let pid: number | undefined;
+  const absent = () => {
+    if (pid === undefined) return true;
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (cause: unknown) {
+      if (cause instanceof Error && "code" in cause && cause.code === "ESRCH")
+        return true;
+      throw cause;
+    }
+  };
+  try {
+    await expect.poll(() => fileExists(ready)).toBe(true);
+    pid = Number(await readFile(ready, "utf8"));
+    caller.abort({ caller: "readiness cancellation" });
+    const outcome = await pending;
+    expect(outcome).toMatchObject({ error: { cause: caller.signal.reason } });
+    // A zero-signal observation is conservative under PID reuse and never
+    // grants cleanup authority; only the fixture's release file requests exit.
+    expect(absent()).toBe(true);
+  } finally {
+    caller.abort();
+    await writeFile(release, "release");
+    await pending;
+    await expect.poll(absent).toBe(true);
+  }
+});
+
+it.each([
+  null,
+  { caller: "before readiness" },
+  new ProviderCleanupError("foreign", ["foreign-resource"], {
+    reason: "foreign cleanup",
+  }),
+])(
+  "preserves opaque pre-admission readiness cancellation %j",
+  async (reason) => {
+    const caller = new AbortController();
+    caller.abort(reason);
+    const error: unknown = await inspectJadxAvailability(
+      {},
+      caller.signal,
+    ).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({
+      _tag: "AnalysisCancelledError",
+      cause: reason,
+      cleanupIncomplete: false,
+    });
+    if (reason instanceof ProviderCleanupError)
+      expect(reason.cleanupIncomplete).toBe(true);
+  },
+);

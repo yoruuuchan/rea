@@ -2,7 +2,6 @@ import type { z } from "zod";
 import type { AndroidRequest } from "../domain/android/androidAnalysis.js";
 import { androidResultSchemas } from "../domain/android/androidAnalysis.js";
 import {
-  AnalysisCapabilityUnavailableError,
   AnalysisInputError,
   AnalysisOutputError,
 } from "../domain/analysisErrorCore.js";
@@ -16,7 +15,6 @@ import {
   jadxXrefsSchema,
   normalizeJadxText,
 } from "./JadxProtocol.js";
-import { JADX_RELEASE } from "./JadxRelease.js";
 
 /** The adapter consumes tool payloads, never provider RPC details outside this layer. */
 export interface JadxToolPort {
@@ -223,8 +221,8 @@ const inspectMethod = async (
       `Select one of ${candidates.length} overloads: ${candidates.map((method) => `${method.overload_index}: ${method.reported_signature}`).join("; ")}`,
     );
   const index = request.input.overload_index ?? 0;
-  const selected = candidates[index];
-  if (selected === undefined)
+  const selected =
+    candidates[index] ??
     inputFailure(
       request,
       "overload_index",
@@ -242,22 +240,12 @@ const inspectMethod = async (
     body.class_name !== summary.full_name ||
     body.method_name !== request.input.method_name ||
     body.overload_index !== index ||
-    body.overload_count !== candidates.length
+    body.overload_count !== candidates.length ||
+    body.dex_descriptor !== selected.dex_descriptor
   )
     throw new AnalysisOutputError(
       request.operation,
       "JADX returned a different method or overload inventory",
-    );
-  if (body.body.startsWith("// ERROR:"))
-    throw new AnalysisOutputError(
-      request.operation,
-      `JADX did not produce method source: ${body.body}`,
-    );
-  if (body.mode === "smali" && candidates.length > 1)
-    throw new AnalysisCapabilityUnavailableError(
-      "jadx",
-      request.operation,
-      `JADX ${JADX_RELEASE.version} smali fallback joins all same-name overloads for ${summary.full_name}.${request.input.method_name}; it cannot establish source for only overload ${index}.`,
     );
   return androidResultSchemas.inspect_android_method.parse({
     engine,
@@ -265,12 +253,7 @@ const inspectMethod = async (
     method: selected,
     overload_count: candidates.length,
     representation: body.mode,
-    body_status:
-      body.body.length === 0 ||
-      body.body ===
-        "// method exists but has no decompiled body (native/abstract)"
-        ? "not_available"
-        : "available",
+    body_status: body.body.length === 0 ? "not_available" : "available",
     fell_back: body.fell_back,
     markers: body.markers,
     source: normalizeJadxText(body.body),

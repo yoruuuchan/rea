@@ -568,7 +568,7 @@ it.each([
   "empty-page",
   "summary-error",
   "wrong-method",
-  "body-error",
+  "wrong-descriptor",
   "partial-xrefs",
 ])(
   "rejects producer failure %s rather than claiming complete analysis",
@@ -834,19 +834,38 @@ it("reports missing explicit tools without trying to install or launch them", as
   });
 });
 
-it.each(["tool-error", "frame-overflow"])(
+it.each(["tool-error", "frame-overflow", "body-error", "heap-decoy"])(
   "preserves the actual failed provider constraint for %s",
   async (mode) => {
     const { service, apk, launches, provider } = await setup(mode);
-    const outcome = await service.execute("inspect_android_package", {
-      path: apk,
-    });
+    const outcome = await service.execute(
+      mode === "body-error"
+        ? "inspect_android_method"
+        : "inspect_android_package",
+      {
+        path: apk,
+        ...(mode === "body-error"
+          ? { class_name: "fixture.Target", method_name: "onCreate" }
+          : {}),
+      },
+    );
     if (outcome.ok) throw new Error("Expected a provider failure");
-    if (mode === "tool-error")
+    if (mode !== "frame-overflow")
       expect(outcome.error).toMatchObject({
         _tag: "ProviderAdapterError",
         diagnostics: {
-          reason: "manifest decoder rejected malformed binary XML",
+          upstream_operation:
+            mode === "body-error"
+              ? "get_method_body"
+              : mode === "heap-decoy"
+                ? "load_apk"
+                : "get_android_manifest",
+          reason:
+            mode === "body-error"
+              ? "// ERROR: decompile timed out or failed"
+              : mode === "heap-decoy"
+                ? "load failed: cannot read /inputs/Java heap space.apk"
+                : "manifest decoder rejected malformed binary XML",
         },
       });
     else
@@ -858,6 +877,88 @@ it.each(["tool-error", "frame-overflow"])(
     await verifyCleanup(launches);
   },
 );
+
+it.each(["heap-failure", "other-memory-failure"])(
+  "projects typed JVM memory failure and cleans its process for %s",
+  async (mode) => {
+    const { service, apk, launches, provider } = await setup(mode);
+    const outcome = await service.execute("inspect_android_package", {
+      path: apk,
+    });
+    if (outcome.ok) throw new Error("Expected memory allocation failure");
+    expect(outcome.error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      resource: "memory",
+      retryable: false,
+      reportedLimits: {
+        observed_max_heap_bytes: 67108864,
+        memory_area: mode === "heap-failure" ? "heap" : "unknown",
+      },
+      diagnostics: { upstream_operation: "load_apk", target_path: apk },
+    });
+    const projected = projectAnalysisError(outcome.error);
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      retryable: false,
+    });
+    expect(projected.remediation.action).toContain(
+      mode === "heap-failure"
+        ? "REA_JADX_HEAP_MIB"
+        : "increasing heap alone may not help",
+    );
+    await provider.close();
+    await verifyCleanup(launches);
+  },
+);
+
+it("retains typed memory failure through failed cleanup and restores it after retry", async () => {
+  let fails = true;
+  const { service, apk, launches, provider } = await setup(
+    "heap-failure",
+    () => fails,
+  );
+  const rootClose = vi
+    .spyOn(PrivateRuntimeRoot.prototype, "close")
+    .mockRejectedValueOnce(new Error("fixture workspace close failure"));
+  try {
+    const result = await service.execute("inspect_android_package", {
+      path: apk,
+    });
+    if (result.ok) throw new Error("Expected failed memory cleanup");
+    const failure = result.error;
+    expect(failure.cleanupIncomplete).toBe(true);
+    expect(projectAnalysisError(failure)).toMatchObject({
+      code: "cleanup_incomplete",
+      details: {
+        diagnostics: { primary_error: { code: "resource_constraint" } },
+      },
+    });
+    const workspace = launches[0]?.cwd;
+    expect(failure.cleanupResources).toContain(workspace);
+    fails = false;
+    await expect(provider.close()).rejects.toMatchObject({
+      cleanupIncomplete: true,
+    });
+    expect(failure.cleanupResources).toEqual([workspace]);
+    await provider.close();
+    expect(failure.cleanupIncomplete).toBe(false);
+    expect(failure.cleanupResources).toEqual([]);
+    expect(projectAnalysisError(failure)).toMatchObject({
+      code: "resource_constraint",
+      retryable: false,
+      remediation: { action: expect.stringContaining("REA_JADX_HEAP_MIB") },
+      details: {
+        resource: "memory",
+        reported_limits: { observed_max_heap_bytes: 67108864 },
+      },
+    });
+    await verifyCleanup(launches);
+  } finally {
+    rootClose.mockRestore();
+    fails = false;
+    await provider.close();
+  }
+});
 
 it("rejects bytes changed after target admission without launching an engine", async () => {
   const { provider, apk, launches } = await setup();
@@ -1022,7 +1123,7 @@ it("retains the execution failure while cleanup is pending and resumes after cle
       error: {
         cleanupIncomplete: true,
         diagnostics: {
-          previous_error: {
+          primary_error: {
             details: {
               diagnostics: {
                 reason: "manifest decoder rejected malformed binary XML",
@@ -1062,6 +1163,16 @@ it("retains the execution failure while cleanup is pending and resumes after cle
       },
     });
     expect(launches).toHaveLength(2);
+    expect(outcome.error.cleanupIncomplete).toBe(false);
+    expect(outcome.error.cleanupResources).toEqual([]);
+    expect(projectAnalysisError(outcome.error)).toMatchObject({
+      code: "execution_failure",
+      details: {
+        diagnostics: {
+          reason: "manifest decoder rejected malformed binary XML",
+        },
+      },
+    });
     await verifyCleanup(launches);
   } finally {
     cleanupFails = false;
@@ -1069,27 +1180,31 @@ it("retains the execution failure while cleanup is pending and resumes after cle
   }
 });
 
-it("does not attribute upstream smali containing all overloads to the selected method", async () => {
-  const { service, apk, launches, provider } = await setup("overloaded-smali");
+it("accepts exact selected-overload smali from the bridge", async () => {
+  const { service, apk, launches, provider } = await setup(
+    "selected-overload-smali",
+  );
   const outcome = await service.execute("inspect_android_method", {
     path: apk,
     class_name: "fixture.Target",
     method_name: "choose",
     overload_index: 1,
   });
-  expect(outcome).toMatchObject({
-    ok: false,
-    error: {
-      _tag: "AnalysisCapabilityUnavailableError",
-      reason: expect.stringContaining("joins all same-name overloads"),
-    },
+  if (!outcome.ok) throw outcome.error;
+  const result = androidResultSchemas.inspect_android_method.parse(
+    outcome.value.normalized_result,
+  );
+  expect(result).toMatchObject({
+    method: { overload_index: 1, dex_descriptor: "(I)V" },
+    representation: "smali",
+    body_status: "available",
   });
   await provider.close();
   await verifyCleanup(launches);
 });
 
-it("reports missing native/abstract method source without claiming an empty implementation", async () => {
-  const { service, apk, launches, provider } = await setup("no-body");
+it("retains parsed native body absence without claiming an empty implementation", async () => {
+  const { service, apk, launches, provider } = await setup("native-method");
   const outcome = await service.execute("inspect_android_method", {
     path: apk,
     class_name: "fixture.Target",
@@ -1100,7 +1215,8 @@ it("reports missing native/abstract method source without claiming an empty impl
     outcome.value.normalized_result,
   );
   expect(result.body_status).toBe("not_available");
-  expect(result.source.text).toContain("no decompiled body");
+  expect(result.source.text).toBe("");
+  expect(result.markers).toEqual(["native_method"]);
   await provider.close();
   await verifyCleanup(launches);
 });

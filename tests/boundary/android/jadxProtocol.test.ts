@@ -3,8 +3,32 @@ import {
   parseJadxEnvelope,
   parseJadxJson,
   normalizeJadxText,
+  parseJadxFailure,
 } from "../../../src/android/JadxProtocol.js";
 import { androidInputSchemas } from "../../../src/domain/android/androidAnalysis.js";
+
+it("recognizes named bridge failures without reinterpreting arbitrary engine text", () => {
+  const failure = {
+    kind: "jvm-memory-failure",
+    memory_area: "heap",
+    exception_type: "java.lang.OutOfMemoryError",
+    message: "Java heap space",
+    max_heap_bytes: 67108864,
+  };
+  expect(parseJadxFailure(JSON.stringify(failure))).toEqual(failure);
+  for (const value of [
+    "load failed: cannot read /inputs/Java heap space.apk",
+    "{malformed Java heap space",
+    JSON.stringify({
+      ...failure,
+      exception_type: "java.lang.IllegalArgumentException",
+    }),
+    JSON.stringify({ ...failure, max_heap_bytes: -1 }),
+    JSON.stringify({ ...failure, memory_area: "native" }),
+    JSON.stringify({ ...failure, arbitrary: true }),
+  ])
+    expect(parseJadxFailure(value)).toBeUndefined();
+});
 
 it("validates provider text envelopes and rejects unsupported content rather than dropping it", () => {
   expect(

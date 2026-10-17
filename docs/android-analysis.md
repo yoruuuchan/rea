@@ -147,10 +147,20 @@ queries accept the same `overload_index`; the bridge resolves the selected
 method node and the result reports its index and displayed signature. These
 indices are tied to the current artifact and engine, not stable across builds.
 
-The engine's smali fallback also joins same-name overloads; REA rejects that
-fallback for an overloaded method instead of attributing all bodies to one
-selected overload. Native/abstract methods with no decompiled body report
-`body_status: "not_available"` without inferring which implementation flag caused it.
+Smali fallbacks select one complete block using the original method name and DEX
+descriptor, before applying the source byte limit. This preserves the selected
+overload even when Java code generation renames a method. If the selected Java
+body was omitted, including a method merged into a synthetic bridge, REA returns
+its original smali with the `java_body_unavailable` marker. The marker describes
+missing Java; it does not infer why the method was omitted or name a replacement.
+Unresolved or duplicate disassembly identities fail instead of attributing another
+method's instructions to the selection.
+
+Native and abstract methods are identified from access flags
+captured before code generation. They report `body_status: "not_available"`, an
+empty source, and the `native_method` or `abstract_method` marker; their declarations
+are not passed through the engine's source slicer. Other missing decompiled bodies
+do not establish either access flag.
 
 Static initializers (`<clinit>`) return smali with the
 `static_initializer_disassembly` marker. Java decompilation can move their
@@ -307,7 +317,15 @@ settings. Evidence reports the worker's observed `Runtime.maxMemory()` rounded
 down to MiB and retains exact bytes, Java version and visible processors in its
 raw runtime response. The observed allocatable heap can differ from configured
 `-Xmx`, especially with Serial GC. Heap is not a total RSS cap: the JVM also
-uses native memory. Independent REA instances have independent queues. Whole
+uses native memory. A typed JVM memory allocation failure during APK loading
+reports `resource_constraint` with the observed maximum heap in bytes. Known
+heap failures name `REA_JADX_HEAP_MIB` in remediation; other memory regions
+remain unknown. A healthy doctor configuration check does not establish that
+any particular APK fits. Failures before the bridge can report a typed result
+and upstream errors from other operations retain their existing diagnostics;
+error text alone does not establish memory exhaustion.
+
+Independent REA instances have independent queues. Whole
 operations have a **120-second** execution deadline by default, starting after
 they reach the queue's front. For a known slow cold load, such as a large
 multidex APK, select another finite deadline:

@@ -1,3 +1,4 @@
+import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import type {
   DoctorProviderCheck,
   DoctorProviderInspection,
@@ -14,9 +15,14 @@ import {
 /** Project the validated JADX configuration into the doctor contract. */
 export const inspectJadxProvider = async (
   environment: Readonly<Record<string, string | undefined>>,
+  resourceOwner: FileCloseResourceOwner,
+  signal?: AbortSignal,
 ): Promise<DoctorProviderInspection> => {
   const configured = environment.REA_JADX_MCP_JAR !== undefined;
-  const availability = await inspectJadxAvailability(environment);
+  const availability = await inspectJadxAvailability(environment, {
+    resourceOwner,
+    signal,
+  });
   // diagnostics is a loosely-typed JsonValue map; guard the published path
   // even though the success path always sets jar_path today.
   const jarPath =
@@ -79,7 +85,7 @@ const configurationCheck = (
       name: "configuration",
       ok: true,
       code: null,
-      detail: `JADX MCP bridge JAR validated at ${jarPath}; its path is recorded for agent registrations.`,
+      detail: `JADX MCP bridge JAR validated at ${jarPath}; its path is recorded for agent registrations. This checks configuration, not whether a selected APK fits in the worker's memory.`,
       remediation: null,
       classification: "config_drift",
       ...(typeof operationTimeout === "number"

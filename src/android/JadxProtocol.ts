@@ -5,12 +5,38 @@ import type { AndroidOperation } from "../domain/android/androidAnalysis.js";
 import { dexDescriptorSchema } from "../domain/android/androidAnalysis.js";
 
 const count = z.number().int().nonnegative();
+/** Typed allocation failures authored before upstream erases the JVM exception. */
+const jadxMemoryFailureSchema = z.strictObject({
+  kind: z.literal("jvm-memory-failure"),
+  memory_area: z.enum(["heap", "unknown"]),
+  exception_type: z.literal("java.lang.OutOfMemoryError"),
+  message: z.string().optional(),
+  max_heap_bytes: z.number().int().positive().safe(),
+});
 /** Selector failures authored by REA's bridge, separate from arbitrary engine errors. */
-export const jadxInputFailureSchema = z.strictObject({
+const jadxInputFailureSchema = z.strictObject({
   kind: z.literal("invalid-input"),
   field: z.enum(["class_name", "method_name", "overload_index"]),
   message: z.string().min(1),
 });
+const bridgeFailureSchema = z.discriminatedUnion("kind", [
+  jadxInputFailureSchema,
+  jadxMemoryFailureSchema,
+]);
+
+/** Arbitrary upstream failure text stays text unless it matches a named bridge contract. */
+export const parseJadxFailure = (
+  text: string,
+): z.infer<typeof bridgeFailureSchema> | undefined => {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const parsed = bridgeFailureSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+};
 /** Values observed inside the exact JVM producing the analysis. */
 export const jadxRuntimeSchema = z.object({
   engine_reported_version: z.string().min(1),
@@ -69,6 +95,7 @@ export const jadxMethodSchema = z.object({
   full_name: z.string(),
   overload_index: count,
   overload_count: count,
+  dex_descriptor: dexDescriptorSchema,
   mode: z.enum(["java", "smali"]),
   fell_back: z.boolean(),
   markers: z.array(z.string()),

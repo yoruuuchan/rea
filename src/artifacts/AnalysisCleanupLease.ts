@@ -1,4 +1,7 @@
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import type {
+  AnalysisError,
+  AnalysisCleanupResourceOwner,
+} from "../domain/analysisErrorBase.js";
 
 /** Link one resource's confirmed release to its originating analysis error. */
 export class AnalysisCleanupLease {
@@ -11,14 +14,46 @@ export class AnalysisCleanupLease {
     return this.#released;
   }
 
-  readonly cleanupResources: readonly string[] | undefined;
+  readonly #resourceOwner: AnalysisCleanupResourceOwner | undefined;
+  readonly #resources: readonly string[] | undefined;
+
+  get cleanupResources(): readonly string[] | undefined {
+    return this.#resourceOwner === undefined
+      ? this.#resources
+      : this.#resourceOwner.cleanupResources;
+  }
+
+  /** Adopt exact close authority while retaining its live labels across retries. */
+  static forCloseOwner(
+    owner: {
+      close(): Promise<void>;
+      readonly cleanupResources?: readonly string[] | undefined;
+    },
+    resource: string,
+  ): AnalysisCleanupLease {
+    return new AnalysisCleanupLease(
+      () => owner.close(),
+      !("cleanupResources" in owner)
+        ? [resource]
+        : {
+            get cleanupResources() {
+              return owner.cleanupResources;
+            },
+          },
+    );
+  }
 
   constructor(
     private readonly cleanup: () => Promise<void>,
-    resources?: readonly string[],
+    resources?: readonly string[] | AnalysisCleanupResourceOwner,
   ) {
-    this.cleanupResources =
-      resources === undefined ? undefined : [...resources];
+    if (resources !== undefined && "cleanupResources" in resources) {
+      this.#resourceOwner = resources;
+      this.#resources = undefined;
+    } else {
+      this.#resourceOwner = undefined;
+      this.#resources = resources === undefined ? undefined : [...resources];
+    }
   }
 
   async release(): Promise<void> {

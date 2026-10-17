@@ -1,12 +1,11 @@
+import { retainOwnedCommandCleanup } from "../providers/OwnedCommandCleanup.js";
 import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
 import { randomUUID } from "node:crypto";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
-import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
-import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
 import {
@@ -207,14 +206,16 @@ const observeGhidraJava = async (
       Object.defineProperty(interpreted.error, "cancellation", {
         value: commandFailure.cancellation,
       });
+    const cleanups = retainOwnedCommandCleanup(
+      cause,
+      options.resourceOwner,
+      "ghidra",
+      "ghidra:java",
+    );
     let primary: AnalysisError | undefined;
     if (interpreted !== undefined && !interpreted.ok) {
       // A completed, invalid report remains the primary fact across cleanup-time cancellation.
-      if (
-        commandFailure?.cleanupOwner === undefined &&
-        preparation?.cleanupFailure === undefined
-      )
-        return interpreted;
+      if (cleanups.length === 0) return interpreted;
       primary = probeFailureError(interpreted.error, cause);
     } else if (
       commandFailure?.reason === "cancelled" &&
@@ -263,53 +264,6 @@ const observeGhidraJava = async (
       });
     } else if (cause instanceof AnalysisError) {
       primary = cause;
-    }
-    const cleanups: AnalysisError[] = [];
-    if (preparation?.cleanupFailure !== undefined) {
-      const cleanup = preparation.cleanupFailure;
-      const lease = new AnalysisCleanupLease(async () => {
-        if (!cleanup.cleanupIncomplete) return;
-        if (preparation.cleanupOwner === undefined) throw cleanup;
-        await preparation.cleanupOwner.close();
-        if (cleanup.cleanupIncomplete) throw cleanup;
-      }, cleanup.cleanupResources);
-      options.resourceOwner.retain(
-        { close: () => lease.release() },
-        cleanup.cleanupResources[0] ??
-          "Java prerequisite ownership preparation",
-      );
-      cleanups.push(cleanup);
-    }
-    if (commandFailure?.cleanupOwner !== undefined) {
-      const supervisor = commandFailure.cleanupOwner;
-      const cleanup = new ProviderCleanupError(
-        "ghidra",
-        commandFailure.resources,
-        {
-          reason:
-            commandFailure.cleanupFailure ??
-            "Java prerequisite cleanup remains incomplete",
-          ...(commandFailure.cleanupResult === undefined
-            ? {}
-            : {
-                process_cleanup: jsonValueSchema.parse(
-                  commandFailure.cleanupResult,
-                ),
-              }),
-        },
-        { cause, operation: "ghidra:java" },
-      );
-      const lease = new AnalysisCleanupLease(async () => {
-        const stopped = await supervisor.stop();
-        if (stopped.status === "incomplete") throw cleanup;
-      }, commandFailure.resources);
-      cleanup.bindCleanupResourceOwner(lease);
-      lease.bindCleanupError(cleanup);
-      options.resourceOwner.retain(
-        { close: () => lease.release() },
-        commandFailure.resources[0] ?? "Java prerequisite process",
-      );
-      cleanups.push(cleanup);
     }
     if (primary === undefined) {
       const code =

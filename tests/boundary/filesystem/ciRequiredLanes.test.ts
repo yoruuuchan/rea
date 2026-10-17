@@ -200,7 +200,7 @@ it("binds provider build reuse to the current run while keeping standalone dispa
   expect(stage).toBeGreaterThan(prepare);
   expect(upload).toBeGreaterThan(stage);
   expect(buildSteps[stage]?.run).toContain(
-    "npm run --silent test:prepare -- --dry=json |",
+    "node scripts/ci/portable-build-cache.mjs snapshot < .cache/ci-build-plan.json",
   );
   expect(buildSteps[stage]?.if).toBeUndefined();
   expect(buildSteps[stage]?.shell).toBe("bash");

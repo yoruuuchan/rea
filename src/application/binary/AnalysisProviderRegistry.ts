@@ -114,7 +114,7 @@ export class AnalysisProviderRegistry {
       this.#profileFiles.retain({
         kind: "lease",
         resource,
-        lease: new AnalysisCleanupLease(() => owner.close(), [resource]),
+        lease: AnalysisCleanupLease.forCloseOwner(owner, resource),
       }),
     run: (operation) => this.#profileFiles.run(operation),
   };

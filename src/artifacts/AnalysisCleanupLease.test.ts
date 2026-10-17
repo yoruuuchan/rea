@@ -111,3 +111,34 @@ it("resolves every live retry error bound to one lease", async () => {
   expect(firstError.cause).toBe(firstCause);
   expect(secondError.cause).toBe(secondCause);
 });
+
+it("keeps explicit unknown labels separate from an absent owner label", () => {
+  const unknown = AnalysisCleanupLease.forCloseOwner(
+    {
+      close: async () => {},
+      get cleanupResources() {
+        return undefined;
+      },
+    },
+    "display-only",
+  );
+  const absent = AnalysisCleanupLease.forCloseOwner(
+    { close: async () => {} },
+    "owned-path",
+  );
+  expect(unknown.cleanupResources).toBeUndefined();
+  expect(absent.cleanupResources).toEqual(["owned-path"]);
+});
+
+it.each([false, true])(
+  "preserves unknown resource labels in pending lease groups (known peer: %s)",
+  (knownPeer) => {
+    const unknown = new AnalysisCleanupLease(async () => {});
+    const error = new ProviderCleanupError("fixture", [], {});
+    const peers = knownPeer
+      ? [new AnalysisCleanupLease(async () => {}, ["known"]), unknown]
+      : [unknown];
+    const group = new AnalysisCleanupLeaseGroup(error, peers);
+    expect(group.cleanupResources).toBeUndefined();
+  },
+);

@@ -510,7 +510,7 @@ export const systemDoctorHost = (
       resources.retain({
         kind: "lease",
         resource,
-        lease: new AnalysisCleanupLease(() => owner.close(), [resource]),
+        lease: AnalysisCleanupLease.forCloseOwner(owner, resource),
       }),
     run: (operation) => resources.run(operation),
   };

@@ -1,12 +1,22 @@
+import { createInspectionResources } from "../../fixtures/inspectionResources.js";
 import { chmod, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, it as test } from "vitest";
+import { expect, it as test, onTestFinished } from "vitest";
 
-import { inspectJadxProvider } from "../../../src/android/JadxDoctor.js";
+import { inspectJadxProvider as inspectProvider } from "../../../src/android/JadxDoctor.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { writeJadxJarInventory } from "../../fixtures/android/jadxJar.js";
 import { writeOrderedZip } from "../../fixtures/artifactEntryOrder.js";
+
+const inspectionOwner = () => {
+  const resources = createInspectionResources();
+  onTestFinished(() => resources.close());
+  return resources.owner;
+};
+const inspectJadxProvider = (
+  environment: Parameters<typeof inspectProvider>[0],
+) => inspectProvider(environment, inspectionOwner());
 
 const it = test.skipIf(process.platform === "win32");
 
