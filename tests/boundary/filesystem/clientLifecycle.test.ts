@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { ClientConfigurationPublication } from "../../../src/application/ClientConfigurationPublication.js";
 import { clearClientLocationEnvironment } from "../../fixtures/clientEnvironment.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
@@ -1877,6 +1878,11 @@ describe("client configuration filesystem failure reporting", () => {
         `Configuration could not be updated. The original was restored and its backup at ${config}.rea.backup was retained. Repair the configuration or restore that backup, then rerun uninstall.`,
     ],
     [
+      "publication",
+      (config: string) =>
+        `Configuration could not be updated or restored. Restore the backup at ${config}.rea.backup manually, then rerun uninstall.`,
+    ],
+    [
       "restore",
       (config: string) =>
         `Configuration could not be updated or restored. Restore the backup at ${config}.rea.backup manually, then rerun uninstall.`,
@@ -1886,7 +1892,6 @@ describe("client configuration filesystem failure reporting", () => {
     async (failure, expectedDetail) => {
       const { home, config } = await uninstallFixture();
       const detail = expectedDetail(config);
-      let writes = 0;
       const fileSystem: UninstallFileSystem = {
         ...testFileSystem,
         readText: (path) =>
@@ -1897,11 +1902,22 @@ describe("client configuration filesystem failure reporting", () => {
           failure === "backup"
             ? Promise.reject(new Error("SECRET backup failure"))
             : copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-        writeText: async (path, contents) => {
-          writes += 1;
-          if ((failure === "update" && writes === 1) || failure === "restore")
-            throw new Error("SECRET write failure");
-          await writeFile(path, contents);
+        publishConfiguration: async (path, contents) => {
+          if (failure === "publication")
+            throw new Error("SECRET publication failure");
+          const publication = await ClientConfigurationPublication.write(
+            path,
+            contents,
+          );
+          if (failure === "update" || failure === "restore")
+            publication.assertCurrent = async () => {
+              throw new Error("SECRET verification failure");
+            };
+          if (failure === "restore")
+            publication.restore = async () => {
+              throw new Error("SECRET restore failure");
+            };
+          return publication;
         },
       };
       const result = await runUninstall(
@@ -1921,13 +1937,17 @@ describe("client configuration filesystem failure reporting", () => {
     const current = await readFile(config, "utf8");
     const initial = '{"existing":true}\n';
     await writeFile(`${config}.rea.backup`, initial);
-    let writes = 0;
     const result = await systemUninstallHost(home, {
       ...testFileSystem,
-      writeText: async (path, contents) => {
-        writes += 1;
-        await writeFile(path, contents);
-        if (writes === 1) throw new Error("update failed after writing");
+      publishConfiguration: async (path, contents) => {
+        const publication = await ClientConfigurationPublication.write(
+          path,
+          contents,
+        );
+        publication.assertCurrent = async () => {
+          throw new Error("verification failed after writing");
+        };
+        return publication;
       },
     }).removeClient({ name: "cursor", format: "json", configPath: config });
     expect(result.status).toBe("failed");
@@ -2034,7 +2054,8 @@ const testFileSystem: UninstallFileSystem = {
   readText: (path) => readFile(path, "utf8"),
   copy: (source, destination) =>
     copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-  writeText: (path, contents) => writeFile(path, contents),
+  publishConfiguration: (path, contents) =>
+    ClientConfigurationPublication.write(path, contents),
   stat: (path) => lstat(path),
   realpath: (path) => realpath(path),
   remove: (path) => rm(path, { recursive: true }),

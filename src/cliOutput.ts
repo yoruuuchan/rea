@@ -11,15 +11,23 @@ const VALUED_OUTPUT_FLAGS = new Set([
   "--token-offset",
 ]);
 
+const ROOT_UPDATE_OUTPUT_FLAGS = new Set([
+  "--json",
+  "--full-output",
+  "--token-count",
+]);
+
 /**
- * Split `--flag=value` forms of the valued output flags. Incur reads these
+ * Route the root update alias and split `--flag=value` output forms. Incur reads these
  * flags only in spaced form, so `--format=json` otherwise reaches the command
  * parser and fails as an unknown flag. Command options accept both forms.
  */
-export const normalizeCliOutputArguments = (
+export const normalizeCliArguments = (
   arguments_: readonly string[],
 ): string[] => {
   const normalized: string[] = [];
+  const updates = new Set<number>();
+  let rootUpdate = true;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index]!;
     if (VALUED_OUTPUT_FLAGS.has(argument) && arguments_[index + 1]) {
@@ -33,9 +41,17 @@ export const normalizeCliOutputArguments = (
     const flag = argument.slice(0, separator);
     if (separator >= 0 && VALUED_OUTPUT_FLAGS.has(flag))
       normalized.push(flag, argument.slice(separator + 1));
-    else normalized.push(argument);
+    else {
+      if (argument === "--update") updates.add(normalized.length);
+      else if (!ROOT_UPDATE_OUTPUT_FLAGS.has(argument)) rootUpdate = false;
+      normalized.push(argument);
+    }
   }
-  return normalized;
+  // Output option values were consumed above; flag-shaped data is never an alias.
+  // Help/check/command/unknown tokens retain Incur's parsing and precedence.
+  return rootUpdate && updates.size > 0
+    ? ["update", ...normalized.filter((_, index) => !updates.has(index))]
+    : normalized;
 };
 
 export type CliOutputArgumentValidation =
@@ -89,7 +105,7 @@ export const parseCliOutputArguments = (
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     // Incur scans builtins across `--` and reads spaced value forms, which
-    // normalizeCliOutputArguments has produced. Mirror those effective values.
+    // normalizeCliArguments has produced. Mirror those effective values.
     if (argument === "--json") {
       format = "json";
       continue;

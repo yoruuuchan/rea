@@ -66,7 +66,6 @@ export function* collectJavaScriptDerivedSemanticsSteps(
     program,
     state,
     callables,
-    references,
   );
   yield;
   const dataEffects = collectJavaScriptSemanticDataEffects(

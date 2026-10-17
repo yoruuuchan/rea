@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { userInfo } from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -71,6 +72,39 @@ describe("Hermes configuration paths", () => {
       join("/home/a", "AppData", "Local", "hermes"),
     );
   });
+
+  it.skipIf(process.platform === "win32")(
+    "expands the named OS account independently of the selected home",
+    () => {
+      const account = userInfo();
+      for (const suffix of ["", "/rea-owned-profile", "//rea-owned-profile"]) {
+        expect(
+          hermesPath({ HERMES_HOME: `~${account.username}${suffix}` })
+            ?.markerPath,
+        ).toBe(join(account.homedir, suffix));
+      }
+      expect(
+        hermesPath({
+          HERMES_HOME: "$PROFILE",
+          PROFILE: `~${account.username}/rea-owned-profile`,
+        })?.markerPath,
+      ).toBe(join(account.homedir, "rea-owned-profile"));
+    },
+  );
+
+  it.each(["linux", "win32"] as const)(
+    "keeps an unresolved named home diagnostic without exposing a write destination on %s",
+    (platform) => {
+      const requested = `~${userInfo().username}-other/rea-profile`;
+      expect(hermesPath({ HERMES_HOME: requested }, platform)).toMatchObject({
+        configPath: requested,
+        configPathError: expect.stringContaining("absolute HERMES_HOME"),
+      });
+      expect(
+        hermesPath({ HERMES_HOME: requested }, platform),
+      ).not.toHaveProperty("markerPath");
+    },
+  );
 
   it("honours HERMES_HOME and Hermes's data-directory suffix", () => {
     expect(

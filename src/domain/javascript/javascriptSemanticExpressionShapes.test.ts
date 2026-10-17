@@ -6,7 +6,6 @@ import {
   indexJavaScriptBindingsSteps,
 } from "./javascriptSemanticAnalysis.js";
 import { createSemanticExpressionShapeResolver } from "./javascriptSemanticExpressionShapes.js";
-import { collectSemanticReferences } from "./javascriptSemanticProjection.js";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
 import {
   completeSemanticSteps,
@@ -32,6 +31,8 @@ it.each([
   ["var a=null;frames.a={};read(a);", ["unknown"]],
   ["function f(){const a=[];a.push(1);read(a);}", ["array"]],
   ["function f(){const a=[];const saved=a;read(saved);}", ["array"]],
+  ['const a=[];function f(){eval("var a={}");read(a)}', ["unknown"]],
+  ['function f(){const a=[];eval("a={}");read(a)}', ["array"]],
   ["function f(){let a=[];eval('a={}');read(a)}", ["unknown"]],
   ["function f(){eval('var undefined={}');read(undefined)}", ["unknown"]],
   ["var a=[];Function('a={}');read(a);", ["unknown"]],
@@ -45,10 +46,7 @@ it.each([
     const state = completeSemanticSteps(
       indexJavaScriptBindingsSteps(file.program),
     );
-    const resolver = createSemanticExpressionShapeResolver(
-      state,
-      collectSemanticReferences(state.program, state),
-    );
+    const resolver = createSemanticExpressionShapeResolver(state);
     const shapes: string[] = [];
     traverseJavaScriptAst(file.program, {
       enter(node) {
@@ -83,10 +81,7 @@ it("bounds long callback aliases without invoking the shared callable resolver",
   const state = completeSemanticSteps(
     indexJavaScriptBindingsSteps(file.program),
   );
-  const resolver = createSemanticExpressionShapeResolver(
-    state,
-    collectSemanticReferences(state.program, state),
-  );
+  const resolver = createSemanticExpressionShapeResolver(state);
   const results: boolean[] = [];
   traverseJavaScriptAst(file.program, {
     enter(node) {
@@ -123,7 +118,7 @@ it.each([
   [
     "fixture.cts",
     "const argv=[];const done=()=>{};eval(input);",
-    ["dynamic", "dynamic"],
+    ["inherit", "default"],
   ],
   [
     "fixture.cts",

@@ -45,7 +45,7 @@ import { failedConfigurationMessage } from "./SetupClients.js";
 import { setupInstallFailure } from "./SetupInstallFailure.js";
 import {
   RegularFileCleanupFailure,
-  retryRegularFileCleanup,
+  retryRegularFileCleanupFailures,
 } from "./RegularFileRead.js";
 import {
   explicitSetupRegistrationEnvironment,
@@ -404,17 +404,17 @@ const runClientConfigurationOperation = async <Value>(
         return await operation();
       } catch (cause: unknown) {
         if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
-        const cleanup = await retryRegularFileCleanup(cause, resources);
-        const primary =
-          cleanup.outcome.kind === "failed"
-            ? cleanup.outcome.cause
-            : cause.cleanupCause;
+        const cleanup = await retryRegularFileCleanupFailures(cause, resources);
+        const rollback = cleanup.failures.find(
+          (failure) =>
+            failure instanceof ClientConfigurationCleanupRollbackFailure,
+        );
         const rollbackMessage =
-          cause instanceof ClientConfigurationCleanupRollbackFailure
-            ? ` ${failedConfigurationMessage(cause.configurationFailure)}`
+          rollback instanceof ClientConfigurationCleanupRollbackFailure
+            ? ` ${failedConfigurationMessage(rollback.configurationFailure)}`
             : "";
         throw configurationCleanupError(
-          `Could not safely access client configuration at ${cause.path}: ${errorMessage(primary)}.${rollbackMessage}`,
+          `Could not safely access client configuration at ${cause.path}: ${errorMessage(cleanup.primary)}.${rollbackMessage}`,
           cause,
           cleanup.cleanup,
         );

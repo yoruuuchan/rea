@@ -344,6 +344,7 @@ export const javaScriptWorkerStaticAnalysisSchema = z
           "cache-storage",
           "sqlite",
         ]),
+        interpretation: z.literal("candidate").exactOptional(),
         name: z.string().nullable(),
         mechanism: z.string(),
       }),

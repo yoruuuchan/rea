@@ -50,6 +50,13 @@ export interface JavaScriptAnalysisAccumulator {
       | t.NewExpression;
     readonly name: string;
   }[];
+  readonly pendingSqliteCalls: {
+    readonly node:
+      | t.CallExpression
+      | t.OptionalCallExpression
+      | t.NewExpression;
+    readonly name: string;
+  }[];
   readonly storage: LocatedJavaScriptFinding<JavaScriptStaticStorage>[];
   readonly roles: LocatedJavaScriptFinding<JavaScriptRolePath>[];
   readonly sourceMaps: JavaScriptStaticAnalysis["source_map_urls"][number][];
@@ -117,6 +124,7 @@ export const createJavaScriptAnalysisAccumulator = (
   endpoints: [],
   pendingNetworkCalls: [],
   storage: [],
+  pendingSqliteCalls: [],
   roles: [],
   sourceMaps: [],
   registrations: [],

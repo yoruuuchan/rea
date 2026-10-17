@@ -1,3 +1,7 @@
+import {
+  semanticOpaqueBindingReadMayHaveChanged,
+  semanticOpaqueNameMayHaveChanged,
+} from "./javascriptSemanticOpaqueEffects.js";
 import * as t from "@babel/types";
 
 import {
@@ -9,7 +13,6 @@ import {
   isUnmodeledJavaScriptRuntimeScope,
 } from "./javascriptModuleDeclaration.js";
 import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
-import type { JavaScriptSemanticReference } from "./javascriptSemanticIr.js";
 import { SEMANTIC_EXPRESSION_DEPTH_LIMIT } from "./javascriptSemanticResourceLimits.js";
 import {
   isUnshadowedGlobal,
@@ -32,7 +35,6 @@ const commonJsWrapperParameterNames = new Set([
 /** Bounded child-argument identity only; never recover named object contents. */
 export const createSemanticExpressionShapeResolver = (
   state: JavaScriptSemanticAnalysisState,
-  references: readonly JavaScriptSemanticReference[],
 ) => {
   const hoistedFunction = (node: t.Node): boolean => {
     const parent = state.parentsByNode.get(node);
@@ -49,22 +51,21 @@ export const createSemanticExpressionShapeResolver = (
   const blockFunctionNames = new Set<string>();
   const namedProofBlocked = (): boolean => {
     if (blocked !== undefined) return blocked;
-    blocked = references.some(({ name }) => name === "eval");
-    if (!blocked)
-      traverseJavaScriptAst(state.program, {
-        enter(node) {
-          blocked ||=
-            isErasedJavaScriptDeclaration(node) ||
-            isUnmodeledJavaScriptRuntimeScope(node);
-          if (
-            javaScriptRuntimeContext(state.program) !== "module" &&
-            t.isFunctionDeclaration(node) &&
-            node.id != null &&
-            !hoistedFunction(node)
-          )
-            blockFunctionNames.add(node.id.name);
-        },
-      });
+    blocked = false;
+    traverseJavaScriptAst(state.program, {
+      enter(node) {
+        blocked ||=
+          isErasedJavaScriptDeclaration(node) ||
+          isUnmodeledJavaScriptRuntimeScope(node);
+        if (
+          javaScriptRuntimeContext(state.program) !== "module" &&
+          t.isFunctionDeclaration(node) &&
+          node.id != null &&
+          !hoistedFunction(node)
+        )
+          blockFunctionNames.add(node.id.name);
+      },
+    });
     return blocked;
   };
   const shape = (input: t.Node): Shape => {
@@ -103,6 +104,7 @@ export const createSemanticExpressionShapeResolver = (
       // assignment. Keep same-named vars unknown rather than model that copy.
       if (
         namedProofBlocked() ||
+        semanticOpaqueBindingReadMayHaveChanged(binding, node, state) ||
         (binding.declarationKinds.has("var") &&
           blockFunctionNames.has(binding.name))
       )
@@ -128,7 +130,9 @@ export const createSemanticExpressionShapeResolver = (
       const { node } = unwrapJavaScriptExpression(input);
       return (
         isNullishJavaScriptSyntax(node) ||
-        (isUnshadowedGlobal(node, state, "undefined") && !namedProofBlocked())
+        (isUnshadowedGlobal(node, state, "undefined") &&
+          !namedProofBlocked() &&
+          !semanticOpaqueNameMayHaveChanged(node, state))
       );
     },
   };

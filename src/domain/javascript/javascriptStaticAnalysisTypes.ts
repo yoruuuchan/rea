@@ -55,7 +55,7 @@ export interface JavaScriptStaticEndpoint {
   readonly location: JavaScriptSourceRange;
 }
 
-/** A storage surface observed without executing application code. */
+/** A storage API or explicitly uncertain candidate, without executing source. */
 export interface JavaScriptStaticStorage {
   readonly kind:
     | "local-storage"
@@ -63,6 +63,7 @@ export interface JavaScriptStaticStorage {
     | "indexed-db"
     | "cache-storage"
     | "sqlite";
+  readonly interpretation?: "candidate";
   readonly name: string | null;
   readonly mechanism: string;
   readonly module_key: string | null;

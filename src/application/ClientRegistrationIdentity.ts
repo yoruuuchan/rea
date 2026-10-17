@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute } from "node:path";
+import { normalizeEntrypointPath } from "../process/CurrentEntrypointPath.js";
 import { valid } from "semver";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
@@ -116,86 +117,77 @@ const isOwnedPackageReference = (packageReference: string): boolean => {
 /** Check that one parsed command points to REA's MCP entry point. */
 export type ClientRegistrationCommandIdentity = "owned" | "foreign" | "unknown";
 
-/** POSIX bin links can name the same dispatcher without changing stored commands. */
-const sameEntrypointPath = (candidate: string, current: string): boolean => {
-  if (!isAbsolute(candidate) || !isAbsolute(current)) return false;
-  if (resolve(candidate) === current) return true;
-  // Windows package bins are command shims, not links to the dispatcher.
-  if (process.platform === "win32") return false;
+/** Compare entrypoint paths without turning failed resolution into a foreign identity. */
+const entrypointIdentity = (
+  candidate: string,
+  current: string,
+): ClientRegistrationCommandIdentity => {
+  if (!isAbsolute(candidate) || !isAbsolute(current)) return "unknown";
+  if (candidate === current) return "owned";
   try {
-    return realpathSync(candidate) === realpathSync(current);
+    return realpathSync.native(candidate) === realpathSync.native(current)
+      ? "owned"
+      : "foreign";
   } catch {
-    return false;
+    return "unknown";
   }
 };
 
-/** Classify only what the command and current executable identity establish. */
+/** A direct launcher may be a native executable or a Node shebang script. */
+const directEntrypointIdentity = (
+  candidate: string,
+  current: string,
+): ClientRegistrationCommandIdentity => {
+  const nativeIdentity = entrypointIdentity(candidate, current);
+  const scriptPath = normalizeEntrypointPath(candidate);
+  if (scriptPath === candidate) return nativeIdentity;
+  // A shebang can pass the original spelling to Node, which selects its script
+  // lexically. Without executing the launcher, divergent interpretations are unknown.
+  return scriptPath !== undefined &&
+    entrypointIdentity(scriptPath, current) === nativeIdentity
+    ? nativeIdentity
+    : "unknown";
+};
+
+/** Classify the command once; uncertainty never grants positive ownership. */
 export const classifyClientRegistrationCommand = (
   command: readonly string[],
   currentCommandPath: string | undefined,
 ): ClientRegistrationCommandIdentity => {
   const packageReference = clientRegistrationPackageReference(command);
   if (packageReference !== undefined)
-    return isOwnedClientRegistrationCommand(command, currentCommandPath)
-      ? "owned"
-      : "foreign";
+    return isOwnedPackageReference(packageReference) ? "owned" : "foreign";
   const currentPathAvailable =
     currentCommandPath !== undefined && currentCommandPath.length > 0;
-  const nodeScript = command.length === 3 && command[2] === "mcp";
-  if (nodeScript) {
+  if (command.length === 3 && command[2] === "mcp") {
+    const interpreter = command[0] ?? "";
+    const entrypoint = command[1] ?? "";
     if (
-      !isAbsolute(command[0] ?? "") ||
-      !isAbsolute(command[1] ?? "") ||
+      !isAbsolute(interpreter) ||
+      !isAbsolute(entrypoint) ||
       !currentPathAvailable
     )
       return "unknown";
-    return isOwnedClientRegistrationCommand(command, currentCommandPath)
-      ? "owned"
-      : "foreign";
+    const interpreterIdentity = entrypointIdentity(
+      interpreter,
+      process.execPath,
+    );
+    if (interpreterIdentity !== "owned") return interpreterIdentity;
+    // Node selects its script from normalized argv; executable paths use native
+    // traversal semantics, where symlink/.. can denote a different file.
+    const selectedEntrypoint = normalizeEntrypointPath(entrypoint);
+    return selectedEntrypoint === undefined
+      ? "unknown"
+      : entrypointIdentity(selectedEntrypoint, currentCommandPath);
   }
   if (command.length === 2 && command[1] === "mcp") {
     const executable = command[0] ?? "";
     if (executable === PRODUCT_IDENTITY.cliBinary) return "owned";
-    const relativePathLike =
-      !isAbsolute(executable) && /[./\\]/u.test(executable);
-    if (relativePathLike || (isAbsolute(executable) && !currentPathAvailable))
-      return "unknown";
+    if (isAbsolute(executable))
+      return currentPathAvailable
+        ? directEntrypointIdentity(executable, currentCommandPath)
+        : "unknown";
+    if (/[./\\]/u.test(executable)) return "unknown";
   }
-  if (isOwnedClientRegistrationCommand(command, currentCommandPath))
-    return "owned";
   return "foreign";
-};
-
-export const isOwnedClientRegistrationCommand = (
-  command: readonly string[],
-  currentCommandPath: string | undefined,
-): boolean => {
-  if (
-    currentCommandPath !== undefined &&
-    currentCommandPath.length > 0 &&
-    command.length === 3 &&
-    command[2] === "mcp" &&
-    isAbsolute(command[0] ?? "") &&
-    isAbsolute(command[1] ?? "") &&
-    resolve(command[0] ?? "") === resolve(process.execPath) &&
-    sameEntrypointPath(command[1] ?? "", currentCommandPath)
-  )
-    return true;
-
-  if (command.length === 2 && command[1] === "mcp") {
-    const executable = command[0] ?? "";
-    if (
-      executable === PRODUCT_IDENTITY.cliBinary ||
-      (isAbsolute(executable) &&
-        currentCommandPath !== undefined &&
-        currentCommandPath.length > 0 &&
-        sameEntrypointPath(executable, currentCommandPath))
-    )
-      return true;
-  }
-
-  const packageReference = clientRegistrationPackageReference(command);
-  return (
-    packageReference !== undefined && isOwnedPackageReference(packageReference)
-  );
 };

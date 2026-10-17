@@ -675,7 +675,6 @@ export const storageKind = (
   if (name.includes("sessionStorage.")) return "session-storage";
   if (name.endsWith("indexedDB.open")) return "indexed-db";
   if (name.endsWith("caches.open")) return "cache-storage";
-  if (name === "Database" || name.endsWith(".Database")) return "sqlite";
   return undefined;
 };
 

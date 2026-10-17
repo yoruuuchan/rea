@@ -1,3 +1,4 @@
+import type { JavaScriptOpaqueScopeEffects } from "./javascriptSemanticOpaqueEffects.js";
 import * as t from "@babel/types";
 import {
   semanticStaticPropertyKey,
@@ -101,6 +102,7 @@ export interface JavaScriptSemanticScopeState {
 /** Shared state for semantic collection and evaluation. */
 export interface JavaScriptSemanticAnalysisState {
   readonly program: t.Program;
+  readonly opaqueEffects: JavaScriptOpaqueScopeEffects;
   /** Effective loader for static imports in this source artifact. */
   readonly staticImportResolutionMode: JavaScriptModuleResolutionMode;
   /** Bounds encountered during this analysis, independent of later projections. */

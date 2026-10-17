@@ -1,3 +1,8 @@
+import {
+  indexSemanticOpaqueEffects,
+  semanticOpaqueBindingEffects,
+  semanticBindingCanBeRebound,
+} from "./javascriptSemanticOpaqueEffects.js";
 import * as t from "@babel/types";
 
 import {
@@ -69,7 +74,10 @@ import {
   resolveSemanticModuleCallables,
 } from "./javascriptSemanticReturns.js";
 import { collectJavaScriptDerivedSemanticsSteps } from "./javascriptSemanticDerivedAnalysis.js";
-import { evaluateSemanticProvenance } from "./javascriptSemanticValues.js";
+import {
+  evaluateSemanticProvenance,
+  clearSemanticValueCaches,
+} from "./javascriptSemanticValues.js";
 import {
   collectJavaScriptIdentityWritesSteps,
   electronExportPath,
@@ -218,6 +226,15 @@ const visitSemanticReferenceEffectsAtSite = (
     });
   };
   if (binding !== undefined) {
+    if (semanticBindingCanBeRebound(binding))
+      for (const node of semanticOpaqueBindingEffects(binding, state))
+        if (!retain("binding-write", node)) return metadata;
+    for (const node of semanticOpaqueBindingEffects(
+      binding,
+      state,
+      "reference",
+    ))
+      if (!retain("escape", node, [])) return metadata;
     for (const node of state.bindingWrites.get(binding.bindingId) ?? [])
       if (!retain("binding-write", node)) return metadata;
     if (indexedMemberMutationStates.has(state)) {
@@ -901,6 +918,12 @@ const createState = (
   };
   return {
     program,
+    opaqueEffects: {
+      sites: new WeakSet(),
+      sloppySites: new WeakSet(),
+      byScope: new Map(),
+      children: new Map(),
+    },
     staticImportResolutionMode,
     valueResourceLimits: new Set(),
     getterResourceLimits: new Set(),
@@ -939,6 +962,7 @@ function* collectDefinitionsSteps(
     readonly scope: JavaScriptSemanticScopeState;
     readonly conditionallySkipped: boolean;
   }[] = [];
+  const opaqueCandidates: { node: t.CallExpression; scopeId: string }[] = [];
   let needsPrototypeFacts = false;
   const functionBodies: {
     readonly body: t.BlockStatement;
@@ -1017,6 +1041,13 @@ function* collectDefinitionsSteps(
       });
       bindInnerDeclaration(node, parent, scope, state);
       if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(unwrapJavaScriptExpression(node.callee).node, {
+          name: "eval",
+        })
+      )
+        opaqueCandidates.push({ node, scopeId: scope.scopeId });
+      if (
         t.isVariableDeclarator(node) &&
         node.init != null &&
         parent !== null &&
@@ -1064,6 +1095,8 @@ function* collectDefinitionsSteps(
         if (t.isIdentifier(identifier))
           copyParameterToBody({ identifier, body, scope, state });
   }
+  indexSemanticOpaqueEffects(opaqueCandidates, state);
+  if (opaqueCandidates.length > 0) clearSemanticValueCaches(state);
 }
 
 type PrototypeOwner = "Object" | "Array" | "String";

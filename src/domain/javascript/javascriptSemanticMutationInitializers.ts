@@ -896,6 +896,21 @@ export const semanticBindingPrecedesCapture = (
   );
 };
 
+/** A preceding initializer and capture in one body precede its later effect. */
+export const semanticBindingEffectFollowsCapture = (
+  binding: JavaScriptSemanticBindingState,
+  capture: t.Node,
+  effect: t.Node,
+  parents: WeakMap<t.Node, t.Node>,
+): boolean => {
+  if (!semanticBindingPrecedesCapture(binding, capture, parents)) return false;
+  const captured = semanticCapturePosition(capture, parents);
+  const written = directMutationPosition(effect, parents);
+  return (
+    captured !== null && written !== null && positionPrecedes(captured, written)
+  );
+};
+
 /** Ignore later escapes only while reading earlier references in one activation. */
 export const semanticEscapeFollowsCapture = (
   binding: JavaScriptSemanticBindingState,

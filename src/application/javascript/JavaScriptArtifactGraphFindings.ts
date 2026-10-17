@@ -278,6 +278,9 @@ const addStorage = (
   context: JavaScriptArtifactGraphContext,
   input: FindingInput<StaticStorage>,
 ): void => {
+  const candidate = input.value.interpretation === "candidate";
+  const limitation =
+    "The constructor name is only a candidate; an unchanged SQLite module API origin is unproven.";
   const source =
     sourceNodeFor(
       context,
@@ -289,7 +292,7 @@ const addStorage = (
     kind: "storage",
     identity: artifactLocalIdentity(
       input.file.sha256,
-      input.value.kind,
+      candidate ? `${input.value.kind}:candidate` : input.value.kind,
       input.value.name ?? input.value.mechanism,
     ),
     observations: [
@@ -299,14 +302,25 @@ const addStorage = (
           storage_kind: input.value.kind,
           name: input.value.name,
           mechanism: input.value.mechanism,
+          ...(candidate ? { interpretation: "candidate" } : {}),
         },
-        evidence: astObservationEvidence({
-          sha256: input.file.sha256,
-          path: input.file.path,
-          range: input.value.location,
-          operation: "discover-static-storage",
-          coverage: input.coverage,
-        }),
+        evidence: candidate
+          ? staticInferenceEvidence({
+              sha256: input.file.sha256,
+              path: input.file.path,
+              range: input.value.location,
+              operation: "classify-static-storage-candidate",
+              coverage: input.coverage,
+              confidence: "low",
+              limitations: [limitation],
+            })
+          : astObservationEvidence({
+              sha256: input.file.sha256,
+              path: input.file.path,
+              range: input.value.location,
+              operation: "discover-static-storage",
+              coverage: input.coverage,
+            }),
       },
     ],
   });
@@ -317,7 +331,13 @@ const addStorage = (
     range: input.value.location,
     coverage: input.coverage,
     relation: "persists_to",
-    properties: { mechanism: input.value.mechanism },
+    properties: {
+      mechanism: input.value.mechanism,
+      ...(candidate ? { interpretation: "candidate" } : {}),
+    },
+    ...(candidate
+      ? { confidence: "low" as const, limitations: [limitation] }
+      : {}),
   });
 };
 

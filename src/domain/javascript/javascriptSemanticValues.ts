@@ -1,3 +1,8 @@
+import {
+  semanticBindingMayHaveOpaqueEffect,
+  semanticBindingCanBeRebound,
+  semanticOpaqueBindingReadMayHaveChanged,
+} from "./javascriptSemanticOpaqueEffects.js";
 import * as t from "@babel/types";
 
 import {
@@ -196,14 +201,20 @@ export const evaluateSemanticBinding = (
   binding: JavaScriptSemanticBindingState,
   state: JavaScriptSemanticAnalysisState,
 ): JavaScriptSemanticValue =>
-  evaluateBinding(binding, {
-    state,
-    bindings: new Map(),
-    expressionDepth: 0,
-    primitiveBindingValues: primitiveBindingValuesFor(state),
-    dependence: { lowest: CALLER_INDEPENDENT },
-    memo: createEvaluationMemo(state),
-  });
+  semanticBindingCanBeRebound(binding) &&
+  semanticBindingMayHaveOpaqueEffect(binding, state)
+    ? {
+        status: "unknown",
+        reason: "Direct eval may have changed this lexical binding.",
+      }
+    : evaluateBinding(binding, {
+        state,
+        bindings: new Map(),
+        expressionDepth: 0,
+        primitiveBindingValues: primitiveBindingValuesFor(state),
+        dependence: { lowest: CALLER_INDEPENDENT },
+        memo: createEvaluationMemo(state),
+      });
 
 /** Evaluate an inert expression, optionally at an earlier reference capture. */
 export const evaluateSemanticExpression = (
@@ -227,12 +238,12 @@ export const evaluateSemanticExpression = (
   );
 };
 
-/** Follow module provenance through destructuring, members, and aliases. */
-export const evaluateSemanticProvenance = (
-  binding: JavaScriptSemanticBindingState,
+/** Resolve an expression using the same alias and module provenance owner. */
+export const evaluateSemanticExpressionProvenance = (
+  node: t.Node,
   state: JavaScriptSemanticAnalysisState,
 ): JavaScriptBindingProvenance =>
-  provenanceForBinding(binding, {
+  provenanceForExpression(node, {
     state,
     bindings: new Map(),
     expressionDepth: 0,
@@ -240,6 +251,28 @@ export const evaluateSemanticProvenance = (
     dependence: { lowest: CALLER_INDEPENDENT },
     memo: createEvaluationMemo(state),
   });
+
+/** Follow module provenance through destructuring, members, and aliases. */
+export const evaluateSemanticProvenance = (
+  binding: JavaScriptSemanticBindingState,
+  state: JavaScriptSemanticAnalysisState,
+): JavaScriptBindingProvenance => {
+  const provenance = provenanceForBinding(binding, {
+    state,
+    bindings: new Map(),
+    expressionDepth: 0,
+    primitiveBindingValues: primitiveBindingValuesFor(state),
+    dependence: { lowest: CALLER_INDEPENDENT },
+    memo: createEvaluationMemo(state),
+  });
+  return semanticBindingCanBeRebound(binding) &&
+    semanticBindingMayHaveOpaqueEffect(binding, state)
+    ? semanticAmbiguousProvenance(
+        provenance.origins,
+        "Direct eval may have changed this runtime value.",
+      )
+    : provenance;
+};
 
 /** Follow a namespace binding as it was read at a specific source position. */
 export const evaluateSemanticProvenanceAtRead = (
@@ -496,6 +529,19 @@ const evaluateBinding = (
     projected = invalidateSemanticEscapedPath(projected, escape.path);
   }
   if (
+    (projected.status === "object" || projected.status === "array") &&
+    semanticBindingMayHaveOpaqueEffect(
+      binding,
+      context.state,
+      context.capturePoint,
+      "reference",
+    )
+  )
+    projected = {
+      status: "unknown",
+      reason: "Direct eval may have mutated this object reference.",
+    };
+  if (
     callerIndependent &&
     independent !== undefined &&
     (retained === undefined ||
@@ -592,6 +638,17 @@ const evaluateExpressionValue = (
       };
     }
     const atRead = read?.binding ?? binding;
+    if (
+      semanticOpaqueBindingReadMayHaveChanged(
+        binding,
+        context.capturePoint ?? node,
+        context.state,
+      )
+    )
+      return {
+        status: "unknown",
+        reason: "Direct eval may have changed this lexical binding.",
+      };
     return evaluateBinding(atRead, nestedContext(context), atRead === binding);
   }
   if (t.isTemplateLiteral(node)) return evaluateTemplate(node, context);
@@ -963,7 +1020,16 @@ const provenanceForBindingValue = (
         : "Catch binding provenance depends on the thrown value.",
     );
   if (binding.directOrigins.length > 0)
-    return semanticOriginsProvenance(binding.directOrigins);
+    return binding.kind === "import" &&
+      !binding.runtimeImport &&
+      binding.directOrigins.every(
+        ({ resolutionMode }) => resolutionMode !== "require",
+      )
+      ? semanticAmbiguousProvenance(
+          binding.directOrigins,
+          "A type-only import does not establish a runtime module value.",
+        )
+      : semanticOriginsProvenance(binding.directOrigins);
   if (binding.initializers.length === 0) return semanticLocalProvenance();
   if (binding.initializers.length > 1)
     return semanticAmbiguousProvenance(
@@ -1127,6 +1193,11 @@ const provenanceForBindingAtRead = (
   read: t.Identifier,
   context: EvaluationContext,
 ): JavaScriptBindingProvenance => {
+  if (semanticOpaqueBindingReadMayHaveChanged(binding, read, context.state))
+    return semanticAmbiguousProvenance(
+      provenanceForBinding(binding, context).origins,
+      "Direct eval may have changed this runtime value.",
+    );
   const { binding: snapshot } = semanticBindingAtRead(
     binding,
     read,
@@ -1151,8 +1222,10 @@ const isLocallyCreatedValue = (node: t.Node): boolean =>
   t.isObjectExpression(node) ||
   t.isArrayExpression(node) ||
   t.isFunctionExpression(node) ||
+  t.isFunctionDeclaration(node) ||
   t.isArrowFunctionExpression(node) ||
   t.isClassExpression(node) ||
+  t.isClassDeclaration(node) ||
   t.isTemplateLiteral(node) ||
   t.isUnaryExpression(node) ||
   t.isBinaryExpression(node) ||

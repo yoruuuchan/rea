@@ -69,6 +69,46 @@ export const retryRegularFileCleanup = async <Value>(
   };
 };
 
+/** Retry every explicit nested operation owner; close rejection values grant no authority. */
+export const retryRegularFileCleanupFailures = async (
+  failure: RegularFileCleanupFailure,
+  resources: ArtifactResourceScope,
+): Promise<{
+  readonly primary: unknown;
+  readonly failures: readonly RegularFileCleanupFailure[];
+  readonly cleanup?: AnalysisCleanupObservation;
+}> => {
+  const failures: RegularFileCleanupFailure[] = [];
+  const observations: AnalysisCleanupObservation[] = [];
+  let current = failure;
+  let primary: unknown;
+  for (;;) {
+    failures.push(current);
+    const retried = await retryRegularFileCleanup(current, resources);
+    if (retried.cleanup !== undefined) observations.push(retried.cleanup);
+    primary =
+      retried.outcome.kind === "failed"
+        ? retried.outcome.cause
+        : current.cleanupCause;
+    const nested =
+      current.outcome.kind === "failed" ? current.outcome.cause : undefined;
+    if (!(nested instanceof RegularFileCleanupFailure)) break;
+    current = nested;
+  }
+  return {
+    primary,
+    failures,
+    ...(observations.length === 0
+      ? {}
+      : {
+          cleanup: {
+            reason: observations.map(({ reason }) => reason).join("; "),
+            resources: observations.flatMap(({ resources }) => resources),
+          },
+        }),
+  };
+};
+
 const failureMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 

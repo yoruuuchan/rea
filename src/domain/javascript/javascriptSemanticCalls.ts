@@ -375,8 +375,8 @@ const collectDynamicScope = (
 ): void => {
   const reason = t.isWithStatement(node)
     ? "`with` introduces a runtime binding environment; names inside are not statically resolvable."
-    : t.isCallExpression(node) && isUnshadowedGlobal(node.callee, state, "eval")
-      ? "`eval` can declare bindings at runtime; names inside the evaluated source are not statically resolvable."
+    : state.opaqueEffects.sites.has(node)
+      ? "`eval` can change bindings and reachable objects at runtime; its effects are not statically resolvable."
       : null;
   if (reason === null) return;
   addFrontier(

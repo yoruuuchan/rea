@@ -65,6 +65,11 @@ before editing; setup also previews it. Both snapshots remain available.
 When an edit made a backup, a failed uninstall update or restore, and a failed
 setup readback or rollback, name the backup path that holds the bytes from just
 before that edit.
+If setup cannot verify a newly created configuration, it retains the file and
+reports manual recovery instead of deleting a pathname that may have changed.
+For an existing configuration, setup and uninstall recovery refuse a detected
+replacement or edit and name the recovery backup. Quit clients before editing their configuration;
+these checks do not lock out another writer modifying the same file in place.
 Setup also retains valid environment overrides in REA's existing server entry,
 such as `REA_MCP_INPUT_SCHEMA_PROFILE`, `REA_MCP_OUTPUT_SCHEMA_PROFILE`, and
 `REA_MCP_MAX_RESPONSE_BYTES`.

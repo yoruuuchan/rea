@@ -23,7 +23,7 @@ describe("executable dispatcher", () => {
         ),
         workspace.write(
           "dist/cli-runtime/cliOutput.js",
-          "export const normalizeCliOutputArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
+          "export const normalizeCliArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
         ),
         workspace.write(
           "dist/cli-runtime/cliResultOutput.js",
@@ -64,7 +64,7 @@ describe("executable dispatcher", () => {
         ),
         workspace.write(
           "dist/cli-runtime/cliOutput.js",
-          "export const normalizeCliOutputArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
+          "export const normalizeCliArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
         ),
         workspace.write(
           "dist/cli-runtime/cliResultOutput.js",

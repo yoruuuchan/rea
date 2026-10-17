@@ -74,13 +74,13 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   const { createCliResultOutput } =
     await import("../dist/cli-runtime/cliResultOutput.js");
   const {
-    normalizeCliOutputArguments,
+    normalizeCliArguments,
     renderCliOutputArgumentError,
     renderEmptyFilteredCliOutput,
     validateCliOutputArguments,
   } = await import("../dist/cli-runtime/cliOutput.js");
   guardClosedStdout();
-  const cliArgs = normalizeCliOutputArguments(args);
+  const cliArgs = normalizeCliArguments(args);
   const outputArguments = validateCliOutputArguments(cliArgs);
   const configurationError = cliConfigurationError(process.env);
   if (configurationError !== undefined) {

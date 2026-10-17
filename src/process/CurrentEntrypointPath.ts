@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 
-/** Absolute argv entrypoint, or undefined when the process did not supply one. */
+/** Node's absolute argv script selection, or undefined when none was supplied.
+ * Native executable paths have different traversal semantics and must not use this.
+ */
 export const normalizeEntrypointPath = (
   entrypoint: string | undefined,
 ): string | undefined =>
