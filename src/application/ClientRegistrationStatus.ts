@@ -80,12 +80,18 @@ export type UnhealthyClientRegistrationStatus = Exclude<
   { readonly state: "aligned" }
 >;
 
+const tomlTimeoutSchema = z.union([
+  z.number().positive(),
+  z.bigint().positive(),
+]);
+
 const registrationSchema = z
   .object({
     command: z.string().min(1),
     args: z.array(z.string()).default([]),
-    startup_timeout_sec: z.number().positive().optional(),
-    tool_timeout_sec: z.number().positive().optional(),
+    // TOML keeps integers beyond the safe Number range exact as bigint.
+    startup_timeout_sec: tomlTimeoutSchema.optional(),
+    tool_timeout_sec: tomlTimeoutSchema.optional(),
     startupTimeoutMs: z.number().positive().optional(),
     toolTimeoutMs: z.number().positive().optional(),
     type: z.string().optional(),
@@ -546,7 +552,8 @@ const timeoutAdvisory = (
   if (toolTimeout === undefined) return undefined;
   const providerAllowance = mcpProviderDeadlineAllowanceMs(timeoutInputs);
   const isKimi = client.name === "kimi";
-  const toolTimeoutMs = isKimi ? toolTimeout : toolTimeout * 1000;
+  // A bigint is beyond the safe Number range, so rounding cannot cross the allowance.
+  const toolTimeoutMs = Number(toolTimeout) * (isKimi ? 1 : 1000);
   if (toolTimeoutMs >= providerAllowance) return undefined;
   const setting = isKimi ? "toolTimeoutMs" : "tool_timeout_sec";
   const currentValue = isKimi

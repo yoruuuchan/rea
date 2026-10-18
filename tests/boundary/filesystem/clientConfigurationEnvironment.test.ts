@@ -39,7 +39,7 @@ it.each([
       REA_GHIDRA_COMPILER_SPEC_ID: "borlandcpp",
       CALLER_SETTING: "preserve exactly",
     };
-    const original = serializeClientConfiguration(
+    const serialized = serializeClientConfiguration(
       {
         [serversKey]: {
           rea: clientRegistrationEntry(format, ["rea-old", "mcp"], custom),
@@ -48,6 +48,8 @@ it.each([
       },
       format,
     );
+    if (!serialized.ok) throw new Error("fixture serialization failed");
+    const original = serialized.value;
     await writeFile(configPath, original);
     const providers = { GHIDRA_INSTALL_DIR: join(root, "new-ghidra") };
     const command = ["rea", "mcp"];

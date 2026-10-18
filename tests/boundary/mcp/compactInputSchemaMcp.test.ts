@@ -16,7 +16,7 @@ import {
   schemaArrays,
   schemaChildren,
   schemaMaps,
-} from "../../../src/contracts/inputSchemaPresentation.js";
+} from "../../../src/contracts/jsonSchemaKeywords.js";
 import {
   COMPACT_INPUT_SCHEMA_BUDGET_BYTES,
   parseMcpInputSchemaProfile,

@@ -110,9 +110,14 @@ rendered declarations. Keep canonical rejection checks separate from the
 intentionally reduced compact advertisement, and probe actual client renderers
 when changing schema representations.
 
-The reused CLI boundary workers cap V8 old space at 384 MiB, based on their
-profiled allocation and cleanup behavior. This encourages collection between
-files; spawned REA processes retain their own heap settings.
+The reused CLI boundary workers cap V8 old space at 384 MiB for ordinary runs
+and 512 MiB with coverage enabled. Covered ADB fixtures exhaust the ordinary
+384 MiB budget; those fixtures also complete with the shared CLI graph preloaded
+at 512 MiB. This is a measured capacity control, not a suite-wide speedup claim.
+Both profiles keep the
+same bounded worker count, and spawned REA processes retain their own heap
+settings. Explicitly disabling coverage retains the ordinary profile; coverage
+provider options alone do not enable instrumentation.
 
 Vitest worker limits do not bound subprocesses launched within a test. Bound
 those batches separately so repeated CLI validation cannot oversubscribe the

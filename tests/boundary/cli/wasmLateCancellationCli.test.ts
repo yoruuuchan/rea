@@ -30,6 +30,7 @@ it("delivers cancellation with completed WASM Evidence through the CLI boundary"
         service,
         "wabt-artifact",
         "inspect_wasm_artifact",
+        signal,
       ),
     {
       on: events.on.bind(events),

@@ -226,9 +226,18 @@ export const createCliResultOutput = (
       metadata,
       originalFailure: cliOperationFailureIdentity(value),
     };
-    const filtered: unknown = options.filterOutput
-      ? Filter.apply(value, Filter.parse(options.filterOutput))
-      : value;
+    const filterPaths = options.filterOutput
+      ? Filter.parse(options.filterOutput)
+      : undefined;
+    const filtered: unknown =
+      filterPaths === undefined ? value : Filter.apply(value, filterPaths);
+    if (
+      filterPaths !== undefined &&
+      filterPaths.length > 0 &&
+      (format === "json" || format === "jsonl") &&
+      Array.isArray(filtered)
+    )
+      normalizeFilteredJsonArrays(filtered);
     // Leave successful YAML and bare YAML rendering to Incur. The custom
     // boundary is needed only for a full failure envelope, whose error
     // sentinel otherwise drops category, remediation, and details.
@@ -257,8 +266,7 @@ export const createCliResultOutput = (
         }
       }
       if (characters <= constants.MAX_STRING_LENGTH) {
-        if (failure === undefined) return false;
-        const count = estimateTokenCount(Formatter.format(failure, format));
+        const count = estimateTokenCount(Formatter.format(tokenValue, format));
         handled = true;
         try {
           await writeOutputText(destination, `${count}\n`);
@@ -363,4 +371,22 @@ const fullFailureEnvelope = (
     error: `${sliceByTokens(formatted, offset, end)}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]`,
     meta: { ...meta, ...(nextOffset === undefined ? {} : { nextOffset }) },
   };
+};
+
+/** Filter.apply owns these mapped arrays; an empty path list returns the source. */
+const normalizeFilteredJsonArrays = (selection: unknown[]): void => {
+  const pending = [selection];
+  while (pending.length > 0) {
+    const array = pending.pop()!;
+    for (let index = 0; index < array.length; index += 1) {
+      const value: unknown = array[index];
+      if (
+        value === undefined ||
+        typeof value === "function" ||
+        typeof value === "symbol"
+      )
+        array[index] = null;
+      else if (Array.isArray(value)) pending.push(value);
+    }
+  }
 };

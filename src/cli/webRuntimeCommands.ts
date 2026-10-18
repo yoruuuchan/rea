@@ -59,7 +59,6 @@ export const registerWebRuntimeCommands = (
             },
             service.provider.identity().id,
             "observe_web_execution",
-            undefined,
             signal,
           );
         }),
@@ -100,7 +99,6 @@ export const registerWebRuntimeCommands = (
             },
             service.provider.identity().id,
             "inspect_web_event_listeners",
-            undefined,
             signal,
           );
         }),

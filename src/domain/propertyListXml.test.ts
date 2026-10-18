@@ -114,7 +114,9 @@ it("keeps XML numeric overflow and unreadable text explicitly unknown", () => {
   const parsed = parseXmlPropertyList(
     "<plist><array><real>1e999</real><real>-1e999</real><real> nan </real><real>-nan</real><real>infinite</real></array></plist>",
   );
-  expect(parsed.value).toEqual(Array.from({ length: 5 }, () => new UnknownPlistReal()));
+  expect(parsed.value).toEqual(
+    Array.from({ length: 5 }, () => new UnknownPlistReal()),
+  );
   expect(parsed.numberLiterals.incomplete).toBe(false);
 });
 

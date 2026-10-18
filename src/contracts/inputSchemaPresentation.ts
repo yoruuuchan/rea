@@ -1,27 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 
-export const schemaMaps = new Set([
-  "$defs",
-  "definitions",
-  "properties",
-  "patternProperties",
-  "dependentSchemas",
-  "dependencies",
-]);
-export const schemaArrays = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
-export const schemaChildren = new Set([
-  "items",
-  "additionalItems",
-  "contains",
-  "additionalProperties",
-  "unevaluatedProperties",
-  "unevaluatedItems",
-  "propertyNames",
-  "not",
-  "if",
-  "then",
-  "else",
-]);
+import {
+  schemaArrays,
+  schemaChildren,
+  schemaMaps,
+} from "./jsonSchemaKeywords.js";
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

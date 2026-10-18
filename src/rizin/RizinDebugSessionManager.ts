@@ -1437,7 +1437,7 @@ const waitForCommandFrames = async (
     outputTruncated ||= frame.truncated;
     const markerIndex = frame.text.indexOf(marker);
     const text =
-      markerIndex < 0 ? frame.text : frame.text.slice(0, markerIndex).trimEnd();
+      markerIndex < 0 ? frame.text : frame.text.slice(0, markerIndex);
     if (markerIndex >= 0 && text.length === 0) return true;
     const separatorBytes = output.length > 0 ? 1 : 0;
     const remaining = maxCommandOutputBytes - outputBytes - separatorBytes;

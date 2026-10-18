@@ -76,6 +76,7 @@ export const registerWasmCommands = (
             service,
             "wabt-artifact",
             "inspect_wasm_artifact",
+            signal,
           ),
         ),
       ),

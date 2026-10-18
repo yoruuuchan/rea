@@ -29,6 +29,7 @@ export const registerAdbCommands = (
           { close: () => provider.close() },
           "adb",
           operation,
+          signal,
         ),
       ),
     );

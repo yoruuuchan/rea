@@ -32,6 +32,7 @@ export const registerGoCommands = (cli: CliInstance, logger: Logger): void => {
               service,
               "go-build-info",
               "inspect_go_binary",
+              signal,
             ),
         );
       }),

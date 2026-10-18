@@ -2,7 +2,8 @@ import {
   schemaArrays,
   schemaChildren,
   schemaMaps,
-} from "./inputSchemaPresentation.js";
+  schemaLiteralValues,
+} from "./jsonSchemaKeywords.js";
 
 // Kimi expands schema-local references before sending tools to Moonshot.
 // Compact advertisements must fit after expansion, independently of client
@@ -11,8 +12,6 @@ import {
 /** Annotation keys that carry guidance but no validation semantics. */
 const annotationKeys = new Set(["description", "examples", "default", "title"]);
 
-/** Keys whose values are literal data, never nested schemas to rewrite. */
-const dataKeys = new Set(["const", "enum", "examples", "default"]);
 const definitionKeys = new Set(["$defs", "definitions"]);
 // An empty schema accepts every JSON value. Kimi otherwise infers string.
 const jsonValueTypes = [
@@ -70,7 +69,7 @@ const rebuildSchemaPositions = (
   if (!isSchemaObject(node)) return node;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
-    if (dataKeys.has(key)) {
+    if (schemaLiteralValues.has(key)) {
       out[key] = value;
       continue;
     }

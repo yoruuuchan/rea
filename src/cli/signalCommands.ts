@@ -62,6 +62,7 @@ export const registerSignalCommands = (
             service,
             "sigrok-recording",
             "inspect_signal_decoders",
+            signal,
           ),
         ),
       ),
@@ -114,6 +115,7 @@ export const registerSignalCommands = (
             service,
             "sigrok-recording",
             "decode_signal_recording",
+            signal,
           );
         }),
       ),

@@ -37,6 +37,7 @@ export interface SetupClient {
   readonly quitBeforeSetup?: boolean;
   readonly format?:
     | "json"
+    | "claude_code"
     | "toml"
     | "vscode"
     | "copilot_cli"
@@ -491,7 +492,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     configPath: (context: ClientPathContext) =>
       join(claudeCodeConfigDirectory(context), ".claude.json"),
     markerPath: claudeCodeMarkerDirectory,
-    format: "json",
+    format: "claude_code",
   },
   {
     name: "claude_desktop",

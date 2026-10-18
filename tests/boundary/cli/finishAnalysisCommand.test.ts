@@ -21,6 +21,7 @@ it("preserves producer-owned cleanup failure when service close does not resolve
     { close: async () => {} },
     "fixture-provider",
     "inspect_web_page",
+    new AbortController().signal,
   );
 
   expect(result).toEqual(expected);
@@ -39,7 +40,6 @@ it("returns completed partial Evidence when cancellation arrives during close", 
     },
     "fixture-provider",
     "capture_browser_scenario",
-    undefined,
     controller.signal,
   );
 
@@ -61,7 +61,6 @@ it("preserves the primary operation error when cancellation arrives during close
     },
     "fixture-provider",
     "inspect_web_page",
-    undefined,
     controller.signal,
   );
 

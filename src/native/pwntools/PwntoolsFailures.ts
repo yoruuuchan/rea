@@ -1,3 +1,7 @@
+import {
+  artifactFileCancellationCause,
+  bindArtifactFileCleanup,
+} from "../../artifacts/ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import {
   AnalysisError,
@@ -91,7 +95,13 @@ export const pwntoolsDecoderFailure = (
         { operation: context.operation, cause },
       );
     if (cause.reason === "cancelled")
-      return new AnalysisCancelledError(context.operation, outputOptions);
+      return new AnalysisCancelledError(context.operation, {
+        ...outputOptions,
+        cause:
+          cause.cancellation === undefined
+            ? cause.cause
+            : cause.cancellation.reason,
+      });
     if (cause.reason === "timeout")
       return new AnalysisTimeoutError(
         context.operation,
@@ -175,8 +185,16 @@ export const pwntoolsDecoderFailure = (
           cause,
         },
       );
-    if (cause.reason === "cancelled")
-      return new AnalysisCancelledError(context.operation);
+    if (cause.reason === "cancelled") {
+      const error = new AnalysisCancelledError(context.operation, {
+        cause: artifactFileCancellationCause(cause),
+        cleanup: cause.cleanup,
+        partialObservation: cause.partialObservation,
+        capturedOutput: context.precedingOutput,
+      });
+      bindArtifactFileCleanup(cause, error);
+      return error;
+    }
     if (
       cause.reason === "limit" ||
       cause.reason === "path" ||

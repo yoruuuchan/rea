@@ -236,8 +236,11 @@ import type { NativeLoadImagePartialObservation } from "./native/nativeLoadImage
 import type { NativeAotSnapshotObservation } from "./native/nativeAotSnapshotObservation.js";
 import type { FileSnapshotPartialObservation } from "./fileSnapshotObservation.js";
 
+import type { WebModuleResolutionObservation } from "./webModuleTrace.js";
+
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
+  | WebModuleResolutionObservation
   | NativeLoadImagePartialObservation
   | NativeAotSnapshotObservation
   | FileSnapshotPartialObservation

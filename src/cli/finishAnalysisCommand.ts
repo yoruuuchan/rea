@@ -18,8 +18,8 @@ export const finishAnalysisCommand = async <
   service: { close(): Promise<void> },
   providerId: string,
   canonicalOperation: string,
+  signal: AbortSignal,
   fallbackResource?: string,
-  signal?: AbortSignal,
 ): Promise<Value | ReturnType<typeof projectAnalysisError>> => {
   let result: Result<Value, AnalysisError>;
   try {
@@ -69,7 +69,7 @@ export const finishAnalysisCommand = async <
           ),
     );
   }
-  if (result.ok && signal?.aborted === true)
+  if (result.ok && signal.aborted)
     return projectAnalysisError(
       new AnalysisCancelledError(canonicalOperation, {
         cause: signal.reason,

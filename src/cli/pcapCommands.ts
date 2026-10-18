@@ -26,6 +26,7 @@ export const registerPcapCommands = (
           { close: () => provider.close() },
           "pcap",
           operation,
+          signal,
         ),
       ),
     );

@@ -2,7 +2,7 @@ import {
   schemaArrays,
   schemaChildren,
   schemaMaps,
-} from "../../src/contracts/inputSchemaPresentation.js";
+} from "../../src/contracts/jsonSchemaKeywords.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

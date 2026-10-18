@@ -1,4 +1,5 @@
 import { closeOwnedWebResources } from "./closeOwnedWebResources.js";
+import { isDeepStrictEqual } from "node:util";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -19,7 +20,9 @@ import {
 import {
   webModuleTraceInputSchema,
   webModuleFileSchema,
-  webModuleResolutionSchema,
+  webModuleResolutionBatchSchema,
+  webModuleResolutionObservationSchema,
+  type WebModuleResolutionBatch,
   webModuleTraceResultSchema,
   type WebModuleResolution,
   type WebModuleTraceResult,
@@ -33,8 +36,9 @@ import type { ExecutionOptions } from "./AnalysisProvider.js";
 import type {
   WebModuleArtifactPort,
   WebModuleResolutionPort,
-  WebModuleResolutionBatch,
 } from "./WebModulePorts.js";
+
+import { completeProviderEvidence } from "./ProviderOperationExecution.js";
 
 const OPERATION = "trace_web_module_imports";
 const artifactsSchema = selectedWebScriptArtifactsSchema.extend({
@@ -45,12 +49,6 @@ const artifactsSchema = selectedWebScriptArtifactsSchema.extend({
       value: jsonObjectSchema,
     })
     .nullable(),
-});
-const resolutionBatchSchema = z.strictObject({
-  engine: z.strictObject({ id: z.string().min(1), version: z.string().min(1) }),
-  resolutions: z.array(webModuleResolutionSchema),
-  diagnostics: z.array(z.string()),
-  rawResult: jsonObjectSchema,
 });
 const LIMITATIONS = [
   "Resolution is derived under the selected importer URL and optional import map; it does not establish that the map was installed in the captured page.",
@@ -84,8 +82,10 @@ export class WebModuleTraceService {
     rawInput: unknown,
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
-    if (isAborted(options?.signal))
-      return err(new AnalysisCancelledError(OPERATION));
+    if (options?.signal?.aborted)
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const parsed = webModuleTraceInputSchema.safeParse(rawInput);
     if (!parsed.success)
       return err(
@@ -144,31 +144,51 @@ export class WebModuleTraceService {
       .filter((reference) => reference.specifier !== null)
       .map((reference) => reference.specifier ?? "");
     let resolution: WebModuleResolutionBatch | null = null;
+    let resolutionFailure: AnalysisError | undefined;
     if (literals.length > 0) {
-      const execution = await this.resolver.resolve(
-        {
-          importerUrl,
-          importMap:
-            data.importMap === null
-              ? null
-              : {
-                  baseUrl: data.importMap.baseUrl,
-                  value: data.importMap.value,
-                },
-          specifiers: literals,
-        },
-        options,
-      );
-      if (!execution.ok) return execution;
-      const report = resolutionBatchSchema.safeParse(execution.value);
-      if (!report.success)
+      if (options?.signal?.aborted)
         return err(
-          new AnalysisOutputError(
-            OPERATION,
-            "Resolver returned malformed or incomplete native evidence.",
-          ),
+          new AnalysisCancelledError(OPERATION, {
+            cause: options.signal.reason,
+          }),
         );
-      resolution = report.data;
+      const request = {
+        importerUrl,
+        importMap:
+          data.importMap === null
+            ? null
+            : {
+                baseUrl: data.importMap.baseUrl,
+                value: data.importMap.value,
+              },
+        specifiers: literals,
+      };
+      const execution = await this.resolver.resolve(request, options);
+      if (execution.ok) {
+        const report = webModuleResolutionBatchSchema.safeParse(
+          execution.value,
+        );
+        if (!report.success)
+          return err(
+            new AnalysisOutputError(
+              OPERATION,
+              "Resolver returned malformed or incomplete native evidence.",
+            ),
+          );
+        resolution = report.data;
+      } else {
+        const observation = webModuleResolutionObservationSchema.safeParse(
+          execution.error.partialObservation,
+        );
+        if (
+          !observation.success ||
+          !isDeepStrictEqual(observation.data.request, request) ||
+          observation.data.batch.resolutions.length !== literals.length
+        )
+          return execution;
+        resolution = observation.data.batch;
+        resolutionFailure = execution.error;
+      }
       if (resolution.resolutions.length !== literals.length)
         return err(
           new AnalysisOutputError(
@@ -177,8 +197,6 @@ export class WebModuleTraceService {
           ),
         );
     }
-    if (isAborted(options?.signal))
-      return err(new AnalysisCancelledError(OPERATION));
     let literalIndex = 0;
     const imports: WebModuleTraceResult["imports"] = [];
     for (const reference of syntax.imports) {
@@ -238,37 +256,40 @@ export class WebModuleTraceService {
     });
     if (!normalized.success)
       return err(new AnalysisOutputError(OPERATION, normalized.error.message));
-    return ok(
-      createEvidence(
-        {
-          path: data.sourceFile.path,
-          sha256: data.sourceFile.sha256,
-          format: "file",
-        },
-        {
-          id: "rea-web-module-trace",
-          name: "REA captured module relationship trace",
-          version: "1",
-        },
-        {
-          operation: OPERATION,
-          parameters: jsonObjectSchema.parse(input),
-          result: normalized.data,
-          rawResult: resolution?.rawResult ?? null,
-          confidence: "derived",
-          authority: "historical-reference",
-          limitations: LIMITATIONS,
-          locations: [
-            { kind: "artifact-path", path: data.sourceFile.path },
-            { kind: "artifact-path", path: input.manifest_path },
-          ],
-          evidenceLinks:
-            data.manifest.source_evidence_id === null
-              ? []
-              : [data.manifest.source_evidence_id],
-        },
-      ),
+    const evidence = createEvidence(
+      {
+        path: data.sourceFile.path,
+        sha256: data.sourceFile.sha256,
+        format: "file",
+      },
+      {
+        id: "rea-web-module-trace",
+        name: "REA captured module relationship trace",
+        version: "1",
+      },
+      {
+        operation: OPERATION,
+        parameters: jsonObjectSchema.parse(input),
+        result: normalized.data,
+        rawResult: resolution?.rawResult ?? null,
+        confidence: "derived",
+        authority: "historical-reference",
+        limitations: LIMITATIONS,
+        locations: [
+          { kind: "artifact-path", path: data.sourceFile.path },
+          { kind: "artifact-path", path: input.manifest_path },
+        ],
+        evidenceLinks:
+          data.manifest.source_evidence_id === null
+            ? []
+            : [data.manifest.source_evidence_id],
+      },
     );
+    if (resolutionFailure !== undefined) {
+      resolutionFailure.partialObservation = evidence;
+      return err(resolutionFailure);
+    }
+    return completeProviderEvidence(evidence, options?.signal);
   }
 }
 
@@ -304,7 +325,6 @@ const admitContext = (
     );
   return ok(null);
 };
-const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 const invalid = (path: readonly string[], message: string) =>
   err(
     new AnalysisInputError(OPERATION, undefined, [

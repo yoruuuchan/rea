@@ -37,6 +37,7 @@ export const registerEvmCommands = (
             service,
             "evmole-interface",
             "inspect_evm_interface",
+            signal,
           ),
         ),
       ),

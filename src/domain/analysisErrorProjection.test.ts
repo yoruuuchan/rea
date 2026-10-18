@@ -866,3 +866,30 @@ it("retains the primary failure and both cleanup reports after a secondary failu
     },
   });
 });
+
+it.each([false, true])(
+  "preserves producer capability recovery with retryable=%s",
+  (retryable) => {
+    const recovery =
+      "Choose an explicit disposition, then retry the same session.";
+    const projected = projectAnalysisError(
+      new AnalysisCapabilityUnavailableError("fixture", "close", "live state", {
+        retryable,
+        remediationAction: recovery,
+      }),
+    );
+    expect(projected).toMatchObject({
+      code: "capability_unavailable",
+      retryable,
+      remediation: { action: recovery },
+      details: {
+        provider_id: "fixture",
+        operation: "close",
+        reason: "live state",
+      },
+    });
+    expect(analysisErrorProjectionSchema.safeParse(projected).success).toBe(
+      true,
+    );
+  },
+);

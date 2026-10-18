@@ -39,6 +39,12 @@ export type ClientConfigurationResult =
     }
   | {
       readonly status: "failed";
+      /** Removing the member a client reads would activate an earlier duplicate. */
+      readonly reason: "shadowed_member";
+      readonly path: readonly string[];
+    }
+  | {
+      readonly status: "failed";
       readonly reason: "readback";
       /** Snapshot of the restored original, when this transaction made one. */
       readonly backupPath?: string;

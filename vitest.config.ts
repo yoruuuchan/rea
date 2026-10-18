@@ -3,6 +3,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { defineConfig } from "vitest/config";
+import { parseCLI } from "vitest/node";
 import {
   BUILT_TEST_PROJECTS,
   SOURCE_TEST_PROJECTS,
@@ -23,12 +24,14 @@ if (
 }
 
 const CANONICAL_TEMPORARY_DIRECTORY = realpathSync(tmpdir());
-const COVERAGE_ENABLED = process.argv.some((argument) =>
-  argument.startsWith("--coverage"),
+// Use Vitest's option parser so explicit false and spaced shard values retain
+// their meaning. Unknown worker/embedding arguments are not Vitest options.
+const { options: testOptions } = parseCLI(
+  ["vitest", ...process.argv.slice(2)],
+  { allowUnknownOptions: true },
 );
-const COVERAGE_SHARD = process.argv.some((argument) =>
-  argument.startsWith("--shard="),
-);
+const COVERAGE_ENABLED = testOptions.coverage?.enabled === true;
+const COVERAGE_SHARD = testOptions.shard !== undefined;
 // Keep local and CI concurrency bounded by the runner rather than command locks.
 const MAX_TEST_WORKERS = Math.min(2, availableParallelism());
 
@@ -63,9 +66,10 @@ const PROJECT_POLICIES = {
     // CLI tests create fresh command instances or subprocesses and own their
     // cleanup. Reuse the immutable graph; module mocks belong in process-global.
     isolate: false,
-    // Long-lived workers should collect temporary command/schema allocations
-    // before their two heaps compete with the real CLI child processes.
-    execArgv: ["--max-old-space-size=384"],
+    // Coverage of the shared command/schema graph exhausts the ordinary
+    // 384 MiB budget. The preloaded CLI/ADB control completes with 512 MiB;
+    // keep both profiles bounded with the same concurrency.
+    execArgv: [`--max-old-space-size=${COVERAGE_ENABLED ? "512" : "384"}`],
   },
   "process-boundary": {
     pool: "forks" as const,

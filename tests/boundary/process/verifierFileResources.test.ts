@@ -265,7 +265,8 @@ it("Ghidra verifier awaits native prerequisite rejection before creating target 
       encoding: "utf8",
       timeout: 10_000,
       env: {
-        PATH: root,
+        // Keep native process inspectors available; the selected JDK and Ghidra are absent.
+        PATH: process.env.PATH ?? "",
         HOME: root,
         USERPROFILE: root,
         GHIDRA_INSTALL_DIR: join(root, "absent-installation"),

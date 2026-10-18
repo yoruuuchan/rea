@@ -187,6 +187,7 @@ def main():
                  'inspect_managed_members', 'inspect_managed_native_boundaries',
                  'inspect_artifact', 'inspect_wasm_artifact',
                  'inspect_evm_interface', 'get_evidence_bundle', 'export_evidence_bundle',
+                 'import_evidence_bundle', 'list_unknowns', 'verify_unknown_resolution',
                  'capture_browser_scenario',
                  'resolve_containing_procedure', 'analyze_function', 'close_binary']:
         config += '[mcp_servers.rea.tools.' + tool + ']\napproval_mode = "approve"\n'

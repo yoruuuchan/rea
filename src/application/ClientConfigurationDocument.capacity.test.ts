@@ -8,6 +8,14 @@ import {
 
 const registration = { command: "rea", args: ["mcp"] };
 
+const serializedText = (
+  ...input: Parameters<typeof serializeClientConfiguration>
+): string => {
+  const serialized = serializeClientConfiguration(...input);
+  if (!serialized.ok) throw new Error("TOML serialization was refused");
+  return serialized.value;
+};
+
 describe("TOML configuration source capacity", () => {
   it.each(["\n", "\r\n"])(
     "retains adjacent assignments and multiline values with %j breaks",
@@ -29,18 +37,14 @@ describe("TOML configuration source capacity", () => {
         ...parsed.servers,
         rea: registration,
       });
-      const configured = serializeClientConfiguration(
-        desired,
-        "toml",
-        original,
-      );
+      const configured = serializedText(desired, "toml", original);
       expect(
         configured.startsWith("\uFEFF" + prefix.replaceAll("\n", newline)),
       ).toBe(true);
       expect(parseClientConfiguration(configured, "toml").document).toEqual(
         desired,
       );
-      const removed = serializeClientConfiguration(
+      const removed = serializedText(
         withClientServers(parsed, {}),
         "toml",
         configured,
@@ -61,16 +65,12 @@ describe("TOML configuration source capacity", () => {
       ...parsed.servers,
       rea: registration,
     });
-    const configured = serializeClientConfiguration(desired, "toml", original);
+    const configured = serializedText(desired, "toml", original);
     expect(configured).toContain(`NOTE="""${note}"""`);
     expect(parseClientConfiguration(configured, "toml").document).toEqual(
       desired,
     );
-    const removed = serializeClientConfiguration(
-      parsed.document,
-      "toml",
-      configured,
-    );
+    const removed = serializedText(parsed.document, "toml", configured);
     expect(removed).toContain(`NOTE="""${note}"""`);
     expect(parseClientConfiguration(removed, "toml").document).toEqual(
       parsed.document,
@@ -87,7 +87,7 @@ describe("TOML configuration source capacity", () => {
       ...parsed.servers,
       rea: registration,
     });
-    const configured = serializeClientConfiguration(desired, "grok", original);
+    const configured = serializedText(desired, "grok", original);
     const result = parseClientConfiguration(configured, "grok");
     expect(result.document.disabled_mcp_servers).toEqual(
       Array<string>(500_000).fill("other"),

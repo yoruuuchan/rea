@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 import {
@@ -12,6 +13,9 @@ import {
   developmentTestPlan,
   parseDevelopmentTestRequest,
 } from "../../../scripts/lib/development-tests.mjs";
+
+import { execFileOutput } from "../../../src/process/ExecFileOutput.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const repository = process.cwd();
 
@@ -72,4 +76,68 @@ describe("canonical test-project ownership", () => {
     expect(config).toContain("PROJECT_POLICIES");
     expect(config).not.toContain('"src/{contracts,domain}/**/*.test.ts"');
   });
+
+  it.each([
+    { flags: [], heap: 384, timeout: 30_000, lines: 68 },
+    { flags: ["--coverage"], heap: 512, timeout: 60_000, lines: 68 },
+    { flags: ["--coverage.enabled"], heap: 512, timeout: 60_000, lines: 68 },
+    { flags: ["--coverage=false"], heap: 384, timeout: 30_000, lines: 68 },
+    {
+      flags: ["--coverage.enabled=false"],
+      heap: 384,
+      timeout: 30_000,
+      lines: 68,
+    },
+    {
+      flags: ["--coverage.provider=v8"],
+      heap: 384,
+      timeout: 30_000,
+      lines: 68,
+    },
+    {
+      flags: ["--coverage.enabled", "--shard", "1/6"],
+      heap: 512,
+      timeout: 60_000,
+      lines: 0,
+    },
+    {
+      flags: ["--coverage.enabled=false", "--shard=1/6"],
+      heap: 384,
+      timeout: 30_000,
+      lines: 0,
+    },
+  ])(
+    "resolves worker resources from actual CLI options: $flags",
+    async ({ flags, heap, timeout, lines }) => {
+      const root = await createTestTempDirectory("rea-vitest-worker-policy-");
+      const script = join(root, "worker-policy.mjs");
+      await writeFile(
+        script,
+        `
+      import config from ${JSON.stringify(pathToFileURL(join(repository, "vitest.config.ts")).href)};
+      const project = config.test.projects.find(project => project.test.name === 'cli-boundary');
+      console.log(JSON.stringify({
+        execArgv: project.test.execArgv,
+        timeout: config.test.testTimeout,
+        lines: config.test.coverage.thresholds.lines,
+      }));
+    `,
+      );
+      const result = await execFileOutput(
+        process.execPath,
+        ["--import", "tsx", script, ...flags],
+        {
+          cwd: repository,
+          timeout: 10_000,
+          maxBuffer: 64 * 1024,
+          stopSignal: "SIGTERM",
+        },
+      );
+      expect(JSON.parse(result.stdout)).toEqual({
+        execArgv: [`--max-old-space-size=${String(heap)}`],
+        timeout,
+        lines,
+      });
+    },
+  );
 });

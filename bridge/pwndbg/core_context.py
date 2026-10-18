@@ -20,8 +20,9 @@ def inspect(request):
     root = Path(os.environ["REA_CORE_CONTEXT_REQUEST"]).parent
     empty = root / "no-libraries"
     empty.mkdir(mode=0o700)
-    for command in ["set auto-load off", "set debuginfod enabled off", "set auto-solib-add off", "set history save off", "set pagination off",
-                    "set sysroot ./no-libraries", "set solib-search-path ./no-libraries"]:
+    for command in ["set auto-load off", "set debuginfod enabled off", "set auto-solib-add off", "set history save off", "set pagination off", "set target-file-system-kind unix",
+                    "set sysroot ./no-libraries", "set solib-search-path ./no-libraries",
+                    "set debug-file-directory ./no-libraries"]:
         gdb.execute(command, to_string=True)
     entry = request["gdbinit"]
     try:
@@ -38,7 +39,19 @@ def inspect(request):
     # relative filename in the owned cwd so no selected path becomes GDB syntax.
     if Path(request["snapshot_path"]) != root.parent / "object.snapshot":
         raise ContextFailure("decoder", "Core context request did not select the shared owned snapshot.")
+    # GDB 16 searches AT_EXECFN/NT_FILE outside sysroot when no executable BFD
+    # is selected. Occupy that slot with the already running, owned debugger;
+    # exec-file loads no symbols and never runs it. Clear it before any query.
+    # /proc/self/exe identifies this process, not the core's historical PID.
+    architecture = {"x86_64-little-endian": "i386:x86-64", "aarch64-little-endian": "aarch64"}.get(request["architecture"])
+    if architecture is None:
+        raise ContextFailure("unsupported", "Unsupported recorded core architecture.")
+    gdb.execute("exec-file /proc/self/exe", to_string=True)
+    # The placeholder must not select the core's architecture. Reuse the
+    # decoder's validated profile, including for cross-architecture GDB builds.
+    gdb.execute("set architecture " + architecture, to_string=True)
     gdb.execute("core-file ../object.snapshot", to_string=True)
+    gdb.execute("file", to_string=True)
     inferior = gdb.selected_inferior()
     if inferior.connection is None or inferior.connection.type != "core" or gdb.current_progspace().filename is not None:
         raise ContextFailure("decoder", "Requested core-only boundary was not established; no mapping query performed.")

@@ -26,6 +26,7 @@ export const registerJebCommands = (
           { close: () => provider.close() },
           "jeb",
           operation,
+          signal,
         ),
       ),
     );

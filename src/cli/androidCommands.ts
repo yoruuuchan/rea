@@ -25,6 +25,7 @@ export const registerAndroidCommands = (
           { close: () => provider.close() },
           "jadx",
           operation,
+          signal,
         ),
       ),
     );

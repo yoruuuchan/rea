@@ -107,6 +107,7 @@ it("retains cancelled source read ownership until service close retries it", asy
     service,
     "web-module-artifacts",
     "trace_web_module_imports",
+    new AbortController().signal,
   );
   expect(finalized).toMatchObject({
     code: "cleanup_incomplete",

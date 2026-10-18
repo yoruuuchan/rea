@@ -551,6 +551,27 @@ const removeClient = async (
     ...(removeNative ? [clientServerPath(parsed, name)] : []),
     ...(legacyPath === undefined ? [] : [legacyPath]),
   ];
+  let serialized: ReturnType<typeof serializeClientConfiguration>;
+  try {
+    serialized = serializeClientConfiguration(
+      document,
+      client.format,
+      original,
+      editedPaths,
+    );
+  } catch {
+    return item(
+      client.name,
+      "failed",
+      "Configuration could not be updated, so no change was made. Repair the configuration, then rerun uninstall.",
+    );
+  }
+  if (!serialized.ok)
+    return item(
+      client.name,
+      "failed",
+      `Configuration repeats the member at ${JSON.stringify(serialized.error.path)}; removing the registration the client reads would activate an earlier duplicate, so no change was made. Remove the duplicate members manually, then rerun uninstall.`,
+    );
   const backupPath = await backupClientConfiguration(
     client,
     transactionPath,
@@ -573,12 +594,7 @@ const removeClient = async (
   try {
     publication = await fileSystem.publishConfiguration(
       transactionPath,
-      serializeClientConfiguration(
-        document,
-        client.format,
-        original,
-        editedPaths,
-      ),
+      serialized.value,
       original,
     );
   } catch (cause: unknown) {

@@ -20,6 +20,8 @@ export const failedConfigurationMessage = (
       return "Agent configuration could not be backed up, so no change was made. Check file permissions, then rerun setup.";
     case "write":
       return "Agent configuration could not be updated. Check file permissions, then rerun setup.";
+    case "shadowed_member":
+      return `Agent configuration repeats the member at ${JSON.stringify(result.path)}; removing the member the client reads would activate an earlier duplicate, so no change was made. Remove the duplicate members, then rerun setup.`;
     case "rollback":
       return result.backupPath === undefined
         ? `Agent configuration rollback failed at ${result.failure.path}: ${result.failure.detail}; the failed first-run file may remain. Remove or repair it before rerunning setup.`

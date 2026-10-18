@@ -88,7 +88,6 @@ const registerWebMcp = (
             },
             context.provider.identity().id,
             "discover_webmcp_tools",
-            undefined,
             signal,
           );
         }),
@@ -200,7 +199,6 @@ const registerScreenshot = (
             },
             context.provider.identity().id,
             "capture_web_screenshot",
-            undefined,
             signal,
           );
         }),

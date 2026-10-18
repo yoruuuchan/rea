@@ -43,7 +43,8 @@ export const analysisErrorRemediationAction = (
 ): string => {
   error = resolvedAnalysisError(error);
   if (
-    error instanceof ProviderAdapterError &&
+    (error instanceof ProviderAdapterError ||
+      error instanceof AnalysisCapabilityUnavailableError) &&
     error.remediationAction !== undefined
   )
     return error.remediationAction;

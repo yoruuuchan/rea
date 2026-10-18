@@ -31,6 +31,7 @@ export const registerApktoolCommands = (
           { close: () => provider.close() },
           "apktool",
           operation,
+          signal,
         ),
       ),
     );

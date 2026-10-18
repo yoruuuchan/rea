@@ -54,6 +54,7 @@ export const registerWebSourceLocationCommands = (
             service,
             "web-source-location",
             "trace_web_source_location",
+            signal,
           ),
         ),
       ),

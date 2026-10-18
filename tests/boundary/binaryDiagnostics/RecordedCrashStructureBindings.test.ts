@@ -2,9 +2,15 @@ import { expect, it } from "vitest";
 import {
   recordedCrashFixture,
   recordedCrashFixtureBytes,
+  recordedCrashFileMappingFixture,
 } from "../../fixtures/binaryDiagnostics/recordedCrash.js";
 import { validateRecordedCrashStructure } from "../../../src/native/pwntools/RecordedCrashStructureBindings.js";
-import { RECORDED_LINUX_CORE_PROFILES } from "../../../src/domain/native/recordedCrash.js";
+import { validateCoreFileMappingAuthority } from "../../../src/native/pwndbg/CoreFileMappingAuthority.js";
+import { validateRecordedCrashSources } from "../../../src/native/pwntools/RecordedCrashSourceBindings.js";
+import {
+  recordedCrashSchema,
+  RECORDED_LINUX_CORE_PROFILES,
+} from "../../../src/domain/native/recordedCrash.js";
 
 it.each(["x86_64-little-endian", "aarch64-little-endian"] as const)(
   "admits a %s core whose header carries that profile's e_machine",
@@ -58,5 +64,25 @@ it.each([
         report.decoder_diagnostics,
       ),
     ).toThrow(/Reported core structure differs/);
+  },
+);
+
+it.each(["/usr/bin/fixture", "../../fixture", "/a/../fixture"])(
+  "separates valid source evidence from debugger mapping authority: %s",
+  (path) => {
+    const report = recordedCrashFileMappingFixture([Buffer.from(path)]);
+    const snapshot = recordedCrashFixtureBytes(report);
+    expect(() => recordedCrashSchema.parse(report)).not.toThrow();
+    validateRecordedCrashStructure(
+      report,
+      snapshot,
+      report.decoder_diagnostics,
+    );
+    validateRecordedCrashSources(report, snapshot, report.decoder_diagnostics);
+    const original = Buffer.from(snapshot);
+    expect(validateCoreFileMappingAuthority(report, snapshot).ok).toBe(
+      path === "/usr/bin/fixture",
+    );
+    expect(snapshot).toEqual(original);
   },
 );

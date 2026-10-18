@@ -149,6 +149,44 @@ export const recordedCrashSignalFixture = (
   return value;
 };
 
+/** Source-owned ELF64 NT_FILE descriptor with exact pathname bytes. */
+export const recordedCrashFileMappingFixture = (
+  paths: readonly Buffer[],
+  path?: string,
+): RecordedCrash => {
+  const value = recordedCrashFixture(path);
+  const header = Buffer.alloc(16);
+  header.writeBigUInt64LE(BigInt(paths.length));
+  header.writeBigUInt64LE(4096n, 8);
+  const descriptor = Buffer.concat([
+    header,
+    Buffer.alloc(paths.length * 24),
+    ...paths.flatMap((name) => [name, Buffer.from([0])]),
+  ]);
+  const note = value.notes[0];
+  if (note === undefined) throw new Error("Expected a source-owned note");
+  const bytes = NOTE_HEADER_BYTES + Math.ceil(descriptor.length / 4) * 4;
+  value.notes = [
+    {
+      ...note,
+      type: "NT_FILE",
+      location: { offset: hex(NOTE_START), bytes: hex(bytes) },
+      descriptor_location: {
+        offset: hex(DESCRIPTOR_START),
+        bytes: hex(descriptor.length),
+      },
+      descriptor_bytes_base64: descriptor.toString("base64"),
+    },
+  ];
+  value.segments = value.segments.map((segment) => ({
+    ...segment,
+    file_size: hex(bytes),
+  }));
+  value.artifact.bytes = Math.max(512, NOTE_START + bytes);
+  value.threads = [];
+  return value;
+};
+
 /** Construct only the original byte ranges consumed by the provider protocol tests. */
 export const recordedCrashFixtureBytes = (value: RecordedCrash): Buffer => {
   const bytes = Buffer.alloc(value.artifact.bytes);
@@ -184,7 +222,11 @@ export const recordedCrashFixtureBytes = (value: RecordedCrash): Buffer => {
       start + 4,
     );
     bytes.writeUInt32LE(
-      note.type === "NT_PRSTATUS" ? 1 : 0x53494749,
+      note.type === "NT_PRSTATUS"
+        ? 1
+        : note.type === "NT_FILE"
+          ? 0x46494c45
+          : 0x53494749,
       start + 8,
     );
     Buffer.from(note.owner_bytes_base64, "base64").copy(

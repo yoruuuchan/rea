@@ -9,7 +9,7 @@ import {
   schemaArrays,
   schemaChildren,
   schemaMaps,
-} from "../dist/contracts/inputSchemaPresentation.js";
+} from "../dist/contracts/jsonSchemaKeywords.js";
 import {
   TOOL_CONTRACTS,
   toolContract,

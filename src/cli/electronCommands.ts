@@ -64,7 +64,6 @@ const registerElectronFuseCommand = (
             service,
             service.provider.identity.id,
             "inspect_electron_fuses",
-            undefined,
             signal,
           );
         }),
@@ -134,7 +133,6 @@ const registerElectronActiveCommand = (
               },
               provider.identity().id,
               "capture_electron_scenario",
-              undefined,
               signal,
             );
             return "code" in result
@@ -217,7 +215,6 @@ const registerElectronTargetList = (
             },
             "rea-cdp-electron",
             "list_electron_targets",
-            undefined,
             signal,
           );
         }),
@@ -259,7 +256,6 @@ const registerElectronPageInspection = (
             },
             "rea-cdp-electron",
             "inspect_electron_page",
-            undefined,
             signal,
           );
         }),

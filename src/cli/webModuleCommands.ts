@@ -66,6 +66,7 @@ export const registerWebModuleCommands = (
             service,
             "web-module-trace",
             "trace_web_module_imports",
+            signal,
           ),
         ),
       ),

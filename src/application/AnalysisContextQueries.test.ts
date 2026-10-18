@@ -259,3 +259,24 @@ describe("analysis context queries: address facets", () => {
     });
   });
 });
+
+it("does not start address facets after document selection completes under cancellation", async () => {
+  const controller = new AbortController();
+  const reason = { request: "cancelled after document selection" };
+  const calls: string[] = [];
+  const result = await inspectAddressContext(
+    {
+      execute: async (operation) => {
+        calls.push(operation);
+        controller.abort(reason);
+        return ok(createAnalysisExecution("fixture", provider));
+      },
+    },
+    { address: "0x401000" },
+    controller.signal,
+  );
+  if (result.ok) throw new Error("expected cancelled selection");
+  expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.error.cause).toBe(reason);
+  expect(calls).toEqual(["current_document"]);
+});

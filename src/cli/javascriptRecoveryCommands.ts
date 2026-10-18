@@ -70,6 +70,7 @@ export const registerJavaScriptRecoveryCommands = (
             service,
             "wakaru",
             "recover_javascript_sources",
+            signal,
           ),
         ),
       ),

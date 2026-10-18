@@ -443,3 +443,37 @@ describe("overview document identity through MCP", () => {
     });
   });
 });
+
+it("refuses document fallback while the current-selection owner reports incomplete cleanup", async () => {
+  const failure = new AnalysisCapabilityUnavailableError(
+    "fixture",
+    "current_document",
+    "Selection unavailable during cleanup",
+    {
+      cleanup: {
+        reason: "controlled live selection resource",
+        resources: ["selection owner"],
+      },
+    },
+  );
+  const calls: string[] = [];
+  const client = await connect({
+    execute: async (operation) => {
+      calls.push(operation);
+      return operation === "current_document"
+        ? err(failure)
+        : ok(["must-not-be-selected"]);
+    },
+  });
+  const response = await client.callTool({
+    name: "binary_overview",
+    arguments: {},
+  });
+  expect(response.isError).toBe(true);
+  expect(parseMcpToolError(response).error).toMatchObject({
+    code: "cleanup_incomplete",
+    details: { operation: "current_document" },
+  });
+  expect(calls).toEqual(["current_document"]);
+  expect(failure.cleanupIncomplete).toBe(true);
+});

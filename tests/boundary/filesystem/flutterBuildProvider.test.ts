@@ -684,6 +684,7 @@ it("retains failed snapshot cleanup and retries it on close", async () => {
     { close: () => provider.close() },
     "flutter",
     "identify_flutter_build",
+    new AbortController().signal,
   );
   expect(result).toMatchObject({
     code: "cleanup_incomplete",

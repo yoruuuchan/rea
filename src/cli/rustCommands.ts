@@ -32,7 +32,6 @@ export const registerRustCommands = (
             service,
             "rust-auditable",
             "inspect_rust_binary",
-            undefined,
             signal,
           ),
         );

@@ -73,6 +73,13 @@ export async function verifyCoreInspectionTrace({
     for (const file of await readdir(root)) {
       if (!file.startsWith(`inspection-${mode}.trace.`)) continue;
       const text = await readFile(join(root, file), "utf8");
+      // Keep the source executable present: GDB 16 otherwise silently hides a
+      // core-only violation when its automatic executable lookup finds nothing.
+      const recordedExecutable = JSON.stringify(join(root, "fixture-program"));
+      assert.ok(
+        !text.split("\n").some((line) => line.includes(recordedExecutable)),
+        `Inspection attempted access to the recorded executable: ${file}`,
+      );
       const ownershipTrace = text
         .split("\n")
         .some(
