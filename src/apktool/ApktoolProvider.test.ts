@@ -169,6 +169,38 @@ const apkFixture = async (
   };
 };
 
+it("returns table-only facts for a single selected primary table", async () => {
+  const { command, root } = await writeApktoolStub(decodeStub());
+  const apk = await apkFixture(root);
+  const provider = providerOver(command);
+  onTestFinished(() => provider.close());
+  const outcome = await new ApktoolResourceAnalysisService(provider).execute(
+    "decode_android_resources",
+    { path: apk.path, string_tables_only: true },
+  );
+  if (!outcome.ok) throw outcome.error;
+  expect(outcome.value).toMatchObject({
+    parameters: { path: apk.path, string_tables_only: true },
+    subject: { digest: { sha256: apk.sha256 } },
+    normalized_result: {
+      strings: [],
+      string_tables: [
+        {
+          locale: null,
+          status: "present",
+          strings: [
+            { name: "api_endpoint", value: "https://api.example.com/v1" },
+            { name: "app_name", value: "ApktoolProbe" },
+          ],
+          total_count: 2,
+          unparsed_count: 0,
+          coverage: "complete",
+        },
+      ],
+    },
+  });
+});
+
 it.each([
   [false, false],
   [true, false],

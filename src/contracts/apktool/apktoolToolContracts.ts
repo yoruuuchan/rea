@@ -39,7 +39,11 @@ export const APKTOOL_TOOL_CONTRACTS = [
       },
       {
         title: "Decode multiple locale string tables in one pass",
-        input: { path: "/targets/Example.apk", locales: ["de", "fr"] },
+        input: {
+          path: "/targets/Example.apk",
+          locales: ["de", "fr"],
+          string_tables_only: true,
+        },
       },
     ],
   },

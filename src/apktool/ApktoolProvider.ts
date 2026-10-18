@@ -660,7 +660,7 @@ export class ApktoolProvider {
           : "complete";
 
       completedDecode.strings = [...projectedStrings.strings];
-      if (input.locales !== undefined)
+      if (input.locales !== undefined || input.string_tables_only === true)
         completedDecode.string_tables = [...projectedStrings.tables];
       completedDecode.coverage = coverage;
       if (!projection.ok) throw projection.error.cause;

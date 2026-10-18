@@ -55,6 +55,8 @@ export const registerApktoolCommands = (
     // `b+zh+Hans+CN` form at the CLI boundary.
     options: z.object({
       locale: apktoolInputSchemas.decode_android_resources.shape.locale,
+      "string-tables-only":
+        apktoolInputSchemas.decode_android_resources.shape.string_tables_only,
       locales:
         apktoolInputSchemas.decode_android_resources.shape.locales.describe(
           "Repeat to project multiple localized string tables, e.g. --locales de --locales pt-BR",
@@ -74,6 +76,9 @@ export const registerApktoolCommands = (
       execute(CLI_COMMANDS.decodeAndroidResources, "decode_android_resources", {
         path: args.path,
         include_strings: options.strings,
+        ...(options["string-tables-only"] === undefined
+          ? {}
+          : { string_tables_only: options["string-tables-only"] }),
         ...(options.locale === undefined ? {} : { locale: options.locale }),
         ...(options.locales === undefined ? {} : { locales: options.locales }),
       }),

@@ -746,11 +746,12 @@ See [Android analysis](android-analysis.md) for boundaries and resource budgets.
 
 `verify:jeb` requires a caller-started JEB client serving MCP at
 `REA_JEB_MCP_URL` (default `http://127.0.0.1:8425/mcp`) with a project
-already open, and verifies real CLI client inspection, unit listing coverage,
+already open, and exercises shared application/provider client inspection, unit listing coverage,
 and method decompilation. The script records the engine's exact response to
-`open_jeb_project`; JEB 5.48.0 headless instances do not advertise that tool.
+`open_jeb_project`; the earlier licensed 5.48.0 headless verification did not
+advertise that tool.
 REA does not install or launch JEB; see [JEB analysis](jeb-analysis.md) for
-the bring-your-own boundary. Verified against JEB 5.48.0 serving
+the bring-your-own boundary. The earlier licensed build was verified against JEB 5.48.0 serving
 `jeb-mcp-server` 1.3.0 at four scales: a compiled Java class fixture, a
 locally built signed probe APK with a launcher activity (manifest, v1/v2/v3
 certificates, dex bytecode, filtered and paginated listing), the published
@@ -761,7 +762,12 @@ decompilation through both CLI and MCP, and the official Flutter Gallery
 analyzed as native code (75k methods on arm64) and decompiled through both
 CLI and MCP with explicit unit selection, plus the thin Java wrapper and
 decoded manifest. The dedicated Dart snapshot processor and `run_script`
-remain GUI-only surfaces in JEB 5.48.0 headless.
+remained GUI-only surfaces in that headless build.
+The separate [Linux CE native audit](../experiments/analysis-efficiency/jeb-linux-native.md)
+uses the official CE `5.48.0.202610071539` direct CLI launcher and real
+CLI/stdio MCP ELF workflows. That audit does not qualify CE Java/Android
+decompilation or GUI project opening, and it does not replace the licensed
+verification above.
 Authenticated IPA and macOS application inventory projection is documented in
 [Apple application analysis](apple-application-analysis.md).
 

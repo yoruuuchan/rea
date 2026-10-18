@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { binaryLayoutSchema, type BinaryLayout } from "./binaryLayout.js";
+import {
+  binaryLayoutSchema,
+  safeParseOwnedBinaryLayout,
+  type BinaryLayout,
+} from "./binaryLayout.js";
+import { freezeJsonSnapshot } from "../immutableJson.js";
 
 const report = () => ({
   artifact: { path: "/fixture.elf", sha256: "a".repeat(64), bytes: 128 },
@@ -58,6 +63,55 @@ const report = () => ({
   },
   diagnostics: { stdout: "", stderr: "", truncated: false },
   limitations: [],
+});
+
+it("reuses an exact validated immutable layout without a second retained copy", () => {
+  const value = freezeJsonSnapshot(report());
+  const parsed = safeParseOwnedBinaryLayout(value);
+  expect(parsed.success).toBe(true);
+  if (!parsed.success) throw parsed.error;
+  expect(parsed.data).toBe(value);
+  expect(safeParseOwnedBinaryLayout(value)).toEqual(parsed);
+  expect(parsed.data).toEqual(binaryLayoutSchema.parse(value));
+  expect(Reflect.set(value.sections[0]!, "index", 5)).toBe(false);
+});
+
+it.each(["mutable", "shallow-frozen"])(
+  "revalidates a changed %s layout instead of caching its former validity",
+  (kind) => {
+    const value = report();
+    if (kind === "shallow-frozen") Object.freeze(value);
+    const first = safeParseOwnedBinaryLayout(value);
+    if (!first.success) throw first.error;
+    expect(first.data).not.toBe(value);
+    value.sections[0]!.header_location.offset = "0x80";
+    const invalid = safeParseOwnedBinaryLayout(value);
+    expect(invalid.success).toBe(false);
+    expect(invalid).toEqual(binaryLayoutSchema.safeParse(value));
+  },
+);
+
+it("never treats sealing as format validity or caches a refused layout", () => {
+  const value = report();
+  value.sections[0]!.index = 10;
+  freezeJsonSnapshot(value);
+  expect(safeParseOwnedBinaryLayout(value).success).toBe(false);
+  expect(safeParseOwnedBinaryLayout(value).success).toBe(false);
+});
+
+it("does not borrow hidden fields that the format parser removed", () => {
+  const value = report();
+  Object.defineProperty(value, "not_in_parsed_result", {
+    value: { unvalidated: true },
+    enumerable: false,
+  });
+  freezeJsonSnapshot(value);
+  for (let repeat = 0; repeat < 2; repeat += 1) {
+    const parsed = safeParseOwnedBinaryLayout(value);
+    if (!parsed.success) throw parsed.error;
+    expect(parsed.data).not.toBe(value);
+    expect(Object.hasOwn(parsed.data, "not_in_parsed_result")).toBe(false);
+  }
 });
 
 it("retains high linked values and NOBITS without inventing file backing", () => {

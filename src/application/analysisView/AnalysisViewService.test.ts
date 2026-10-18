@@ -25,6 +25,36 @@ import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import { err, ok } from "../../domain/result.js";
 import { EvidenceLedger } from "../investigation/EvidenceLedger.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
+import { isImmutableJsonSnapshot } from "../../domain/immutableJson.js";
+
+it.each(["layout", "javascript"])(
+  "carries the retained %s source snapshot into repeatable shared views",
+  (kind) => {
+    const parent =
+      kind === "layout"
+        ? analysisViewLayoutEvidence()
+        : analysisViewJavaScriptEvidence();
+    const ledger = new EvidenceLedger();
+    const recorded = ledger.record(parent);
+    if (!recorded.ok) throw recorded.error;
+    const borrowed = ledger.forAnalysis(parent.evidence_id)!;
+    const original = JSON.stringify(borrowed);
+    const input = {
+      source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
+      view: { kind: "summary" },
+    } as const;
+    const first = inspectAnalysisView(input, (id) => ledger.forAnalysis(id));
+    if (!first.ok) throw first.error;
+    const repeated = inspectAnalysisView(input, (id) => ledger.forAnalysis(id));
+    if (!repeated.ok) throw repeated.error;
+    expect(repeated.value.normalized_result).toEqual(
+      first.value.normalized_result,
+    );
+    expect(isImmutableJsonSnapshot(borrowed.normalized_result)).toBe(true);
+    expect(JSON.stringify(borrowed)).toBe(original);
+    expect(ledger.forAnalysis(parent.evidence_id)).toBe(borrowed);
+  },
+);
 
 it.each(["/fixtures/unknown.exe", ""])(
   "preserves recorded empty native identity fields: path=%j",
