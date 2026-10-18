@@ -71,6 +71,14 @@ export function* collectJavaScriptIdentityWritesSteps(
   staticString: (node: t.Node | undefined) => string | undefined,
   freshObject: (node: t.Node) => boolean,
   retain: (node: t.Node, path: readonly (string | null)[]) => void,
+  observeInvocation?: (
+    node:
+      | t.CallExpression
+      | t.OptionalCallExpression
+      | t.NewExpression
+      | t.TaggedTemplateExpression,
+    invocation: JavaScriptIntrinsicInvocation | undefined,
+  ) => void,
 ): Generator<void> {
   const objectMutators = new Set([
     "defineProperty",
@@ -87,8 +95,19 @@ export function* collectJavaScriptIdentityWritesSteps(
   const keyedMutators = new Set(["set", "deleteProperty", "defineProperty"]);
   yield* traverseJavaScriptAstSteps(program, {
     enter: (node) => {
-      if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
-        const invocation = intrinsicInvocation(node);
+      if (
+        t.isCallExpression(node) ||
+        t.isOptionalCallExpression(node) ||
+        t.isNewExpression(node) ||
+        t.isTaggedTemplateExpression(node)
+      ) {
+        const invocation =
+          t.isNewExpression(node) || t.isTaggedTemplateExpression(node)
+            ? undefined
+            : intrinsicInvocation(node);
+        observeInvocation?.(node, invocation);
+        if (t.isNewExpression(node) || t.isTaggedTemplateExpression(node))
+          return;
         if (invocation?.kind === "opaque") {
           for (const scope of origin(node, "opaque-call", node))
             retain(node, scope);

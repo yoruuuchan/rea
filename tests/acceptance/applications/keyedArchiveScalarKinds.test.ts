@@ -108,9 +108,10 @@ cliTest.for(["xml", "binary"] as const)(
       $plist_type: "date",
       iso8601: "2001-01-01T00:00:00.000Z",
     });
+    // XML and binary decoding preserve the same non-finite value identity.
     expect(result.objects[7]?.value).toEqual({
       $plist_type: "real",
-      value: null,
+      value: "+infinity",
     });
     expect(result.objects[10]?.value).toEqual({
       $plist_type: "real",
@@ -282,5 +283,138 @@ cliTest(
         "Keyed archive has no $top roots",
       );
     }
+  },
+);
+
+cliTest("preserves binary IEEE non-finite scalar identity", async ({ cli }) => {
+  const root = await createTestTempDirectory("rea-binary-nonfinite-");
+  const path = join(root, "archive.plist");
+  const bytes = Buffer.from(
+    buildBinary({
+      $archiver: "NSKeyedArchiver",
+      $version: 100000,
+      $top: {
+        positive: { CF$UID: 1 },
+        negative: { CF$UID: 2 },
+        nan: { CF$UID: 3 },
+      },
+      $objects: [
+        "$null",
+        Infinity,
+        -Infinity,
+        NaN,
+        { $plist_type: "real", value: "nan" },
+        1.25,
+      ],
+    }),
+  );
+  await writeFile(path, bytes);
+  const output = await cli.run({
+    arguments: ["inspect-keyed-archive", path, "--json"],
+    environment: { HOME: root, USERPROFILE: root, REA_LOG_LEVEL: "silent" },
+  });
+  expect(output.exitCode, output.stderr).toBe(0);
+  const result = keyedArchiveResultSchema.parse(
+    parseEvidence(output.json).normalized_result,
+  );
+  expect(
+    result.objects.slice(1).map(({ kind, value }) => ({ kind, value })),
+  ).toEqual([
+    { kind: "scalar", value: { $plist_type: "real", value: "+infinity" } },
+    { kind: "scalar", value: { $plist_type: "real", value: "-infinity" } },
+    { kind: "scalar", value: { $plist_type: "real", value: "nan" } },
+    { kind: "dictionary", value: { $plist_type: "real", value: "nan" } },
+    { kind: "scalar", value: 1.25 },
+  ]);
+  expect(result.archive_sha256).toBe(
+    createHash("sha256").update(bytes).digest("hex"),
+  );
+  const { call } = await connectLocalToolsMcp({
+    HOME: root,
+    USERPROFILE: root,
+  });
+  const opened = await call("open_binary", { path });
+  expect(opened.isError).not.toBe(true);
+  const mcp = await call("inspect_keyed_archive", {});
+  expect(mcp.isError).not.toBe(true);
+  expect(
+    keyedArchiveResultSchema.parse(
+      parseEvidence(mcp.structuredContent).normalized_result,
+    ),
+  ).toEqual(result);
+  expect(await readFile(path)).toEqual(bytes);
+});
+
+cliTest(
+  "keeps CFPropertyList's non-finite real spellings in an XML keyed archive",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-keyed-non-finite-");
+    const archive = {
+      $archiver: "NSKeyedArchiver",
+      $version: 100000,
+      $top: {
+        up: { CF$UID: 1 },
+        down: { CF$UID: 2 },
+        missing: { CF$UID: 3 },
+        control: { CF$UID: 4 },
+      },
+      $objects: ["$null", 1.5, 0.25, 1.75, 1.25],
+    };
+    // plist@5 writes its own spellings for non-finite reals, so encode
+    // placeholder reals and patch them to the text CFPropertyList writes.
+    let xml = build(archive);
+    for (const [placeholder, spelling] of [
+      ["1.5", "+infinity"],
+      ["0.25", "-INFINITY"],
+      ["1.75", "nan"],
+    ] as const) {
+      expect(xml).toContain(`<real>${placeholder}</real>`);
+      xml = xml.replace(
+        `<real>${placeholder}</real>`,
+        `<real>${spelling}</real>`,
+      );
+    }
+    const bytes = Buffer.from(xml);
+    const path = join(root, "archive.plist");
+    await writeFile(path, bytes);
+    const output = await cli.run({
+      arguments: ["inspect-keyed-archive", path, "--json"],
+      environment: {
+        HOME: root,
+        USERPROFILE: root,
+        REA_LOG_LEVEL: "silent",
+        REA_ANALYSIS_PROVIDER: "auto",
+      },
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const result = keyedArchiveResultSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    const { call } = await connectLocalToolsMcp({
+      HOME: root,
+      USERPROFILE: root,
+    });
+    const opened = await call("open_binary", { path });
+    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
+    const mcp = await call("inspect_keyed_archive", {});
+    expect(mcp.isError, JSON.stringify(mcp)).not.toBe(true);
+    expect(
+      keyedArchiveResultSchema.parse(
+        parseEvidence(mcp.structuredContent).normalized_result,
+      ),
+    ).toEqual(result);
+    for (const object of result.objects.slice(1)) {
+      expect(object).toMatchObject({ kind: "scalar", status: "observed" });
+    }
+    expect(JSON.stringify(result.objects.map(({ value }) => value))).toBe(
+      '["$null",{"$plist_type":"real","value":"+infinity"},{"$plist_type":"real","value":"-infinity"},{"$plist_type":"real","value":"nan"},1.25]',
+    );
+    expect(result.limitations).toContain(
+      '3 non-finite real value(s) are reported as { "$plist_type": "real", "value": "<spelling>" } using canonical numeric labels nan, +infinity or -infinity because a JSON number cannot carry them.',
+    );
+    expect(result.limitations).not.toContainEqual(
+      expect.stringContaining('"value": null'),
+    );
+    expect(await readFile(path)).toEqual(bytes);
   },
 );

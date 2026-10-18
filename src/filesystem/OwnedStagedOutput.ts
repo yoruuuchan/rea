@@ -52,9 +52,11 @@ export class OwnedStagedOutput {
     this.#file = file;
   }
 
-  /** Verify that the path still names the file its descriptor observed at close. */
+  /** Verify the staged name against its descriptor after the last write. */
   async assertReadyForPublication(content: string): Promise<void> {
     await this.#verifiedDirectory();
+    if (this.#file !== undefined && !this.#fileClosed)
+      await this.#observeFileIdentity();
     if (this.#fileIdentity === undefined)
       throw new Error("Cannot verify staged file identity", {
         cause: this.#identityFailure,
@@ -72,6 +74,14 @@ export class OwnedStagedOutput {
   async closeFile(): Promise<void> {
     const file = this.#file;
     if (file === undefined || this.#fileClosed) return;
+    await this.#observeFileIdentity();
+    await file.close();
+    this.#fileClosed = true;
+  }
+
+  async #observeFileIdentity(): Promise<void> {
+    const file = this.#file;
+    if (file === undefined) return;
     // FAT and exFAT assign a file ID when the first write allocates storage,
     // so only the descriptor's final identity can prove the staged pathname.
     try {
@@ -81,8 +91,6 @@ export class OwnedStagedOutput {
       this.#fileIdentity = undefined;
       this.#identityFailure = cause;
     }
-    await file.close();
-    this.#fileClosed = true;
   }
 
   /** Record that the staged file moved to the published destination by rename. */

@@ -13,7 +13,7 @@ import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { functionDossierSchema } from "../dist/domain/hopperValues.js";
-import { inspectGhidraInstallation } from "../dist/ghidra/GhidraInstallation.js";
+import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
 import { buildMipsRelocatableFixture } from "../tests/conformance/ghidra/mips-fixture.mjs";
 import {
   assertMipsRelocations,
@@ -34,7 +34,7 @@ if (!["linux", "darwin"].includes(process.platform))
   );
 if (process.env.GHIDRA_INSTALL_DIR === undefined)
   throw new Error("Missing prerequisite: caller-supplied GHIDRA_INSTALL_DIR");
-const installation = inspectGhidraInstallation({
+const installation = await inspectVerifierGhidraInstallation({
   environment: process.env,
   installDir: process.env.GHIDRA_INSTALL_DIR,
   ...(process.env.JAVA_HOME === undefined

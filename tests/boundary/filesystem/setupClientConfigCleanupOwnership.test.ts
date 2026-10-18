@@ -1,8 +1,25 @@
-import { mkdir, open as fsOpen, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open as fsOpen,
+  readFile,
+  rename,
+  writeFile,
+  type FileHandle,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  readClientRegistrationInspections,
+  readClientRegistrationStatuses,
+} from "../../../src/application/ClientRegistrationStatus.js";
+import {
+  existingMaintenanceScope,
+  planIntegrationMaintenance,
+} from "../../../src/application/UpdateMaintenance.js";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
+import { ok } from "../../../src/domain/result.js";
 import type { DoctorHost } from "../../../src/application/Doctor.js";
 import { ConfigurationError } from "../../../src/domain/configurationErrors.js";
 import {
@@ -34,7 +51,7 @@ beforeEach(async () => {
 afterEach(() => openMock.mockReset());
 
 const holdReadHandle = (path: string, reason: string) => {
-  const closeAttempts: object[] = [];
+  const closeAttempts: FileHandle[] = [];
   let released = false;
   openMock.mockImplementation(async (...args) => {
     const handle = await actualFs.open(...args);
@@ -70,16 +87,17 @@ const preparedVsCodeSetupHost = async (prefix: string) => {
   return { home, host, client };
 };
 
-/** Release the held read handle and show host cleanup reuses it as a third attempt. */
+/** Release the held read handle and verify host cleanup retries that same owner. */
 const expectCloseReclaimsHandle = async (
   host: { close?: () => Promise<string | undefined> },
   closeAttempts: readonly object[],
   release: () => void,
 ) => {
+  const attemptsBeforeClose = closeAttempts.length;
   release();
   expect(await host.close?.()).toBeUndefined();
-  expect(closeAttempts).toHaveLength(3);
-  expect(closeAttempts[2]).toBe(closeAttempts[0]);
+  expect(closeAttempts).toHaveLength(attemptsBeforeClose + 1);
+  expect(closeAttempts.at(-1)).toBe(closeAttempts[0]);
 };
 
 /** Give up on the assertion path: release the handle and let cleanup close it. */
@@ -113,7 +131,10 @@ it("retains invalid UTF-8 diagnostics and the uninstall read owner when close fa
       detail: expect.stringContaining("not valid UTF-8"),
     });
     expect(await readFile(path)).toEqual(original);
-    expect(closeAttempts).toHaveLength(2);
+    expect(closeAttempts).toHaveLength(3);
+    expect(closeAttempts.every((handle) => handle === closeAttempts[0])).toBe(
+      true,
+    );
     await expectCloseReclaimsHandle(host, closeAttempts, release);
   } finally {
     await cleanupHeldHandle(host, release);
@@ -327,4 +348,148 @@ describe("setup client configuration cleanup ownership", () => {
       await host.close?.();
     }
   });
+});
+
+const unscopedRegistrationReaders: readonly {
+  readonly name: string;
+  readonly read: (
+    home: string,
+    environment: NodeJS.ProcessEnv,
+    execute: Parameters<typeof planIntegrationMaintenance>[3],
+  ) => Promise<unknown>;
+}[] = [
+  {
+    name: "inspections",
+    read: (home, environment) =>
+      readClientRegistrationInspections(home, "/current/rea", { environment }),
+  },
+  {
+    name: "statuses",
+    read: (home, environment) =>
+      readClientRegistrationStatuses(home, "/current/rea", { environment }),
+  },
+  {
+    name: "maintenance scope",
+    read: (home, environment) =>
+      existingMaintenanceScope(home, "/current/rea", environment),
+  },
+  {
+    name: "maintenance plan",
+    read: (home, environment, execute) =>
+      planIntegrationMaintenance(home, "/current/rea", environment, execute),
+  },
+];
+
+it.each(
+  unscopedRegistrationReaders.flatMap((reader) =>
+    ["configuration", "policy"].flatMap((source) =>
+      ["completed", "failed"].map((readOutcome) => ({
+        ...reader,
+        source,
+        readOutcome,
+      })),
+    ),
+  ),
+)(
+  "$name transfers the exact $source owner after a $readOutcome read without a supplied scope",
+  async ({ read, source, readOutcome }) => {
+    const home = await createTestTempDirectory(
+      "rea-registration-unscoped-close-",
+    );
+    const config = join(
+      home,
+      source === "policy" ? ".gemini/settings.json" : ".cursor/mcp.json",
+    );
+    await mkdir(dirname(config), { recursive: true });
+    const registration =
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}\n';
+    await writeFile(config, registration);
+    const heldPath = source === "policy" ? join(home, "system.json") : config;
+    const heldText = source === "policy" ? "{}\n" : registration;
+    await writeFile(
+      heldPath,
+      readOutcome === "failed" ? Buffer.from([0xff]) : heldText,
+    );
+    const environment = {
+      HOME: home,
+      GEMINI_CLI_SYSTEM_SETTINGS_PATH: join(home, "system.json"),
+      GEMINI_CLI_SYSTEM_DEFAULTS_PATH: join(home, "absent-defaults.json"),
+    };
+    const held = holdReadHandle(
+      heldPath,
+      "held standalone registration descriptor",
+    );
+    const execute = vi.fn(async () =>
+      ok('{"status":"planned","plannedActions":[]}'),
+    );
+    try {
+      const outcome = await read(home, environment, execute).then(
+        (value) => ({ kind: "returned" as const, value }),
+        (cause: unknown) => ({ kind: "threw" as const, cause }),
+      );
+      expect(outcome).toMatchObject({
+        kind: "threw",
+        cause: expect.any(RegularFileCleanupFailure),
+      });
+      if (
+        outcome.kind !== "threw" ||
+        !(outcome.cause instanceof RegularFileCleanupFailure)
+      )
+        throw new Error("Read lost its failed cleanup owner");
+      const failure = outcome.cause;
+      expect(failure.path).toBe(heldPath);
+      if (readOutcome === "completed")
+        expect(failure.outcome).toEqual({ kind: "completed", value: heldText });
+      else
+        expect(failure.outcome).toMatchObject({
+          kind: "failed",
+          cause: { _tag: "InvalidUtf8FileError", path: heldPath },
+        });
+      expect(failure.owner.handle).toBe(held.closeAttempts[0]);
+      await expect(failure.owner.close()).rejects.toThrow("held standalone");
+      await rename(heldPath, `${heldPath}.retired`);
+      await writeFile(heldPath, "replacement");
+      held.release();
+      await failure.owner.close();
+      expect(failure.owner.handle.fd).toBe(-1);
+      expect(new Set(held.closeAttempts).size).toBe(1);
+      expect(await readFile(heldPath, "utf8")).toBe("replacement");
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      held.release();
+      for (const handle of new Set(held.closeAttempts)) await handle.close();
+    }
+  },
+);
+
+it("keeps a supplied registration scope responsible for diagnostics and cleanup retry", async () => {
+  const home = await createTestTempDirectory("rea-registration-scoped-close-");
+  const config = join(home, ".cursor/mcp.json");
+  await mkdir(dirname(config), { recursive: true });
+  await writeFile(
+    config,
+    '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}',
+  );
+  const held = holdReadHandle(config, "held scoped registration descriptor");
+  const resources = new ArtifactResourceScope();
+  try {
+    expect(
+      (
+        await readClientRegistrationStatuses(home, "/current/rea", {
+          environment: { HOME: home },
+          resources,
+        })
+      ).find((status) => status.client === "cursor"),
+    ).toMatchObject({ state: "invalid", command: [] });
+    expect(resources.hasPending).toBe(true);
+    await expect(resources.close()).rejects.toThrow();
+    held.release();
+    await resources.close();
+    expect(resources.hasPending).toBe(false);
+    expect(new Set(held.closeAttempts).size).toBe(1);
+    expect(held.closeAttempts[0]!.fd).toBe(-1);
+  } finally {
+    held.release();
+    await resources.close();
+  }
 });

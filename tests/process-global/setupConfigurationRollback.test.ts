@@ -13,12 +13,15 @@ const state = vi.hoisted(() => ({
   beforePublicationOpen: undefined as
     | ((path: string) => Promise<void>)
     | undefined,
-  stagingPrefix: undefined as string | undefined,
-  readOnlyStageHandles: [] as FileHandle[],
-  rejectStageModeRestore: false,
+  rejectPublicationMode: false,
+  rejectStageRemoval: false,
+  beforeFirstPublication: undefined as (() => Promise<void>) | undefined,
   afterPublication: undefined as ((path: string) => Promise<void>) | undefined,
   rejectRestore: false,
   removeCopiedRecovery: false,
+  afterBackupCopy: undefined as
+    | ((source: string, destination: string) => Promise<void>)
+    | undefined,
   initialCleanupFailure: undefined as unknown,
   readbackCleanupFailure: undefined as unknown,
 }));
@@ -30,12 +33,13 @@ afterEach(() => {
   state.publicationCloseFailure = undefined;
   state.publicationHandles = [];
   state.beforePublicationOpen = undefined;
-  state.stagingPrefix = undefined;
-  state.readOnlyStageHandles = [];
-  state.rejectStageModeRestore = false;
+  state.rejectPublicationMode = false;
+  state.rejectStageRemoval = false;
   state.afterPublication = undefined;
+  state.beforeFirstPublication = undefined;
   state.rejectRestore = false;
   state.removeCopiedRecovery = false;
+  state.afterBackupCopy = undefined;
   state.initialCleanupFailure = undefined;
   state.readbackCleanupFailure = undefined;
 });
@@ -50,23 +54,20 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       if (writable && typeof arguments_[0] === "string")
         await state.beforePublicationOpen?.(arguments_[0]);
       const handle = await original.open(...arguments_);
-      if (
-        typeof arguments_[0] === "string" &&
-        state.stagingPrefix !== undefined &&
-        arguments_[0].startsWith(state.stagingPrefix) &&
-        typeof arguments_[1] === "number" &&
-        (arguments_[1] & 3) === 0
-      ) {
-        state.readOnlyStageHandles.push(handle);
-        const chmod = handle.chmod.bind(handle);
-        handle.chmod = async (mode) => {
-          if (state.rejectStageModeRestore && mode === 0o400)
-            throw new Error("staging mode restoration denied");
-          await chmod(mode);
-        };
-      }
       if (typeof arguments_[1] === "number" && (arguments_[1] & 3) === 2) {
         state.publicationHandles.push(handle);
+        const write = handle.write.bind(handle);
+        handle.write = ((...values: Parameters<typeof handle.write>) => {
+          if (state.rejectRestore && state.readbackFailed)
+            return Promise.reject(new Error("injected restore write failure"));
+          return write(...values);
+        }) as typeof handle.write;
+        const chmod = handle.chmod.bind(handle);
+        handle.chmod = async (mode) => {
+          if (state.rejectPublicationMode && mode === 0o400)
+            throw new Error("staging mode preparation denied");
+          await chmod(mode);
+        };
         const close = handle.close.bind(handle);
         handle.close = async () => {
           if (state.rejectPublicationClose)
@@ -79,46 +80,41 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       }
       return handle;
     },
-    writeFile: (
-      ...arguments_: Parameters<typeof original.writeFile>
-    ): ReturnType<typeof original.writeFile> => {
-      if (state.rejectRestore && state.readbackFailed)
-        return Promise.reject(new Error("injected restore write failure"));
-      return original.writeFile(...arguments_);
+    rmdir: async (...values: Parameters<typeof original.rmdir>) => {
+      if (
+        state.rejectStageRemoval &&
+        String(values[0]).includes(".rea-config-")
+      )
+        throw new Error("injected staging directory removal failure");
+      return original.rmdir(...values);
+    },
+    rename: async (...values: Parameters<typeof original.rename>) => {
+      const result = await original.rename(...values);
+      state.readbackFailed = true;
+      await state.afterPublication?.(String(values[1]));
+      return result;
+    },
+    link: async (...values: Parameters<typeof original.link>) => {
+      await state.beforeFirstPublication?.();
+      const result = await original.link(...values);
+      state.readbackFailed = true;
+      await state.afterPublication?.(String(values[1]));
+      return result;
     },
     copyFile: async (
       ...arguments_: Parameters<typeof original.copyFile>
     ): Promise<void> => {
       await original.copyFile(...arguments_);
+      const source = arguments_[0];
       const destination = arguments_[1];
+      if (typeof source === "string" && typeof destination === "string")
+        await state.afterBackupCopy?.(source, destination);
       if (
         state.removeCopiedRecovery &&
         typeof destination === "string" &&
         destination.endsWith(".recovery")
       )
         await original.rm(destination);
-    },
-  };
-});
-
-vi.mock("write-file-atomic", async (importOriginal) => {
-  const original = await importOriginal<{
-    default: typeof import("write-file-atomic");
-  }>();
-  return {
-    ...original,
-    default: async (...arguments_: Parameters<typeof original.default>) => {
-      if (state.initialCleanupFailure !== undefined)
-        throw new Error("unexpected config write before initial read");
-      const result = await original.default(...arguments_);
-      state.readbackFailed = true;
-      const publishedPath = arguments_[0];
-      if (
-        state.afterPublication !== undefined &&
-        typeof publishedPath === "string"
-      )
-        await state.afterPublication(publishedPath);
-      return result;
     },
   };
 });
@@ -143,6 +139,7 @@ vi.mock("../../src/application/RegularFileRead.js", async (importOriginal) => {
   };
 });
 
+import { ClientConfigurationPublication } from "../../src/application/ClientConfigurationPublication.js";
 import { configureClientConfiguration } from "../../src/application/SetupClientConfiguration.js";
 import { RegularFileCleanupFailure } from "../../src/application/RegularFileRead.js";
 import { OwnedFileHandle } from "../../src/filesystem/OwnedFileHandle.js";
@@ -895,10 +892,10 @@ it("uninstall progresses when a peer leaves a denied-close descriptor pending", 
 });
 
 it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "read-only staging never changes permissions on a substituted writable descriptor",
+  "exclusive staging refuses a preexisting entry without changing its permissions",
   async () => {
     const root = await createTestTempDirectory(
-      "rea-uninstall-staging-handoff-",
+      "rea-uninstall-staging-exclusive-",
     );
     const path = join(root, "client.json");
     const foreign = join(root, "foreign.json");
@@ -912,9 +909,10 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     await fs.chmod(path, 0o400);
     await fs.writeFile(foreign, "foreign");
     await fs.chmod(foreign, 0o640);
+    let inserted: string | undefined;
     state.beforePublicationOpen = async (stagedPath) => {
       state.beforePublicationOpen = undefined;
-      await fs.unlink(stagedPath);
+      inserted = stagedPath;
       await fs.link(foreign, stagedPath);
     };
     const host = systemUninstallHost(root);
@@ -932,16 +930,17 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       expect((await fs.lstat(foreign)).mode & 0o777).toBe(0o640);
       expect(await fs.readFile(path, "utf8")).toBe(original);
       expect((await fs.lstat(path)).mode & 0o777).toBe(0o400);
-      expect(state.publicationHandles).toHaveLength(1);
-      expect(state.publicationHandles[0]!.fd).toBe(-1);
+      expect(state.publicationHandles).toHaveLength(0);
+      expect(await host.close?.()).toContain("cleanup failed");
     } finally {
+      if (inserted !== undefined) await fs.unlink(inserted);
       await host.close?.();
     }
   },
 );
 
 it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "uninstall retains permission restoration ownership until the staged descriptor releases",
+  "uninstall retains the private stage after mode preparation and descriptor cleanup fail",
   async () => {
     const root = await createTestTempDirectory(
       "rea-uninstall-staging-mode-retry-",
@@ -955,8 +954,8 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}\n';
     await fs.writeFile(path, original);
     await fs.chmod(path, 0o400);
-    state.stagingPrefix = `${path}.`;
-    state.rejectStageModeRestore = true;
+    state.rejectPublicationMode = true;
+    state.rejectPublicationClose = true;
     const host = systemUninstallHost(root);
     try {
       expect(
@@ -968,18 +967,20 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
           })
         ).status,
       ).toBe("failed");
-      const pending = state.readOnlyStageHandles.filter(({ fd }) => fd >= 0);
-      expect(pending).toHaveLength(1);
+      expect(state.publicationHandles).toHaveLength(1);
+      expect(state.publicationHandles[0]!.fd).toBeGreaterThanOrEqual(0);
       expect(await host.close?.()).toContain("cleanup failed");
-      state.rejectStageModeRestore = false;
+      state.rejectPublicationMode = false;
+      state.rejectPublicationClose = false;
       expect(await host.close?.()).toBeUndefined();
-      expect(pending[0]!.fd).toBe(-1);
+      expect(state.publicationHandles[0]!.fd).toBe(-1);
       expect(await fs.readFile(path, "utf8")).toBe(original);
       expect((await fs.lstat(path)).mode & 0o777).toBe(0o400);
     } finally {
-      state.rejectStageModeRestore = false;
+      state.rejectPublicationMode = false;
+      state.rejectPublicationClose = false;
       await host.close?.();
-      for (const handle of state.readOnlyStageHandles)
+      for (const handle of state.publicationHandles)
         if (handle.fd >= 0) await handle.close();
     }
   },
@@ -1016,5 +1017,350 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     } finally {
       await host.close?.();
     }
+  },
+);
+
+it.each(["setup", "uninstall"] as const)(
+  "%s refuses a configuration symlink inserted after backup without overwriting its target",
+  async (operation) => {
+    const root = await createTestTempDirectory(
+      "rea-config-prepublication-symlink-",
+    );
+    const path = join(root, "client.json");
+    const foreign = join(root, "foreign.json");
+    const fs =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    const original =
+      operation === "setup"
+        ? '{"keep":"original"}\n'
+        : '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}},"keep":"original"}\n';
+    const unrelated = '{"keep":"foreign"}\n';
+    await fs.writeFile(path, original);
+    await fs.writeFile(foreign, unrelated);
+    state.failReadback = false;
+    state.afterBackupCopy = async (source) => {
+      state.afterBackupCopy = undefined;
+      await fs.unlink(source);
+      await fs.symlink(foreign, source);
+    };
+    if (operation === "setup") {
+      expect(
+        (
+          await configureClientConfiguration(
+            { name: "cursor", configPath: path, format: "json" },
+            {},
+            ["rea", "mcp"],
+          )
+        ).status,
+      ).toBe("failed");
+    } else {
+      const host = systemUninstallHost(root);
+      try {
+        expect(
+          (
+            await host.removeClient({
+              name: "cursor",
+              configPath: path,
+              format: "json",
+            })
+          ).status,
+        ).toBe("failed");
+      } finally {
+        await host.close?.();
+      }
+    }
+    expect(await fs.readFile(foreign, "utf8")).toBe(unrelated);
+    expect((await fs.lstat(path)).isSymbolicLink()).toBe(true);
+    expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
+  },
+);
+
+const runConfigurationChange = async (
+  operation: "setup" | "uninstall",
+  root: string,
+  path: string,
+) => {
+  if (operation === "setup")
+    return configureClientConfiguration(
+      { name: "cursor", configPath: path, format: "json" },
+      {},
+      ["new-rea", "mcp"],
+    );
+  const host = systemUninstallHost(root);
+  try {
+    return await host.removeClient({
+      name: "cursor",
+      configPath: path,
+      format: "json",
+    });
+  } finally {
+    await host.close?.();
+  }
+};
+
+it.each([
+  ["setup", "edit"],
+  ["uninstall", "edit"],
+  ["setup", "delete"],
+  ["uninstall", "delete"],
+] as const)(
+  "%s preserves a configuration %s after backup",
+  async (operation, change) => {
+    const root = await createTestTempDirectory("rea-config-backup-change-");
+    const path = join(root, "client.json");
+    const fs =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    const original =
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}},"keep":true}\n';
+    const edited = '{"changed":"by client"}\n';
+    await fs.writeFile(path, original);
+    state.failReadback = false;
+    state.afterBackupCopy = async (source) => {
+      state.afterBackupCopy = undefined;
+      if (change === "edit") await fs.writeFile(source, edited);
+      else await fs.unlink(source);
+    };
+    expect((await runConfigurationChange(operation, root, path)).status).toBe(
+      "failed",
+    );
+    if (change === "edit") expect(await fs.readFile(path, "utf8")).toBe(edited);
+    else await expect(fs.lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
+    expect(
+      (await fs.readdir(root)).filter((name) =>
+        name.startsWith(".rea-config-"),
+      ),
+    ).toEqual([]);
+  },
+);
+
+it.each(["setup", "uninstall"] as const)(
+  "%s refuses an input changed during staging",
+  async (operation) => {
+    const root = await createTestTempDirectory("rea-config-staging-change-");
+    const path = join(root, "client.json");
+    const fs =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    const original =
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}},"keep":true}\n';
+    const edited = '{"changed":"during staging"}\n';
+    await fs.writeFile(path, original);
+    state.failReadback = false;
+    state.beforePublicationOpen = async () => {
+      state.beforePublicationOpen = undefined;
+      await fs.writeFile(path, edited);
+    };
+    expect((await runConfigurationChange(operation, root, path)).status).toBe(
+      "failed",
+    );
+    expect(await fs.readFile(path, "utf8")).toBe(edited);
+    expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
+    expect(
+      (await fs.readdir(root)).filter((name) =>
+        name.startsWith(".rea-config-"),
+      ),
+    ).toEqual([]);
+  },
+);
+
+it("first-run setup preserves a destination created during staging", async () => {
+  const root = await createTestTempDirectory("rea-config-first-conflict-");
+  const path = join(root, "client.json");
+  const fs =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+  const edited = '{"created":"by client"}\n';
+  state.failReadback = false;
+  state.beforePublicationOpen = async () => {
+    state.beforePublicationOpen = undefined;
+    await fs.writeFile(path, edited);
+  };
+  expect((await runConfigurationChange("setup", root, path)).status).toBe(
+    "failed",
+  );
+  expect(await fs.readFile(path, "utf8")).toBe(edited);
+  expect(
+    (await fs.readdir(root)).filter((name) => name.startsWith(".rea-config-")),
+  ).toEqual([]);
+});
+
+it.each(["setup", "uninstall"] as const)(
+  "%s retains staging directory cleanup for host retry",
+  async (operation) => {
+    const root = await createTestTempDirectory(
+      "rea-config-staging-directory-retry-",
+    );
+    const path = join(root, "client.json");
+    const fs =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    await fs.writeFile(
+      path,
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}},"keep":true}\n',
+    );
+    state.failReadback = false;
+    state.rejectStageRemoval = true;
+    const host =
+      operation === "setup"
+        ? systemSetupHost(
+            { platform: "linux", homeDirectory: root } as DoctorHost,
+            { HOME: root },
+          )
+        : systemUninstallHost(root);
+    try {
+      const client = {
+        name: "cursor",
+        configPath: path,
+        format: "json" as const,
+      };
+      if (operation === "setup") {
+        await expect(
+          (host as ReturnType<typeof systemSetupHost>).configureClient(
+            client,
+            {},
+            ["new-rea", "mcp"],
+          ),
+        ).rejects.toThrow();
+      } else {
+        expect(
+          (
+            await (host as ReturnType<typeof systemUninstallHost>).removeClient(
+              client,
+            )
+          ).status,
+        ).toBe("failed");
+      }
+      expect(await host.close?.()).toContain("cleanup");
+      expect(
+        (await fs.readdir(root)).filter((name) =>
+          name.startsWith(".rea-config-"),
+        ),
+      ).toHaveLength(1);
+      state.rejectStageRemoval = false;
+      expect(await host.close?.()).toBeUndefined();
+      expect(
+        (await fs.readdir(root)).filter((name) =>
+          name.startsWith(".rea-config-"),
+        ),
+      ).toEqual([]);
+      expect(state.publicationHandles[0]!.fd).toBe(-1);
+    } finally {
+      state.rejectStageRemoval = false;
+      await host.close?.();
+    }
+  },
+);
+
+it("first-run publication exclusively refuses a destination created after its final check", async () => {
+  const root = await createTestTempDirectory("rea-config-exclusive-link-");
+  const path = join(root, "client.json");
+  const fs =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+  const edited = '{"created":"after final check"}\n';
+  state.beforeFirstPublication = async () => {
+    await fs.writeFile(path, edited);
+  };
+  await expect(
+    ClientConfigurationPublication.write(path, "{}", undefined),
+  ).rejects.toMatchObject({ code: "EEXIST" });
+  expect(await fs.readFile(path, "utf8")).toBe(edited);
+  expect(
+    (await fs.readdir(root)).filter((name) => name.startsWith(".rea-config-")),
+  ).toEqual([]);
+});
+
+it("publication keeps its selected canonical parent when a directory symlink is retargeted", async () => {
+  const root = await createTestTempDirectory("rea-config-parent-selection-");
+  const fs =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+  const selected = join(root, "selected");
+  const foreign = join(root, "foreign");
+  const alias = join(root, "alias");
+  await fs.mkdir(selected);
+  await fs.mkdir(foreign);
+  await fs.symlink(selected, alias, "dir");
+  const original = '{"original":true}\n';
+  const unrelated = '{"foreign":true}\n';
+  await fs.writeFile(join(selected, "client.json"), original);
+  await fs.writeFile(join(foreign, "client.json"), unrelated);
+  state.beforePublicationOpen = async () => {
+    state.beforePublicationOpen = undefined;
+    await fs.unlink(alias);
+    await fs.symlink(foreign, alias, "dir");
+  };
+  const publication = await ClientConfigurationPublication.write(
+    join(alias, "client.json"),
+    "{}",
+    original,
+  );
+  await publication.verify(() => publication.assertCurrent());
+  expect(await fs.readFile(join(selected, "client.json"), "utf8")).toBe("{}");
+  expect(await fs.readFile(join(foreign, "client.json"), "utf8")).toBe(
+    unrelated,
+  );
+  expect(
+    (await fs.readdir(selected)).filter((name) =>
+      name.startsWith(".rea-config-"),
+    ),
+  ).toEqual([]);
+});
+
+it.each(["setup", "uninstall"] as const)(
+  "%s reads back the selected canonical parent after its alias is retargeted",
+  async (operation) => {
+    const root = await createTestTempDirectory(
+      "rea-config-adapter-parent-selection-",
+    );
+    const fs =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    const selected = join(root, "selected");
+    const foreign = join(root, "foreign");
+    const alias = join(root, "alias");
+    await fs.mkdir(selected);
+    await fs.mkdir(foreign);
+    await fs.symlink(selected, alias, "dir");
+    const original =
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}},"keep":true}\n';
+    const unrelated = '{"foreign":true}\n';
+    await fs.writeFile(join(selected, "client.json"), original);
+    await fs.writeFile(join(foreign, "client.json"), unrelated);
+    state.failReadback = false;
+    state.beforePublicationOpen = async () => {
+      state.beforePublicationOpen = undefined;
+      await fs.unlink(alias);
+      await fs.symlink(foreign, alias, "dir");
+    };
+    expect(
+      (
+        await runConfigurationChange(
+          operation,
+          root,
+          join(alias, "client.json"),
+        )
+      ).status,
+    ).toBe(operation === "setup" ? "configured" : "removed");
+    expect(
+      JSON.parse(await fs.readFile(join(selected, "client.json"), "utf8")),
+    ).toMatchObject({ keep: true });
+    expect(await fs.readFile(join(foreign, "client.json"), "utf8")).toBe(
+      unrelated,
+    );
+    expect(
+      await fs.readFile(join(selected, "client.json.rea.backup"), "utf8"),
+    ).toBe(original);
   },
 );

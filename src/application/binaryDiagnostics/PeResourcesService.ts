@@ -37,7 +37,9 @@ export class PeResourcesService {
   ): Promise<Result<Evidence, AnalysisError>> {
     const operation = "inspect_pe_resources";
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const input = inspectPeResourcesInputSchema.safeParse(rawInput);
     if (!input.success)
       return err(

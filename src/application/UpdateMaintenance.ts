@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 
 import { classifyClientRegistrationCommand } from "./ClientRegistrationIdentity.js";
 import { readClientRegistrationInspections } from "./ClientRegistrationStatus.js";
@@ -150,6 +151,9 @@ export const planIntegrationMaintenance = async (
       ),
     };
   } catch (cause: unknown) {
+    // Without a supplied scope, the typed failure is the caller's cleanup capability.
+    if (resources === undefined && cause instanceof RegularFileCleanupFailure)
+      throw cause;
     return {
       status: "unavailable",
       remediation: cause instanceof Error ? cause.message : String(cause),

@@ -1902,12 +1902,13 @@ describe("client configuration filesystem failure reporting", () => {
           failure === "backup"
             ? Promise.reject(new Error("SECRET backup failure"))
             : copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-        publishConfiguration: async (path, contents) => {
+        publishConfiguration: async (path, contents, original) => {
           if (failure === "publication")
             throw new Error("SECRET publication failure");
           const publication = await ClientConfigurationPublication.write(
             path,
             contents,
+            original,
           );
           if (failure === "update" || failure === "restore")
             publication.assertCurrent = async () => {
@@ -1939,10 +1940,11 @@ describe("client configuration filesystem failure reporting", () => {
     await writeFile(`${config}.rea.backup`, initial);
     const result = await systemUninstallHost(home, {
       ...testFileSystem,
-      publishConfiguration: async (path, contents) => {
+      publishConfiguration: async (path, contents, original) => {
         const publication = await ClientConfigurationPublication.write(
           path,
           contents,
+          original,
         );
         publication.assertCurrent = async () => {
           throw new Error("verification failed after writing");
@@ -2054,8 +2056,8 @@ const testFileSystem: UninstallFileSystem = {
   readText: (path) => readFile(path, "utf8"),
   copy: (source, destination) =>
     copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-  publishConfiguration: (path, contents) =>
-    ClientConfigurationPublication.write(path, contents),
+  publishConfiguration: (path, contents, original) =>
+    ClientConfigurationPublication.write(path, contents, original),
   stat: (path) => lstat(path),
   realpath: (path) => realpath(path),
   remove: (path) => rm(path, { recursive: true }),

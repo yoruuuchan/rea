@@ -1,13 +1,25 @@
-import { constants } from "node:fs";
-import { lstat, open, writeFile, type FileHandle } from "node:fs/promises";
-import writeFileAtomic from "write-file-atomic";
+import { constants, type Stats } from "node:fs";
+import {
+  link,
+  lstat,
+  mkdtemp,
+  open,
+  realpath,
+  rename,
+  type FileHandle,
+} from "node:fs/promises";
+import { basename, dirname, join, sep } from "node:path";
 
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
-import { withOwnedFileHandle } from "../filesystem/OwnedRegularFile.js";
+import { OwnedStagedOutput } from "../filesystem/OwnedStagedOutput.js";
 import {
   RegularFileChangedError,
   sameRegularFileState,
 } from "../filesystem/RegularFile.js";
+import type { RegularFileOperationOutcome } from "../filesystem/OwnedRegularFile.js";
+import { readRegularFileTextSnapshot } from "./RegularFileRead.js";
+import { ClientConfigurationPublicationFailure } from "./ClientConfigurationCleanup.js";
 
 /** The exact staged file retained through publication, verification and recovery. */
 export class ClientConfigurationPublication {
@@ -15,83 +27,86 @@ export class ClientConfigurationPublication {
     readonly path: string,
     private readonly contents: string,
     private readonly owner: OwnedFileHandle,
+    private readonly staging: OwnedStagedOutput,
+    private readonly cleanup: AnalysisCleanupLease,
   ) {}
 
   static async write(
     path: string,
     contents: string,
+    previous: string | undefined,
     mode?: number,
   ): Promise<ClientConfigurationPublication> {
-    let owner: OwnedFileHandle | undefined;
+    const parent = await realpath(dirname(path));
+    const destination = join(parent, basename(path));
+    const input = await selectedConfiguration(destination, previous);
+    const directory = await mkdtemp(`${parent}${sep}.rea-config-`);
+    const staging = await OwnedStagedOutput.create(directory);
+    const cleanup = new AnalysisCleanupLease(
+      () => staging.close(),
+      [directory],
+    );
     try {
-      await writeFileAtomic(path, contents, {
-        encoding: "utf8",
-        ...(mode === undefined ? {} : { mode }),
-        tmpfileCreated: async (stagedPath) => {
-          const writableFlags =
-            constants.O_RDWR |
+      const stagedPath = `${directory}${sep}content`;
+      const owner = new OwnedFileHandle(
+        await open(
+          stagedPath,
+          constants.O_RDWR |
+            constants.O_CREAT |
+            constants.O_EXCL |
             (constants.O_NONBLOCK ?? 0) |
-            (constants.O_NOFOLLOW ?? 0);
-          if (((await lstat(stagedPath)).mode & 0o200) !== 0) {
-            owner = new OwnedFileHandle(await open(stagedPath, writableFlags));
-          } else {
-            // The atomic writer already owns a writable creation descriptor.
-            // Retain ours before restoring the staged file's final read-only mode.
-            const readable = new StagedConfigurationPermissions(
-              await open(
-                stagedPath,
-                constants.O_RDONLY |
-                  (constants.O_NONBLOCK ?? 0) |
-                  (constants.O_NOFOLLOW ?? 0),
-              ),
-            );
-            await withOwnedFileHandle(
-              stagedPath,
-              readable,
-              {},
-              async (handle) => {
-                const staged = await handle.stat();
-                if (!staged.isFile())
-                  throw new Error("Staged configuration is not a regular file");
-                readable.restoreMode(staged.mode & 0o7777);
-                await handle.chmod((staged.mode & 0o7777) | 0o600);
-                owner = new OwnedFileHandle(
-                  await open(stagedPath, writableFlags),
-                );
-                const writable = await owner.handle.stat();
-                if (
-                  staged.ino === 0 ||
-                  !writable.isFile() ||
-                  writable.dev !== staged.dev ||
-                  writable.ino !== staged.ino
-                )
-                  throw new RegularFileChangedError(stagedPath);
-              },
-            );
-          }
-          if (owner === undefined)
-            throw new Error("Staged configuration has no file owner");
-          if (!(await owner.handle.stat()).isFile())
-            throw new Error("Staged configuration is not a regular file");
-        },
-      });
-      if (owner === undefined)
-        throw new Error("Atomic configuration publication has no file owner");
-      return new ClientConfigurationPublication(path, contents, owner);
+            (constants.O_NOFOLLOW ?? 0),
+          0o600,
+        ),
+      );
+      staging.setFile(owner);
+      await owner.handle.writeFile(contents, { encoding: "utf8" });
+      const created = await owner.handle.stat();
+      if (
+        input !== undefined &&
+        (input.uid !== created.uid || input.gid !== created.gid)
+      )
+        await owner.handle.chown(input.uid, input.gid);
+      await owner.handle.chmod(mode ?? (input?.mode ?? 0o600) & 0o7777);
+      await owner.handle.sync();
+      if ((await owner.handle.stat()).ino === 0)
+        throw new RegularFileChangedError(stagedPath);
+      await staging.assertReadyForPublication(stagedPath);
+      await assertSelectedConfiguration(destination, input);
+      if (input === undefined) {
+        // An exclusive link cannot overwrite a file created after absence was checked.
+        await link(stagedPath, destination);
+      } else {
+        // The destination is explicit: rename never follows its final symlink.
+        await rename(stagedPath, destination);
+        staging.recordPublishedRename();
+      }
+      return new ClientConfigurationPublication(
+        destination,
+        contents,
+        owner,
+        staging,
+        cleanup,
+      );
     } catch (cause: unknown) {
-      if (owner === undefined) throw cause;
-      return withOwnedFileHandle(path, owner, {}, async () => {
-        throw cause;
-      });
+      await releaseStaging(path, staging, cleanup, { kind: "failed", cause });
+      throw cause;
     }
   }
 
-  /** Keep the publication descriptor owned until the complete transaction ends. */
-  verify<Value>(operation: () => Promise<Value>): Promise<Value> {
-    return withOwnedFileHandle(this.path, this.owner, {}, operation);
+  /** Keep all publication resources owned through the complete operation. */
+  async verify<Value>(operation: () => Promise<Value>): Promise<Value> {
+    let outcome: RegularFileOperationOutcome<Value>;
+    try {
+      outcome = { kind: "completed", value: await operation() };
+    } catch (cause: unknown) {
+      outcome = { kind: "failed", cause };
+    }
+    await releaseStaging(this.path, this.staging, this.cleanup, outcome);
+    if (outcome.kind === "failed") throw outcome.cause;
+    return outcome.value;
   }
 
-  /** Readback cannot establish a successful transaction through a replaced name. */
   async assertCurrent(): Promise<void> {
     const owned = await this.owner.handle.stat();
     const named = await lstat(this.path);
@@ -100,14 +115,10 @@ export class ClientConfigurationPublication {
       named.isSymbolicLink() ||
       !sameRegularFileState(owned, named)
     )
-      throw new Error(
-        "Published configuration path no longer names its owned file",
-      );
+      throw new RegularFileChangedError(this.path);
   }
 
-  /** Require observed published bytes and restore through the owned descriptor.
-   * State checks do not exclude a concurrent writer to the same inode.
-   */
+  /** State checks do not exclude a concurrent writer to the same inode. */
   async restore(original: string | undefined): Promise<void> {
     if (original === undefined)
       throw new Error(
@@ -122,18 +133,25 @@ export class ClientConfigurationPublication {
       named.isSymbolicLink() ||
       !sameRegularFileState(before, named) ||
       !(await this.#hasPublishedBytes(handle)) ||
-      !sameRegularFileState(before, await handle.stat())
+      !sameRegularFileState(before, await handle.stat()) ||
+      !sameRegularFileState(before, await lstat(this.path))
     )
-      throw new Error(
-        "Published configuration changed; recovery requires the retained backup",
+      throw new RegularFileChangedError(this.path);
+    const bytes = Buffer.from(original, "utf8");
+    for (let position = 0; position < bytes.length;) {
+      const { bytesWritten } = await handle.write(
+        bytes,
+        position,
+        bytes.length - position,
+        position,
       );
-    // Recovery writes through the retained descriptor, never through the name.
-    if (!sameRegularFileState(before, await lstat(this.path)))
-      throw new Error("Published configuration path changed before recovery");
-    await writeFile(handle, original, { encoding: "utf8" });
-    await handle.truncate(Buffer.byteLength(original, "utf8"));
+      if (bytesWritten === 0)
+        throw new Error("Configuration restoration made no write progress");
+      position += bytesWritten;
+    }
+    await handle.truncate(bytes.length);
     if (!sameRegularFileState(await handle.stat(), await lstat(this.path)))
-      throw new Error("Configuration path changed during recovery");
+      throw new RegularFileChangedError(this.path);
   }
 
   async #hasPublishedBytes(handle: FileHandle): Promise<boolean> {
@@ -160,27 +178,60 @@ export class ClientConfigurationPublication {
   }
 }
 
-/** Restore temporary staging permissions before releasing their exact descriptor. */
-class StagedConfigurationPermissions extends OwnedFileHandle {
-  #mode: number | undefined;
-  #restoring: Promise<void> | undefined;
-
-  restoreMode(mode: number): void {
-    this.#mode = mode;
+const selectedConfiguration = async (
+  path: string,
+  previous: string | undefined,
+): Promise<Stats | undefined> => {
+  let selected:
+    | Awaited<ReturnType<typeof readRegularFileTextSnapshot>>
+    | undefined;
+  try {
+    selected = await readRegularFileTextSnapshot(path, { symlinks: "reject" });
+  } catch (cause: unknown) {
+    if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT"))
+      throw cause;
   }
+  if (selected?.text !== previous || selected?.state.ino === 0)
+    throw new RegularFileChangedError(path);
+  return selected?.state;
+};
 
-  override async close(): Promise<void> {
-    if (this.#mode !== undefined) {
-      this.#restoring ??= this.handle
-        .chmod(this.#mode)
-        .then(() => {
-          this.#mode = undefined;
-        })
-        .finally(() => {
-          this.#restoring = undefined;
-        });
-      await this.#restoring;
-    }
-    await super.close();
+const assertSelectedConfiguration = async (
+  path: string,
+  selected: Stats | undefined,
+): Promise<void> => {
+  let current: Stats | undefined;
+  try {
+    current = await lstat(path);
+  } catch (cause: unknown) {
+    if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT"))
+      throw cause;
   }
-}
+  if (
+    selected === undefined
+      ? current !== undefined
+      : current === undefined ||
+        current.isSymbolicLink() ||
+        !sameRegularFileState(selected, current)
+  )
+    throw new RegularFileChangedError(path);
+};
+
+const releaseStaging = async <Value>(
+  path: string,
+  staging: OwnedStagedOutput,
+  cleanup: AnalysisCleanupLease,
+  outcome: RegularFileOperationOutcome<Value>,
+): Promise<void> => {
+  try {
+    await cleanup.release();
+  } catch (cause: unknown) {
+    throw new ClientConfigurationPublicationFailure(
+      path,
+      outcome,
+      cause,
+      { kind: "staged-output", resource: staging.directory, output: staging },
+      cleanup,
+    );
+  }
+};

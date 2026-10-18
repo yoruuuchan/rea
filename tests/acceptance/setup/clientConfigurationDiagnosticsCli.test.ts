@@ -1,4 +1,11 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect } from "vitest";
 
@@ -165,3 +172,56 @@ for (const scenario of cases)
       ]);
     },
   );
+
+cliTest.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "doctor reports an unreadable configuration symlink without changing it",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory(
+      "rea-doctor-denied-registration-",
+    );
+    const locked = join(home, "owned-denied");
+    const target = join(locked, "client.json");
+    await mkdir(locked);
+    const original =
+      '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}\n';
+    await writeFile(target, original);
+    const config = join(home, ".claude.json");
+    await symlink(target, config);
+    await chmod(locked, 0);
+    try {
+      const result = await cli.run({
+        arguments: [
+          "doctor",
+          "--client",
+          "claude_code",
+          "--skill=false",
+          "--json",
+        ],
+        cwd: home,
+        environment: {
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+        },
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.json).toMatchObject({
+        healthy: false,
+        identity: {
+          registrations: [
+            expect.objectContaining({
+              client: "claude_code",
+              config_path: config,
+              state: "invalid",
+              command: [],
+            }),
+          ],
+        },
+      });
+    } finally {
+      await chmod(locked, 0o700);
+    }
+    expect(await readFile(target, "utf8")).toBe(original);
+    expect(await readdir(home)).toEqual([".claude.json", "owned-denied"]);
+  },
+);

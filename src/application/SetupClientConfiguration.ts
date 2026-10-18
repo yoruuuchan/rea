@@ -23,6 +23,7 @@ import {
 import { dshDocument, DshCordisDocument } from "./DshCordisPatch.js";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { isClientConfigurationCleanupFailure } from "./ClientConfigurationCleanup.js";
 import { ClientConfigurationPublication } from "./ClientConfigurationPublication.js";
 import {
   clientRegistrationEnvironment,
@@ -304,10 +305,11 @@ const persistClientConfiguration = async ({
         ...(legacyPath === undefined ? [] : [legacyPath]),
         ...(enableOmp ? [[OMP_DISABLED_SERVERS_KEY]] : []),
       ]),
+      original,
       0o600,
     );
   } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure) throw cause;
+    if (isClientConfigurationCleanupFailure(cause)) throw cause;
     // Write failure is reported by the status reason.
     void cause;
     return { status: "failed", reason: "write" };
@@ -315,7 +317,7 @@ const persistClientConfiguration = async ({
   return publication.verify(async () => {
     try {
       const readback = parseClientConfiguration(
-        await readRegularFileText(transactionPath),
+        await readRegularFileText(publication.path),
         format,
       );
       await publication.assertCurrent();

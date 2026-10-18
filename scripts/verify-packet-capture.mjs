@@ -268,7 +268,7 @@ try {
     const capinfosOutput = (
       await execute(
         process.env.REA_CAPINFOS_COMMAND ?? "capinfos",
-        ["-M", "--", capturePath],
+        ["-M", "-S", "--", capturePath],
         {
           env: { ...environment, LC_ALL: "C", LANG: "C" },
           timeout: 60000,
@@ -276,16 +276,25 @@ try {
         },
       )
     ).stdout;
-    const expectedCaptureStart =
-      /^(?:Earliest|First) packet time:[ \t]*(.+)$/mu
-        .exec(capinfosOutput)?.[1]
-        ?.trim() ?? null;
+    // Expected instants come from the independently authored PCAP records above,
+    // rather than a second implementation of the product's epoch decoder.
+    const captureStartText = /^(?:Earliest|First) packet time:[ \t]*(.+)$/mu
+      .exec(capinfosOutput)?.[1]
+      ?.trim();
+    const captureEndText = /^(?:Latest|Last) packet time:[ \t]*(.+)$/mu
+      .exec(capinfosOutput)?.[1]
+      ?.trim();
+    const expectedCaptureStart = "2023-11-14T22:13:20.000000Z";
     const expectedCaptureEnd =
-      /^(?:Latest|Last) packet time:[ \t]*(.+)$/mu
-        .exec(capinfosOutput)?.[1]
-        ?.trim() ?? null;
-    assert.ok(expectedCaptureStart, capinfosOutput);
-    assert.ok(expectedCaptureEnd, capinfosOutput);
+      capturePath === path
+        ? "2023-11-14T22:13:22.000000Z"
+        : expectedCaptureStart;
+    assert.equal(captureStartText, "1700000000.000000", capinfosOutput);
+    assert.equal(
+      captureEndText,
+      capturePath === path ? "1700000002.000000" : "1700000000.000000",
+      capinfosOutput,
+    );
     const response = await client.callTool({
       name: pcapTool.name,
       arguments: { path: capturePath, detail: "summary" },

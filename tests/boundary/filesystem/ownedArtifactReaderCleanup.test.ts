@@ -117,11 +117,20 @@ it.each(readers)(
       expect(causeChainContains(primary, statFailure)).toBe(true);
 
       const release = await scope.release(owner);
-      expect(release).toEqual({ kind: "failed", cause: closeFailure });
+      expect(release).toMatchObject({
+        kind: "failed",
+        cause: closeFailure,
+        owner,
+      });
+      if (release.kind !== "failed")
+        throw new Error("Expected owned cleanup failure");
+      expect(release.cause).toBe(closeFailure);
+      expect(release.lease.released).toBe(false);
       expect(descriptor?.fd).toBe(-1);
       await expect(scope.close()).rejects.toMatchObject({
         reason: "unavailable",
         cleanup: { reason: closeFailure.message, resources: [path] },
+        cleanupLeases: [release.lease],
       });
       // Native close invalidated the fd before rejecting. Retrying the same owner
       // must remain failed without another syscall or a false successful release.

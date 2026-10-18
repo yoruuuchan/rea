@@ -1,5 +1,4 @@
 import type { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
-import { ArtifactResourceRetryFailure } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import {
   ArtifactFileCleanupFailure,
@@ -44,10 +43,7 @@ export const firmwareFailure = (
       { operation, cause },
     );
     bindArtifactFileCleanup(cause, cleanup);
-    if (
-      !(cause instanceof ArtifactFileCleanupFailure) &&
-      !(cause instanceof ArtifactResourceRetryFailure)
-    )
+    if (cause.cleanupLeases === undefined)
       treeCleanupLease?.bindCleanupError(cleanup);
     if (cause instanceof ArtifactFileCleanupFailure) {
       const outcome = cause.fileCleanupFailure.outcome;

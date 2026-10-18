@@ -183,3 +183,18 @@ it("reports XML numbers whose integer or real origin is ambiguous", () => {
     expect.stringContaining("2 number(s)"),
   ]);
 });
+
+it("keeps CFPropertyList's non-finite real spellings in XML evidence", () => {
+  const parsed = parsePlistXml(
+    "<plist><dict><key>Up</key><real>+infinity</real><key>Down</key><real>-INFINITY</real><key>Missing</key><real>nan</real><key>Overflow</key><real>1e999</real><key>Ratio</key><real>1.25</real></dict></plist>",
+  );
+  if (!parsed.ok) throw parsed.error;
+  expect(JSON.stringify(parsed.value.value)).toBe(
+    '{"Up":{"$plist_type":"real","value":"+infinity"},"Down":{"$plist_type":"real","value":"-infinity"},"Missing":{"$plist_type":"real","value":"nan"},"Overflow":{"$plist_type":"real","value":null},"Ratio":1.25}',
+  );
+  expect(parsed.value.limitations).toEqual([
+    expect.stringContaining("XML conversion"),
+    '3 non-finite real value(s) are reported as { "$plist_type": "real", "value": "<spelling>" } using canonical numeric labels nan, +infinity or -infinity because a JSON number cannot carry them.',
+    '1 numeric value(s) are reported as { "$plist_type": "real", "value": null } because XML numeric decoding could not establish their value identity.',
+  ]);
+});

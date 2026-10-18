@@ -8,7 +8,9 @@ import {
 } from "../../domain/analysisErrorCore.js";
 import {
   negativeZeroRealLimitation,
+  nonFiniteRealLimitation,
   unknownDateLimitation,
+  unknownRealLimitation,
 } from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
@@ -86,6 +88,7 @@ export const decodeKeyedArchiveBytes = (
         }
       : parseXmlPropertyList(xmlText ?? "");
   const {
+    nonFiniteRealCount,
     unknownRealCount,
     negativeZeroRealCount,
     unknownDateCount,
@@ -115,11 +118,12 @@ export const decodeKeyedArchiveBytes = (
       ...(parsed.omittedPrototypeKeys === 0
         ? []
         : [omittedPrototypeKeysLimitation(parsed.omittedPrototypeKeys)]),
+      ...(nonFiniteRealCount === 0
+        ? []
+        : [nonFiniteRealLimitation(nonFiniteRealCount)]),
       ...(unknownRealCount === 0
         ? []
-        : [
-            `${String(unknownRealCount)} non-finite real value(s) are reported as { "$plist_type": "real", "value": null } because JSON evidence cannot preserve NaN vs infinity.`,
-          ]),
+        : [unknownRealLimitation(unknownRealCount)]),
       ...(negativeZeroRealCount === 0
         ? []
         : [negativeZeroRealLimitation(negativeZeroRealCount)]),

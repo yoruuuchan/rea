@@ -22,7 +22,7 @@ import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
 import { functionDossierSchema } from "../dist/domain/hopperValues.js";
-import { inspectGhidraInstallation } from "../dist/ghidra/GhidraInstallation.js";
+import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
 import { buildRiscvFixture } from "../tests/conformance/ghidra/riscv-fixture.mjs";
 import {
   mcpTextValue,
@@ -42,7 +42,7 @@ for (const key of ["REA_GHIDRA_LANGUAGE_ID", "REA_GHIDRA_COMPILER_SPEC_ID"])
     throw new Error(
       `Unset ${key}: this lane verifies provider-pinned selection.`,
     );
-const installation = inspectGhidraInstallation({
+const installation = await inspectVerifierGhidraInstallation({
   environment: process.env,
   installDir: process.env.GHIDRA_INSTALL_DIR,
   ...(process.env.JAVA_HOME === undefined

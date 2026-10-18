@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { inspectGhidraInstallation } from "../../dist/ghidra/GhidraInstallation.js";
+import { inspectVerifierGhidraInstallation } from "./ghidra-installation-inspection.mjs";
 
 /** Exercise qualified annotation names against real demangled C++ ABI symbols. */
 export async function verifyGhidraNamespaceAnnotations({
@@ -353,8 +353,8 @@ async function verifyAddressNames(call, symbols, kind) {
 }
 
 async function requireNamespaceDemangler(env) {
-  const inspection = inspectGhidraInstallation({
-    environment: process.env,
+  const inspection = await inspectVerifierGhidraInstallation({
+    environment: env,
     installDir: env.GHIDRA_INSTALL_DIR,
     ...(env.JAVA_HOME === undefined ? {} : { javaHome: env.JAVA_HOME }),
   });

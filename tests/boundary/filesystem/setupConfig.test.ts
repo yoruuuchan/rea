@@ -1,4 +1,12 @@
-import { lstat, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +18,10 @@ import {
   configureClientConfiguration,
   inspectClientConfiguration,
 } from "../../../src/application/SetupClientConfiguration.js";
+import { resolveWindowsClaudeDesktopLocation } from "../../../src/application/ClaudeDesktopConfigLocation.js";
+import { supportedClients } from "../../../src/application/SupportedClients.js";
+import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
+import { failedConfigurationMessage } from "../../../src/application/SetupClients.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
 
 const pinnedPackage = PRODUCT_IDENTITY.registrationPackageSpecifier;
@@ -417,4 +429,131 @@ describe("JSON client configuration shape diagnostics", () => {
       expect(await readFile(configPath, "utf8")).toBe(original);
     },
   );
+});
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "preserves the private-path access diagnostic during the final MSIX target recheck",
+  async () => {
+    const home = await createTestTempDirectory("rea-msix-recheck-denied-");
+    const configPath = join(home, "client.json");
+    const locked = join(home, "private");
+    const privateConfigPath = join(locked, "client.json");
+    const original = '{"keep":true}\n';
+    await writeFile(configPath, original);
+    await mkdir(locked);
+    await chmod(locked, 0);
+    try {
+      const result = await configureClientConfiguration({
+        name: "claude_desktop",
+        format: "json",
+        configPath,
+        msixPackage: {
+          packageFamilyName: "Claude_pzs8sxrjxfjjc",
+          appDataConfigPath: configPath,
+          privateConfigPath,
+          virtualizedRoots: [],
+          processView: "direct",
+        },
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        reason: "target_unavailable",
+        failure: {
+          kind: "inspect",
+          path: privateConfigPath,
+          detail: expect.stringContaining("EACCES"),
+        },
+      });
+      if (result.status !== "failed")
+        throw new Error("Expected inspection failure");
+      expect(failedConfigurationMessage(result)).toContain(privateConfigPath);
+      expect(failedConfigurationMessage(result)).not.toContain(
+        "began reading a different",
+      );
+      expect(await readFile(configPath, "utf8")).toBe(original);
+      expect(await readdir(home)).toEqual(["client.json", "private"]);
+    } finally {
+      await chmod(locked, 0o700);
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "selects literal AppData directories with trailing spaces through native filesystem discovery",
+  async () => {
+    const home = await createTestTempDirectory("rea-appdata-literal-root-");
+    const environment = {
+      APPDATA: join(home, "Roaming "),
+      LOCALAPPDATA: join(home, "Local "),
+    };
+    const appDataConfig = join(
+      environment.APPDATA,
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    await mkdir(join(environment.APPDATA, "Claude"), { recursive: true });
+    await writeFile(appDataConfig, "{}");
+    // The trimmed alternate root contains a different package identity and must not be selected.
+    await mkdir(
+      join(home, "Local", "Packages", "AnthropicPBC.Claude_fnn82j28hfe8t"),
+      { recursive: true },
+    );
+    expect(resolveWindowsClaudeDesktopLocation(home, environment)).toEqual({
+      ok: true,
+      value: {
+        configPath: appDataConfig,
+        markerPath: join(environment.APPDATA, "Claude"),
+      },
+    });
+    expect(await readFile(appDataConfig, "utf8")).toBe("{}");
+  },
+);
+
+it("keeps setup and registration diagnostics blocked for an unrecognized Claude package deployment", async () => {
+  const home = await createTestTempDirectory("rea-claude-deployment-unknown-");
+  const environment = {
+    APPDATA: join(home, "Roaming"),
+    LOCALAPPDATA: join(home, "Local"),
+  };
+  await mkdir(
+    join(
+      environment.LOCALAPPDATA,
+      "Packages",
+      "AnthropicPBC.Claude_fnn82j28hfe8t",
+    ),
+    { recursive: true },
+  );
+  const config = join(
+    environment.APPDATA,
+    "Claude",
+    "claude_desktop_config.json",
+  );
+  await mkdir(join(environment.APPDATA, "Claude"), { recursive: true });
+  const original = '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}\n';
+  await writeFile(config, original);
+  const client = supportedClients(home, "win32", environment).find(
+    (client) => client.name === "claude_desktop",
+  );
+  if (client === undefined) throw new Error("Claude client definition missing");
+  expect(client.configPathError).toContain("unrecognized Claude Desktop");
+  expect(await configureClientConfiguration(client)).toMatchObject({
+    status: "failed",
+    reason: "path",
+  });
+  expect(
+    (
+      await readClientRegistrationStatuses(home, "/current/rea", {
+        platform: "win32",
+        environment,
+      })
+    ).find((status) => status.client === "claude_desktop"),
+  ).toMatchObject({
+    state: "invalid",
+    command: [],
+    remediation: expect.stringContaining("does not fall back"),
+  });
+  expect(await readFile(config, "utf8")).toBe(original);
+  expect(await readdir(join(environment.APPDATA, "Claude"))).toEqual([
+    "claude_desktop_config.json",
+  ]);
 });

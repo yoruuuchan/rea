@@ -1,3 +1,4 @@
+import type { ArtifactCleanupAttempt } from "../ArtifactResourceScope.js";
 import { lstat, realpath } from "node:fs/promises";
 
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
@@ -245,13 +246,9 @@ const materializeSelection = async ({
     localReaderOwner = undefined;
     const closeAttempt = await input.resourceScope.release(readerOwner);
     if (closeAttempt.kind === "failed")
-      throw ArtifactReaderFailure.withCleanup(
-        closeAttempt.cause,
-        ArtifactReaderFailure.cleanupObservation(
-          closeAttempt.cause,
-          readerOwner.resource,
-        ),
-      );
+      throw input.resourceScope.cleanupFailure({ kind: "completed" }, [
+        closeAttempt,
+      ]);
     extracted.sort((left, right) =>
       compareUnicodeCodePoints(left.relative_path, right.relative_path),
     );
@@ -265,19 +262,11 @@ const materializeSelection = async ({
       output,
       input.outputRoot,
     );
-    if (cleanupFailures.length > 0) {
-      const observations = cleanupFailures.map(
-        ({ cause: cleanupCause, resource }) =>
-          ArtifactReaderFailure.cleanupObservation(cleanupCause, resource),
-      );
-      throw ArtifactReaderFailure.withCleanup(
-        cause,
-        {
-          reason: observations.map(({ reason }) => reason).join("; "),
-          resources: [
-            ...new Set(observations.flatMap(({ resources }) => resources)),
-          ],
-        },
+    const [firstCleanup, ...remainingCleanup] = cleanupFailures;
+    if (firstCleanup !== undefined) {
+      throw input.resourceScope.cleanupFailure(
+        { kind: "failed", cause },
+        [firstCleanup, ...remainingCleanup],
         output?.published === true && completed !== undefined
           ? { kind: "artifact-extraction", extraction: completed }
           : undefined,
@@ -346,12 +335,14 @@ const releaseExtractionOwners = async (
   readerOwner: ArtifactResourceOwner | undefined,
   output: SafeOutputTree | undefined,
   outputRoot: string,
-): Promise<{ readonly cause: unknown; readonly resource: string }[]> => {
-  const failures: { readonly cause: unknown; readonly resource: string }[] = [];
+): Promise<Extract<ArtifactCleanupAttempt, { readonly kind: "failed" }>[]> => {
+  const failures: Extract<
+    ArtifactCleanupAttempt,
+    { readonly kind: "failed" }
+  >[] = [];
   if (readerOwner !== undefined) {
     const attempt = await resourceScope.release(readerOwner);
-    if (attempt.kind === "failed")
-      failures.push({ cause: attempt.cause, resource: readerOwner.resource });
+    if (attempt.kind === "failed") failures.push(attempt);
   }
   if (output !== undefined) {
     const owner: ArtifactResourceOwner = {
@@ -360,8 +351,7 @@ const releaseExtractionOwners = async (
       resource: outputRoot,
     };
     const attempt = await resourceScope.release(owner);
-    if (attempt.kind === "failed")
-      failures.push({ cause: attempt.cause, resource: owner.resource });
+    if (attempt.kind === "failed") failures.push(attempt);
   }
   return failures;
 };

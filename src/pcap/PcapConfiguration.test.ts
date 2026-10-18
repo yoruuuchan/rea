@@ -48,8 +48,8 @@ const REAL_CAPINFOS = [
   "Number of packets:   50",
   "File size:           23279 bytes",
   "Capture duration:    0.373473 seconds",
-  "Earliest packet time: 2026-10-11 14:13:40.608505",
-  "Latest packet time:   2026-10-11 14:13:40.981978",
+  "Earliest packet time: 1791728020.608505",
+  "Latest packet time:   1791728020.981978",
   "SHA256:              c94f94742b3288b9a979711509ed5eab3028576301f8938319de3c22a6f5c40b",
 ].join("\n");
 
@@ -59,8 +59,8 @@ describe("parseCapinfosOutput", () => {
       fileType: "Wireshark/tcpdump/... - pcap",
       encapsulation: "Linux cooked-mode capture v2",
       packetCount: 50,
-      captureStart: "2026-10-11 14:13:40.608505",
-      captureEnd: "2026-10-11 14:13:40.981978",
+      captureStart: "2026-10-11T14:13:40.608505Z",
+      captureEnd: "2026-10-11T14:13:40.981978Z",
       captureDurationSeconds: 0.373473,
       snapshotLength: 262144,
       sha256:
@@ -74,8 +74,67 @@ describe("parseCapinfosOutput", () => {
       "First packet time",
     ).replace("Latest packet time", "Last packet time");
     const metadata = parseCapinfosOutput(output);
-    expect(metadata.captureStart).toBe("2026-10-11 14:13:40.608505");
-    expect(metadata.captureEnd).toBe("2026-10-11 14:13:40.981978");
+    expect(metadata.captureStart).toBe("2026-10-11T14:13:40.608505Z");
+    expect(metadata.captureEnd).toBe("2026-10-11T14:13:40.981978Z");
+  });
+
+  it("projects epoch timestamps to UTC instants and keeps other spellings unknown", () => {
+    const withTimes = (start: string, end: string): string =>
+      REAL_CAPINFOS.replace("1791728020.608505", start).replace(
+        "1791728020.981978",
+        end,
+      );
+    expect(
+      parseCapinfosOutput(withTimes("1791728020", "1791728020.500000")),
+    ).toMatchObject({
+      captureStart: "2026-10-11T14:13:40Z",
+      captureEnd: "2026-10-11T14:13:40.500000Z",
+    });
+    // capinfos prints n/a for an empty capture, and its default wall-clock
+    // spelling carries no zone, so neither names an instant.
+    expect(
+      parseCapinfosOutput(withTimes("n/a", "2026-10-11 14:13:40.981978")),
+    ).toMatchObject({ captureStart: null, captureEnd: null });
+    // a packet before the epoch prints with a leading minus; the whole seconds
+    // and the fraction are borrowed so the instant stays exact
+    expect(parseCapinfosOutput(withTimes("-1", "-1.250000"))).toMatchObject({
+      captureStart: "1969-12-31T23:59:59Z",
+      captureEnd: "1969-12-31T23:59:58.750000Z",
+    });
+    expect(parseCapinfosOutput(withTimes("-0.5", "0"))).toMatchObject({
+      captureStart: "1969-12-31T23:59:59.5Z",
+      captureEnd: "1970-01-01T00:00:00Z",
+    });
+    // beyond the RFC 3339 year range in either direction stays unknown
+    expect(
+      parseCapinfosOutput(withTimes("-62167219201", "253402300800")),
+    ).toMatchObject({ captureStart: null, captureEnd: null });
+  });
+
+  it.each([
+    ["0.000000001", "1970-01-01T00:00:00.000000001Z"],
+    ["-0.000000001", "1969-12-31T23:59:59.999999999Z"],
+    ["-1.000000", "1969-12-31T23:59:59.000000Z"],
+    ["-0.000000", "1970-01-01T00:00:00.000000Z"],
+    ["-62167219200.000000001", null],
+    ["-62167219200", "0000-01-01T00:00:00Z"],
+    ["253402300799.999999999", "9999-12-31T23:59:59.999999999Z"],
+    ["253402300800", null],
+    ["NaN", null],
+    ["Infinity", null],
+    ["1791728020.5junk", null],
+    ["1e3", null],
+    ["1.1234567890", null],
+    ["9".repeat(1000), null],
+  ])("preserves the exact instant or unknown for %s", (text, expected) => {
+    const metadata = parseCapinfosOutput(
+      REAL_CAPINFOS.replace("1791728020.608505", text).replace(
+        "1791728020.981978",
+        text,
+      ),
+    );
+    expect(metadata.captureStart).toBe(expected);
+    expect(metadata.captureEnd).toBe(expected);
   });
 
   it("keeps missing capture timestamps unknown", () => {

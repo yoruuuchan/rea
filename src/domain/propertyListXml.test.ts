@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 
+import { projectPlistValue } from "./apple/plistValue.js";
+import { UnknownPlistReal } from "./apple/plistNumbers.js";
 import { parseXmlPropertyList } from "./propertyListKeys.js";
 
 it.each([
@@ -82,4 +84,62 @@ it("retains native decoder null and nested-envelope behavior", () => {
       "<plist><array><null/><dict><key>value</key><null/></dict><plist><null/></plist></array></plist>",
     ).value,
   ).toEqual([{ value: null }, [null]]);
+});
+
+it.each([
+  ["nan", NaN],
+  ["NaN", NaN],
+  ["+infinity", Infinity],
+  ["infinity", Infinity],
+  ["INFINITY", Infinity],
+  ["inf", Infinity],
+  ["+inf", Infinity],
+  ["-infinity", -Infinity],
+  ["-Infinity", -Infinity],
+  ["-inf", -Infinity],
+  ["<![CDATA[-inf]]>", -Infinity],
+] as const)(
+  "retains the canonical non-finite real value for %s",
+  (literal, expected) => {
+    const parsed = parseXmlPropertyList(
+      `<plist><real>${literal}</real></plist>`,
+    );
+    expect(parsed.value).toBe(expected);
+    expect(parsed.numberLiterals.reals).toEqual(new Set([expected]));
+    expect(parsed.numberLiterals.incomplete).toBe(false);
+  },
+);
+
+it("keeps XML numeric overflow and unreadable text explicitly unknown", () => {
+  const parsed = parseXmlPropertyList(
+    "<plist><array><real>1e999</real><real>-1e999</real><real> nan </real><real>-nan</real><real>infinite</real></array></plist>",
+  );
+  expect(parsed.value).toEqual(Array.from({ length: 5 }, () => new UnknownPlistReal()));
+  expect(parsed.numberLiterals.incomplete).toBe(false);
+});
+
+it("does not infer a spelled real from incomplete numeric markup", () => {
+  const parsed = parseXmlPropertyList(
+    "<plist><real>-inf<!-- unsupported --></real></plist>",
+  );
+  expect(parsed.value).toBeInstanceOf(UnknownPlistReal);
+  expect(parsed.numberLiterals.incomplete).toBe(true);
+});
+
+it.each([
+  ["integer", "unreadable"],
+  ["integer", `${"9".repeat(400)}invalid`],
+  ["real", "1e999"],
+  ["real", "-1e999"],
+  ["real", "Infinitysuffix"],
+  ["real", "nan<!-- unsupported -->"],
+])("keeps unresolved <%s> numeric identity explicit", (tag, text) => {
+  const parsed = parseXmlPropertyList(
+    `<plist><${tag}>${text}</${tag}></plist>`,
+  );
+  expect(parsed.value).toBeInstanceOf(UnknownPlistReal);
+  const projected = projectPlistValue(parsed.value);
+  expect(projected.value).toEqual({ $plist_type: "real", value: null });
+  expect(projected.unknownRealCount).toBe(1);
+  expect(projected.nonFiniteRealCount).toBe(0);
 });

@@ -43,8 +43,8 @@ it("advertises exact valid pcap schemas and records inline evidence through MCP"
             file_type: "Wireshark/tcpdump/... - pcap",
             encapsulation: "Linux cooked-mode capture v2",
             packet_count: 50,
-            capture_start: "2026-10-11 14:13:40.608505",
-            capture_end: "2026-10-11 14:13:40.981978",
+            capture_start: "2026-10-11T14:13:40.608505Z",
+            capture_end: "2026-10-11T14:13:40.981978Z",
             capture_duration_seconds: 0.373473,
             snapshot_length: 262144,
             endpoints: [
@@ -112,6 +112,8 @@ it("advertises exact valid pcap schemas and records inline evidence through MCP"
   const evidence = parseEvidence(JSON.parse(text));
   expect(evidence.normalized_result).toMatchObject({
     packet_count: 50,
+    capture_start: "2026-10-11T14:13:40.608505Z",
+    capture_end: "2026-10-11T14:13:40.981978Z",
     tls_sni_values: ["example.com"],
     coverage: "complete",
   });

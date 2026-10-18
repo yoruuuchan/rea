@@ -115,10 +115,11 @@ it("rejects a cycle claim the package dependencies do not contain", async () => 
 
 it("retains completed Rust Evidence on late cancellation and keeps output failure precedence", async () => {
   const controller = new AbortController();
+  const reason = { request: "late Rust cancellation" };
   const service = new RustBinaryService({
     identity,
     inspect: () => {
-      controller.abort();
+      controller.abort(reason);
       return Promise.resolve(ok(report));
     },
   });
@@ -154,8 +155,14 @@ it("retains completed Rust Evidence on late cancellation and keeps output failur
     error: { _tag: "AnalysisOutputError" },
   });
   expect(cancelled.ok).toBe(false);
-  if (!cancelled.ok)
+  if (!cancelled.ok) {
     expect(cancelled.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(cancelled.error.cause).toBe(reason);
+    expect(parseEvidence(cancelled.error.partialObservation)).toMatchObject({
+      operation: "inspect_rust_binary",
+      normalized_result: report,
+    });
+  }
 });
 
 it.each([
@@ -178,39 +185,39 @@ it.each([
   if (!result.ok) expect(result.error).toBeInstanceOf(AnalysisOutputError);
 });
 
-it("retains a completed report on late cancellation and keeps output errors primary", async () => {
-  const controller = new AbortController();
-  const completed = await new RustBinaryService({
-    identity,
-    inspect: () => {
-      controller.abort();
-      return Promise.resolve(ok(report));
+it.each([
+  null,
+  "caller cancellation",
+  { request: "opaque caller value" },
+  new Error("caller failure"),
+  new AnalysisOutputError("caller_operation", "caller-owned cleanup", {
+    cleanup: {
+      reason: "unresolved caller resource",
+      resources: ["caller resource"],
     },
-  }).inspect({ path: report.artifact.path }, { signal: controller.signal });
-  expect(completed.ok).toBe(false);
-  if (!completed.ok) {
-    expect(completed.error).toBeInstanceOf(AnalysisCancelledError);
-    expect(parseEvidence(completed.error.partialObservation)).toMatchObject({
-      operation: "inspect_rust_binary",
-      normalized_result: report,
+  }),
+])(
+  "preserves an opaque admission cancellation reason without invoking the reader: %j",
+  async (reason) => {
+    const controller = new AbortController();
+    controller.abort(reason);
+    let calls = 0;
+    const service = new RustBinaryService({
+      identity,
+      inspect: async () => {
+        calls += 1;
+        throw new Error("cancelled admission must not invoke the reader");
+      },
     });
-  }
-
-  const malformed = {
-    ...report,
-    artifact: { ...report.artifact, path: "/artifacts/other" },
-  };
-  const outputController = new AbortController();
-  const invalid = await new RustBinaryService({
-    identity,
-    inspect: () => {
-      outputController.abort();
-      return Promise.resolve(ok(malformed));
-    },
-  }).inspect(
-    { path: report.artifact.path },
-    { signal: outputController.signal },
-  );
-  expect(invalid.ok).toBe(false);
-  if (!invalid.ok) expect(invalid.error).toBeInstanceOf(AnalysisOutputError);
-});
+    const result = await service.inspect(null, { signal: controller.signal });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected cancelled admission");
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.partialObservation).toBeUndefined();
+    expect(calls).toBe(0);
+    if (reason instanceof AnalysisOutputError)
+      expect(reason.cleanupIncomplete).toBe(true);
+  },
+);

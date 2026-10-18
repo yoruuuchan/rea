@@ -1,3 +1,7 @@
+import {
+  isClientConfigurationCleanupFailure,
+  retryClientConfigurationCleanup,
+} from "./ClientConfigurationCleanup.js";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -43,10 +47,7 @@ import {
 } from "./SetupClientConfiguration.js";
 import { failedConfigurationMessage } from "./SetupClients.js";
 import { setupInstallFailure } from "./SetupInstallFailure.js";
-import {
-  RegularFileCleanupFailure,
-  retryRegularFileCleanupFailures,
-} from "./RegularFileRead.js";
+import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import {
   explicitSetupRegistrationEnvironment,
   providerRegistrationEnvironment,
@@ -403,8 +404,8 @@ const runClientConfigurationOperation = async <Value>(
       try {
         return await operation();
       } catch (cause: unknown) {
-        if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
-        const cleanup = await retryRegularFileCleanupFailures(cause, resources);
+        if (!isClientConfigurationCleanupFailure(cause)) throw cause;
+        const cleanup = await retryClientConfigurationCleanup(cause, resources);
         const rollback = cleanup.failures.find(
           (failure) =>
             failure instanceof ClientConfigurationCleanupRollbackFailure,

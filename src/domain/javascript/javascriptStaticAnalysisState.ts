@@ -42,7 +42,7 @@ export interface JavaScriptAnalysisAccumulator {
   electronCallPathLimitReached?: boolean;
   readonly references: LocatedJavaScriptFinding<JavaScriptStaticReference>[];
   readonly endpoints: LocatedJavaScriptFinding<JavaScriptStaticEndpoint>[];
-  /** Dynamic targets held until the shared mutation index is requested on demand. */
+  /** Target and receiver identities awaiting the shared mutation index. */
   readonly pendingNetworkCalls: {
     readonly node:
       | t.CallExpression

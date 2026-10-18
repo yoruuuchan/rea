@@ -66,13 +66,9 @@ export const classifyAndHashRoot = async (
       };
       const cleanupAttempt = await options.resourceScope.release(owner);
       if (cleanupAttempt.kind === "failed")
-        throw ArtifactReaderFailure.withCleanup(
-          cleanupAttempt.cause,
-          ArtifactReaderFailure.cleanupObservation(
-            cleanupAttempt.cause,
-            owner.resource,
-          ),
-        );
+        throw options.resourceScope.cleanupFailure({ kind: "completed" }, [
+          cleanupAttempt,
+        ]);
     }
     return { format: result.format, digest: result.digest };
   });
@@ -136,13 +132,7 @@ export const classifyAndHashRootForInventory = async (
   if (outcome.kind === "failed" || outcome.value.rootSource === undefined) {
     const cleanupAttempt = await options.resourceScope.release(owner);
     if (cleanupAttempt.kind === "failed")
-      throw ArtifactReaderFailure.withCleanup(
-        outcome.kind === "failed" ? outcome.cause : cleanupAttempt.cause,
-        ArtifactReaderFailure.cleanupObservation(
-          cleanupAttempt.cause,
-          owner.resource,
-        ),
-      );
+      throw options.resourceScope.cleanupFailure(outcome, [cleanupAttempt]);
   }
   if (outcome.kind === "failed") throw outcome.cause;
   return outcome.value;

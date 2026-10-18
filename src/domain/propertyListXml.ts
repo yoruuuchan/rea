@@ -1,8 +1,10 @@
 import type { Document, Node } from "@xmldom/xmldom";
 
 import {
+  UnknownPlistReal,
   createPlistNumberCollector,
   parsePlistIntegerLiteral,
+  parsePlistNonFiniteRealLiteral,
 } from "./apple/plistNumbers.js";
 
 /** Interpret an already validated, depth-bounded DOM, owning values and number facts together. */
@@ -100,7 +102,11 @@ export const decodeXmlPropertyList = (document: Document) => {
           numbers.markIncomplete();
           const partial = Number.parseInt(first.nodeValue ?? "", 10);
           // An integer has no signed zero; keep -0 from reading as a real.
-          return partial === 0 ? 0 : partial;
+          return !Number.isFinite(partial)
+            ? new UnknownPlistReal()
+            : partial === 0
+              ? 0
+              : partial;
         }
         numbers.integer(exact);
         const decoded = Number(exact);
@@ -111,9 +117,19 @@ export const decodeXmlPropertyList = (document: Document) => {
       case "real": {
         requireContent(node);
         const literal = content(node, characterNode);
+        if (!literal.complete) numbers.markIncomplete();
+        // CFPropertyList spells NaN and the infinities; parseFloat would read
+        // the lowercase spellings as NaN and lose the kind and sign.
+        const known = literal.complete
+          ? parsePlistNonFiniteRealLiteral(literal.text)
+          : undefined;
+        if (known !== undefined) {
+          numbers.real(known);
+          return known;
+        }
         const value = Number.parseFloat(literal.text);
+        if (!Number.isFinite(value)) return new UnknownPlistReal();
         if (literal.complete) numbers.real(value);
-        else numbers.markIncomplete();
         return value;
       }
       case "data": {

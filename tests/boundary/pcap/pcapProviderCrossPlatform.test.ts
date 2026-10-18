@@ -131,6 +131,8 @@ it.runIf(hasNativeBound)(
     });
     expect(result.file_type).toContain("pcap");
     expect(result.packet_count).toBe(3);
+    expect(result.capture_start).toBe("2026-10-11T14:13:40.608505Z");
+    expect(result.capture_end).toBe("2026-10-11T14:13:40.981978Z");
     expect((result.endpoints as unknown[]).length).toBeGreaterThan(0);
     expect((result.protocol_distribution as unknown[]).length).toBeGreaterThan(
       0,

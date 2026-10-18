@@ -1,7 +1,8 @@
 import {
   plistSourceFormat,
   requireRegularPlist,
-  nativePlistFileFailure,
+  nativePlistFailure,
+  resolveNativePlistSelection,
   unreadablePlist,
 } from "./NativePlistSource.js";
 import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";
@@ -21,8 +22,7 @@ import {
 import { NativeUiCleanupError } from "./NativeUiCleanupError.js";
 import { LldbCallTracer, type NativeCallTracer } from "./LldbCallTracer.js";
 import { observeNativeCalls } from "./NativeCallObservation.js";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
-import { realpath, stat } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 
 import { z } from "zod";
 
@@ -61,6 +61,14 @@ import {
   resolvedAnalysisError,
 } from "../domain/analysisErrorBase.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
+import {
+  projectPlistValue,
+  nonFiniteRealLimitation,
+  unknownRealLimitation,
+  negativeZeroRealLimitation,
+  unknownDateLimitation,
+} from "../domain/apple/plistValue.js";
+import { createPlistNumberProjection } from "../domain/apple/plistNumbers.js";
 import type { NativeUiObservationResult } from "../domain/native/nativeUiObservation.js";
 import {
   omittedPrototypeKeysLimitation,
@@ -648,6 +656,7 @@ class NativeMacOSClient implements AnalysisClient {
     const captures = [display.value, requirements.value, entitlements.value];
     const limitations = [
       ...parsed.limitations,
+      ...entitlementValue.limitations.map((note) => `Entitlements: ${note}`),
       "Inspected a digest-verified Mach-O byte snapshot; filesystem-bound signing context and trust validation are not examined.",
       ...(entitlementValue.omittedPrototypeKeys === 0
         ? []
@@ -781,11 +790,13 @@ class NativeMacOSClient implements AnalysisClient {
     try {
       return await this.#plistResources.run(async () => {
         try {
-          const plist = await resolvePlistPath(this.target, requested);
+          const plist = await resolveNativePlistSelection(
+            this.target,
+            requested,
+          );
           if (!plist.ok) return plist;
           const fileInput = {
-            path: plist.value,
-            requested,
+            selection: plist.value,
             resources: this.#plistResources,
             signal,
           };
@@ -794,14 +805,14 @@ class NativeMacOSClient implements AnalysisClient {
           const classified = await this.#run(
             "inspect_plist",
             "file",
-            ["-b", plist.value],
+            ["-b", plist.value.path],
             { signal },
           );
           if (!classified.ok) return classified;
           const json = await this.#run(
             "inspect_plist",
             "plutil",
-            ["-convert", "json", "-o", "-", "--", plist.value],
+            ["-convert", "json", "-o", "-", "--", plist.value.path],
             { signal, acceptNonZero: true },
           );
           if (!json.ok) return json;
@@ -816,18 +827,30 @@ class NativeMacOSClient implements AnalysisClient {
               : await this.#run(
                   "inspect_plist",
                   "plutil",
-                  ["-convert", "xml1", "-o", "-", "--", plist.value],
+                  ["-convert", "xml1", "-o", "-", "--", plist.value.path],
                   { signal, acceptNonZero: !jsonDecoded },
                 );
           if (xml !== undefined && !xml.ok) return xml;
-          if (xml !== undefined && xml.value.exitCode !== 0)
+          if (xml !== undefined && xml.value.exitCode !== 0) {
+            const capture = failureCapture(xml.value, false);
             return err(
               unreadablePlist(
                 plist.value,
-                requested,
-                `plutil could not decode it as a property list (${plutilDiagnostic(xml.value.stderr, plist.value)})`,
+                `plutil could not decode it as a property list (${plutilDiagnostic(capture, plist.value.path)})`,
+                {
+                  capturedOutput: {
+                    stdout: capture.stdout,
+                    stderr: capture.stderr,
+                    truncated: capture.truncated,
+                    stdout_bytes: capture.stdoutBytes,
+                    stderr_bytes: capture.stderrBytes,
+                    exit_code: capture.exitCode,
+                    signal: capture.signal,
+                  },
+                },
               ),
             );
+          }
           const parsed =
             xml === undefined
               ? parsePlistJson(json.value.stdout)
@@ -839,7 +862,7 @@ class NativeMacOSClient implements AnalysisClient {
             classified.value,
             json.value,
             ...(xml === undefined ? [] : [xml.value]),
-          ].map((item) => invocation(item, plist.value, "$PLIST"));
+          ].map((item) => invocation(item, plist.value.path, "$PLIST"));
           const converted = xml?.value ?? json.value;
           const format = await plistSourceFormat(classified.value.stdout, {
             ...fileInput,
@@ -858,14 +881,14 @@ class NativeMacOSClient implements AnalysisClient {
             format: format.value,
             value: parsed.value.value,
             bundle: parsed.value.bundle,
-            source_path: plist.value,
+            source_path: plist.value.path,
             provenance,
             limitations: parsed.value.limitations,
           });
           return ok({
             result: jsonValueSchema.parse(result),
             limitations: parsed.value.limitations,
-            locations: [{ kind: "artifact-path", path: plist.value }],
+            locations: [{ kind: "artifact-path", path: plist.value.path }],
           });
         } catch (cause: unknown) {
           // Producer failures stay opaque; only scope admission failures reach the file mapper.
@@ -873,9 +896,7 @@ class NativeMacOSClient implements AnalysisClient {
         }
       });
     } catch (cause: unknown) {
-      return err(
-        nativePlistFileFailure(cause, requested ?? this.target.path, requested),
-      );
+      return err(nativePlistFailure(cause, undefined));
     }
   }
 
@@ -1199,53 +1220,54 @@ const invocation = (
 
 const parseEntitlements = (
   output: string,
-): { readonly value: JsonValue; readonly omittedPrototypeKeys: number } => {
+): {
+  readonly value: JsonValue;
+  readonly omittedPrototypeKeys: number;
+  readonly limitations: readonly string[];
+} => {
   const start = output.indexOf("<?xml");
   const end = output.lastIndexOf("</plist>");
-  if (start < 0 || end < start) return { value: null, omittedPrototypeKeys: 0 };
-  const { value, omittedPrototypeKeys } = parseXmlPropertyList(
+  if (start < 0 || end < start)
+    return { value: null, omittedPrototypeKeys: 0, limitations: [] };
+  const decoded = parseXmlPropertyList(
     output.slice(start, end + "</plist>".length),
   );
-  return { value: jsonValueSchema.parse(value), omittedPrototypeKeys };
+  const projected = projectPlistValue(decoded.value);
+  const numbers = createPlistNumberProjection(decoded.numberLiterals);
+  const value = numbers.project(projected.value);
+  return {
+    value,
+    omittedPrototypeKeys: decoded.omittedPrototypeKeys,
+    limitations: [
+      ...numbers.limitations(),
+      ...(projected.nonFiniteRealCount === 0
+        ? []
+        : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
+      ...(projected.unknownRealCount === 0
+        ? []
+        : [unknownRealLimitation(projected.unknownRealCount)]),
+      ...(projected.negativeZeroRealCount === 0
+        ? []
+        : [negativeZeroRealLimitation(projected.negativeZeroRealCount)]),
+      ...(projected.unknownDateCount === 0
+        ? []
+        : [unknownDateLimitation(projected.unknownDateCount)]),
+    ],
+  };
 };
 
-/** plutil prefixes its diagnostic with the path the message already names. */
-const plutilDiagnostic = (stderr: string, path: string): string => {
-  const text = stderr.trim();
-  return text.startsWith(`${path}: `) ? text.slice(path.length + 2) : text;
-};
-
-/** The bundle whose Contents/MacOS directory directly holds `path`. */
-const macOSBundleRoot = (path: string): string | undefined => {
-  const programs = dirname(path);
-  const contents = dirname(programs);
-  return basename(programs) === "MacOS" && basename(contents) === "Contents"
-    ? dirname(contents)
-    : undefined;
-};
-
-const resolvePlistPath = async (
-  target: BinaryTarget,
-  requested: string | undefined,
-): Promise<Result<string, AnalysisError>> => {
-  try {
-    const source = target.sourcePath ?? target.path;
-    if (requested !== undefined && isAbsolute(requested))
-      return ok(resolve(requested));
-    const sourceMetadata = await stat(source);
-    const root = sourceMetadata.isDirectory()
-      ? source
-      : (macOSBundleRoot(target.path) ?? dirname(target.path));
-    if (requested !== undefined) return ok(resolve(root, requested));
-    // A selected plist file is itself the plist to inspect.
-    if (target.kind === "artifact" && target.format === "plist")
-      return ok(target.path);
-    // A bundle target records the Info.plist its program file was declared
-    // in: Contents/Info.plist, or the root plist of an iOS-style bundle.
-    return ok(target.bundleInfoPlist ?? resolve(root, "Contents/Info.plist"));
-  } catch (cause: unknown) {
-    return err(
-      new ProviderAdapterError(IDENTITY.id, "inspect_plist", { cause }),
-    );
-  }
+/** Failed plutil conversions can report on either stream; preserve both. */
+const plutilDiagnostic = (
+  capture: Pick<NativeCommandCapture, "stdout" | "stderr">,
+  path: string,
+): string => {
+  const diagnostics = [capture.stderr, capture.stdout]
+    .map((stream) => {
+      const text = stream.trim();
+      return text.startsWith(`${path}: `) ? text.slice(path.length + 2) : text;
+    })
+    .filter((text) => text.length > 0);
+  return diagnostics.length === 0
+    ? "plutil printed no diagnostic"
+    : diagnostics.join("\n");
 };

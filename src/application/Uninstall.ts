@@ -1,4 +1,8 @@
 import {
+  isClientConfigurationCleanupFailure,
+  retryClientConfigurationCleanup,
+} from "./ClientConfigurationCleanup.js";
+import {
   ClientConfigurationShapeError,
   parseClientConfiguration,
   serializeClientConfiguration,
@@ -34,7 +38,6 @@ import {
   InvalidUtf8FileError,
   RegularFileCleanupFailure,
   readRegularFileText,
-  retryRegularFileCleanupFailures,
 } from "./RegularFileRead.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import {
@@ -66,8 +69,12 @@ export interface UninstallFileSystem {
   publishConfiguration(
     path: string,
     contents: string,
+    original: string,
   ): Promise<
-    Pick<ClientConfigurationPublication, "verify" | "assertCurrent" | "restore">
+    Pick<
+      ClientConfigurationPublication,
+      "path" | "verify" | "assertCurrent" | "restore"
+    >
   >;
   stat(path: string): Promise<ManagedPathStats>;
   realpath?(path: string): Promise<string>;
@@ -83,8 +90,8 @@ const systemFileSystem = (
   readRegularText: (path) => readSkillFile(path, resources),
   copy: (source, destination) =>
     copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-  publishConfiguration: (path, contents) =>
-    ClientConfigurationPublication.write(path, contents),
+  publishConfiguration: (path, contents, original) =>
+    ClientConfigurationPublication.write(path, contents, original),
   stat: (path) => lstat(path),
   realpath: (path) => realpath(path),
   remove: (path, recursive = true) => rm(path, { recursive }),
@@ -389,13 +396,15 @@ const readClientConfiguration = async (
   try {
     original = await fileSystem.readText(transactionPath);
   } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure) {
-      await retryRegularFileCleanupFailures(cause, resources);
+    if (isClientConfigurationCleanupFailure(cause)) {
+      const cleanup = await retryClientConfigurationCleanup(cause, resources);
       return itemRead(
         item(
           client.name,
           "failed",
-          "Configuration could not be read or its resources could not be released. Check file permissions, then rerun uninstall.",
+          cleanup.primary instanceof InvalidUtf8FileError
+            ? "Configuration is not valid UTF-8 and was not changed; its resources could not be released. Repair it, then rerun uninstall."
+            : "Configuration could not be read or its resources could not be released. Check file permissions, then rerun uninstall.",
         ),
       );
     }
@@ -570,17 +579,18 @@ const removeClient = async (
         original,
         editedPaths,
       ),
+      original,
     );
   } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure)
-      await retryRegularFileCleanupFailures(cause, resources);
+    if (isClientConfigurationCleanupFailure(cause))
+      await retryClientConfigurationCleanup(cause, resources);
     return manualRecovery();
   }
   try {
     return await publication.verify(async () => {
       try {
         const readback = parseClientConfiguration(
-          await fileSystem.readText(transactionPath),
+          await fileSystem.readText(publication.path),
           client.format,
         );
         await publication.assertCurrent();
@@ -597,8 +607,8 @@ const removeClient = async (
           `Removed registration from ${client.configPath}.`,
         );
       } catch (cause: unknown) {
-        if (cause instanceof RegularFileCleanupFailure)
-          await retryRegularFileCleanupFailures(cause, resources);
+        if (isClientConfigurationCleanupFailure(cause))
+          await retryClientConfigurationCleanup(cause, resources);
         try {
           await publication.restore(original);
         } catch {
@@ -612,8 +622,8 @@ const removeClient = async (
       }
     });
   } catch (cause: unknown) {
-    if (cause instanceof RegularFileCleanupFailure)
-      await retryRegularFileCleanupFailures(cause, resources);
+    if (isClientConfigurationCleanupFailure(cause))
+      await retryClientConfigurationCleanup(cause, resources);
     return item(
       client.name,
       "failed",

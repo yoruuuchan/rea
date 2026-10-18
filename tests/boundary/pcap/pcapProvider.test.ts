@@ -26,6 +26,8 @@ const CAPINFOS_OUTPUT = [
   "Packet size limit:   file hdr: 262144 bytes",
   "Number of packets:   3",
   "Capture duration:    0.123 seconds",
+  "Earliest packet time: 1791728020.608505",
+  "Latest packet time:   1791728020.981978",
 ].join("\n");
 
 const TSHARK_JSON = JSON.stringify([
@@ -86,7 +88,7 @@ exit 0
     capinfos,
     `#!/bin/sh
 if [ "$1" = "--version" ]; then printf 'Capinfos (Wireshark) 4.6.6-stub\\n'; exit 0; fi
-[ "$1" = "-M" ] && [ "$2" = "--" ] && [ "$#" = "3" ] || exit 2
+[ "$1" = "-M" ] && [ "$2" = "-S" ] && [ "$3" = "--" ] && [ "$#" = "4" ] || exit 2
 if [ "${String(options.failCapinfos === true)}" = "true" ]; then
   printf 'capinfos: The file is not a capture file' >&2; exit 1
 fi
@@ -165,6 +167,8 @@ it("inspects a capture with endpoints, DNS, TLS SNI, and HTTP", async () => {
     sha256: createHash("sha256").update("pcap-fixture-bytes").digest("hex"),
   });
   expect(result.file_type).toBe("Wireshark/tcpdump/... - pcap");
+  expect(result.capture_start).toBe("2026-10-11T14:13:40.608505Z");
+  expect(result.capture_end).toBe("2026-10-11T14:13:40.981978Z");
   expect(result.packet_count).toBe(3);
   expect(result.endpoints).toEqual(
     expect.arrayContaining([

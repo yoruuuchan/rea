@@ -74,6 +74,47 @@ describe("native signature target identity", () => {
     });
   });
 
+  it("projects typed plist scalars from a controlled entitlement response", async () => {
+    const { path, target } = await fixture();
+    const replay = new NativeFixtureRunner();
+    const xml = `<?xml version="1.0"?><plist><dict>
+<key>positive</key><real>+infinity</real>
+<key>negative</key><real>-inf</real>
+<key>nan</key><real>nan</real>
+<key>integer</key><integer>9007199254740993</integer>
+<key>date</key><date>2001-01-01T00:00:00Z</date>
+<key>data</key><data>AQID</data><key>control</key><true/>
+</dict></plist>`;
+    const runner: NativeCommandRunner = {
+      run(tool, args) {
+        return args.includes("--entitlements")
+          ? new NativeFixtureRunner({ codesign: xml }).run(tool, args)
+          : replay.run(tool, args);
+      },
+    };
+    const result = await new NativeMacOSProvider({}, runner, "darwin")
+      .createClient(target)
+      .execute("inspect_signature", {});
+    if (!result.ok) throw result.error;
+    const signature = inspectSignatureSchema.parse(result.value.result);
+    expect(signature.entitlements).toEqual({
+      positive: { $plist_type: "real", value: "+infinity" },
+      negative: { $plist_type: "real", value: "-infinity" },
+      nan: { $plist_type: "real", value: "nan" },
+      integer: { $plist_type: "integer", decimal: "9007199254740993" },
+      date: { $plist_type: "date", iso8601: "2001-01-01T00:00:00.000Z" },
+      data: { $plist_type: "data", base64: "AQID" },
+      control: true,
+    });
+    expect(signature.limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Entitlements: 3 non-finite real value(s)"),
+        expect.stringContaining("unambiguous integer value(s)"),
+      ]),
+    );
+    expect(await readFile(path, "utf8")).toBe(CONTENT);
+  });
+
   it.each(["changed", "missing", "directory", "symlink"] as const)(
     "rejects a %s target before commands run",
     async (replacement) => {

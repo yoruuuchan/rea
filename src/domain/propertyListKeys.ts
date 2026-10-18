@@ -3,6 +3,7 @@ import { parseOpenStep } from "plist";
 
 import { decodeXmlPropertyList } from "./propertyListXml.js";
 import {
+  UnknownPlistReal,
   createPlistNumberCollector,
   type PlistNumberLiterals,
 } from "./apple/plistNumbers.js";
@@ -41,7 +42,8 @@ export const omitPrototypeKeys = (
       item === null ||
       typeof item !== "object" ||
       item instanceof Date ||
-      item instanceof Uint8Array
+      item instanceof Uint8Array ||
+      item instanceof UnknownPlistReal
     )
       return item;
     return Object.fromEntries(

@@ -32,10 +32,11 @@ const failedVerificationFileSystem = (
     readText: (path) => readFile(path, "utf8"),
     copy: (source, destination) =>
       copyFile(source, destination, fsConstants.COPYFILE_EXCL),
-    publishConfiguration: async (path, contents) => {
+    publishConfiguration: async (path, contents, original) => {
       const publication = await ClientConfigurationPublication.write(
         path,
         contents,
+        original,
       );
       publication.assertCurrent = async () => {
         throw new Error("verification failed");

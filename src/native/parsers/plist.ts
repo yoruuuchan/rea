@@ -5,8 +5,10 @@ import type { JsonValue } from "../../domain/jsonValue.js";
 import {
   negativeZeroReal,
   negativeZeroRealLimitation,
+  nonFiniteRealLimitation,
   projectPlistValue,
   unknownDateLimitation,
+  unknownRealLimitation,
   type ProjectedPlistValue,
 } from "../../domain/apple/plistValue.js";
 import {
@@ -202,11 +204,12 @@ export const parsePlistXml = (
     bundle: projectPlistBundle(value),
     limitations: [
       'plutil cannot express this plist as JSON, so it was decoded from plutil\'s XML conversion; data and date values are typed objects such as { "$plist_type": "data", "base64": ... }.',
+      ...(projected.nonFiniteRealCount === 0
+        ? []
+        : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
       ...(projected.unknownRealCount === 0
         ? []
-        : [
-            `${String(projected.unknownRealCount)} non-finite real value(s) are reported as { "$plist_type": "real", "value": null } because the XML decoder does not distinguish NaN from infinity.`,
-          ]),
+        : [unknownRealLimitation(projected.unknownRealCount)]),
       ...negativeZeroLimitations(projected.negativeZeroRealCount),
       ...(projected.unknownDateCount === 0
         ? []

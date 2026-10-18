@@ -80,10 +80,11 @@ it.each([
 it("retains a completed observation on late cancellation and keeps output errors primary", async () => {
   const report = await observedReport();
   const controller = new AbortController();
+  const reason = { request: "late PE cancellation" };
   const service = new PeResourcesService({
     identity: PE_RESOURCES_PROVIDER,
     inspect: () => {
-      controller.abort();
+      controller.abort(reason);
       return Promise.resolve(ok(report));
     },
   });
@@ -96,6 +97,7 @@ it("retains a completed observation on late cancellation and keeps output errors
     error: { _tag: "AnalysisCancelledError" },
   });
   if (!late.ok) {
+    expect(late.error.cause).toBe(reason);
     expect(parseEvidence(late.error.partialObservation)).toMatchObject({
       operation: "inspect_pe_resources",
       subject: { architecture: "x86" },
@@ -119,3 +121,40 @@ it("retains a completed observation on late cancellation and keeps output errors
   expect(invalid.ok).toBe(false);
   if (!invalid.ok) expect(invalid.error).toBeInstanceOf(AnalysisOutputError);
 });
+
+it.each([
+  null,
+  "caller cancellation",
+  { request: "opaque caller value" },
+  new Error("caller failure"),
+  new AnalysisOutputError("caller_operation", "caller-owned cleanup", {
+    cleanup: {
+      reason: "unresolved caller resource",
+      resources: ["caller resource"],
+    },
+  }),
+])(
+  "preserves an opaque admission cancellation reason without invoking the reader: %j",
+  async (reason) => {
+    const controller = new AbortController();
+    controller.abort(reason);
+    let calls = 0;
+    const service = new PeResourcesService({
+      identity: PE_RESOURCES_PROVIDER,
+      inspect: async () => {
+        calls += 1;
+        throw new Error("cancelled admission must not invoke the reader");
+      },
+    });
+    const result = await service.inspect(null, { signal: controller.signal });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected cancelled admission");
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.partialObservation).toBeUndefined();
+    expect(calls).toBe(0);
+    if (reason instanceof AnalysisOutputError)
+      expect(reason.cleanupIncomplete).toBe(true);
+  },
+);

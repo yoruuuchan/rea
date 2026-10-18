@@ -655,7 +655,10 @@ export const endpointArgument = (
     )
       return undefined;
     return {
-      kind: isRequestUrlReference(value) ? "endpoint" : "candidate",
+      kind:
+        method !== "get" && method !== "delete" && isRequestUrlReference(value)
+          ? "endpoint"
+          : "candidate",
       value,
     };
   }

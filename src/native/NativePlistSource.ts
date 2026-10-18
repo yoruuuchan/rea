@@ -1,3 +1,6 @@
+import { stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
+import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { FileHandle } from "node:fs/promises";
 import type { z } from "zod";
 import type { inspectPlistSchema } from "../domain/native/nativeInspection.js";
@@ -27,20 +30,67 @@ import {
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { NATIVE_MACOS_PROVIDER_IDENTITY as IDENTITY } from "./NativeMacOSProviderMetadata.js";
 
+/** Resolved lookup identity and selection intent, independent of file readiness. */
+export interface NativePlistSelection {
+  readonly path: string;
+  readonly origin: "selected" | "default";
+}
+
+/** Resolve intent once; consumers never infer it from an omitted tool argument. */
+export const resolveNativePlistSelection = async (
+  target: BinaryTarget,
+  requested: string | undefined,
+): Promise<Result<NativePlistSelection, AnalysisError>> => {
+  try {
+    if (requested !== undefined && isAbsolute(requested))
+      return ok({ path: resolve(requested), origin: "selected" });
+    if (
+      requested === undefined &&
+      target.kind === "artifact" &&
+      target.format === "plist"
+    )
+      return ok({ path: target.path, origin: "selected" });
+    const source = target.sourcePath ?? target.path;
+    const sourceMetadata = await stat(source);
+    const root = sourceMetadata.isDirectory()
+      ? source
+      : (macOSBundleRoot(target.path) ?? dirname(target.path));
+    if (requested !== undefined)
+      return ok({ path: resolve(root, requested), origin: "selected" });
+    return ok({
+      path: target.bundleInfoPlist ?? resolve(root, "Contents/Info.plist"),
+      origin: "default",
+    });
+  } catch (cause: unknown) {
+    return err(
+      new ProviderAdapterError(IDENTITY.id, "inspect_plist", { cause }),
+    );
+  }
+};
+
+/** The bundle whose Contents/MacOS directory directly holds the program. */
+const macOSBundleRoot = (path: string): string | undefined => {
+  const programs = dirname(path);
+  const contents = dirname(programs);
+  return basename(programs) === "MacOS" && basename(contents) === "Contents"
+    ? dirname(contents)
+    : undefined;
+};
+
 /**
  * Report a plist that cannot be decoded as the caller's selection, or as the
  * target's missing default, rather than as a failed tool run.
  */
 export const unreadablePlist = (
-  path: string,
-  requested: string | undefined,
+  selection: NativePlistSelection,
   reason: string,
   options?: AnalysisErrorOptions,
 ): AnalysisError => {
+  const { path } = selection;
   const sentence = reason.endsWith(".") ? reason : `${reason}.`;
   // Name the default that is missing and the selection that still works.
   const missingDefault = `The target has no readable default plist at ${path}: ${sentence} Select another plist in the target with the path input (CLI: --relative-path).`;
-  return requested === undefined
+  return selection.origin === "default"
     ? new AnalysisCapabilityUnavailableError(
         IDENTITY.id,
         "inspect_plist",
@@ -57,18 +107,16 @@ export const unreadablePlist = (
 };
 
 interface PlistFileInput {
-  readonly path: string;
-  readonly requested: string | undefined;
+  readonly selection: NativePlistSelection;
   readonly resources: ArtifactResourceScope;
   readonly signal: AbortSignal | undefined;
   readonly capturedOutput?: AnalysisCapturedOutput;
 }
 
 /** Translate only physical file outcomes, never a later signal or arbitrary abort value. */
-export const nativePlistFileFailure = (
+export const nativePlistFailure = (
   cause: unknown,
-  path: string,
-  requested: string | undefined,
+  selection: NativePlistSelection | undefined,
   capturedOutput?: AnalysisCapturedOutput,
 ): AnalysisError => {
   if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined) {
@@ -78,10 +126,9 @@ export const nativePlistFileFailure = (
         : undefined;
     const previous =
       physical?.outcome.kind === "failed"
-        ? nativePlistFileFailure(
+        ? nativePlistFailure(
             artifactFilePrimaryFailure(cause),
-            path,
-            requested,
+            selection,
             capturedOutput,
           )
         : physical?.completionCancellation === undefined
@@ -134,15 +181,25 @@ export const nativePlistFileFailure = (
       cause.message,
       { cause, capturedOutput },
     );
+  if (selection === undefined)
+    return new ProviderAdapterError(IDENTITY.id, "inspect_plist", {
+      cause,
+      capturedOutput,
+      diagnostics: {
+        phase: "plist-scope",
+        reason: cause instanceof Error ? cause.message : String(cause),
+      },
+    });
+  const { path } = selection;
   const code =
     cause instanceof Error && "code" in cause ? cause.code : undefined;
   if (code === "ENOENT" || code === "ENOTDIR")
-    return unreadablePlist(path, requested, "no file exists there", {
+    return unreadablePlist(selection, "no file exists there", {
       cause,
       capturedOutput,
     });
   if (code === "EISDIR" || code === "ENOTFILE")
-    return unreadablePlist(path, requested, "it is not a regular file", {
+    return unreadablePlist(selection, "it is not a regular file", {
       cause,
       capturedOutput,
     });
@@ -170,7 +227,7 @@ const readPlistFile = async <Value>(
   try {
     return ok(
       await withArtifactRegularFile(
-        input.path,
+        input.selection.path,
         input.resources,
         input.signal,
         read,
@@ -179,12 +236,7 @@ const readPlistFile = async <Value>(
     );
   } catch (cause: unknown) {
     return err(
-      nativePlistFileFailure(
-        cause,
-        input.path,
-        input.requested,
-        input.capturedOutput,
-      ),
+      nativePlistFailure(cause, input.selection, input.capturedOutput),
     );
   }
 };

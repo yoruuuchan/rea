@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
+import { parseBinary } from "plist";
 
 import { projectPlistValue } from "./plistValue.js";
+import { UnknownPlistReal } from "./plistNumbers.js";
 
 // Binary decoders build dates from seconds; beyond the Date range they are invalid.
 it("projects an unrepresentable date as unknown and counts it", () => {
@@ -11,6 +13,7 @@ it("projects an unrepresentable date as unknown and counts it", () => {
       far: { $plist_type: "date", iso8601: null },
       near: { $plist_type: "date", iso8601: "1970-01-01T00:00:00.000Z" },
     },
+    nonFiniteRealCount: 0,
     unknownRealCount: 0,
     negativeZeroRealCount: 0,
     unknownDateCount: 1,
@@ -125,4 +128,105 @@ it("keeps retained integer scalars distinct from lookalike dictionaries", () => 
   expect(observed).toHaveLength(1);
   expect(observed[0]).toBe(projected.value[0]);
   expect(observed[0]).not.toBe(projected.value[1]);
+});
+
+it("projects known non-finite numbers while retaining explicit XML unknowns", () => {
+  const observed: object[] = [];
+  const projected = projectPlistValue(
+    [
+      Infinity,
+      -Infinity,
+      NaN,
+      new UnknownPlistReal(),
+      new UnknownPlistReal(),
+      { $plist_type: "real", value: "nan" },
+    ],
+    (wrapper) => observed.push(wrapper),
+  );
+  expect(projected.nonFiniteRealCount).toBe(3);
+  expect(projected.unknownRealCount).toBe(2);
+  expect(projected.negativeZeroRealCount).toBe(0);
+  expect(JSON.stringify(projected.value)).toBe(
+    '[{"$plist_type":"real","value":"+infinity"},{"$plist_type":"real","value":"-infinity"},{"$plist_type":"real","value":"nan"},{"$plist_type":"real","value":null},{"$plist_type":"real","value":null},{"$plist_type":"real","value":"nan"}]',
+  );
+  expect(Array.isArray(projected.value)).toBe(true);
+  if (!Array.isArray(projected.value)) throw new Error("Expected array");
+  // Only generated wrappers are reported; the lookalike stays a dictionary.
+  expect(observed).toEqual(projected.value.slice(0, 5));
+  expect(observed).not.toContain(projected.value[5]);
+});
+
+it.each([
+  [
+    "float32",
+    [
+      "7f800000",
+      "ff800000",
+      "7fc00001",
+      "ffc00002",
+      "80000000",
+      "00000000",
+      "3fa00000",
+    ],
+  ],
+  [
+    "float64",
+    [
+      "7ff0000000000000",
+      "fff0000000000000",
+      "7ff8000000000001",
+      "fff8000000000002",
+      "8000000000000000",
+      "0000000000000000",
+      "3ff4000000000000",
+    ],
+  ],
+] as const)("retains independently authored %s IEEE values", (_, payloads) => {
+  // An array object followed by seven real objects; no plist builder oracle.
+  const start = 8 + 1 + payloads.length;
+  const width = payloads[0].length / 2;
+  const offsets = [
+    8,
+    ...payloads.map((_, index) => start + index * (width + 1)),
+  ];
+  const table = start + payloads.length * (width + 1);
+  const trailer = Buffer.alloc(32);
+  trailer[6] = 1;
+  trailer[7] = 1;
+  trailer.writeBigUInt64BE(BigInt(offsets.length), 8);
+  trailer.writeBigUInt64BE(BigInt(table), 24);
+  const bytes = Buffer.concat([
+    Buffer.from("bplist00"),
+    Buffer.from([
+      0xa0 | payloads.length,
+      ...payloads.map((_, index) => index + 1),
+    ]),
+    ...payloads.map((hex) =>
+      Buffer.concat([
+        Buffer.from([width === 4 ? 0x22 : 0x23]),
+        Buffer.from(hex, "hex"),
+      ]),
+    ),
+    Buffer.from(offsets),
+    trailer,
+  ]);
+  const original = Buffer.from(bytes);
+  const observed: object[] = [];
+  const projected = projectPlistValue(parseBinary(bytes), (value) =>
+    observed.push(value),
+  );
+  expect(projected.value).toEqual([
+    { $plist_type: "real", value: "+infinity" },
+    { $plist_type: "real", value: "-infinity" },
+    { $plist_type: "real", value: "nan" },
+    { $plist_type: "real", value: "nan" },
+    { $plist_type: "real", value: "-0" },
+    0,
+    1.25,
+  ]);
+  expect(projected.nonFiniteRealCount).toBe(4);
+  expect(projected.negativeZeroRealCount).toBe(1);
+  expect(projected.unknownRealCount).toBe(0);
+  expect(observed).toHaveLength(5);
+  expect(bytes).toEqual(original);
 });

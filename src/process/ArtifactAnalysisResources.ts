@@ -7,10 +7,7 @@ import {
   artifactFileCancellationCause,
 } from "../artifacts/ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
-import {
-  ArtifactResourceScope,
-  ArtifactResourceRetryFailure,
-} from "../artifacts/ArtifactResourceScope.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import {
   AnalysisError,
@@ -282,11 +279,7 @@ export class ArtifactAnalysisResources {
       },
       { operation, cause },
     );
-    let leases =
-      cause instanceof ArtifactFileCleanupFailure ||
-      cause instanceof ArtifactResourceRetryFailure
-        ? cause.cleanupLeases
-        : undefined;
+    let leases = cause.cleanupLeases;
     if (leases === undefined) {
       // An unreported capability cannot be recovered by observing an empty scope.
       // Retain the unresolved source failure and refuse replacement admission.

@@ -121,75 +121,85 @@ it("keeps mixed client cleanup live until both file and tracer owners resolve", 
   expect(first.error.cleanupResources).toEqual([]);
 });
 
-it("retains prefix read and close failures through repeated client cleanup", async ({
-  onTestFinished,
-}) => {
-  const root = await createTestTempDirectory("rea-native-plist-close-");
-  const path = join(root, "selected.plist");
-  await writeFile(path, "<plist><string>value</string></plist>");
-  const probe = await open(path, "r");
-  const prototype = Object.getPrototypeOf(probe) as FileHandle;
-  await probe.close();
-  const primary = Object.assign(new Error("controlled prefix read failure"), {
-    code: "EIO",
-  });
-  const cleanup = new Error("controlled prefix close failure");
-  let attempts = 0;
-  let release: (() => Promise<void>) | undefined;
-  const read = vi
-    .spyOn(prototype, "read")
-    .mockImplementationOnce(async function (this: FileHandle) {
-      release = this.close.bind(this);
-      this.close = async () => {
-        attempts += 1;
-        if (attempts <= 2) throw cleanup;
-        await release!();
-      };
-      throw primary;
+it.for(["path-input", "target"] as const)(
+  "retains %s prefix read and close failures through repeated client cleanup",
+  async (selection, { onTestFinished }) => {
+    const root = await createTestTempDirectory("rea-native-plist-close-");
+    const path = join(root, "selected.plist");
+    await writeFile(path, "<plist><string>value</string></plist>");
+    const probe = await open(path, "r");
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    await probe.close();
+    const primary = Object.assign(new Error("controlled prefix read failure"), {
+      code: "EIO",
     });
-  onTestFinished(async () => {
-    read.mockRestore();
-    await release?.();
-  });
-  const client = new NativeMacOSProvider(
-    {},
-    new NativeFixtureRunner({ file: "ASCII text", plutil: '"value"' }),
-    "darwin",
-  ).createClient(nativeMachoTarget(join(root, "target")));
-  onTestFinished(async () => {
-    await client.close();
-  });
-  const result = await client.execute("inspect_plist", { path });
-  expect(result.ok).toBe(false);
-  if (result.ok) throw new Error("Expected retained cleanup failure");
-  expect(result.error).toMatchObject({
-    cleanupIncomplete: true,
-    operation: "inspect_plist",
-  });
-  expect(result.error.cleanupResources).toContain(path);
-  expect(result.error.capturedOutput?.stdout).toBe('"value"');
-  const projected = projectAnalysisError(result.error);
-  expect(JSON.stringify(projected).match(/captured_output/gu)).toHaveLength(1);
-  expect(result.error.cause).toBeInstanceOf(ArtifactFileCleanupFailure);
-  const failure = result.error.cause as ArtifactFileCleanupFailure;
-  expect(failure.fileCleanupFailure.outcome).toEqual({
-    kind: "failed",
-    cause: primary,
-  });
-  expect(failure.fileCleanupFailure.cleanupCause).toBe(cleanup);
-  const first = await client.close();
-  expect(first.ok).toBe(false);
-  expect(attempts).toBe(2);
-  const retried = await client.close();
-  expect(retried.ok).toBe(true);
-  expect(attempts).toBe(3);
-  expect(result.error.cleanupIncomplete).toBe(false);
-  expect(resolvedAnalysisError(result.error).cause).toBe(primary);
-  expect(resolvedAnalysisError(result.error).capturedOutput?.stdout).toBe(
-    '"value"',
-  );
-  if (!first.ok) expect(first.error.cleanupIncomplete).toBe(false);
-});
+    const cleanup = new Error("controlled prefix close failure");
+    let attempts = 0;
+    let release: (() => Promise<void>) | undefined;
+    const read = vi
+      .spyOn(prototype, "read")
+      .mockImplementationOnce(async function (this: FileHandle) {
+        release = this.close.bind(this);
+        this.close = async () => {
+          attempts += 1;
+          if (attempts <= 2) throw cleanup;
+          await release!();
+        };
+        throw primary;
+      });
+    onTestFinished(async () => {
+      read.mockRestore();
+      await release?.();
+    });
+    const client = new NativeMacOSProvider(
+      {},
+      new NativeFixtureRunner({ file: "ASCII text", plutil: '"value"' }),
+      "darwin",
+    ).createClient(
+      selection === "target"
+        ? { kind: "artifact", format: "plist", path, sha256: "0".repeat(64) }
+        : nativeMachoTarget(join(root, "target")),
+    );
+    onTestFinished(async () => {
+      await client.close();
+    });
+    const result = await client.execute(
+      "inspect_plist",
+      selection === "target" ? {} : { path },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected retained cleanup failure");
+    expect(result.error).toMatchObject({
+      cleanupIncomplete: true,
+      operation: "inspect_plist",
+    });
+    expect(result.error.cleanupResources).toContain(path);
+    expect(result.error.capturedOutput?.stdout).toBe('"value"');
+    const projected = projectAnalysisError(result.error);
+    expect(JSON.stringify(projected).match(/captured_output/gu)).toHaveLength(
+      1,
+    );
+    expect(result.error.cause).toBeInstanceOf(ArtifactFileCleanupFailure);
+    const failure = result.error.cause as ArtifactFileCleanupFailure;
+    expect(failure.fileCleanupFailure.outcome).toEqual({
+      kind: "failed",
+      cause: primary,
+    });
+    expect(failure.fileCleanupFailure.cleanupCause).toBe(cleanup);
+    const first = await client.close();
+    expect(first.ok).toBe(false);
+    expect(attempts).toBe(2);
+    const retried = await client.close();
+    expect(retried.ok).toBe(true);
+    expect(attempts).toBe(3);
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(resolvedAnalysisError(result.error).cause).toBe(primary);
+    expect(resolvedAnalysisError(result.error).capturedOutput?.stdout).toBe(
+      '"value"',
+    );
+    if (!first.ok) expect(first.error.cleanupIncomplete).toBe(false);
+  },
+);
 
 for (const readFails of [false, true])
   it(`retains a ${readFails ? "failed" : "completed"} read when cancellation and close failure coincide`, async () => {

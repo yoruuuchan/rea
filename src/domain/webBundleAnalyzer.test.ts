@@ -64,6 +64,55 @@ it.each([
   },
 );
 
+it.each([
+  [
+    "const records = new Map(); const alias = records; alias.get('/accounts');",
+    false,
+  ],
+  ["new Map().delete('/accounts');", false],
+  [
+    "const records = new Map(); records.get('/accounts'); records.delete('/accounts');",
+    false,
+  ],
+  [
+    "const records = new Map(); records.get = fetch; records.get('/accounts');",
+    true,
+  ],
+  [
+    "Object.getPrototypeOf = () => Map.prototype; Object.getPrototypeOf({}).get = fetch; new Map().get('/accounts');",
+    true,
+  ],
+  ["client.get('/accounts');", true],
+  ["eval('Map.prototype.get = fetch'); new Map().get('/accounts');", true],
+] as const)(
+  "shares Map receiver certainty with application analysis: %s",
+  (source, candidate) => {
+    const input = source + " fetch('/network');";
+    const result = analyzeCapturedWebBundle(inspection(input));
+    expect(result.observations.endpoints.map(({ value }) => value)).toEqual([
+      "/network",
+    ]);
+    expect(
+      result.inferences
+        .filter(({ kind }) => kind === "endpoint_candidate")
+        .map(({ value }) => value),
+    ).toEqual(candidate ? ["/accounts"] : []);
+    const staticResult = analyzeJavaScriptStaticSource(input);
+    expect(
+      staticResult.endpoints
+        .map(({ value, interpretation }) => [value, interpretation ?? null])
+        .sort(),
+    ).toEqual(
+      candidate
+        ? [
+            ["/accounts", "candidate"],
+            ["/network", null],
+          ]
+        : [["/network", null]],
+    );
+  },
+);
+
 describe("web bundle analyzer", () => {
   it("extracts graph, route, endpoint, vendor, and WebMCP evidence", () => {
     const source = `
@@ -385,20 +434,20 @@ describe("web bundle API classification parity", () => {
     );
     expect(
       result.observations.endpoints.map(({ value }) => value).sort(),
-    ).toEqual([
-      "../search",
-      "/search",
-      "/users",
-      "/v1/headers",
-      "https://api.example.test/headers",
-      "https://api.example.test/users",
-    ]);
+    ).toEqual(["/search", "/v1/headers"]);
     expect(
       result.inferences
         .filter(({ kind }) => kind === "endpoint_candidate")
         .map(({ value }) => value)
         .sort(),
-    ).toEqual(["cache-key", "users"]);
+    ).toEqual([
+      "../search",
+      "/users",
+      "cache-key",
+      "https://api.example.test/headers",
+      "https://api.example.test/users",
+      "users",
+    ]);
   });
 
   it("keeps undici header-store reads out of endpoint observations", () => {
@@ -410,15 +459,12 @@ describe("web bundle API classification parity", () => {
         api.get("/api/users");
       `),
     );
-    expect(result.observations.endpoints.map(({ value }) => value)).toEqual([
-      "/header-list",
-      "/api/users",
-    ]);
+    expect(result.observations.endpoints).toEqual([]);
     expect(
       result.inferences
         .filter(({ kind }) => kind === "endpoint_candidate")
         .map(({ value }) => value),
-    ).toEqual([]);
+    ).toEqual(["/header-list", "/api/users"]);
   });
 });
 
@@ -495,13 +541,17 @@ describe("web bundle explicit request reference forms", () => {
       fs.open(path, "r");
     `;
     const expected = [
-      ...references,
       "?view=1",
       "#view=1",
       "#literal=1",
       "https:api.example.test/xhr",
     ].sort();
-    const expectedCandidates = [...ambiguous, "POST", "X"].sort();
+    const expectedCandidates = [
+      ...references,
+      ...ambiguous,
+      "POST",
+      "X",
+    ].sort();
     const web = analyzeCapturedWebBundle(inspection(source));
     expect(web.observations.endpoints.map(({ value }) => value).sort()).toEqual(
       expected,
@@ -545,11 +595,12 @@ describe("web bundle endpoint candidate classification", () => {
     const result = analyzeCapturedWebBundle(inspection(source));
     expect(
       result.observations.endpoints.map(({ value }) => value).sort(),
-    ).toEqual(["/api/users", "login", "ping"]);
+    ).toEqual(["login", "ping"]);
     const candidates = result.inferences.filter(
       ({ kind }) => kind === "endpoint_candidate",
     );
     expect(candidates.map(({ value }) => value).sort()).toEqual([
+      "/api/users",
       "ADDRESS_ADDED",
       "POST",
       "X",
@@ -684,15 +735,13 @@ describe("web bundle configuration and navigation parity", () => {
       "users",
     ];
     const web = analyzeCapturedWebBundle(inspection(source));
-    expect(web.observations.endpoints.map(({ value }) => value)).toEqual([
-      "/v1/settings",
-    ]);
+    expect(web.observations.endpoints).toEqual([]);
     expect(
       web.inferences
         .filter(({ kind }) => kind === "endpoint_candidate")
         .map(({ value }) => value)
         .sort(),
-    ).toEqual(expected.slice(1));
+    ).toEqual(expected);
     expect(
       analyzeJavaScriptStaticSource(source)
         .endpoints.map(({ value }) => value)
@@ -735,8 +784,8 @@ describe("web bundle configuration and navigation parity", () => {
       };
     };
     const proven = {
-      endpoints: ["/v1/state"],
-      candidates: ["token", "users"],
+      endpoints: [],
+      candidates: ["/v1/state", "token", "users"],
     };
     expect(analyze(`const vscode = require("vscode");${reads}`)).toEqual({
       web: proven,
@@ -747,8 +796,9 @@ describe("web bundle configuration and navigation parity", () => {
       application: proven,
     });
     const unproven = {
-      endpoints: ["/v1/state"],
+      endpoints: [],
       candidates: [
+        "/v1/state",
         "closedRepositories",
         "lastVersion",
         "onboarded",

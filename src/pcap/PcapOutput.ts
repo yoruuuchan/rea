@@ -27,6 +27,40 @@ export interface CapinfosMetadata {
   readonly sha256: string | null;
 }
 
+/**
+ * capinfos -S prints each packet timestamp as seconds since the Unix epoch
+ * with the capture's own fractional precision, a leading minus for an instant
+ * before the epoch. Its default spelling is a zone-less local wall-clock time,
+ * so one capture reads differently on hosts in different time zones. Project
+ * the exact value to an RFC 3339 UTC instant, keeping the fractional digit
+ * count. "n/a" (an empty capture), a wall-clock spelling and a value outside
+ * years 0000 to 9999 stay unknown.
+ */
+const captureInstant = (value: string | undefined): string | null => {
+  // Wireshark formats at most 64-bit seconds and nine fractional digits.
+  const match = /^(-?)(\d{1,20})(?:\.(\d{1,9}))?$/u.exec(value ?? "");
+  if (match?.[2] === undefined) return null;
+  const negative = match[1] === "-";
+  let seconds = BigInt(match[2]);
+  let fraction = match[3] ?? "";
+  if (negative) {
+    // -1.25 is one and a quarter seconds before the epoch: whole second
+    // -2 plus 0.75, so the fraction is borrowed from the next whole second.
+    const digits = fraction.length;
+    const borrowed = digits > 0 && BigInt(fraction) > 0n;
+    seconds = -seconds - (borrowed ? 1n : 0n);
+    if (borrowed)
+      fraction = (10n ** BigInt(digits) - BigInt(fraction))
+        .toString()
+        .padStart(digits, "0");
+  }
+  if (seconds < -62_167_219_200n || seconds > 253_402_300_799n) return null;
+  const date = new Date(Number(seconds) * 1000);
+  const year = date.getUTCFullYear();
+  if (Number.isNaN(year) || year < 0 || year > 9999) return null;
+  return `${date.toISOString().slice(0, 19)}${fraction === "" ? "" : `.${fraction}`}Z`;
+};
+
 /** capinfos -M with a C locale provides exact numbers instead of "20 k". */
 export const parseCapinfosOutput = (stdout: string): CapinfosMetadata => {
   const lines = new Map<string, string>();
@@ -66,12 +100,12 @@ export const parseCapinfosOutput = (stdout: string): CapinfosMetadata => {
     fileType,
     encapsulation,
     packetCount,
-    captureStart:
-      lines.get("Earliest packet time") ??
-      lines.get("First packet time") ??
-      null,
-    captureEnd:
-      lines.get("Latest packet time") ?? lines.get("Last packet time") ?? null,
+    captureStart: captureInstant(
+      lines.get("Earliest packet time") ?? lines.get("First packet time"),
+    ),
+    captureEnd: captureInstant(
+      lines.get("Latest packet time") ?? lines.get("Last packet time"),
+    ),
     captureDurationSeconds: duration === null ? null : Number(duration[1]),
     snapshotLength:
       snapshotLength !== null &&

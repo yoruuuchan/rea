@@ -48,6 +48,15 @@ it.each([undefined, ""])(
   },
 );
 
+it.each([" root with trailing space ", "   "])(
+  "preserves a nonempty AppData root literally: %j",
+  (value) => {
+    expect(
+      windowsAppDataRoots(home, { APPDATA: value, LOCALAPPDATA: value }),
+    ).toEqual({ roaming: value, local: value });
+  },
+);
+
 /** Package storage holding `privateFiles`; realpath decides the process view. */
 const packagedFileSystem = (
   realpath: ClaudeDesktopLocationFileSystem["realpath"],
@@ -163,6 +172,24 @@ describe("Claude Desktop MSIX process view", () => {
 });
 
 describe("unresolved Claude Desktop package identity", () => {
+  it.each(["AnthropicPBC.Claude_fnn82j28hfe8t", "Claude_fnn82j28hfe8t"])(
+    "refuses an unrecognized package deployment %s instead of selecting AppData",
+    (name) => {
+      const location = resolveWindowsClaudeDesktopLocation(home, env, {
+        readdir: () => [name],
+        lstat: () => file,
+        realpath: (path) => path,
+      });
+      expect(location).toMatchObject({
+        ok: false,
+        error: {
+          path: join(packages, name),
+          message: expect.stringContaining("does not fall back"),
+        },
+      });
+    },
+  );
+
   it.each([
     "Notes.AnthropicPBC.Claude_fnn82j28hfe8t",
     "AnthropicPBC.Claude_fnn82j28hfe8t.backup",

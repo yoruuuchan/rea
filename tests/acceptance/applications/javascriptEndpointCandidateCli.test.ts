@@ -20,6 +20,14 @@ it("reports a candidate endpoint through the worker boundary in the public CLI",
     import * as vscode from "vscode";
     client.post("session");
     (client.get as any)("/api/items");
+    const records = new Map([["/accounts", { name: "Alice" }]]);
+    console.log(records.get("/accounts"));
+    function inspect() {
+      const records = new Map();
+      const alias = records;
+      return alias.get("/local-accounts");
+    }
+    fetch("/network");
     (new Headers().get as any)("content-type");
     (new URLSearchParams() as any).delete("q");
     ((vscode.workspace.getConfiguration("editor") as any).get as any)("tabSize");
@@ -32,6 +40,33 @@ it("reports a candidate endpoint through the worker boundary in the public CLI",
     (cache.open as any)("fixture-cache");
   `,
   );
+  for (const [name, source] of Object.entries({
+    "escaped.mjs": `const box = {};
+    box.prototype = Map.prototype;
+    function patch(b) { b.prototype.get = fetch; }
+    patch(box); new Map().get("/escaped");`,
+    "returned.mjs":
+      'patch((() => Map.prototype)()); new Map().get("/returned");',
+    "opaque.mjs":
+      'eval("Map.prototype.get = fetch"); new Map().get("/opaque");',
+    "private.mjs":
+      'const box = {}; box.prototype = Map.prototype; new Map().get("/private");',
+    "returned-write.mjs":
+      'const prototype = (() => Map.prototype)(); prototype.get = fetch; new Map().get("/returned-write");',
+    "prototype.mjs":
+      'Object.getPrototypeOf(new Map()).get = fetch; new Map().get("/prototype");',
+    "indirect.mjs":
+      'globalThis.eval("Map.prototype.get = fetch"); new Map().get("/indirect");',
+    "late-link.mjs":
+      'function store() { box.child.prototype = Map.prototype; } const box = {}; const inner = {}; box.child = inner; store(); patch(inner); new Map().get("/late-link");',
+    "constructor.mjs":
+      'new Map().constructor.prototype.get = fetch; new Map().get("/constructor");',
+    "getter.mjs":
+      'const holder = { get prototype() { return Map.prototype; } }; holder.prototype.get = fetch; new Map().get("/getter");',
+    "assignment.mjs":
+      'let run; (run = eval)("Map.prototype.get = fetch"); new Map().get("/assignment");',
+  }))
+    await writeFile(join(root, name), source);
   const { stdout } = await execute(
     process.execPath,
     ["scripts/rea.mjs", "analyze-javascript-application", root, "--json"],
@@ -49,7 +84,53 @@ it("reports a candidate endpoint through the worker boundary in the public CLI",
         )
         .sort(),
     )
-    .toEqual(["/api/items", "session"]);
+    .toEqual([
+      "/api/items",
+      "/assignment",
+      "/constructor",
+      "/escaped",
+      "/getter",
+      "/indirect",
+      "/late-link",
+      "/network",
+      "/opaque",
+      "/prototype",
+      "/returned",
+      "/returned-write",
+      "session",
+    ]);
+  for (const value of [
+    "/api/items",
+    "/assignment",
+    "/constructor",
+    "/escaped",
+    "/getter",
+    "/indirect",
+    "/late-link",
+    "/opaque",
+    "/prototype",
+    "/returned",
+    "/returned-write",
+  ]) {
+    const escaped = result.graph.nodes.find(
+      ({ kind, observations }) =>
+        kind === "endpoint" &&
+        observations.some(({ properties }) => properties.value === value),
+    );
+    expect(escaped?.observations[0]).toMatchObject({
+      properties: { interpretation: "candidate" },
+      evidence: { state: "inferred", confidence: "low" },
+    });
+  }
+  const request = result.graph.nodes.find(
+    ({ kind, observations }) =>
+      kind === "endpoint" &&
+      observations.some(({ properties }) => properties.value === "/network"),
+  );
+  expect(request?.observations[0]?.evidence).toMatchObject({
+    state: "observed",
+    confidence: "exact",
+  });
   expect(
     result.graph.nodes
       .filter(({ kind }) => kind === "storage")

@@ -87,6 +87,8 @@ it.each([false, true])(
       invalidated ? attemptsBeforeRecovery : attemptsBeforeRecovery + 1,
     );
     expect(descriptor?.fd).toBe(-1);
+    if (!invalidated && !inventory.ok)
+      expect(inventory.error.cleanupIncomplete).toBe(false);
     if (invalidated) expect(closeAttempts).toBe(1);
   },
 );

@@ -1,10 +1,14 @@
+import type { AnalysisPartialObservation } from "../domain/analysisErrorBase.js";
 import type { JavaScriptSourceAnalysisPort } from "../domain/javascript/javascriptSourceAnalysis.js";
 import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import type { OwnedDirectoryHandle } from "../filesystem/OwnedDirectoryHandle.js";
 import type { OwnedStagedOutput } from "../filesystem/OwnedStagedOutput.js";
 
 import type { ArtifactReader } from "./ArtifactReader.js";
-import { ArtifactReaderFailure } from "./ArtifactReader.js";
+import {
+  ArtifactReaderFailure,
+  artifactPrimaryCleanupLeases,
+} from "./ArtifactReader.js";
 import type { SafeOutputTree } from "./SafeOutputTree.js";
 import type { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { AnalysisCleanupLease } from "./AnalysisCleanupLease.js";
@@ -54,12 +58,17 @@ export type ArtifactResourceOwner =
 
 export type ArtifactCleanupAttempt =
   | { readonly kind: "released" }
-  | { readonly kind: "failed"; readonly cause: unknown };
+  | {
+      readonly kind: "failed";
+      readonly cause: unknown;
+      readonly owner: ArtifactResourceOwner;
+      readonly lease: AnalysisCleanupLease;
+    };
 
 /** Retry failure carrying the exact retained owners that did not release. */
 export class ArtifactResourceRetryFailure extends ArtifactReaderFailure {
   readonly failedOwners: readonly ArtifactResourceOwner[];
-  readonly cleanupLeases: readonly AnalysisCleanupLease[];
+  override readonly cleanupLeases: readonly AnalysisCleanupLease[];
   constructor(
     failures: readonly {
       readonly owner: ArtifactResourceOwner;
@@ -77,7 +86,13 @@ export class ArtifactResourceRetryFailure extends ArtifactReaderFailure {
 /** Caller-owned scope that retains failed artifact cleanup for a later close. */
 export class ArtifactResourceScope {
   readonly #pending = new Set<ArtifactResourceOwner>();
-  readonly #leases = new WeakMap<ArtifactResourceOwner, AnalysisCleanupLease>();
+  readonly #leases = new WeakMap<
+    ArtifactResourceOwner,
+    {
+      readonly lease: AnalysisCleanupLease;
+      resources: readonly string[];
+    }
+  >();
   readonly #active = new Set<Promise<unknown>>();
   #draining: Promise<void> | undefined;
   #closed = false;
@@ -90,13 +105,12 @@ export class ArtifactResourceScope {
   get cleanupResources(): readonly string[] {
     return [
       ...new Set(
-        [...this.#pending].flatMap((owner) =>
-          owner.kind === "lease" && owner.lease instanceof AnalysisCleanupLease
-            ? owner.lease.released
-              ? []
-              : (owner.lease.cleanupResources ?? [owner.resource])
-            : [owner.resource],
-        ),
+        [...this.#pending].flatMap((owner) => {
+          const lease = this.#lease(owner);
+          return lease.released
+            ? []
+            : (lease.cleanupResources ?? [owner.resource]);
+        }),
       ),
     ];
   }
@@ -137,8 +151,42 @@ export class ArtifactResourceScope {
       return { kind: "released" };
     } catch (cause: unknown) {
       this.#pending.add(owner);
-      return { kind: "failed", cause };
+      this.#observeCleanupFailure(owner, cause);
+      return { kind: "failed", cause, owner, lease: this.#lease(owner) };
     }
+  }
+
+  /** Compose initial cleanup authority without confusing it with an independent primary. */
+  cleanupFailure(
+    outcome:
+      | { readonly kind: "completed" }
+      | { readonly kind: "failed"; readonly cause: unknown },
+    failures: readonly [
+      Extract<ArtifactCleanupAttempt, { readonly kind: "failed" }>,
+      ...Extract<ArtifactCleanupAttempt, { readonly kind: "failed" }>[],
+    ],
+    partialObservation?: AnalysisPartialObservation,
+  ): ArtifactReaderFailure {
+    const observations = failures.map(({ cause, owner }) =>
+      ArtifactReaderFailure.cleanupObservation(cause, owner.resource),
+    );
+    const primary =
+      outcome.kind === "failed" ? outcome.cause : failures[0].cause;
+    const inherited =
+      outcome.kind === "failed" ? artifactPrimaryCleanupLeases(primary) : [];
+    return ArtifactReaderFailure.withCleanup(
+      primary,
+      {
+        reason: observations.map(({ reason }) => reason).join("; "),
+        resources: [
+          ...new Set(observations.flatMap(({ resources }) => resources)),
+        ],
+      },
+      partialObservation,
+      inherited === undefined
+        ? undefined
+        : [...new Set([...inherited, ...failures.map(({ lease }) => lease)])],
+    );
   }
 
   /** Adopt an owner after another boundary's cleanup attempt failed. */
@@ -172,6 +220,7 @@ export class ArtifactResourceScope {
         await this.#lease(owner).release();
         this.#pending.delete(owner);
       } catch (cause: unknown) {
+        this.#observeCleanupFailure(owner, cause);
         failures.push({ owner, cause });
       }
     }
@@ -203,15 +252,34 @@ export class ArtifactResourceScope {
     );
   }
 
+  /** This boundary owns the latest parsed child cleanup facts for a composite owner. */
+  #observeCleanupFailure(owner: ArtifactResourceOwner, cause: unknown): void {
+    const retained = this.#leases.get(owner);
+    if (retained !== undefined)
+      retained.resources = [
+        ...ArtifactReaderFailure.cleanupObservation(cause, owner.resource)
+          .resources,
+      ];
+  }
+
   #lease(owner: ArtifactResourceOwner): AnalysisCleanupLease {
     if (owner.kind === "lease" && owner.lease instanceof AnalysisCleanupLease)
       return owner.lease;
-    let lease = this.#leases.get(owner);
-    if (lease === undefined) {
-      lease = new AnalysisCleanupLease(() => cleanup(owner), [owner.resource]);
-      this.#leases.set(owner, lease);
-    }
-    return lease;
+    const previous = this.#leases.get(owner);
+    if (previous !== undefined) return previous.lease;
+    const retained: {
+      readonly lease: AnalysisCleanupLease;
+      resources: readonly string[];
+    } = {
+      resources: [owner.resource],
+      lease: new AnalysisCleanupLease(() => cleanup(owner), {
+        get cleanupResources() {
+          return retained.resources;
+        },
+      }),
+    };
+    this.#leases.set(owner, retained);
+    return retained.lease;
   }
 }
 

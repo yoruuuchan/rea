@@ -1,7 +1,6 @@
 import { open } from "node:fs/promises";
-import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import { withArtifactFileHandle } from "../artifacts/ArtifactFileOperation.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 
 /** Per-process ceilings inherited by an owned Linux producer. */
 export interface LinuxResourceLimits {
@@ -70,36 +69,20 @@ export const readLinuxResourceLimits = async (
   resourceScope?: ArtifactResourceScope,
 ): Promise<LinuxResourceLimits> => {
   const file = await open("/proc/self/limits", "r");
-  const owner = new OwnedFileHandle(file);
-  let failure: unknown;
-  try {
-    const buffer = Buffer.alloc(16 * 1024);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (bytesRead === buffer.length)
-      throw new Error("Inherited Linux limits exceed the report budget.");
-    return clampLinuxResourceLimits(
-      configured,
-      buffer.subarray(0, bytesRead).toString("utf8"),
-    );
-  } catch (cause: unknown) {
-    failure = cause;
-    throw cause;
-  } finally {
-    if (resourceScope === undefined) await file.close();
-    else {
-      const cleaned = await resourceScope.release({
-        kind: "file-handle",
-        resource: "/proc/self/limits",
-        handle: owner,
-      });
-      if (cleaned.kind === "failed")
-        throw ArtifactReaderFailure.withCleanup(
-          failure ?? cleaned.cause,
-          ArtifactReaderFailure.cleanupObservation(
-            cleaned.cause,
-            "/proc/self/limits",
-          ),
-        );
-    }
-  }
+  return withArtifactFileHandle(
+    "/proc/self/limits",
+    file,
+    resourceScope,
+    undefined,
+    async (handle) => {
+      const buffer = Buffer.alloc(16 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead === buffer.length)
+        throw new Error("Inherited Linux limits exceed the report budget.");
+      return clampLinuxResourceLimits(
+        configured,
+        buffer.subarray(0, bytesRead).toString("utf8"),
+      );
+    },
+  );
 };

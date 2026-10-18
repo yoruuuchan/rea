@@ -63,9 +63,9 @@ it.each(expressionWrappers)(
       ]),
     ).toEqual([
       ["setting", "candidate"],
-      ["/api/header-shaped", null],
-      ["https://api.example.test/config-shaped", null],
-      ["/api/items", null],
+      ["/api/header-shaped", "candidate"],
+      ["https://api.example.test/config-shaped", "candidate"],
+      ["/api/items", "candidate"],
       ["changed-setting", "candidate"],
       ["conditional-setting", "candidate"],
     ]);
@@ -197,7 +197,7 @@ it("retains endpoint observations for exact template and TypeScript member keys"
         ]),
       )
       .toEqual([
-        ["network", "/api/items", "call:client.get", null],
+        ["network", "/api/items", "call:client.get", "candidate"],
         ["network", "/api/telemetry", "call:navigator.sendBeacon", null],
         ["network", "setting", "call:client.get", "candidate"],
       ]);

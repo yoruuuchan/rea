@@ -1,5 +1,6 @@
 import { deflateSync } from "node:zlib";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { toolContract } from "../../src/contracts/toolContracts.js";
@@ -103,3 +104,69 @@ cliTest("reports malformed zlib as invalid input", async ({ cli }) => {
     details: { operation: "inspect_rust_binary" },
   });
 });
+
+cliTest(
+  "releases a failed Rust descriptor close before projecting the CLI failure",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-rust-cli-close-");
+    const path = join(root, "sample.elf");
+    const marker = join(root, "close-events.json");
+    const preload = join(root, "deny-first-close.mjs");
+    const bytes = createRustImage({ format: "elf" });
+    await writeFile(path, bytes);
+    await writeFile(
+      preload,
+      `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const open = fs.promises.open;
+    const events = [];
+    let denied = false;
+    let opened = 0;
+    fs.promises.open = async (...args) => {
+      const file = await open(...args);
+      if (String(args[0]) !== process.env.REA_TEST_SELECTED_FILE) return file;
+      const handleId = opened++;
+      events.push({ stage: 'opened', handleId });
+      const close = file.close.bind(file);
+      let releaseObserved = false;
+      file.close = async () => {
+        if (!denied) {
+          denied = true;
+          events.push({ stage: 'denied', handleId, open: file.fd >= 0 });
+          fs.writeFileSync(process.env.REA_TEST_CLOSE_EVENTS, JSON.stringify(events));
+          throw new Error('controlled Rust descriptor close failure');
+        }
+        await close();
+        // Node can re-enter close while notifying its attached read stream.
+        // Record the descriptor's completed transition once per exact handle.
+        if (!releaseObserved) {
+          releaseObserved = true;
+          events.push({ stage: 'released', handleId, fd: file.fd });
+          fs.writeFileSync(process.env.REA_TEST_CLOSE_EVENTS, JSON.stringify(events));
+        }
+      };
+      return file;
+    };
+    syncBuiltinESMExports();
+  `,
+    );
+    const result = await cli.run({
+      arguments: ["inspect-rust-binary", path, "--json"],
+      environment: {
+        NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+        REA_TEST_SELECTED_FILE: path,
+        REA_TEST_CLOSE_EVENTS: marker,
+      },
+    });
+    expect(result.exitCode, result.stdout + result.stderr).toBe(1);
+    expect(result.json).toHaveProperty("code");
+    expect(result.json).not.toMatchObject({ code: "cleanup_incomplete" });
+    expect(JSON.parse(await readFile(marker, "utf8"))).toEqual([
+      { stage: "opened", handleId: 0 },
+      { stage: "denied", handleId: 0, open: true },
+      { stage: "released", handleId: 0, fd: -1 },
+    ]);
+    expect(await readFile(path)).toEqual(bytes);
+  },
+);

@@ -6,12 +6,14 @@ import {
   effectiveClientServer,
   type ClientConfigurationDocument,
 } from "./ClientConfigurationDocument.js";
-import { access } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
+import { err, ok, type Result } from "../domain/result.js";
 import { isAbsolute } from "node:path";
 
 import { z } from "zod";
 import { valid } from "semver";
 
+import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 import {
@@ -118,7 +120,9 @@ export const readClientRegistrationStatuses = async (
     await readClientRegistrationInspections(home, currentCommandPath, options)
   ).map(({ status }) => status);
 
-/** Parse effective registrations and their client-specific activation once. */
+/** Parse effective registrations and their client-specific activation once.
+ * A supplied scope retains failed cleanup; otherwise transfer its exact failure.
+ */
 export const readClientRegistrationInspections = async (
   home: string,
   currentCommandPath: string | undefined = CURRENT_ENTRYPOINT_PATH,
@@ -146,7 +150,18 @@ export const readClientRegistrationInspections = async (
       });
       continue;
     }
-    if (!(await clientEvidencePresent(client))) continue;
+    const presence = await clientEvidencePresent(client);
+    if (!presence.ok) {
+      record({
+        client: client.name,
+        config_path: presence.error.path,
+        command: [],
+        state: "invalid",
+        remediation: presence.error.detail,
+      });
+      continue;
+    }
+    if (!presence.value) continue;
     const manualRemediation = manualRegistrationRemediation(client.name);
     if (client.format === "unsupported") {
       if (manualRemediation !== undefined)
@@ -166,6 +181,11 @@ export const readClientRegistrationInspections = async (
         options.resources,
       );
       if (!configuration.ok) {
+        if (
+          options.resources === undefined &&
+          configuration.error.cleanupFailure !== undefined
+        )
+          throw configuration.error.cleanupFailure;
         record({
           client: client.name,
           config_path: configuration.error.path,
@@ -188,6 +208,11 @@ export const readClientRegistrationInspections = async (
         options.resources,
       );
       if (!policy.ok) {
+        if (
+          options.resources === undefined &&
+          policy.error.cleanupFailure !== undefined
+        )
+          throw policy.error.cleanupFailure;
         record({
           client: client.name,
           config_path: configPath,
@@ -301,6 +326,11 @@ export const readClientRegistrationInspections = async (
         activation,
       );
     } catch (cause: unknown) {
+      if (
+        options.resources === undefined &&
+        cause instanceof RegularFileCleanupFailure
+      )
+        throw cause;
       record(
         unavailableStatus(
           client,
@@ -559,22 +589,28 @@ const unavailableStatus = (
   remediation: remediation(client),
 });
 
-const clientEvidencePresent = async (client: SetupClient): Promise<boolean> => {
-  for (const path of clientEvidencePaths(client))
-    if (await exists(path)) return true;
-  return false;
-};
-
-const exists = async (path: string | undefined): Promise<boolean> => {
-  if (path === undefined) return false;
-  try {
-    await access(path);
-    return true;
-  } catch (cause: unknown) {
-    // best-effort cleanup: optional registration probing; absence means unregistered.
-    void cause;
-    return false;
+/** Entry presence is independent of whether its target can currently be read. */
+const clientEvidencePresent = async (
+  client: SetupClient,
+): Promise<
+  Result<boolean, { readonly path: string; readonly detail: string }>
+> => {
+  let unavailable:
+    | { readonly path: string; readonly detail: string }
+    | undefined;
+  for (const path of clientEvidencePaths(client)) {
+    try {
+      await lstat(path);
+      return ok(true);
+    } catch (cause: unknown) {
+      if (!isMissing(cause))
+        unavailable ??= {
+          path,
+          detail: `Client configuration evidence at ${path} could not be inspected: ${cause instanceof Error ? cause.message : String(cause)}. Check file permissions and rerun rea doctor.`,
+        };
+    }
   }
+  return unavailable === undefined ? ok(false) : err(unavailable);
 };
 
 const isMissing = (cause: unknown): boolean =>

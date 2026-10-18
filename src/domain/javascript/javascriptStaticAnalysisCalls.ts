@@ -1,4 +1,5 @@
 import * as t from "@babel/types";
+import { isIntrinsicMapLookup } from "./javascriptSemanticMapOperations.js";
 import { traverseJavaScriptAst } from "./javascriptSemanticTraversal.js";
 
 import { htmlUrlText, stripQueryAndFragment } from "../artifactPathSyntax.js";
@@ -472,6 +473,33 @@ const inspectEndpointCall = (
   // A local or shadowed function with a familiar network name is not a known
   // browser request API. Do not let the literal fallback turn it into one.
   if (isNetworkRequestSpelling(name)) return;
+  if (first !== undefined && /(?:^|\.)(?:get|delete)$/u.test(name)) {
+    // Apply existing literal exclusions before requesting whole-source alias
+    // mutation facts. Inline receivers and unbound names need no such index.
+    if (
+      endpointArgumentHelper(
+        name,
+        node.arguments,
+        node.callee,
+        context.openReceiverFacts?.get(node.start ?? -1),
+      ) === undefined
+    )
+      return;
+    const mapLookup = isIntrinsicMapLookup(node, bindings);
+    if (mapLookup === true) return;
+    if (mapLookup === undefined) {
+      context.accumulator.pendingNetworkCalls.push({ node, name });
+      return;
+    }
+  }
+  inspectLiteralEndpointCall(node, name, context);
+};
+
+const inspectLiteralEndpointCall = (
+  node: JavaScriptCallLike,
+  name: string,
+  context: FindingContext,
+): void => {
   const receiverFact = context.openReceiverFacts?.get(node.start ?? -1);
   const endpoint = endpointArgumentHelper(
     name,
@@ -531,6 +559,11 @@ export const finishPartialNetworkEndpoints = (
   index: JavaScriptBindingIndex,
 ): void => {
   for (const { node, name } of context.accumulator.pendingNetworkCalls) {
+    if (!isKnownNetworkRequest(node, bindings)) {
+      if (!isIntrinsicMapLookup(node, bindings, index))
+        inspectLiteralEndpointCall(node, name, context);
+      continue;
+    }
     const target = argumentNode(node.arguments[0]);
     if (target === undefined) continue;
     const resolved = resolvedRequestTarget(target, node, bindings, index);

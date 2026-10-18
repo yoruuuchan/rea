@@ -20,6 +20,7 @@ interface IterationSourceValue {
 export interface SemanticIterationSource extends IterationSourceValue {
   readonly kind: "iteration" | "reference-store";
   readonly mutation: t.Node;
+  readonly target?: t.MemberExpression;
   readonly fallbackSources?: readonly IterationSourceValue[];
   readonly requiredSources?: readonly IterationSourceValue[];
 }
@@ -40,6 +41,7 @@ const add = (
   mutation: t.Node,
   guards: SourceGuards,
   kind: SemanticIterationSource["kind"] = "iteration",
+  target?: t.MemberExpression,
 ): void => {
   sources.push({
     kind,
@@ -47,6 +49,7 @@ const add = (
     projection: source.projection,
     mutation,
     ...guards,
+    ...(target === undefined ? {} : { target }),
   });
 };
 const project = (
@@ -95,6 +98,7 @@ const visit = (
         mutation,
         guards,
         "reference-store",
+        pattern,
       );
     return;
   }
