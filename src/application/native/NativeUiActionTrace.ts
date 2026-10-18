@@ -23,6 +23,13 @@ import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 
 type Input = z.output<typeof enhancedInputSchemas.trace_native_ui_action>;
+
+/** Source roles used by execution and route availability. */
+export const NATIVE_UI_ACTION_OPERATIONS = {
+  interfaceBuilder: "decode_interface_builder",
+  nativeSeed: "procedure_address",
+} as const;
+
 /** Build a UI-to-code trace from the active app and selected native provider. */
 export const traceNativeUiAction = async (
   analysis: AnalysisOperationPort,
@@ -31,7 +38,7 @@ export const traceNativeUiAction = async (
 ): EnhancedResult => {
   const [uiExecution, metadataExecution] = await Promise.all([
     analysis.execute(
-      "decode_interface_builder",
+      NATIVE_UI_ACTION_OPERATIONS.interfaceBuilder,
       {
         max_documents: 64,
         max_objects: input.max_nodes,
@@ -65,14 +72,14 @@ export const traceNativeUiAction = async (
     if (!decoded.success)
       return err(
         new AnalysisOutputError(
-          "decode_interface_builder",
+          NATIVE_UI_ACTION_OPERATIONS.interfaceBuilder,
           "artifact provider returned an invalid interface graph",
         ),
       );
     if (decoded.data.target_sha256 !== targetSha256)
       return err(
         new AnalysisOutputError(
-          "decode_interface_builder",
+          NATIVE_UI_ACTION_OPERATIONS.interfaceBuilder,
           "UI and native provider results refer to different target SHA-256 values",
         ),
       );
@@ -123,7 +130,7 @@ export const traceNativeUiAction = async (
   let selected = resolveUiAction(graph, input.action);
   if (selected.nodeId === null && selected.candidates.length === 0) {
     const native = await analysis.execute(
-      "procedure_address",
+      NATIVE_UI_ACTION_OPERATIONS.nativeSeed,
       { procedure: input.action },
       signal === undefined ? {} : { signal },
     );
@@ -139,7 +146,7 @@ export const traceNativeUiAction = async (
       if (!address.success || native.value.subject?.sha256 !== targetSha256)
         return err(
           new AnalysisOutputError(
-            "procedure_address",
+            NATIVE_UI_ACTION_OPERATIONS.nativeSeed,
             "Native seed lacks a validated address or matching target identity",
           ),
         );

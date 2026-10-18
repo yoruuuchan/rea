@@ -216,6 +216,17 @@ sites remain distinct. A static route does not establish runtime reachability.
 Swift/closure dispatch requires resolved static references; unavailable ABI
 forms remain unknown.
 
+Session discovery describes two automatic source routes for this trace:
+`authored_ui_dispatch` needs Interface Builder decoding and dispatch metadata;
+`native_seed_call_trace` needs native address resolution, dispatch metadata and
+a call reader. Metadata can come from direct inspection or `list_names`;
+the call reader can supply typed `procedure_references` or inferred
+`procedure_callees`. An authored UI-to-handler edge remains useful without
+call expansion, and native-seed tracing can proceed without UI decoding.
+These routes add no request option or default mode, so discovery omits
+`default_mode_available`. Availability describes source prerequisites;
+the result reports the query's actual matches, coverage and failures.
+
 `trace_native_values` / `rea trace-native-values <binary> <procedure> --provider
  ghidra` composes high-p-code def-use graphs across statically resolved calls.
 Logical CALL arguments bind to recovered parameter ordinals; recovered RETURN

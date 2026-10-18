@@ -11,6 +11,12 @@ import {
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import type { SourceLimitation } from "../SourceLimitations.js";
 
+/** Preferred typed observations and the untyped fallback share one owner. */
+export const NATIVE_CALL_ROUTE_SOURCES = {
+  references: "procedure_references",
+  callees: "procedure_callees",
+} as const;
+
 const limitationsFrom = (
   operation: SourceLimitation["operation"],
   provider: ProviderIdentity,
@@ -71,7 +77,7 @@ export const readNativeCallRoutes = async (
     ...(selectorOrigin === undefined ? {} : { selectorOrigin }),
   };
   const execution = await analysis.execute(
-    "procedure_references",
+    NATIVE_CALL_ROUTE_SOURCES.references,
     { procedure, direction: "outgoing" },
     options,
   );
@@ -83,7 +89,7 @@ export const readNativeCallRoutes = async (
   let limitations: SourceLimitation[] = [];
   if (execution.ok) {
     limitations = limitationsFrom(
-      "procedure_references",
+      NATIVE_CALL_ROUTE_SOURCES.references,
       execution.value.provider,
       execution.value.limitations,
     );
@@ -92,7 +98,7 @@ export const readNativeCallRoutes = async (
       return {
         ok: false as const,
         error: new AnalysisOutputError(
-          "procedure_references",
+          NATIVE_CALL_ROUTE_SOURCES.references,
           "Invalid typed call references",
         ),
         unknowns,
@@ -128,7 +134,7 @@ export const readNativeCallRoutes = async (
       limitations,
     };
   const callees = await analysis.execute(
-    "procedure_callees",
+    NATIVE_CALL_ROUTE_SOURCES.callees,
     { procedure },
     options,
   );
@@ -137,7 +143,7 @@ export const readNativeCallRoutes = async (
   limitations = [
     ...limitations,
     ...limitationsFrom(
-      "procedure_callees",
+      NATIVE_CALL_ROUTE_SOURCES.callees,
       callees.value.provider,
       callees.value.limitations,
     ),
