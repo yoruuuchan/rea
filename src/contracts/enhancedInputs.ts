@@ -5,6 +5,14 @@ const traceLiteralInputSchema = z.strictObject({
   case_sensitive: z.boolean().default(false),
 });
 
+export const DEFAULT_CALL_RELATIONSHIP_DIRECTION = "forward";
+const callRelationshipDirectionSchema = z
+  .enum(["forward", "backward"])
+  .default(DEFAULT_CALL_RELATIONSHIP_DIRECTION);
+export type CallRelationshipDirection = z.output<
+  typeof callRelationshipDirectionSchema
+>;
+
 /** Input schemas shared by MCP registration and enhanced application dispatch. */
 export const enhancedInputSchemas = {
   trace_native_values: nativeValueTraceInputSchema,
@@ -24,7 +32,7 @@ export const enhancedInputSchemas = {
       .describe(
         "A procedure symbol or address to resolve to its canonical entry",
       ),
-    direction: z.enum(["forward", "backward"]).default("forward"),
+    direction: callRelationshipDirectionSchema,
   }),
   analyze_swift_types: z.strictObject({
     category: z
@@ -55,7 +63,7 @@ export const enhancedInputSchemas = {
       .string()
       .describe("An optional destination procedure symbol or address")
       .optional(),
-    direction: z.enum(["forward", "backward"]).default("forward"),
+    direction: callRelationshipDirectionSchema,
   }),
   trace_native_ui_action: z.strictObject({
     action: z

@@ -266,6 +266,60 @@ describe("LLDB completed trace retention through finalization", () => {
 });
 
 describe("LLDB failure retention through the production tracer", () => {
+  it("treats an invalid UTF-8 tracer result as unavailable and retains journal facts", async () => {
+    let configPath: string | undefined;
+    const tracer = new LldbCallTracer(
+      {},
+      async (_executable, arguments_) => {
+        const resolved = await configFromArguments(arguments_);
+        configPath = resolved.configPath;
+        await writeFile(
+          resolved.config.observation_path,
+          `${JSON.stringify({ kind: "event", event: EVENT })}\n`,
+        );
+        await writeFile(
+          resolved.config.result_path,
+          Buffer.concat([
+            Buffer.from('{"status":"tracer-error","error":"before'),
+            Buffer.from([0xff]),
+            Buffer.from('after"}'),
+          ]),
+        );
+        return {
+          kind: "exited",
+          targetLaunched: false,
+          exitCode: 1,
+          output: "invalid UTF-8 tracer result",
+          targetIdentity: undefined,
+          cleanupFailure: undefined,
+        };
+      },
+      async () => ok(fakeTool),
+    );
+
+    const result = await tracer.trace(request);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected unavailable tracer result");
+    expect(result.error).toMatchObject({
+      _tag: "ProviderAdapterError",
+      diagnostics: { reason: "LLDB exited without a usable tracer result" },
+      partialObservation: { events: [EVENT] },
+    });
+    expect(result.error.cause).toMatchObject({
+      code: "ERR_ENCODING_INVALID_ENCODED_DATA",
+    });
+    expect(result.error.secondaryFailures).toHaveLength(1);
+    expect(result.error.secondaryFailures[0]?.cause).toBeInstanceOf(
+      AggregateError,
+    );
+    if (configPath === undefined)
+      throw new Error("LLDB fixture did not launch");
+    await expect(access(dirname(configPath))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("waits for an active trace before client close removes its runtime root", async () => {
     const launchGate = createDeferred<void>();
     const launchStarted = createDeferred<void>();
@@ -692,7 +746,106 @@ const readbackPath = (
     pid: config.pid_path,
   })[selected];
 
-const readbackCases = [
+const controlReadbackDescriptor = async (options: {
+  readonly path: string;
+  readonly selected: "journal" | "stdout" | "stderr" | "result" | "pid";
+  readonly readFails: boolean;
+  readonly readFailsAfterPrefix: boolean;
+  readonly cancels: boolean;
+  readonly controller: AbortController;
+  readonly reason: unknown;
+  readonly physicalFailure: Error;
+}) => {
+  const selectedStat = await stat(options.path);
+  const probe = await open(options.path, "r");
+  const prototype = Object.getPrototypeOf(probe) as FileHandle;
+  await probe.close();
+  let captured: FileHandle | undefined;
+  let originalClose: (() => Promise<void>) | undefined;
+  let allowClose = false;
+  let partialReadAttempted = false;
+  const arm = async (file: FileHandle) => {
+    if (captured !== undefined) return;
+    const metadata = await file.stat();
+    if (metadata.ino !== selectedStat.ino || metadata.dev !== selectedStat.dev)
+      return;
+    captured = file;
+    originalClose = file.close.bind(file);
+    file.close = async () => {
+      if (!allowClose) {
+        if (options.cancels) options.controller.abort(options.reason);
+        throw new Error("controlled selected descriptor cleanup failure");
+      }
+      await originalClose!();
+    };
+  };
+  const readMethod = prototype.read;
+  const readFileMethod = prototype.readFile;
+  const read = vi.spyOn(prototype, "read").mockImplementation(async function (
+    this: FileHandle,
+    ...parameters: Parameters<FileHandle["read"]>
+  ) {
+    await arm(this);
+    if (options.readFails && captured === this) throw options.physicalFailure;
+    if (options.readFailsAfterPrefix && captured === this) {
+      if (partialReadAttempted) throw options.physicalFailure;
+      partialReadAttempted = true;
+      const [buffer, offset, length, position] = parameters as unknown as [
+        Buffer,
+        number,
+        number,
+        number,
+      ];
+      const prefixLength =
+        options.selected === "journal"
+          ? Buffer.byteLength(
+              JSON.stringify({ kind: "event", event: EVENT }) + "\n",
+            )
+          : 4;
+      return Reflect.apply(readMethod, this, [
+        buffer,
+        offset,
+        Math.min(prefixLength, length),
+        position,
+      ]);
+    }
+    return Reflect.apply(readMethod, this, parameters);
+  });
+  const readFile = vi
+    .spyOn(prototype, "readFile")
+    .mockImplementation(async function (
+      this: FileHandle,
+      ...parameters: Parameters<FileHandle["readFile"]>
+    ) {
+      await arm(this);
+      return Reflect.apply(readFileMethod, this, parameters);
+    });
+  return {
+    get captured() {
+      return captured;
+    },
+    allowClose() {
+      allowClose = true;
+    },
+    restore() {
+      read.mockRestore();
+      readFile.mockRestore();
+    },
+    closeCaptured() {
+      return originalClose?.();
+    },
+  };
+};
+
+interface ReadbackCase {
+  readonly selected: "journal" | "stdout" | "stderr" | "result" | "pid";
+  readonly readFails: boolean;
+  readonly readFailsAfterPrefix?: boolean;
+  readonly rootFails: boolean;
+  readonly cancels: boolean;
+}
+
+const readbackCases: readonly ReadbackCase[] = [
   ...(["journal", "stdout", "stderr", "result", "pid"] as const).map(
     (selected) => ({
       selected,
@@ -704,8 +857,23 @@ const readbackCases = [
   {
     selected: "stdout" as const,
     readFails: true,
+    readFailsAfterPrefix: false,
     rootFails: false,
     cancels: false,
+  },
+  {
+    selected: "stdout" as const,
+    readFails: false,
+    readFailsAfterPrefix: true,
+    rootFails: false,
+    cancels: false,
+  },
+  {
+    selected: "journal" as const,
+    readFails: false,
+    readFailsAfterPrefix: true,
+    rootFails: false,
+    cancels: true,
   },
   {
     selected: "stdout" as const,
@@ -720,16 +888,21 @@ const readbackCases = [
     cancels: true,
   },
 ];
-for (const { selected, readFails, rootFails, cancels } of readbackCases)
-  it(`retains ${selected} readback cleanup and sibling facts (read fails: ${readFails}, root fails: ${rootFails})`, async () => {
+for (const {
+  selected,
+  readFails,
+  readFailsAfterPrefix = false,
+  rootFails,
+  cancels,
+} of readbackCases)
+  it(`retains ${selected} readback cleanup and sibling facts (read fails: ${readFails || readFailsAfterPrefix}, root fails: ${rootFails})`, async () => {
     const controller = new AbortController();
     const reason = { caller: "readback-final-close" };
-    let allowClose = false;
     let launches = 0;
     let runtime: string | undefined;
-    let captured: FileHandle | undefined;
-    let originalClose: (() => Promise<void>) | undefined;
-    let restore: (() => void) | undefined;
+    let descriptorControl:
+      | Awaited<ReturnType<typeof controlReadbackDescriptor>>
+      | undefined;
     let restoreRoot: (() => void) | undefined;
     const physicalFailure = new Error("controlled capture read failure");
     const tracer = new LldbCallTracer(
@@ -739,54 +912,20 @@ for (const { selected, readFails, rootFails, cancels } of readbackCases)
         const { config } = await configFromArguments(args);
         runtime = dirname(config.result_path);
         await writeReadbackFixture(config, "stdout fact", "stderr fact");
-        const selectedPath = readbackPath(config, selected);
-        const selectedStat = await stat(selectedPath);
-        const probe = await open(selectedPath, "r");
-        const prototype = Object.getPrototypeOf(probe) as FileHandle;
-        await probe.close();
-        const arm = async (file: FileHandle) => {
-          if (captured !== undefined) return;
-          const metadata = await file.stat();
-          if (
-            metadata.ino !== selectedStat.ino ||
-            metadata.dev !== selectedStat.dev
-          )
-            return;
-          captured = file;
-          originalClose = file.close.bind(file);
-          file.close = async () => {
-            if (!allowClose) {
-              if (cancels) controller.abort(reason);
-              throw new Error("controlled selected descriptor cleanup failure");
-            }
-            await originalClose!();
-          };
-        };
-        const readMethod = prototype.read;
-        const readFileMethod = prototype.readFile;
-        const read = vi
-          .spyOn(prototype, "read")
-          .mockImplementation(async function (
-            this: FileHandle,
-            ...parameters: Parameters<FileHandle["read"]>
-          ) {
-            await arm(this);
-            if (readFails && captured === this) throw physicalFailure;
-            return Reflect.apply(readMethod, this, parameters);
-          });
-        const readFile = vi
-          .spyOn(prototype, "readFile")
-          .mockImplementation(async function (
-            this: FileHandle,
-            ...parameters: Parameters<FileHandle["readFile"]>
-          ) {
-            await arm(this);
-            return Reflect.apply(readFileMethod, this, parameters);
-          });
-        restore = () => {
-          read.mockRestore();
-          readFile.mockRestore();
-        };
+        const journalRow =
+          JSON.stringify({ kind: "event", event: EVENT }) + "\n";
+        if (selected === "journal" && readFailsAfterPrefix)
+          await writeFile(config.observation_path, journalRow + '{"kind":');
+        descriptorControl = await controlReadbackDescriptor({
+          path: readbackPath(config, selected),
+          selected,
+          readFails,
+          readFailsAfterPrefix,
+          cancels,
+          controller,
+          reason,
+          physicalFailure,
+        });
         return selected === "journal"
           ? {
               kind: "cancelled",
@@ -806,11 +945,11 @@ for (const { selected, readFails, rootFails, cancels } of readbackCases)
       async () => ok(fakeTool),
     );
     onTestFinished(async () => {
-      restore?.();
+      descriptorControl?.restore();
       restoreRoot?.();
-      allowClose = true;
+      descriptorControl?.allowClose();
       await tracer.close();
-      await originalClose?.();
+      await descriptorControl?.closeCaptured();
     });
     const result = await tracer.trace(request, controller.signal);
     expect(result.ok).toBe(false);
@@ -833,15 +972,30 @@ for (const { selected, readFails, rootFails, cancels } of readbackCases)
         kind: "failed",
         cause: physicalFailure,
       });
+    } else if (readFailsAfterPrefix && selected === "stdout") {
+      expect(partial.process.stdout).toMatchObject({
+        text: "stdo",
+        truncated: true,
+        complete: false,
+      });
+      const primary = result.error.cleanupPrimary;
+      if (!(primary?.cause instanceof AggregateError))
+        throw new Error("Expected retained capture read failure");
+      expect(primary.cause.errors).toContain(physicalFailure);
+    } else if (readFailsAfterPrefix) {
+      const primary = result.error.cleanupPrimary ?? result.error;
+      expect(primary.cause).toBe(reason);
+      expect(primary.secondaryFailures).toHaveLength(1);
+      expect(primary.secondaryFailures[0]?.cause).toBe(physicalFailure);
     } else expect(partial.process.stdout?.text).toBe("stdout fact");
     expect(partial.process.stderr?.text).toBe("stderr fact");
-    expect(captured?.fd).toBeGreaterThanOrEqual(0);
+    expect(descriptorControl?.captured?.fd).toBeGreaterThanOrEqual(0);
     if (runtime === undefined) throw new Error("Missing owned runtime");
     await expect(access(runtime)).resolves.toBeUndefined();
     const replacement = await tracer.trace(request);
     expect(replacement.ok).toBe(false);
     expect(launches).toBe(1);
-    allowClose = true;
+    descriptorControl?.allowClose();
     if (rootFails) {
       const close = vi
         .spyOn(PrivateRuntimeRoot.prototype, "close")
@@ -849,7 +1003,7 @@ for (const { selected, readFails, rootFails, cancels } of readbackCases)
       restoreRoot = () => close.mockRestore();
       const rootRetry = await tracer.close();
       expect(rootRetry.ok).toBe(false);
-      expect(captured?.fd).toBe(-1);
+      expect(descriptorControl?.captured?.fd).toBe(-1);
       expect(result.error.cleanupIncomplete).toBe(true);
       expect(result.error.cleanupResources).toEqual([runtime]);
       expect((await tracer.close()).ok).toBe(true);

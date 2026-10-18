@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 
 import { projectPlistValue } from "./apple/plistValue.js";
-import { UnknownPlistReal } from "./apple/plistNumbers.js";
+import { UnknownPlistScalar } from "./apple/unknownPlistScalar.js";
 import { parseXmlPropertyList } from "./propertyListKeys.js";
 
 it.each([
@@ -55,8 +55,10 @@ it("keeps processing instructions inside numeric content subject to scalar rules
     const parsed = parseXmlPropertyList(
       `<plist><integer>4${markup}2</integer></plist>`,
     );
-    expect(parsed.value).toBe(4);
-    expect(parsed.numberLiterals.incomplete).toBe(true);
+    expect(parsed.value).toEqual(
+      new UnknownPlistScalar("integer", `4${markup}2`, "unsupported-markup"),
+    );
+    expect(parsed.numberLiterals.incomplete).toBe(false);
   }
 });
 
@@ -77,8 +79,7 @@ it.each([
   ["0X2a", 42],
   ["+0x2A", 42],
   ["-0x2A", -42],
-  ["&#48;x2A", 42],
-  ["\n0x2A\n", 42],
+  ["\n0x2A", 42],
   ["42", 42],
 ])(
   "decodes exact integer text %s at the shared boundary",
@@ -91,6 +92,20 @@ it.each([
     expect(parsed.numberLiterals.unsafeIntegerLiterals).toBe(0);
   },
 );
+
+it.each([
+  ["AQID", [1, 2, 3]],
+  [" A Q I D\n", [1, 2, 3]],
+  ["AQI", []],
+  ["AQ!ID", [1, 2, 3]],
+  ["AQ==", [1]],
+  ["AQI=", [1, 2]],
+  ["AQ= =\n", [1]],
+  ["", []],
+])("decodes data text %j as CFPropertyList does", (text, expected) => {
+  const parsed = parseXmlPropertyList(`<plist><data>${text}</data></plist>`);
+  expect(parsed.value).toEqual(Uint8Array.from(expected));
+});
 
 it("collects source integers and CDATA reals before rounding and duplicate assignment", () => {
   const parsed = parseXmlPropertyList(
@@ -115,12 +130,24 @@ it("does not invent numeric facts from ignored scalar markup", () => {
   expect(parsed.numberLiterals.incomplete).toBe(false);
 });
 
-it("retains partial numeric values with explicit incomplete metadata for unsupported markup", () => {
+it("keeps unsupported numeric markup out of numeric source facts", () => {
   const parsed = parseXmlPropertyList(
     "<plist><array><integer>0x2A<!-- unsupported --></integer><real>1<string>ignored</string>.25</real></array></plist>",
   );
-  expect(parsed.value).toEqual([0, 1.25]);
-  expect(parsed.numberLiterals.incomplete).toBe(true);
+  expect(parsed.value).toEqual([
+    new UnknownPlistScalar(
+      "integer",
+      "0x2A<!-- unsupported -->",
+      "unsupported-markup",
+    ),
+    new UnknownPlistScalar(
+      "real",
+      "1<string>ignored</string>.25",
+      "unsupported-markup",
+    ),
+  ]);
+  expect(parsed.numberLiterals.incomplete).toBe(false);
+  expect(parsed.numberLiterals.reals.size).toBe(0);
 });
 
 it("decodes a signed integer zero as zero and a negative-zero real with its sign", () => {
@@ -135,7 +162,16 @@ it("decodes a signed integer zero as zero and a negative-zero real with its sign
     true,
     false,
   ]);
-  expect(parsed.value).toEqual([0, 0, -0, 0]);
+  expect(parsed.value).toEqual([
+    0,
+    new UnknownPlistScalar(
+      "integer",
+      "-0<!-- partial -->",
+      "unsupported-markup",
+    ),
+    -0,
+    0,
+  ]);
 });
 
 it("interprets failures in omitted entries before reporting partial evidence", () => {
@@ -178,38 +214,106 @@ it.each([
   },
 );
 
-it("keeps XML numeric overflow and unreadable text explicitly unknown", () => {
-  const parsed = parseXmlPropertyList(
-    "<plist><array><real>1e999</real><real>-1e999</real><real> nan </real><real>-nan</real><real>infinite</real></array></plist>",
-  );
-  expect(parsed.value).toEqual(
-    Array.from({ length: 5 }, () => new UnknownPlistReal()),
-  );
-  expect(parsed.numberLiterals.incomplete).toBe(false);
-});
-
-it("does not infer a spelled real from incomplete numeric markup", () => {
-  const parsed = parseXmlPropertyList(
-    "<plist><real>-inf<!-- unsupported --></real></plist>",
-  );
-  expect(parsed.value).toBeInstanceOf(UnknownPlistReal);
-  expect(parsed.numberLiterals.incomplete).toBe(true);
-});
+it.each([
+  ["integer", "unreadable", "invalid-literal"],
+  ["integer", `${"9".repeat(400)}invalid`, "invalid-literal"],
+  ["integer", "&#48;x2A", "invalid-literal"],
+  ["integer", "42\n", "invalid-literal"],
+  ["integer", "", "invalid-literal"],
+  ["real", "", "invalid-literal"],
+  ["real", "1e999", "unrepresentable"],
+  ["real", "-1e999", "unrepresentable"],
+  ["real", " nan ", "invalid-literal"],
+  ["real", "-nan", "invalid-literal"],
+  ["real", "infinite", "invalid-literal"],
+  ["real", "Infinitysuffix", "invalid-literal"],
+  ["real", "nan<!-- unsupported -->", "unsupported-markup"],
+  ["date", "2026-10-17T12:00:00+02:00", "invalid-literal"],
+  ["date", "2026-10-17T12:00:00.5Z", "invalid-literal"],
+  ["date", "2026-10-17T12:00:00", "invalid-literal"],
+  ["date", "2026-13-17T12:00:00Z", "unrepresentable"],
+  ["date", "2026-02-31T12:00:00Z", "unrepresentable"],
+  ["date", "<![CDATA[2026-10-17T12:00:00Z]]>", "unsupported-markup"],
+  ["true", "x", "invalid-literal"],
+  ["false", " ", "invalid-literal"],
+  ["true", "<!-- empty -->", "unsupported-markup"],
+] as const)(
+  "keeps unresolved <%s> %j identity explicit",
+  (element, literal, reason) => {
+    const parsed = parseXmlPropertyList(
+      `<plist><${element}>${literal}</${element}></plist>`,
+    );
+    expect(parsed.value).toEqual(
+      new UnknownPlistScalar(element, literal, reason),
+    );
+    const projected = projectPlistValue(parsed.value);
+    expect(projected.value).toEqual({
+      $plist_type: "unknown",
+      element,
+      literal,
+      reason,
+    });
+    expect(projected.unknownScalarCount).toBe(1);
+    expect(projected.nonFiniteRealCount).toBe(0);
+    expect(parsed.numberLiterals.incomplete).toBe(false);
+  },
+);
 
 it.each([
-  ["integer", "unreadable"],
-  ["integer", `${"9".repeat(400)}invalid`],
-  ["real", "1e999"],
-  ["real", "-1e999"],
-  ["real", "Infinitysuffix"],
-  ["real", "nan<!-- unsupported -->"],
-])("keeps unresolved <%s> numeric identity explicit", (tag, text) => {
+  "4<!-- </integer> -->2",
+  "4<?rea </integer> ?>2",
+  "4<![CDATA[</integer>]]>2",
+  '4<integer note=">">2<integer/></integer>3',
+])(
+  "retains complete source markup %j without treating apparent closing tags as structure",
+  (literal) => {
+    expect(
+      parseXmlPropertyList(`<plist><integer>${literal}</integer></plist>`)
+        .value,
+    ).toEqual(new UnknownPlistScalar("integer", literal, "unsupported-markup"));
+  },
+);
+
+it("binds raw literals to their nodes across normalized line endings and UTF-16 columns", () => {
   const parsed = parseXmlPropertyList(
-    `<plist><${tag}>${text}</${tag}></plist>`,
+    '<plist><array><string>💡</string>\r\n<integer note=">">42\r\nabc</integer>\u0085<date>2026-10-17T12:00:00&#90;</date>\u2028<false>\r\n</false></array></plist>',
   );
-  expect(parsed.value).toBeInstanceOf(UnknownPlistReal);
-  const projected = projectPlistValue(parsed.value);
-  expect(projected.value).toEqual({ $plist_type: "real", value: null });
-  expect(projected.unknownRealCount).toBe(1);
-  expect(projected.nonFiniteRealCount).toBe(0);
+  expect(parsed.value).toEqual([
+    "💡",
+    new UnknownPlistScalar("integer", "42\r\nabc", "invalid-literal"),
+    new UnknownPlistScalar(
+      "date",
+      "2026-10-17T12:00:00&#90;",
+      "invalid-literal",
+    ),
+    new UnknownPlistScalar("false", "\r\n", "invalid-literal"),
+  ]);
+});
+
+it.each(["\u0085", "\u2028", "\u2029"])(
+  "does not normalize unsupported leading whitespace %j into an observed scalar",
+  (prefix) => {
+    const parsed = parseXmlPropertyList(
+      `<plist><array><integer>${prefix}42</integer><real>${prefix}1.5</real></array></plist>`,
+    );
+    expect(parsed.value).toEqual([
+      new UnknownPlistScalar("integer", `${prefix}42`, "invalid-literal"),
+      prefix === "\u0085"
+        ? 1.5
+        : new UnknownPlistScalar("real", `${prefix}1.5`, "invalid-literal"),
+    ]);
+  },
+);
+
+it("expands real references outside CDATA without changing scalar source policy", () => {
+  expect(
+    parseXmlPropertyList(
+      "<plist><array><real>&#49;<![CDATA[.5]]></real><real><![CDATA[&#49;.5]]></real><true/><false></false></array></plist>",
+    ).value,
+  ).toEqual([
+    1.5,
+    new UnknownPlistScalar("real", "<![CDATA[&#49;.5]]>", "invalid-literal"),
+    true,
+    false,
+  ]);
 });

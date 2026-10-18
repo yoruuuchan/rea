@@ -355,6 +355,17 @@ checking that a client received the full catalog. An operation absent from all
 groups is missing from the complete inventory; it is not an implicit
 unavailable entry.
 
+`get_call_graph` and `trace_call_path` report `forward` and `backward` modes.
+Each requires `procedure_address` plus `procedure_callees` or `procedure_callers`,
+respectively. The tool is available when either traversal mode is supported;
+`default_mode_available` describes the default forward direction. Read each mode's
+missing operations and remediation before selecting a direction. These facts
+describe traversal prerequisites, not relationship completeness or a guarantee
+for every selector. A trace whose start and goal resolve to the same address can
+finish without reading relationships, even when neither traversal mode is
+available. Discovery does not block that direct invocation or replace its typed
+partial/error outcomes.
+
 The `effects` and `annotations` arrays list the true members of their fixed
 vocabularies. A known member omitted from either array is false. This applies
 only to these closed flag sets; it does not make an omitted tool, provider, mode,

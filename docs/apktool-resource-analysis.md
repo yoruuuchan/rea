@@ -72,8 +72,10 @@ Equivalent MCP methods are `inspect_apktool_client` and
 primary `locale` (project `res/values-<locale>/strings.xml` instead of the default
 table), `locales` (repeatable array of additional localized string tables to project
 from the same single decode pass), and `include_strings` (default true). Regional locales such as `pt-BR`
-select Android's `values-pt-rBR`; Android qualifiers such as `pt-rBR` and
-`b+zh+Hans+CN` may also be supplied directly.
+select Android's `values-pt-rBR`. A three-digit region such as `es-419`
+selects `values-b+es+419`; `es-r419` is rejected because Android's legacy
+`-r` form requires a two-letter region. Android qualifiers such as `pt-rBR`
+and `b+zh+Hans+CN` may also be supplied directly.
 
 Set `string_tables_only: true` (CLI `--string-tables-only`) to return string
 entries only inside `string_tables`, including when selecting a single table.

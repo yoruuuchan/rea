@@ -55,6 +55,9 @@ const OWNER_ADMITTED_LOCALES = [
   "pt-rBR",
   "zh-rCN",
   "en-419",
+  "es-419",
+  "en-001",
+  "ar-015",
   "b+zh+Hans+CN",
   "b+sr+Latn+RS+REVISED",
   "b+fil+Latn+419+ABCDEFGH",
@@ -127,18 +130,25 @@ it("forwards repeated --locales to project multiple localized tables", async () 
   ]);
 });
 
-it("still refuses a locale the apktool input owner refuses", async () => {
-  const result = await invoke([
-    "decode-android-resources",
-    "/targets/app.apk",
-    "--locale",
-    "not a locale",
-    "--json",
-  ]);
+it.each(["not a locale", "en-r419", "es-r419"])(
+  "refuses the invalid locale %s before invoking Apktool",
+  async (locale) => {
+    const result = await invoke([
+      "decode-android-resources",
+      "/targets/app.apk",
+      "--locale",
+      locale,
+      "--json",
+    ]);
 
-  expect(result.exitCode).not.toBe(0);
-  expect(result.requests).toEqual([]);
-});
+    expect(result.exitCode).not.toBe(0);
+    expect(result.requests).toEqual([]);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: [expect.objectContaining({ path: "locale" })],
+    });
+  },
+);
 
 it("forwards --no-strings with --locale preserving caller options", async () => {
   const result = await invoke([

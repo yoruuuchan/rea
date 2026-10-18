@@ -64,9 +64,9 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import {
   projectPlistValue,
   nonFiniteRealLimitation,
-  unknownRealLimitation,
   negativeZeroRealLimitation,
   unknownDateLimitation,
+  unknownScalarLimitation,
 } from "../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../domain/apple/plistNumbers.js";
 import type { NativeUiObservationResult } from "../domain/native/nativeUiObservation.js";
@@ -118,6 +118,7 @@ import {
   createNativeUiHelperRuntime,
   type NativeUiHelperRuntime,
 } from "./NativeUiHelperRuntime.js";
+import { NativeUiInterruptionControl } from "./NativeUiInterruptionControl.js";
 
 type SignatureRuntimeRootFactory = () => Promise<
   Pick<PrivateRuntimeRoot, "path" | "close">
@@ -362,57 +363,57 @@ class NativeMacOSClient implements AnalysisClient {
           this.#nativeUiCleanupFailure(earlierCleanupFailures, operation),
         );
       const runtime = createNativeUiHelperRuntime(this.environment);
-      const observationSignal =
-        signal === undefined
-          ? runtime.signal
-          : AbortSignal.any([signal, runtime.signal]);
-      this.#pendingNativeUiRuntimes.add(runtime);
-      let result: Awaited<ReturnType<typeof observeNativeUi>>;
+      const interruption = new NativeUiInterruptionControl(
+        signal,
+        runtime.signal,
+      );
       try {
-        result = await observeNativeUi(this.target, operation, parameters, {
-          environment: this.environment,
-          signal: observationSignal,
-          runtime,
-        });
-      } catch (cause: unknown) {
-        result = err(
-          cause instanceof AnalysisError
-            ? cause
-            : new ProviderAdapterError(IDENTITY.id, operation, { cause }),
-        );
+        this.#pendingNativeUiRuntimes.add(runtime);
+        let result: Awaited<ReturnType<typeof observeNativeUi>>;
+        try {
+          result = await observeNativeUi(this.target, operation, parameters, {
+            environment: this.environment,
+            runtime,
+            interruption,
+          });
+        } catch (cause: unknown) {
+          result = err(
+            cause instanceof AnalysisError
+              ? cause
+              : new ProviderAdapterError(IDENTITY.id, operation, { cause }),
+          );
+        }
+        try {
+          await runtime.close();
+          this.#pendingNativeUiRuntimes.delete(runtime);
+        } catch (cause: unknown) {
+          result = finishNativeUiObservation(result, operation, interruption);
+          const cleanup = this.#nativeUiCleanupFailure(
+            [{ runtime, cause }],
+            operation,
+            result.ok ? result.value : undefined,
+          );
+          return err(
+            result.ok
+              ? cleanup
+              : analysisErrorWithCleanupFailure(
+                  result.error,
+                  cleanup,
+                  operation,
+                ).bindCleanupDependencies([result.error, cleanup]),
+          );
+        }
+        result = finishNativeUiObservation(result, operation, interruption);
+        return result.ok
+          ? ok(
+              createAnalysisExecution(result.value, IDENTITY, {
+                limitations: result.value.limitations,
+              }),
+            )
+          : result;
+      } finally {
+        interruption.dispose();
       }
-      try {
-        await runtime.close();
-        this.#pendingNativeUiRuntimes.delete(runtime);
-      } catch (cause: unknown) {
-        result = finishNativeUiObservation(
-          result,
-          operation,
-          observationSignal,
-        );
-        const cleanup = this.#nativeUiCleanupFailure(
-          [{ runtime, cause }],
-          operation,
-          result.ok ? result.value : undefined,
-        );
-        return err(
-          result.ok
-            ? cleanup
-            : analysisErrorWithCleanupFailure(
-                result.error,
-                cleanup,
-                operation,
-              ).bindCleanupDependencies([result.error, cleanup]),
-        );
-      }
-      result = finishNativeUiObservation(result, operation, observationSignal);
-      return result.ok
-        ? ok(
-            createAnalysisExecution(result.value, IDENTITY, {
-              limitations: result.value.limitations,
-            }),
-          )
-        : result;
     });
   }
 
@@ -1243,15 +1244,15 @@ const parseEntitlements = (
       ...(projected.nonFiniteRealCount === 0
         ? []
         : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
-      ...(projected.unknownRealCount === 0
-        ? []
-        : [unknownRealLimitation(projected.unknownRealCount)]),
       ...(projected.negativeZeroRealCount === 0
         ? []
         : [negativeZeroRealLimitation(projected.negativeZeroRealCount)]),
       ...(projected.unknownDateCount === 0
         ? []
         : [unknownDateLimitation(projected.unknownDateCount)]),
+      ...(projected.unknownScalarCount === 0
+        ? []
+        : [unknownScalarLimitation(projected.unknownScalarCount)]),
     ],
   };
 };

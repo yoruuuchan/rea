@@ -8,7 +8,7 @@ import {
   nonFiniteRealLimitation,
   projectPlistValue,
   unknownDateLimitation,
-  unknownRealLimitation,
+  unknownScalarLimitation,
   type ProjectedPlistValue,
 } from "../../domain/apple/plistValue.js";
 import {
@@ -207,13 +207,13 @@ export const parsePlistXml = (
       ...(projected.nonFiniteRealCount === 0
         ? []
         : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
-      ...(projected.unknownRealCount === 0
-        ? []
-        : [unknownRealLimitation(projected.unknownRealCount)]),
       ...negativeZeroLimitations(projected.negativeZeroRealCount),
       ...(projected.unknownDateCount === 0
         ? []
         : [unknownDateLimitation(projected.unknownDateCount)]),
+      ...(projected.unknownScalarCount === 0
+        ? []
+        : [unknownScalarLimitation(projected.unknownScalarCount)]),
       ...(literals.incomplete ? [incompletePlistNumberLimitation] : []),
       ...numberLimitations(exactIntegerCount, ambiguousNumberCount),
       ...prototypeKeyLimitations(omittedPrototypeKeys),

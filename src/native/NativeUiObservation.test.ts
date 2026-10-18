@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 import { observeNativeUi } from "./NativeUiObservation.js";
+import {
+  AnalysisCancelledError,
+  AnalysisTimeoutError,
+} from "../domain/analysisErrorCore.js";
+import { ExecFileOutputCancelledError } from "../process/ExecFileOutput.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 
 const target: BinaryTarget = {
@@ -265,6 +271,182 @@ describe("native UI capture selection and budgets", () => {
         },
       ],
     });
+  });
+});
+
+describe("native UI deadline execution", () => {
+  it("reports the owned deadline as a timeout during helper execution", async () => {
+    const deadline = new AbortController();
+    const reason = new DOMException("deadline elapsed", "TimeoutError");
+    const result = await observeNativeUi(target, "observe_native_ui", scope, {
+      environment: {},
+      runtime: {
+        signal: deadline.signal,
+        invoke: async () => ({ ok: true, result: snapshot }),
+        cleanupLease: new AnalysisCleanupLease(async () => undefined),
+        close: async () => undefined,
+        resources: () => [],
+      },
+      invoke: async () => {
+        deadline.abort(reason);
+        throw new ExecFileOutputCancelledError(reason);
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected deadline timeout");
+    expect(result.error).toBeInstanceOf(AnalysisTimeoutError);
+    expect(result.error.cause).toBe(reason);
+  });
+
+  it("preserves an independent producer cancellation when the deadline fires", async () => {
+    const deadline = new AbortController();
+    const producerReason = { phase: "producer" };
+    const result = await observeNativeUi(target, "observe_native_ui", scope, {
+      environment: {},
+      runtime: {
+        signal: deadline.signal,
+        invoke: async () => ({ ok: true, result: snapshot }),
+        cleanupLease: new AnalysisCleanupLease(async () => undefined),
+        close: async () => undefined,
+        resources: () => [],
+      },
+      invoke: async () => {
+        deadline.abort({ phase: "late-deadline" });
+        throw new ExecFileOutputCancelledError(producerReason);
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected producer cancellation");
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.cause).toBe(producerReason);
+  });
+
+  it("keeps deadline failure in a scenario report as failed, not cancelled", async () => {
+    const deadline = new AbortController();
+    const reason = { phase: "scenario-deadline" };
+    let calls = 0;
+    const result = await observeNativeUi(
+      target,
+      "capture_native_ui_scenario",
+      { ...scope, steps: [{ kind: "click", path: [1] }] },
+      {
+        environment: {},
+        runtime: {
+          signal: deadline.signal,
+          invoke: async () => ({ ok: true, result: snapshot }),
+          cleanupLease: new AnalysisCleanupLease(async () => undefined),
+          close: async () => undefined,
+          resources: () => [],
+        },
+        invoke: async () => {
+          if (++calls === 1) {
+            deadline.abort(reason);
+            return { ok: true, result: snapshot };
+          }
+          throw new Error("unexpected second capture");
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected deadline timeout");
+    expect(result.error).toBeInstanceOf(AnalysisTimeoutError);
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.partialObservation).toMatchObject({
+      steps: [{ outcome: "failed", after: null }],
+    });
+    expect(calls).toBe(1);
+  });
+});
+
+describe("native UI interruption provenance", () => {
+  it("reports an owned deadline during a scenario wait as a failed step", async () => {
+    const deadline = new AbortController();
+    const reason = { phase: "wait-deadline" };
+    const timer = setTimeout(() => deadline.abort(reason), 0);
+    const result = await observeNativeUi(
+      target,
+      "capture_native_ui_scenario",
+      { ...scope, steps: [{ kind: "wait", milliseconds: 100 }] },
+      {
+        environment: {},
+        runtime: {
+          signal: deadline.signal,
+          invoke: async () => ({ ok: true, result: snapshot }),
+          cleanupLease: new AnalysisCleanupLease(async () => undefined),
+          close: async () => undefined,
+          resources: () => [],
+        },
+        invoke: async () => ({ ok: true, result: snapshot }),
+      },
+    );
+    clearTimeout(timer);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected deadline timeout");
+    expect(result.error).toBeInstanceOf(AnalysisTimeoutError);
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.partialObservation).toMatchObject({
+      steps: [{ outcome: "failed", reason: expect.any(String) }],
+    });
+  });
+
+  it("treats a caller TimeoutError-shaped reason as caller cancellation", async () => {
+    const caller = new AbortController();
+    const reason = new DOMException("caller stopped", "TimeoutError");
+    caller.abort(reason);
+    const result = await observeNativeUi(target, "observe_native_ui", scope, {
+      environment: {},
+      signal: caller.signal,
+      invoke: async () => ({ ok: true, result: snapshot }),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected caller cancellation");
+    expect(result.error._tag).toBe("AnalysisCancelledError");
+    expect(result.error.cause).toBe(reason);
+  });
+
+  it("preserves a physical helper failure even if the owned deadline fires", async () => {
+    const deadline = new AbortController();
+    const failure = new Error("physical helper failure");
+    const result = await observeNativeUi(target, "observe_native_ui", scope, {
+      environment: {},
+      runtime: {
+        signal: deadline.signal,
+        invoke: async () => ({ ok: true, result: snapshot }),
+        cleanupLease: new AnalysisCleanupLease(async () => undefined),
+        close: async () => undefined,
+        resources: () => [],
+      },
+      invoke: async () => {
+        deadline.abort({ phase: "late-deadline" });
+        throw failure;
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected helper failure");
+    expect(result.error._tag).toBe("ProviderAdapterError");
+    expect(result.error.cause).toBe(failure);
+  });
+
+  it("preserves schema failure even if the owned deadline fires", async () => {
+    const deadline = new AbortController();
+    const result = await observeNativeUi(target, "observe_native_ui", scope, {
+      environment: {},
+      runtime: {
+        signal: deadline.signal,
+        invoke: async () => ({ ok: true, result: snapshot }),
+        cleanupLease: new AnalysisCleanupLease(async () => undefined),
+        close: async () => undefined,
+        resources: () => [],
+      },
+      invoke: async () => {
+        deadline.abort({ phase: "late-deadline" });
+        return { ok: true, result: { malformed: true } };
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected schema failure");
+    expect(result.error._tag).toBe("ProviderAdapterError");
+    expect(result.error.cause).toMatchObject({ name: "ZodError" });
   });
 });
 

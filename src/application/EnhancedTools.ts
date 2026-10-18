@@ -1,3 +1,4 @@
+import { CALL_RELATIONSHIP_TRAVERSALS } from "./CallRelationshipTraversal.js";
 import { z } from "zod";
 
 import type {
@@ -6,8 +7,11 @@ import type {
   AnalysisOperationPort,
   ExecutionOptions,
 } from "./AnalysisProvider.js";
-import type { EnhancedToolName } from "../contracts/enhancedInputs.js";
-import { enhancedInputSchemas } from "../contracts/enhancedInputs.js";
+import {
+  enhancedInputSchemas,
+  type CallRelationshipDirection,
+  type EnhancedToolName,
+} from "../contracts/enhancedInputs.js";
 import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
@@ -444,13 +448,12 @@ export class EnhancedTools {
   async #callGraph(
     input: {
       readonly address: string;
-      readonly direction: "forward" | "backward";
+      readonly direction: CallRelationshipDirection;
     },
     signal?: AbortSignal,
   ): EnhancedResult {
-    const relation = input.direction === "forward" ? "callees" : "callers";
-    const tool =
-      input.direction === "forward" ? "procedure_callees" : "procedure_callers";
+    const { relation, operation: tool } =
+      CALL_RELATIONSHIP_TRAVERSALS[input.direction];
     const limitations = new Set<string>();
     const resolved = await this.#observe(
       "procedure_address",

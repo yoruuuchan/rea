@@ -347,11 +347,12 @@ test.each([
     expect(result.error.cleanupIncomplete).toBe(false);
     expect(result.error.cleanupResources).toEqual([]);
     expect(sourceCloseAttempts).toBe(2);
-    const cause = result.error.cause;
-    expect(cause).toBeInstanceOf(AggregateError);
-    const secondary = (cause as AggregateError).errors.find(
-      (entry) => entry instanceof AnalysisOutputError,
-    );
+    expect(result.error.cause).toMatchObject({
+      message: "controlled snapshot read failure",
+    });
+    expect(result.error.secondaryFailures).toHaveLength(1);
+    const secondary = result.error.secondaryFailures[0];
+    expect(secondary).toBeInstanceOf(AnalysisOutputError);
     expect(secondary?.cause).toBeInstanceOf(AdbInputSnapshotFailure);
     expect(
       (secondary?.cause as AdbInputSnapshotFailure).cleanupCause,

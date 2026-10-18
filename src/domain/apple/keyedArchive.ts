@@ -248,9 +248,9 @@ export const projectKeyedArchive = (
   const ids = new Set(page.map(({ id }) => id));
   return {
     nonFiniteRealCount: projected.nonFiniteRealCount,
-    unknownRealCount: projected.unknownRealCount,
     negativeZeroRealCount: projected.negativeZeroRealCount,
     unknownDateCount: projected.unknownDateCount,
+    unknownScalarCount: projected.unknownScalarCount,
     roots,
     objects: page,
     references: references.filter(

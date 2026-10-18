@@ -30,6 +30,7 @@ import {
   NATIVE_UI_OUTPUT_BUDGET_BYTES,
   NATIVE_UI_OUTPUT_WEIGHT,
 } from "./NativeUiOutputBudget.js";
+import { NativeUiInterruptionControl } from "./NativeUiInterruptionControl.js";
 
 const helper = fileURLToPath(
   new URL("../../bridge/native/ReaNativeUI.swift", import.meta.url),
@@ -61,56 +62,64 @@ export const observeNativeUi = async (
     signal?: AbortSignal | undefined;
     invoke?: NativeUiHelper;
     runtime?: NativeUiHelperRuntime;
+    interruption?: NativeUiInterruptionControl;
   },
 ): Promise<Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>> => {
   const runtime =
     options.runtime ?? createNativeUiHelperRuntime(options.environment);
-  const signal =
-    options.signal === undefined
-      ? runtime.signal
-      : AbortSignal.any([options.signal, runtime.signal]);
+  const interruption =
+    options.interruption ??
+    new NativeUiInterruptionControl(options.signal, runtime.signal);
+  const ownsInterruption = options.interruption === undefined;
   let result: Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>;
   try {
-    result = await observeWithHelper(target, operation, parameters, {
-      signal,
-      invoke: options.invoke ?? runtime.invoke,
-    });
-  } catch (cause: unknown) {
-    result = err(
-      cause instanceof AnalysisError
-        ? cause
-        : new ProviderAdapterError("native-macos", operation, { cause }),
-    );
-  }
-  if (options.runtime === undefined) {
     try {
-      await runtime.close();
+      result = await observeWithHelper(target, operation, parameters, {
+        interruption,
+        invoke: options.invoke ?? runtime.invoke,
+      });
     } catch (cause: unknown) {
-      result = finishNativeUiObservation(result, operation, signal);
-      const cleanup = new NativeUiCleanupError(
-        [{ runtime, cause }],
-        operation,
-        result.ok ? result.value : undefined,
+      result = err(
+        cause instanceof AnalysisError
+          ? cause
+          : new ProviderAdapterError("native-macos", operation, { cause }),
       );
-      return result.ok
-        ? err(cleanup)
-        : err(
-            analysisErrorWithCleanupFailure(
-              result.error,
-              cleanup,
-              operation,
-            ).bindCleanupDependencies([result.error, cleanup]),
-          );
     }
+    if (options.runtime === undefined) {
+      try {
+        await runtime.close();
+      } catch (cause: unknown) {
+        result = finishNativeUiObservation(result, operation, interruption);
+        const cleanup = new NativeUiCleanupError(
+          [{ runtime, cause }],
+          operation,
+          result.ok ? result.value : undefined,
+        );
+        return result.ok
+          ? err(cleanup)
+          : err(
+              analysisErrorWithCleanupFailure(
+                result.error,
+                cleanup,
+                operation,
+              ).bindCleanupDependencies([result.error, cleanup]),
+            );
+      }
+    }
+    return finishNativeUiObservation(result, operation, interruption);
+  } finally {
+    if (ownsInterruption) interruption.dispose();
   }
-  return finishNativeUiObservation(result, operation, signal);
 };
 
 const observeWithHelper = async (
   target: BinaryTarget,
   operation: "observe_native_ui" | "capture_native_ui_scenario",
   parameters: unknown,
-  options: { signal: AbortSignal; invoke: NativeUiHelper },
+  options: {
+    interruption: NativeUiInterruptionControl;
+    invoke: NativeUiHelper;
+  },
 ): Promise<Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>> => {
   const parsed = (
     operation === "observe_native_ui"
@@ -135,17 +144,16 @@ const observeWithHelper = async (
       }),
     );
   const steps = input.steps;
-  const signal = options.signal;
+  const interruption = options.interruption;
+  const signal = interruption.signal;
   const invoke = options.invoke;
   let launchTime: number | undefined;
   let outputBytes = 0;
   const take = async (
     action?: unknown,
   ): Promise<Result<z.infer<typeof nativeUiSnapshotSchema>, AnalysisError>> => {
-    if (signal.aborted)
-      return err(
-        new AnalysisCancelledError(operation, { cause: signal.reason }),
-      );
+    const interrupted = interruption.error(operation);
+    if (interrupted !== undefined) return err(interrupted);
     try {
       const response = responseSchema.parse(
         await invoke(
@@ -202,7 +210,10 @@ const observeWithHelper = async (
       if (cause instanceof AnalysisError) return err(cause);
       return err(
         cause instanceof ExecFileOutputCancelledError
-          ? new AnalysisCancelledError(operation, { cause: cause.cause })
+          ? ((signal.aborted && cause.cause === signal.reason
+              ? interruption.error(operation)
+              : undefined) ??
+              new AnalysisCancelledError(operation, { cause: cause.cause }))
           : new ProviderAdapterError("native-macos", operation, {
               cause,
               diagnostics: {
@@ -221,37 +232,8 @@ const observeWithHelper = async (
   let before = initial.value;
   let terminalFailure: AnalysisError | undefined;
   for (const [index, step] of steps.entries()) {
-    if (signal.aborted) {
-      terminalFailure = new AnalysisCancelledError(operation, {
-        cause: signal.reason,
-      });
-      results.push({
-        index,
-        kind: step.kind,
-        before,
-        after: null,
-        outcome: "cancelled",
-        reason: "Scenario cancelled before action",
-      });
-      break;
-    }
-    if (
-      step.kind === "wait" &&
-      (await waitForAbortableDelay(step.milliseconds, signal)) === "aborted"
-    ) {
-      terminalFailure = new AnalysisCancelledError(operation, {
-        cause: signal.reason,
-      });
-      results.push({
-        index,
-        kind: step.kind,
-        before,
-        after: null,
-        outcome: "cancelled",
-        reason: "Scenario cancelled during wait",
-      });
-      break;
-    }
+    if (step.kind === "wait")
+      await waitForAbortableDelay(step.milliseconds, signal);
     const after = await take(step.kind === "wait" ? undefined : step);
     if (!after.ok) {
       terminalFailure = after.error;
@@ -288,11 +270,11 @@ const observeWithHelper = async (
       "Click uses AXPress; scroll uses AXIncrement/AXDecrement; key-entry sets the selected element's AXValue. Unsupported elements fail without global event fallback.",
       "Each completed action is followed immediately by capture; delayed UI changes require explicit wait steps. A failed after-capture can follow a completed action, so failure does not prove absence of application effects.",
       "Scenarios can change app data, cause app network activity and persist changes. The caller explicitly chooses leave-as-is; automatic restoration is unsupported.",
-      "Window matching uses exact PID and window ID for screenshots and unique accessibility geometry. Accessibility paths can change as the UI changes; stale or ambiguous paths fail. Screenshots are scaled to at most 2048 pixels; scenario output is budgeted at 64 MiB and execution is cancelled after 180 seconds.",
+      "Window matching uses exact PID and window ID for screenshots and unique accessibility geometry. Accessibility paths can change as the UI changes; stale or ambiguous paths fail. Screenshots are scaled to at most 2048 pixels; scenario output is budgeted at 64 MiB and execution has a 180-second deadline.",
     ],
   });
   return terminalFailure === undefined
-    ? finishNativeUiObservation(ok(report), operation, signal)
+    ? finishNativeUiObservation(ok(report), operation, interruption)
     : err(terminalFailure.retainPartialObservation(report));
 };
 
@@ -300,13 +282,9 @@ const observeWithHelper = async (
 export const finishNativeUiObservation = (
   result: Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>,
   operation: string,
-  signal?: AbortSignal,
-): Result<z.infer<typeof nativeUiResultSchema>, AnalysisError> =>
-  result.ok && signal?.aborted
-    ? err(
-        new AnalysisCancelledError(operation, {
-          cause: signal.reason,
-          partialObservation: result.value,
-        }),
-      )
-    : result;
+  interruption: NativeUiInterruptionControl,
+): Result<z.infer<typeof nativeUiResultSchema>, AnalysisError> => {
+  if (!result.ok) return result;
+  const error = interruption.error(operation, result.value);
+  return error === undefined ? result : err(error);
+};

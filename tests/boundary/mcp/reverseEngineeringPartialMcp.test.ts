@@ -186,10 +186,14 @@ it("delivers failed Rizin execution after external admission", async () => {
 
 it("preserves the Rizin operation error when analysis retirement also fails", async () => {
   const { server, handler } = createReverseEngineeringMcpHarness();
+  const reason = { stage: "operation-input" };
+  const primary = new AnalysisInputError("execute_rizin_command", {
+    cause: reason,
+  });
+  const retirement = new AnalysisInputError("rebind");
   const service = {
     retryCleanup: async () => ok(null),
-    executeRizinCommand: async () =>
-      err(new AnalysisInputError("execute_rizin_command")),
+    executeRizinCommand: async () => err(primary),
   } as unknown as ReverseEngineeringService;
   const observedOperationResult = vi.fn();
   registerReverseEngineeringTools(
@@ -203,7 +207,7 @@ it("preserves the Rizin operation error when analysis retirement also fails", as
     async (_path, _signal, operation, rebindFailure) => {
       const result = await operation();
       observedOperationResult(result);
-      return err(rebindFailure(result, new AnalysisInputError("rebind")));
+      return err(rebindFailure(result, retirement));
     },
   );
   const invoke = handler("execute_rizin_command");
@@ -221,6 +225,8 @@ it("preserves the Rizin operation error when analysis retirement also fails", as
     };
   };
 
+  expect(primary.cause).toBe(reason);
+  expect(primary.secondaryFailures).toEqual([retirement]);
   expect(response.isError).toBe(true);
   expect(observedOperationResult).toHaveBeenCalledWith(
     expect.objectContaining({ ok: false }),

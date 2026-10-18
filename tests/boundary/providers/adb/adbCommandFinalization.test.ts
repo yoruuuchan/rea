@@ -63,7 +63,7 @@ const capture = (
 ) =>
   runAdbCapture(
     "inspect_adb_device",
-    "device",
+    { device: "device" },
     process.execPath,
     ["-e", script],
     limits,

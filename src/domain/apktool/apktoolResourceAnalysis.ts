@@ -26,9 +26,10 @@ const localeQualifierSchema = z
   .string()
   .min(2)
   .max(MAX_ANDROID_LOCALE_SUFFIX)
+  // Legacy -r regions use two letters; numeric aliases select b+ tables.
   .regex(
-    /^(?:[a-z]{2,3}(?:-(?:r?[A-Z]{2}|r?[0-9]{3}))?|b\+[a-z]{2,3}(?:\+[A-Za-z0-9]{2,8})*)$/u,
-    "Locale must look like de, pt-BR, pt-rBR, or b+zh+Hans+CN",
+    /^(?:[a-z]{2,3}(?:-(?:r?[A-Z]{2}|[0-9]{3}))?|b\+[a-z]{2,3}(?:\+[A-Za-z0-9]{2,8})*)$/u,
+    "Locale must look like de, pt-BR, pt-rBR, es-419, or b+zh+Hans+CN",
   )
   .refine(
     (value) => !ANDROID_NON_LOCALE_QUALIFIERS.has(value.toLowerCase()),
@@ -40,7 +41,9 @@ export const androidLocaleQualifierSchema = localeQualifierSchema;
 
 /** Normalize an admitted request alias at the locale-selection owner. */
 export const androidLocaleDirectorySuffix = (locale: string): string =>
-  locale.replace(/^([a-z]{2,3})-([A-Z]{2}|[0-9]{3})$/u, "$1-r$2");
+  locale
+    .replace(/^([a-z]{2,3})-([A-Z]{2})$/u, "$1-r$2")
+    .replace(/^([a-z]{2,3})-([0-9]{3})$/u, "b+$1+$2");
 
 /** Exact selectable table names are distinct from whole resource configurations. */
 export const classifyAndroidStringsTable = (

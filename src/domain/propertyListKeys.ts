@@ -1,15 +1,13 @@
-import { normalizeLineEndings, type Document, type Node } from "@xmldom/xmldom";
 import { parseOpenStep } from "plist";
 
 import { decodeXmlPropertyList } from "./propertyListXml.js";
 import {
-  UnknownPlistReal,
   createPlistNumberCollector,
   type PlistNumberLiterals,
 } from "./apple/plistNumbers.js";
+import { UnknownPlistScalar } from "./apple/unknownPlistScalar.js";
 
 import { MAX_PLIST_DEPTH } from "./apple/plistValue.js";
-import { parseXmlDocument } from "./xmlDocument.js";
 
 /** The dictionary key REA results cannot carry: validation strips it. */
 const PROTOTYPE_KEY = "__proto__";
@@ -43,7 +41,7 @@ export const omitPrototypeKeys = (
       typeof item !== "object" ||
       item instanceof Date ||
       item instanceof Uint8Array ||
-      item instanceof UnknownPlistReal
+      item instanceof UnknownPlistScalar
     )
       return item;
     return Object.fromEntries(
@@ -57,37 +55,6 @@ export const omitPrototypeKeys = (
   const stripped = strip(value);
   return { value: stripped, omittedPrototypeKeys: omitted };
 };
-
-const XML_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  quot: '"',
-};
-
-/**
- * Expand XML character and predefined entity references. A reference beyond
- * Unicode stays as written: comments and CDATA may hold such text literally,
- * and the XML decoder rejects it anywhere else.
- */
-export const decodeXmlText = (text: string): string =>
-  text.replace(
-    /&(?:#x([\da-f]+)|#(\d+)|([a-z]+));/giu,
-    (entity, hex?: string, decimal?: string, name?: string) => {
-      const codePoint =
-        hex !== undefined
-          ? parseInt(hex, 16)
-          : decimal !== undefined
-            ? parseInt(decimal, 10)
-            : undefined;
-      if (codePoint !== undefined)
-        return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity;
-      return name !== undefined && Object.hasOwn(XML_ENTITIES, name)
-        ? XML_ENTITIES[name]!
-        : entity;
-    },
-  );
 
 /**
  * Decode one validated XML DOM into values and numeric source facts.
@@ -108,20 +75,7 @@ export const parseXmlPropertyList = (text: string): ParsedPropertyList => {
       omittedPrototypeKeys: prototypeKeys,
     };
   }
-  // Normalize only the literal line endings the pinned decoder normalizes.
-  // Decode this DOM directly so character references are never reserialized
-  // into literal line endings and normalized a second time.
-  const normalized = normalizeLineEndings(text);
-  // Strict syntax owns well-formedness before value interpretation. Reuse the
-  // same DOM for depth, keys, values and number facts.
-  const parsed = parseXmlDocument(normalized, {
-    doctype: "allow",
-    lineEndings: "preserve",
-  });
-  if (!parsed.ok) throw parsed.error;
-  const document = parsed.value;
-  assertXmlPlistDepthWithinLimit(document);
-  const decoded = decodeXmlPropertyList(document);
+  const decoded = decodeXmlPropertyList(text);
   return {
     ...omitPrototypeKeys(decoded.value),
     numberLiterals: decoded.numberLiterals,
@@ -287,44 +241,4 @@ const skipOpenStepScalar = (text: string, start: number): number => {
       cursor += 1;
   }
   return cursor;
-};
-
-/** Elements whose children the plist value decoder visits recursively. */
-const PLIST_CONTAINER_ELEMENTS = new Set(["plist", "dict", "array"]);
-
-/**
- * Reject XML plists nested deeper than the projection supports before any
- * recursive value pass runs. Value decoding and prototype omission recurse once
- * per nesting level, so a deeply nested document exhausts the call stack
- * before the projection limit can report the resource bound. The failure
- * matches `projectPlistValue` so callers classify it as a limit failure.
- *
- * Depth counts values the way the projection does: the root value is level 0
- * and every container member is one level deeper. A dictionary key names a
- * member instead of nesting one, and a self-closing element is the value at
- * its own level. The outer plist envelope is unwrapped by the decoder;
- * nested plist elements decode as arrays and must count toward the bound.
- */
-const assertXmlPlistDepthWithinLimit = (document: Document): void => {
-  const root = document.documentElement;
-  if (root === null) return;
-  const pending: Array<{ node: Node; depth: number }> = [
-    { node: root, depth: -1 },
-  ];
-  while (pending.length > 0) {
-    const entry = pending.pop();
-    if (entry === undefined) break;
-    const { node, depth } = entry;
-    // Schedule only the next sibling, keeping traversal storage proportional
-    // to depth rather than the number of members in a wide container.
-    if (node.nextSibling !== null)
-      pending.push({ node: node.nextSibling, depth });
-    if (node.nodeType !== node.ELEMENT_NODE) continue;
-    if (node.nodeName !== "key" && depth > MAX_PLIST_DEPTH)
-      throw new RangeError(
-        `Plist exceeds ${String(MAX_PLIST_DEPTH)} nesting levels`,
-      );
-    if (PLIST_CONTAINER_ELEMENTS.has(node.nodeName) && node.firstChild !== null)
-      pending.push({ node: node.firstChild, depth: depth + 1 });
-  }
 };

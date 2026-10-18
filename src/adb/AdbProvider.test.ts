@@ -568,7 +568,7 @@ it.each([
   async (_, stderr, excerpt) => {
     const { binary } = await writeAdbStub(
       () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
-if [ "$1" = "-s" ]; then printf '%s\\n' "${stderr.replace(/'/gu, "'\\''")}" >&2; exit 1; fi`,
+if [ "$1" = "-s" ]; then printf '%s\\n' "${stderr}" >&2; exit 1; fi`,
     );
     const projected = await refusedBy(providerOver(binary), {
       operation: "inspect_adb_device",
@@ -874,6 +874,137 @@ exit 1`,
 });
 
 it.each([
+  [
+    "pull_adb_file",
+    "adb: error: failed to stat remote object /sdcard/unauthorized.bin: No such file or directory",
+    "/sdcard/unauthorized.bin",
+  ],
+  [
+    "pull_adb_file",
+    "adb: error: failed to open /sdcard/unauthorized.bin: Permission denied",
+    "/sdcard/unauthorized.bin",
+  ],
+  [
+    "pull_adb_file",
+    "* daemon not running; starting now at tcp:5037\n* daemon started successfully\nadb: error: device offline",
+    "emulator-5554",
+  ],
+  ["pull_adb_file", "error: device unauthorized", "emulator-5554"],
+  [
+    "pull_adb_file",
+    "* daemon not running. starting it now on port 5037 *\r\n* daemon started successfully *\r\nerror: device offline",
+    "emulator-5554",
+  ],
+  [
+    "pull_adb_file",
+    "* daemon started successfully *\r\nerror: device 'emulator-5554' not found",
+    "emulator-5554",
+  ],
+  [
+    "push_adb_file",
+    "adb: error: connect failed: device offline",
+    "emulator-5554",
+  ],
+  ["push_adb_file", "error: device unauthorized", "emulator-5554"],
+  ["push_adb_file", "Permission denied", "/sdcard/unauthorized.bin"],
+] as const)(
+  "attributes %s refusal %s to %s",
+  async (operation, reason, path) => {
+    const { binary, root } = await writeAdbStub(
+      () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" != "-s" ] || [ "$2" != "emulator-5554" ]; then exit 91; fi
+if [ "$3" = "shell" ] && [ "$4" = "test" ] && [ "$6" = "/sdcard/unauthorized.bin" ]; then exit 1; fi
+if [ "$3:$4" = "pull:/sdcard/unauthorized.bin" ] || [ "$3:$5" = "push:/sdcard/unauthorized.bin" ]; then
+  printf '%s\\n' '${reason.replaceAll("'", "'\\''")}' >&2
+  exit 1
+fi
+exit 91`,
+    );
+    const localPath = join(root, "payload.bin");
+    await writeFile(localPath, "payload");
+    const input = {
+      serial: "emulator-5554",
+      device_path: "/sdcard/unauthorized.bin",
+    };
+    const projected = await refusedBy(
+      providerOver(binary),
+      operation === "pull_adb_file"
+        ? {
+            operation,
+            input: { ...input, output_directory: join(root, "pulls") },
+          }
+        : {
+            operation,
+            input: { ...input, local_path: localPath, overwrite: false },
+          },
+    );
+    expect(projected).toMatchObject({
+      code: "unsupported_target",
+      details: { operation, path, reason },
+      message: `Unsupported target for ${operation} at ${path}: ${reason}`,
+    });
+  },
+);
+
+it.each([
+  ["pull_adb_file", "cannot create '%s': Permission denied"],
+  ["pull_adb_file", "cannot create file/directory '%s': Permission denied"],
+  ["pull_adb_file", "cannot write '%s': Permission denied"],
+  ["push_adb_file", "cannot stat '%s': No such file or directory"],
+  ["push_adb_file", "opening '%s' locally failed: Permission denied"],
+  ["push_adb_file", "reading '%s' locally failed: Permission denied"],
+  ["push_adb_file", "failed to read all of '%s': Permission denied"],
+] as const)(
+  "keeps the actual host file identity for %s refusal %s",
+  async (operation, diagnostic) => {
+    const { binary, root } = await writeAdbStub(
+      (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" != "-s" ] || [ "$2" != "emulator-5554" ]; then exit 91; fi
+if [ "$3" = "shell" ] && [ "$4" = "test" ]; then exit 1; fi
+if [ "$3" = "pull" ]; then
+  printf '%s' "$5" > '${stubRoot}/host-path'
+  printf "adb: error: ${diagnostic}\\n" "$5" >&2
+  exit 1
+fi
+if [ "$3" = "push" ]; then
+  printf '%s' "$4" > '${stubRoot}/host-path'
+  printf "adb: error: ${diagnostic}\\n" "$4" >&2
+  exit 1
+fi
+exit 91`,
+    );
+    const localPath = join(root, "payload.bin");
+    await writeFile(localPath, "payload");
+    const input = {
+      serial: "emulator-5554",
+      device_path: "/sdcard/sample.bin",
+    };
+    const projected = await refusedBy(
+      providerOver(binary),
+      operation === "pull_adb_file"
+        ? {
+            operation,
+            input: { ...input, output_directory: join(root, "pulls") },
+          }
+        : {
+            operation,
+            input: { ...input, local_path: localPath, overwrite: false },
+          },
+    );
+    const hostPath = await readFile(join(root, "host-path"), "utf8");
+    expect(projected).toMatchObject({
+      code: "unsupported_target",
+      details: {
+        operation,
+        path: hostPath,
+        reason: expect.stringContaining(hostPath),
+      },
+    });
+    expect(projected.message).toContain(`at ${hostPath}:`);
+  },
+);
+
+it.each([
   ["/data/local/tmp/..", "dot_segment"],
   ["/data/local/tmp/", "empty_file_name"],
 ] as const)(
@@ -1113,7 +1244,10 @@ if [ "$1" = "-s" ]; then printf '%s\\n' "$3" >> "${stubRoot}/calls"; printf '%s\
       },
     });
     // Existence is unknown, so nothing is claimed about the path and no push runs.
-    expect(projected).toMatchObject({ code: "unsupported_target" });
+    expect(projected).toMatchObject({
+      code: "unsupported_target",
+      details: { path: "emulator-5554", reason: stderr },
+    });
     expect(projected.message).toContain(state);
     expect(projected.message).not.toContain("already exists");
     expect(await readFile(join(root, "calls"), "utf8")).toBe("shell\n");

@@ -11,6 +11,13 @@ import { parseEvidence } from "../../../src/domain/evidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 
+const unknownMixedInteger = {
+  $plist_type: "unknown",
+  element: "integer",
+  literal: "9007199254740992<!-- split -->3",
+  reason: "unsupported-markup",
+};
+
 const scenarios = [
   "XML",
   "binary",
@@ -131,7 +138,9 @@ cliTest.for(scenarios)(
           scenario === "hexadecimal" ||
           scenario === "segmented keys"
             ? { $plist_type: "integer", decimal: "9007199254740993" }
-            : 9007199254740992,
+            : scenario === "mixed XML"
+              ? unknownMixedInteger
+              : 9007199254740992,
         safe: 42,
         children: [{ archiveUID: 2, className: "UIView" }],
         interface_builder_object_id: "1",
@@ -155,18 +164,20 @@ cliTest.for(scenarios)(
       expect(result.limitations).toContainEqual(
         expect.stringContaining("1 unambiguous integer value"),
       );
-    else if (scenario !== "real" && scenario !== "CDATA real")
+    else if (scenario.includes("collision"))
       expect(result.limitations).toContainEqual(
         expect.stringContaining("integer precision loss remains possible"),
+      );
+    else if (scenario === "mixed XML")
+      expect(result.limitations).toContainEqual(
+        expect.stringContaining(
+          "1 XML scalar value(s) could not be established",
+        ),
       );
     else
       expect(
         result.limitations.some((note) => note.includes("integer precision")),
       ).toBe(false);
-    if (scenario === "mixed XML")
-      expect(result.limitations).toContainEqual(
-        expect.stringContaining("could not be completely observed"),
-      );
     expect(result.graph.truncated).toBe(false);
   },
 );

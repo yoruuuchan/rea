@@ -23,6 +23,37 @@ const probe = (signal?: AbortSignal) =>
     signal,
   );
 
+it("classifies the complete diagnostic before shortening its displayed reason", async () => {
+  const localPath = `/host/${"directory/".repeat(60)}payload.bin`;
+  const stderr = `adb: error: cannot create '${localPath}': Permission denied`;
+  vi.mocked(execFileBytes).mockRejectedValueOnce(
+    Object.assign(new Error("local destination refused"), {
+      code: 1,
+      stdout: "",
+      stderr,
+      signal: null,
+      killed: false,
+    }),
+  );
+  await expect(
+    runAdbCapture(
+      "pull_adb_file",
+      { device: "device", path: "/remote/file", localPath },
+      "/host/adb",
+      [],
+      { timeoutMs: 100, maxOutputBytes: 2048 },
+      undefined,
+    ),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisUnsupportedTargetError",
+      path: localPath,
+      reason: stderr.slice(0, 512),
+    },
+  });
+});
+
 it("recognizes only the completed empty false result as absence", async () => {
   vi.mocked(execFileBytes).mockRejectedValueOnce(
     Object.assign(new Error("test false"), {
@@ -161,7 +192,7 @@ it("keeps a physical failure even when the later abort reason is that same error
   });
   const result = await runAdbCapture(
     "inspect_adb_device",
-    "device",
+    { device: "device" },
     "/host/adb",
     [],
     { timeoutMs: 100, maxOutputBytes: 1024 },

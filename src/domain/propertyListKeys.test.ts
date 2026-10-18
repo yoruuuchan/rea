@@ -2,19 +2,9 @@ import { describe, expect, it } from "vitest";
 import { parse } from "plist";
 
 import {
-  decodeXmlText,
   omitPrototypeKeys,
   parseXmlPropertyList as parseWithNumbers,
 } from "./propertyListKeys.js";
-
-it("preserves unknown named entities that collide with object prototype properties", () => {
-  expect(
-    decodeXmlText("&constructor; &toString; &valueOf; &hasOwnProperty;"),
-  ).toBe("&constructor; &toString; &valueOf; &hasOwnProperty;");
-  expect(decodeXmlText("&amp;&lt;&gt;&quot;&apos;&#65;&#x42;")).toBe(
-    "&<>\"'AB",
-  );
-});
 
 // Existing key/omission controls assert those facts exactly; numeric facts
 // have separate source-type and ambiguity controls below.

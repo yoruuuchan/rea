@@ -10,6 +10,7 @@ import { execFileOutput } from "../process/ExecFileOutput.js";
 import { safeParseJson } from "../domain/safeJson.js";
 import type { NativeUiHelper } from "./NativeUiObservation.js";
 import { NATIVE_UI_HELPER_MAX_BUFFER } from "./NativeUiOutputBudget.js";
+import { NATIVE_UI_DEADLINE_MS } from "./NativeUiInterruptionControl.js";
 
 export interface NativeUiHelperRuntime {
   readonly invoke: NativeUiHelper;
@@ -24,7 +25,7 @@ export const createNativeUiHelperRuntime = (
   environment: Readonly<NodeJS.ProcessEnv>,
 ): NativeUiHelperRuntime => {
   const selectedEnvironment = snapshotEnvironment(environment);
-  const deadlineSignal = AbortSignal.timeout(180_000);
+  const deadlineSignal = AbortSignal.timeout(NATIVE_UI_DEADLINE_MS);
   const operations = new ArtifactResourceScope();
   let root: string | undefined;
   let preparation: Promise<string> | undefined;

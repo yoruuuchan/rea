@@ -79,6 +79,7 @@ export abstract class AnalysisError extends Error {
   cleanupIncomplete: boolean;
   #ownedCleanupResources: readonly string[];
   #cleanupResourceOwner: AnalysisCleanupResourceOwner | undefined;
+  #secondaryFailures: AnalysisError[] = [];
   constructor(message: string, options?: AnalysisErrorOptions) {
     super(message, options);
     this.#cleanupPrimary = options?.cleanupPrimary;
@@ -103,6 +104,10 @@ export abstract class AnalysisError extends Error {
 
   get cleanupPrimary(): AnalysisError | undefined {
     return this.#cleanupPrimary;
+  }
+  /** Later typed failures retained without changing the primary error cause. */
+  get secondaryFailures(): readonly AnalysisError[] {
+    return this.#secondaryFailures;
   }
   readonly cleanupReport: ProcessCaptureCleanupReport | undefined = undefined;
 
@@ -142,12 +147,8 @@ export abstract class AnalysisError extends Error {
     // the primary error's live cleanup status and original output.
     Object.assign(this, {
       diagnostics: structuredClone({ ...this.diagnostics, ...diagnostics }),
-      cause: new AggregateError(
-        this.cause === undefined ? [failure] : [this.cause, failure],
-        "Analysis failed and a later lifecycle operation also failed.",
-        { cause: this.cause },
-      ),
     });
+    this.#secondaryFailures.push(failure);
     return this;
   }
 

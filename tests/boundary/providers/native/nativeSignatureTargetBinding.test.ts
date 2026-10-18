@@ -68,7 +68,8 @@ describe("native signature target identity", () => {
     const result = await new NativeMacOSProvider({}, new Captures(), "darwin")
       .createClient(target)
       .execute("inspect_signature", {});
-    expect(result.ok && result.value.result).toMatchObject({
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toMatchObject({
       signed: true,
       identifier: "com.example.fixture",
     });
@@ -477,11 +478,11 @@ it.skipIf(process.platform !== "darwin")(
     const result = await new NativeMacOSProvider({}, runner, "darwin")
       .createClient(target)
       .execute("inspect_signature", {});
-    expect(result.ok && result.value.result).toMatchObject({
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toMatchObject({
       signed: true,
       identifier: "rea.original",
     });
-    if (!result.ok) throw result.error;
     expect(
       inspectSignatureSchema
         .parse(result.value.result)

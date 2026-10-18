@@ -32,7 +32,7 @@ const DEVICE_LINE = /^(\S+)\s+(.*)$/u;
 
 const normalizeAdbOutputLine = (rawLine: string): string => rawLine.trimEnd();
 
-const isSuccessfulDaemonStartNotice = (line: string): boolean =>
+export const isSuccessfulDaemonStartNotice = (line: string): boolean =>
   line === "* daemon started successfully" ||
   line === "* daemon started successfully *";
 

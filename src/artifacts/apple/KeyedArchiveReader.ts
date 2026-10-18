@@ -10,7 +10,7 @@ import {
   negativeZeroRealLimitation,
   nonFiniteRealLimitation,
   unknownDateLimitation,
-  unknownRealLimitation,
+  unknownScalarLimitation,
 } from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
@@ -89,9 +89,9 @@ export const decodeKeyedArchiveBytes = (
       : parseXmlPropertyList(xmlText ?? "");
   const {
     nonFiniteRealCount,
-    unknownRealCount,
     negativeZeroRealCount,
     unknownDateCount,
+    unknownScalarCount,
     ...graph
   } = projectKeyedArchive(parsed.value, selection);
   const numbers = createPlistNumberProjection(parsed.numberLiterals);
@@ -121,15 +121,15 @@ export const decodeKeyedArchiveBytes = (
       ...(nonFiniteRealCount === 0
         ? []
         : [nonFiniteRealLimitation(nonFiniteRealCount)]),
-      ...(unknownRealCount === 0
-        ? []
-        : [unknownRealLimitation(unknownRealCount)]),
       ...(negativeZeroRealCount === 0
         ? []
         : [negativeZeroRealLimitation(negativeZeroRealCount)]),
       ...(unknownDateCount === 0
         ? []
         : [unknownDateLimitation(unknownDateCount)]),
+      ...(unknownScalarCount === 0
+        ? []
+        : [unknownScalarLimitation(unknownScalarCount)]),
     ],
   };
 };

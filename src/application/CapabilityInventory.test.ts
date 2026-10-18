@@ -177,7 +177,7 @@ describe("capability failure reasons", () => {
           ],
         }),
       ),
-    ).toMatchObject({ available: false, reason: "provider_missing" });
+    ).toMatchObject({ available: true, reason: "available" });
   });
 
   it.each([
