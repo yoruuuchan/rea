@@ -1,13 +1,202 @@
 import { chmod, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, it as test } from "vitest";
+import { expect, it as test, vi } from "vitest";
 
 import { createSystemDoctorHost } from "./doctorRuntime.js";
 import { DOCTOR_PROVIDER_IDS } from "./application/DoctorProviderIds.js";
 import { providerRegistrationEnvironment } from "./application/SetupRegistrationEnvironment.js";
 import { createTestTempDirectory } from "../tests/fixtures/temporaryDirectory.js";
 import { writeJadxJarInventory } from "../tests/fixtures/android/jadxJar.js";
+import * as privateDisplay from "./hopper/LinuxPrivateDisplayProbe.js";
+import * as pythonRuntime from "./application/LinuxHopperPython.js";
+import { err, ok } from "./domain/result.js";
+import { AnalysisError } from "./domain/analysisErrorBase.js";
+import { AnalysisCancelledError } from "./domain/analysisErrorCore.js";
+import { createDoctorHostFixture } from "./application/Doctor.fixture.js";
+import { runDoctorOwned } from "./application/Doctor.js";
+
+const readyDisplay = {
+  ok: true,
+  strategy: "direct",
+  diagnostic: {
+    component: "hopper_private_display",
+    operation: "probe",
+    reason: "ready",
+    socket_directory: "/tmp/.X11-unix",
+    socket_directory_mode: "1777",
+    mount_read_only: false,
+    effective_socket_directory_mode: "1777",
+    effective_mount_read_only: false,
+    wsl: false,
+    strategy: "direct",
+    fallback_reason: null,
+    xvfb_stderr_bytes: 0,
+    status: "ready",
+    failure_code: null,
+  },
+} as const satisfies privateDisplay.LinuxPrivateDisplaySelection;
+
+test.each([undefined, "controlled close refusal"])(
+  "propagates runtime-probe cancellation through owned doctor cleanup: %s",
+  async (cleanupFailure) => {
+    const controller = new AbortController();
+    const reason = { request: "cancel Python runtime inspection" };
+    const display = vi
+      .spyOn(privateDisplay, "selectLinuxPrivateDisplayStrategy")
+      .mockResolvedValue(readyDisplay);
+    const python = vi
+      .spyOn(pythonRuntime, "inspectLinuxHopperPythonRuntime")
+      .mockImplementation(async (_environment, signal) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort(reason);
+        return err(
+          new pythonRuntime.LinuxHopperPythonError(
+            "cancelled",
+            "Controlled runtime cancellation",
+            reason,
+          ),
+        );
+      });
+    const systemHost = createSystemDoctorHost({}, controller.signal);
+    const close = vi.fn(async () => {
+      await systemHost.close?.();
+      return cleanupFailure;
+    });
+    try {
+      const failure = await runDoctorOwned(
+        undefined,
+        createDoctorHostFixture({
+          platform: "linux",
+          configuredHopperPath: "/fixture/Hopper",
+          signal: controller.signal,
+          linuxDemoRuntimeCheck: systemHost.linuxDemoRuntimeCheck,
+          close,
+        }),
+      ).then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+      if (!(failure instanceof AnalysisError))
+        throw new Error("Expected a doctor cancellation failure");
+      const primary = failure.cleanupPrimary ?? failure;
+      expect(primary).toBeInstanceOf(AnalysisCancelledError);
+      expect(primary.cause).toBe(reason);
+      expect(primary.diagnostics).toMatchObject({
+        hopper_demo_runtime: {
+          private_display: readyDisplay.diagnostic,
+          embedded_python: { status: "unknown", reason: "cancelled" },
+        },
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      if (cleanupFailure === undefined) expect(failure).toBe(primary);
+      else expect(failure.cleanupIncomplete).toBe(true);
+    } finally {
+      try {
+        await systemHost.close?.();
+      } finally {
+        python.mockRestore();
+        display.mockRestore();
+      }
+    }
+  },
+);
+
+test.each(["unavailable", "unknown"] as const)(
+  "does not report a healthy Hopper runtime when Python is %s",
+  async (state) => {
+    const display = vi
+      .spyOn(privateDisplay, "selectLinuxPrivateDisplayStrategy")
+      .mockResolvedValue(readyDisplay);
+    const python = vi
+      .spyOn(pythonRuntime, "inspectLinuxHopperPythonRuntime")
+      .mockResolvedValue(
+        state === "unavailable"
+          ? ok({
+              interpreter: "/usr/bin/python3",
+              version: [3, 14],
+              library: {
+                status: "unavailable",
+                path: "/usr/lib/libpython3.14.so.1.0",
+                reason: "No such file",
+              },
+            })
+          : err(
+              new pythonRuntime.LinuxHopperPythonError(
+                "query_failed",
+                "Fixture query failed",
+              ),
+            ),
+      );
+    try {
+      const check = await createSystemDoctorHost({}).linuxDemoRuntimeCheck?.();
+      expect(check).toMatchObject({
+        name: "hopper-demo-runtime",
+        ok: false,
+        classification:
+          state === "unavailable" ? "missing_dependency" : "unknown",
+        details: {
+          private_display: readyDisplay.diagnostic,
+          embedded_python: {
+            scope: "system_interpreter",
+            hopper_interpreter: "unknown",
+            ...(state === "unavailable"
+              ? { status: "observed", library: { status: "unavailable" } }
+              : { status: "unknown", reason: "query_failed" }),
+          },
+        },
+      });
+      expect(check?.remediation).toContain(
+        state === "unavailable"
+          ? "rea setup --install-hopper"
+          : "Retry rea doctor",
+      );
+    } finally {
+      python.mockRestore();
+      display.mockRestore();
+    }
+  },
+);
+
+test("preserves both X11 and Python failures and their independent remediation", async () => {
+  const display = vi
+    .spyOn(privateDisplay, "selectLinuxPrivateDisplayStrategy")
+    .mockResolvedValue({
+      ok: false,
+      strategy: "unavailable",
+      exitCode: 80,
+      diagnostic: {
+        ...readyDisplay.diagnostic,
+        status: "error",
+        failure_code: "x11_socket_directory_unusable",
+      },
+    });
+  const python = vi
+    .spyOn(pythonRuntime, "inspectLinuxHopperPythonRuntime")
+    .mockResolvedValue(
+      ok({
+        interpreter: "/usr/bin/python3",
+        version: [3, 14],
+        library: { status: "unknown", reason: "No INSTSONAME" },
+      }),
+    );
+  try {
+    const check = await createSystemDoctorHost({}).linuxDemoRuntimeCheck?.();
+    expect(check).toMatchObject({
+      ok: false,
+      classification: "config_drift",
+      details: {
+        private_display: { failure_code: "x11_socket_directory_unusable" },
+        embedded_python: { status: "observed", library: { status: "unknown" } },
+      },
+    });
+    expect(check?.remediation).toContain("user and mount namespaces");
+    expect(check?.remediation).toContain("shared-runtime configuration");
+  } finally {
+    python.mockRestore();
+    display.mockRestore();
+  }
+});
 
 const it = test.skipIf(process.platform === "win32");
 

@@ -25,6 +25,11 @@ cliTest.for([
   },
   { name: "hexadecimal", element: "<integer>0x2A</integer>", expected: 42 },
   {
+    name: "integer between processing instructions",
+    element: "<?integer 9007199254740993?><integer>42</integer><?rea ignored?>",
+    expected: 42,
+  },
+  {
     name: "unsafe hexadecimal",
     element: "<integer>0x20000000000001</integer>",
     expected: { $plist_type: "integer", decimal: "9007199254740993" },

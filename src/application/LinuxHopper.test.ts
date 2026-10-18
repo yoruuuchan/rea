@@ -28,6 +28,7 @@ import {
 import type { VerifiedLinuxHopperPackage } from "./LinuxHopperPublisher.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import * as nativeCommands from "../process/ExecFileOutput.js";
+import * as pythonRuntime from "./LinuxHopperPython.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 
 describe("Linux package-manager command display", () => {
@@ -123,6 +124,7 @@ class RecordingLinuxHost implements LinuxHopperInstallHost {
   installPackage = (
     family: LinuxPackageFamily,
     archive: string,
+    _options?: { readonly signal?: AbortSignal },
   ): Promise<LinuxPackageInstallOutcome> => {
     if (!this.verifiedBeforeInstall)
       throw new Error("Package manager ran before publisher verification");
@@ -260,6 +262,24 @@ describe("Linux Hopper installation", () => {
 });
 
 describe("Linux Hopper package installation", () => {
+  it("keeps runtime inspection failure distinct from package-manager failure and cleans the archive", async () => {
+    const host = new RecordingLinuxHost();
+    const failure = new pythonRuntime.LinuxHopperPythonError(
+      "configuration_unknown",
+      "Fixture unknown runtime",
+    );
+    host.installPackage = async () => ({
+      status: "runtime_unavailable",
+      failure,
+    });
+    expect(await installLinuxHopper(host)).toMatchObject({
+      status: "failed",
+      reason: "runtime_dependencies",
+      pythonRuntimeFailure: failure,
+    });
+    expect(host.cleaned).toEqual(["/tmp/rea test"]);
+  });
+
   it.each(["deb", "rpm", "arch"] as const)(
     "downloads, verifies, installs, reads back, and cleans a %s package",
     async (family) => {
@@ -426,9 +446,29 @@ describe("Linux Hopper cancellation", () => {
     ).toEqual({
       status: "failed",
       reason: "cancelled",
+      cancellationReason: controller.signal.reason,
     });
     expect(host.downloads).toEqual([]);
     expect(host.installed).toEqual([]);
+  });
+
+  it("forwards cancellation to package stages and retains its original cause through cleanup", async () => {
+    const host = new RecordingLinuxHost();
+    const controller = new AbortController();
+    const cause = new Error("caller cancelled between package transactions");
+    host.installPackage = async (_family, _archive, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      expect(host.verifiedBeforeInstall).toBe(true);
+      controller.abort(cause);
+      return { status: "cancelled", cause };
+    };
+    const result = await installLinuxHopper(host, {
+      signal: controller.signal,
+    });
+    expect(result).toMatchObject({ status: "failed", reason: "cancelled" });
+    if (result.status === "failed")
+      expect(result.cancellationReason).toBe(cause);
+    expect(host.cleaned).toEqual(["/tmp/rea test"]);
   });
 });
 

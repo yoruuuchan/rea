@@ -136,7 +136,7 @@ export const setupInstallFailure = (
         status: "failed",
         code: "runtime_dependency_unavailable",
         remediation:
-          "Hopper was installed but required shared libraries are missing. Rerun rea setup, then apply the hopper-demo-runtime remediation from rea doctor.",
+          "Hopper's required runtime could not be verified. Inspect rea doctor --provider hopper; on a supported system use rea setup --install-hopper to repair its dependencies.",
       };
     case "unsupported_hopper_build":
       return {
@@ -150,7 +150,7 @@ export const setupInstallFailure = (
         status: "failed",
         code: "setup_cancelled",
         remediation:
-          "Setup was cancelled before Hopper was installed. Rerun rea setup when ready.",
+          "Setup was cancelled. Run rea doctor to inspect the current state before retrying.",
       };
     case "destination_exists":
       return {

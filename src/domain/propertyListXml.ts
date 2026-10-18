@@ -45,7 +45,8 @@ export const decodeXmlPropertyList = (document: Document) => {
       if (
         child.nodeType !== child.TEXT_NODE &&
         child.nodeType !== child.CDATA_SECTION_NODE &&
-        child.nodeType !== child.COMMENT_NODE
+        child.nodeType !== child.COMMENT_NODE &&
+        child.nodeType !== child.PROCESSING_INSTRUCTION_NODE
       )
         yield child;
   };
