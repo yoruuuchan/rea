@@ -1,5 +1,9 @@
 # Analysis efficiency measurements
 
+For Hopper literal string queries, see the [decoded-record checkpoint](hopper-string-records.md).
+It measures record reuse through real Linux CLI/MCP workflows, preserving
+native recognition gaps, guard-stopped attempts and negative whole-task costs.
+
 For JEB on Linux, see the [CE native audit](jeb-linux-native.md). It qualifies
 the direct headless launch route and measures selected function reads through
 real CLI and production stdio MCP, preserving timeout attempts and the limits

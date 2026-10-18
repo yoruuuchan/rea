@@ -4,15 +4,16 @@ import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { isOwnedTestTemporaryName } from "./lib/test-temporary-ownership.mjs";
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const vitestPath = resolve(repositoryRoot, "node_modules/vitest/vitest.mjs");
-const OWNED_ENTRY = /^(?:rea-|bb-session-)/u;
 
 const findOwnedEntries = async (root, directory = root) => {
   const owned = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (OWNED_ENTRY.test(entry.name)) {
+    if (isOwnedTestTemporaryName(entry.name)) {
       owned.push(relative(root, path));
       continue;
     }

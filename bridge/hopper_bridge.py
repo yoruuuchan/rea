@@ -431,10 +431,6 @@ def _procedure_map(document):
     return result
 
 
-def _strings(document):
-    return {address: record["value"] for address, record in _string_inventory(document).items()}
-
-
 def _string_record(segment, address, display):
     """Read one native typed object, retaining its shortened display separately."""
     length = segment.getObjectLength(address)
@@ -521,7 +517,7 @@ def _search_inventory(document, kind):
         if kind == "procedure":
             values = _procedure_map(document)
         elif kind == "string":
-            values = _strings(document)
+            values = _string_inventory(document)
         elif kind == "name":
             values = {_hex(address): value for address, value in _name_map(document).items()}
         else:
@@ -548,23 +544,17 @@ def _search_results(document, kind, params):
     else:
         raise CapabilityUnavailableError("Regex matching requires REA's supervised worker; the native bridge only executes literal searches")
 
-    selected = []
-    for item in _search_inventory(document, kind):
-        if not matches(item[1]):
-            continue
-        selected.append(item)
-    if not selected:
-        return []
     if kind == "string":
-        records = _string_inventory(document)
-        return [{"address": address, **records[address]} for address, _ in selected]
-    return [
-            {
-                "address": address,
-                "value": value,
-            }
-            for address, value in selected
+        return [
+            {"address": address, **record}
+            for address, record in _search_inventory(document, kind)
+            if matches(record["value"])
         ]
+    return [
+        {"address": address, "value": value}
+        for address, value in _search_inventory(document, kind)
+        if matches(value)
+    ]
 
 
 def _unavailable(reason):

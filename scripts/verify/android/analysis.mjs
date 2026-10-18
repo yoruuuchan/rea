@@ -14,10 +14,8 @@ import { verifyAndroidCliCancellation } from "./cli-cancellation.mjs";
 import { verifyAndroidMetadata } from "./metadata.mjs";
 import { verifyAndroidClassSearch } from "./class-search.mjs";
 import { verifyAndroidFailureRecovery } from "./failure-recovery.mjs";
-import {
-  resolveJadxConfigurationInputs,
-  validateJadxConfiguration,
-} from "../../../dist/android/JadxConfiguration.js";
+import { resolveJadxConfigurationInputs } from "../../../dist/android/JadxConfiguration.js";
+import { validateVerifierJadxConfiguration } from "../../lib/jadx-configuration-inspection.mjs";
 import { verifyWindowsAndroidLifecycle } from "./windows-lifecycle.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -43,7 +41,7 @@ const configuration = await resolveJadxConfigurationInputs(
   process.env,
   "inspect_android_package",
 );
-await validateJadxConfiguration(
+await validateVerifierJadxConfiguration(
   configuration,
   process.env,
   "inspect_android_package",

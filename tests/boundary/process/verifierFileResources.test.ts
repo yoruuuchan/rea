@@ -1,13 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, it } from "vitest";
 import ts from "typescript6";
 import type { inspectVerifierGhidraInstallation } from "../../../scripts/lib/ghidra-installation-inspection.mjs";
+import type { validateVerifierJadxConfiguration } from "../../../scripts/lib/jadx-configuration-inspection.mjs";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { writeJadxJarInventory } from "../../fixtures/android/jadxJar.js";
 
 it("retains and retries the exact descriptor after a verifier hash close failure", async () => {
   const directory = await createTestTempDirectory("rea-verifier-file-");
@@ -133,6 +135,120 @@ it("Ghidra verifier probes await the shared owned inspection contract", async ()
   expect(probes.length).toBeGreaterThan(0);
   expect(violations).toEqual([]);
 });
+
+it("Android verifier probes await the shared owned validation contract", async () => {
+  const paths = [
+    "scripts/verify/android/analysis.mjs",
+    "scripts/verify/android/windows-lifecycle.mjs",
+  ];
+  const probes = new Set<string>();
+  const violations: { path: string; reason: string }[] = [];
+  for (const path of paths) {
+    const source = ts.createSourceFile(
+      path,
+      await readFile(path, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.JS,
+    );
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        [
+          "validateJadxConfiguration",
+          "validateVerifierJadxConfiguration",
+        ].includes(node.expression.text)
+      ) {
+        probes.add(path);
+        if (!ts.isAwaitExpression(node.parent))
+          violations.push({ path, reason: "validation was not awaited" });
+        if (node.expression.text !== "validateVerifierJadxConfiguration")
+          violations.push({ path, reason: "validation has no cleanup owner" });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  expect([...probes].sort()).toEqual(paths.toSorted());
+  expect(violations).toEqual([]);
+});
+
+it
+  .skipIf(process.platform === "win32")
+  .each(["clean", "retry-close", "retained-close"])(
+  "owns Android verifier prerequisite finalization: %s",
+  async (mode) => {
+    const root = await createTestTempDirectory("rea-verifier-jadx-owner-");
+    const jar = join(root, "engine.jar");
+    await writeJadxJarInventory(jar);
+    const java = join(root, "java");
+    await writeFile(
+      java,
+      "#!/bin/sh\nprintf 'java.base@21\\njdk.compiler@21\\n'\n",
+    );
+    await chmod(java, 0o700);
+    const configuration = {
+      java,
+      jar,
+      jvmArguments: [],
+    } satisfies Parameters<typeof validateVerifierJadxConfiguration>[0];
+    const script = String.raw`
+    import assert from 'node:assert/strict';
+    import { validateVerifierJadxConfiguration } from ${JSON.stringify(new URL("../../../scripts/lib/jadx-configuration-inspection.mjs", import.meta.url).href)};
+    import { OwnedFileHandle } from ${JSON.stringify(new URL("../../../dist/filesystem/OwnedFileHandle.js", import.meta.url).href)};
+    import { ArtifactResourceRetryFailure } from ${JSON.stringify(new URL("../../../dist/artifacts/ArtifactResourceScope.js", import.meta.url).href)};
+    const [serializedConfiguration, mode] = process.argv.slice(1);
+    const configuration = JSON.parse(serializedConfiguration);
+    const handles = new Set();
+    let attempts = 0, denied = true;
+    const originalClose = OwnedFileHandle.prototype.close;
+    OwnedFileHandle.prototype.close = async function () {
+      handles.add(this.handle); attempts++;
+      if ((mode === 'retry-close' && attempts === 1) || (mode === 'retained-close' && denied)) throw new Error('controlled archive close refusal');
+      return originalClose.call(this);
+    };
+    let failure;
+    try {
+      await validateVerifierJadxConfiguration(configuration, process.env, 'inspect_android_package');
+    } catch (cause) { failure = cause; }
+    try {
+      if (mode === 'clean') { assert.equal(failure, undefined); assert.equal(attempts, 1); }
+      else if (mode === 'retry-close') {
+        assert.ok(failure); assert.ok(attempts >= 2);
+        assert.ok(!(failure instanceof AggregateError), 'Successful retry reported unresolved cleanup');
+      } else {
+        assert.ok(failure instanceof AggregateError);
+        assert.equal(failure.errors.length, 2, 'Primary and cleanup failures must both survive');
+        const cleanup = failure.errors.find(error => error instanceof ArtifactResourceRetryFailure);
+        assert.ok(cleanup); assert.ok(cleanup.cleanupLeases.length > 0);
+        denied = false;
+        for (const lease of cleanup.cleanupLeases) await lease.release();
+      }
+      assert.equal(handles.size, 1);
+      for (const handle of handles) assert.equal(handle.fd, -1);
+      console.log(JSON.stringify({ mode, verified: true }));
+    } finally {
+      denied = false;
+      OwnedFileHandle.prototype.close = originalClose;
+      for (const handle of handles) await handle.close();
+    }
+  `;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        script,
+        JSON.stringify(configuration),
+        mode,
+      ],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual({ mode, verified: true });
+  },
+);
 
 it("firmware verifier loads its current hash API before reporting unavailable prerequisites", () => {
   const result = spawnSync(
