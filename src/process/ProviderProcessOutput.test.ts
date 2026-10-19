@@ -532,3 +532,40 @@ it.each(["close", "abort"] as const)(
     }
   },
 );
+
+it("keeps current checkpoint coverage separate from historically dropped output", () => {
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const supervisor = new ProviderProcessSupervisor(
+    { process: producer, ownsProcessLifetime: false },
+    { maxDiagnosticBytes: 0 },
+  );
+  try {
+    producer.stdout.write("earlier dropped output");
+    expect(supervisor.snapshot().diagnosticTruncated).toBe(true);
+    const checkpoint = supervisor.checkpointOutput();
+    const current = supervisor.snapshotOutputSince(checkpoint);
+    expect(current.complete).toBe(true);
+    expect(current.snapshot.diagnosticTruncated).not.toBe(true);
+    expect(current.snapshot.stdout).toEqual({
+      text: "",
+      bytes: 0,
+      observedBytes: 0,
+    });
+    producer.stderr.write("current dropped output");
+    expect(supervisor.snapshotOutputSince(checkpoint)).toMatchObject({
+      complete: false,
+      snapshot: { diagnosticTruncated: true },
+    });
+    expect(supervisor.snapshot().diagnosticTruncated).toBe(true);
+  } finally {
+    supervisor.dispose();
+    producer.stdout.destroy();
+    producer.stderr.destroy();
+  }
+});

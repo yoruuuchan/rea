@@ -157,21 +157,50 @@ export const withCdpDiscoveryDeadline = async <T>(
   timeoutMs: number = CDP_DISCOVERY_RESPONSE_LIMITS.timeoutMs,
 ): Promise<T> => {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  let abortSource: "caller" | "deadline" | undefined;
+  let abortReason: unknown;
+  const abort = (source: "caller" | "deadline", reason: unknown): void => {
+    if (abortSource !== undefined) return;
+    abortSource = source;
+    abortReason = reason;
+    deadline.abort(reason);
+  };
+  const onCallerAbort = (): void => {
+    if (signal?.aborted === true) abort("caller", signal.reason);
+  };
+  const timer = setTimeout(
+    () => abort("deadline", new Error("CDP discovery deadline exceeded")),
+    timeoutMs,
+  );
+  signal?.addEventListener("abort", onCallerAbort, { once: true });
+  onCallerAbort();
   try {
-    return await work(
-      signal === undefined
-        ? deadline.signal
-        : AbortSignal.any([signal, deadline.signal]),
-    );
+    return await work(deadline.signal);
   } catch (cause: unknown) {
-    if (deadline.signal.aborted && signal?.aborted !== true)
-      throw new BrowserObservationError(operation, "timeout", {
-        detail: `CDP browser-socket discovery exceeded its ${String(timeoutMs)} ms deadline.`,
-      });
+    if (cause === abortReason) {
+      if (abortSource === "caller")
+        throw new AnalysisCancelledError(operation, { cause: abortReason });
+      if (abortSource === "deadline")
+        throw new BrowserObservationError(operation, "timeout", {
+          detail: `CDP browser-socket discovery exceeded its ${String(timeoutMs)} ms deadline.`,
+        });
+    }
+    // A concrete failure produced before cancellation remains authoritative.
+    if (cause instanceof AnalysisError) {
+      if (
+        abortSource === "deadline" &&
+        cause instanceof AnalysisCancelledError &&
+        cause.cause === abortReason
+      )
+        throw new BrowserObservationError(operation, "timeout", {
+          detail: `CDP browser-socket discovery exceeded its ${String(timeoutMs)} ms deadline.`,
+        });
+      throw cause;
+    }
     throw cause;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onCallerAbort);
   }
 };
 
@@ -409,7 +438,7 @@ export const readCdpJson = async (
 ): Promise<unknown> =>
   await new Promise((resolve, reject) => {
     if (signal?.aborted === true) {
-      reject(new AnalysisCancelledError(operation));
+      reject(new AnalysisCancelledError(operation, { cause: signal.reason }));
       return;
     }
     let response: IncomingMessage | undefined;
@@ -431,7 +460,7 @@ export const readCdpJson = async (
     };
     const onAbort = (): void => {
       if (signal?.aborted === true)
-        finish(new AnalysisCancelledError(operation));
+        finish(new AnalysisCancelledError(operation, { cause: signal.reason }));
     };
     request_ = request(
       url,
@@ -523,7 +552,8 @@ const endpointFailure = (
   signal?: AbortSignal,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
-  if (signal?.aborted === true) return new AnalysisCancelledError(operation);
+  if (signal?.aborted === true)
+    return new AnalysisCancelledError(operation, { cause: signal.reason });
   return new BrowserObservationError(operation, "endpoint_unreachable", {
     cause,
   });

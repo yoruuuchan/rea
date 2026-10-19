@@ -3,7 +3,10 @@ import type {
   InspectWebPageInput,
   ListBrowserTargetsInput,
 } from "../domain/browserObservation.js";
-import type { AnalyzeWebBundleInput } from "../domain/webBundleAnalysis.js";
+import {
+  webBundleAnalysisSchema,
+  type AnalyzeWebBundleInput,
+} from "../domain/webBundleAnalysis.js";
 import type { ObserveWebSessionInput } from "../domain/browserSession.js";
 import type { DiscoverWebMcpToolsInput } from "../domain/webMcpDiscovery.js";
 import type { BrowserCaptureComparisonInput } from "../domain/browserCaptureComparison.js";
@@ -24,6 +27,7 @@ import { createBrowserEvidence } from "./BrowserEvidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { completeProviderEvidence } from "./ProviderOperationExecution.js";
 import { webPageInspectionSchema } from "../domain/browserObservationSchemas.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 
 /** List browser targets within the endpoint and origin scope in the request. */
 export const listBrowserTargets = async (
@@ -34,7 +38,11 @@ export const listBrowserTargets = async (
   const ready = requireBrowser(browser, "list_browser_targets");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("list_browser_targets"));
+    return err(
+      new AnalysisCancelledError("list_browser_targets", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.listTargets(input, options);
   return result.ok
     ? browserEvidence(
@@ -56,10 +64,14 @@ export const inspectWebPage = async (
   const ready = requireBrowser(browser, "inspect_web_page");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("inspect_web_page"));
+    return err(
+      new AnalysisCancelledError("inspect_web_page", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.inspectPage(input, options);
   if (!result.ok)
-    return retainPageInspection(
+    return retainBrowserObservation(
       result.error,
       input,
       ready.value,
@@ -85,10 +97,14 @@ export const analyzeWebBundle = async (
   const ready = requireBrowser(browser, "analyze_web_bundle");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("analyze_web_bundle"));
+    return err(
+      new AnalysisCancelledError("analyze_web_bundle", {
+        cause: options.signal.reason,
+      }),
+    );
   const analyzed = await ready.value.analyzeBundle(input, options);
   if (!analyzed.ok)
-    return retainPageInspection(
+    return retainBrowserObservation(
       analyzed.error,
       input,
       ready.value,
@@ -112,7 +128,11 @@ export const observeWebSession = async (
   const ready = requireBrowser(browser, "observe_web_session");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("observe_web_session"));
+    return err(
+      new AnalysisCancelledError("observe_web_session", {
+        cause: options.signal.reason,
+      }),
+    );
   const observed = await ready.value.observeSession(input, options);
   return observed.ok
     ? browserEvidence(
@@ -134,7 +154,11 @@ export const discoverWebMcpTools = async (
   const ready = requireBrowser(browser, "discover_webmcp_tools");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("discover_webmcp_tools"));
+    return err(
+      new AnalysisCancelledError("discover_webmcp_tools", {
+        cause: options.signal.reason,
+      }),
+    );
   const discovered = await ready.value.discoverWebMcpTools(input, options);
   return discovered.ok
     ? browserEvidence(
@@ -176,7 +200,11 @@ export const captureWebScreenshot = async (
   const ready = requireBrowser(browser, "capture_web_screenshot");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("capture_web_screenshot"));
+    return err(
+      new AnalysisCancelledError("capture_web_screenshot", {
+        cause: options.signal.reason,
+      }),
+    );
   const captured = await ready.value.captureScreenshot(input, options);
   return captured.ok
     ? browserEvidence(
@@ -247,14 +275,46 @@ const browserEvidence = (
   );
 };
 
-/** Convert a provider-retained page capture without claiming bundle analysis completed. */
-const retainPageInspection = (
+/** Retain the completed capture or bundle facts under their actual operation. */
+const retainBrowserObservation = (
   error: AnalysisError,
   input: InspectWebPageInput | AnalyzeWebBundleInput,
   provider: BrowserObservationPort,
   errorOperation: "inspect_web_page" | "analyze_web_bundle",
 ): Result<Evidence, AnalysisError> => {
   const partial = error.partialObservation;
+  if (
+    errorOperation === "analyze_web_bundle" &&
+    partial !== undefined &&
+    !("evidence_id" in partial) &&
+    "observations" in partial &&
+    "capture" in partial
+  ) {
+    const bundle = webBundleAnalysisSchema.safeParse(partial);
+    if (!bundle.success) {
+      const malformed = new AnalysisOutputError(
+        errorOperation,
+        "Browser provider retained malformed completed bundle facts.",
+        { cause: bundle.error },
+      );
+      return err(
+        error.cleanupIncomplete
+          ? analysisErrorWithCleanupFailure(
+              malformed,
+              error,
+              errorOperation,
+            ).bindCleanupDependencies([malformed, error])
+          : malformed,
+      );
+    }
+    error.partialObservation = createBrowserEvidence(
+      "analyze_web_bundle",
+      input,
+      bundle.data,
+      provider.identity(),
+    );
+    return err(error);
+  }
   if (
     partial === undefined ||
     "evidence_id" in partial ||

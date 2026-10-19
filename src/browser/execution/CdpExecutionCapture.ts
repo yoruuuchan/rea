@@ -53,7 +53,9 @@ export const captureWebExecution = async (
     const reason = await waiting;
     session.beginCompletion();
     if (session.options.signal?.aborted)
-      throw new AnalysisCancelledError(session.operation);
+      throw new AnalysisCancelledError(session.operation, {
+        cause: session.options.signal.reason,
+      });
     sources.check();
     requests.check();
     let raw: unknown;

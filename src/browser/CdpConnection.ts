@@ -66,7 +66,8 @@ export class CdpConnection {
     limits?: { readonly maxPayloadBytes: number },
     onConnected?: (connection: CdpConnection) => void,
   ): Promise<CdpConnection> {
-    if (signal?.aborted === true) throw new AnalysisCancelledError(operation);
+    if (signal?.aborted === true)
+      throw new AnalysisCancelledError(operation, { cause: signal.reason });
     const maxPayloadBytes =
       limits === undefined
         ? WEB_RUNTIME_LIMITS.protocolBytes
@@ -152,7 +153,9 @@ export class CdpConnection {
     if (this.#closed || this.socket.readyState !== WebSocket.OPEN)
       throw this.#transportError(this.#transportFailure);
     if (signal?.aborted === true)
-      throw new AnalysisCancelledError(this.operation);
+      throw new AnalysisCancelledError(this.operation, {
+        cause: signal.reason,
+      });
     const id = this.#nextId;
     this.#nextId += 1;
     const message = JSON.stringify({
@@ -166,7 +169,11 @@ export class CdpConnection {
         const pending = this.#pending.get(id);
         if (pending === undefined) return;
         this.#complete(id, pending);
-        reject(new AnalysisCancelledError(this.operation));
+        reject(
+          new AnalysisCancelledError(this.operation, {
+            cause: signal?.reason,
+          }),
+        );
       };
       const timer = setTimeout(() => {
         const pending = this.#pending.get(id);
@@ -446,11 +453,9 @@ const waitForOpen = async (
     const onFailure = (cause: unknown): void => {
       cleanup();
       reject(
-        signal?.aborted === true
-          ? new AnalysisCancelledError(operation)
-          : new BrowserObservationError(operation, "endpoint_unreachable", {
-              cause,
-            }),
+        new BrowserObservationError(operation, "endpoint_unreachable", {
+          cause,
+        }),
       );
     };
     const onClose = (code: number, reason: Buffer): void => {
@@ -461,8 +466,9 @@ const waitForOpen = async (
       );
     };
     const onAbort = (): void => {
+      cleanup();
       terminateSocket(socket);
-      onFailure(new AnalysisCancelledError(operation));
+      reject(new AnalysisCancelledError(operation, { cause: signal?.reason }));
     };
     const cleanup = (): void => {
       clearTimeout(timer);

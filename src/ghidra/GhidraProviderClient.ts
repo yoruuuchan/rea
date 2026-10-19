@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { artifactFilePrimaryFailure } from "../artifacts/ArtifactFileOperation.js";
 import { fileURLToPath } from "node:url";
@@ -958,32 +959,96 @@ const projectPrimarySessionError = (
       failure.message,
       context,
     );
+  const output =
+    failure.kind === "start" ||
+    failure.kind === "process" ||
+    failure.kind === "protocol" ||
+    failure.kind === "timeout"
+      ? readGhidraFailureOutput(failure.diagnostics.failure_output)
+      : undefined;
   const memoryFailure = projectObservedJvmMemoryFailure(
     operation,
     failure,
     context,
+    output,
   );
+  const uncertainty =
+    output?.complete === false
+      ? "Ghidra's output for this operation is incomplete. No OutOfMemoryError was confirmed; a memory cause cannot be ruled out."
+      : undefined;
   if (memoryFailure !== undefined) return memoryFailure;
   if (failure.kind === "timeout") {
     const timeoutMs = failure.timeoutMs ?? startupTimeoutMs;
-    return new AnalysisTimeoutError(
-      operation,
-      timeoutMs,
+    const guidance =
       failure.message === GHIDRA_STARTUP_DEADLINE_ELAPSED
-        ? { ...context, ...ghidraStartupTimeoutGuidance(timeoutMs) }
-        : context,
-    );
+        ? ghidraStartupTimeoutGuidance(timeoutMs)
+        : undefined;
+    return new AnalysisTimeoutError(operation, timeoutMs, {
+      ...context,
+      ...guidance,
+      ...(uncertainty === undefined
+        ? {}
+        : {
+            userMessage: `${
+              guidance?.userMessage ??
+              `Ghidra did not finish within its ${String(timeoutMs)} ms deadline.`
+            } ${uncertainty}`,
+          }),
+    });
   }
   const exited = exitedProviderMessage(operation, failure, health);
   if (exited !== undefined)
     return new ProviderAdapterError("ghidra", operation, {
       ...context,
-      userMessage: exited,
+      userMessage:
+        uncertainty === undefined ? exited : `${exited} ${uncertainty}`,
     });
-  return new ProviderAdapterError("ghidra", operation, context);
+  return new ProviderAdapterError("ghidra", operation, {
+    ...context,
+    ...(uncertainty === undefined
+      ? {}
+      : {
+          userMessage: uncertainty,
+          remediationAction:
+            "Review the retained Ghidra diagnostics and capture complete launcher output before choosing resource-specific recovery.",
+        }),
+  });
 };
 
-/** Project only OOME evidence captured during the operation that failed. */
+const observedJvmFailureSchema = z.object({
+  stream: z.enum(["stdout", "stderr"]),
+  offset: z.number().int().nonnegative(),
+  line: z.string().min(1),
+});
+
+interface GhidraFailureOutputView {
+  readonly oomText: string | undefined;
+  readonly complete: boolean | undefined;
+}
+
+/** Read the scoped capture once; unavailable fields remain unconfirmed. */
+const readGhidraFailureOutput = (
+  scoped: JsonValue | undefined,
+): GhidraFailureOutputView | undefined => {
+  if (scoped === null || typeof scoped !== "object" || Array.isArray(scoped))
+    return undefined;
+  const observedLines = Array.isArray(scoped.observed_oome)
+    ? scoped.observed_oome.flatMap((observed) => {
+        const parsed = observedJvmFailureSchema.safeParse(observed);
+        return parsed.success ? [parsed.data.line] : [];
+      })
+    : [];
+  return {
+    oomText: observedLines.length === 0 ? undefined : observedLines.join("\n"),
+    complete:
+      typeof scoped.complete === "boolean" ? scoped.complete : undefined,
+  };
+};
+
+/**
+ * Project OOME evidence captured during the operation that failed, including
+ * OOME lines the process supervisor observed beyond the retention budget.
+ */
 const projectObservedJvmMemoryFailure = (
   operation: AnalysisOperation,
   failure: GhidraSessionError,
@@ -991,35 +1056,10 @@ const projectObservedJvmMemoryFailure = (
     readonly cause: GhidraSessionError;
     readonly diagnostics: Readonly<Record<string, JsonValue>>;
   },
+  scoped: GhidraFailureOutputView | undefined,
 ): AnalysisResourceConstraintError | undefined => {
-  if (
-    failure.kind !== "start" &&
-    failure.kind !== "process" &&
-    failure.kind !== "protocol" &&
-    failure.kind !== "timeout"
-  )
-    return undefined;
-  const scoped = failure.diagnostics.failure_output;
-  if (
-    scoped === null ||
-    typeof scoped !== "object" ||
-    Array.isArray(scoped) ||
-    typeof scoped.stdout !== "object" ||
-    scoped.stdout === null ||
-    typeof scoped.stderr !== "object" ||
-    scoped.stderr === null
-  )
-    return undefined;
-  const streamText = (value: JsonValue): string =>
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof value.text === "string"
-      ? value.text
-      : "";
-  const output = `${streamText(scoped.stdout)}\n${streamText(scoped.stderr)}`;
-  if (!/java\.lang\.OutOfMemoryError(?:\s*:|\b)/u.test(output))
-    return undefined;
+  const output = scoped?.oomText;
+  if (output === undefined) return undefined;
   const threadCapacity = /unable to create native thread/iu.test(output);
   const heapExhaustion = /Java heap space|GC overhead limit exceeded/iu.test(
     output,

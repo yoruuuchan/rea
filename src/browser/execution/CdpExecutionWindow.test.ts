@@ -10,6 +10,7 @@ it("settles an already lost transport without arming a timer that cannot resolve
   window.end("target_terminated");
   await expect(window.start(30_000)).resolves.toBe("target_terminated");
   expect(window.active).toBe(false);
+  expect(window.armedAt).toBeUndefined();
 });
 
 it("ends the actual armed window at its selected duration and disposes its timer", async () => {
@@ -41,11 +42,20 @@ it("settles caller cancellation and removes its local timer", async () => {
     options: { signal: controller.signal },
   });
   try {
-    const assertion = expect(window.start(30_000)).rejects.toMatchObject({
+    const reason = new Error("operator stopped the armed window");
+    const result = window.start(30_000).catch((error: unknown) => error);
+    controller.abort(reason);
+    const failure = await result;
+    expect(failure).toMatchObject({
       _tag: "AnalysisCancelledError",
+      cause: reason,
     });
-    controller.abort();
-    await assertion;
+    expect(() => window.check()).toThrow(failure as Error);
+    const endedAt = window.endedAt;
+    window.end("target_terminated");
+    expect(window.reason).toBeUndefined();
+    expect(window.endedAt).toBe(endedAt);
+    await expect(window.start(30_000)).rejects.toBe(failure);
     expect(window.active).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   } finally {

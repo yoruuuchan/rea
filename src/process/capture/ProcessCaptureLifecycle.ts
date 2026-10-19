@@ -459,7 +459,9 @@ const captureCoverageUnknowns = (
     unknowns.push({
       scope: "process",
       reason:
-        "Process sampling stopped with incomplete observations; sample_limit is reported in truncation_details.process.",
+        details.process.first_sampling_failure !== null
+          ? `Process sampling has incomplete observations: ${details.process.first_sampling_failure}. See truncation_details.process.`
+          : "The process sample limit was reached; see truncation_details.process.",
     });
   return unknowns;
 };

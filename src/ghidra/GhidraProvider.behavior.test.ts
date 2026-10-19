@@ -1,3 +1,4 @@
+import { ProcessOutputTokenScanner } from "../process/ProcessOutputTokenScanner.js";
 import { GhidraNativeAotSnapshotOwner } from "./GhidraNativeAotSnapshotOwner.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { resolvedAnalysisError } from "../domain/analysisErrorBase.js";
@@ -3360,6 +3361,23 @@ const failureOutput = (stdout = "", stderr = "") => ({
   stdout: output(stdout),
   stderr: output(stderr),
   complete: true,
+  observed_oome: (["stdout", "stderr"] as const).flatMap((stream) => {
+    const bytes = Buffer.from(stream === "stdout" ? stdout : stderr);
+    const scanner = new ProcessOutputTokenScanner("java.lang.OutOfMemoryError");
+    scanner.scan(bytes, 0);
+    scanner.finish();
+    const observed = scanner.latestWithin(0, bytes.length);
+    return observed === undefined
+      ? []
+      : [
+          {
+            stream,
+            offset: observed.offset,
+            line: observed.line,
+            truncated: observed.truncated,
+          },
+        ];
+  }),
 });
 const projectFailure = async (
   kind: "cancelled" | "process" | "protocol" | "remote" | "timeout",
@@ -3548,6 +3566,45 @@ describe("Ghidra OOME error projection", () => {
       configured_jvm_max_heap: "4G",
     });
     expect(projected.code).not.toBe("resource_constraint");
+  });
+});
+
+describe("Ghidra OOME beyond the retention budget", () => {
+  it("projects an observed OOME line that the retained text omits", async () => {
+    const projected = await projectFailure("process", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: {
+        ...failureOutput("", ""),
+        complete: false,
+        observed_oome: [
+          {
+            stream: "stderr",
+            offset: 9_000_000,
+            line: "ERROR Abort due to Headless analyzer error: Java heap space (HeadlessAnalyzer) java.lang.OutOfMemoryError: Java heap space",
+          },
+        ],
+      },
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: {
+        resource: "memory",
+        reported_limits: { configured_jvm_max_heap: "4G" },
+      },
+    });
+    expect(projected.message).toContain("Java heap space");
+  });
+
+  it("keeps the original failure when incomplete output shows no OOME", async () => {
+    const projected = await projectFailure("process", {
+      stdout: output(""),
+      stderr: output(""),
+      failure_output: { ...failureOutput("", ""), complete: false },
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected.code).toBe("execution_failure");
   });
 });
 
@@ -3744,5 +3801,84 @@ it.each([
     } finally {
       await client.close();
     }
+  },
+);
+
+it.each([
+  {
+    unrelated: "INFO unrelated capacity: unable to create native thread",
+    reported: "Java heap space",
+    heapAdvice: true,
+  },
+  {
+    unrelated: "INFO unrelated configuration: Java heap space",
+    reported: "Metaspace",
+    heapAdvice: false,
+  },
+])(
+  "binds Ghidra OOME detail to the reporting line instead of unrelated output ($reported)",
+  async ({ unrelated, reported, heapAdvice }) => {
+    const projected = await projectFailure("process", {
+      failure_output: failureOutput(
+        `${unrelated}\njava.lang.OutOfMemoryError: ${reported}\n`,
+      ),
+      configured_jvm_max_heap: "4G",
+    });
+    expect(projected).toMatchObject({
+      code: "resource_constraint",
+      details: { resource: "memory" },
+    });
+    expect(projected.message).toContain(reported);
+    expect(
+      projected.remediation.action.includes("GHIDRA_HEADLESS_MAXMEM"),
+    ).toBe(heapAdvice);
+  },
+);
+
+it("does not infer a complete OOME token from a budget-cut text prefix", async () => {
+  const projected = await projectFailure("process", {
+    failure_output: {
+      stdout: output("java.lang.OutOfMemoryError"),
+      stderr: output(""),
+      complete: false,
+      observed_oome: [],
+    },
+  });
+  expect(projected.code).toBe("execution_failure");
+  expect(projected.message).toContain("a memory cause cannot be ruled out");
+});
+
+it.each([false, true])(
+  "preserves valid OOME facts among malformed observations without inventing a constraint (confirmed=%s)",
+  async (confirmed) => {
+    const malformed: JsonValue[] = [
+      null,
+      {},
+      { stream: "stderr", offset: 0, line: "" },
+      { stream: "unknown", offset: 0, line: "java.lang.OutOfMemoryError" },
+    ];
+    const projected = await projectFailure("process", {
+      failure_output: {
+        complete: false,
+        observed_oome: [
+          ...malformed,
+          ...(confirmed
+            ? [
+                {
+                  stream: "stderr",
+                  offset: 0,
+                  line: "java.lang.OutOfMemoryError: Metaspace",
+                },
+              ]
+            : []),
+        ],
+      },
+    });
+    expect(projected.code).toBe(
+      confirmed ? "resource_constraint" : "execution_failure",
+    );
+    expect(projected.message).toContain(
+      confirmed ? "Metaspace" : "a memory cause cannot be ruled out",
+    );
   },
 );

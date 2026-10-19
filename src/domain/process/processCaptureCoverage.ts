@@ -115,7 +115,7 @@ export const hasCaptureTruncation = (
 
 /** Whether producer accounting reports a gap in the selected observation source. */
 export const processSourceTruncated = (
-  capture: UnverifiedProcessCapture,
+  capture: Pick<UnverifiedProcessCapture, "truncation_details">,
   source: ProcessObservationSource,
 ): boolean => {
   const details = capture.truncation_details;

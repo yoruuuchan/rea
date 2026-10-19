@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { webPageInspectionSchema } from "./browserObservationSchemas.js";
 import { analyzeJavaScriptStaticSource } from "./javascript/javascriptStaticAnalysis.js";
-import { analyzeCapturedWebBundle } from "./webBundleAnalyzer.js";
+import {
+  analyzeCapturedWebBundle,
+  analyzeCapturedWebScript,
+} from "./webBundleAnalyzer.js";
+import { buildCapturedWebBundleAnalysis } from "./webBundleAnalyzerResult.js";
 import { webBundleAnalysisSchema } from "./webBundleAnalysis.js";
+import { isIncludedScript } from "./webBundleAnalyzerInspection.js";
+import { webBundleScriptAnalysisSchema } from "./webBundleScriptAnalysis.js";
 import { createWebTextArtifact } from "./webContentArtifact.js";
 
 const origin = "https://app.example.test";
@@ -1018,6 +1024,364 @@ const inspection = (source: string) =>
     },
     limitations: [],
   });
+
+describe("per-script web bundle analysis", () => {
+  it("keeps parser failures as analyzed outcomes with their own coverage", () => {
+    const captured = inspection("function broken( {");
+    const script = captured.scripts.items.find(isIncludedScript);
+    if (script === undefined)
+      throw new Error("Missing included script fixture");
+
+    expect(analyzeCapturedWebScript(script)).toMatchObject({
+      status: "analyzed",
+      script_key: script.script_key,
+      parse_status: "failed",
+      visited_ast_nodes: 0,
+      observations: {
+        edges: [],
+        routes: [],
+        endpoints: [],
+        webmcp_declarations: [],
+      },
+    });
+  });
+
+  it("merges out-of-order worker outcomes in capture order and preserves exact unavailable keys", () => {
+    const firstCapture = inspection("import './first.js'; fetch('/first');");
+    const secondCapture = inspection("import './second.js'; fetch('/second');");
+    const first = firstCapture.scripts.items.find(isIncludedScript);
+    const second = secondCapture.scripts.items.find(isIncludedScript);
+    if (first === undefined || second === undefined)
+      throw new Error("Missing included script fixtures");
+    const captured = firstCapture;
+    captured.scripts.items.push({ ...second, script_key: "second-script" });
+    captured.scripts.total += 1;
+
+    const result = buildCapturedWebBundleAnalysis(
+      captured,
+      {
+        status: "not_requested",
+        requested: 0,
+        processed: 0,
+        items: [],
+      },
+      [
+        {
+          status: "unavailable",
+          script_key: "second-script",
+          reason: "deadline",
+          detail: "Worker deadline expired.",
+        },
+        analyzeCapturedWebScript(first),
+      ],
+    );
+
+    expect(
+      result.observations.chunks.edges.map(({ specifier }) => specifier),
+    ).toEqual(["./first.js"]);
+    expect(result.observations.endpoints.map(({ value }) => value)).toEqual([
+      "/first",
+    ]);
+    expect(result.unknowns).toContainEqual({
+      dimension: "javascript_analysis",
+      reason: expect.stringContaining("deadline"),
+      affected_script_keys: ["second-script"],
+    });
+    expect(result.completeness).toMatchObject({
+      status: "partial",
+      parsed_scripts: 1,
+      parse_failures: 0,
+    });
+  });
+
+  it("does not count explicitly unstarted scripts as submitted and reports source budget omissions", () => {
+    const captured = inspection("fetch('/started');");
+    const script = captured.scripts.items.find(isIncludedScript);
+    if (script === undefined)
+      throw new Error("Missing included script fixture");
+    const later = { ...script, script_key: "not-started-script" };
+    captured.scripts.items.push(later);
+    captured.scripts.total += 1;
+    captured.completeness.excluded.push({
+      section: "script_sources",
+      reason: "resource_budget_exhausted",
+      count: 2,
+    });
+
+    const result = buildCapturedWebBundleAnalysis(
+      captured,
+      {
+        status: "not_requested",
+        requested: 0,
+        processed: 0,
+        items: [],
+      },
+      [
+        analyzeCapturedWebScript(script),
+        {
+          status: "unavailable",
+          script_key: "not-started-script",
+          reason: "not_started",
+        },
+      ],
+    );
+
+    expect(result.capture.scripts_analyzed).toBe(1);
+    expect(result.completeness.status).toBe("partial");
+    expect(result.unknowns).toContainEqual({
+      dimension: "script_source",
+      reason: expect.stringContaining("omitted 2 script source artifacts"),
+      affected_script_keys: [],
+    });
+    expect(result.unknowns).toContainEqual({
+      dimension: "javascript_analysis",
+      reason: expect.stringContaining("not_started"),
+      affected_script_keys: ["not-started-script"],
+    });
+  });
+});
+
+describe("unavailable web bundle analysis outcomes", () => {
+  it("preserves distinct unavailable reasons and details with their exact script keys", () => {
+    const captured = inspection("fetch('/started');");
+    const first = captured.scripts.items.find(isIncludedScript);
+    if (first === undefined) throw new Error("Missing included script fixture");
+    const keys = ["deadline-second", "deadline-different", "resource-failure"];
+    for (const script_key of keys)
+      captured.scripts.items.push({ ...first, script_key });
+    captured.scripts.total += keys.length;
+
+    const result = buildCapturedWebBundleAnalysis(
+      captured,
+      {
+        status: "not_requested",
+        requested: 0,
+        processed: 0,
+        items: [],
+      },
+      [
+        {
+          status: "unavailable",
+          script_key: first.script_key,
+          reason: "not_started",
+          detail: "Total analysis deadline expired after 50 ms.",
+        },
+        {
+          status: "unavailable",
+          script_key: "deadline-second",
+          reason: "not_started",
+          detail: "Total analysis deadline expired after 50 ms.",
+        },
+        {
+          status: "unavailable",
+          script_key: "deadline-different",
+          reason: "deadline",
+          detail: "Per-script deadline expired after 10 ms.",
+        },
+        {
+          status: "unavailable",
+          script_key: "resource-failure",
+          reason: "resource_constraint",
+          detail: "Worker result exceeded its byte budget.",
+        },
+      ],
+    );
+
+    expect(
+      result.unknowns.filter(
+        ({ dimension }) => dimension === "javascript_analysis",
+      ),
+    ).toEqual([
+      {
+        dimension: "javascript_analysis",
+        reason:
+          'Analysis was unavailable for captured scripts (not_started); findings from those scripts are unknown. Worker detail: "Total analysis deadline expired after 50 ms."',
+        affected_script_keys: [first.script_key, "deadline-second"],
+      },
+      {
+        dimension: "javascript_analysis",
+        reason:
+          'Analysis was unavailable for captured scripts (deadline); findings from those scripts are unknown. Worker detail: "Per-script deadline expired after 10 ms."',
+        affected_script_keys: ["deadline-different"],
+      },
+      {
+        dimension: "javascript_analysis",
+        reason:
+          'Analysis was unavailable for captured scripts (resource_constraint); findings from those scripts are unknown. Worker detail: "Worker result exceeded its byte budget."',
+        affected_script_keys: ["resource-failure"],
+      },
+    ]);
+  });
+});
+
+it("requires every result reference to belong to its script key", () => {
+  const captured = inspection(
+    "import './module.js'; const routes = [{ path: '/known' }]; fetch('/api'); form.get('candidate'); document.modelContext.registerTool({ name: 'lookup' });",
+  );
+  const script = captured.scripts.items.find(isIncludedScript);
+  if (script === undefined) throw new Error("Missing included script fixture");
+  const outcome = analyzeCapturedWebScript(script);
+  if (outcome.status !== "analyzed")
+    throw new Error("Expected a completed script analysis fixture");
+  const result = outcome;
+  expect(webBundleScriptAnalysisSchema.parse(result)).toEqual(result);
+  expect(result.observations.edges.length).toBeGreaterThan(0);
+  expect(result.observations.routes.length).toBeGreaterThan(0);
+  expect(result.observations.endpoints.length).toBeGreaterThan(0);
+  expect(result.observations.webmcp_declarations.length).toBeGreaterThan(0);
+  expect(result.inferences.length).toBeGreaterThan(0);
+
+  const wrongEdgeSource = {
+    ...result,
+    observations: {
+      ...result.observations,
+      edges: result.observations.edges.map((edge, index) =>
+        index === 0 ? { ...edge, from_script_key: "another-script" } : edge,
+      ),
+    },
+  };
+  const wrongEdgeLocation = {
+    ...result,
+    observations: {
+      ...result.observations,
+      edges: result.observations.edges.map((edge, index) =>
+        index === 0
+          ? {
+              ...edge,
+              location: { ...edge.location, script_key: "another-script" },
+            }
+          : edge,
+      ),
+    },
+  };
+  const wrongFindingLocation = {
+    ...result,
+    observations: {
+      ...result.observations,
+      endpoints: result.observations.endpoints.map((finding, index) =>
+        index === 0
+          ? {
+              ...finding,
+              location: {
+                ...finding.location,
+                script_key: "another-script",
+              },
+            }
+          : finding,
+      ),
+    },
+  };
+  const wrongRouteLocation = {
+    ...result,
+    observations: {
+      ...result.observations,
+      routes: result.observations.routes.map((finding, index) =>
+        index === 0
+          ? {
+              ...finding,
+              location: {
+                ...finding.location,
+                script_key: "another-script",
+              },
+            }
+          : finding,
+      ),
+    },
+  };
+  const wrongWebMcpLocation = {
+    ...result,
+    observations: {
+      ...result.observations,
+      webmcp_declarations: result.observations.webmcp_declarations.map(
+        (declaration, index) =>
+          index === 0
+            ? {
+                ...declaration,
+                location: {
+                  ...declaration.location,
+                  script_key: "another-script",
+                },
+              }
+            : declaration,
+      ),
+    },
+  };
+  const wrongInferenceBasis = {
+    ...result,
+    inferences: result.inferences.map((inference, inferenceIndex) =>
+      inferenceIndex === 0
+        ? {
+            ...inference,
+            basis: inference.basis.map((basis, basisIndex) =>
+              basisIndex === 0
+                ? { ...basis, script_key: "another-script" }
+                : basis,
+            ),
+          }
+        : inference,
+    ),
+  };
+
+  expect(webBundleScriptAnalysisSchema.safeParse(wrongEdgeSource).success).toBe(
+    false,
+  );
+  expect(
+    webBundleScriptAnalysisSchema.safeParse(wrongEdgeLocation).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse(wrongFindingLocation).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse(wrongRouteLocation).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse(wrongWebMcpLocation).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse(wrongInferenceBasis).success,
+  ).toBe(false);
+});
+
+it("rejects a failed parse that claims visited nodes or derived facts", () => {
+  const malformed =
+    inspection("function broken( {").scripts.items.find(isIncludedScript);
+  const valid =
+    inspection("fetch('/api');").scripts.items.find(isIncludedScript);
+  if (malformed === undefined || valid === undefined)
+    throw new Error("Missing parse result fixtures");
+  const failedOutcome = analyzeCapturedWebScript(malformed);
+  const parsedOutcome = analyzeCapturedWebScript(valid);
+  if (
+    failedOutcome.status !== "analyzed" ||
+    parsedOutcome.status !== "analyzed"
+  )
+    throw new Error("Expected completed script analysis fixtures");
+  const failed = failedOutcome;
+  const parsed = parsedOutcome;
+
+  expect(webBundleScriptAnalysisSchema.parse(failed)).toEqual(failed);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse({
+      ...failed,
+      visited_ast_nodes: 1,
+    }).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse({
+      ...failed,
+      widened_return_references: true,
+    }).success,
+  ).toBe(false);
+  expect(
+    webBundleScriptAnalysisSchema.safeParse({
+      ...failed,
+      observations: {
+        ...failed.observations,
+        endpoints: parsed.observations.endpoints,
+      },
+    }).success,
+  ).toBe(false);
+});
 
 it("recognizes expression-free template literals as route properties", () => {
   const result = analyzeCapturedWebBundle(

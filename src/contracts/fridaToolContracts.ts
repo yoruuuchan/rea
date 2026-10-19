@@ -90,10 +90,14 @@ export const FRIDA_TOOL_CONTRACTS = [
     kind: "native-provider",
     description:
       "List processes observed on a selected Frida device or caller-supplied remote endpoint. A remote connection is closed after discovery; authentication values are never returned or recorded.",
-    inputSchema: exclusiveDeviceSelector(deviceSelector).refine(
-      (value) => value.device_id !== undefined || value.remote !== undefined,
-      "Select a device_id or a remote endpoint",
-    ),
+    inputSchema: exclusiveDeviceSelector(deviceSelector)
+      .refine(
+        (value) => value.device_id !== undefined || value.remote !== undefined,
+        "Select a device_id or a remote endpoint",
+      )
+      .describe(
+        'Provide exactly one of device_id or remote. device_id selects a device (use "local" for this host); remote requires an address.',
+      ),
     outputSchema: z.strictObject({
       device_id: z.string(),
       processes: z.array(
@@ -251,7 +255,7 @@ export const FRIDA_TOOL_CONTRACTS = [
     ...toolContractMetadata("close_frida_session"),
     kind: "native-provider",
     description:
-      "Unload session scripts and detach REA's Frida session. If a spawned process is still paused, resume it before detaching so it is not left suspended. REA never kills the target; its final state is reported as unknown.",
+      "Unload session scripts and attempt to detach REA's Frida session. Then resume a still-paused spawned process if script cleanup or session detach confirms instrumentation was released. Cleanup failures are reported. REA never kills the target; its final state is reported as unknown.",
     inputSchema: z.strictObject({ session_id: sessionId }),
     outputSchema: z.strictObject({ target_state: z.literal("unknown") }),
     examples: [

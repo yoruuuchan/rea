@@ -51,9 +51,9 @@ export const startMcpTransport = async (
       "Optional MCP providers could not load; affected tools remain unavailable",
     );
   }
-  for (const failure of Object.values(
-    optionalProviders.optionalProviderLoadFailures ?? {},
-  )) {
+  const { optionalProviderLoadFailures, ...observationProviders } =
+    optionalProviders;
+  for (const failure of Object.values(optionalProviderLoadFailures ?? {})) {
     serverLogger.warn(
       { providerId: failure.providerId, error: failure.reason },
       "Optional MCP adapter could not load; its peers remain available",
@@ -81,12 +81,9 @@ export const startMcpTransport = async (
   // Optional providers are shared by every server instance the SDK creates,
   // including a discarded discovery probe, so only process shutdown closes them.
   const optionalProvidersToClose = new Set<ClosableOptionalProvider>(
-    [
-      optionalProviders.browserObservation,
-      optionalProviders.browserScenarioCapture,
-      optionalProviders.electronObservation,
-      optionalProviders.electronActiveObservation,
-    ].filter((provider) => provider !== undefined),
+    Object.values(observationProviders).filter(
+      (provider) => provider !== undefined,
+    ),
   );
   let optionalProviderClose: Promise<void> | undefined;
   const closeOptionalProviders = async (): Promise<void> => {

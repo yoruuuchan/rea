@@ -55,6 +55,12 @@ it as inline Evidence to `inspect-analysis-view`; the same summary and capture
 page contracts apply. Large complete records can still exceed MCP's response
 budget; export the retained Evidence when a single record cannot fit.
 
+If decoding completes before cancellation or private-root cleanup fails, the
+failure retains the completed capture as Evidence with the requested record
+selection and explicit sensitivity exclusions. Earlier decode failures remain
+primary. Failed cleanup stays linked to its exact owner, including through
+redaction, and its live status clears only after a confirmed retry.
+
 ## Formats and upstream profiles
 
 HAR uses unchanged `har-schema@2.0.0` draft-06 schemas, `ajv@8.20.0`,

@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { createServer as createNetServer, type Socket } from "node:net";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CdpConnection } from "../../../src/browser/CdpConnection.js";
+import {
+  AnalysisCancelledError,
+  AnalysisOutputError,
+} from "../../../src/domain/analysisErrorCore.js";
 import { WEB_RUNTIME_LIMITS } from "../../../src/domain/webRuntime.js";
 import {
   startFakeCdpBrowser,
@@ -73,7 +78,31 @@ afterEach(async () => {
   await Promise.all(browsers.splice(0).map(async (browser) => browser.close()));
 });
 
-describe("CDP connection", () => {
+describe("CDP connection admission cancellation", () => {
+  it("preserves an AnalysisError reason when admission is already cancelled", async () => {
+    const controller = new AbortController();
+    const reason = new AnalysisOutputError(
+      "inspect_web_page",
+      "caller supplied cancellation reason",
+    );
+    controller.abort(reason);
+
+    const failure = await CdpConnection.connect(
+      "ws://127.0.0.1:1/unused",
+      "inspect_web_page",
+      controller.signal,
+    ).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(failure).toBeInstanceOf(AnalysisCancelledError);
+    if (!(failure instanceof AnalysisCancelledError))
+      throw new Error("Expected admission cancellation");
+    expect(failure.cause).toBe(reason);
+  });
+});
+
+describe("CDP connection response correlation", () => {
   it("correlates concurrent command responses over a real WebSocket", async () => {
     const browser = await startFakeCdpBrowser();
     browsers.push(browser);
@@ -96,6 +125,35 @@ describe("CDP connection", () => {
       await connection.close();
     }
   });
+});
+
+describe("CDP command cancellation causes", () => {
+  it("preserves a supplied reason when a command starts with an aborted signal", async () => {
+    const browser = await startFakeCdpBrowser();
+    browsers.push(browser);
+    const connection = await CdpConnection.connect(
+      browser.browserWebSocketUrl,
+      "observe_web_session",
+    );
+    const controller = new AbortController();
+    const reason = new Error("command was cancelled before send");
+    controller.abort(reason);
+    try {
+      const failure = await connection
+        .send("Page.enable", {}, undefined, controller.signal)
+        .then(
+          () => undefined,
+          (cause: unknown) => cause,
+        );
+      expect(failure).toBeInstanceOf(AnalysisCancelledError);
+      if (!(failure instanceof AnalysisCancelledError))
+        throw new Error("Expected pre-send command cancellation");
+      expect(failure.cause).toBe(reason);
+      expect(browser.commands).toHaveLength(0);
+    } finally {
+      await connection.close();
+    }
+  });
 
   it("waits for an unresponsive command until caller cancellation", async () => {
     const browser = await startFakeCdpBrowser({ hangOnMethod: "Page.enable" });
@@ -112,17 +170,134 @@ describe("CDP connection", () => {
         undefined,
         controller.signal,
       );
-      const assertion = expect(pending).rejects.toMatchObject({
-        _tag: "AnalysisCancelledError",
-        operation: "observe_web_session",
-      });
-      controller.abort();
-      await assertion;
+      await vi.waitFor(() => expect(browser.commands).toHaveLength(1));
+      const reason = new Error("cancel the pending CDP command");
+      controller.abort(reason);
+      const failure = await pending.then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+      expect(failure).toBeInstanceOf(AnalysisCancelledError);
+      if (!(failure instanceof AnalysisCancelledError))
+        throw new Error("Expected command cancellation");
+      expect(failure.operation).toBe("observe_web_session");
+      expect(failure.cause).toBe(reason);
     } finally {
       await connection.close();
     }
   });
 
+  it("preserves AbortController's default reason for an in-flight command", async () => {
+    const browser = await startFakeCdpBrowser({ hangOnMethod: "Page.enable" });
+    browsers.push(browser);
+    const connection = await CdpConnection.connect(
+      browser.browserWebSocketUrl,
+      "observe_web_session",
+    );
+    const controller = new AbortController();
+    try {
+      const pending = connection.send(
+        "Page.enable",
+        {},
+        undefined,
+        controller.signal,
+      );
+      await vi.waitFor(() => expect(browser.commands).toHaveLength(1));
+      controller.abort();
+      const failure = await pending.then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+      expect(failure).toBeInstanceOf(AnalysisCancelledError);
+      if (!(failure instanceof AnalysisCancelledError))
+        throw new Error("Expected command cancellation");
+      expect(failure.cause).toBe(controller.signal.reason);
+      expect(failure.cause).toMatchObject({ name: "AbortError" });
+    } finally {
+      await connection.close();
+    }
+  });
+});
+
+describe("CDP handshake cancellation", () => {
+  it("preserves handshake cancellation and closes the pending socket", async () => {
+    const sockets = new Set<Socket>();
+    const server = createNetServer((socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      socket.resume();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Expected a TCP listener address");
+    const controller = new AbortController();
+    const reason = new Error("cancel pending CDP handshake");
+    const connecting = CdpConnection.connect(
+      `ws://127.0.0.1:${String(address.port)}/target`,
+      "inspect_web_page",
+      controller.signal,
+    );
+    try {
+      await vi.waitFor(() => expect(sockets.size).toBe(1));
+      controller.abort(reason);
+      const failure = await connecting.then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+      expect(failure).toBeInstanceOf(AnalysisCancelledError);
+      if (!(failure instanceof AnalysisCancelledError))
+        throw new Error("Expected handshake cancellation");
+      expect(failure.cause).toBe(reason);
+      await vi.waitFor(() => expect(sockets.size).toBe(0));
+    } finally {
+      if (sockets.size > 0) for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) =>
+          error === undefined ? resolve() : reject(error),
+        ),
+      );
+    }
+  });
+});
+
+describe("CDP transport failure precedence", () => {
+  it("keeps a completed transport failure primary over a later abort", async () => {
+    const browser = await startFakeCdpBrowser({ closeOnMethod: "Page.enable" });
+    browsers.push(browser);
+    const controller = new AbortController();
+    const connection = await CdpConnection.connect(
+      browser.browserWebSocketUrl,
+      "observe_web_session",
+    );
+    try {
+      const pending = connection
+        .send("Page.enable", {}, undefined, controller.signal)
+        .then(
+          () => undefined,
+          (cause: unknown) => cause,
+        );
+      await vi.waitFor(() => expect(browser.commands).toHaveLength(1));
+      const failure = await pending;
+      expect(failure).toMatchObject({
+        _tag: "BrowserObservationError",
+        reason: "disconnected",
+      });
+      controller.abort(new Error("abort after transport failure"));
+      expect(failure).toMatchObject({
+        _tag: "BrowserObservationError",
+        reason: "disconnected",
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+});
+
+describe("CDP connection command responses", () => {
   it("surfaces an unmodeled fake command as a CDP method rejection", async () => {
     const browser = await startFakeCdpBrowser();
     browsers.push(browser);

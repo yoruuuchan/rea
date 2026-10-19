@@ -27,10 +27,26 @@ const admit = async (path: string) => {
   } finally {
     // Admission must inspect only the fixed prefix, even for forged extents.
     const calls = [...read.mock.calls];
+    const results = await Promise.all(
+      read.mock.results.map(
+        ({ value }) => value as Promise<{ readonly bytesRead: number }>,
+      ),
+    );
     read.mockRestore();
     await handle.close();
     expect(handle.fd).toBe(-1);
-    expect(calls).toEqual([[expect.any(Buffer), 0, 16, 0]]);
+    expect(calls.length).toBeGreaterThan(0);
+    let filled = 0;
+    for (const [index, call] of calls.entries()) {
+      const [buffer, offset, length, position]: readonly unknown[] =
+        call as unknown as readonly unknown[];
+      expect(buffer).toBeInstanceOf(Buffer);
+      expect(offset).toBe(filled);
+      expect(position).toBe(filled);
+      expect(length).toBe(16 - filled);
+      filled += results[index]!.bytesRead;
+    }
+    expect(filled).toBeLessThanOrEqual(16);
   }
 };
 

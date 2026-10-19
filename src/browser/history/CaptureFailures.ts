@@ -57,7 +57,14 @@ export const historicalCaptureFailure = (
         { operation: OPERATION, cause },
       );
     if (cause.reason === "cancelled")
-      return new AnalysisCancelledError(OPERATION);
+      return new AnalysisCancelledError(OPERATION, {
+        cause:
+          cause.cancellation === undefined
+            ? options?.signal?.aborted === true
+              ? options.signal.reason
+              : undefined
+            : cause.cancellation.reason,
+      });
     if (cause.reason === "timeout")
       return new AnalysisTimeoutError(
         OPERATION,
@@ -91,10 +98,6 @@ export const historicalCaptureFailure = (
         cause,
       );
   }
-  if (options?.signal?.aborted)
-    return new AnalysisCancelledError(OPERATION, {
-      cause: options.signal.reason,
-    });
   if (
     phase === "capture-read" &&
     cause instanceof ArtifactReaderFailure &&
@@ -163,6 +166,17 @@ export const historicalCaptureFailure = (
         message: `Selected capture could not be read (${String(cause.code)}): ${input.capture_path}.`,
       },
     ]);
+  if (
+    options?.signal?.aborted === true &&
+    (cause === options.signal.reason ||
+      (cause instanceof Error &&
+        cause.name === "AbortError" &&
+        "code" in cause &&
+        cause.code === "ABORT_ERR"))
+  )
+    return new AnalysisCancelledError(OPERATION, {
+      cause: options.signal.reason,
+    });
   return new ProviderAdapterError(input.format, OPERATION, {
     cause,
     diagnostics: {

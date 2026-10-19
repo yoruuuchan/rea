@@ -370,8 +370,13 @@ const waitForWindow = async (
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       removeEnd();
-      reject(new AnalysisCancelledError("observe_web_session"));
+      reject(
+        new AnalysisCancelledError("observe_web_session", {
+          cause: signal?.reason,
+        }),
+      );
     };
     const timer = setTimeout(() => finish("window_elapsed"), durationMs);
     removeEnd = capture.onEnd(finish);

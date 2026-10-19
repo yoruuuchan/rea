@@ -1,7 +1,7 @@
+import { jsonStringByteLength } from "../domain/jsonStringByteLength.js";
 import {
   admitManagedProjection,
   managedDecodeBudget,
-  managedJsonStringBytes,
   type ManagedDecodeBudget,
 } from "./ManagedDecodeBudget.js";
 import type { ManagedPeLayout } from "./ManagedPeReader.js";
@@ -481,9 +481,9 @@ const callerName = (method: ManagedMethod): string =>
 /** JSON bytes of `callerName`, from its parts: the joining dot adds one byte. */
 const callerNameBytes = (method: ManagedMethod): number =>
   method.declaring_type === null
-    ? managedJsonStringBytes(method.name)
-    : managedJsonStringBytes(method.declaring_type) +
-      managedJsonStringBytes(method.name) -
+    ? jsonStringByteLength(method.name)
+    : jsonStringByteLength(method.declaring_type) +
+      jsonStringByteLength(method.name) -
       1;
 
 const budgetedSignature = (

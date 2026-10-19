@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { CPU, fatImage, machoImage } from "../apple/MachoImage.fixture.js";
 import {
-  classifyArtifactContent,
   createArtifactEdges,
   createOccurrence,
   indexOccurrencesByPath,
@@ -10,6 +9,8 @@ import {
 } from "./ArtifactGraphConstruction.js";
 import { artifactIdForContent } from "../../domain/artifactIdentity.js";
 import type { ArtifactEntry } from "../ArtifactReader.js";
+
+import { classifyArtifactBytesAtPath } from "../../../tests/fixtures/artifactClassification.js";
 
 const entry = (path: string, kind: ArtifactEntry["kind"]): ArtifactEntry => ({
   path,
@@ -168,7 +169,7 @@ describe("bounded FAT inventory classification", () => {
     const bytes = fat();
     for (const length of [4, 7, 8, 27]) {
       expect(
-        classifyArtifactContent(
+        classifyArtifactBytesAtPath(
           "native",
           bytes.subarray(0, length),
           bytes.length,
@@ -176,7 +177,7 @@ describe("bounded FAT inventory classification", () => {
       ).toEqual({ kind: "unknown", format: "unknown" });
     }
     expect(
-      classifyArtifactContent(
+      classifyArtifactBytesAtPath(
         "native.class",
         bytes.subarray(0, 28),
         bytes.length,
@@ -197,7 +198,7 @@ describe("bounded FAT inventory classification", () => {
   ] as const)("keeps %s unknown", (_label, mutate) => {
     const bytes = fat();
     mutate(bytes);
-    expect(classifyArtifactContent("native", bytes)).toEqual({
+    expect(classifyArtifactBytesAtPath("native", bytes)).toEqual({
       kind: "unknown",
       format: "unknown",
     });
@@ -206,7 +207,7 @@ describe("bounded FAT inventory classification", () => {
   it("does not infer Mach-O from an out-of-bounds architecture count", () => {
     const bytes = fat();
     bytes.writeUInt32BE(0xffffffff, 4);
-    expect(classifyArtifactContent("native", bytes)).toEqual({
+    expect(classifyArtifactBytesAtPath("native", bytes)).toEqual({
       kind: "resource",
       format: "file",
     });
@@ -215,7 +216,7 @@ describe("bounded FAT inventory classification", () => {
   it("does not lose unsafe FAT64 range values to number conversion", () => {
     const bytes = fat(true);
     bytes.writeBigUInt64BE(BigInt(Number.MAX_SAFE_INTEGER) + 1n, 16);
-    expect(classifyArtifactContent("native", bytes)).toEqual({
+    expect(classifyArtifactBytesAtPath("native", bytes)).toEqual({
       kind: "unknown",
       format: "unknown",
     });
@@ -229,7 +230,7 @@ describe("bounded FAT inventory classification", () => {
       ]),
     );
     bytes.writeUInt32BE(bytes.length, 40);
-    expect(classifyArtifactContent("native", bytes)).toEqual({
+    expect(classifyArtifactBytesAtPath("native", bytes)).toEqual({
       kind: "unknown",
       format: "unknown",
     });
@@ -239,9 +240,13 @@ describe("bounded FAT inventory classification", () => {
     const cpu = { type: 0x12345678, subtype: 0 };
     const bytes = Buffer.from(fatImage([{ cpu, bytes: machoImage({ cpu }) }]));
     expect(
-      classifyArtifactContent("native", bytes.subarray(0, 28), bytes.length),
+      classifyArtifactBytesAtPath(
+        "native",
+        bytes.subarray(0, 28),
+        bytes.length,
+      ),
     ).toEqual({ kind: "unknown", format: "unknown" });
-    expect(classifyArtifactContent("native", bytes)).toEqual({
+    expect(classifyArtifactBytesAtPath("native", bytes)).toEqual({
       kind: "executable",
       format: "mach-o-universal",
     });
@@ -251,7 +256,7 @@ describe("bounded FAT inventory classification", () => {
     "keeps invalid or contradictory file size %s unknown",
     (size) => {
       const bytes = fat();
-      expect(classifyArtifactContent("native", bytes, size)).toEqual({
+      expect(classifyArtifactBytesAtPath("native", bytes, size)).toEqual({
         kind: "unknown",
         format: "unknown",
       });
@@ -263,19 +268,19 @@ it("preserves path-selected inventory roles for XML content", () => {
   const xml = Buffer.from(
     '<?xml version="1.0"?><plist version="1.0"><dict/></plist>',
   );
-  expect(classifyArtifactContent("state.archive", xml)).toEqual({
+  expect(classifyArtifactBytesAtPath("state.archive", xml)).toEqual({
     kind: "plist",
     format: "plist",
   });
-  expect(classifyArtifactContent("state.js", xml)).toEqual({
+  expect(classifyArtifactBytesAtPath("state.js", xml)).toEqual({
     kind: "javascript",
     format: "javascript-bundle",
   });
-  expect(classifyArtifactContent("state.map", xml)).toEqual({
+  expect(classifyArtifactBytesAtPath("state.map", xml)).toEqual({
     kind: "source-map",
     format: "source-map",
   });
-  expect(classifyArtifactContent("state.asar", xml)).toEqual({
+  expect(classifyArtifactBytesAtPath("state.asar", xml)).toEqual({
     kind: "resource",
     format: "file",
   });

@@ -4,6 +4,7 @@
     "src/main.ts",
     "src/cli.ts",
     "src/composition/javascriptAnalysisWorkerProcess.ts",
+    "src/composition/webBundleAnalysisWorkerProcess.ts",
     "src/contracts/errorSchemas.ts",
     "src/evaluation/AgentEvaluationFixtures.ts",
     "src/application/RealHopperAssertions.ts",

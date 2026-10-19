@@ -38,6 +38,10 @@ supervision on macOS. REA removes that directory when it exits. REA does not
 install Xcode, Command Line Tools, or other software. Capability checks prepare
 this helper before reporting macOS capture as available.
 
+Stopping process sampling or cancelling an ownership query waits for its issued
+inspection command to exit. Closing a macOS ownership reader rejects new queries
+and waits for admitted helper commands before removing their executable directory.
+
 ## Capture a command
 
 For a small first capture, save this as `scenario.json`:
@@ -428,6 +432,17 @@ Every capture requires `truncation_details`, with separate accounting for:
   imply incomplete path enumeration.
 - `process`: sampling limit and whether sampling ended partially. Coverage
   remains `sampled`, including when that limit was not exhausted.
+  `sampling_failures` counts failed read observations plus at most one
+  unfinished pass interrupted by sampler shutdown. `first_sampling_failure`
+  retains the first attributed read diagnostic, with shutdown context appended
+  when applicable; interruption alone has an explicit shutdown diagnostic.
+  Denied or failed procfs reads mark
+  sampling partial while preserving readable process rows and thread children;
+  a process with unreadable identity is not attributed. Expected process-exit
+  races are separate from failed observations. Shutdown counts only when it
+  interrupts a read or leaves traversal unfinished; a completed pass does not
+  become partial merely because the sampler stops. Completed rows
+  remain available and issued reads settle before final coverage is returned.
 
 The aggregate `truncated` flag summarizes these observations. Comparisons retain
 results for unaffected dimensions and mark affected dimensions unknown; an

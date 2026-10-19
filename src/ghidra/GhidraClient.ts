@@ -45,6 +45,8 @@ import type { GhidraFunctionOperation } from "./GhidraFunctionValues.js";
 import {
   createGhidraDiagnostics,
   ghidraDiagnosticStream,
+  ghidraFailureOutput,
+  GHIDRA_JVM_OOME_MARKER,
   GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
 } from "./GhidraDiagnostics.js";
 import { GhidraLaunchError, type GhidraLaunch } from "./GhidraLauncher.js";
@@ -890,6 +892,7 @@ export class GhidraClient {
         this.#launch = partialLaunch;
         this.#process = new ProviderProcessSupervisor(partialLaunch, {
           maxDiagnosticBytes: GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
+          outputToken: GHIDRA_JVM_OOME_MARKER,
           onDiagnostic: (event) => this.#onProcessDiagnostic(event),
         });
         this.#startupOutputCheckpoint = this.#process.checkpointOutput();
@@ -913,6 +916,7 @@ export class GhidraClient {
     this.#launch = launched.value;
     this.#process = new ProviderProcessSupervisor(launched.value, {
       maxDiagnosticBytes: GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
+      outputToken: GHIDRA_JVM_OOME_MARKER,
       onDiagnostic: (event) => this.#onProcessDiagnostic(event),
     });
     this.#startupOutputCheckpoint = this.#process.checkpointOutput();
@@ -1268,11 +1272,7 @@ export class GhidraClient {
     const failureOutput: JsonValue | undefined =
       scoped === undefined
         ? undefined
-        : {
-            stdout: ghidraDiagnosticStream(scoped.snapshot.stdout, this.#token),
-            stderr: ghidraDiagnosticStream(scoped.snapshot.stderr, this.#token),
-            complete: scoped.complete && !this.#outputDrainIncomplete,
-          };
+        : ghidraFailureOutput(scoped, this.#token, this.#outputDrainIncomplete);
     return createGhidraDiagnostics({
       targetPath: this.#options.targetPath,
       targetSha256: this.#options.targetSha256,
@@ -1319,11 +1319,7 @@ export class GhidraClient {
       output_incomplete: snapshot.outputIncomplete === true || drainIncomplete,
       stdout: ghidraDiagnosticStream(snapshot.stdout, token),
       stderr: ghidraDiagnosticStream(snapshot.stderr, token),
-      failure_output: {
-        stdout: ghidraDiagnosticStream(scoped.snapshot.stdout, token),
-        stderr: ghidraDiagnosticStream(scoped.snapshot.stderr, token),
-        complete: scoped.complete && !drainIncomplete,
-      },
+      failure_output: ghidraFailureOutput(scoped, token, drainIncomplete),
     });
   }
 

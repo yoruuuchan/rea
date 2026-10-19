@@ -317,7 +317,7 @@ const digestArtifactEntry = async (
   const classified =
     entry.kind === "slice"
       ? ({ kind: "universal-slice", format: "mach-o" } as const)
-      : classifyArtifactContent(logicalPath, digest.prefix, digest.bytes);
+      : classifyArtifactContent(logicalPath, digest, digest.bytes);
   return {
     node: createArtifactNode({
       sha256: digest.sha256,

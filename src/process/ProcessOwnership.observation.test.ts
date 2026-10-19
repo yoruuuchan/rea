@@ -136,6 +136,116 @@ describe("multi-group ownership observation", () => {
   });
 });
 
+describe("multi-group ownership observation cancellation", () => {
+  it("cancels an unavailable-token liveness recheck before the host releases it", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancel process liveness recheck");
+    const rows = [processes[0]!];
+    let listCalls = 0;
+    let releaseSecondList: (() => void) | undefined;
+    let signalAtSecondList: AbortSignal | undefined;
+    let announceSecondList: (() => void) | undefined;
+    const secondListStarted = new Promise<void>((resolve) => {
+      announceSecondList = resolve;
+    });
+    const listProcesses = vi.fn<ProcessOwnershipHost["listProcesses"]>(
+      (signal) => {
+        listCalls += 1;
+        if (listCalls === 1) return Promise.resolve(rows);
+        signalAtSecondList = signal;
+        announceSecondList?.();
+        return new Promise((resolve, reject) => {
+          releaseSecondList = () => resolve(rows);
+          if (signal === undefined) return;
+          const rejectOnAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", rejectOnAbort, { once: true });
+          if (signal.aborted) rejectOnAbort();
+        });
+      },
+    );
+    const signalGroup = vi.fn();
+    const observed = observeOwnedProcessGroups(
+      ownership.runId,
+      [ownership.processGroupId],
+      {
+        listProcesses,
+        environment: vi.fn(() => Promise.resolve({})),
+        runTokens: vi.fn(() =>
+          Promise.resolve(
+            new Map([
+              [
+                ownership.leaderPid,
+                { state: "unavailable" as const, reason: "token unavailable" },
+              ],
+            ]),
+          ),
+        ),
+        signalGroup,
+      },
+      controller.signal,
+    ).then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (cause: unknown) => ({ kind: "rejected" as const, cause }),
+    );
+    let settled = false;
+    const observedOutcome = observed.then((outcome) => {
+      settled = true;
+      return outcome;
+    });
+    let settledBeforeRelease = false;
+    try {
+      await secondListStarted;
+      controller.abort(reason);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      settledBeforeRelease = settled;
+    } finally {
+      releaseSecondList?.();
+    }
+
+    const outcome = await observedOutcome;
+    expect(settledBeforeRelease).toBe(true);
+    expect(signalAtSecondList).toBe(controller.signal);
+    expect(outcome.kind).toBe("rejected");
+    if (outcome.kind !== "rejected")
+      throw new Error(
+        "The cancelled process observation unexpectedly resolved",
+      );
+    expect(outcome.cause).toBe(reason);
+    expect(signalGroup).not.toHaveBeenCalled();
+    expect(listProcesses).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves cancellation when a liveness recheck returns successfully after abort", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancel at liveness completion");
+    const listProcesses = vi
+      .fn<ProcessOwnershipHost["listProcesses"]>()
+      .mockResolvedValueOnce(processes)
+      .mockImplementation(async (signal) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort(reason);
+        return [];
+      });
+    const signalGroup = vi.fn();
+    await expect(
+      observeOwnedProcessGroups(
+        ownership.runId,
+        [ownership.processGroupId],
+        {
+          listProcesses,
+          environment: async () => {
+            throw new Error("token unavailable");
+          },
+          signalGroup,
+        },
+        controller.signal,
+      ),
+    ).rejects.toBe(reason);
+    expect(listProcesses).toHaveBeenCalledTimes(2);
+    expect(signalGroup).not.toHaveBeenCalled();
+  });
+});
+
 describe("multi-group observation short-circuit", () => {
   it("stops missing-row fallbacks once every live group is unverifiable", async () => {
     const listProcesses = vi.fn(() => Promise.resolve(processes));

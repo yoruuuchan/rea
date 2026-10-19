@@ -14,6 +14,7 @@ import {
 } from "./domain/javascript/javascriptRuntimeObservation.js";
 import { analysisInputErrorFromIssues } from "./domain/inputIssueProjection.js";
 import { projectAnalysisError } from "./domain/analysisErrorProjection.js";
+import { finishAnalysisCommand } from "./cli/finishAnalysisCommand.js";
 import type { JsonValue } from "./domain/jsonValue.js";
 import type { Logger } from "pino";
 import { withCommandCancellation } from "./cli/commandCancellation.js";
@@ -62,12 +63,17 @@ export const registerJavaScriptRuntimeObservationCommands = (
                   input,
                 ),
               );
-            const result = await listJavaScriptRuntimeTargets(
-              context.provider,
-              parsed.data,
-              { signal },
+            return await finishAnalysisCommand(
+              () =>
+                listJavaScriptRuntimeTargets(context.provider, parsed.data, {
+                  signal,
+                }),
+              { close: () => context.provider.close?.() ?? Promise.resolve() },
+              context.provider.identity().id,
+              "list_javascript_runtime_targets",
+              signal,
+              "V8 Inspector resources",
             );
-            return result.ok ? result.value : cliError(result.error);
           },
         ),
       ),
@@ -104,12 +110,17 @@ export const registerJavaScriptRuntimeObservationCommands = (
                   input,
                 ),
               );
-            const result = await observeJavaScriptRuntime(
-              context.provider,
-              parsed.data,
-              { signal },
+            return await finishAnalysisCommand(
+              () =>
+                observeJavaScriptRuntime(context.provider, parsed.data, {
+                  signal,
+                }),
+              { close: () => context.provider.close?.() ?? Promise.resolve() },
+              context.provider.identity().id,
+              "observe_javascript_runtime",
+              signal,
+              "V8 Inspector resources",
             );
-            return result.ok ? result.value : cliError(result.error);
           },
         ),
       ),

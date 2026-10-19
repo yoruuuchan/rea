@@ -63,18 +63,20 @@ export class CdpExecutionWindow {
 
   /** The timer starts at arming, before progress delivery can delay the external action. */
   start(duration: number): Promise<EndReason> {
-    this.armedAt = new Date().toISOString();
     if (this.#failure !== undefined) return Promise.reject(this.#failure);
     if (this.reason !== undefined) return Promise.resolve(this.reason);
+    this.armedAt = new Date().toISOString();
     return new Promise((resolve, reject) => {
       this.#resolve = resolve;
       this.#reject = reject;
       this.#timer = setTimeout(() => this.end("window_elapsed"), duration);
       const signal = this.session.options.signal;
       const abort = (): void => {
-        this.endedAt = new Date().toISOString();
-        this.dispose();
-        this.#reject?.(new AnalysisCancelledError(this.session.operation));
+        this.fail(
+          new AnalysisCancelledError(this.session.operation, {
+            cause: signal?.reason,
+          }),
+        );
       };
       this.#removeAbort = () => signal?.removeEventListener("abort", abort);
       signal?.addEventListener("abort", abort, { once: true });

@@ -5,6 +5,7 @@ import type {
   InspectElectronPageInput,
 } from "../domain/javascript/electronObservation.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type { CdpConnection, CdpEvent } from "./CdpConnection.js";
 import type { CdpEndpointDiscovery, CdpEndpointTarget } from "./CdpEndpoint.js";
 import { CdpCaptureCompleteness } from "./CdpCaptureCompleteness.js";
@@ -153,7 +154,11 @@ const authorizeInitialFrames = async (
     context.sessionId,
     context.signal,
   );
-  const frames = await captureFrames(result, state.completeness);
+  const frames = await captureFrames(
+    result,
+    state.completeness,
+    context.signal,
+  );
   if (frames[0] === undefined)
     throw new BrowserObservationError("inspect_web_page", "target_not_allowed");
   return frames;
@@ -219,7 +224,7 @@ const assertStableMainFrame = async (
     context.sessionId,
     context.signal,
   );
-  const afterPath = await mainFilePath(result);
+  const afterPath = await mainFilePath(result, context.signal);
   if (afterPath === undefined)
     throw new BrowserObservationError("inspect_web_page", "target_not_allowed");
   if (state.navigationDuringCapture || afterPath !== expectedPath)
@@ -239,6 +244,7 @@ const navigatedFrameId = (event: CdpEvent): string | undefined => {
 export const captureFrames = async (
   result: unknown,
   completeness: CdpCaptureCompleteness,
+  signal?: AbortSignal,
 ): Promise<ElectronPageInspection["frames"]> => {
   const frameTree = recordValue(requiredRecord(result).frameTree);
   if (frameTree === undefined)
@@ -247,13 +253,18 @@ export const captureFrames = async (
   for (const tree of walkFrameTrees(frameTree, () =>
     completeness.exclude("frames", "invalid_protocol_value"),
   )) {
+    throwIfElectronInspectionCancelled(signal);
     const frame = recordValue(tree.frame);
     const frameId = cdpStringValue(frame?.id);
     if (frame === undefined || frameId === undefined) {
       completeness.exclude("frames", "invalid_protocol_value");
       continue;
     }
-    const path = await authorizedElectronFile(cdpStringValue(frame.url) ?? "");
+    const path = await authorizedElectronFile(
+      cdpStringValue(frame.url) ?? "",
+      signal,
+      "inspect_electron_page",
+    );
     if (path === undefined) {
       completeness.exclude("frames", "out_of_target_scope");
       continue;
@@ -285,8 +296,11 @@ const captureResources = async (
   for (const resource of frameTreeResources(root, (count) =>
     completeness.exclude("resources", "invalid_protocol_value", count),
   )) {
+    throwIfElectronInspectionCancelled(context.signal);
     const path = await authorizedElectronFile(
       cdpStringValue(resource.url) ?? "",
+      context.signal,
+      "inspect_electron_page",
     );
     if (path === undefined) {
       completeness.exclude("resources", "out_of_target_scope");
@@ -336,12 +350,19 @@ const captureDom = async (
   const nodes: ElectronPageInspection["dom"]["nodes"] = [];
   let total = 0;
   for (const document of snapshotDocuments(result.documents, invalid)) {
+    throwIfElectronInspectionCancelled(context.signal);
     const documentUrl = cdpSnapshotString(strings, document.documentURL);
     if (documentUrl === undefined) {
       invalid(1);
       continue;
     }
-    if ((await authorizedElectronFile(documentUrl)) === undefined) {
+    if (
+      (await authorizedElectronFile(
+        documentUrl,
+        context.signal,
+        "inspect_electron_page",
+      )) === undefined
+    ) {
       completeness.exclude("dom", "out_of_target_scope");
       continue;
     }
@@ -376,10 +397,24 @@ const captureDom = async (
   return { total_nodes: total, nodes };
 };
 
-const mainFilePath = async (result: unknown): Promise<string | undefined> => {
+const mainFilePath = async (
+  result: unknown,
+  signal?: AbortSignal,
+): Promise<string | undefined> => {
   const frameTree = recordValue(requiredRecord(result).frameTree);
   const frame = recordValue(frameTree?.frame);
-  return await authorizedElectronFile(cdpStringValue(frame?.url) ?? "");
+  return await authorizedElectronFile(
+    cdpStringValue(frame?.url) ?? "",
+    signal,
+    "inspect_electron_page",
+  );
+};
+
+const throwIfElectronInspectionCancelled = (signal?: AbortSignal): void => {
+  if (signal?.aborted === true)
+    throw new AnalysisCancelledError("inspect_electron_page", {
+      cause: signal.reason,
+    });
 };
 
 const report = async (

@@ -125,7 +125,8 @@ export const delayWithCancellation = async (
   const maximumTimerDelay = 2_147_483_647;
   let remaining = durationMs;
   while (remaining > 0) {
-    if (signal?.aborted === true) throw new AnalysisCancelledError(operation);
+    if (signal?.aborted === true)
+      throw new AnalysisCancelledError(operation, { cause: signal.reason });
     const delay = Math.min(remaining, maximumTimerDelay);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -135,7 +136,9 @@ export const delayWithCancellation = async (
       const onAbort = (): void => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
-        reject(new AnalysisCancelledError(operation));
+        reject(
+          new AnalysisCancelledError(operation, { cause: signal?.reason }),
+        );
       };
       signal?.addEventListener("abort", onAbort, { once: true });
       if (signal?.aborted === true) onAbort();

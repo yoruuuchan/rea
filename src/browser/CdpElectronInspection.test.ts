@@ -159,3 +159,75 @@ describe("Electron frame capture", () => {
     });
   });
 });
+
+it("admits a prefix and fitting suffix around an oversized Electron source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-electron-source-budget-"));
+  temporary.push(root);
+  const paths = await Promise.all(
+    ["prefix.js", "oversized.js", "suffix.js"].map(async (name) => {
+      const path = join(root, name);
+      await writeFile(path, "metadata");
+      return path;
+    }),
+  );
+  const sourceById = {
+    prefix: "p".repeat(16 * 1024 * 1024),
+    oversized: "o".repeat(17 * 1024 * 1024),
+    suffix: "s".repeat(1024 * 1024),
+  };
+  const scripts: ElectronScriptDraft[] = paths.map((path, index) => {
+    const scriptId = ["prefix", "oversized", "suffix"][index];
+    if (scriptId === undefined) throw new Error("Missing script identity");
+    return {
+      scriptId,
+      rawUrl: pathToFileURL(path).href,
+      hash: scriptId,
+      length: null,
+      isModule: false,
+      language: "JavaScript",
+      frameId: null,
+    };
+  });
+  const completeness = new CdpCaptureCompleteness();
+  const capture = await captureElectronScripts({
+    connection: {
+      send: async (
+        _method: string,
+        params: Readonly<Record<string, unknown>>,
+      ) => ({
+        scriptSource:
+          sourceById[
+            (params as { scriptId: keyof typeof sourceById }).scriptId
+          ],
+      }),
+    } as unknown as CdpConnection,
+    sessionId: undefined,
+    request: inspectElectronPageInputSchema.parse({
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "page-1",
+      observation_ms: 0,
+      include_script_sources: true,
+    }),
+    scripts,
+    frameIds: new Set(),
+    completeness,
+  });
+  const byHash = new Map(
+    capture.items.map((item) => [item.cdp_hash, item.source]),
+  );
+
+  expect(capture.total).toBe(3);
+  expect([...byHash.keys()].sort()).toEqual(["oversized", "prefix", "suffix"]);
+  expect(byHash.get("prefix")?.included).toBe(true);
+  expect(byHash.get("oversized")).toEqual({
+    included: false,
+    reason:
+      "script source was omitted because the aggregate 32 MiB source budget was exhausted",
+  });
+  expect(byHash.get("suffix")?.included).toBe(true);
+  expect(completeness.snapshot().excluded).toContainEqual({
+    section: "script_sources",
+    reason: "resource_budget_exhausted",
+    count: 1,
+  });
+});

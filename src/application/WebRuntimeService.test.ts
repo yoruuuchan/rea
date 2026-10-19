@@ -29,10 +29,15 @@ it("rejects malformed input and prior cancellation without calling a provider", 
   if (malformed.ok)
     throw new Error("Invalid endpoint must fail before execution");
   expect(malformed.error._tag).toBe("AnalysisInputError");
-  const cancelled = await service.inspect({}, { signal: AbortSignal.abort() });
+  const reason = { requested: "stop before provider admission" };
+  const cancelled = await service.inspect(
+    {},
+    { signal: AbortSignal.abort(reason) },
+  );
   if (cancelled.ok)
     throw new Error("Prior cancellation must fail before inspection");
   expect(cancelled.error._tag).toBe("AnalysisCancelledError");
+  expect(cancelled.error.cause).toBe(reason);
 });
 
 it("preserves actual provider failures and rejects changed target/selector identities", async () => {

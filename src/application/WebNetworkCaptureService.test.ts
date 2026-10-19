@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { WebNetworkCaptureService } from "./WebNetworkCaptureService.js";
 import { historicalHar } from "../../tests/fixtures/historicalHar.js";
-import { ok } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { parseEvidence } from "../domain/evidence.js";
 import {
@@ -12,6 +12,11 @@ import {
   webNetworkCaptureSchema,
   type WebNetworkCapture,
 } from "../domain/webNetworkCapture.js";
+import {
+  AnalysisCleanupLease,
+  AnalysisCleanupLeaseGroup,
+} from "../artifacts/AnalysisCleanupLease.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 
 it.each(["REDACTED", "[", "]", "/capture.har"])(
   "excludes sensitive path text even when a replacement marker would collide: %s",
@@ -164,6 +169,100 @@ it("retains valid completed capture Evidence on late cancellation and preserves 
   );
   expect(invalid.ok).toBe(false);
   if (!invalid.ok) expect(invalid.error).toBeInstanceOf(AnalysisOutputError);
+});
+
+it("projects completed raw capture facts on failure through the caller's selection and sensitivity rules", async () => {
+  const report = fixture();
+  report.artifact.path = "/private-marker/capture.har";
+  report.limitations = ["private-marker producer limitation"];
+  const reason = { request: "cancel after decoder completion" };
+  const error = new AnalysisCancelledError("inspect_web_network_capture", {
+    cause: reason,
+    partialObservation: report,
+  });
+  const result = await new WebNetworkCaptureService({
+    inspect: () => Promise.resolve({ ok: false, error }),
+  }).inspect({
+    capture_path: report.artifact.path,
+    format: "har",
+    record_ordinals: [0],
+    sensitive_values: ["private-marker"],
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Cancellation must remain the primary result");
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(reason);
+  const partial = parseEvidence(result.error.partialObservation);
+  expect(partial).toMatchObject({
+    operation: "inspect_web_network_capture",
+    parameters: { record_ordinals: [0] },
+    subject: { local_path: "" },
+    normalized_result: {
+      artifact: { path: "", sha256: "a".repeat(64) },
+      records: [{ ordinal: 0 }],
+    },
+  });
+  expect(JSON.stringify(partial)).not.toContain("private-marker");
+});
+
+it("does not expose a malformed capture-shaped partial observation", async () => {
+  const malformed = fixture();
+  malformed.artifact.path = "/private-marker";
+  malformed.artifact.sha256 = "invalid";
+  const error = new AnalysisCancelledError("inspect_web_network_capture", {
+    partialObservation: malformed,
+  });
+  const result = await new WebNetworkCaptureService({
+    inspect: () => Promise.resolve({ ok: false, error }),
+  }).inspect({
+    capture_path: "/capture.har",
+    format: "har",
+    sensitive_values: ["private-marker"],
+  });
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.error.partialObservation).toBeUndefined();
+});
+
+it("keeps a redacted cleanup error linked to its live owner through service close", async () => {
+  const report = fixture();
+  const cleanupPath = "/tmp/private-marker-capture-root";
+  const lease = new AnalysisCleanupLease(async () => {}, [cleanupPath]);
+  const original = new ProviderCleanupError(
+    "test-capture",
+    [cleanupPath],
+    { reason: "private-marker cleanup remains pending" },
+    {
+      operation: "inspect_web_network_capture",
+      partialObservation: report,
+    },
+  );
+  new AnalysisCleanupLeaseGroup(original, [lease]);
+  const service = new WebNetworkCaptureService({
+    inspect: () => Promise.resolve(err(original)),
+    close: () => lease.release(),
+  });
+  const result = await service.inspect({
+    capture_path: report.artifact.path,
+    format: "har",
+    sensitive_values: ["private-marker"],
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Retained cleanup must remain a failure");
+  const returnedError = result.error;
+  expect(returnedError.cleanupIncomplete).toBe(true);
+  expect(returnedError.cleanupResources).toEqual([
+    "/tmp/[REDACTED]-capture-root",
+  ]);
+  expect(JSON.stringify(projectAnalysisError(returnedError))).not.toContain(
+    "private-marker",
+  );
+  expect(parseEvidence(returnedError.partialObservation)).toMatchObject({
+    operation: "inspect_web_network_capture",
+  });
+
+  await service.close();
+  expect(returnedError.cleanupIncomplete).toBe(false);
+  expect(returnedError.cleanupResources).toEqual([]);
 });
 
 it.each([
@@ -379,3 +478,68 @@ it.each(["12345", "67890", "234", "789"])(
     expect(parseEvidence(result.value)).toEqual(result.value);
   },
 );
+
+it("preserves a pre-abort reason without entering the capture adapter", async () => {
+  const reason = new Error("stop historical capture inspection");
+  const controller = new AbortController();
+  controller.abort(reason);
+  let providerCalls = 0;
+  const service = new WebNetworkCaptureService({
+    inspect: async () => {
+      providerCalls += 1;
+      return ok(fixture());
+    },
+  });
+
+  const result = await service.inspect(
+    {
+      capture_path: "/capture.har",
+      format: "har",
+      sensitive_values: [],
+    },
+    { signal: controller.signal },
+  );
+
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.error.cause).toBe(reason);
+  }
+  expect(providerCalls).toBe(0);
+});
+
+it("reports malformed retained facts while keeping their cleanup owner retryable", async () => {
+  const report = fixture();
+  report.artifact.sha256 = "invalid";
+  const lease = new AnalysisCleanupLease(async () => {}, [
+    "/tmp/private-marker-root",
+  ]);
+  const cleanup = new ProviderCleanupError(
+    "test-historical-port",
+    ["/tmp/private-marker-root"],
+    { reason: "close denied" },
+    { operation: "inspect_web_network_capture", partialObservation: report },
+  );
+  new AnalysisCleanupLeaseGroup(cleanup, [lease]);
+  const service = new WebNetworkCaptureService({
+    inspect: async () => err(cleanup),
+    close: async () => {
+      await lease.release();
+    },
+  });
+  const result = await service.inspect({
+    capture_path: "/capture.har",
+    format: "har",
+    sensitive_values: ["private-marker"],
+  });
+  if (result.ok) throw new Error("Expected malformed retained evidence");
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.cleanupPrimary).toBeInstanceOf(AnalysisOutputError);
+  expect(result.error.partialObservation).toBeUndefined();
+  expect(JSON.stringify(projectAnalysisError(result.error))).not.toContain(
+    "private-marker",
+  );
+  await service.close();
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(projectAnalysisError(result.error).code).toBe("unreadable_output");
+});

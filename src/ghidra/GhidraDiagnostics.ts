@@ -1,11 +1,17 @@
 import type { JsonValue } from "../domain/jsonValue.js";
 import { redactCapturedTransportCredential } from "../process/ProviderDiagnosticRedaction.js";
-import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
+import type {
+  ProviderProcessOutputSince,
+  ProviderProcessSnapshot,
+} from "../process/ProviderProcess.js";
 import type { GhidraLaunch } from "./GhidraLauncher.js";
 import type { GhidraTransportKind } from "./GhidraTransport.js";
 
 /** Aggregate in-memory retention budget for this provider's launcher output. */
 export const GHIDRA_PROCESS_DIAGNOSTIC_BYTES = 8 * 1024 * 1024;
+
+/** JVM error class located in all launcher output, beyond the retention budget. */
+export const GHIDRA_JVM_OOME_MARKER = "java.lang.OutOfMemoryError";
 
 /** Inputs needed to project bounded diagnostics for one Ghidra runtime. */
 export interface GhidraDiagnosticsOptions {
@@ -97,6 +103,41 @@ export const createGhidraDiagnostics = (
       : { failure_output: options.failure_output }),
   };
 };
+
+/**
+ * Operation-scoped output, plus OOME lines observed after the checkpoint even
+ * when the retention budget dropped them from the retained text.
+ */
+export const ghidraFailureOutput = (
+  scoped: ProviderProcessOutputSince,
+  token: string | undefined,
+  drainIncomplete: boolean,
+): JsonValue => ({
+  stdout: ghidraDiagnosticStream(scoped.snapshot.stdout, token),
+  stderr: ghidraDiagnosticStream(scoped.snapshot.stderr, token),
+  complete: scoped.complete && !drainIncomplete,
+  observed_oome: (scoped.markers ?? []).map((marker) => {
+    const bytes = Buffer.byteLength(marker.line, "utf8");
+    return {
+      stream: marker.stream,
+      offset: marker.offset,
+      line: redactCapturedTransportCredential(
+        {
+          text: marker.line,
+          bytes,
+          // A cut line may end in a partial credential.
+          observedBytes:
+            marker.trailingContextIncomplete === true ? bytes + 1 : bytes,
+        },
+        token,
+        "[REDACTED]",
+      ),
+      line_complete: marker.trailingContextIncomplete !== true,
+      ...(marker.truncated ? { truncated: true } : {}),
+      ...(marker.invalidUtf8 === true ? { invalid_utf8: true } : {}),
+    };
+  }),
+});
 
 export const ghidraDiagnosticStream = (
   stream: ProviderProcessSnapshot["stdout"],

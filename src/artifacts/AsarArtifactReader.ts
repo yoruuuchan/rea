@@ -63,7 +63,7 @@ export class AsarArtifactReader implements ArtifactReader {
         const snapshotPath = this.#snapshotPath();
         this.#resetArchiveState();
         this.#entries.clear();
-        const admitted = await this.#admitHeader(snapshotPath);
+        const admitted = await this.#admitHeader(snapshotPath, signal);
         this.#archiveSize = admitted.archiveBytes;
         this.#headerSize = admitted.headerBytes;
         abortIfNeeded(signal);
@@ -122,7 +122,7 @@ export class AsarArtifactReader implements ArtifactReader {
     }
   }
 
-  async #admitHeader(snapshotPath: string) {
+  async #admitHeader(snapshotPath: string, signal?: AbortSignal) {
     const headerHandle = await this.#openOwned(
       snapshotPath,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -134,7 +134,10 @@ export class AsarArtifactReader implements ArtifactReader {
         }
       | { readonly ok: false; readonly cause: unknown };
     try {
-      admission = { ok: true, value: await admitAsarHeader(headerHandle) };
+      admission = {
+        ok: true,
+        value: await admitAsarHeader(headerHandle, signal),
+      };
     } catch (cause: unknown) {
       admission = { ok: false, cause };
     }

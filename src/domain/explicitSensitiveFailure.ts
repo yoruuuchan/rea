@@ -40,6 +40,18 @@ export const redactExplicitFailure = (
   values: readonly string[],
 ): AnalysisError => {
   if (values.length === 0) return error;
+  const redacted = redactFailure(error, values);
+  return redacted === error
+    ? error
+    : mirrorCleanup(error, redacted, (value) =>
+        redactExplicitText(value, values),
+      );
+};
+
+const redactFailure = (
+  error: AnalysisError,
+  values: readonly string[],
+): AnalysisError => {
   const text = (value: string): string => redactExplicitText(value, values);
   const path = (
     parts: readonly (string | number)[],
@@ -76,6 +88,11 @@ export const redactExplicitFailure = (
   };
   const context = {
     cause: error,
+    ...(error.cleanupPrimary === undefined
+      ? {}
+      : {
+          cleanupPrimary: redactExplicitFailure(error.cleanupPrimary, values),
+        }),
     ...(error.diagnostics === undefined
       ? {}
       : { diagnostics: diagnostics(error.diagnostics) }),
@@ -100,6 +117,7 @@ export const redactExplicitFailure = (
   if (error instanceof AnalysisCancelledError)
     return new AnalysisCancelledError(error.operation, {
       ...context,
+      cause: error.cause,
       partialObservation: error.partialObservation,
     });
   if (error instanceof AnalysisTimeoutError)
@@ -178,9 +196,37 @@ export const redactExplicitFailure = (
       error.providerId,
       error.cleanupResources.map(text),
       diagnostics(error.diagnostics ?? {}),
-      { operation: error.operation, cause: error },
+      {
+        ...context,
+        operation: error.operation,
+        ...(error.partialObservation === undefined
+          ? {}
+          : { partialObservation: error.partialObservation }),
+      },
     );
   if (error instanceof ProviderAdapterError)
-    return new ProviderAdapterError(error.providerId, error.operation, context);
+    return new ProviderAdapterError(error.providerId, error.operation, {
+      ...context,
+      ...(error.partialObservation === undefined
+        ? {}
+        : { partialObservation: error.partialObservation }),
+      ...(error.userMessage === undefined
+        ? {}
+        : { userMessage: text(error.userMessage) }),
+      ...(error.remediationAction === undefined
+        ? {}
+        : { remediationAction: text(error.remediationAction) }),
+    });
   return error;
 };
+
+const mirrorCleanup = <Value extends AnalysisError>(
+  source: AnalysisError,
+  redacted: Value,
+  redact: (value: string) => string,
+): Value =>
+  redacted.bindCleanupDependencies([source], {
+    get cleanupResources(): readonly string[] {
+      return source.cleanupResources.map(redact);
+    },
+  });

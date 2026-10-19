@@ -29,7 +29,11 @@ export const listElectronTargets = async (
   const ready = requireProvider(provider, "list_electron_targets");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("list_electron_targets"));
+    return err(
+      new AnalysisCancelledError("list_electron_targets", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.listTargets(input, options);
   if (!result.ok) return result;
   const report = electronTargetListSchema.safeParse(result.value);
@@ -61,7 +65,11 @@ export const inspectElectronPage = async (
   const ready = requireProvider(provider, "inspect_electron_page");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("inspect_electron_page"));
+    return err(
+      new AnalysisCancelledError("inspect_electron_page", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.inspectPage(input, options);
   if (!result.ok) {
     const partial = result.error.partialObservation;

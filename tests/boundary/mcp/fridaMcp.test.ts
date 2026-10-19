@@ -27,7 +27,14 @@ const createFridaTestProvider = (
   async listProcesses() {
     return {
       ok: true,
-      value: { deviceId: "remote-device", processes: [], cleanupError: null },
+      value: {
+        deviceId: "remote-device",
+        processes: [
+          { pid: 0, name: "idle", identifier: null },
+          { pid: 10, name: "target", identifier: "example.target" },
+        ],
+        cleanupError: "earlier endpoint cleanup diagnostic",
+      },
     };
   },
   async startSession(input) {
@@ -112,6 +119,69 @@ const expectFridaToolsAvailable = async (client: Client) => {
   );
 };
 
+const expectFridaProcessDiscovery = async (client: Client) => {
+  const processes = await client.callTool({
+    name: "list_frida_processes",
+    arguments: { device_id: "remote-device" },
+  });
+  expect(processes.isError).not.toBe(true);
+  expect(
+    toolContract("list_frida_processes").outputSchema.parse(
+      processes.structuredContent,
+    ),
+  ).toEqual({
+    device_id: "remote-device",
+    processes: [
+      { pid: 0, name: "idle", identifier: null },
+      { pid: 10, name: "target", identifier: "example.target" },
+    ],
+    cleanup_error: "earlier endpoint cleanup diagnostic",
+  });
+};
+
+const expectFridaSelectorGuidance = async (
+  client: Client,
+  tools: Awaited<ReturnType<Client["listTools"]>>["tools"],
+) => {
+  const ajv = new Ajv2020({ strict: false, validateFormats: false });
+  const processTool = tools.find(
+    (tool) => tool.name === "list_frida_processes",
+  );
+  if (processTool === undefined) throw new Error("Missing Frida process tool");
+  expect(processTool.inputSchema.description).toMatch(
+    /exactly one of device_id or remote/u,
+  );
+  expect(ajv.validateSchema(processTool.inputSchema)).toBe(true);
+  for (const args of [
+    { device_id: "local" },
+    { remote: { address: "127.0.0.1:27042" } },
+  ]) {
+    expect(ajv.validate(processTool.inputSchema, args)).toBe(true);
+    expect(
+      (await client.callTool({ name: "list_frida_processes", arguments: args }))
+        .isError,
+    ).not.toBe(true);
+  }
+  // Runtime refinements enforce the choice that advertisement describes.
+  for (const { args, reason } of [
+    { args: {}, reason: "Select a device_id or a remote endpoint" },
+    {
+      args: { device_id: "local", remote: { address: "127.0.0.1:27042" } },
+      reason: "Choose either device_id or remote, not both",
+    },
+  ]) {
+    const rejected = await client.callTool({
+      name: "list_frida_processes",
+      arguments: args,
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining(reason),
+    });
+  }
+};
+
 it("advertises Frida MCP schemas and keeps remote credentials out of results", async () => {
   const session = createTestBinarySession(() => {
     throw new Error("Binary provider must not start");
@@ -156,13 +226,19 @@ it("advertises Frida MCP schemas and keeps remote credentials out of results", a
     "synthetic-secret-token",
   );
   expect(ajv.validate(outputSchema, response.structuredContent)).toBe(true);
+  expect(
+    toolContract("list_frida_devices").outputSchema.parse(
+      response.structuredContent,
+    ),
+  ).toEqual({
+    devices: [{ device_id: "remote-device", name: "target", type: "remote" }],
+    cleanup_error: null,
+  });
   expect(toolContract("start_frida_session").effects.mutatesTarget).toBe(true);
 
-  const processes = await client.callTool({
-    name: "list_frida_processes",
-    arguments: { device_id: "remote-device" },
-  });
-  expect(processes.isError).not.toBe(true);
+  await expectFridaSelectorGuidance(client, tools);
+
+  await expectFridaProcessDiscovery(client);
 
   const started = await client.callTool({
     name: "start_frida_session",

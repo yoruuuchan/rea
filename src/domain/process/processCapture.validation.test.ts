@@ -45,6 +45,71 @@ const captureWithEnumerationOmission = (
   };
 };
 
+const captureWithSamplingInterruption = () => {
+  const capture = emptyCapture();
+  return {
+    ...capture,
+    truncated: true,
+    truncation_details: {
+      ...capture.truncation_details,
+      process: {
+        ...capture.truncation_details.process,
+        sampling_partial: true,
+        sampling_failures: 1,
+        first_sampling_failure: "Process sampling interrupted by shutdown",
+      },
+    },
+  };
+};
+
+it("requires interrupted sampling diagnostics to agree with partial and aggregate truncation", () => {
+  const interrupted = captureWithSamplingInterruption();
+  expect(parseProcessCapture(interrupted)).toEqual(interrupted);
+  expect(() =>
+    parseProcessCapture({
+      ...interrupted,
+      truncated: false,
+    }),
+  ).toThrow("truncation_details");
+  expect(() =>
+    parseProcessCapture({
+      ...interrupted,
+      truncation_details: {
+        ...interrupted.truncation_details,
+        process: {
+          ...interrupted.truncation_details.process,
+          sampling_partial: false,
+        },
+      },
+    }),
+  ).toThrow("truncation_details.process");
+  expect(() =>
+    parseProcessCapture({
+      ...interrupted,
+      truncation_details: {
+        ...interrupted.truncation_details,
+        process: {
+          ...interrupted.truncation_details.process,
+          first_sampling_failure: null,
+        },
+      },
+    }),
+  ).toThrow("truncation_details.process");
+});
+
+it("limits interruption impact to process comparison", () => {
+  const baseline = emptyCapture();
+  const interrupted = captureWithSamplingInterruption();
+  expect(compareProcessCaptures(interrupted, baseline)).toMatchObject({
+    status: "unknown",
+    terminal: "unchanged",
+    interaction: "unchanged",
+    exit: "unchanged",
+    filesystem: "unchanged",
+    process: "unknown",
+  });
+});
+
 it.each([
   { path: "root_0:.", reason: "entry_unavailable", system_code: "ENOENT" },
   { path: "root_0:.", reason: "identity_changed", system_code: null },

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
@@ -30,9 +30,11 @@ const processLimit = javaScriptWorkerMemoryLimitBytes(128);
 
 it("reuses one real owned analyzer while retaining distinct source identities and exported returns", async () => {
   const launches: number[] = [];
+  let runtimeRoot: string | undefined;
   const worker = new JavaScriptAnalysisWorker(
     { heapMb: 128, timeoutMs: 30_000 },
     async (request) => {
+      runtimeRoot = request.cwd;
       const spawned = await spawnOwnedProviderProcess(request);
       const pid = spawned.process.pid;
       if (pid === undefined)
@@ -74,6 +76,15 @@ it("reuses one real owned analyzer while retaining distinct source identities an
       ).toBe(true);
     }
     expect(launches).toHaveLength(1);
+    if (runtimeRoot === undefined)
+      throw new Error(
+        "Owned analyzer did not expose its runtime root to launcher",
+      );
+    expect(
+      (await readdir(runtimeRoot)).filter((name) =>
+        /\.(?:source|static\.json|records)$/u.test(name),
+      ),
+    ).toEqual([]);
   } finally {
     await worker.close();
   }

@@ -405,6 +405,8 @@ export const createServer = (
             options.browserScenarioCapture?.close?.() ?? Promise.resolve(),
             options.electronObservation?.close?.() ?? Promise.resolve(),
             options.electronActiveObservation?.close?.() ?? Promise.resolve(),
+            options.javascriptRuntimeObservation?.close?.() ??
+              Promise.resolve(),
           ]),
       webRuntime.provider.close?.() ?? Promise.resolve(),
       artifactResources.close(),

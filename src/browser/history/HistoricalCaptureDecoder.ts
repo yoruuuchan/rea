@@ -17,7 +17,12 @@ import { z } from "zod";
 import type { ExecutionOptions } from "../../application/AnalysisProvider.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
-import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
+import { bindArtifactFileCleanup } from "../../artifacts/ArtifactFileOperation.js";
+import {
+  ArtifactResourceScope,
+  type ArtifactCleanupAttempt,
+} from "../../artifacts/ArtifactResourceScope.js";
+import { AnalysisCleanupLeaseGroup } from "../../artifacts/AnalysisCleanupLease.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCapabilityUnavailableError,
@@ -183,13 +188,16 @@ export class HistoricalCaptureDecoder {
         );
         reply = replySchema.parse(JSON.parse(replyFile.bytes.toString("utf8")));
       } catch (cause: unknown) {
+        if (cause instanceof ArtifactReaderFailure) throw cause;
         if (
-          cause instanceof ArtifactReaderFailure &&
-          cause.cleanup !== undefined
+          options?.signal?.aborted === true &&
+          (cause === options.signal.reason ||
+            (cause instanceof Error &&
+              cause.name === "AbortError" &&
+              "code" in cause &&
+              cause.code === "ABORT_ERR"))
         )
           throw cause;
-        if (options?.signal?.aborted)
-          throw new AnalysisCancelledError(OPERATION);
         throw new AnalysisOutputError(
           OPERATION,
           `Owned capture decoder reply failed for ${input.capture_path}: ${replyFailureReason(cause)}`,
@@ -296,38 +304,59 @@ export class HistoricalCaptureDecoder {
         ),
       );
     }
+    const completedCapture = result.ok ? result.value : undefined;
+    let cleanupFailure:
+      | Extract<ArtifactCleanupAttempt, { readonly kind: "failed" }>
+      | undefined;
     if (runtime !== undefined) {
       const cleanup = await this.#resources.release({
         kind: "private-runtime-root",
         resource: runtime.path,
         root: runtime,
       });
-      if (cleanup.kind === "failed") {
-        return err(
-          redactExplicitFailure(
-            new ProviderCleanupError(
-              input.format,
-              [runtime.path],
-              {
-                capture_path: input.capture_path,
-                previous_error: result.ok
-                  ? null
-                  : projectAnalysisError(result.error),
-                reason:
-                  cleanup.cause instanceof Error
-                    ? cleanup.cause.message
-                    : String(cleanup.cause),
-              },
-              { operation: OPERATION, cause: cleanup.cause },
-            ),
-            input.sensitive_values,
-          ),
-        );
-      }
+      if (cleanup.kind === "failed") cleanupFailure = cleanup;
     }
-    return result.ok && options?.signal?.aborted
-      ? err(new AnalysisCancelledError(OPERATION))
-      : result;
+    if (result.ok && options?.signal?.aborted)
+      result = err(
+        new AnalysisCancelledError(OPERATION, {
+          cause: options.signal.reason,
+        }),
+      );
+    if (cleanupFailure !== undefined) {
+      const cleanupError = new ProviderCleanupError(
+        input.format,
+        [cleanupFailure.owner.resource],
+        {
+          capture_path: input.capture_path,
+          reason:
+            cleanupFailure.cause instanceof Error
+              ? cleanupFailure.cause.message
+              : String(cleanupFailure.cause),
+        },
+        {
+          operation: OPERATION,
+          cause: cleanupFailure.cause,
+        },
+      );
+      const failure = result.ok
+        ? cleanupError
+        : analysisErrorWithCleanupFailure(
+            result.error,
+            cleanupError,
+            OPERATION,
+          );
+      if (completedCapture !== undefined)
+        failure.retainPartialObservation(completedCapture);
+      new AnalysisCleanupLeaseGroup(cleanupError, [cleanupFailure.lease]);
+      const redacted = redactExplicitFailure(failure, input.sensitive_values);
+      if (!result.ok)
+        redacted.bindCleanupDependencies([result.error, cleanupError]);
+      new AnalysisCleanupLeaseGroup(redacted, [cleanupFailure.lease]);
+      return err(redacted);
+    }
+    if (!result.ok && completedCapture !== undefined)
+      result.error.retainPartialObservation(completedCapture);
+    return result;
   }
 
   private withReaderCleanup(
@@ -339,23 +368,30 @@ export class HistoricalCaptureDecoder {
       cause.cleanup === undefined
     )
       return primary;
-    if (cause.reason === "unavailable")
-      return new ProviderCleanupError(
+    if (cause.reason === "unavailable") {
+      const cleanup = new ProviderCleanupError(
         "web-network-capture",
         cause.cleanup.resources,
         { reason: cause.cleanup.reason },
         { operation: OPERATION, cause },
       );
+      bindArtifactFileCleanup(cause, cleanup);
+      return cleanup;
+    }
     const cleanup = new ProviderCleanupError(
       "web-network-capture",
       cause.cleanup.resources,
-      {
-        reason: cause.cleanup.reason,
-        previous_error: projectAnalysisError(primary),
-      },
+      { reason: cause.cleanup.reason },
       { operation: OPERATION, cause },
     );
-    return analysisErrorWithCleanupFailure(primary, cleanup, OPERATION);
+    bindArtifactFileCleanup(cause, cleanup);
+    const composed = analysisErrorWithCleanupFailure(
+      primary,
+      cleanup,
+      OPERATION,
+    ).bindCleanupDependencies([primary, cleanup]);
+    bindArtifactFileCleanup(cause, composed);
+    return composed;
   }
 }
 

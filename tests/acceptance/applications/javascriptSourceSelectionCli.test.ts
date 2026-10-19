@@ -1,12 +1,16 @@
 import { createPackageWithOptions } from "@electron/asar";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect } from "vitest";
 
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { writeJavaScriptSourceSelectionFixture } from "../../fixtures/javascriptSourceSelection.js";
+import {
+  asarHeaderBytes,
+  prependAsarJsonWhitespace,
+} from "../../fixtures/asarHeader.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 
@@ -142,6 +146,81 @@ cliTest(
       details: {
         issues: [{ path: ["source_paths"], reason: "invalid_value" }],
       },
+    });
+  },
+);
+
+cliTest(
+  "accepts legal ASAR JSON whitespace while preserving selected-source identity",
+  { timeout: 60_000 },
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-js-asar-whitespace-");
+    await writeJavaScriptSourceSelectionFixture(root);
+    const archive = join(
+      await createTestTempDirectory("rea-js-asar-whitespace-output-"),
+      "app.asar",
+    );
+    await createPackageWithOptions(root, archive, {});
+
+    for (const prefix of [" \t\r\n", " ".repeat(9_001)]) {
+      await prependAsarJsonWhitespace(archive, prefix);
+      const response = await cli.run({
+        arguments: [
+          "analyze-javascript-application",
+          archive,
+          "--source-path",
+          "main.mjs",
+          "--format",
+          "json",
+        ],
+      });
+      expect(response.exitCode).toBe(0);
+      const evidence = parseEvidence(response.json);
+      const result = javascriptApplicationAnalysisResultSchema.parse(
+        evidence.normalized_result,
+      );
+      expect(result.statistics).toMatchObject({
+        nested_asar_containers: 0,
+        parsed_javascript_files: 1,
+        parse_failures: 0,
+      });
+      expect(result.semantic_graph.nodes).toContainEqual(
+        expect.objectContaining({ kind: "function", label: "selected" }),
+      );
+      expect(result.root_artifact_sha256).toBe(
+        createHash("sha256")
+          .update(await readFile(archive))
+          .digest("hex"),
+      );
+    }
+  },
+);
+
+cliTest(
+  "does not parse ASAR-looking JSON beyond the declared JSON extent",
+  async ({ cli }) => {
+    const archive = join(
+      await createTestTempDirectory("rea-js-asar-padding-output-"),
+      "opaque.asar",
+    );
+    await writeFile(
+      archive,
+      asarHeaderBytes("  ", {
+        padding: Buffer.from('{"files":{"main.mjs":{"size":0,"offset":"0"}}}'),
+      }),
+    );
+    const response = await cli.run({
+      arguments: [
+        "analyze-javascript-application",
+        archive,
+        "--format",
+        "json",
+      ],
+    });
+    expect(response.exitCode).toBe(1);
+    expect(response.json).toMatchObject({
+      code: "artifact_operation_failed",
+      details: { reason: "format" },
     });
   },
 );

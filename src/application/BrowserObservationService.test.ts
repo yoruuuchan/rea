@@ -137,8 +137,8 @@ it("retains captured page Evidence when bundle analysis fails after capture", as
     "cancelled",
     { partialObservation: inspection },
   );
-  const browser = {
-    identity: () => ({ id: "browser-fixture", name: "Fixture", version: "1" }),
+  const browser: BrowserObservationPort = {
+    ...provider(async () => ok(report)),
     analyzeBundle: async () => ({ ok: false as const, error: failure }),
   } as unknown as BrowserObservationPort;
   const bundleInput = analyzeWebBundleInputSchema.parse({
@@ -158,4 +158,60 @@ it("retains captured page Evidence when bundle analysis fails after capture", as
       normalized_result: inspection,
     });
   }
+});
+
+it("retains completed bundle facts as bundle Evidence after cancellation", async () => {
+  const { analyzeCapturedWebBundle } =
+    await import("../domain/webBundleAnalyzer.js");
+  const { AnalysisCancelledError } =
+    await import("../domain/analysisErrorCore.js");
+  const bundle = analyzeCapturedWebBundle(passiveNetworkCapture());
+  const reason = { requested: "stop after completed script" };
+  const failure = new AnalysisCancelledError("analyze_web_bundle", {
+    cause: reason,
+    partialObservation: bundle,
+  });
+  const browser: BrowserObservationPort = {
+    ...provider(async () => ok(report)),
+    analyzeBundle: async () => ({ ok: false as const, error: failure }),
+  };
+  const selected = analyzeWebBundleInputSchema.parse({
+    cdp_endpoint: input.cdp_endpoint.recorded,
+    target_id: "page",
+    max_heap_mb: 256,
+    analysis_timeout_ms: 100,
+    total_analysis_timeout_ms: 1000,
+  });
+  const result = await analyzeWebBundle(browser, selected);
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected cancellation");
+  expect(result.error).toBe(failure);
+  expect(result.error.cause).toBe(reason);
+  expect(parseEvidence(result.error.partialObservation)).toMatchObject({
+    operation: "analyze_web_bundle",
+    parameters: expect.objectContaining({
+      max_heap_mb: 256,
+      analysis_timeout_ms: 100,
+      total_analysis_timeout_ms: 1000,
+    }),
+    normalized_result: bundle,
+  });
+});
+
+it("preserves a prior caller reason without admitting browser work", async () => {
+  const reason = new AnalysisOutputError(
+    "inspect_web_page",
+    "caller supplied reason",
+  );
+  const result = await listBrowserTargets(
+    provider(async () => {
+      throw new Error("Cancelled inventory must not start");
+    }),
+    input,
+    { signal: AbortSignal.abort(reason) },
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected cancelled inventory");
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(reason);
 });

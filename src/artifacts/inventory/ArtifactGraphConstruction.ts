@@ -1,3 +1,5 @@
+import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
+import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import { isJavaScriptSourcePath } from "../../domain/javascript/javascriptArtifactFiles.js";
 import { digestCanonicalValue } from "../../domain/canonicalDigest.js";
@@ -473,12 +475,13 @@ export const classifyArtifactPath = (
 /** Classify executable formats from bytes while retaining path-specific roles. */
 export const classifyArtifactContent = (
   path: string,
-  prefix: Buffer,
-  fileSize = prefix.length,
+  evidence: ArtifactClassificationEvidence,
+  fileSize = evidence.prefix.length,
 ): {
   readonly kind: ArtifactOccurrence["artifact_kind"];
   readonly format: ArtifactOccurrence["artifact_format"];
 } => {
+  const { prefix, asarHeader } = evidence;
   const format = classifyArtifactBytes(prefix, fileSize);
   const byPath = classifyArtifactPath(path);
   if (
@@ -491,25 +494,17 @@ export const classifyArtifactContent = (
   if (
     format === "file" &&
     path.toLowerCase().endsWith(".asar") &&
-    hasAsarHeader(prefix)
-  )
-    return { kind: "container", format: "asar" };
+    asarHeader.state !== "rejected"
+  ) {
+    if (asarHeader.state === "limit")
+      throw new ArtifactReaderFailure(
+        "limit",
+        "ASAR header exceeds the bounded classification or decode budget",
+      );
+    if (asarHeader.state === "matched")
+      return { kind: "container", format: "asar" };
+  }
   return artifactRoleForFormat(path, format);
-};
-
-/**
- * Electron ASAR starts with a size pickle whose payload is one uint32, then
- * a header pickle whose payload begins with a JSON object.
- */
-export const hasAsarHeader = (prefix: Buffer): boolean => {
-  if (prefix.length < 17 || prefix.readUInt32LE(0) !== 4) return false;
-  const headerSize = prefix.readUInt32LE(4);
-  const payloadSize = prefix.readUInt32LE(8);
-  if (headerSize < 16 || payloadSize !== headerSize - 4) return false;
-  const stringLength = prefix.readUInt32LE(12);
-  return (
-    stringLength >= 2 && stringLength <= payloadSize - 4 && prefix[16] === 0x7b
-  );
 };
 
 const artifactRoleForFormat = (

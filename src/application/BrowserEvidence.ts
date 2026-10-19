@@ -160,7 +160,18 @@ const browserParameters = (
         }
       : {}),
     ...("fetch_source_maps" in input
-      ? { fetch_source_maps: input.fetch_source_maps }
+      ? {
+          fetch_source_maps: input.fetch_source_maps,
+          ...(input.max_heap_mb === undefined
+            ? {}
+            : { max_heap_mb: input.max_heap_mb }),
+          ...(input.analysis_timeout_ms === undefined
+            ? {}
+            : { analysis_timeout_ms: input.analysis_timeout_ms }),
+          ...(input.total_analysis_timeout_ms === undefined
+            ? {}
+            : { total_analysis_timeout_ms: input.total_analysis_timeout_ms }),
+        }
       : {}),
   };
 };

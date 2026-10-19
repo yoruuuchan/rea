@@ -8,6 +8,33 @@ import { webTextArtifactSchema } from "./webContentArtifact.js";
 export const analyzeWebBundleInputSchema =
   inspectWebPageWithSourceInputSchema.safeExtend({
     fetch_source_maps: z.boolean().default(false),
+    max_heap_mb: z
+      .number()
+      .int()
+      .min(128)
+      .max(16_384)
+      .optional()
+      .describe(
+        "Maximum V8 old-space heap in MiB for the isolated inert-script analyzer; defaults to 1024. This is not a total process RSS limit. Bun ignores V8 flags; Windows Bun uses an owned process commit limit plus a 512 MiB runtime reserve, while other Bun hosts have no enforced memory limit.",
+      ),
+    analysis_timeout_ms: z
+      .number()
+      .int()
+      .min(1)
+      .max(2_147_483_647)
+      .optional()
+      .describe(
+        "Maximum startup, analysis and result transfer time per captured script, in milliseconds; defaults to 30000. Timed-out scripts are explicit unknowns and other scripts may still be analyzed.",
+      ),
+    total_analysis_timeout_ms: z
+      .number()
+      .int()
+      .min(1)
+      .max(2_147_483_647)
+      .optional()
+      .describe(
+        "Maximum time for all captured-script analysis, in milliseconds; defaults to 300000. Capture and optional source-map fetching have separate budgets. Unstarted scripts remain explicit unknowns.",
+      ),
   });
 export type AnalyzeWebBundleInput = z.infer<typeof analyzeWebBundleInputSchema>;
 

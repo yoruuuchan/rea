@@ -205,3 +205,42 @@ it("retains completed target facts when cancellation arrives before Evidence pub
     });
   }
 });
+
+it.each(["list", "inspect"] as const)(
+  "preserves a pre-abort reason before Electron %s provider work",
+  async (kind) => {
+    const reason = new Error(`stop Electron ${kind}`);
+    const controller = new AbortController();
+    controller.abort(reason);
+    let providerCalls = 0;
+    const provider: ElectronObservationPort = {
+      identity: () => identity,
+      listTargets: async () => {
+        providerCalls += 1;
+        return err(new AnalysisCancelledError("list_electron_targets"));
+      },
+      inspectPage: async () => {
+        providerCalls += 1;
+        return err(new AnalysisCancelledError("inspect_electron_page"));
+      },
+    };
+
+    const result =
+      kind === "list"
+        ? await listElectronTargets(
+            provider,
+            { cdp_endpoint: input.cdp_endpoint },
+            { signal: controller.signal },
+          )
+        : await inspectElectronPage(provider, input, {
+            signal: controller.signal,
+          });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+      expect(result.error.cause).toBe(reason);
+    }
+    expect(providerCalls).toBe(0);
+  },
+);

@@ -9,6 +9,7 @@ import type { CdpEndpointTarget } from "./CdpEndpoint.js";
 import { optionalCdpCommand } from "./CdpOptionalCommand.js";
 import { authorizedElectronFile } from "./ElectronFileScope.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 
 /** Inventory local worker targets without attaching to them. */
 export const captureElectronWorkers = async (input: {
@@ -42,6 +43,7 @@ export const captureElectronWorkers = async (input: {
     return [];
   }
   for (const entry of targetInfos) {
+    throwIfElectronWorkerCaptureCancelled(input.signal);
     const target = recordValue(entry);
     if (target === undefined) {
       input.completeness.exclude("workers", "invalid_protocol_value");
@@ -58,7 +60,11 @@ export const captureElectronWorkers = async (input: {
       input.completeness.exclude("workers", "out_of_target_scope");
       continue;
     }
-    const path = await authorizedElectronFile(cdpStringValue(target.url) ?? "");
+    const path = await authorizedElectronFile(
+      cdpStringValue(target.url) ?? "",
+      input.signal,
+      "inspect_electron_page",
+    );
     if (path === undefined) {
       input.completeness.exclude("workers", "out_of_target_scope");
       continue;
@@ -84,6 +90,13 @@ export const captureElectronWorkers = async (input: {
   return workers.sort((left, right) =>
     compareUnicodeCodePoints(left.target_id, right.target_id),
   );
+};
+
+const throwIfElectronWorkerCaptureCancelled = (signal?: AbortSignal): void => {
+  if (signal?.aborted === true)
+    throw new AnalysisCancelledError("inspect_electron_page", {
+      cause: signal.reason,
+    });
 };
 
 const boundedTargetField = (value: unknown): string | null => {

@@ -178,6 +178,7 @@ it("retains a failed capture reader and retries it before a fresh load", async (
     const first = await decoder.inspect(input);
     expect(first.ok).toBe(false);
     if (first.ok) throw new Error("Reader close failure must fail inspection");
+    expect(first.error.cleanupIncomplete).toBe(true);
     expect(first.error.cleanupResources).toContain(path);
     expect(decoderCalls).toBe(0);
 
@@ -192,6 +193,8 @@ it("retains a failed capture reader and retries it before a fresh load", async (
     allowClose = true;
     await decoder.close();
     expect(closeAttempts).toBe(3);
+    expect(first.error.cleanupIncomplete).toBe(false);
+    expect(first.error.cleanupResources).toEqual([]);
   } finally {
     allowClose = true;
     await decoder.close().catch(() => undefined);
@@ -361,6 +364,199 @@ it("cancels after snapshot acquisition before launch and removes private input d
   if (privatePath === undefined)
     throw new Error("Private root was not acquired");
   await expect(access(privatePath)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("preserves the exact cancellation reason observed during final runtime close", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-historical-final-cancel-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "input.har");
+  const text = JSON.stringify(historicalHar());
+  await writeFile(path, text);
+  const controller = new AbortController();
+  const reason = { request: "cancel during runtime close" };
+  const decoder = new HistoricalCaptureDecoder(
+    [
+      {
+        format: "har",
+        identity: HAR_CAPTURE_PROVIDER_IDENTITY,
+        command: async (_, runtimePath) => {
+          await writeFile(
+            join(runtimePath, "reply.json"),
+            JSON.stringify({ ok: true, value: decodeHarCapture(text, []) }),
+          );
+          return {
+            command: process.execPath,
+            arguments: ["-e", "process.exit(0)"],
+          };
+        },
+      },
+    ],
+    process.env,
+    async () => {
+      const runtime = await PrivateRuntimeRoot.create({
+        prefix: "rea-final-cancel-proof-",
+      });
+      return {
+        path: runtime.path,
+        close: async () => {
+          controller.abort(reason);
+          await runtime.close();
+        },
+      };
+    },
+  );
+  const result = await decoder.inspect(
+    inspectWebNetworkCaptureInputSchema.parse({
+      capture_path: path,
+      format: "har",
+    }),
+    { signal: controller.signal },
+  );
+  if (result.ok) throw new Error("Finalization cancellation must fail");
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toMatchObject({
+    artifact: { path, sha256: expect.any(String) },
+    records: [{ ordinal: 0 }],
+  });
+});
+
+it("retains completed capture facts and binds final root cleanup to its retry lease", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-historical-report-cleanup-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "input.har");
+  const text = JSON.stringify(historicalHar());
+  await writeFile(path, text);
+  let runtimePath: string | undefined;
+  let allowClose = false;
+  let runtime: PrivateRuntimeRoot | undefined;
+  const decoder = new HistoricalCaptureDecoder(
+    [
+      {
+        format: "har",
+        identity: HAR_CAPTURE_PROVIDER_IDENTITY,
+        command: async (_, path) => {
+          await writeFile(
+            join(path, "reply.json"),
+            JSON.stringify({ ok: true, value: decodeHarCapture(text, []) }),
+          );
+          return {
+            command: process.execPath,
+            arguments: ["-e", "process.exit(0)"],
+          };
+        },
+      },
+    ],
+    process.env,
+    async () => {
+      runtime = await PrivateRuntimeRoot.create({
+        prefix: "rea-report-cleanup-proof-",
+      });
+      runtimePath = runtime.path;
+      onTestFinished(() => runtime?.close());
+      return {
+        path: runtime.path,
+        close: async () => {
+          if (!allowClose)
+            throw new Error("injected private root close failure");
+          await runtime?.close();
+        },
+      };
+    },
+  );
+  const result = await decoder.inspect(
+    inspectWebNetworkCaptureInputSchema.parse({
+      capture_path: path,
+      format: "har",
+    }),
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Root close failure must be reported");
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(runtimePath).toBeDefined();
+  expect(result.error.cleanupResources).toContain(runtimePath);
+  expect(result.error.partialObservation).toMatchObject({
+    artifact: { path, sha256: expect.any(String) },
+    records: [{ ordinal: 0 }],
+  });
+
+  allowClose = true;
+  await decoder.close();
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(result.error.cleanupResources).toEqual([]);
+});
+
+it("keeps late cancellation primary when runtime close also fails, then clears on retry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-historical-cancel-cleanup-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "input.har");
+  const text = JSON.stringify(historicalHar());
+  await writeFile(path, text);
+  const controller = new AbortController();
+  const reason = { request: "cancel during failed root close" };
+  let runtime: PrivateRuntimeRoot | undefined;
+  let closeAttempts = 0;
+  const decoder = new HistoricalCaptureDecoder(
+    [
+      {
+        format: "har",
+        identity: HAR_CAPTURE_PROVIDER_IDENTITY,
+        command: async (_, runtimePath) => {
+          await writeFile(
+            join(runtimePath, "reply.json"),
+            JSON.stringify({ ok: true, value: decodeHarCapture(text, []) }),
+          );
+          return {
+            command: process.execPath,
+            arguments: ["-e", "process.exit(0)"],
+          };
+        },
+      },
+    ],
+    process.env,
+    async () => {
+      runtime = await PrivateRuntimeRoot.create({
+        prefix: "rea-cancel-cleanup-proof-",
+      });
+      onTestFinished(() => runtime?.close());
+      return {
+        path: runtime.path,
+        close: async () => {
+          closeAttempts += 1;
+          if (closeAttempts === 1) {
+            controller.abort(reason);
+            throw new Error("injected close failure after cancellation");
+          }
+          await runtime?.close();
+        },
+      };
+    },
+  );
+  const result = await decoder.inspect(
+    inspectWebNetworkCaptureInputSchema.parse({
+      capture_path: path,
+      format: "har",
+    }),
+    { signal: controller.signal },
+  );
+  if (result.ok) throw new Error("Cancellation and failed close must fail");
+  expect(result.error._tag).toBe("ProviderAdapterError");
+  expect(result.error.cleanupPrimary?._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cleanupPrimary?.cause).toBe(reason);
+  expect(JSON.stringify(result.error.diagnostics)).not.toContain(
+    "partial_observation",
+  );
+  expect(result.error.partialObservation).toMatchObject({
+    artifact: { path, sha256: expect.any(String) },
+    records: [{ ordinal: 0 }],
+  });
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.cleanupResources).toContain(runtime?.path);
+
+  await decoder.close();
+  expect(closeAttempts).toBe(2);
+  expect(result.error.cleanupIncomplete).toBe(false);
+  expect(result.error.cleanupResources).toEqual([]);
 });
 
 it.each([
@@ -560,12 +756,15 @@ it.each(["format", "process"])(
       }),
     );
     if (result.ok) throw new Error("Cleanup failure required");
+    expect(result.error.cleanupPrimary?._tag).toBe(
+      kind === "format" ? "AnalysisInputError" : "ProviderAdapterError",
+    );
     const projected = projectAnalysisError(result.error);
     expect(projected).toMatchObject({
       code: "cleanup_incomplete",
       details: {
         diagnostics: {
-          previous_error:
+          primary_error:
             kind === "format"
               ? {
                   category: "invalid_input",

@@ -286,3 +286,43 @@ it.each(["io", "unavailable"] as const)(
     });
   },
 );
+
+it("preserves the exact cancellation reason and an earlier reader failure", () => {
+  const input = inspectWebNetworkCaptureInputSchema.parse({
+    capture_path: "/selected/input.har",
+    format: "har",
+  });
+  const reason = { request: "caller cancellation" };
+  const controller = new AbortController();
+  controller.abort(reason);
+  const cancelledCommand = new OwnedCommandFailure(
+    "cancelled",
+    "Command cancelled",
+    null,
+    null,
+    { cancellation: { reason } },
+  );
+  expect(
+    historicalCaptureFailure(input, cancelledCommand, "decoder", {
+      signal: controller.signal,
+    }).cause,
+  ).toBe(reason);
+  const cancelledRead = new ArtifactReaderFailure(
+    "cancelled",
+    "Read cancelled",
+    { cancellation: { reason } },
+  );
+  expect(
+    historicalCaptureFailure(input, cancelledRead, "capture-read", {
+      signal: controller.signal,
+    }).cause,
+  ).toBe(reason);
+
+  const changed = historicalCaptureFailure(
+    input,
+    new ArtifactReaderFailure("integrity", "Observed changed capture"),
+    "capture-read",
+    { signal: controller.signal },
+  );
+  expect(changed._tag).toBe("AnalysisArtifactChangedError");
+});

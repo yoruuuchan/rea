@@ -28,7 +28,11 @@ export const listJavaScriptRuntimeTargets = async (
   const ready = requireProvider(provider, "list_javascript_runtime_targets");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("list_javascript_runtime_targets"));
+    return err(
+      new AnalysisCancelledError("list_javascript_runtime_targets", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.listTargets(input, options);
   if (!result.ok) return result;
   const report = javascriptRuntimeTargetListSchema.safeParse(result.value);
@@ -58,7 +62,11 @@ export const observeJavaScriptRuntime = async (
   const ready = requireProvider(provider, "observe_javascript_runtime");
   if (!ready.ok) return ready;
   if (options.signal?.aborted)
-    return err(new AnalysisCancelledError("observe_javascript_runtime"));
+    return err(
+      new AnalysisCancelledError("observe_javascript_runtime", {
+        cause: options.signal.reason,
+      }),
+    );
   const result = await ready.value.observe(input, options);
   if (!result.ok) {
     const partial = result.error.partialObservation;

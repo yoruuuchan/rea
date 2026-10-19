@@ -12,11 +12,10 @@ import {
   type BrowserTargetList,
   type WebPageInspection,
 } from "../domain/browserObservationSchemas.js";
-import { analyzeCapturedWebBundle } from "../domain/webBundleAnalyzer.js";
-import {
-  webBundleAnalysisSchema,
-  type AnalyzeWebBundleInput,
-  type WebBundleAnalysis,
+import { IsolatedWebBundleAnalyzer } from "./IsolatedWebBundleAnalyzer.js";
+import type {
+  AnalyzeWebBundleInput,
+  WebBundleAnalysis,
 } from "../domain/webBundleAnalysis.js";
 import {
   webObservationSessionSchema,
@@ -93,9 +92,31 @@ const CLEANUP_DOMAINS = [
 /** Passive browser observation through a selected user-owned CDP endpoint. */
 export class CdpBrowserProvider implements BrowserObservationPort {
   readonly #owner = new CdpTargetSessionOwner();
+  readonly #bundleAnalyzer = new IsolatedWebBundleAnalyzer();
 
-  close(): Promise<void> {
-    return this.#owner.close();
+  async close(): Promise<void> {
+    const outcomes = await Promise.allSettled([
+      this.#owner.close(),
+      this.#bundleAnalyzer.close(),
+    ]);
+    const failures = outcomes.flatMap((outcome) =>
+      outcome.status === "rejected" ? [outcome.reason as unknown] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) {
+      const typed = failures.filter(
+        (failure): failure is AnalysisError => failure instanceof AnalysisError,
+      );
+      throw new ProviderCleanupError(
+        CDP_BROWSER_PROVIDER_IDENTITY.id,
+        typed.flatMap((failure) => failure.cleanupResources),
+        { reason: "Browser transport and analyzer cleanup remain incomplete" },
+        {
+          operation: "analyze_web_bundle",
+          cause: new AggregateError(failures),
+        },
+      ).bindCleanupDependencies(typed);
+    }
   }
 
   identity(): ProviderIdentity {
@@ -166,6 +187,8 @@ export class CdpBrowserProvider implements BrowserObservationPort {
     input: AnalyzeWebBundleInput,
     options: ExecutionOptions = {},
   ): Promise<Result<WebBundleAnalysis, AnalysisError>> {
+    const admission = await this.#bundleAnalyzer.reserve();
+    if (!admission.ok) return admission;
     let captured: CapturedPage | undefined;
     try {
       captured = await this.#capture(input, options, "analyze_web_bundle");
@@ -182,10 +205,16 @@ export class CdpBrowserProvider implements BrowserObservationPort {
             options.signal,
           )
         : undefined;
-      return ok(
-        webBundleAnalysisSchema.parse(
-          analyzeCapturedWebBundle(captured.inspection, sourceMaps),
-        ),
+      return await this.#bundleAnalyzer.analyze(
+        captured.inspection,
+        sourceMaps ?? {
+          status: "not_requested",
+          requested: 0,
+          processed: 0,
+          items: [],
+        },
+        input,
+        options.signal,
       );
     } catch (cause: unknown) {
       // fetchWebSourceMaps rethrows the exact abort reason. Preserve cancellation
@@ -201,6 +230,8 @@ export class CdpBrowserProvider implements BrowserObservationPort {
         );
       }
       return err(providerError(cause, "analyze_web_bundle", options.signal));
+    } finally {
+      this.#bundleAnalyzer.releaseReservation();
     }
   }
 

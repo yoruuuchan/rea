@@ -271,3 +271,49 @@ it("reports non-JSON Inspector output before late cancellation", async () => {
     error: { _tag: "AnalysisOutputError", partialObservation: undefined },
   });
 });
+
+it.each(["list", "observe"] as const)(
+  "preserves a pre-abort reason before Inspector %s provider work",
+  async (kind) => {
+    const reason = new Error(`stop Inspector ${kind}`);
+    const controller = new AbortController();
+    controller.abort(reason);
+    let providerCalls = 0;
+    const provider: JavaScriptRuntimeObservationPort = {
+      identity: () => ({ id: "test", name: "Test", version: "1" }),
+      listTargets: async () => {
+        providerCalls += 1;
+        return err(
+          new AnalysisCancelledError("list_javascript_runtime_targets"),
+        );
+      },
+      observe: async () => {
+        providerCalls += 1;
+        return err(new AnalysisCancelledError("observe_javascript_runtime"));
+      },
+    };
+    const result =
+      kind === "list"
+        ? await listJavaScriptRuntimeTargets(
+            provider,
+            { inspector_endpoint: "http://127.0.0.1:9229" },
+            { signal: controller.signal },
+          )
+        : await observeJavaScriptRuntime(
+            provider,
+            {
+              inspector_endpoint: "http://127.0.0.1:9229",
+              target_id: "target",
+              observation_ms: 0,
+            },
+            { signal: controller.signal },
+          );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+      expect(result.error.cause).toBe(reason);
+    }
+    expect(providerCalls).toBe(0);
+  },
+);

@@ -12,6 +12,8 @@ import {
 import { projectAnalysisError } from "./analysisErrorProjection.js";
 import { ProviderCleanupError } from "./providerCleanupError.js";
 import { ProviderAdapterError } from "./providerAdapterError.js";
+import { analysisErrorWithCleanupFailure } from "./analysisErrorCleanup.js";
+import { resolvedAnalysisError } from "./analysisErrorBase.js";
 import {
   redactExplicitFailure,
   redactExplicitPointer,
@@ -101,6 +103,53 @@ it("preserves cleanup failure authority and resources while excluding diagnostic
   expect(JSON.stringify(projected)).not.toContain("REDACTED");
   expect(JSON.stringify(projected)).toContain("pid:123");
   expect(JSON.stringify(projected)).toContain('"exit_code":2');
+});
+
+it("redacts cleanup primaries and mirrors the source error's live status", () => {
+  const primary = new AnalysisInputError(
+    "inspect_web_network_capture",
+    undefined,
+    [
+      {
+        path: ["capture_path", "/root/private-marker/capture.har"],
+        reason: "invalid_value",
+        message: "Selected private-marker capture was invalid",
+      },
+    ],
+  );
+  const cleanup = new ProviderCleanupError(
+    "har",
+    ["/tmp/private-marker-runtime"],
+    { reason: "private-marker runtime close failed" },
+    { operation: "inspect_web_network_capture" },
+  );
+  const original = analysisErrorWithCleanupFailure(
+    primary,
+    cleanup,
+    "inspect_web_network_capture",
+  );
+
+  const redacted = redactExplicitFailure(original, ["private-marker"]);
+  expect(redacted.cleanupIncomplete).toBe(true);
+  expect(redacted.cleanupResources).toEqual(["/tmp/[REDACTED]-runtime"]);
+  expect(JSON.stringify(projectAnalysisError(redacted))).not.toContain(
+    "private-marker",
+  );
+
+  original.resolveCleanup();
+  expect(redacted.cleanupIncomplete).toBe(false);
+  const resolved = resolvedAnalysisError(redacted);
+  expect(JSON.stringify(projectAnalysisError(resolved))).not.toContain(
+    "private-marker",
+  );
+  expect(projectAnalysisError(resolved).details).toMatchObject({
+    issues: [
+      {
+        path: ["capture_path", "/root"],
+        reason: "invalid_value",
+      },
+    ],
+  });
 });
 
 it("keeps unsupported profile reasons distinct from malformed input", () => {

@@ -2,7 +2,8 @@ import { expect, it } from "vitest";
 
 import { snapshotRoots } from "./FilesystemSnapshot.js";
 import { buildCaptureResult } from "./ProcessCaptureLifecycle.js";
-import { isInitializedPtyRoot, readLinuxChildren } from "./ProcessSampling.js";
+import { isInitializedPtyRoot } from "./ProcessSampling.js";
+import { readLinuxChildren } from "./LinuxProcessSampling.js";
 import { TerminalRenderer } from "./TerminalRenderer.js";
 import { parseProcessScenario } from "../../domain/process/processScenario.js";
 import type { ProcessCapture } from "../../domain/process/processCaptureParsing.js";
@@ -215,7 +216,10 @@ it("collects and deduplicates children from every Linux thread", async () => {
           taskId === 100 ? "201 202" : taskId === 101 ? "202 203" : "",
         ),
     }),
-  ).toEqual([201, 202, 203]);
+  ).toEqual({
+    value: [201, 202, 203],
+    diagnostics: { count: 0, first: null, interrupted: false },
+  });
 });
 
 it("admits PTY samples only after stable session and token setup", () => {
@@ -275,5 +279,9 @@ it("cancels filesystem snapshots before traversing declared roots", async () => 
       }),
       controller.signal,
     ),
-  ).rejects.toMatchObject({ name: "AbortError" });
+  ).rejects.toMatchObject({
+    reason: "cancelled",
+    cause: controller.signal.reason,
+    snapshot: { files: [], truncated: true },
+  });
 });

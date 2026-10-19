@@ -187,7 +187,9 @@ const parseInput = <T>(
   options: ExecutionOptions | undefined,
 ): Result<T, AnalysisError> => {
   if (options?.signal?.aborted)
-    return err(new AnalysisCancelledError(operation));
+    return err(
+      new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+    );
   const parsed = schema.safeParse(rawInput);
   return parsed.success
     ? ok(parsed.data)

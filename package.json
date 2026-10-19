@@ -35,7 +35,8 @@
   },
   "type": "module",
   "imports": {
-    "#javascript-analysis-worker": "./dist/composition/javascriptAnalysisWorkerProcess.js"
+    "#javascript-analysis-worker": "./dist/composition/javascriptAnalysisWorkerProcess.js",
+    "#web-bundle-analysis-worker": "./dist/composition/webBundleAnalysisWorkerProcess.js"
   },
   "bin": {
     "rea": "scripts/rea.mjs",

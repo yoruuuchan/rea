@@ -42,22 +42,7 @@ export const registerFridaTools = (
       const result = await logToolExecution(logger, listDevices.name, () =>
         service.listDevices(remoteConnection(input.remote)),
       );
-      return result.ok
-        ? delivery.toCallToolResult(
-            {
-              ok: true,
-              value: jsonValueSchema.parse({
-                devices: result.value.devices.map((device) => ({
-                  device_id: device.deviceId,
-                  name: device.name,
-                  type: device.type,
-                })),
-                cleanup_error: result.value.cleanupError,
-              }),
-            },
-            listDevices,
-          )
-        : delivery.toCallToolResult(result, listDevices);
+      return delivery.toCallToolResult(result, listDevices);
     },
   );
   server.registerTool(
@@ -73,19 +58,7 @@ export const registerFridaTools = (
           ...(remote === undefined ? {} : { remote }),
         }),
       );
-      return result.ok
-        ? delivery.toCallToolResult(
-            {
-              ok: true,
-              value: jsonValueSchema.parse({
-                device_id: result.value.deviceId,
-                processes: result.value.processes,
-                cleanup_error: result.value.cleanupError,
-              }),
-            },
-            listProcesses,
-          )
-        : delivery.toCallToolResult(result, listProcesses);
+      return delivery.toCallToolResult(result, listProcesses);
     },
   );
   server.registerTool(
