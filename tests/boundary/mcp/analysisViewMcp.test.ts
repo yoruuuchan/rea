@@ -1,11 +1,15 @@
 import { advertisedMcpToolSchemas } from "../../fixtures/advertisedMcpTool.js";
 import { API_SURFACE_EXAMPLE } from "../../../src/contracts/analysisViewApiSurfaceExample.js";
+import { ENVIRONMENT_MANIFEST_EXAMPLE } from "../../../src/contracts/analysisViewEnvironmentManifestExample.js";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { WebNetworkCaptureService } from "../../../src/application/WebNetworkCaptureService.js";
 import { decodeHarCapture } from "../../../src/browser/history/HarCapture.js";
 import { join } from "node:path";
-import { apiSurfaceHar } from "../../fixtures/historicalHar.js";
+import {
+  apiSurfaceHar,
+  environmentManifestHar,
+} from "../../fixtures/historicalHar.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -38,6 +42,7 @@ import {
   analysisViewCaptureEvidence,
   analysisViewObjectDenseCapture,
   analysisViewNativeEvidence,
+  environmentManifestCaptureFixture,
 } from "../../fixtures/analysisView.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { BINARY_LAYOUT_TEST_PROVIDER } from "../../fixtures/binaryDiagnostics/layout.js";
@@ -1092,37 +1097,153 @@ it("projects an actual HAR capture retained by the public MCP workflow", async (
   });
 });
 
-it("reproduces the published API surface example from decoded fixture bytes", async () => {
-  const fixture = apiSurfaceHar();
-  fixture.log.entries = fixture.log.entries.slice(0, 2);
-  const bytes = Buffer.from(JSON.stringify(fixture));
-  const service = new WebNetworkCaptureService({
-    inspect: async () =>
-      ok({
-        ...decodeHarCapture(bytes.toString("utf8"), []),
-        artifact: {
-          path: "/fixtures/api-surface.har",
-          sha256: createHash("sha256").update(bytes).digest("hex"),
-          bytes: bytes.length,
-        },
-        format: "har",
-        runtime_attribution: "unknown",
-        limitations: [],
+const PUBLISHED_EXAMPLES: readonly (readonly [
+  name: string,
+  example: {
+    readonly input: {
+      readonly source: { readonly evidence_id: string };
+      readonly view: Record<string, unknown>;
+    };
+    readonly output: { readonly artifact: { readonly path: string } };
+  },
+  fixture: () => unknown,
+])[] = [
+  [
+    "API surface",
+    API_SURFACE_EXAMPLE,
+    () => {
+      const fixture = apiSurfaceHar();
+      fixture.log.entries = fixture.log.entries.slice(0, 2);
+      return fixture;
+    },
+  ],
+  [
+    "environment manifest",
+    ENVIRONMENT_MANIFEST_EXAMPLE,
+    () => {
+      const fixture = environmentManifestHar();
+      fixture.log.entries = [10, 20, 27].map(
+        (index) => fixture.log.entries[index]!,
+      );
+      return fixture;
+    },
+  ],
+];
+
+it.each(PUBLISHED_EXAMPLES)(
+  "reproduces the published %s example from decoded fixture bytes",
+  async (_name, example, fixture) => {
+    const bytes = Buffer.from(JSON.stringify(fixture()));
+    const path = example.output.artifact.path;
+    const service = new WebNetworkCaptureService({
+      inspect: async () =>
+        ok({
+          ...decodeHarCapture(bytes.toString("utf8"), []),
+          artifact: {
+            path,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            bytes: bytes.length,
+          },
+          format: "har",
+          runtime_attribution: "unknown",
+          limitations: [],
+        }),
+    });
+    const { client } = await connect(undefined, service);
+    const capture = await client.callTool({
+      name: "inspect_web_network_capture",
+      arguments: { capture_path: path, format: "har" },
+    });
+    expect(parseEvidence(capture.structuredContent).evidence_id).toBe(
+      example.input.source.evidence_id,
+    );
+    const response = await client.callTool({
+      name: "inspect_analysis_view",
+      arguments: example.input,
+    });
+    expect(parseEvidence(response.structuredContent).normalized_result).toEqual(
+      example.output,
+    );
+  },
+);
+
+it("projects an environment manifest identically from retained and portable MCP Evidence", async () => {
+  const { client, session } = await connect();
+  const { ajv, inputSchema, outputSchema } = await advertisedMcpToolSchemas(
+    client,
+    "inspect_analysis_view",
+  );
+  const capture = environmentManifestCaptureFixture();
+  const parent = analysisViewCaptureEvidence(capture);
+  expect(session.recordEvidence(parent).ok).toBe(true);
+  const view = {
+    kind: "environment-manifest",
+    template_rules: ["after-uid-literal", "opaque-token", "sibling-variance"],
+  };
+  const outputs = [];
+  for (const source of [
+    { kind: "inline", evidence: parent },
+    { kind: "retained-evidence", evidence_id: parent.evidence_id },
+  ]) {
+    expect(ajv.validate(inputSchema, { source, view })).toBe(true);
+    expect(
+      ajv.validate(inputSchema, {
+        source,
+        view: { ...view, template_rules: ["glob"] },
       }),
-  });
-  const { client } = await connect(undefined, service);
-  const capture = await client.callTool({
-    name: "inspect_web_network_capture",
-    arguments: { capture_path: "/fixtures/api-surface.har", format: "har" },
-  });
-  expect(parseEvidence(capture.structuredContent).evidence_id).toBe(
-    API_SURFACE_EXAMPLE.input.source.evidence_id,
+    ).toBe(false);
+    const response = await client.callTool({
+      name: "inspect_analysis_view",
+      arguments: { source, view },
+    });
+    expect(response.isError).not.toBe(true);
+    expect(
+      ajv.validate(outputSchema, response.structuredContent),
+      JSON.stringify(ajv.errors),
+    ).toBe(true);
+    const evidence = parseEvidence(response.structuredContent);
+    expect(evidence.confidence).toBe("inferred");
+    expect(evidence.normalized_result).toMatchObject({
+      kind: "environment-manifest",
+      name: "grafana-example",
+      templated_groups: 13,
+      tools: expect.arrayContaining([
+        expect.objectContaining({
+          name: "get_plugins_settings_by_plugin_id",
+          path_template: "/api/plugins/{plugin_id}/settings",
+        }),
+        expect.objectContaining({
+          name: "get_folders_by_uid",
+          path_template: "/api/folders/{uid}",
+        }),
+      ]),
+    });
+    expect(session.evidenceById(evidence.evidence_id)).toEqual(evidence);
+    for (const value of ["probe folder", "Main Org", "JFIF", "console.log"])
+      expect(JSON.stringify(response)).not.toContain(value);
+    outputs.push(evidence.normalized_result);
+  }
+  expect(outputs[0]).toEqual(outputs[1]);
+  const hidden = createEvidence(
+    {
+      path: capture.artifact.path,
+      sha256: capture.artifact.sha256!,
+      format: "file",
+    },
+    { id: "fixture", name: "fixture", version: "1" },
+    {
+      operation: "inspect_web_network_capture",
+      parameters: { sensitive_value_count: 1 },
+      result: capture,
+      confidence: "observed",
+    },
   );
-  const response = await client.callTool({
+  const refused = await client.callTool({
     name: "inspect_analysis_view",
-    arguments: API_SURFACE_EXAMPLE.input,
+    arguments: { source: { kind: "inline", evidence: hidden }, view },
   });
-  expect(parseEvidence(response.structuredContent).normalized_result).toEqual(
-    API_SURFACE_EXAMPLE.output,
-  );
+  expect(parseMcpToolError(refused).error.code).toBe("unsupported_target");
+  expect(JSON.stringify(refused)).toContain("sensitive_values_unretained");
+  expect(JSON.stringify(refused)).not.toContain("/api/folders");
+  await client.ping();
 });

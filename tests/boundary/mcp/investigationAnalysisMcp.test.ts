@@ -56,8 +56,7 @@ it("aggregates comparison Evidence and records an approved runtime gap", async (
     });
     expect(session.listUnknowns({ domain: "changed-behavior" })).toMatchObject([
       {
-        question:
-          "Did both versions behave the same under a complete controlled replay?",
+        question: `Did both versions behave the same under a complete controlled replay? (Evidence ${evidence.evidence_id})`,
       },
     ]);
   } finally {
@@ -406,8 +405,7 @@ it.each([
       else
         expect(session.listUnknowns({ domain: "call-path" })).toMatchObject([
           {
-            question:
-              "Can the requested call path be established from complete analysis?",
+            question: `Can the requested call path be established from complete analysis? (Evidence ${evidence.evidence_id})`,
             supporting_evidence_ids: [evidence.evidence_id],
           },
         ]);
@@ -416,32 +414,6 @@ it.each([
     }
   },
 );
-
-it("records a safe unresolved call-path question", async () => {
-  const { session, server, client } = await connected();
-  const dossier = dossierWithCallees(["0x2000"]);
-  expect(session.recordEvidence(dossier).ok).toBe(true);
-  try {
-    const response = await client.callTool({
-      name: "build_call_path",
-      arguments: {
-        ...INVESTIGATION_EXAMPLES.build_call_path,
-        functions: [dossier],
-        start: { address: "0x1000" },
-        goal: { address: "0x3000" },
-      },
-    });
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    expect(session.listUnknowns({ domain: "call-path" })).toMatchObject([
-      {
-        question:
-          "Can the requested call path be established from complete analysis?",
-      },
-    ]);
-  } finally {
-    await close(session, server, client);
-  }
-});
 
 it("records an explicit non-causal static/runtime hypothesis", async () => {
   const { session, server, client } = await connected();
@@ -586,7 +558,7 @@ it("cannot omit a session-owned active unknown from reconstruction input", async
       session.listUnknowns({ domain: "reconstruction-verification" }),
     ).toContainEqual(
       expect.objectContaining({
-        question: "Does the reconstruction satisfy every declared claim?",
+        question: `Does the reconstruction satisfy every declared claim? (Evidence ${evidence.evidence_id})`,
       }),
     );
   } finally {

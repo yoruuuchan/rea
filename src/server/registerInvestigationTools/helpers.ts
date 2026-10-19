@@ -4,6 +4,7 @@ import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { recordDerivedEvidence } from "../recordDerivedEvidence.js";
+import { workflowUnknownInput } from "../../application/investigation/WorkflowUnknown.js";
 import type { WorkflowUnknownInput } from "./types.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 
@@ -64,16 +65,17 @@ export const recordWorkflowEvidence = (
   if (!unresolved) {
     return recordDerivedEvidence(session, evidence, undefined);
   }
-  return recordDerivedEvidence(session, evidence, {
+  const unknown = workflowUnknownInput(evidence.evidence_id, {
     question: input.question,
     severity: "high",
     domain: input.domain,
-    supporting_evidence_ids: [evidence.evidence_id],
-    contradicting_evidence_ids: [],
     required_authority: input.requiredAuthority,
     required_confidence: input.requiredConfidence,
     required_environment: null,
     recommended_probes: [...input.probes],
     relationships: [],
   });
+  return unknown.ok
+    ? recordDerivedEvidence(session, evidence, unknown.value)
+    : unknown;
 };

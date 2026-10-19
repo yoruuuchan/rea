@@ -1,4 +1,7 @@
-import { apiSurfaceHar } from "../../fixtures/historicalHar.js";
+import {
+  apiSurfaceHar,
+  environmentManifestHar,
+} from "../../fixtures/historicalHar.js";
 import { inspectAnalysisView } from "../../../src/application/analysisView/AnalysisViewService.js";
 import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
@@ -18,6 +21,7 @@ import {
   analysisViewJavaScriptEvidence,
   analysisViewJavaScriptAnalysisWithSource,
   analysisViewNativeEvidence,
+  environmentManifestCaptureFixture,
 } from "../../fixtures/analysisView.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
@@ -540,5 +544,128 @@ cliTest(
     });
     expect(JSON.stringify(result.json)).not.toContain("password");
     expect(JSON.stringify(result.json)).not.toContain("ordinary");
+  },
+);
+
+cliTest(
+  "projects an environment manifest through the compiled CLI without recorded values",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-environment-manifest-cli-");
+    const path = join(root, "view.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        source: {
+          kind: "inline",
+          evidence: analysisViewCaptureEvidence(
+            environmentManifestCaptureFixture(),
+          ),
+        },
+        view: {
+          kind: "environment-manifest",
+          template_rules: [
+            "after-uid-literal",
+            "opaque-token",
+            "sibling-variance",
+          ],
+        },
+      }),
+    );
+    const result = await cli.run({
+      arguments: ["inspect-analysis-view", path, "--json"],
+    });
+    expect(result.exitCode, result.stdout).toBe(0);
+    const evidence = parseEvidence(result.json);
+    expect(evidence.confidence).toBe("inferred");
+    expect(evidence.normalized_result).toMatchObject({
+      kind: "environment-manifest",
+      origin: "http://grafana.example",
+      name: "grafana-example",
+      coverage: { total: 19, exhausted: true },
+      excluded: expect.arrayContaining([
+        expect.objectContaining({ reason: "other-origin" }),
+      ]),
+    });
+    for (const template of [
+      "/api/dashboards/uid/{uid}",
+      "/api/folders/{uid}",
+      "/api/plugins/{plugin_id}/settings",
+      "/api/datasources/uid/{uid}/health",
+    ])
+      expect(result.stdout).toContain(JSON.stringify(template));
+    for (const value of ["probe folder", "Main Org", "JFIF", "console.log"])
+      expect(result.stdout).not.toContain(value);
+    await writeFile(
+      path,
+      JSON.stringify({
+        source: {
+          kind: "inline",
+          evidence: analysisViewCaptureEvidence(
+            analysisViewObjectDenseCapture(),
+          ),
+        },
+        view: { kind: "environment-manifest" },
+      }),
+    );
+    const refused = await cli.run({
+      arguments: ["inspect-analysis-view", path, "--json"],
+    });
+    expect(refused.exitCode).toBe(1);
+    expect(refused.json).toMatchObject({
+      code: "resource_constraint",
+      details: { resource: "memory" },
+    });
+  },
+);
+
+cliTest(
+  "decodes a Grafana-shaped HAR and projects its environment manifest through the compiled workflows",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-manifest-chain-cli-");
+    const capturePath = join(root, "capture.har");
+    await writeFile(capturePath, JSON.stringify(environmentManifestHar()));
+    const capture = await cli.run({
+      arguments: ["inspect-web-network-capture", capturePath, "har", "--json"],
+    });
+    expect(capture.exitCode, capture.stdout).toBe(0);
+    const parent = parseEvidence(capture.json);
+    const input = join(root, "manifest.json");
+    await writeFile(
+      input,
+      JSON.stringify({
+        source: { kind: "inline", evidence: parent },
+        view: { kind: "environment-manifest" },
+      }),
+    );
+    const result = await cli.run({
+      arguments: ["inspect-analysis-view", input, "--json"],
+    });
+    expect(result.exitCode, result.stdout).toBe(0);
+    expect(result.json).toMatchObject({
+      confidence: "inferred",
+      evidence_links: [parent.evidence_id],
+      normalized_result: {
+        kind: "environment-manifest",
+        name: "grafana-example",
+        templated_groups: 6,
+        coverage: { total: 22, exhausted: true },
+        artifact: { path: capturePath, sha256: parent.subject?.digest.sha256 },
+        records: expect.arrayContaining([
+          {
+            ordinal: 3,
+            method: "GET",
+            path: "/api/org",
+            status: 200,
+            content_type: "application/json",
+          },
+        ]),
+        unknowns: [
+          expect.objectContaining({ kind: "authorization-model" }),
+          expect.objectContaining({ kind: "response-semantics" }),
+          expect.objectContaining({ kind: "state-transition" }),
+        ],
+      },
+    });
+    expect(JSON.stringify(result.json)).not.toContain("probe folder");
   },
 );

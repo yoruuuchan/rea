@@ -437,7 +437,7 @@ export const projectWebNetworkCaptureView = (
           path: ["view"],
           reason: "invalid_value",
           message:
-            "Historical captures support summary, capture record pages, qlog fact pages and admitted api-surface views.",
+            "Historical captures support summary, capture record pages, qlog fact pages and admitted api-surface or environment-manifest views.",
         },
       ]),
     );

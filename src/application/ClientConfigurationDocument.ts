@@ -16,6 +16,7 @@ import {
   applyEdits,
   createScanner,
   format as formatJson,
+  getNodeValue,
   parse as parseJsonc,
   parseTree,
   printParseErrorCode,
@@ -1325,6 +1326,101 @@ const isJsonMember = (property: Node, key: string): boolean =>
 const effectiveJsonProperty = (object: Node, key: string): Node | undefined =>
   object.children?.findLast((property) => isJsonMember(property, key));
 
+/** The object a client reads at `path`, following the effective members. */
+const effectiveJsonObject = (
+  root: Node | undefined,
+  path: readonly string[],
+): Node | undefined => {
+  let node = root;
+  for (const key of path) {
+    if (node?.type !== "object") return undefined;
+    node = effectiveJsonProperty(node, key)?.children?.[1];
+  }
+  return node?.type === "object" ? node : undefined;
+};
+
+/**
+ * Earlier members of one server name repeated in the tables a client reads,
+ * in document order. Parsing keeps only the last member, as clients do.
+ */
+export interface ShadowedClientServers {
+  readonly servers: readonly unknown[];
+  /** Repeats among OpenCode V1 members beside a native V2 table. */
+  readonly legacyServers: readonly unknown[];
+}
+
+const NO_SHADOWED_SERVERS: ShadowedClientServers = Object.freeze({
+  servers: [],
+  legacyServers: [],
+});
+
+// Token codes follow the pinned jsonc-parser scanner, as JSON_COMMA does.
+const JSON_STRING = 10 satisfies SyntaxKind;
+const JSON_EOF = 17 satisfies SyntaxKind;
+
+/** A conservative duplicate check using the parser's own string decoder. */
+const hasRepeatedJsonString = (text: string, name: string): boolean => {
+  const scanner = createScanner(text, true);
+  let matches = 0;
+  for (let token = scanner.scan(); token !== JSON_EOF; token = scanner.scan()) {
+    if (token === JSON_STRING && scanner.getTokenValue() === name) {
+      matches += 1;
+      if (matches === 2) return true;
+    }
+  }
+  return false;
+};
+
+/** Values of the earlier members named `name` in `object`. */
+const shadowedJsonMembers = (
+  object: Node | undefined,
+  name: string,
+): readonly unknown[] =>
+  (object?.children ?? [])
+    .filter((property) => isJsonMember(property, name))
+    .slice(0, -1)
+    .map((property): unknown => {
+      const value = property.children?.[1];
+      return value === undefined ? undefined : getNodeValue(value);
+    });
+
+/**
+ * Earlier members of `name` that removing its effective entry would make
+ * effective, so a removal decision must cover them too. Locating them needs a
+ * syntax tree of the whole document, which is built only when the name's
+ * string token occurs more than once.
+ */
+export const shadowedClientServers = (
+  text: string,
+  parsed: ClientConfigurationDocument,
+  name: string,
+): ShadowedClientServers => {
+  // TOML rejects repeated keys, Hermes parses YAML with unique keys, and the
+  // Harness owner edits REA's entry by id rather than through a server table.
+  if (
+    parsed.dialect === "toml" ||
+    parsed.dialect === "grok" ||
+    parsed.dialect === "hermes" ||
+    parsed.dialect === "dsh" ||
+    !hasRepeatedJsonString(text, name)
+  )
+    return NO_SHADOWED_SERVERS;
+  const root = parseTree(text, [], { allowTrailingComma: true });
+  return {
+    servers: shadowedJsonMembers(
+      effectiveJsonObject(root, parsed.serversPath),
+      name,
+    ),
+    legacyServers:
+      parsed.dialect === "opencode_v2" && !OPENCODE_V2_MCP_SETTINGS.has(name)
+        ? shadowedJsonMembers(
+            effectiveJsonObject(root, parsed.serversPath.slice(0, 1)),
+            name,
+          )
+        : [],
+  };
+};
+
 /** Apply one edit and format the lines it touched, as `modify` does. */
 const applyFormattedJsonEdit = (text: string, edit: Edit): string => {
   const edited = applyEdits(text, [edit]);
@@ -1345,38 +1441,32 @@ const applyFormattedJsonEdit = (text: string, edit: Edit): string => {
   );
 };
 
-/**
- * Delete a property by its JSONC AST span and the separator needed to keep its
- * parent object valid. All whitespace and comments outside those tokens stay
- * byte-for-byte in place.
- */
-const deleteJsonProperty = (
+/** Remove selected member spans and only the separators needed by kept members. */
+const deleteJsonMembers = (
   text: string,
   object: Node,
-  property: Node,
+  properties: readonly Node[],
 ): string => {
   const siblings = object.children ?? [];
-  const propertyIndex = siblings.indexOf(property);
-  const previous = siblings[propertyIndex - 1];
-  const next = siblings[propertyIndex + 1];
-  const comma = nextJsoncToken(
-    text,
-    previous === undefined
-      ? property.offset + property.length
-      : previous.offset + previous.length,
-  );
-  if (
-    propertyIndex < 0 ||
-    (comma.kind !== JSON_COMMA &&
-      (previous !== undefined || next !== undefined))
-  )
-    throw new TypeError("JSON property separator was not found");
-  const edits = [
-    { offset: property.offset, length: property.length, content: "" },
-    ...(comma.kind === JSON_COMMA
-      ? [{ offset: comma.offset, length: 1, content: "" }]
-      : []),
-  ];
+  const removed = new Set(properties);
+  const anyKept = siblings.some((member) => !removed.has(member));
+  const edits: Edit[] = [];
+  let earlierKept = false;
+  for (const [index, member] of siblings.entries()) {
+    if (removed.has(member))
+      edits.push({ offset: member.offset, length: member.length, content: "" });
+    else earlierKept = true;
+    const separator = nextJsoncToken(text, member.offset + member.length);
+    const next = siblings[index + 1];
+    if (separator.kind !== JSON_COMMA && next !== undefined)
+      throw new TypeError("JSON property separator was not found");
+    // Keep the separator before the next retained member, matching the
+    // existing single-member deletion rule. JSONC may retain a trailing comma.
+    const keepSeparator =
+      next === undefined ? anyKept : earlierKept && !removed.has(next);
+    if (separator.kind === JSON_COMMA && !keepSeparator)
+      edits.push({ offset: separator.offset, length: 1, content: "" });
+  }
   return applyEdits(text, edits);
 };
 
@@ -1391,12 +1481,13 @@ export interface ClientConfigurationShadowedMember {
  * Set or delete the member a client reads at `path`, keeping every byte
  * outside that member. Shadowed duplicates stay in place, and deleting a
  * member that shadows one is refused so the earlier member never becomes
- * active, whatever its ownership.
+ * active, unless the caller has established removal authority for that path.
  */
 const editJsonMember = (
   text: string,
   path: readonly string[],
   value: unknown,
+  removeShadowedMembers: boolean,
 ): Result<string, ClientConfigurationShadowedMember> => {
   let object = parseTree(text, [], { allowTrailingComma: true });
   for (const [index, key] of path.entries()) {
@@ -1442,11 +1533,31 @@ const editJsonMember = (
         (sibling) => sibling !== property && isJsonMember(sibling, key),
       )
     )
-      return err({ kind: "shadowed_member", path });
-    return ok(deleteJsonProperty(text, object, property));
+      return removeShadowedMembers
+        ? ok(
+            deleteJsonMembers(
+              text,
+              object,
+              (object.children ?? []).filter((sibling) =>
+                isJsonMember(sibling, key),
+              ),
+            ),
+          )
+        : err({ kind: "shadowed_member", path });
+    return ok(deleteJsonMembers(text, object, [property]));
   }
   throw new TypeError("JSON edit path is empty");
 };
+
+/** Edit authority beyond the members a client reads. */
+export interface ClientConfigurationEditOptions {
+  /**
+   * Exact deleted paths whose repeated members the caller may remove.
+   * Uninstall must establish ownership of every shadowed member; setup may
+   * grant replacement authority for an explicitly superseded registration.
+   */
+  readonly removeShadowedMembersAt?: readonly (readonly string[])[];
+}
 
 /**
  * Serialize a validated client document, retaining JSONC and TOML comments.
@@ -1457,6 +1568,7 @@ export const serializeClientConfiguration = (
   format: ClientConfigurationFormat | undefined,
   originalText?: string,
   editedPaths?: readonly (readonly string[])[],
+  options: ClientConfigurationEditOptions = {},
 ): Result<string, ClientConfigurationShadowedMember> => {
   if (format === undefined || format === "unsupported")
     throw new TypeError("client does not have a supported MCP config format");
@@ -1477,7 +1589,16 @@ export const serializeClientConfiguration = (
     return ok(`${JSON.stringify(document, null, 2)}\n`);
   let text = originalText;
   for (const path of editedPaths) {
-    const edited = editJsonMember(text, path, valueAt(document, path));
+    const edited = editJsonMember(
+      text,
+      path,
+      valueAt(document, path),
+      options.removeShadowedMembersAt?.some(
+        (allowed) =>
+          allowed.length === path.length &&
+          allowed.every((key, index) => key === path[index]),
+      ) ?? false,
+    );
     if (!edited.ok) return edited;
     text = edited.value;
   }

@@ -23,6 +23,7 @@ import {
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { UnknownRegistryPort } from "./investigation/InvestigationRecordPort.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
+import { workflowUnknownInput } from "./investigation/WorkflowUnknown.js";
 import {
   renderSourceLimitations,
   sourceLimitationKey,
@@ -180,12 +181,10 @@ export const recordWorkflowUnknowns = ({
     return { ok: true, value: null };
   for (const question of result.residual_unknowns) {
     if (typeof question !== "string") continue;
-    const recorded = recordUnknown({
+    const input = workflowUnknownInput(evidenceId, {
       question,
       severity: "medium",
       domain: name === "inspect_native_api" ? "native-api" : "control-flow",
-      supporting_evidence_ids: [evidenceId],
-      contradicting_evidence_ids: [],
       required_authority: "shipped-artifact",
       required_confidence: "observed",
       required_environment: null,
@@ -200,6 +199,8 @@ export const recordWorkflowUnknowns = ({
       ],
       relationships: [],
     });
+    if (!input.ok) return input;
+    const recorded = recordUnknown(input.value);
     if (
       !recorded.ok &&
       !(

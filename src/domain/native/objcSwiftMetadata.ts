@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isMachOFormat, type BinaryTarget } from "../binaryTargetTypes.js";
 import { providerSchema } from "../evidence.js";
 import { isSwiftMangledSymbolName } from "../swiftSymbolClassification.js";
+import { nativeCallReferenceSchema } from "./nativeCallReference.js";
 
 import {
   compareUnicodeCodePoints,
@@ -126,6 +127,7 @@ export const nativeMetadataEvidenceSchema = z.strictObject({
   location: nativeMetadataLocationSchema,
   /** Preserve a provider's source value when it does not establish a location. */
   reported_address: z.string().optional(),
+  call_reference: nativeCallReferenceSchema.exactOptional(),
   artifact_path: z.string().min(1).nullable().default(null),
   artifact_sha256: z
     .string()

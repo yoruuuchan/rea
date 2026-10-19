@@ -129,7 +129,20 @@ export const inferJsonShape = (text: string): JsonShape | null => {
   };
 };
 
-const jsonValueType = (value: unknown): JsonValueType => {
+/** Parse text as a JSON object; anything else, including invalid JSON, is null. */
+export const parseJsonObject = (
+  text: string,
+): Readonly<Record<string, unknown>> | null => {
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return isRecord(root) ? root : null;
+};
+/** The JSON type name of one parsed value. */
+export const jsonValueType = (value: unknown): JsonValueType => {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   switch (typeof value) {

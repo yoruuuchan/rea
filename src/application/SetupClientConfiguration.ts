@@ -284,14 +284,22 @@ const persistClientConfiguration = async ({
       : registered;
   let serialized: ReturnType<typeof serializeClientConfiguration>;
   try {
-    serialized = serializeClientConfiguration(document, format, original, [
-      ...Object.keys(fallbackServers)
-        .filter((name) => name !== PRODUCT_IDENTITY.mcpServerKey)
-        .map((name) => clientServerPath(parsed, name)),
-      clientServerPath(parsed, PRODUCT_IDENTITY.mcpServerKey),
-      ...(legacyPath === undefined ? [] : [legacyPath]),
-      ...(enableOmp ? [[OMP_DISABLED_SERVERS_KEY]] : []),
-    ]);
+    serialized = serializeClientConfiguration(
+      document,
+      format,
+      original,
+      [
+        ...Object.keys(fallbackServers)
+          .filter((name) => name !== PRODUCT_IDENTITY.mcpServerKey)
+          .map((name) => clientServerPath(parsed, name)),
+        clientServerPath(parsed, PRODUCT_IDENTITY.mcpServerKey),
+        ...(legacyPath === undefined ? [] : [legacyPath]),
+        ...(enableOmp ? [[OMP_DISABLED_SERVERS_KEY]] : []),
+      ],
+      // Setup deletes only REA's OpenCode V1 name, which the native V2 entry
+      // supersedes whatever its launcher; every repeat goes, as one member does.
+      { removeShadowedMembersAt: legacyPath === undefined ? [] : [legacyPath] },
+    );
   } catch (cause: unknown) {
     // An unserializable edit is reported before any file is written.
     void cause;

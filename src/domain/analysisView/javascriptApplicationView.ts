@@ -307,7 +307,10 @@ const selectModule = (
 export const projectJavaScriptApplicationView = (
   parent: AnalysisViewParent,
   analysis: JavaScriptApplicationAnalysisResult,
-  view: Exclude<AnalysisViewRequest, { kind: "api-surface" }>,
+  view: Exclude<
+    AnalysisViewRequest,
+    { kind: "api-surface" | "environment-manifest" }
+  >,
 ): Result<UnsignedAnalysisView, AnalysisError> => {
   if (
     view.kind !== "summary" &&

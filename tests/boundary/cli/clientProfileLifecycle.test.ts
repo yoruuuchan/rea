@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -12,6 +13,89 @@ import { expect } from "vitest";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
+
+cliTest(
+  "uninstall reports completed file removals beside a later OpenCode failure and recovers",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory(
+      "rea-uninstall-layered-failure-",
+    );
+    const directory = join(home, "opencode");
+    await mkdir(directory, { recursive: true });
+    const first = join(directory, "opencode.json");
+    const second = join(directory, "opencode.jsonc");
+    const original = JSON.stringify({
+      mcp: {
+        rea: {
+          type: "local",
+          command: ["npx", "-y", "rea-agents@6.7.0", "mcp"],
+        },
+      },
+      unrelated: "keep",
+    });
+    await writeFile(first, original);
+    await writeFile(second, original);
+    await mkdir(`${second}.rea.backup`);
+    const run = () =>
+      cli.run({
+        arguments: ["uninstall", "--json"],
+        cwd: home,
+        environment: {
+          HOME: home,
+          USERPROFILE: home,
+          OPENCODE_CONFIG_DIR: directory,
+        },
+      });
+
+    const failed = await run();
+    expect(failed.exitCode, failed.stderr).toBe(1);
+    expect(failed.json).toMatchObject({
+      status: "failed",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "opencode",
+          status: "failed",
+          detail: expect.stringContaining("Removed registration"),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              configuration_path: first,
+              status: "removed",
+            }),
+            expect.objectContaining({
+              configuration_path: second,
+              status: "failed",
+            }),
+          ]),
+        }),
+      ]),
+    });
+    expect(failed.json).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "opencode",
+          detail: expect.stringContaining("could not be backed up"),
+        }),
+      ]),
+    });
+    expect(JSON.parse(await readFile(first, "utf8"))).toEqual({
+      mcp: {},
+      unrelated: "keep",
+    });
+    expect(await readFile(`${first}.rea.backup`, "utf8")).toBe(original);
+    expect(await readFile(second, "utf8")).toBe(original);
+
+    await rm(`${second}.rea.backup`, { recursive: true });
+    const recovered = await run();
+    expect(recovered.exitCode, recovered.stderr).toBe(0);
+    expect(recovered.json).toMatchObject({ status: "complete" });
+    expect(JSON.parse(await readFile(second, "utf8"))).toEqual({
+      mcp: {},
+      unrelated: "keep",
+    });
+    expect(await readFile(`${first}.rea.backup`, "utf8")).toBe(original);
+    expect(await readFile(`${second}.rea.backup`, "utf8")).toBe(original);
+  },
+);
 
 const cases = [
   {

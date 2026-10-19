@@ -157,7 +157,10 @@ const layoutSummary = (layout: BinaryLayout) => ({
 export const projectBinaryLayoutView = (
   parent: AnalysisViewParent,
   layout: BinaryLayout,
-  view: Exclude<AnalysisViewRequest, { kind: "api-surface" }>,
+  view: Exclude<
+    AnalysisViewRequest,
+    { kind: "api-surface" | "environment-manifest" }
+  >,
 ): Result<UnsignedAnalysisView, AnalysisError> => {
   const shared = parentFields(parent, layout);
   if (view.kind === "native")

@@ -1,0 +1,185 @@
+import { z } from "zod";
+import { AnalysisUnsupportedTargetError } from "../analysisErrorCore.js";
+import type { AnalysisError } from "../analysisErrorBase.js";
+import { uniqueSorted } from "../canonicalOrdering.js";
+import { err, ok, type Result } from "../result.js";
+import type {
+  AnalysisViewParent,
+  AnalysisViewRequest,
+  UnsignedAnalysisView,
+} from "./analysisView.js";
+import { EnvironmentManifestAccumulator } from "./EnvironmentManifestAccumulator.js";
+import { TEMPLATE_RULES } from "./environmentManifestRules.js";
+import { admitHarCaptureParent } from "./WebNetworkProjectionAccumulator.js";
+import { ROUTE_RULES } from "./webNetworkRouteTemplates.js";
+
+export const environmentManifestViewRequestSchema = z.strictObject({
+  kind: z.literal("environment-manifest"),
+  template_rules: z
+    .array(z.enum(TEMPLATE_RULES))
+    .refine((rules) => new Set(rules).size === rules.length, {
+      message: "template_rules must not repeat a rule",
+    })
+    .meta({ uniqueItems: true })
+    .default([])
+    .describe(
+      "Opt-in template rules applied after the four format rules, each listed at most once: after-uid-literal templates the segment following a literal uid, opaque-token templates long mixed alphanumeric segments, sibling-variance merges groups that differ in one identifier-like segment. Literal sibling folding into existing opt-in parameters also requires sibling-variance. Merged parameters are inferences.",
+    ),
+  include_query_parameter_names: z
+    .boolean()
+    .default(true)
+    .describe(
+      "Include distinct observed query parameter names per tool; names do not establish required parameters or a complete API schema.",
+    ),
+});
+
+const manifestRuleSchema = z.enum([...ROUTE_RULES, ...TEMPLATE_RULES]);
+const jsonTypeNameSchema = z.enum([
+  "string",
+  "number",
+  "boolean",
+  "object",
+  "array",
+  "null",
+]);
+const toolSchema = z.strictObject({
+  name: z.string(),
+  method: z.string(),
+  path_template: z.string(),
+  api_surface_template: z
+    .string()
+    .describe("Four-rule template of the tool's earliest record."),
+  params: z.array(
+    z.strictObject({
+      index: z.number().int().nonnegative(),
+      name: z.string(),
+      rule: manifestRuleSchema,
+      basis: z.literal("inferred"),
+      observed_values: z.array(z.string()),
+    }),
+  ),
+  query_parameter_names: z.array(z.string()),
+  body_shape: z
+    .strictObject({
+      type: z.literal("object"),
+      properties: z.record(z.string(), jsonTypeNameSchema),
+    })
+    .nullable(),
+  statuses: z.array(z.number()),
+  content_types: z.array(z.string()),
+  record_ordinals: z.array(z.number().int().nonnegative()),
+});
+export const environmentManifestFields = {
+  origin: z
+    .string()
+    .describe("Primary origin: the origin with the most JSON-like records."),
+  name: z
+    .string()
+    .describe(
+      "Kebab-case environment name derived from the primary origin host.",
+    ),
+  tools: z.array(toolSchema),
+  records: z
+    .array(
+      z.strictObject({
+        ordinal: z.number().int().nonnegative(),
+        method: z.string(),
+        path: z.string(),
+        status: z.number().nullable(),
+        content_type: z.string().nullable(),
+      }),
+    )
+    .describe(
+      "Pointers to the retained parent records cited by tools; no bodies.",
+    ),
+  excluded: z.array(
+    z.strictObject({
+      method: z.string(),
+      origin: z.string(),
+      path_template: z.string(),
+      reason: z.enum(["other-origin", "ui-page-or-asset", "non-json"]),
+    }),
+  ),
+  unknowns: z.array(
+    z.strictObject({
+      kind: z.enum([
+        "authorization-model",
+        "response-semantics",
+        "state-transition",
+      ]),
+      statement: z.string(),
+    }),
+  ),
+  templated_groups: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe(
+      "Tools and excluded groups that carry at least one templated segment.",
+    ),
+};
+
+/** Project retained HAR request lines into a replayable tool surface; templates are inferences. */
+export const projectEnvironmentManifestView = (
+  parent: AnalysisViewParent,
+  view: AnalysisViewRequest,
+  accumulator = view.kind === "environment-manifest"
+    ? new EnvironmentManifestAccumulator(
+        undefined,
+        view.include_query_parameter_names,
+        view.template_rules,
+      )
+    : new EnvironmentManifestAccumulator(),
+): Result<UnsignedAnalysisView, AnalysisError> => {
+  if (view.kind !== "environment-manifest")
+    return err(
+      new AnalysisUnsupportedTargetError(
+        "inspect_analysis_view",
+        parent.evidenceId,
+        `View ${view.kind} is unsupported for parent operation ${parent.operation}; environment-manifest requires inspect_web_network_capture.`,
+      ),
+    );
+  const admitted = admitHarCaptureParent(
+    parent,
+    "environment-manifest",
+    accumulator,
+  );
+  if (!admitted.ok) return admitted;
+  const capture = admitted.value;
+  const limitations = accumulator.addLimitations([
+    ...parent.limitations,
+    ...capture.limitations,
+    "Tool templates, parameters and names are inferences from recorded request lines; they do not establish handler identity, URL-space schemas or causality.",
+    ...(view.include_query_parameter_names
+      ? [
+          "Observed query parameter names do not establish required parameters, value types or a complete API schema.",
+        ]
+      : []),
+    ...(view.template_rules.length > 0
+      ? [
+          `Opt-in template rules ${uniqueSorted(view.template_rules).join(", ")} merge recorded literals by shape; merged parameters may conflate distinct resources.`,
+        ]
+      : []),
+    ...(capture.records.length < capture.total_records
+      ? [
+          "Parent contains an ordinal subset; the manifest covers only retained records.",
+        ]
+      : []),
+  ]);
+  if (!limitations.ok) return limitations;
+  for (const record of capture.records) {
+    const added = accumulator.add(record);
+    if (!added.ok) return added;
+  }
+  const manifest = accumulator.finish();
+  if (!manifest.ok) return manifest;
+  return ok({
+    kind: "environment-manifest",
+    view,
+    parent_evidence_id: parent.evidenceId,
+    parent_operation: "inspect_web_network_capture",
+    parent_digest: parent.evidenceId.slice(3),
+    artifact: { path: capture.artifact.path, sha256: capture.artifact.sha256 },
+    ...manifest.value,
+  });
+};

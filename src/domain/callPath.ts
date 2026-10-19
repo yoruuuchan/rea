@@ -2,11 +2,11 @@ import { relationshipCoverageLimitations } from "./relationshipCoverage.js";
 import {
   callPathInputSchema,
   callPathResultSchema,
-  parseCallPathAddress,
   type CallPathInput,
   type CallPathResult,
   type OutputCallPath,
 } from "./callPathSchemas.js";
+import { parseNativeAddress } from "./native/nativeAddress.js";
 import {
   parseFunctionEvidence,
   type FunctionSnapshot,
@@ -158,9 +158,9 @@ const parseSnapshots = (
   const snapshots = new Map<string, FunctionSnapshot>();
   for (const group of groups) {
     const snapshot = parseFunctionEvidence(group);
-    const address = parseCallPathAddress(snapshot.dossier.procedure.address);
+    const address = parseNativeAddress(snapshot.dossier.procedure.address);
     for (const callee of snapshot.dossier.callees)
-      parseCallPathAddress(callee.address);
+      parseNativeAddress(callee.address);
     if (snapshots.has(address))
       throw new TypeError(`Duplicate function Evidence for ${address}`);
     snapshots.set(address, snapshot);
@@ -197,7 +197,7 @@ const createGraph = (
   for (const [address, snapshot] of snapshots) {
     graph.mergeNode(address);
     for (const callee of snapshot.dossier.callees) {
-      const calleeAddress = parseCallPathAddress(callee.address);
+      const calleeAddress = parseNativeAddress(callee.address);
       graph.mergeNode(calleeAddress);
       graph.mergeDirectedEdge(address, calleeAddress);
     }

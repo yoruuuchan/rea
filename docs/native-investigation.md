@@ -216,6 +216,25 @@ sites remain distinct. A static route does not establish runtime reachability.
 Swift/closure dispatch requires resolved static references; unavailable ABI
 forms remain unknown.
 
+Incomplete reference kinds do not discard known typed calls or partial
+provider call references. A `provider_call` with `observed` resolution retains
+the provider-reported call site and endpoint without claiming generic direct,
+indirect or Objective-C dispatch semantics. Its `call_reference` evidence
+preserves the original endpoints, classification, raw provider type and
+provenance, even when the target node is a containing procedure. Hopper's
+`none`, `unknown`, `direct` and `objective_c` labels stay provider-scoped;
+unknown numeric types remain available in the raw type field. Target-only
+callee fallback uses `provider_call` with `inferred` resolution.
+
+Callee fallback adds inferred targets while each retained route keeps its
+original provider and call site. If enumeration fails, known routes remain alongside an unresolved
+failure; cancellation still terminates the request. A node-limit omission keeps
+the route's known relation while marking its target unresolved. Distinct call
+sites to the same omitted target retain separate evidence.
+Reports sharing a call site and containing target procedure retain all their
+original endpoint evidence on the shared graph edge. Different reported
+relations retain separate edges, independent of enumeration order.
+
 Session discovery describes two automatic source routes for this trace:
 `authored_ui_dispatch` needs Interface Builder decoding and dispatch metadata;
 `native_seed_call_trace` needs native address resolution, dispatch metadata and

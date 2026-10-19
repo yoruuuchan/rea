@@ -1,3 +1,4 @@
+import { workflowUnknownInput } from "../../application/investigation/WorkflowUnknown.js";
 import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordSessionEvidenceSources } from "../sessionEvidence.js";
@@ -83,14 +84,12 @@ export const registerVerifyManagedNativeBoundaries = (
             verification.summary.unresolved > 0 ||
             verification.summary.contradicted > 0 ||
             verification.summary.native_body_unresolved > 0;
-          const output = unknown
-            ? options.recordEvidenceWithUnknown?.(result.value, {
+          const unknownInput = unknown
+            ? workflowUnknownInput(result.value.evidence_id, {
                 question:
                   "Which managed/native boundaries remain unresolved or contradicted by the supplied native Evidence?",
                 severity: "medium",
                 domain: "managed-native-verification",
-                supporting_evidence_ids: [result.value.evidence_id],
-                contradicting_evidence_ids: [],
                 required_authority: "shipped-artifact",
                 required_confidence: "observed",
                 required_environment: null,
@@ -108,7 +107,16 @@ export const registerVerifyManagedNativeBoundaries = (
                 ],
                 relationships: [],
               })
-            : options.recordEvidence?.(result.value);
+            : undefined;
+          const output =
+            unknownInput === undefined
+              ? options.recordEvidence?.(result.value)
+              : unknownInput.ok
+                ? options.recordEvidenceWithUnknown?.(
+                    result.value,
+                    unknownInput.value,
+                  )
+                : unknownInput;
           return server.delivery.toEvidenceToolResult(
             result.value,
             nativeVerificationContract,

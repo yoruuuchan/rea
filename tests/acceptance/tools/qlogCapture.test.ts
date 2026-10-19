@@ -301,14 +301,16 @@ it("runs built CLI and real stdio SDK with exact evidence parity, selection, ret
     unique_bytes: "5",
     covered_ranges: [{ start: "10", end: "15" }],
   });
-  const retained = await call("inspect_analysis_view", {
-    source: { kind: "retained-evidence", evidence_id: mcp.evidence_id },
-    view: { kind: "api-surface" },
-  });
   // An unsupported view over an existing retained parent proves lookup without pretending qlog is HAR.
-  expect(parseMcpToolError(retained)).toMatchObject({
-    error: { code: "unsupported_target" },
-  });
+  for (const kind of ["api-surface", "environment-manifest"] as const) {
+    const retained = await call("inspect_analysis_view", {
+      source: { kind: "retained-evidence", evidence_id: mcp.evidence_id },
+      view: { kind },
+    });
+    expect(parseMcpToolError(retained)).toMatchObject({
+      error: { code: "unsupported_target" },
+    });
+  }
   await client.ping();
   for (const record_ordinals of [[2], [0, 0]]) {
     expect(

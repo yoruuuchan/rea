@@ -7,6 +7,7 @@ import type { JsonValue } from "./jsonValue.js";
 import { err, ok, type Result } from "./result.js";
 import { nativeApiBoundarySchema } from "./native/nativeApiBoundary.js";
 import { nativeValueFlowSchema } from "./native/nativeValueFlow.js";
+import { nativeCallClassificationSchema } from "./native/nativeCallReference.js";
 import { AnalysisOutputError } from "./analysisErrorCore.js";
 
 export interface AddressedName {
@@ -350,13 +351,7 @@ export const referenceEdgeSchema = z
     source_procedure: procedureIdentitySchema.nullable(),
     target_procedure: procedureIdentitySchema.nullable(),
     kind: referenceKindSchema,
-    call: z
-      .strictObject({
-        classification: z.enum(["none", "unknown", "direct", "objective_c"]),
-        provider_type: z.number().int(),
-        provenance: z.string().min(1),
-      })
-      .exactOptional(),
+    call: nativeCallClassificationSchema.exactOptional(),
   })
   .strict();
 const facetAvailabilitySchema = z.discriminatedUnion("available", [

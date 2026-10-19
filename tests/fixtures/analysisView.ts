@@ -1,4 +1,4 @@
-import { apiSurfaceHar } from "./historicalHar.js";
+import { apiSurfaceHar, environmentManifestHar } from "./historicalHar.js";
 import { webNetworkCaptureSchema } from "../../src/domain/webNetworkCapture.js";
 import { BINARY_LAYOUT_TEST_PROVIDER } from "./binaryDiagnostics/layout.js";
 import { binaryLayoutFixture } from "./binaryDiagnostics/layout.js";
@@ -286,5 +286,20 @@ export const analysisViewObjectDenseCapture = (headerCount = 100_000) => {
       })),
     },
   };
+  return capture;
+};
+
+/** Capture parent decoded from the Grafana-shaped HAR with producer ordinals intact. */
+export const environmentManifestCaptureFixture = () => {
+  const capture = analysisViewCaptureFixture();
+  const entries = environmentManifestHar().log.entries;
+  capture.artifact.path = "/fixtures/environment-manifest.har";
+  capture.total_records = entries.length;
+  capture.records = entries.map((reported, ordinal) => ({
+    ...capture.records[0]!,
+    ordinal,
+    location: { kind: "json-pointer", pointer: `/log/entries/${ordinal}` },
+    reported,
+  }));
   return capture;
 };

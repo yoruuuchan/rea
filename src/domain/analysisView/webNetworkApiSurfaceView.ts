@@ -1,15 +1,15 @@
-import { analysisViewInputError } from "./analysisViewErrors.js";
 import { z } from "zod";
 import { AnalysisUnsupportedTargetError } from "../analysisErrorCore.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { err, ok, type Result } from "../result.js";
-import { webNetworkCaptureSchema } from "../webNetworkCapture.js";
 import type {
   AnalysisViewParent,
   AnalysisViewRequest,
   UnsignedAnalysisView,
 } from "./analysisView.js";
 import { WebNetworkApiSurfaceAccumulator } from "./WebNetworkApiSurfaceAccumulator.js";
+import { admitHarCaptureParent } from "./WebNetworkProjectionAccumulator.js";
+import { ROUTE_RULES } from "./webNetworkRouteTemplates.js";
 
 export const apiSurfaceViewSchema = z.strictObject({
   kind: z.literal("api-surface"),
@@ -22,7 +22,7 @@ export const apiSurfaceViewSchema = z.strictObject({
       "Include distinct observed query parameter names and their original record ordinals; names do not establish required parameters or a complete API schema.",
     ),
 });
-const ruleSchema = z.enum(["numeric", "uuid", "hex", "iso-date"]);
+const ruleSchema = z.enum(ROUTE_RULES);
 const groupSchema = z.strictObject({
   method: z.string(),
   origin: z.string(),
@@ -85,45 +85,17 @@ export const projectWebNetworkApiSurfaceView = (
     view.kind === "api-surface" && view.include_query_parameter_names === true,
   ),
 ): Result<UnsignedAnalysisView, AnalysisError> => {
-  const unsupported = (reason: string) =>
-    err(
+  if (view.kind !== "api-surface")
+    return err(
       new AnalysisUnsupportedTargetError(
         "inspect_analysis_view",
         parent.evidenceId,
-        reason,
+        `View ${view.kind} is unsupported for parent operation ${parent.operation}; api-surface requires inspect_web_network_capture.`,
       ),
     );
-  if (
-    parent.operation !== "inspect_web_network_capture" ||
-    view.kind !== "api-surface"
-  )
-    return unsupported(
-      `View ${view.kind} is unsupported for parent operation ${parent.operation}; api-surface requires inspect_web_network_capture.`,
-    );
-  const admitted = accumulator.admitCaptureClone(parent.normalizedResult);
+  const admitted = admitHarCaptureParent(parent, "api-surface", accumulator);
   if (!admitted.ok) return admitted;
-  const parsed = webNetworkCaptureSchema.safeParse(parent.normalizedResult);
-  if (!parsed.success)
-    return err(
-      analysisViewInputError([
-        {
-          path: ["source"],
-          reason: "invalid_value",
-          message:
-            "Parent Evidence result does not match inspect_web_network_capture.",
-        },
-      ]),
-    );
-  const capture = parsed.data;
-  if (capture.format !== "har")
-    return unsupported(
-      `api-surface does not support capture format ${capture.format}.`,
-    );
-  const declarations = z
-    .object({ sensitive_value_count: z.number().int().nonnegative() })
-    .safeParse(parent.parameters);
-  if (!declarations.success || declarations.data.sensitive_value_count > 0)
-    return unsupported("sensitive_values_unretained");
+  const capture = admitted.value;
   const limitations = accumulator.addLimitations([
     ...parent.limitations,
     ...capture.limitations,

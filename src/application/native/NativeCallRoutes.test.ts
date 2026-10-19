@@ -4,9 +4,40 @@ import { createAnalysisExecution } from "../AnalysisProvider.js";
 import { ghidraReferenceEdge } from "../../domain/ghidraValues.fixture.js";
 import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { err, ok } from "../../domain/result.js";
-import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisCapabilityUnavailableError,
+} from "../../domain/analysisErrorCore.js";
 
 const provider = { id: "fixture", name: "Fixture", version: "1" };
+const callReference = (source: string, target: string) => ({
+  source_address: source,
+  target_address: target,
+  target_procedure: { address: target },
+  kind: {
+    available: true as const,
+    provenance: "fixture-reference",
+    type: "UNCONDITIONAL_CALL",
+    flow: true,
+    call: true,
+    jump: false,
+    data: false,
+    read: false,
+    write: false,
+    indirect: false,
+    computed: false,
+    external: false,
+    conditional: false,
+    terminal: false,
+    primary: true,
+    operand_index: 0,
+  },
+});
+
+const unavailableCallKind = {
+  available: false as const,
+  reason: "Reference kind is unavailable.",
+};
 describe("untyped native call route fallback", () => {
   it.each([{ callees: [] }, { callees: ["0x2000"] }])(
     "preserves targetless calls and their provider when fallback callees are $callees",
@@ -50,35 +81,343 @@ describe("untyped native call route fallback", () => {
       );
       expect(calls).toEqual(["procedure_references", "procedure_callees"]);
       expect(result).toEqual({
-        ok: true,
-        value: {
+        routes: callees.map((address) => ({
           provider: fallbackProvider,
-          routes: callees.map((address) => ({
-            address,
-            site: "0x1000",
-            relation: "provider_call",
-            resolution: "inferred",
-          })),
-          unknowns: [{ ...unknown, provider: referenceProvider }],
-          limitations: [
-            {
-              provider: referenceProvider,
-              operation: "procedure_references",
-              limitation: "Reference-kind metadata is incomplete.",
-            },
-            {
-              provider: fallbackProvider,
-              operation: "procedure_callees",
-              limitation: "Callee enumeration is limited to named functions.",
-            },
-          ],
-        },
+          address,
+          site: "0x1000",
+          relation: "provider_call",
+          resolution: "inferred",
+        })),
+        unknowns: [{ ...unknown, provider: referenceProvider }],
+        limitations: [
+          {
+            provider: referenceProvider,
+            operation: "procedure_references",
+            limitation: "Reference-kind metadata is incomplete.",
+          },
+          {
+            provider: fallbackProvider,
+            operation: "procedure_callees",
+            limitation: "Callee enumeration is limited to named functions.",
+          },
+        ],
+        outcome: { ok: true, value: undefined },
       });
     },
   );
 });
 
-describe("typed native call routes", () => {
+describe("partially typed native call routes", () => {
+  it.each([false, true])(
+    "keeps known typed calls when an individual kind is unavailable (aggregate=$0)",
+    async (referenceKindsAvailable) => {
+      const typedProvider = { ...provider, id: "typed" };
+      const fallbackProvider = { ...provider, id: "fallback" };
+      const result = await readNativeCallRoutes(
+        {
+          execute: async (operation) =>
+            operation === "procedure_references"
+              ? ok(
+                  createAnalysisExecution(
+                    {
+                      reference_kinds_available: referenceKindsAvailable,
+                      references: [
+                        callReference("0x1004", "0x2000"),
+                        {
+                          ...callReference("0x1008", "0x3000"),
+                          kind: unavailableCallKind,
+                        },
+                      ],
+                      unresolved_calls: [],
+                    },
+                    typedProvider,
+                    { limitations: ["Some reference kinds are unavailable."] },
+                  ),
+                )
+              : ok(
+                  createAnalysisExecution(
+                    ["0x2000", "0x3000", "0x4000"],
+                    fallbackProvider,
+                    { limitations: ["Callee enumeration is incomplete."] },
+                  ),
+                ),
+        },
+        "0x1000",
+      );
+
+      expect(result).toEqual({
+        routes: [
+          {
+            provider: typedProvider,
+            address: "0x2000",
+            site: "0x1004",
+            relation: "direct_call",
+            resolution: "observed",
+          },
+          {
+            provider: fallbackProvider,
+            address: "0x3000",
+            site: "0x1000",
+            relation: "provider_call",
+            resolution: "inferred",
+          },
+          {
+            provider: fallbackProvider,
+            address: "0x4000",
+            site: "0x1000",
+            relation: "provider_call",
+            resolution: "inferred",
+          },
+        ],
+        unknowns: [],
+        limitations: [
+          {
+            provider: typedProvider,
+            operation: "procedure_references",
+            limitation: "Some reference kinds are unavailable.",
+          },
+          {
+            provider: fallbackProvider,
+            operation: "procedure_callees",
+            limitation: "Callee enumeration is incomplete.",
+          },
+        ],
+        outcome: { ok: true, value: undefined },
+      });
+    },
+  );
+
+  it("preserves distinct typed sites when fallback overlaps their target", async () => {
+    const typedProvider = { ...provider, id: "typed" };
+    const fallbackProvider = { ...provider, id: "fallback" };
+    const result = await readNativeCallRoutes(
+      {
+        execute: async (operation) =>
+          operation === "procedure_references"
+            ? ok(
+                createAnalysisExecution(
+                  {
+                    reference_kinds_available: false,
+                    references: [
+                      callReference("0x1004", "0x2000"),
+                      callReference("0x1008", "0x2000"),
+                      {
+                        ...callReference("0x100c", "0x4000"),
+                        kind: unavailableCallKind,
+                      },
+                    ],
+                    unresolved_calls: [],
+                  },
+                  typedProvider,
+                ),
+              )
+            : ok(
+                createAnalysisExecution(["0x2000", "0x3000"], fallbackProvider),
+              ),
+      },
+      "0x1000",
+    );
+
+    expect(result).toEqual({
+      routes: [
+        {
+          provider: typedProvider,
+          address: "0x2000",
+          site: "0x1004",
+          relation: "direct_call",
+          resolution: "observed",
+        },
+        {
+          provider: typedProvider,
+          address: "0x2000",
+          site: "0x1008",
+          relation: "direct_call",
+          resolution: "observed",
+        },
+        {
+          provider: fallbackProvider,
+          address: "0x3000",
+          site: "0x1000",
+          relation: "provider_call",
+          resolution: "inferred",
+        },
+      ],
+      unknowns: [],
+      limitations: [],
+      outcome: { ok: true, value: undefined },
+    });
+  });
+});
+
+describe("native call fallback output failures", () => {
+  it("retains source limitations when fallback output is invalid", async () => {
+    const typedProvider = { ...provider, id: "typed" };
+    const fallbackProvider = { ...provider, id: "fallback" };
+    const result = await readNativeCallRoutes(
+      {
+        execute: async (operation) =>
+          operation === "procedure_references"
+            ? err(
+                new AnalysisCapabilityUnavailableError(
+                  typedProvider.id,
+                  "procedure_references",
+                  "Typed references are unavailable.",
+                ),
+              )
+            : ok(
+                createAnalysisExecution(
+                  { callees: "not-an-address-list" },
+                  fallbackProvider,
+                  { limitations: ["Fallback output is truncated."] },
+                ),
+              ),
+      },
+      "0x1000",
+    );
+
+    expect(result).toMatchObject({
+      routes: [],
+      unknowns: [],
+      limitations: [
+        {
+          provider: fallbackProvider,
+          operation: "procedure_callees",
+          limitation: "Fallback output is truncated.",
+        },
+      ],
+      outcome: {
+        ok: false,
+        error: { _tag: "AnalysisOutputError" },
+      },
+    });
+  });
+
+  it("retains known typed routes when fallback output is invalid", async () => {
+    const typedProvider = { ...provider, id: "typed" };
+    const fallbackProvider = { ...provider, id: "fallback" };
+    const result = await readNativeCallRoutes(
+      {
+        execute: async (operation) =>
+          operation === "procedure_references"
+            ? ok(
+                createAnalysisExecution(
+                  {
+                    reference_kinds_available: false,
+                    references: [
+                      callReference("0x1004", "0x2000"),
+                      {
+                        ...callReference("0x1008", "0x3000"),
+                        kind: unavailableCallKind,
+                      },
+                    ],
+                    unresolved_calls: [],
+                  },
+                  typedProvider,
+                  { limitations: ["One call kind remains unavailable."] },
+                ),
+              )
+            : ok(
+                createAnalysisExecution(
+                  { callees: "not-an-address-list" },
+                  fallbackProvider,
+                  { limitations: ["Fallback output is truncated."] },
+                ),
+              ),
+      },
+      "0x1000",
+    );
+
+    expect(result).toMatchObject({
+      routes: [
+        {
+          provider: typedProvider,
+          address: "0x2000",
+          site: "0x1004",
+          relation: "direct_call",
+          resolution: "observed",
+        },
+      ],
+      unknowns: [],
+      limitations: [
+        {
+          provider: typedProvider,
+          operation: "procedure_references",
+          limitation: "One call kind remains unavailable.",
+        },
+        {
+          provider: fallbackProvider,
+          operation: "procedure_callees",
+          limitation: "Fallback output is truncated.",
+        },
+      ],
+      outcome: {
+        ok: false,
+        error: { _tag: "AnalysisOutputError" },
+      },
+    });
+  });
+});
+
+describe("native call fallback cancellation", () => {
+  it("keeps known typed routes when fallback is cancelled", async () => {
+    let calls = 0;
+    const referenceProvider = { ...provider, id: "references" };
+    const result = await readNativeCallRoutes(
+      {
+        execute: async (operation) => {
+          calls += 1;
+          return operation === "procedure_references"
+            ? ok(
+                createAnalysisExecution(
+                  {
+                    reference_kinds_available: false,
+                    references: [
+                      callReference("0x1004", "0x2000"),
+                      {
+                        ...callReference("0x1008", "0x3000"),
+                        kind: unavailableCallKind,
+                      },
+                    ],
+                    unresolved_calls: [],
+                  },
+                  referenceProvider,
+                  { limitations: ["One call kind remains unavailable."] },
+                ),
+              )
+            : err(new AnalysisCancelledError("procedure_callees"));
+        },
+      },
+      "0x1000",
+    );
+
+    expect(result).toMatchObject({
+      routes: [
+        {
+          provider: referenceProvider,
+          address: "0x2000",
+          site: "0x1004",
+          relation: "direct_call",
+          resolution: "observed",
+        },
+      ],
+      unknowns: [],
+      limitations: [
+        {
+          provider: referenceProvider,
+          operation: "procedure_references",
+          limitation: "One call kind remains unavailable.",
+        },
+      ],
+      outcome: {
+        ok: false,
+        error: { _tag: "AnalysisCancelledError" },
+      },
+    });
+    expect(calls).toBe(2);
+  });
+});
+
+describe("complete typed native call routes", () => {
   it("preserves computed targets, ambiguity and targetless call sites", async () => {
     const reference = jsonValueSchema.parse(ghidraReferenceEdge());
     if (
@@ -87,13 +426,15 @@ describe("typed native call routes", () => {
       Array.isArray(reference)
     )
       throw new TypeError("Invalid reference fixture");
+    const calls: string[] = [];
     const result = await readNativeCallRoutes(
       {
-        execute: async () =>
-          ok(
+        execute: async (operation) => {
+          calls.push(operation);
+          return ok(
             createAnalysisExecution(
               {
-                reference_kinds_available: true,
+                reference_kinds_available: false,
                 references: ["0x2000", "0x3000"].map((address) => ({
                   ...reference,
                   source_address: "0x1004",
@@ -125,36 +466,41 @@ describe("typed native call routes", () => {
               provider,
               { limitations: ["SEH handler targets may be outside the body."] },
             ),
-          ),
+          );
+        },
       },
       "0x1000",
     );
     expect(result).toMatchObject({
-      ok: true,
-      value: {
-        routes: [
-          {
-            address: "0x2000",
-            relation: "indirect_call",
-            resolution: "ambiguous",
-          },
-          {
-            address: "0x3000",
-            relation: "indirect_call",
-            resolution: "ambiguous",
-          },
-        ],
-        unknowns: [{ address: "0x1008" }],
-        limitations: [
-          {
-            provider,
-            operation: "procedure_references",
-            limitation: "SEH handler targets may be outside the body.",
-          },
-        ],
-      },
+      routes: [
+        {
+          provider,
+          address: "0x2000",
+          relation: "indirect_call",
+          resolution: "ambiguous",
+        },
+        {
+          provider,
+          address: "0x3000",
+          relation: "indirect_call",
+          resolution: "ambiguous",
+        },
+      ],
+      unknowns: [{ address: "0x1008", provider }],
+      limitations: [
+        {
+          provider,
+          operation: "procedure_references",
+          limitation: "SEH handler targets may be outside the body.",
+        },
+      ],
+      outcome: { ok: true, value: undefined },
     });
+    expect(calls).toEqual(["procedure_references"]);
   });
+});
+
+describe("malformed typed native call output", () => {
   it("does not fall back on cancellation or invalid typed output", async () => {
     let calls = 0;
     const cancelled = await readNativeCallRoutes(
@@ -167,8 +513,10 @@ describe("typed native call routes", () => {
       "0x1000",
     );
     expect(cancelled).toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisCancelledError" },
+      routes: [],
+      unknowns: [],
+      limitations: [],
+      outcome: { ok: false, error: { _tag: "AnalysisCancelledError" } },
     });
     expect(calls).toBe(1);
     const malformed = await readNativeCallRoutes(
@@ -183,8 +531,8 @@ describe("typed native call routes", () => {
       "0x1000",
     );
     expect(malformed).toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisOutputError" },
+      routes: [],
+      unknowns: [],
       limitations: [
         {
           provider,
@@ -192,8 +540,12 @@ describe("typed native call routes", () => {
           limitation: "Malformed output still has source caveats.",
         },
       ],
+      outcome: { ok: false, error: { _tag: "AnalysisOutputError" } },
     });
   });
+});
+
+describe("missing unresolved-call observations", () => {
   it("rejects omitted unresolved-call observations instead of claiming none", async () => {
     let calls = 0;
     const result = await readNativeCallRoutes(
@@ -215,8 +567,10 @@ describe("typed native call routes", () => {
     );
 
     expect(result).toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisOutputError" },
+      routes: [],
+      unknowns: [],
+      limitations: [],
+      outcome: { ok: false, error: { _tag: "AnalysisOutputError" } },
     });
     expect(calls).toBe(1);
   });

@@ -199,9 +199,7 @@ itWithCaptureCapability(
         captured.structuredContent,
       ),
     ).toBe(true);
-    expect(
-      contract.outputSchema.safeParse(captured.structuredContent).success,
-    ).toBe(true);
+    const evidence = contract.outputSchema.parse(captured.structuredContent);
     const listedUnknowns = await mcp.callTool({
       name: "list_unknowns",
       arguments: {},
@@ -224,7 +222,7 @@ itWithCaptureCapability(
       .parse(listedUnknowns.structuredContent).result.items;
     expect(listed).toContainEqual(
       expect.objectContaining({
-        question: "Was network behavior fully observed during capture?",
+        question: `Was network behavior fully observed during capture? (Evidence ${evidence.evidence_id})`,
         domain: "process-network",
       }),
     );

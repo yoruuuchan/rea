@@ -9,7 +9,11 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
 import { nativeLoadImageSchema } from "../../../src/domain/native/nativeLoadImage.js";
+import { nativeApiInspectionResultSchema } from "../../../src/domain/native/nativeApiBoundary.js";
+import { functionDossierSchema } from "../../../src/domain/hopperValues.js";
 import { ok } from "../../../src/domain/result.js";
+import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
+import { toolContract } from "../../../src/contracts/toolContracts.js";
 
 it.each([
   { state: "final", failed: [] },
@@ -129,3 +133,121 @@ describe("Ghidra MCP native API evidence", () => {
     }
   }, 30_000);
 });
+
+it("retains unavailable Ghidra native API observations across provenance and exact replay", async () => {
+  const residual = "The controlled provider omitted native API boundary facts.";
+  // This wire fixture is controlled and never launches Ghidra.
+  const harness = await connectGhidraMcp(
+    "ghidra-native-api-unavailable-identity",
+    async (operation, input) => {
+      if (operation !== "analyze_function")
+        throw new Error(`Unexpected controlled Ghidra operation: ${operation}`);
+      const procedure = String(input.procedure);
+      const base = functionDossierSchema.parse(ghidraFunctionDossier());
+      const address = procedure === "0x401000" ? procedure : "0x401100";
+      return ok(
+        jsonValueSchema.parse({
+          value: functionDossierSchema.parse({
+            ...base,
+            procedure: {
+              ...base.procedure,
+              address,
+              name: address === "0x401000" ? "fixture_main" : "fixture_other",
+              body: {
+                ...base.procedure.body,
+                ranges: [
+                  {
+                    start: address,
+                    end: address === "0x401000" ? "0x401005" : "0x401105",
+                  },
+                ],
+              },
+            },
+            native_api: {
+              available: false,
+              reason: residual,
+              residual_unknowns: [residual],
+            },
+          }),
+          limitations: [],
+        }),
+      );
+    },
+  );
+  const { mcp, session } = harness;
+  try {
+    const inspect = async (procedure: string) => {
+      const reply = await mcp.callTool({
+        name: "inspect_native_api",
+        arguments: { procedure },
+      });
+      expect(reply.isError, JSON.stringify(reply.content)).not.toBe(true);
+      const evidence = sessionEvidence(session, reply.structuredContent);
+      const result = nativeApiInspectionResultSchema.parse(
+        evidence.normalized_result,
+      );
+      expect(result).toMatchObject({
+        procedure: {
+          address: procedure,
+        },
+        boundary: {
+          available: false,
+          reason: residual,
+          residual_unknowns: [residual],
+        },
+        residual_unknowns: [residual],
+      });
+      return evidence;
+    };
+
+    const first = await inspect("0x401000");
+    const replay = await inspect("0x401000");
+    expect(replay.normalized_result).toEqual(first.normalized_result);
+    expect(replay.evidence_id).not.toBe(first.evidence_id);
+    expect(replay.limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Loaded from a local REA analysis snapshot"),
+      ]),
+    );
+    const warmBundle = session.exportEvidenceBundle();
+    const warmReplay = await inspect("0x401000");
+    expect(warmReplay.evidence_id).toBe(replay.evidence_id);
+    expect(session.exportEvidenceBundle()).toEqual(warmBundle);
+
+    const second = await inspect("0x401100");
+    expect(second.evidence_id).not.toBe(first.evidence_id);
+    expect(session.evidenceById(first.evidence_id)).toEqual(first);
+    expect(session.evidenceById(replay.evidence_id)).toEqual(replay);
+
+    const listed = await mcp.callTool({
+      name: "list_unknowns",
+      arguments: { domain: "native-api" },
+    });
+    expect(listed.isError, JSON.stringify(listed.content)).not.toBe(true);
+    const unknownPage = toolContract("list_unknowns").outputSchema.parse(
+      listed.structuredContent,
+    ).result;
+    expect(unknownPage.total).toBe(3);
+    expect(unknownPage.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          question: expect.stringContaining(first.evidence_id),
+          supporting_evidence_ids: [first.evidence_id],
+        }),
+        expect.objectContaining({
+          question: expect.stringContaining(replay.evidence_id),
+          supporting_evidence_ids: [replay.evidence_id],
+        }),
+        expect.objectContaining({
+          question: expect.stringContaining(second.evidence_id),
+          supporting_evidence_ids: [second.evidence_id],
+        }),
+      ]),
+    );
+    expect(
+      unknownPage.items.every(({ question }) => question.includes(residual)),
+    ).toBe(true);
+  } finally {
+    await harness.close();
+  }
+}, 30_000);

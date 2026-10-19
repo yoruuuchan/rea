@@ -212,12 +212,53 @@ describe("workflow residual question retention", () => {
     expect(recordWorkflowUnknowns(input).ok).toBe(true);
     expect(records.listUnknowns()).toMatchObject([
       {
-        question: result.residual_unknowns[0],
+        question: `${result.residual_unknowns[0]} (Evidence ${evidence.evidence_id})`,
         domain: "native-api",
         supporting_evidence_ids: [evidence.evidence_id],
         required_authority: "shipped-artifact",
       },
     ]);
+  });
+
+  it("retains one identical residual question per distinct workflow Evidence", () => {
+    const records = new InvestigationRecords();
+    const result = {
+      residual_unknowns: ["Which provider resolves this boundary?"],
+    };
+    const evidence = ["0x1000", "0x2000"].map((procedure) =>
+      createWorkflowEvidence({
+        target: undefined,
+        operation: "inspect_native_api",
+        parameters: { procedure },
+        result,
+        upstreamProfile: undefined,
+        upstreamLimitations: [],
+      }),
+    );
+    expect(evidence[0]?.evidence_id).not.toBe(evidence[1]?.evidence_id);
+
+    for (const item of evidence) {
+      expect(records.recordEvidence(item).ok).toBe(true);
+      const input = {
+        name: "inspect_native_api",
+        result,
+        evidenceId: item.evidence_id,
+        recordUnknown: (
+          unknown: Parameters<InvestigationRecords["recordUnknown"]>[0],
+        ) => records.recordUnknown(unknown),
+      };
+      expect(recordWorkflowUnknowns(input).ok).toBe(true);
+      expect(recordWorkflowUnknowns(input).ok).toBe(true);
+    }
+
+    expect(records.listUnknowns()).toHaveLength(2);
+    expect(
+      records
+        .listUnknowns()
+        .map(({ supporting_evidence_ids }) => supporting_evidence_ids),
+    ).toEqual(
+      expect.arrayContaining(evidence.map(({ evidence_id }) => [evidence_id])),
+    );
   });
 
   it.each([
@@ -248,7 +289,7 @@ describe("workflow residual question retention", () => {
         }).ok,
       ).toBe(true);
       expect(records.listUnknowns()).toMatchObject([
-        { question: "Which boundary?" },
+        { question: `Which boundary? (Evidence ${evidence.evidence_id})` },
       ]);
       expect(evidence.normalized_result).toEqual(result);
     },
@@ -328,7 +369,7 @@ it.each([
       }).ok,
     ).toBe(true);
     expect(records.listUnknowns()).toMatchObject([
-      { question: "Which boundary?" },
+      { question: `Which boundary? (Evidence ${evidence.evidence_id})` },
     ]);
     expect(records.evidenceById(evidence.evidence_id)).toEqual(evidence);
     expect(evidence.normalized_result).toMatchObject({

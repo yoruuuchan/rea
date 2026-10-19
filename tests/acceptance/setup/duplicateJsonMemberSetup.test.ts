@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { expect } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -25,6 +25,15 @@ const runIn = (cli: TestCli, home: string) => (arguments_: readonly string[]) =>
 
 const setupArguments = (client: string) =>
   ["setup", "--client", client, "--skill=false", "--json", "--yes"] as const;
+
+const openCodeOwned =
+  '{"type":"local","command":["npx","-y","rea-agents@6.6.0","mcp"]}';
+const openCodeForeign = '{"type":"local","command":["/usr/bin/false"]}';
+
+const writeConfiguration = async (path: string, text: string) => {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, text);
+};
 
 for (const [layout, original] of [
   [
@@ -139,6 +148,138 @@ cliTest(
     expect(await readFile(config, "utf8")).toBe(original);
     await expect(readFile(`${config}.rea.backup`)).rejects.toMatchObject({
       code: "ENOENT",
+    });
+  },
+);
+
+cliTest(
+  "uninstall removes repeated owned entries and preserves inactive parents, peers, and its original backup",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-json-owned-repeats-");
+    const config = join(home, ".claude.json");
+    const inactive = '{"inactivePeer":{"command":"/usr/bin/false"}}';
+    const active = `{"rea":{"command":"npx","args":["-y","rea-agents@6.6.0","mcp"]},"peer":{"command":"/usr/bin/true"},"rea":{"command":"npx","args":["-y","rea-agents@6.5.0","mcp"]}}`;
+    const original = `{"mcpServers":${inactive},"mcpServers":${active}}\n`;
+    await writeFile(config, original);
+
+    const run = runIn(cli, home);
+    const removed = await run(["uninstall", "--json"]);
+    expect(removed.exitCode, removed.stdout).toBe(0);
+    expect(removed.json).toMatchObject({
+      status: "complete",
+      items: expect.arrayContaining([
+        expect.objectContaining({ name: "claude_code", status: "removed" }),
+      ]),
+    });
+    const afterRemoval = await readFile(config, "utf8");
+    expect(JSON.parse(afterRemoval)).toEqual({
+      mcpServers: { peer: { command: "/usr/bin/true" } },
+    });
+    expect(afterRemoval).toContain(`"mcpServers":${inactive}`);
+    expect(afterRemoval).toContain('"peer":{"command":"/usr/bin/true"}');
+    expect(afterRemoval).not.toContain("rea-agents@");
+    expect(await readFile(`${config}.rea.backup`, "utf8")).toBe(original);
+
+    const repeated = await run(["uninstall", "--json"]);
+    expect(repeated.exitCode, repeated.stdout).toBe(0);
+    expect(await readFile(config, "utf8")).toBe(afterRemoval);
+    expect(await readFile(`${config}.rea.backup`, "utf8")).toBe(original);
+  },
+);
+
+cliTest(
+  "preflights a later Cursor null duplicate before changing Claude or creating backups",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-json-repeat-preflight-");
+    const claude = join(home, ".claude.json");
+    const claudeOriginal = `{"mcpServers":{${owned}}}\n`;
+    await writeFile(claude, claudeOriginal);
+    const cursor = join(home, ".cursor", "mcp.json");
+    const cursorOriginal = `{"mcpServers":{"rea":null,${owned}}}\n`;
+    await writeConfiguration(cursor, cursorOriginal);
+
+    const removed = await runIn(cli, home)(["uninstall", "--json"]);
+    expect(removed.exitCode, removed.stdout).toBe(1);
+    expect(removed.json).toMatchObject({
+      status: "failed",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "cursor",
+          status: "failed",
+          detail: expect.stringContaining("earlier duplicate"),
+        }),
+        expect.objectContaining({ name: "uninstall", status: "skipped" }),
+      ]),
+    });
+    expect(await readFile(claude, "utf8")).toBe(claudeOriginal);
+    expect(await readFile(cursor, "utf8")).toBe(cursorOriginal);
+    for (const path of [claude, cursor])
+      await expect(readFile(`${path}.rea.backup`)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+  },
+);
+
+cliTest(
+  "preflights a foreign OpenCode V1 fallback before changing Claude or creating backups",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-json-opencode-fallback-");
+    const claude = join(home, ".claude.json");
+    const claudeOriginal = `{"mcpServers":{${owned}}}\n`;
+    await writeFile(claude, claudeOriginal);
+    const openCode = join(home, ".config", "opencode", "opencode.json");
+    const openCodeOriginal = `{"mcp":{"servers":{"rea":${openCodeOwned}},"rea":${openCodeForeign}}}\n`;
+    await writeConfiguration(openCode, openCodeOriginal);
+
+    const removed = await runIn(cli, home)(["uninstall", "--json"]);
+    expect(removed.exitCode, removed.stdout).toBe(1);
+    expect(removed.json).toMatchObject({
+      status: "failed",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "opencode",
+          status: "failed",
+          detail: expect.stringContaining("would activate it"),
+        }),
+        expect.objectContaining({ name: "uninstall", status: "skipped" }),
+      ]),
+    });
+    expect(await readFile(claude, "utf8")).toBe(claudeOriginal);
+    expect(await readFile(openCode, "utf8")).toBe(openCodeOriginal);
+    for (const path of [claude, openCode])
+      await expect(readFile(`${path}.rea.backup`)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+  },
+);
+
+cliTest(
+  "OpenCode setup replaces every repeated V1 entry while preserving the V2 peer",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-json-opencode-migration-");
+    const config = join(home, ".config", "opencode", "opencode.json");
+    const original = `{"mcp":{"servers":{"peer":{"type":"local","command":["/usr/bin/true"]}},"rea":${openCodeForeign},"rea":${openCodeForeign}}}\n`;
+    await writeConfiguration(config, original);
+
+    const setup = await runIn(cli, home)(setupArguments("opencode"));
+    expect(setup.exitCode, setup.stdout).toBe(0);
+    expect(setup.json).toMatchObject({
+      clients: { opencode: { status: "configured" } },
+    });
+    const { mcp } = JSON.parse(await readFile(config, "utf8")) as {
+      mcp: Record<string, unknown> & { servers: Record<string, unknown> };
+    };
+    expect(Object.hasOwn(mcp, "rea")).toBe(false);
+    const launcher = resolve("scripts/rea.mjs");
+    expect(mcp.servers).toMatchObject({
+      peer: { command: ["/usr/bin/true"] },
+      rea: {
+        type: "local",
+        command:
+          process.platform === "win32"
+            ? [process.execPath, launcher, "mcp"]
+            : [launcher, "mcp"],
+      },
     });
   },
 );

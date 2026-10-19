@@ -72,101 +72,6 @@ export const normalizeCfg = (
   return graph;
 };
 
-type ReferenceEdge = FunctionSnapshot["dossier"]["outgoing_references"][number];
-
-/**
- * A named endpoint survives relocation. An unnamed endpoint is identified
- * only by its address, which names one location only within one artifact;
- * across artifacts it stays unknown (null).
- */
-const referenceEndpoint = (
-  procedure: ReferenceEdge["source_procedure"],
-  address: string,
-  sameArtifact: boolean,
-): string | { readonly address: string } | null =>
-  procedure !== null ? procedure.name : sameArtifact ? { address } : null;
-
-export const referenceProjection = (
-  snapshot: FunctionSnapshot,
-  sameArtifact: boolean,
-) =>
-  sorted(
-    [
-      ...snapshot.dossier.incoming_references.map((item) => ({
-        direction: "in",
-        item,
-      })),
-      ...snapshot.dossier.outgoing_references.map((item) => ({
-        direction: "out",
-        item,
-      })),
-    ].map(({ direction, item }) => ({
-      direction,
-      source: referenceEndpoint(
-        item.source_procedure,
-        item.source_address,
-        sameArtifact,
-      ),
-      target: referenceEndpoint(
-        item.target_procedure,
-        item.target_address,
-        sameArtifact,
-      ),
-    })),
-  );
-
-export const referenceKindProjection = (
-  snapshot: FunctionSnapshot,
-  sameArtifact: boolean,
-): readonly unknown[] | null => {
-  const edges = [
-    ...snapshot.dossier.incoming_references.map((edge) => ({
-      direction: "in",
-      edge,
-    })),
-    ...snapshot.dossier.outgoing_references.map((edge) => ({
-      direction: "out",
-      edge,
-    })),
-  ];
-  if (edges.some(({ edge }) => !edge.kind.available)) return null;
-  return sorted(
-    edges.map(({ direction, edge }) => {
-      if (!edge.kind.available)
-        throw new TypeError(
-          "Reference-kind availability changed during projection",
-        );
-      return {
-        direction,
-        source: referenceEndpoint(
-          edge.source_procedure,
-          edge.source_address,
-          sameArtifact,
-        ),
-        target: referenceEndpoint(
-          edge.target_procedure,
-          edge.target_address,
-          sameArtifact,
-        ),
-        type: edge.kind.type,
-        flow: edge.kind.flow,
-        call: edge.kind.call,
-        jump: edge.kind.jump,
-        data: edge.kind.data,
-        read: edge.kind.read,
-        write: edge.kind.write,
-        indirect: edge.kind.indirect,
-        computed: edge.kind.computed,
-        conditional: edge.kind.conditional,
-        terminal: edge.kind.terminal,
-        primary: edge.kind.primary,
-        operand_index: edge.kind.operand_index,
-        external: edge.kind.external,
-      };
-    }),
-  );
-};
-
 export const commentProjection = (
   snapshot: FunctionSnapshot,
 ): readonly unknown[] | null => {
@@ -287,7 +192,7 @@ const swiftLiteralSites = (snapshot: FunctionSnapshot) => {
   return { values, complete };
 };
 
-export const sorted = (values: readonly unknown[]): readonly unknown[] =>
+export const sorted = <T>(values: readonly T[]): readonly T[] =>
   values
     .map((value) => ({
       value,

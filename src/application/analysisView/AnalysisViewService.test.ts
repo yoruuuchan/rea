@@ -2,6 +2,7 @@ import {
   analysisViewCaptureFixture,
   analysisViewCaptureEvidence,
   analysisViewObjectDenseCapture,
+  environmentManifestCaptureFixture,
 } from "../../../tests/fixtures/analysisView.js";
 import { describe, expect, it } from "vitest";
 
@@ -446,24 +447,82 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
   if (!recorded.ok) throw recorded.error;
   const borrowed = ledger.forAnalysis(parent.evidence_id)!;
   expect(Object.isFrozen(borrowed.normalized_result)).toBe(true);
-  const result = inspectAnalysisView(
-    {
-      source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
-      view: { kind: "api-surface", limit: 1 },
-    },
-    (id) => ledger.forAnalysis(id),
-  );
-  expect(result).toMatchObject({
-    ok: false,
-    error: {
-      _tag: "AnalysisResourceConstraintError",
-      resource: "memory",
-    },
-  });
+  for (const view of [
+    { kind: "api-surface", limit: 1 },
+    { kind: "environment-manifest" },
+  ] as const) {
+    const result = inspectAnalysisView(
+      {
+        source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
+        view,
+      },
+      (id) => ledger.forAnalysis(id),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisResourceConstraintError",
+        resource: "memory",
+      },
+    });
+  }
   expect(ledger.forAnalysis(parent.evidence_id)).toBe(borrowed);
 });
 
-it.each(["summary", "capture", "api-surface"] as const)(
+it("seals an inferred environment manifest and a derived manifest without templated groups", () => {
+  const parent = analysisViewCaptureEvidence(
+    environmentManifestCaptureFixture(),
+  );
+  const inferred = inspectAnalysisView({
+    source: { kind: "inline", evidence: parent },
+    view: { kind: "environment-manifest", template_rules: ["opaque-token"] },
+  });
+  if (!inferred.ok) throw inferred.error;
+  expect(inferred.value.confidence).toBe("inferred");
+  expect(inferred.value.authority).toBe(parent.authority);
+  expect(inferred.value.evidence_links).toEqual([parent.evidence_id]);
+  expect(inferred.value.parameters).toMatchObject({
+    view: {
+      kind: "environment-manifest",
+      template_rules: ["opaque-token"],
+      include_query_parameter_names: true,
+    },
+  });
+  expect(inferred.value.normalized_result).toMatchObject({
+    kind: "environment-manifest",
+    name: "grafana-example",
+    parent_evidence_id: parent.evidence_id,
+  });
+  expect(parseEvidence(inferred.value)).toEqual(inferred.value);
+  const literal = environmentManifestCaptureFixture();
+  literal.artifact.sha256 = null;
+  literal.records = [3, 4, 8].map((ordinal) => literal.records[ordinal]!);
+  const derived = inspectAnalysisView({
+    source: { kind: "inline", evidence: analysisViewCaptureEvidence(literal) },
+    view: { kind: "environment-manifest" },
+  });
+  if (!derived.ok) throw derived.error;
+  expect(derived.value.confidence).toBe("derived");
+  expect(derived.value.subject).toBeNull();
+  expect(derived.value.normalized_result).toMatchObject({
+    templated_groups: 0,
+    tools: [{ name: "get_org" }, { name: "get_search" }, { name: "get_user" }],
+    limitations: expect.arrayContaining([
+      "Parent contains an ordinal subset; the manifest covers only retained records.",
+    ]),
+  });
+  expect(
+    inspectAnalysisView({
+      source: { kind: "inline", evidence: analysisViewLayoutEvidence() },
+      view: { kind: "environment-manifest" },
+    }),
+  ).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisUnsupportedTargetError" },
+  });
+});
+
+it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
   "rejects inline accessors before parsing a %s view",
   (kind) => {
     let accessed = false;
@@ -498,7 +557,7 @@ it.each(["summary", "capture", "api-surface"] as const)(
   },
 );
 
-it.each(["summary", "capture", "api-surface"] as const)(
+it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
   "rejects nested, hidden and inherited inline accessors for %s",
   (kind) => {
     const parent = analysisViewCaptureEvidence();
@@ -575,7 +634,12 @@ it.each([
       },
     });
     if (inherited) Object.setPrototypeOf(array, owner);
-    for (const kind of ["summary", "capture", "api-surface"] as const) {
+    for (const kind of [
+      "summary",
+      "capture",
+      "api-surface",
+      "environment-manifest",
+    ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
         view: { kind },
@@ -606,7 +670,12 @@ it("rejects callable array overrides and subclass species before parsing", () =>
     Object.defineProperty([], Symbol.iterator, { value: callback }),
     new CustomArray(),
   ])
-    for (const kind of ["summary", "capture", "api-surface"] as const) {
+    for (const kind of [
+      "summary",
+      "capture",
+      "api-surface",
+      "environment-manifest",
+    ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
         view: { kind },
@@ -619,7 +688,7 @@ it("rejects callable array overrides and subclass species before parsing", () =>
   expect(invoked).toBe(false);
 });
 
-it.each(["summary", "capture", "api-surface"] as const)(
+it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
   "preserves ordinary inline Evidence for %s",
   (kind) => {
     const parent = analysisViewCaptureEvidence();
@@ -650,7 +719,12 @@ it("rejects executable constructor values before schema plain-object checks", ()
       throw new Error("Constructor metadata must remain inert");
     },
   });
-  for (const kind of ["summary", "capture", "api-surface"] as const) {
+  for (const kind of [
+    "summary",
+    "capture",
+    "api-surface",
+    "environment-manifest",
+  ] as const) {
     expect(
       inspectAnalysisView({
         source: {
@@ -678,7 +752,12 @@ it("rejects inline proxy values before reflection or parsing can run traps", () 
     new Proxy(() => undefined, { get: trap }),
     revoked.proxy,
   ])
-    for (const kind of ["summary", "capture", "api-surface"] as const) {
+    for (const kind of [
+      "summary",
+      "capture",
+      "api-surface",
+      "environment-manifest",
+    ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: value } },
         view: { kind },
@@ -717,7 +796,12 @@ it("keeps ignored array metadata inert through parsing and projection", () => {
   for (let index = 0; index < 10_000; index += 1)
     Object.defineProperty(array, `metadata-${index}`, { get: getter });
   Object.defineProperty(array, Symbol("metadata"), { get: getter });
-  for (const kind of ["summary", "capture", "api-surface"] as const) {
+  for (const kind of [
+    "summary",
+    "capture",
+    "api-surface",
+    "environment-manifest",
+  ] as const) {
     const result = inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind },
@@ -763,15 +847,16 @@ it("keeps inline-envelope admission live alongside capture validation and groupi
 it("admits raw_result and parameters before authenticating a portable capture", () => {
   const dense = analysisViewObjectDenseCapture();
   const parent = analysisViewCaptureEvidence();
-  for (const field of ["raw_result", "parameters"] as const) {
-    const result = inspectAnalysisView({
-      source: { kind: "inline", evidence: { ...parent, [field]: dense } },
-      view: { kind: "api-surface" },
-    });
-    // Refuse expansion before hashing can report the deliberately stale ID.
-    expect(result).toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
-    });
-  }
+  for (const field of ["raw_result", "parameters"] as const)
+    for (const kind of ["api-surface", "environment-manifest"] as const) {
+      const result = inspectAnalysisView({
+        source: { kind: "inline", evidence: { ...parent, [field]: dense } },
+        view: { kind },
+      });
+      // Refuse expansion before hashing can report the deliberately stale ID.
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
+      });
+    }
 });

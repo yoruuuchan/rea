@@ -1,5 +1,6 @@
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { workflowUnknownInput } from "../application/investigation/WorkflowUnknown.js";
 
 import {
   getNavigationContext,
@@ -48,12 +49,10 @@ const recordProcessResidualUnknowns = (
   residuals: ProcessCapture["residual_unknowns"],
 ): Result<null, AnalysisError> => {
   for (const residual of residuals) {
-    const unknown = session.recordUnknown({
+    const input = workflowUnknownInput(evidence.evidence_id, {
       question: `Was ${residual.scope} behavior fully observed during capture?`,
       severity: "medium",
       domain: `process-${residual.scope}`,
-      supporting_evidence_ids: [evidence.evidence_id],
-      contradicting_evidence_ids: [],
       required_authority: "controlled-replay",
       required_confidence: "observed",
       required_environment: evidence.environment,
@@ -66,6 +65,8 @@ const recordProcessResidualUnknowns = (
       ],
       relationships: [],
     });
+    if (!input.ok) return input;
+    const unknown = session.recordUnknown(input.value);
     if (
       !unknown.ok &&
       !(

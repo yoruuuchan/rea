@@ -1642,7 +1642,9 @@ describe("client configuration filesystem removal", () => {
       }
     },
   );
+});
 
+describe("uninstall configuration symlink ownership", () => {
   it("removes an owned entry through a symlink without replacing it", async () => {
     const home = await createTestTempDirectory("rea-uninstall-symlink-");
     roots.push(home);
@@ -1658,8 +1660,14 @@ describe("client configuration filesystem removal", () => {
     await writeFile(targetPath, original);
     await symlink(targetPath, configPath);
 
-    expect((await runUninstall(false, systemUninstallHost(home))).status).toBe(
-      "complete",
+    const result = await runUninstall(false, systemUninstallHost(home));
+    expect(result.status).toBe("complete");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        name: "cursor",
+        status: "removed",
+        configuration_path: configPath,
+      }),
     );
     expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
     expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(original);
@@ -1680,6 +1688,7 @@ describe("client configuration filesystem removal", () => {
     expect(result.items).toContainEqual({
       name: "cursor",
       status: "failed",
+      configuration_path: configPath,
       detail:
         "Configuration path could not be safely verified. Check its permissions and, if it is a symbolic link, verify that the link resolves to a regular file owned by the current user, then rerun uninstall.",
     });
@@ -1687,6 +1696,184 @@ describe("client configuration filesystem removal", () => {
     await expect(
       readFile(`${configPath}.rea.backup`, "utf8"),
     ).rejects.toThrow();
+  });
+});
+
+describe("uninstall registration ownership preflight", () => {
+  it("removes repeated owned registrations from the table the client reads", async () => {
+    const home = await createTestTempDirectory("rea-uninstall-repeated-owned-");
+    roots.push(home);
+    const config = join(home, ".claude.json");
+    await mkdir(dirname(config), { recursive: true });
+    const owned = {
+      command: PRODUCT_IDENTITY.cliBinary,
+      args: ["mcp"],
+    };
+    const original =
+      `{"mcpServers":{"rea":${JSON.stringify(owned)},` +
+      `"peer":{"command":"peer"},` +
+      `"rea":${JSON.stringify(owned)}}}\n`;
+    await writeFile(config, original);
+
+    const result = await runUninstall(false, systemUninstallHost(home));
+
+    expect(result.status).toBe("complete");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "claude_code", status: "removed" }),
+    );
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({
+      mcpServers: { peer: { command: "peer" } },
+    });
+    expect(await readFile(`${config}.rea.backup`, "utf8")).toBe(original);
+  });
+
+  it("refuses an unowned repeat before changing any client or making backups", async () => {
+    const home = await createTestTempDirectory(
+      "rea-uninstall-repeated-foreign-",
+    );
+    roots.push(home);
+    const claude = join(home, ".claude.json");
+    const cursor = join(home, ".cursor/mcp.json");
+    await mkdir(dirname(claude), { recursive: true });
+    await mkdir(dirname(cursor), { recursive: true });
+    const owned = {
+      command: PRODUCT_IDENTITY.cliBinary,
+      args: ["mcp"],
+    };
+    const claudeOriginal = JSON.stringify({ mcpServers: { rea: owned } });
+    const cursorOriginal = `{"mcpServers":{"rea":null,"rea":${JSON.stringify(owned)}}}`;
+    await writeFile(claude, claudeOriginal);
+    await writeFile(cursor, cursorOriginal);
+
+    const result = await runUninstall(false, systemUninstallHost(home));
+
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "cursor", status: "failed" }),
+    );
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "uninstall", status: "skipped" }),
+    );
+    expect(await readFile(claude, "utf8")).toBe(claudeOriginal);
+    expect(await readFile(cursor, "utf8")).toBe(cursorOriginal);
+    await expect(
+      readFile(`${claude}.rea.backup`, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(`${cursor}.rea.backup`, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps an owned OpenCode V2 registration when its V1 fallback is foreign", async () => {
+    const home = await createTestTempDirectory(
+      "rea-uninstall-opencode-fallback-",
+    );
+    roots.push(home);
+    const config = join(home, ".config/opencode/opencode.json");
+    await mkdir(dirname(config), { recursive: true });
+    const original = JSON.stringify({
+      mcp: {
+        servers: {
+          rea: {
+            type: "local",
+            command: [PRODUCT_IDENTITY.cliBinary, "mcp"],
+            enabled: true,
+          },
+        },
+        rea: { type: "local", command: ["/usr/bin/false"] },
+      },
+    });
+    await writeFile(config, original);
+
+    const result = await runUninstall(false, systemUninstallHost(home));
+
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "opencode", status: "failed" }),
+    );
+    expect(await readFile(config, "utf8")).toBe(original);
+    await expect(
+      readFile(`${config}.rea.backup`, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+describe("layered uninstall outcomes", () => {
+  it("reports an earlier layered OpenCode removal when a later backup is blocked", async () => {
+    const home = await createTestTempDirectory(
+      "rea-uninstall-opencode-layers-",
+    );
+    roots.push(home);
+    const directory = join(home, ".config/opencode");
+    const json = join(directory, "opencode.json");
+    const jsonc = join(directory, "opencode.jsonc");
+    const blocker = `${jsonc}.rea.backup`;
+    await mkdir(directory, { recursive: true });
+    const registration = {
+      type: "local",
+      command: [PRODUCT_IDENTITY.cliBinary, "mcp"],
+      enabled: true,
+    };
+    const jsonOriginal = JSON.stringify({
+      mcp: { servers: { rea: registration } },
+    });
+    const jsoncOriginal = `// OpenCode's later JSONC layer\n${JSON.stringify({
+      mcp: { servers: { rea: registration } },
+    })}\n`;
+    await writeFile(json, jsonOriginal);
+    await writeFile(jsonc, jsoncOriginal);
+    await mkdir(blocker);
+
+    const host = systemUninstallHost(home);
+    const blocked = await runUninstall(false, {
+      ...host,
+      close: async () => {
+        await host.close?.();
+        return "Controlled final cleanup diagnostic.";
+      },
+    });
+
+    expect(blocked.status).toBe("failed");
+    expect(await readFile(json, "utf8")).not.toContain('"rea"');
+    expect(await readFile(jsonc, "utf8")).toBe(jsoncOriginal);
+    const client = blocked.items.find(({ name }) => name === "opencode");
+    expect(client?.status).toBe("failed");
+    expect(client?.detail).toContain(`Removed registration from ${json}.`);
+    expect(client?.detail).toContain("Configuration could not be backed up");
+    expect(client?.detail).toContain("Check file permissions");
+    expect(client?.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          configuration_path: json,
+          status: "removed",
+        }),
+        expect.objectContaining({
+          configuration_path: jsonc,
+          status: "failed",
+        }),
+      ]),
+    );
+    expect(
+      client?.actions?.filter(
+        ({ configuration_path }) => configuration_path === json,
+      ),
+    ).toHaveLength(1);
+    expect(blocked.items).toContainEqual({
+      name: "uninstall_cleanup",
+      status: "failed",
+      detail: "Controlled final cleanup diagnostic.",
+    });
+
+    await rm(blocker, { recursive: true });
+    const recovered = await runUninstall(false, systemUninstallHost(home));
+
+    expect(recovered.status).toBe("complete");
+    expect(recovered.items).toContainEqual(
+      expect.objectContaining({ name: "opencode", status: "removed" }),
+    );
+    expect(parseJsonc(await readFile(jsonc, "utf8"))).toEqual({
+      mcp: { servers: {} },
+    });
   });
 });
 
@@ -1734,6 +1921,7 @@ describe("uninstall configuration preflight", () => {
       expect(result.items).toContainEqual({
         name: "cursor",
         status: "failed",
+        configuration_path: config,
         detail: `Configuration was not changed: ${problem}. Repair it, then rerun uninstall.`,
       });
       expect(await readFile(config, "utf8")).toBe(content);
@@ -1802,6 +1990,45 @@ describe("uninstall configuration preflight", () => {
 });
 
 describe("client configuration changed during uninstall", () => {
+  it("rechecks duplicate ownership after preflight and keeps the changed source", async () => {
+    const home = await createTestTempDirectory("rea-uninstall-repeat-race-");
+    roots.push(home);
+    const cursor = join(home, ".cursor/mcp.json");
+    await mkdir(dirname(cursor), { recursive: true });
+    const owned = {
+      command: PRODUCT_IDENTITY.cliBinary,
+      args: ["mcp"],
+    };
+    const original = JSON.stringify({ mcpServers: { rea: owned } });
+    const changed = `{"mcpServers":{"rea":null,"rea":${JSON.stringify(owned)}}}`;
+    await writeFile(cursor, original);
+    let reads = 0;
+    const fileSystem: UninstallFileSystem = {
+      ...testFileSystem,
+      readText: async (path) => {
+        if (path !== cursor) return readFile(path, "utf8");
+        reads += 1;
+        if (reads === 2) await writeFile(cursor, changed);
+        return readFile(path, "utf8");
+      },
+    };
+
+    const result = await runUninstall(
+      false,
+      systemUninstallHost(home, fileSystem),
+    );
+
+    expect(reads).toBe(2);
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "cursor", status: "failed" }),
+    );
+    expect(await readFile(cursor, "utf8")).toBe(changed);
+    await expect(
+      readFile(`${cursor}.rea.backup`, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("stops the remaining removals when a configuration fails after preflight", async () => {
     const home = await createTestTempDirectory("rea-uninstall-race-");
     roots.push(home);

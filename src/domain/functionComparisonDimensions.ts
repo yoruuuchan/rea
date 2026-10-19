@@ -1,4 +1,5 @@
 import { canonicalJson } from "./comparisonSemantics.js";
+import { compareFunctionReferences } from "./functionReferenceComparison.js";
 import { diffLines } from "diff";
 
 import type { FunctionSnapshot } from "./functionDossierEvidence.js";
@@ -7,8 +8,6 @@ import {
   identityProjection,
   isAutoName,
   normalizeCfg,
-  referenceKindProjection,
-  referenceProjection,
   sorted,
   stringAndNameProjection,
   swiftLiteralSitesConflict,
@@ -253,78 +252,25 @@ const swiftLiteralCoverage = (
       ? "absent"
       : "complete";
 
-const hasUnnamedEndpoint = (snapshot: FunctionSnapshot): boolean =>
-  [
-    ...snapshot.dossier.incoming_references,
-    ...snapshot.dossier.outgoing_references,
-  ].some(
-    (edge) => edge.source_procedure === null || edge.target_procedure === null,
-  );
-
 const compareReferences = (
   left: FunctionSnapshot,
   right: FunctionSnapshot,
   context: ComparisonContext,
 ): FunctionDimension => {
-  const sameArtifact =
-    left.subject.digest.sha256 === right.subject.digest.sha256;
-  const leftProjection = referenceProjection(left, sameArtifact);
-  const rightProjection = referenceProjection(right, sameArtifact);
-  if (leftProjection.length === 0 && rightProjection.length === 0)
-    return compareValues(
-      "references",
-      leftProjection,
-      rightProjection,
-      context,
-    );
-  if (
-    canonicalJson(leftProjection, "Function comparison") !==
-    canonicalJson(rightProjection, "Function comparison")
-  )
-    return dimensionResult({
-      dimension: "references",
-      status: "changed",
-      left: leftProjection,
-      right: rightProjection,
-      ...context,
-      leftCount: leftProjection.length,
-      rightCount: rightProjection.length,
-      textDelta: null,
-      limitations: [
-        "Reference endpoints differ independently of provider reference-kind metadata.",
-      ],
-    });
-  const leftKinds = referenceKindProjection(left, sameArtifact);
-  const rightKinds = referenceKindProjection(right, sameArtifact);
-  const kindsKnown = leftKinds !== null && rightKinds !== null;
-  // Differing known edge kinds are a change whatever the endpoint identity.
-  if (
-    kindsKnown &&
-    canonicalJson(leftKinds, "Function comparison") !==
-      canonicalJson(rightKinds, "Function comparison")
-  )
-    return compareValues("references", leftKinds, rightKinds, context);
-  // Equal projections with unknown endpoints do not establish equal targets.
-  if (!sameArtifact && (hasUnnamedEndpoint(left) || hasUnnamedEndpoint(right)))
+  const compared = compareFunctionReferences(left, right);
+  if (compared.status === "unknown")
     return unresolvedDimension({
       dimension: "references",
       links: context.links,
-      leftCount: leftProjection.length,
-      rightCount: rightProjection.length,
-      limitations: [
-        "Unnamed reference endpoints have no stable identity across different artifacts, so equal named endpoints do not establish equal references.",
-      ],
+      leftCount: compared.leftCount,
+      rightCount: compared.rightCount,
+      limitations: compared.limitations,
     });
-  if (kindsKnown)
-    return compareValues("references", leftKinds, rightKinds, context);
-  return unresolvedDimension({
+  return dimensionResult({
     dimension: "references",
-    links: context.links,
-    leftCount: leftProjection.length,
-    rightCount: rightProjection.length,
-    limitations: [
-      "At least one provider did not expose reference kinds, so equal endpoints do not prove equal edge semantics.",
-    ],
+    ...compared,
+    ...context,
+    textDelta: null,
   });
 };
 

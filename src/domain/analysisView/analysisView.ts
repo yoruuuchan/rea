@@ -92,6 +92,12 @@ import {
   captureSummarySchema,
 } from "./webNetworkCaptureView.js";
 import type { WebNetworkApiSurfaceAccumulator } from "./WebNetworkApiSurfaceAccumulator.js";
+import type { EnvironmentManifestAccumulator } from "./EnvironmentManifestAccumulator.js";
+import {
+  projectEnvironmentManifestView,
+  environmentManifestFields,
+  environmentManifestViewRequestSchema,
+} from "./environmentManifestView.js";
 import {
   pcapViewRequestSchema,
   pcapViewPageSchema,
@@ -234,6 +240,7 @@ export const analysisViewRequestSchema = z.discriminatedUnion("kind", [
   managedMembersViewRequestSchema,
   androidViewRequestSchema,
   apiSurfaceViewSchema,
+  environmentManifestViewRequestSchema,
   captureViewRequestSchema,
   qlogViewRequestSchema,
   pcapViewRequestSchema,
@@ -497,6 +504,13 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     }),
   }),
   z.strictObject({
+    ...viewResultBase,
+    ...environmentManifestFields,
+    kind: z.literal("environment-manifest"),
+    parent_operation: z.literal("inspect_web_network_capture"),
+    view: environmentManifestViewRequestSchema,
+  }),
+  z.strictObject({
     ...summaryViewResultBase,
     summary: z.union([
       layoutSummarySchema,
@@ -671,6 +685,10 @@ export type UnsignedAnalysisView =
       "view_digest"
     >
   | Omit<
+      Extract<AnalysisViewResult, { readonly kind: "environment-manifest" }>,
+      "view_digest"
+    >
+  | Omit<
       Extract<AnalysisViewResult, { readonly kind: "summary" }>,
       "view_digest"
     >
@@ -809,6 +827,7 @@ export const projectAnalysisView = (
   parent: AnalysisViewParent,
   view: AnalysisViewRequest,
   apiSurfaceAccumulator?: WebNetworkApiSurfaceAccumulator,
+  manifestAccumulator?: EnvironmentManifestAccumulator,
 ): Result<AnalysisViewResult, AnalysisError> => {
   const digest = parentDigest(parent.evidenceId);
   if (!digestSchema.safeParse(digest).success)
@@ -826,6 +845,14 @@ export const projectAnalysisView = (
       parent,
       view,
       apiSurfaceAccumulator,
+    );
+    return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
+  }
+  if (view.kind === "environment-manifest") {
+    const projected = projectEnvironmentManifestView(
+      parent,
+      view,
+      manifestAccumulator,
     );
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
