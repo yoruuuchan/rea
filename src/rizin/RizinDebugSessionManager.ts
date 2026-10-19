@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
-import { open, readFile, readlink, realpath, stat } from "node:fs/promises";
+import { open, readlink, realpath, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { isatty } from "node:tty";
 
@@ -25,6 +25,7 @@ import {
 import {
   closeOwnedDebuggerSessions,
   stopOwnedDebuggerProcess,
+  readLinuxProcessStartTime,
   verifyOwnedInferiorsEnded,
   type OwnedInferiorIdentity,
   type OwnedDebuggerDetachResult,
@@ -1041,20 +1042,13 @@ export class RizinDebugSessionManager {
     const protocolOutput = [...session.history, partialFrame]
       .filter((frame) => frame.length > 0)
       .join("\n");
-    const protocolBytes = Buffer.from(protocolOutput, "utf8");
-    let stdoutBytes = Math.min(protocolBytes.length, MAX_DIAGNOSTIC_BYTES);
-    while (
-      stdoutBytes > 0 &&
-      stdoutBytes < protocolBytes.length &&
-      (protocolBytes[stdoutBytes]! & 0xc0) === 0x80
-    )
-      stdoutBytes -= 1;
+    const stdout = truncateUtf8(protocolOutput, MAX_DIAGNOSTIC_BYTES);
     return {
-      stdout: protocolBytes.subarray(0, stdoutBytes).toString("utf8"),
+      stdout,
       stderr: output.stderr.text,
       truncated:
         session.historyTruncated ||
-        protocolBytes.length > stdoutBytes ||
+        protocolOutput.length > stdout.length ||
         output.diagnosticTruncated === true ||
         output.stdout.observedBytes > output.stdout.bytes ||
         output.stderr.observedBytes > output.stderr.bytes,
@@ -1066,13 +1060,15 @@ export class RizinDebugSessionManager {
     frame: RizinFrame,
     frameBytes: number,
   ): void {
-    const historyFrame =
-      frameBytes > MAX_RECENT_FRAME_BYTES || frame.truncated
-        ? `${frame.text.slice(0, MAX_RECENT_FRAME_BYTES)}[recent frame truncated]`
-        : frame.text;
-    if (frameBytes > MAX_RECENT_FRAME_BYTES || frame.truncated)
-      session.historyTruncated = true;
-    session.history.push(historyFrame);
+    const historyPrefix = truncateUtf8(frame.text, MAX_RECENT_FRAME_BYTES);
+    const historyTruncated =
+      historyPrefix.length < frame.text.length || frame.truncated;
+    if (historyTruncated) session.historyTruncated = true;
+    session.history.push(
+      historyTruncated
+        ? `${historyPrefix}[recent frame truncated]`
+        : historyPrefix,
+    );
     if (session.history.length > 64) {
       session.history.splice(0, session.history.length - 64);
       session.historyTruncated = true;
@@ -1138,10 +1134,7 @@ export class RizinDebugSessionManager {
 
   async #detachInferior(
     session: RizinDebugSession,
-  ): Promise<
-    | { readonly status: "no-inferior" }
-    | { readonly status: "detached"; readonly outputSink: "durable" }
-  > {
+  ): Promise<OwnedDebuggerDetachResult> {
     if (session.exited || session.protocolError !== undefined)
       throw new Error(
         "Rizin protocol state is ambiguous; inferior detach is unverified.",
@@ -1159,74 +1152,88 @@ export class RizinDebugSessionManager {
 
   async #detachInferiorUnlocked(
     session: RizinDebugSession,
-  ): Promise<
-    | { readonly status: "no-inferior" }
-    | { readonly status: "detached"; readonly outputSink: "durable" }
-  > {
+  ): Promise<OwnedDebuggerDetachResult> {
     if (session.exited || session.protocolError !== undefined)
       throw new Error(
         "Rizin protocol state is ambiguous; inferior detach is unverified.",
       );
-    {
-      session.inferiorInventoryComplete = false;
+    session.inferiorInventoryComplete = false;
+    session.knownInferiorIdentities.clear();
+    const inferior = parseRizinPtraceRows(
+      await this.#runInternalCommand(session, "olj"),
+    );
+    if (inferior.length === 0) {
       session.knownInferiorIdentities.clear();
-      const initial = parseRizinPtraceRows(
-        await this.#runInternalCommand(session, "olj"),
-      );
-      const inferior = initial;
-      if (inferior.length === 0) {
-        session.knownInferiorIdentities.clear();
-        session.inferiorInventoryComplete = true;
-        return { status: "no-inferior" };
-      }
-      session.knownInferiorIdentities.clear();
-      for (const [, pid] of inferior) {
-        if (session.knownInferiorIdentities.has(pid)) continue;
-        const startTime = await readProcStartTime(pid);
-        session.knownInferiorIdentities.set(pid, {
-          pid,
-          startTime,
-        });
-      }
       session.inferiorInventoryComplete = true;
-      if (inferior.length !== 1)
-        throw new Error(
-          "Rizin reported multiple or ambiguous ptrace inferiors.",
-        );
-      const [fd, pid] = inferior[0]!;
-      const processStartTime = await readProcStartTime(pid);
-      await this.#verifyInferiorOutputConfiguration(session, pid);
-      await this.#runInternalCommand(session, `o- ${fd}`);
-      const after = parseRizinPtraceRows(
-        await this.#runInternalCommand(session, "olj"),
-      );
-      if (
-        after.some(
-          ([activeFd, activePid]) => activeFd === fd || activePid === pid,
-        ) ||
-        after.length !== 0
-      )
-        throw new Error(
-          "Rizin did not confirm that the selected inferior FD was detached.",
-        );
-      assertRizinProcessStartTimeStable(
-        processStartTime,
-        await readProcStartTime(pid),
-      );
-      await this.#verifyInferiorOutputConfiguration(session, pid);
-      return { status: "detached", outputSink: "durable" };
+      return { status: "no-inferior" };
     }
+    session.knownInferiorIdentities.clear();
+    for (const [, pid] of inferior) {
+      if (session.knownInferiorIdentities.has(pid)) continue;
+      const startTime = await readLinuxProcessStartTime(pid);
+      if (startTime === null)
+        throw new Error(
+          `Inferior PID ${pid} ended before its identity could be established.`,
+        );
+      session.knownInferiorIdentities.set(pid, {
+        pid,
+        startTime,
+      });
+    }
+    session.inferiorInventoryComplete = true;
+    if (inferior.length !== 1)
+      throw new Error("Rizin reported multiple or ambiguous ptrace inferiors.");
+    const [fd, pid] = inferior[0]!;
+    const identity = session.knownInferiorIdentities.get(pid)!;
+    assertRizinProcessStartTimeStable(
+      identity.startTime,
+      await readLinuxProcessStartTime(pid),
+    );
+    await this.#verifyDebuggerExitPolicy(session);
+    await this.#verifyInferiorOutputDescriptors(session, pid);
+    await this.#runInternalCommand(session, `o- ${fd}`);
+    const after = parseRizinPtraceRows(
+      await this.#runInternalCommand(session, "olj"),
+    );
+    if (
+      after.some(
+        ([activeFd, activePid]) => activeFd === fd || activePid === pid,
+      ) ||
+      after.length !== 0
+    )
+      throw new Error(
+        "Rizin did not confirm that the selected inferior FD was detached.",
+      );
+    // Protocol readback must never be waived by proof that a process ended.
+    await this.#verifyDebuggerExitPolicy(session);
+    try {
+      assertRizinProcessStartTimeStable(
+        identity.startTime,
+        await readLinuxProcessStartTime(pid),
+      );
+      await this.#verifyInferiorOutputDescriptors(session, pid);
+    } catch (cause) {
+      // Detach resumes the inferior. Its identity or descriptors may disappear
+      // before readback; only a previously identified process can prove its end.
+      if (!(await verifyOwnedInferiorsEnded([identity]))) throw cause;
+      session.knownInferiorIdentities.clear();
+      return { status: "no-inferior" };
+    }
+    return { status: "detached", outputSink: "durable" };
   }
 
-  async #verifyInferiorOutputConfiguration(
-    session: RizinDebugSession,
-    pid: string,
-  ): Promise<void> {
+  async #verifyDebuggerExitPolicy(session: RizinDebugSession): Promise<void> {
     const exitKills = (
       await this.#runInternalCommand(session, "e dbg.exitkills")
     ).trim();
     if (exitKills !== "false")
       throw new Error("Rizin dbg.exitkills readback did not confirm false.");
+  }
+
+  async #verifyInferiorOutputDescriptors(
+    session: RizinDebugSession,
+    pid: string,
+  ): Promise<void> {
     for (const descriptor of ["1", "2"]) {
       const descriptorPath = `/proc/${pid}/fd/${descriptor}`;
       const destination = await readlink(descriptorPath);
@@ -1369,34 +1376,16 @@ const parseRizinPtraceRows = (output: string): Array<[string, string]> => {
   return rows;
 };
 
-/** @internal Pure parser kept separately testable from live `/proc` access. */
-export const parseRizinProcStartTime = (statContents: string): string => {
-  const commandEnd = statContents.lastIndexOf(")");
-  if (commandEnd < 0)
-    throw new Error("Inferior process identity is malformed.");
-  const fieldsAfterCommand = statContents
-    .slice(commandEnd + 1)
-    .trim()
-    .split(/\s+/u);
-  const startTime = fieldsAfterCommand[19];
-  if (startTime === undefined || !/^\d+$/u.test(startTime))
-    throw new Error("Inferior process start time could not be verified.");
-  return startTime;
-};
-
 /** @internal Reject a PID that changed identity during inferior detach. */
 export const assertRizinProcessStartTimeStable = (
   before: string,
-  after: string,
+  after: string | null,
 ): void => {
   if (after !== before)
     throw new Error(
       "The inferior PID disappeared or was reused during detach verification.",
     );
 };
-
-const readProcStartTime = async (pid: string): Promise<string> =>
-  parseRizinProcStartTime(await readFile(`/proc/${pid}/stat`, "utf8"));
 
 const hasUnclaimedRizinFrames = (session: RizinDebugSession): boolean =>
   session.frames.length > 0 ||
@@ -1548,11 +1537,11 @@ const waitForCommandFrames = async (
 
 const truncateUtf8 = (value: string, maximumBytes: number): string => {
   if (maximumBytes <= 0) return "";
-  const bytes = Buffer.from(value, "utf8");
-  let end = Math.min(bytes.length, maximumBytes);
-  while (end > 0 && end < bytes.length && (bytes[end]! & 0xc0) === 0x80)
-    end -= 1;
-  return bytes.subarray(0, end).toString("utf8");
+  // A UTF-16 code unit needs at most three UTF-8 bytes. Buffer.write stops
+  // before a partial character; only decode bytes it actually initialized.
+  const bytes = Buffer.allocUnsafe(Math.min(value.length * 3, maximumBytes));
+  const written = bytes.write(value, "utf8");
+  return bytes.toString("utf8", 0, written);
 };
 
 const waitForFrame = (

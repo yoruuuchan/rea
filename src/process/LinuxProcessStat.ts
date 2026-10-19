@@ -1,8 +1,10 @@
+import type { ProcessLifecycle } from "./ProcessLifecycle.js";
+
 /** Native process facts parsed from one Linux `/proc/<pid>/stat` record. */
 export interface LinuxProcessStat {
   readonly pid: number;
   readonly startTime: string;
-  readonly lifecycle: "non-zombie" | "zombie";
+  readonly lifecycle: ProcessLifecycle | undefined;
   readonly parentPid: number;
   readonly processGroupId: number;
   readonly sessionId: number;
@@ -58,10 +60,28 @@ export const parseLinuxProcessStat = (
   )
     return undefined;
 
+  // Field 9 is task flags. PF_EXITING can precede state Z and procfs token
+  // access can already fail during that interval. Neither proves terminal exit.
+  const flagsText = fields[6];
+  const flags =
+    flagsText !== undefined && /^\d+$/u.test(flagsText)
+      ? Number(flagsText)
+      : Number.NaN;
+  const lifecycle: ProcessLifecycle | undefined =
+    state === "Z"
+      ? "zombie"
+      : state === "X" || state === "x"
+        ? "dead"
+        : !Number.isSafeInteger(flags)
+          ? undefined
+          : (flags & 0x00000004) !== 0
+            ? "exiting"
+            : "non-zombie";
+
   return {
     pid,
     startTime,
-    lifecycle: state === "Z" ? "zombie" : "non-zombie",
+    lifecycle,
     parentPid,
     processGroupId,
     sessionId,

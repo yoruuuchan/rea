@@ -138,7 +138,8 @@ const isJson = (essence: string | null): boolean =>
     essence.startsWith("application/") &&
     essence.endsWith("+json"));
 
-const isJsonLike = (essence: string | null): boolean =>
+/** JSON, `+json`, `text/plain` or `text/markdown`: the content types a replay parses as JSON. */
+export const isJsonLike = (essence: string | null): boolean =>
   isJson(essence) || (essence !== null && JSON_LIKE_TEXT.has(essence));
 
 const isApiPath = (path: string): boolean =>

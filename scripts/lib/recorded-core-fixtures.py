@@ -8,7 +8,7 @@ from elftools.elf.elffile import ELFFile
 from elftools.construct import Container
 from pwnlib.elf.datatypes import elf_prstatus_amd64
 
-source, directory, sentinel = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+source, directory, sentinel, unlisted = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 original = source.read_bytes()
 image = ELFFile(io.BytesIO(original))
 segments = list(image.iter_segments())
@@ -81,14 +81,15 @@ content = bytearray(original)
 start = descriptor_start(status) + elf_prstatus_amd64.pr_pid.offset
 content[start:start + ctypes.sizeof(ctypes.c_uint32)] = (0xfffffffe).to_bytes(4, "little")
 save("negative-pid", content)
-content = bytearray(original)
-content[start:start + ctypes.sizeof(ctypes.c_uint32)] = sentinel.to_bytes(4, "little")
-for note in notes:
-    if note.n_name == "CORE" and note.n_type == "NT_PRPSINFO":
-        # Build with unchanged pyelftools; no hard-coded PID offset or host file resolution.
-        raw = dict(note.n_desc, pr_pid=sentinel)
-        encoded = image.structs.Elf_Prpsinfo.build(Container(**raw))
-        offset = descriptor_start(note)
-        content[offset:offset + len(encoded)] = encoded
-save("historical-pid-collision", content)
+for name, pid in [("historical-pid-collision", sentinel), ("historical-pid-unlisted", unlisted)]:
+    content = bytearray(original)
+    content[start:start + ctypes.sizeof(ctypes.c_uint32)] = pid.to_bytes(4, "little")
+    for note in notes:
+        if note.n_name == "CORE" and note.n_type == "NT_PRPSINFO":
+            # Build with unchanged pyelftools; no hard-coded PID offset or host file resolution.
+            raw = dict(note.n_desc, pr_pid=pid)
+            encoded = image.structs.Elf_Prpsinfo.build(Container(**raw))
+            offset = descriptor_start(note)
+            content[offset:offset + len(encoded)] = encoded
+    save(name, content)
 print(json.dumps(files))

@@ -11,6 +11,7 @@ export class ArtifactOperationError extends AnalysisError {
     readonly operation:
       | "inventory_artifact"
       | "inspect_artifact"
+      | "inspect_desktop_application"
       | "inspect_pe_resources"
       | "extract_artifact"
       | "decode_interface_builder"

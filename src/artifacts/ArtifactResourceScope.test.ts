@@ -15,7 +15,7 @@ import {
   ArtifactReaderFailure,
   type ArtifactReader,
 } from "./ArtifactReader.js";
-import { translateArtifactFailure } from "./ArtifactProvider.js";
+import { translateArtifactFailure } from "./ArtifactOperationFailure.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 
 const deferred = <T>() => {

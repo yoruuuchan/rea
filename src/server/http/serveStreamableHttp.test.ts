@@ -158,6 +158,27 @@ const initializeRequest = (): Request =>
     }),
   });
 
+it("closes a bound listener without announcing it when startup aborts during factory creation", async () => {
+  const controller = new AbortController();
+  const reason = new Error("startup cancelled");
+  const lines: string[] = [];
+  const closed = vi.fn();
+  await expect(
+    serveStreamableHttp({
+      host: "127.0.0.1",
+      port: 0,
+      signal: controller.signal,
+      createMcpServer: () => {
+        controller.abort(reason);
+        return createEchoServer(closed);
+      },
+      logger: pino({}, { write: (line) => lines.push(line) }),
+    }),
+  ).rejects.toBe(reason);
+  expect(closed).toHaveBeenCalledTimes(1);
+  expect(lines.join("")).not.toContain("MCP transport listening");
+});
+
 it("announces the bound URL and serves one session at a time on one live instance", async () => {
   const { served, entries, messages, factoryCalls, shutdownHooks } =
     await start();

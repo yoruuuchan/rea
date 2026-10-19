@@ -409,6 +409,7 @@ const workflowAvailabilityFor = ({
   policy,
 }: AvailabilityContext): Availability | null => {
   if (
+    name === "inspect_desktop_application" ||
     name === "inspect_go_binary" ||
     name === "inspect_rust_binary" ||
     name === "inspect_electron_fuses"

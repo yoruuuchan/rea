@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
+/** Entry kinds or subtrees deliberately excluded by an artifact traversal. */
+export const artifactTraversalOmissionKindSchema = z.enum([
+  "fifo",
+  "socket",
+  "block-device",
+  "character-device",
+  "unsupported",
+  "directory-descendants",
+]);
+export type ArtifactTraversalOmissionKind = z.infer<
+  typeof artifactTraversalOmissionKindSchema
+>;
+
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const artifactIdSchema = prefixedDigestSchema("art");
 const occurrenceIdSchema = prefixedDigestSchema("occ");

@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 import type {
   ArtifactCommand,
   ArtifactInventoryCoverage,
+  ArtifactTraversalOmissionKind,
 } from "../domain/artifactGraph.js";
 import type { ZipPackageFormat } from "../domain/zipPackageFormat.js";
 import type {
@@ -106,13 +107,7 @@ export const sameArtifactEntry = (
 /** One entry or subtree deliberately excluded from a traversal. */
 export interface ArtifactTraversalOmission {
   readonly path: string;
-  readonly kind:
-    | "fifo"
-    | "socket"
-    | "block-device"
-    | "character-device"
-    | "unsupported"
-    | "directory-descendants";
+  readonly kind: ArtifactTraversalOmissionKind;
 }
 
 /** Facts from an exhausted traversal, separate from entry content certainty. */

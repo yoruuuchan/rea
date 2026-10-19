@@ -1,27 +1,58 @@
 import { resolve } from "node:path";
 
+import { sealOwnedJsonInput } from "./application/OwnedJsonInput.js";
 import { readJsonInputFile } from "./application/JsonInputFile.js";
 import { NonRegularFileReadError } from "./filesystem/RegularFile.js";
 import {
   AnalysisAccessDeniedError,
+  AnalysisCancelledError,
   AnalysisInputError,
 } from "./domain/analysisErrorCore.js";
 import { projectAnalysisError } from "./domain/analysisErrorProjection.js";
 import type { JsonValue } from "./domain/jsonValue.js";
 import { safeParseJson } from "./domain/safeJson.js";
 
-/** Parse inline JSON or one local JSON file for a CLI workflow. */
+/** Parse inline JSON or one local JSON file, honoring optional caller cancellation. */
 export const parseCliJsonInput = async (
   value: string,
   operation: string,
+  signal?: AbortSignal,
+  options?: { readonly snapshot?: boolean },
 ): Promise<
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: JsonValue }
 > => {
-  const inline = safeParseJson(value);
-  if (inline.ok) return { ok: true, value: inline.value };
+  const cancelled = () => ({
+    ok: false as const,
+    error: {
+      error: "Application workflow failed",
+      ...projectAnalysisError(new AnalysisCancelledError(operation)),
+    },
+  });
+  if (signal?.aborted) return cancelled();
   try {
-    const parsed = await readJsonInputFile(value, operation);
+    const inline = safeParseJson(value);
+    if (inline.ok) {
+      if (!options?.snapshot) return { ok: true, value: inline.value };
+      const sealed = await sealOwnedJsonInput(inline.value, operation, signal);
+      return sealed.ok
+        ? { ok: true, value: sealed.value }
+        : {
+            ok: false,
+            error: {
+              error: "Application workflow failed",
+              ...projectAnalysisError(sealed.error),
+            },
+          };
+    }
+    const parsed = await readJsonInputFile(
+      value,
+      operation,
+      signal,
+      undefined,
+      options?.snapshot ?? false,
+    );
+    if (parsed.ok && signal?.aborted) return cancelled();
     return parsed.ok
       ? { ok: true, value: parsed.value }
       : {
@@ -37,6 +68,12 @@ export const parseCliJsonInput = async (
           },
         };
   } catch (cause: unknown) {
+    if (
+      signal?.aborted &&
+      (cause === signal.reason ||
+        (cause instanceof Error && cause.name === "AbortError"))
+    )
+      return cancelled();
     const systemCode = accessDeniedSystemCode(cause);
     if (systemCode !== undefined)
       return jsonAccessDeniedError(value, operation, systemCode, cause);

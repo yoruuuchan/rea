@@ -2,7 +2,7 @@
 export interface RecordedTransportUrl {
   readonly origin: string | null;
   readonly path: string | null;
-  /** WHATWG query spelling, present only when explicitly selected for projection. */
+  /** WHATWG query spelling, retaining an explicit empty delimiter; selected only on request. */
   readonly query?: string;
   readonly credentials:
     | { readonly start: number; readonly end: number }
@@ -70,8 +70,13 @@ export const parseRecordedTransportUrl = (
     (special && value[authorityEnd] === "\\")
   )
     return { origin, path: null, credentials };
+  const hash = value.indexOf("#", authorityEnd);
+  const question = value.indexOf("?", authorityEnd);
+  const hasQuery = question >= 0 && (hash < 0 || question < hash);
   const query =
-    options.includeQuery === true ? { query: absolute!.search } : {};
+    options.includeQuery === true
+      ? { query: absolute!.search || (hasQuery ? "?" : "") }
+      : {};
   if (value[authorityEnd] !== "/")
     return { origin, path: "/", credentials, ...query };
   let pathEnd = authorityEnd;
@@ -85,7 +90,79 @@ export const parseRecordedTransportUrl = (
   };
 };
 
-/** WHATWG form-query name decoding; preserve order, repeats and empty names. */
-export const parseUrlQueryParameterNames = (
+/** WHATWG form decoding; native fallback preserves replacement behavior on malformed escapes/UTF-8. */
+const formComponent = (raw: string): string => {
+  if (!/[%+\uD800-\uDFFF]/u.test(raw)) return raw;
+  if (!/[\uD800-\uDFFF]/u.test(raw)) {
+    try {
+      return decodeURIComponent(raw.replaceAll("+", " "));
+    } catch {
+      // Malformed escapes and UTF-8 use the native replacement semantics below.
+    }
+  }
+  return new URLSearchParams(`value=${raw}`).get("value") ?? "";
+};
+
+/** Separator coordinates shared by name projection and selected-value matching. */
+function* queryFields(
   query: string,
-): IterableIterator<string> => new URLSearchParams(query).keys();
+): IterableIterator<readonly [number, number, number]> {
+  let start = query.startsWith("?") ? 1 : 0;
+  let equals = query.indexOf("=", start);
+  while (start < query.length) {
+    const separator = query.indexOf("&", start);
+    const end = separator < 0 ? query.length : separator;
+    if (end > start)
+      yield [start, equals >= start && equals < end ? equals : end, end];
+    start = end + 1;
+    if (equals >= 0 && equals < start) equals = query.indexOf("=", start);
+  }
+}
+
+/** Scan one field at a time; selection avoids decoding unrelated values. */
+export function* iterateUrlQueryParameters(
+  query: string,
+  selected?: ReadonlyMap<string, string>,
+): IterableIterator<[string, string]> {
+  for (const [start, nameEnd, end] of queryFields(query)) {
+    const name = formComponent(query.slice(start, nameEnd));
+    if (selected === undefined || selected.has(name))
+      yield [
+        name,
+        formComponent(nameEnd < end ? query.slice(nameEnd + 1, end) : ""),
+      ];
+  }
+}
+
+/** WHATWG form-query names, preserving order, repeats and empty names without decoding values. */
+export function* parseUrlQueryParameterNames(
+  query: string,
+): IterableIterator<string> {
+  for (const [start, nameEnd] of queryFields(query))
+    yield formComponent(query.slice(start, nameEnd));
+}
+
+/** Scan a raw path once, retaining only caller-selected coordinates. */
+export const recordedPathSegments = (
+  path: string,
+  indexes: Iterable<number>,
+): ReadonlyMap<number, string> => {
+  const needed = new Set<number>();
+  for (const index of indexes)
+    if (Number.isSafeInteger(index) && index >= 0) needed.add(index);
+  const result = new Map<number, string>();
+  if (needed.size === 0) return result;
+  let start = path.indexOf("/");
+  if (start < 0) return result;
+  start += 1;
+  let index = 0;
+  while (needed.size > 0) {
+    const end = path.indexOf("/", start);
+    if (needed.delete(index))
+      result.set(index, path.slice(start, end < 0 ? path.length : end));
+    if (end < 0) break;
+    start = end + 1;
+    index += 1;
+  }
+  return result;
+};

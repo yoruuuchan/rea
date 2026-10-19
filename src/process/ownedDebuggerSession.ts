@@ -19,7 +19,10 @@ export interface OwnedInferiorIdentity {
 
 export type ProcessStartTimeReader = (pid: string) => Promise<string | null>;
 
-const readLinuxProcessStartTime: ProcessStartTimeReader = async (pid) => {
+/** Read one Linux identity; absence is distinct from unreadable or malformed data. */
+export const readLinuxProcessStartTime: ProcessStartTimeReader = async (
+  pid,
+) => {
   if (process.platform !== "linux")
     throw new Error(
       "Inferior process identity verification requires Linux /proc.",

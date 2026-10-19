@@ -1,5 +1,21 @@
 # Native, managed, and packaged artifacts
 
+## Desktop installation directories
+
+When an installation directory is supplied and its runtime is unknown, use
+`inspect_desktop_application` with its absolute path. Default MCP summary
+delivery retains complete Evidence. Read `files`, `omissions`, `candidates`, `components` or
+`next_probes` with `inspect_analysis_view` kind `desktop-application`, selecting
+exact paths, batched file/omission IDs or families and only needed fields and pages.
+Summary `probe_issues` retains counts and bounded previews. Select files with
+`has_issues: true` and fields `path`, `read_status`, `issues` to retrieve exact
+failures directly; preview text is display data, while `file_id` selects full facts. Preserve source
+coverage, read-range identity and unknowns; directory snapshot identity is not
+a digest of every file's contents. Component path markers do not establish
+runtime presence. For compact CLI output, use
+`inspect-desktop-application PATH --detail summary --evidence_output BUNDLE`.
+See [desktop installations](https://github.com/morluto/rea/blob/main/docs/desktop-applications.md).
+
 ## Go build metadata
 
 Use `inspect_go_binary` for an explicit local ELF, PE or thin Mach-O when the

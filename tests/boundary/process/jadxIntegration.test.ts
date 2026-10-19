@@ -917,9 +917,21 @@ it("retains typed memory failure through failed cleanup and restores it after re
     "heap-failure",
     () => fails,
   );
+  const originalRootClose = PrivateRuntimeRoot.prototype.close;
+  const workspaceCloseCause = new Error("fixture workspace close failure");
+  let workspaceCloseFails = true;
+  let workspaceCloseAttempts = 0;
   const rootClose = vi
     .spyOn(PrivateRuntimeRoot.prototype, "close")
-    .mockRejectedValueOnce(new Error("fixture workspace close failure"));
+    .mockImplementation(function (this: PrivateRuntimeRoot) {
+      // Independent native helpers own their own roots. Keep the acquired
+      // Android workspace's failure active until the test explicitly clears it.
+      if (this.path === launches[0]?.cwd) {
+        workspaceCloseAttempts += 1;
+        if (workspaceCloseFails) return Promise.reject(workspaceCloseCause);
+      }
+      return originalRootClose.call(this);
+    });
   try {
     const result = await service.execute("inspect_android_package", {
       path: apk,
@@ -935,11 +947,14 @@ it("retains typed memory failure through failed cleanup and restores it after re
     });
     const workspace = launches[0]?.cwd;
     expect(failure.cleanupResources).toContain(workspace);
+    expect(workspaceCloseAttempts).toBe(0);
     fails = false;
     await expect(provider.close()).rejects.toMatchObject({
       cleanupIncomplete: true,
     });
     expect(failure.cleanupResources).toEqual([workspace]);
+    expect(workspaceCloseAttempts).toBeGreaterThan(0);
+    workspaceCloseFails = false;
     await provider.close();
     expect(failure.cleanupIncomplete).toBe(false);
     expect(failure.cleanupResources).toEqual([]);
@@ -955,6 +970,7 @@ it("retains typed memory failure through failed cleanup and restores it after re
     await verifyCleanup(launches);
   } finally {
     rootClose.mockRestore();
+    workspaceCloseFails = false;
     fails = false;
     await provider.close();
   }

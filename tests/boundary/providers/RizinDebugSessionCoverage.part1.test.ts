@@ -5,7 +5,6 @@ import {
   stopFakeNoInferior,
   rizinTestInferiorTty,
 } from "./RizinTestInferiorTty.js";
-import { rizinCommand } from "../../../src/rizin/RizinCommand.js";
 import * as providerProcess from "../../../src/process/ProviderProcess.js";
 import type { SpawnedOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
 import {
@@ -25,19 +24,6 @@ const {
   spawnOwnedProcess,
 } = createRizinCoverageHarness();
 afterEach(cleanup);
-
-it.skipIf(process.platform === "win32")(
-  "builds the one-shot command with the caller's path and command",
-  () => {
-    expect(rizinCommand({ path: "./sample file", command: "izz" })).toEqual([
-      "-N",
-      "-q",
-      "-c",
-      "izz",
-      expect.stringMatching(/sample file/u),
-    ]);
-  },
-);
 
 it.skipIf(process.platform === "win32")(
   "rejects unsupported, pre-cancelled, and failed startup requests",

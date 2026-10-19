@@ -1,3 +1,4 @@
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it } from "vitest";
 import { z } from "zod";
 
@@ -135,4 +136,21 @@ it("advertises every portable base64 constraint and keeps large inputs stack-saf
     ).toBe(true);
   }
   expect(isCanonicalBase64(encoded)).toBe(true);
+});
+
+it("validates complete projected canonical schemas at the encoded-input budget", () => {
+  const projected = z.toJSONSchema(canonicalBase64Schema, {
+    target: "draft-2020-12",
+  });
+  const validate = new Ajv2020({ strict: true }).compile(projected);
+  const encoded = Buffer.alloc(24 * 1024 * 1024 - 3, 0x81).toString("base64");
+  for (const { value, expected } of [
+    { value: encoded, expected: true },
+    { value: `${encoded.slice(0, -1)}!`, expected: false },
+    { value: `${encoded.slice(0, -3)}R==`, expected: false },
+    { value: `${encoded}A`, expected: false },
+  ]) {
+    expect(canonicalBase64Schema.safeParse(value).success).toBe(expected);
+    expect(validate(value)).toBe(expected);
+  }
 });

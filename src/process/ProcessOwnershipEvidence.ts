@@ -1,3 +1,4 @@
+import { processIdentityHasExited } from "./ProcessLifecycle.js";
 import type {
   ProcessIdentityObservation,
   ProcessNativeRelationObservation,
@@ -164,32 +165,50 @@ export class ProcessOwnershipEvidenceOwner {
       number,
       Extract<ProcessIdentityObservation, { readonly state: "readable" }>
     >();
-    const scopeTokenMatchedPids = new Set<number>();
-    for (const fact of options.scopeFacts ?? []) {
-      const current = sameGeneration.get(fact.process.pid);
+    const scopeOwnedPids = new Set<number>();
+    // Keep the original batch together: retries can reparent a child after its
+    // verified parent exits. Historical parent proof is scope evidence only;
+    // it neither establishes current liveness nor authorizes a signal.
+    for (const observed of options.scopeFacts ?? facts) {
+      const fact = observed.beforeExitSettlement ?? observed;
       if (
         fact.state !== "same-generation" ||
-        fact.identityAfter.state !== "readable" ||
-        current?.identity !== fact.identityAfter.identity
+        fact.identityAfter.state !== "readable"
       )
         continue;
       scopeGenerations.set(fact.process.pid, fact.identityAfter);
       if (
         fact.identityBefore.state === "readable" &&
-        current?.identity === fact.identityBefore.identity
+        fact.identityAfter.identity === fact.identityBefore.identity
       )
         scopeBeforeGenerations.set(fact.process.pid, fact.identityBefore);
-      if (fact.token.state === "readable" && fact.token.runId === options.runId)
-        scopeTokenMatchedPids.add(fact.process.pid);
+      // Capture earlier proof before applying terminal observations below.
+      // Its generation must match this historical native observation exactly.
+      const previous = this.#candidates.get(fact.process.pid);
+      if (
+        (fact.token.state === "readable" &&
+          fact.token.runId === options.runId) ||
+        (previous?.applicability === "token-verified" &&
+          previous.identity === fact.identityAfter.identity)
+      )
+        scopeOwnedPids.add(fact.process.pid);
     }
     const related = (pid: number) => {
       const current =
         findScopeEvidence(pid, sameGeneration, tokenMatchedPids) ??
         findScopeEvidence(pid, sameGenerationBefore, tokenMatchedPids);
       if (current !== undefined) return current;
+      // The child must still be the generation observed in that original
+      // batch. A reused PID cannot inherit its predecessor's historical scope.
+      const original = scopeGenerations.get(pid);
+      if (
+        original === undefined ||
+        sameGeneration.get(pid)?.identity !== original.identity
+      )
+        return undefined;
       const initial =
-        findScopeEvidence(pid, scopeGenerations, scopeTokenMatchedPids) ??
-        findScopeEvidence(pid, scopeBeforeGenerations, scopeTokenMatchedPids);
+        findScopeEvidence(pid, scopeGenerations, scopeOwnedPids) ??
+        findScopeEvidence(pid, scopeBeforeGenerations, scopeOwnedPids);
       return initial === undefined
         ? undefined
         : "previously-related-generation";
@@ -208,9 +227,7 @@ export class ProcessOwnershipEvidenceOwner {
           fact.identityAfter.state === "readable" &&
           fact.identityAfter.identity !== previous.identity) ||
         (fact.state === "same-generation" &&
-          fact.identityAfter.state === "readable" &&
-          fact.identityAfter.lifecycle?.state === "observed" &&
-          fact.identityAfter.lifecycle.lifecycle === "zombie")
+          processIdentityHasExited(fact.identityAfter))
       ) {
         this.#candidates.delete(pid);
         retiredPids.add(pid);
@@ -274,9 +291,7 @@ export class ProcessOwnershipEvidenceOwner {
         (retiredPids.has(pid) && fact.state !== "same-generation") ||
         fact.state === "absent" ||
         (fact.state === "same-generation" &&
-          fact.identityAfter.state === "readable" &&
-          fact.identityAfter.lifecycle?.state === "observed" &&
-          fact.identityAfter.lifecycle.lifecycle === "zombie")
+          processIdentityHasExited(fact.identityAfter))
       )
         continue;
       const identity = fact.identityAfter;

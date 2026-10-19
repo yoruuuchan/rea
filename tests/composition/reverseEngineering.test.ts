@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -274,9 +274,10 @@ it("marks signal-terminated provider commands as unknown completion", async () =
 });
 
 describe("Rizin command service", () => {
-  it("runs Rizin with user scripts suppressed while retaining plugins and preserves nonzero output", async () => {
+  it("defaults Rizin to plain presentation and preserves caller-selected colour on nonzero exits", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rea-rizin-"));
-    const path = join(directory, "fixture.bin");
+    const path = join(directory, "fixture with spaces.bin");
+    const callerPath = relative(process.cwd(), path);
     await writeFile(path, "fixture");
     const calls: { command: string; args: readonly string[] }[] = [];
     const service = new ReverseEngineeringService({
@@ -291,7 +292,7 @@ describe("Rizin command service", () => {
           killed: boolean;
         };
         Object.assign(failure, {
-          stdout: "partial data",
+          stdout: "\u001b[31mpartial data\u001b[0m\n",
           stderr: "command error",
           code: 2,
           signal: null,
@@ -302,17 +303,26 @@ describe("Rizin command service", () => {
     });
 
     try {
-      const result = await service.executeRizinCommand({ path, command: "iI" });
+      const command = "e scr.color=1;pd 1";
+      const result = await service.executeRizinCommand({
+        path: callerPath,
+        command,
+      });
       expect(result.ok).toBe(true);
       if (!result.ok) return;
+      const lookupPath = result.value.subject?.local_path;
+      expect(isAbsolute(lookupPath ?? "")).toBe(true);
+      expect(result.value.subject?.digest.sha256).toBe(
+        createHash("sha256").update("fixture").digest("hex"),
+      );
       expect(calls).toEqual([
         {
           command: "/tools/rizin",
-          args: ["-N", "-q", "-c", "iI", path],
+          args: ["-N", "-q", "-e", "scr.color=0", "-c", command, lookupPath],
         },
       ]);
       expect(result.value.raw_result).toMatchObject({
-        stdout: "partial data",
+        stdout: "\u001b[31mpartial data\u001b[0m\n",
         stderr: "command error",
         exit_code: 2,
         completion_status: "complete",
@@ -320,14 +330,19 @@ describe("Rizin command service", () => {
       expect(result.value.limitations.join(" ")).not.toContain(
         "terminated by signal",
       );
+      expect(result.value.normalized_result).toMatchObject({
+        stdout: "\u001b[31mpartial data\u001b[0m\n",
+      });
       expect(result.value.limitations).toContain(
         "Rizin commands and retained plugins may read files or access network resources outside the selected artifact; those external inputs are not bound to Evidence.",
       );
       expect(result.value.limitations).toHaveLength(4);
       expect(result.value.parameters).toMatchObject({
-        command: "iI",
+        path: callerPath,
+        command,
         provider_executable: "/tools/rizin",
       });
+      expect(result.value.parameters.command_arguments).toEqual(calls[0]?.args);
       expect(result.value.provider.id).toBe("rizin");
     } finally {
       await rm(directory, { recursive: true, force: true });

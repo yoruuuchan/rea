@@ -793,8 +793,42 @@ it.each([
     { code: true, sqlite: true, runtime: true },
   ],
   [
+    "src/application/environment/environmentExport.ts",
+    {
+      code: true,
+      runtime: true,
+      agentenv: true,
+      browser: false,
+      package: false,
+    },
+  ],
+  [
+    "scripts/verify-agentenv-environment.mjs",
+    { code: true, agentenv: true, runtime: false, package: false },
+  ],
+  [
+    "src/application/OwnedJsonInput.ts",
+    { code: true, agentenv: true, runtime: true, package: false },
+  ],
+  [
+    "src/artifacts/SafeOutputTree.ts",
+    { code: true, agentenv: true, runtime: true },
+  ],
+  [
+    "src/cliJsonInput.ts",
+    { code: true, agentenv: true, runtime: true, package: false },
+  ],
+  [
+    "tests/boundary/process/agentenvVerifierIdentity.test.ts",
+    { code: true, agentenv: false, runtime: false, package: false },
+  ],
+  [
+    ".github/workflows/real-agentenv.yml",
+    { code: false, agentenv: true, workflows: true, package: false },
+  ],
+  [
     "src/domain/javascript/example.ts",
-    { code: true, sqlite: false, ghidra_bridge: false },
+    { code: true, sqlite: false, ghidra_bridge: false, agentenv: false },
   ],
 ])("selects the appropriate lanes for %s", async (path, expected) => {
   const { directory, base } = await fixture();
@@ -893,6 +927,7 @@ it.each([
   ["web_network", "real-web-network-captures"],
   ["web_runtime", "real-web-runtime"],
   ["web_source_map", "real-web-source-map"],
+  ["agentenv", "real-agentenv"],
   ["nativeaot", "nativeaot-fixtures"],
   ["ghidra_bridge", "ghidra-bridge-sources"],
   ["website", "website-check"],

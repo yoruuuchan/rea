@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
-import { translateArtifactFailure } from "../../../src/artifacts/ArtifactProvider.js";
+import { translateArtifactFailure } from "../../../src/artifacts/ArtifactOperationFailure.js";
 import {
   ArtifactReaderFailure,
   type ArtifactEntry,

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   cleanupOwnedProcessGroup,
+  verifyNoTokenOwnedProcesses,
   type ProcessOwnershipHost,
   type ProcessRunTokenObservation,
   type ProcessTableEntry,
@@ -352,4 +353,42 @@ it("retries a moved token-owned helper group without signaling a released peer a
   expect(retry).toEqual({ cleaned: true, signaled: true });
   expect(signalGroups).toEqual([100, 200, 300]);
   expect(owner.evidenceOwner.candidates).toEqual([]);
+});
+
+it("settles transient token reads without borrowing the application timer", async () => {
+  const fixture = makeHost(() => undefined);
+  let reads = 0;
+  const host: ProcessOwnershipHost = {
+    ...fixture.host,
+    runTokens: async (entries) => {
+      reads += 1;
+      return new Map(
+        entries.map(({ pid }) => [
+          pid,
+          reads === 1
+            ? {
+                state: "unavailable" as const,
+                reason: "environment_errno_EACCES",
+              }
+            : { state: "readable" as const, runId: undefined },
+        ]),
+      );
+    },
+  };
+  const applicationTimer = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation(() => {
+      throw new Error(
+        "application timer must not mediate native ownership retries",
+      );
+    });
+  try {
+    await expect(
+      verifyNoTokenOwnedProcesses("sweep-run", host),
+    ).resolves.toEqual({ cleaned: true, signaled: false });
+    expect(reads).toBe(2);
+    expect(applicationTimer).not.toHaveBeenCalled();
+  } finally {
+    applicationTimer.mockRestore();
+  }
 });

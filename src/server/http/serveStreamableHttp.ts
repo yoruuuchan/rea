@@ -11,7 +11,6 @@ import {
   type Server,
 } from "@modelcontextprotocol/server";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -25,6 +24,7 @@ import {
   UnsupportedRequestTargetError,
   writeWebResponse,
 } from "./nodeHttpBridge.js";
+import { listenHttpServer } from "./listenHttpServer.js";
 import { StreamableHttpListenError } from "./streamableHttpListenError.js";
 import {
   NodeHttpRequestOwner,
@@ -47,6 +47,8 @@ export interface StreamableHttpRoute {
 export interface ServeStreamableHttpOptions {
   readonly host: string;
   readonly port: number;
+  /** Cancellation during listener startup; later shutdown remains owned by close(). */
+  readonly signal?: AbortSignal;
   /** Called once; the instance serves every session in turn on a fresh transport. */
   readonly createMcpServer: (
     context: McpRequestContext,
@@ -105,11 +107,17 @@ export const hostHeaderAllowlist = (
   return [...new Set([...localhostAllowedHostnames(), ...known])];
 };
 
-const jsonError = (status: number, code: number, message: string): Response =>
+/** A JSON-RPC error answered outside any session, so its id is null. */
+export const jsonRpcErrorResponse = (
+  status: number,
+  code: number,
+  message: string,
+): Response =>
   Response.json(
     { jsonrpc: "2.0", error: { code, message }, id: null },
     { status },
   );
+const jsonError = jsonRpcErrorResponse;
 
 const protocolOf = (instance: McpServer | Server): Server =>
   "server" in instance ? instance.server : instance;
@@ -518,9 +526,13 @@ export const serveStreamableHttp = async (
     () => requests.drain(),
   ]);
   try {
-    httpServer.listen(port, host);
-    await once(httpServer, "listening");
+    await listenHttpServer(httpServer, host, port, options.signal);
+    options.signal?.throwIfAborted();
   } catch (cause: unknown) {
+    if (options.signal?.aborted && cause === options.signal.reason) {
+      if (httpServer.listening) await prepareTransportShutdown();
+      throw cause;
+    }
     throw new StreamableHttpListenError(cause);
   }
   const bound = httpServer.address();
@@ -562,6 +574,18 @@ export const serveStreamableHttp = async (
     options.sessionDrainTimeoutMs,
   );
   slot = live;
+  const prepareShutdown = stagedClose([
+    prepareTransportShutdown,
+    () => live.close(),
+  ]);
+  const close = stagedClose([
+    prepareShutdown,
+    ...(closeInstance ? [() => instance.close()] : []),
+  ]);
+  if (options.signal?.aborted) {
+    await close();
+    throw options.signal.reason;
+  }
   if (allowedHosts === undefined)
     logger?.warn(
       { host },
@@ -571,14 +595,6 @@ export const serveStreamableHttp = async (
   logger
     ?.child({}, { level: "info" })
     .info({ transport: "streamable-http", url }, "MCP transport listening");
-  const prepareShutdown = stagedClose([
-    prepareTransportShutdown,
-    () => live.close(),
-  ]);
-  const close = stagedClose([
-    prepareShutdown,
-    ...(closeInstance ? [() => instance.close()] : []),
-  ]);
   return { url, prepareShutdown, close };
 };
 

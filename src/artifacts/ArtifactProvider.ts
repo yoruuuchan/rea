@@ -1,3 +1,6 @@
+import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { translateArtifactFailure } from "./ArtifactOperationFailure.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   createAnalysisExecution,
@@ -27,21 +30,14 @@ import {
 } from "../domain/binaryTargetTypes.js";
 import {
   AnalysisCapabilityUnavailableError,
-  AnalysisCancelledError,
   AnalysisInputError,
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
-import { ArtifactOperationError } from "../domain/artifactOperationError.js";
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { interfaceBuilderLimitsSchema } from "../domain/apple/interfaceBuilderGraph.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
-import {
-  artifactFileCancellationCause,
-  bindArtifactFileCleanup,
-} from "./ArtifactFileOperation.js";
 import { artifactCapabilities } from "./ArtifactProviderMetadata.js";
 import { ARTIFACT_GRAPH_PROVIDER } from "../application/InvestigationProviders.js";
 import { createEvidence } from "../domain/evidence.js";
@@ -407,42 +403,6 @@ const isArtifactOperation = (
   ARTIFACT_ANALYSIS_OPERATIONS.includes(
     operation as (typeof ARTIFACT_ANALYSIS_OPERATIONS)[number],
   );
-
-/** Translate one artifact boundary failure while retaining cleanup evidence. */
-export const translateArtifactFailure = (
-  operation: ArtifactAnalysisOperation,
-  cause: unknown,
-): AnalysisError => {
-  if (cause instanceof ArtifactReaderFailure) {
-    const error = new ArtifactOperationError(
-      operation,
-      cause.reason,
-      cause.details,
-      cause.message,
-      {
-        cause:
-          cause.reason === "cancelled"
-            ? artifactFileCancellationCause(cause)
-            : cause,
-        ...(cause.cleanup === undefined ? {} : { cleanup: cause.cleanup }),
-        ...(cause.partialObservation === undefined
-          ? {}
-          : { partialObservation: cause.partialObservation }),
-      },
-    );
-    bindArtifactFileCleanup(cause, error);
-    return error;
-  }
-  // Caller-selection and unsupported-target failures are already typed; keep
-  // their correction details instead of reducing them to an I/O failure.
-  if (
-    cause instanceof AnalysisInputError ||
-    cause instanceof AnalysisCancelledError ||
-    cause instanceof AnalysisUnsupportedTargetError
-  )
-    return cause;
-  return new ArtifactOperationError(operation, "io");
-};
 
 const subjectFor = (
   path: string,

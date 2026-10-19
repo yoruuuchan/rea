@@ -1,4 +1,13 @@
 import { readFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  processIdentityHasExited,
+  processIdentityIsExiting,
+  PROCESS_CLEANUP_VERIFICATION_GRACE_MS,
+  PROCESS_CLEANUP_VERIFICATION_INTERVAL_MS,
+  type ProcessExitSettlementBudget,
+} from "./ProcessLifecycle.js";
 import { parseLinuxProcessStat } from "./LinuxProcessStat.js";
 import { parseLinuxProcessEffectiveUid } from "./LinuxProcessStatus.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
@@ -63,11 +72,7 @@ export const observeOwnedProcessGroups = async (
       if (retainedPids.has(process.pid)) return true;
       const identity = firstIdentities.get(process.pid);
       if (identity?.state === "readable") {
-        if (
-          identity.lifecycle?.state === "observed" &&
-          identity.lifecycle.lifecycle === "zombie"
-        )
-          return false;
+        if (processIdentityHasExited(identity)) return false;
         if (
           identity.relation?.state === "observed" &&
           groupIds.includes(identity.relation.processGroupId)
@@ -116,12 +121,7 @@ export const observeOwnedProcessGroups = async (
         fact.identityAfter.relation?.state === "observed"
           ? fact.identityAfter.relation.processGroupId
           : undefined;
-      if (
-        fact.identityAfter.state === "readable" &&
-        fact.identityAfter.lifecycle?.state === "observed" &&
-        fact.identityAfter.lifecycle.lifecycle === "zombie"
-      )
-        continue;
+      if (processIdentityHasExited(fact.identityAfter)) continue;
       const candidateGroups = groupIds.filter(
         (groupId) =>
           nativeGroupId === groupId ||
@@ -301,10 +301,7 @@ const observeNativeOwnedProcessLineage = async (
       ownership,
       `owned launcher identity could not be read: ${launcherIdentity?.reason ?? "identity observation was omitted"}`,
     );
-  if (
-    launcherIdentity.lifecycle?.state === "observed" &&
-    launcherIdentity.lifecycle.lifecycle === "zombie"
-  )
+  if (processIdentityHasExited(launcherIdentity))
     return unavailableLineage(ownership, "owned launcher is not live");
   const nativeLauncher = processWithNativeRelation(launcher, launcherIdentity);
   if (nativeLauncher === undefined)
@@ -318,12 +315,7 @@ const observeNativeOwnedProcessLineage = async (
 
   const nativeProcesses = processes.flatMap((process) => {
     const identity = initialIdentities.get(process.pid);
-    if (
-      identity?.state === "readable" &&
-      identity.lifecycle?.state === "observed" &&
-      identity.lifecycle.lifecycle === "zombie"
-    )
-      return [];
+    if (processIdentityHasExited(identity)) return [];
     const nativeProcess =
       identity?.state === "readable"
         ? processWithNativeRelation(process, identity)
@@ -371,11 +363,7 @@ const observeNativeOwnedProcessLineage = async (
         ownership,
         `process identity changed or became unavailable during lineage validation for PID ${String(member.pid)}`,
       );
-    if (
-      fact.identityAfter.state === "readable" &&
-      fact.identityAfter.lifecycle?.state === "observed" &&
-      fact.identityAfter.lifecycle.lifecycle === "zombie"
-    ) {
+    if (processIdentityHasExited(fact.identityAfter)) {
       if (member.pid === ownership.leaderPid)
         return unavailableLineage(
           ownership,
@@ -543,6 +531,57 @@ export const readNativeProcessIdentityMap = async (
   readIdentityFacts(processes, host, "before", signal);
 
 /**
+ * Wait only for positively observed native exit-in-progress. Never infer exit
+ * from EACCES or ps text, enumerate the process table, or follow a reused PID.
+ * A deadline, unavailable read or changed generation remains explicit evidence.
+ */
+export const settleExitingProcessIdentities = async (
+  processes: readonly ProcessTableEntry[],
+  host: ProcessOwnershipHost,
+  initial: ReadonlyMap<number, ProcessIdentityObservation>,
+  signal?: AbortSignal,
+  budget: ProcessExitSettlementBudget = { deadline: undefined },
+): Promise<ReadonlyMap<number, ProcessIdentityObservation>> => {
+  signal?.throwIfAborted();
+  let pending = processes.filter(({ pid }) =>
+    processIdentityIsExiting(initial.get(pid)),
+  );
+  if (pending.length === 0) return initial;
+  const identities = new Map(initial);
+  const deadline = (budget.deadline ??=
+    performance.now() + PROCESS_CLEANUP_VERIFICATION_GRACE_MS);
+  while (pending.length > 0) {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) break;
+    try {
+      await delay(
+        Math.min(PROCESS_CLEANUP_VERIFICATION_INTERVAL_MS, remaining),
+        undefined,
+        signal === undefined ? undefined : { signal },
+      );
+    } catch (cause: unknown) {
+      signal?.throwIfAborted();
+      throw cause;
+    }
+    const refreshed = await readNativeProcessIdentityMap(pending, host, signal);
+    for (const { pid } of pending)
+      identities.set(pid, identityFact(refreshed, pid, "after"));
+    pending = pending.filter(({ pid }) => {
+      const first = initial.get(pid);
+      const current = identities.get(pid);
+      return (
+        first?.state === "readable" &&
+        current?.state === "readable" &&
+        processIdentityIsExiting(current) &&
+        current.identity === first.identity
+      );
+    });
+  }
+  signal?.throwIfAborted();
+  return identities;
+};
+
+/**
  * Read identity, token, then identity for caller-provided rows. This owner
  * never enumerates the process table; a token is tied to a generation only
  * when both native identity observations match.
@@ -553,6 +592,7 @@ export const readProcessOwnershipFacts = async (
   signal?: AbortSignal,
   options: {
     readonly identityBefore?: ReadonlyMap<number, ProcessIdentityObservation>;
+    readonly exitSettlement?: ProcessExitSettlementBudget;
   } = {},
 ): Promise<readonly ProcessOwnershipFact[]> => {
   signal?.throwIfAborted();
@@ -591,20 +631,30 @@ export const readProcessOwnershipFacts = async (
       .filter(({ pid }) => tokens.get(pid)?.state !== "readable")
       .map(({ pid }) => pid),
   );
-  const identityAfter = await readIdentityFacts(
+  const observedAfter = await readIdentityFacts(
     processes,
     host,
     "after",
     signal,
     effectiveUidPids,
   );
+  const identityAfter = await settleExitingProcessIdentities(
+    processes,
+    host,
+    observedAfter,
+    signal,
+    options.exitSettlement,
+  );
   signal?.throwIfAborted();
-  const facts = processes.map((process): ProcessOwnershipFact => {
+  const deriveFact = (
+    process: ProcessTableEntry,
+    observation: ProcessIdentityObservation | undefined,
+  ): ProcessOwnershipFact => {
     const before = identityBefore.get(process.pid) ?? {
       state: "unavailable" as const,
       reason: "process identity was not returned during before observation",
     };
-    const after = identityAfter.get(process.pid) ?? {
+    const after = observation ?? {
       state: "unavailable" as const,
       reason: "process identity was not returned during after observation",
     };
@@ -629,6 +679,14 @@ export const readProcessOwnershipFacts = async (
       token,
       identityAfter: after,
     };
+  };
+  const facts = processes.map((process): ProcessOwnershipFact => {
+    const after = identityAfter.get(process.pid);
+    const original = observedAfter.get(process.pid);
+    const fact = deriveFact(process, after);
+    return after === original
+      ? fact
+      : { ...fact, beforeExitSettlement: deriveFact(process, original) };
   });
   signal?.throwIfAborted();
   return facts;
@@ -741,10 +799,16 @@ export const createSystemProcessOwnershipHost = (
                 state: "readable" as const,
                 identity: `linux-starttime:${facts.startTime}`,
                 ...(effectiveUid === undefined ? {} : { effectiveUid }),
-                lifecycle: {
-                  state: "observed" as const,
-                  lifecycle: facts.lifecycle,
-                },
+                lifecycle:
+                  facts.lifecycle === undefined
+                    ? {
+                        state: "unavailable" as const,
+                        reason: "malformed_proc_flags",
+                      }
+                    : {
+                        state: "observed" as const,
+                        lifecycle: facts.lifecycle,
+                      },
                 relation: {
                   state: "observed" as const,
                   parentPid: facts.parentPid,

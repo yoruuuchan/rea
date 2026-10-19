@@ -7,6 +7,7 @@ const statRecord = (
     readonly pid?: string;
     readonly command?: string;
     readonly state?: string;
+    readonly flags?: string;
     readonly parentPid?: string;
     readonly processGroupId?: string;
     readonly sessionId?: string;
@@ -20,6 +21,7 @@ const statRecord = (
     options.sessionId ?? "19",
   ];
   while (fields.length < 19) fields.push("0");
+  fields[6] = options.flags ?? "0";
   fields.push(options.startTime ?? "987654");
   return `${options.pid ?? "42"} (${options.command ?? "worker"}) ${fields.join(" ")}`;
 };
@@ -56,3 +58,38 @@ it("distinguishes zombie lifecycle and rejects malformed or missing identity fie
     undefined,
   );
 });
+
+it.each(["R", "S", "D"])(
+  "retains PF_EXITING separately from terminal state %s",
+  (state) => {
+    expect(
+      parseLinuxProcessStat(statRecord({ state, flags: "4194316" }))?.lifecycle,
+    ).toBe("exiting");
+    expect(
+      parseLinuxProcessStat(statRecord({ state, flags: "4194312" }))?.lifecycle,
+    ).toBe("non-zombie");
+  },
+);
+
+it.each(["Z", "X", "x"])(
+  "recognizes terminal native state %s independently of flags",
+  (state) => {
+    expect(
+      parseLinuxProcessStat(statRecord({ state, flags: "invalid" }))?.lifecycle,
+    ).toBe(state === "Z" ? "zombie" : "dead");
+  },
+);
+
+it.each(["invalid", "-1", "4.1", "9007199254740992"])(
+  "preserves identity and relations with unknown flags %s",
+  (flags) => {
+    expect(parseLinuxProcessStat(statRecord({ flags }))).toEqual({
+      pid: 42,
+      startTime: "987654",
+      lifecycle: undefined,
+      parentPid: 17,
+      processGroupId: 18,
+      sessionId: 19,
+    });
+  },
+);

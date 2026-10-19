@@ -20,6 +20,7 @@ import {
 } from "../../../src/contracts/javascript/javascriptApplicationWorkflowExamples.js";
 import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
+import { absoluteCallerPath } from "../../../src/filesystem/callerPath.js";
 import {
   javascriptApplicationAnalysisResultSchema,
   type JavaScriptApplicationAnalysisResult,
@@ -640,16 +641,18 @@ it("resolves source-map URL paths once without changing their declarations", asy
 }, 20_000);
 
 describe("JavaScript application path CLI", () => {
-  it("accepts a relative local application path and preserves canonical Evidence identity", async () => {
+  it("retains the admitted relative CLI selection and canonical artifact identity", async () => {
     const root = await createTestTempDirectory("rea-relative-application-cli-");
     await writeFile(join(root, "app.js"), "export const value = 1;\n");
-    const absolute = await analyzeJavaScriptApplication({ input_path: root });
+    const relativePath = relative(process.cwd(), root);
+    const admittedPath = absoluteCallerPath(relativePath);
+    const absolute = await analyzeJavaScriptApplication({
+      input_path: admittedPath,
+    });
     if (!absolute.ok) throw absolute.error;
     const absoluteAnalysis = javascriptApplicationAnalysisResultSchema.parse(
       absolute.value.normalized_result,
     );
-
-    const relativePath = relative(process.cwd(), root);
     const fromCli = await runCli([
       "analyze-javascript-application",
       relativePath,
@@ -658,6 +661,7 @@ describe("JavaScript application path CLI", () => {
 
     expect(fromCli).toMatchObject({
       evidence_id: absolute.value.evidence_id,
+      parameters: { input_path: admittedPath },
       normalized_result: {
         input_path: absoluteAnalysis.input_path,
       },

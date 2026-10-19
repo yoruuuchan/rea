@@ -22,6 +22,8 @@ export interface RegularFileReadOptions {
   readonly signal?: AbortSignal | undefined;
   readonly symlinks?: "follow" | "reject";
   readonly resources?: ArtifactResourceScope;
+  /** Runs on the opened file's own state before any byte is read; throw to refuse the read. */
+  readonly admit?: (state: Stats) => void;
 }
 
 export class InvalidUtf8FileError extends TypeError {
@@ -223,6 +225,7 @@ const readRegularFileContent = <Value>(
   withRegularFile(
     path,
     async (handle, stats) => {
+      options.admit?.(stats);
       const bytes = await readBoundedFileBytes(
         handle,
         stats.size,

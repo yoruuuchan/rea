@@ -20,6 +20,52 @@ const observedIdentity = (entry: ProcessTableEntry, identity: string) => ({
   },
 });
 
+it.each([undefined, "run-token"])(
+  "validates a current generation with token %s when its baseline identity was unknown",
+  async (runId) => {
+    const row: ProcessTableEntry = {
+      pid: 909,
+      parentPid: 1,
+      processGroupId: 909,
+      state: "S",
+      command: "foreign-process",
+    };
+    const environment = vi.fn(() =>
+      Promise.resolve(runId === undefined ? {} : { REA_PROCESS_RUN_ID: runId }),
+    );
+    const signalGroup = vi.fn();
+    const host: ProcessOwnershipHost = {
+      listProcesses: () => Promise.resolve([row]),
+      environment,
+      processIdentities: (entries) =>
+        Promise.resolve(
+          new Map(
+            entries.map((entry) => [
+              entry.pid,
+              observedIdentity(entry, "current-start"),
+            ]),
+          ),
+        ),
+      signalGroup,
+    };
+
+    await expect(
+      verifyNoTokenOwnedProcesses("run-token", host, [
+        { pid: row.pid, identity: null },
+      ]),
+    ).resolves.toEqual(
+      runId === undefined
+        ? { cleaned: true, signaled: false }
+        : {
+            cleaned: false,
+            reason: "token-owned process remained after cleanup",
+          },
+    );
+    expect(environment).toHaveBeenCalledWith(row.pid);
+    expect(signalGroup).not.toHaveBeenCalled();
+  },
+);
+
 describe("Linux process start identities", () => {
   itOnLinux("reads Linux process start identities from proc stat", async () => {
     const host = createSystemProcessOwnershipHost("linux", {});

@@ -150,12 +150,12 @@ export const readAssembly = (
   };
 };
 
-export const readAssemblyReference = (
+/** One owner for the shared AssemblyRef prefix and column indexes. */
+const assemblyReferenceHeader = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   row: number,
-  heapExtent: number,
-): AssemblyReference => {
+) => {
   const cursor = metadataRowCursor(bytes, layout, 35, row);
   const version = [
     cursor.readUInt16(),
@@ -163,19 +163,40 @@ export const readAssemblyReference = (
     cursor.readUInt16(),
     cursor.readUInt16(),
   ].join(".");
-  const flags = cursor.readUInt32();
-  const keyOrToken = readMetadataBlob(
-    bytes,
-    layout,
-    cursor.readIndex(layout.blobIndexSize),
-    heapExtent,
-  );
-  const name = readMetadataString(
-    bytes,
-    layout,
-    cursor.readIndex(layout.stringIndexSize),
-    heapExtent,
-  );
+  return {
+    cursor,
+    version,
+    flags: cursor.readUInt32(),
+    keyIndex: cursor.readIndex(layout.blobIndexSize),
+    nameIndex: cursor.readIndex(layout.stringIndexSize),
+  };
+};
+
+/** Name/token facts do not require decoding or hashing unrelated key/hash payloads. */
+export const readAssemblyReferenceName = (
+  bytes: Buffer,
+  layout: ManagedMetadataLayout,
+  row: number,
+  heapExtent: number,
+): Pick<AssemblyReference, "name" | "token" | "row_offset"> => {
+  const { nameIndex } = assemblyReferenceHeader(bytes, layout, row);
+  return {
+    name: readMetadataString(bytes, layout, nameIndex, heapExtent),
+    token: metadataToken(35, row),
+    row_offset: metadataRowOffset(layout, 35, row),
+  };
+};
+
+export const readAssemblyReference = (
+  bytes: Buffer,
+  layout: ManagedMetadataLayout,
+  row: number,
+  heapExtent: number,
+): AssemblyReference => {
+  const { cursor, version, flags, keyIndex, nameIndex } =
+    assemblyReferenceHeader(bytes, layout, row);
+  const keyOrToken = readMetadataBlob(bytes, layout, keyIndex, heapExtent);
+  const name = readMetadataString(bytes, layout, nameIndex, heapExtent);
   const culture = readMetadataString(
     bytes,
     layout,
