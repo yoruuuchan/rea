@@ -24,7 +24,13 @@ const event = {
   error: false,
 };
 
-it.each(["custom-apply", "listener-chain"])(
+it.each([
+  "custom-apply",
+  "listener-chain",
+  "once-metadata",
+  "listener-registration",
+  "listener-removal",
+])(
   "keeps %s gaps distinct from captured IPC and retention loss",
   (boundary) => {
     const result = projectElectronActiveCapture(

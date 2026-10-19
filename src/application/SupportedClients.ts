@@ -8,7 +8,10 @@ import {
 } from "./HermesClientHome.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { resolveWindowsClaudeDesktopLocation } from "./ClaudeDesktopConfigLocation.js";
-import type { MsixPackageView } from "./MsixPackageStorage.js";
+import {
+  type MsixPackageView,
+  windowsAppDataRoots,
+} from "./MsixPackageStorage.js";
 
 /** One supported client configuration location. */
 export interface SetupClient {
@@ -117,11 +120,7 @@ const vscodeUserDirectory = ({
   env,
 }: ClientPathContext): string => {
   if (platform === "win32")
-    return join(
-      env.APPDATA ?? join(home, "AppData", "Roaming"),
-      "Code",
-      "User",
-    );
+    return join(windowsAppDataRoots(home, env).roaming, "Code", "User");
   if (platform === "darwin")
     return join(home, "Library", "Application Support", "Code", "User");
   return join(xdgConfigHome({ home, platform, env }), "Code", "User");
@@ -133,11 +132,7 @@ const traeUserDirectory = ({
   env,
 }: ClientPathContext): string => {
   if (platform === "win32")
-    return join(
-      env.APPDATA ?? join(home, "AppData", "Roaming"),
-      "Trae",
-      "User",
-    );
+    return join(windowsAppDataRoots(home, env).roaming, "Trae", "User");
   if (platform === "darwin")
     return join(home, "Library", "Application Support", "Trae", "User");
   return join(xdgConfigHome({ home, platform, env }), "Trae", "User");
@@ -479,7 +474,7 @@ const geminiSettings = ({
 
 const devinDirectory = ({ home, platform, env }: ClientPathContext): string =>
   platform === "win32"
-    ? join(env.APPDATA ?? join(home, "AppData", "Roaming"), "devin")
+    ? join(windowsAppDataRoots(home, env).roaming, "devin")
     : join(env.XDG_CONFIG_HOME || join(home, ".config"), "devin");
 
 /** Stable product metadata used to derive setup discovery and documentation. */

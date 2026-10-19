@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../../domain/analysisErrorCleanup.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
@@ -20,6 +21,7 @@ import { parseProcessCapture } from "../../domain/process/processCaptureParsing.
 import { createProgressReporter } from "../ProgressReporter.js";
 import { captureProcessScenario } from "../../process/capture/ProcessHarness.js";
 import { ProcessCaptureResourceScope } from "../../process/capture/ProcessCaptureLifecycle.js";
+import { ProcessCaptureError } from "../../process/capture/ProcessCaptureError.js";
 import {
   PROCESS_PROVIDER,
   isProcessEvidenceProvider,
@@ -84,7 +86,16 @@ export const captureProcessScenarioFile = async (
     try {
       await resourceScope.close();
     } catch (cause: unknown) {
-      if (!captured.ok) return cliAnalysisError(captured.error);
+      if (!captured.ok && cause instanceof AnalysisError)
+        return cliAnalysisError(
+          captured.error instanceof ProcessCaptureError
+            ? captured.error.withFinalization({ cleanupFailure: cause })
+            : analysisErrorWithCleanupFailure(
+                captured.error,
+                cause,
+                "capture_process_scenario",
+              ).bindCleanupDependencies([captured.error, cause]),
+        );
       throw cause;
     }
     if (!captured.ok) return cliAnalysisError(captured.error);

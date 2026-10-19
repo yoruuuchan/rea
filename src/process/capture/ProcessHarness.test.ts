@@ -25,6 +25,7 @@ import {
   createProcessCaptureObservationBuffer,
   prepareProcessCapture,
   resolveProcessResult,
+  type ProcessCaptureCleanupOutcome,
   type ProcessCaptureCleanupHost,
 } from "./ProcessCaptureLifecycle.js";
 import { DarwinProcessOwnershipInspectionError } from "../DarwinProcessRunTokenReader.js";
@@ -32,6 +33,7 @@ import { DarwinProcessOwnershipInspectionError } from "../DarwinProcessRunTokenR
 import {
   partialProcessCaptureObservationSchema,
   processCaptureSchema,
+  type ProcessCaptureCleanupReport,
 } from "../../domain/process/processCapture.js";
 const emptyFilesystemCoverage =
   emptyProcessCapture().truncation_details.filesystem_before;
@@ -40,8 +42,13 @@ const incompleteFilesystemCoverage = {
   enumeration_truncated: true,
   enumeration_reasons: ["identity_changed"],
 } satisfies typeof emptyFilesystemCoverage;
+const historicalCleanupOutcome = (
+  report: ProcessCaptureCleanupReport,
+): ProcessCaptureCleanupOutcome => ({ report, cleanupLease: undefined });
+
 it("retains cancellation and cleanup facts when ownership baseline inspection aborts", async () => {
   const controller = new AbortController();
+  const reason = new Error("ownership baseline caller cancellation");
   const scenario = processScenarioSchema.parse({
     executable: process.execPath,
   });
@@ -58,7 +65,7 @@ it("retains cancellation and cleanup facts when ownership baseline inspection ab
       {
         createTemporaryRoot: async () => "/fixture/allocated-root",
         captureOwnershipBaseline: async () => {
-          controller.abort();
+          controller.abort(reason);
           controller.signal.throwIfAborted();
           return [];
         },
@@ -67,6 +74,7 @@ it("retains cancellation and cleanup facts when ownership baseline inspection ab
     ),
   ).rejects.toMatchObject({
     reason: "cancelled",
+    cause: reason,
     message: "process capture was cancelled",
     cleanupReport: {
       temporary_root: { state: "cleaned", reason: null },
@@ -192,7 +200,7 @@ it("projects complete after-snapshot metadata when a later capture stage fails",
     resolveProcessResult(
       undefined,
       new Error("capture manifest failed after final snapshot"),
-      cleanup,
+      historicalCleanupOutcome(cleanup),
       observations,
       { scenario },
     );
@@ -316,7 +324,7 @@ it("keeps empty cleanup exception messages actionable in the report", async () =
       throw new Error("");
     },
   };
-  const report = await releaseProcessResources({
+  const outcome = await releaseProcessResources({
     timers: new Set(),
     terminal: undefined,
     renderer: undefined,
@@ -325,7 +333,10 @@ it("keeps empty cleanup exception messages actionable in the report", async () =
     host,
   });
 
-  expect(report.temporary_root).toEqual({ state: "failed", reason: "Error" });
+  expect(outcome.report.temporary_root).toEqual({
+    state: "failed",
+    reason: "Error",
+  });
 });
 
 it.each(["termination", "verification"] as const)(
@@ -363,16 +374,16 @@ it.each(["termination", "verification"] as const)(
     });
 
     expect(removeTemporaryRoot).not.toHaveBeenCalled();
-    expect(cleanup.temporary_root).toEqual({
+    expect(cleanup.report.temporary_root).toEqual({
       state: "unverified",
       reason: `temporary root retained because owned process cleanup is failed: ${cleanupFailure.message}`,
     });
-    expect(cleanup.owned_process_group).toMatchObject({
+    expect(cleanup.report.owned_process_group).toMatchObject({
       state: "failed",
       reason: cleanupFailure.message,
     });
     if (stage === "verification")
-      expect(cleanup.owned_process_group.unverified_processes).toEqual([
+      expect(cleanup.report.owned_process_group.unverified_processes).toEqual([
         { pid: 900, reason: "environment unavailable" },
       ]);
 
@@ -395,7 +406,7 @@ it.each(["termination", "verification"] as const)(
       ).toMatchObject({
         code: "cleanup_incomplete",
         details: {
-          cleanup_report: cleanup,
+          cleanup_report: cleanup.report,
           execution_failure: "capture snapshot failed",
           partial_observation: {
             capture: { frames: [{ data: "collected before failure" }] },
@@ -443,9 +454,9 @@ it("waits for token-owned processes to exit after one cleanup signal", async () 
     });
 
     await vi.runAllTimersAsync();
-    const report = await result;
+    const outcome = await result;
 
-    expect(report.owned_process_group).toEqual({
+    expect(outcome.report.owned_process_group).toEqual({
       state: "cleaned",
       reason: null,
     });
@@ -473,7 +484,7 @@ it("retains unrelated withheld processes through cleanup, capture, and JSON", as
     }),
     removeTemporaryRoot: async () => undefined,
   };
-  const report = await releaseProcessResources({
+  const outcome = await releaseProcessResources({
     timers: new Set(),
     terminal: { pid: 321 },
     renderer: undefined,
@@ -485,7 +496,7 @@ it("retains unrelated withheld processes through cleanup, capture, and JSON", as
     { pid: 900, reason: "platform_binary_environment_withheld" },
     { pid: 901, reason: "foreign uid: EINVAL" },
   ];
-  expect(report.owned_process_group).toEqual({
+  expect(outcome.report.owned_process_group).toEqual({
     state: "cleaned",
     reason: null,
     unverified_processes: unverified,
@@ -493,7 +504,7 @@ it("retains unrelated withheld processes through cleanup, capture, and JSON", as
   const original = emptyProcessCapture();
   const { cleanup: previousCleanup, ...pending } = original;
   for (const input of [pending, original]) {
-    const resolved = resolveProcessResult(input, undefined, report);
+    const resolved = resolveProcessResult(input, undefined, outcome);
     const serialized: unknown = JSON.parse(JSON.stringify(resolved));
     const capture = parseProcessCapture(serialized);
     expect(capture.cleanup).toEqual({
@@ -547,9 +558,9 @@ it("retains the last ownership failure when the verification grace expires", asy
     });
 
     await vi.runAllTimersAsync();
-    const report = await result;
+    const outcome = await result;
 
-    expect(report.owned_process_group).toEqual({
+    expect(outcome.report.owned_process_group).toEqual({
       state: "unverified",
       reason: "owned process remained after identity recheck",
     });
@@ -578,7 +589,7 @@ it("passes sampled detached groups into cleanup even when their token is unknown
     removeTemporaryRoot: async () => undefined,
   };
 
-  const report = await releaseProcessResources({
+  const outcome = await releaseProcessResources({
     timers: new Set(),
     terminal: { pid: 321 },
     renderer: undefined,
@@ -589,7 +600,7 @@ it("passes sampled detached groups into cleanup even when their token is unknown
   });
 
   expect(sampledGroups).toEqual([654]);
-  expect(report.owned_process_group).toEqual({
+  expect(outcome.report.owned_process_group).toEqual({
     state: "unverified",
     reason: "sampled group has no verifiable run token",
   });
@@ -630,7 +641,11 @@ it("retains observations and both causes when process cleanup is unverifiable", 
 
   let error: ProcessCaptureError | undefined;
   try {
-    resolveProcessResult(capture, executionFailure, cleanup);
+    resolveProcessResult(
+      capture,
+      executionFailure,
+      historicalCleanupOutcome(cleanup),
+    );
   } catch (cause: unknown) {
     if (!(cause instanceof ProcessCaptureError)) throw cause;
     error = cause;
@@ -700,7 +715,11 @@ it("projects execution and cleanup failures when capture never completed", () =>
 
   let error: ProcessCaptureError | undefined;
   try {
-    resolveProcessResult(undefined, executionFailure, cleanup);
+    resolveProcessResult(
+      undefined,
+      executionFailure,
+      historicalCleanupOutcome(cleanup),
+    );
   } catch (cause: unknown) {
     if (!(cause instanceof ProcessCaptureError)) throw cause;
     error = cause;
@@ -735,7 +754,11 @@ it("retains completed observations when finalization fails after clean cleanup",
 
   let error: ProcessCaptureError | undefined;
   try {
-    resolveProcessResult(capture, executionFailure, cleanup);
+    resolveProcessResult(
+      capture,
+      executionFailure,
+      historicalCleanupOutcome(cleanup),
+    );
   } catch (cause: unknown) {
     if (!(cause instanceof ProcessCaptureError)) throw cause;
     error = cause;
@@ -788,7 +811,11 @@ it("preserves cancellation while projecting observations and successful cleanup"
   };
   let error: ProcessCaptureError | undefined;
   try {
-    resolveProcessResult(capture, processCaptureCancelled(), cleanup);
+    resolveProcessResult(
+      capture,
+      processCaptureCancelled(),
+      historicalCleanupOutcome(cleanup),
+    );
   } catch (cause: unknown) {
     if (!(cause instanceof ProcessCaptureError)) throw cause;
     error = cause;

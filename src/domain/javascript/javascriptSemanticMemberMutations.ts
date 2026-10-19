@@ -761,7 +761,7 @@ export function* collectSemanticMemberMutationsSteps(
         t.isOptionalCallExpression(node) ||
         t.isNewExpression(node)
       ) {
-        for (const source of returnedReferences(node.callee))
+        for (const source of returnedReferences(node.callee).references)
           markEscaped(source.node, node, source.projection);
         for (const argument of node.arguments)
           if (t.isSpreadElement(argument))

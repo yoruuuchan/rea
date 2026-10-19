@@ -154,7 +154,7 @@ export const createAmbientPathResolver = (
           ...(current.readsAtSelf && { readsAtSelf: true }),
         });
       const continueReturned = (callee: t.Node, path: AmbientProjection) => {
-        for (const source of returnedReferences(callee))
+        for (const source of returnedReferences(callee).references)
           continueWith(
             source.node,
             path === undefined

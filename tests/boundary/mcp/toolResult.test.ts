@@ -7,7 +7,10 @@ import {
 } from "@modelcontextprotocol/server";
 
 import { ProcessCaptureError } from "../../../src/process/capture/ProcessCaptureError.js";
-import { resolveProcessResult } from "../../../src/process/capture/ProcessCaptureLifecycle.js";
+import {
+  resolveProcessResult,
+  type ProcessCaptureCleanupOutcome,
+} from "../../../src/process/capture/ProcessCaptureLifecycle.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import type { ToolContract } from "../../../src/contracts/toolContractTypes.js";
 import { err } from "../../../src/domain/result.js";
@@ -23,13 +26,19 @@ import type { JsonValue } from "../../../src/domain/jsonValue.js";
 import { evidenceResultOf } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 
-import type { IncompleteProcessCaptureObservations } from "../../../src/domain/process/processCapture.js";
+import type {
+  IncompleteProcessCaptureObservations,
+  ProcessCaptureCleanupReport,
+} from "../../../src/domain/process/processCapture.js";
 const delivery = new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE);
 const UNTRUSTED_TARGET_CONTENT = {
   provenance: { untrusted_content: true, source: "analysis_target" },
 };
 const emptyFilesystemCoverage =
   emptyProcessCapture().truncation_details.filesystem_before;
+const historicalCleanupOutcome = (
+  report: ProcessCaptureCleanupReport,
+): ProcessCaptureCleanupOutcome => ({ report, cleanupLease: undefined });
 
 const captureWithObservedOutput = () =>
   accountFullyObservedProcessCapture({
@@ -80,7 +89,7 @@ describe("completed partial process capture MCP projection", () => {
       resolveProcessResult(
         capture,
         new Error("final filesystem snapshot failed"),
-        cleanup,
+        historicalCleanupOutcome(cleanup),
       );
     } catch (cause: unknown) {
       if (!(cause instanceof ProcessCaptureError)) throw cause;
@@ -128,7 +137,11 @@ describe("completed partial process capture MCP projection", () => {
 
     let failure: ProcessCaptureError | undefined;
     try {
-      resolveProcessResult(capture, executionFailure, cleanup);
+      resolveProcessResult(
+        capture,
+        executionFailure,
+        historicalCleanupOutcome(cleanup),
+      );
     } catch (cause: unknown) {
       if (!(cause instanceof ProcessCaptureError)) throw cause;
       failure = cause;
@@ -267,7 +280,7 @@ describe("incomplete partial process observations MCP projection", () => {
       resolveProcessResult(
         undefined,
         new Error("capture failed before completion"),
-        cleanup,
+        historicalCleanupOutcome(cleanup),
         observations,
         { scenario, rootPid },
       );

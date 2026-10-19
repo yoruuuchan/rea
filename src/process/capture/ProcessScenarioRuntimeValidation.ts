@@ -119,5 +119,5 @@ const osFailure = (cause: unknown): string => {
 
 /** Reject cancellation before a process capture operation begins. */
 export const assertNotCancelled = (signal: AbortSignal | undefined): void => {
-  if (signal?.aborted === true) throw processCaptureCancelled();
+  if (signal?.aborted === true) throw processCaptureCancelled(signal.reason);
 };

@@ -33,6 +33,8 @@ interface CallResolutionContext {
   readonly state: JavaScriptSemanticAnalysisState;
   readonly callableById: ReadonlyMap<string, JavaScriptSemanticCallable>;
   readonly seenInitializers: ReadonlySet<JavaScriptSemanticInitializer>;
+  /** Bindings on the active chain whose read selected every initializer. */
+  readonly seenBindings: ReadonlySet<JavaScriptSemanticBindingState>;
   readonly bindingCache: WeakMap<t.Identifier, LocalCallableResolution>;
 }
 
@@ -53,6 +55,7 @@ export const resolveLocalCallables = (
     state: input.state,
     callableById: input.callableById,
     seenInitializers: input.seenInitializers,
+    seenBindings: new Set(),
     bindingCache: input.bindingCache,
   });
 
@@ -103,7 +106,26 @@ const resolveIdentifier = (
     node,
     context.state.parentsByNode,
   );
-  const candidates = resolveBindingCallables(read.binding, context);
+  // A full read re-enters the same candidate set wherever the chain returns
+  // to this binding. Close that cycle at the binding; position-narrowed reads
+  // keep their per-initializer cycle handling.
+  const selectsAll = read.binding === binding;
+  if (selectsAll && context.seenBindings.has(binding))
+    return {
+      callableIds: [],
+      complete: false,
+      cycleDependent: true,
+      reason: `Call target initializer cycle at ${binding.name}.`,
+    };
+  const candidates = resolveBindingCallables(
+    read.binding,
+    selectsAll
+      ? {
+          ...context,
+          seenBindings: new Set(context.seenBindings).add(binding),
+        }
+      : context,
+  );
   // Knowing every local candidate does not prove that any write replaced the
   // incoming value, or that a write in another activation precedes this read.
   const covered =

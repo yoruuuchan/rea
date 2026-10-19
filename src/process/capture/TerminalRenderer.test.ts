@@ -168,7 +168,7 @@ it.each(["write", "resize"] as const)(
         runId: "failed-observation",
         temporaryRoot,
       });
-      expect(cleanup.terminal_renderer).toEqual({
+      expect(cleanup.report.terminal_renderer).toEqual({
         state: "cleaned",
         reason: null,
       });
@@ -213,7 +213,7 @@ it("retains disposal failures for a later cleanup retry", async () => {
       runId: "failed-disposal",
       temporaryRoot,
     });
-    expect(cleanup.terminal_renderer).toEqual({
+    expect(cleanup.report.terminal_renderer).toEqual({
       state: "failed",
       reason: failure.message,
     });

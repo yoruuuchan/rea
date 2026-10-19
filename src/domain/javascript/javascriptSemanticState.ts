@@ -109,6 +109,8 @@ export interface JavaScriptSemanticAnalysisState {
   readonly valueResourceLimits: Set<JavaScriptSemanticResourceLimit>;
   /** Getter query bounds encountered while resolving object and class properties. */
   readonly getterResourceLimits: Set<JavaScriptSemanticResourceLimit>;
+  /** Callee sites whose possible local returns needed a broader projection. */
+  readonly returnedReferenceWidenings: Set<t.Node>;
   readonly parentsByNode: WeakMap<t.Node, t.Node>;
   readonly scopes: JavaScriptSemanticScopeState[];
   readonly scopesById: Map<string, JavaScriptSemanticScopeState>;

@@ -6,10 +6,26 @@ import type { FileHandle } from "node:fs/promises";
 import type { ProcessScenario } from "../../domain/process/processScenario.js";
 import type { FilesystemCoverage } from "../../domain/process/processCaptureCoverage.js";
 import type { Stats } from "node:fs";
+import { err, ok, type Result } from "../../domain/result.js";
 import type {
   FileState,
   ProcessFilesystemSnapshot,
 } from "../../domain/process/processCapture.js";
+import {
+  AnalysisCleanupLease,
+  AnalysisCleanupLeaseGroup,
+} from "../../artifacts/AnalysisCleanupLease.js";
+import {
+  normalizeCaptureFailure,
+  describeProcessCaptureExecutionFailure,
+  ProcessCaptureError,
+} from "./ProcessCaptureError.js";
+import {
+  ProcessCaptureReadFailure,
+  withProcessCaptureDirectory,
+  withProcessCaptureFile,
+  type ProcessCaptureCleanupRetainer,
+} from "./ProcessCaptureRead.js";
 
 const hasSameIdentity = (
   before: Stats,
@@ -30,21 +46,68 @@ const hasSameFileState = (before: Stats, after: Stats): boolean =>
   before.mtimeMs === after.mtimeMs &&
   before.ctimeMs === after.ctimeMs;
 
-const fileUnavailableSystemCode = (cause: unknown): string | undefined => {
+const filesystemSystemCode = (cause: unknown): string | undefined => {
   if (!(cause instanceof Error) || !("code" in cause)) return undefined;
   const code = cause.code;
-  return typeof code === "string" &&
-    [
-      "EACCES",
-      "EISDIR",
-      "ELOOP",
-      "ENOTDIR",
-      "ENOENT",
-      "EPERM",
-      "ESTALE",
-    ].includes(code)
+  return typeof code === "string" ? code : undefined;
+};
+
+const unavailableSystemCodes = new Set([
+  "EACCES",
+  "EISDIR",
+  "ELOOP",
+  "ENOTDIR",
+  "ENOENT",
+  "EPERM",
+  "ESTALE",
+]);
+
+const fileUnavailableSystemCode = (cause: unknown): string | undefined => {
+  const code = filesystemSystemCode(cause);
+  return code !== undefined && unavailableSystemCodes.has(code)
     ? code
     : undefined;
+};
+
+type EntryOmission =
+  | { readonly reason: "entry_unavailable"; readonly system_code: string }
+  | { readonly reason: "identity_changed"; readonly system_code: null };
+
+/** A follow-up read cannot turn previously observed metadata into absence. */
+const readEntryObservation = async <T>(
+  read: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<Result<T, EntryOmission>> => {
+  signal?.throwIfAborted();
+  try {
+    const value = await read();
+    signal?.throwIfAborted();
+    return ok(value);
+  } catch (cause: unknown) {
+    const code = filesystemSystemCode(cause);
+    // readlink reports EINVAL if the observed symlink was replaced by a file.
+    if (
+      code === undefined ||
+      (!unavailableSystemCodes.has(code) && code !== "EINVAL")
+    )
+      throw cause;
+    signal?.throwIfAborted();
+    return err({ reason: "entry_unavailable", system_code: code });
+  }
+};
+
+const observeSymlink = async (
+  path: string,
+  before: Stats,
+  signal?: AbortSignal,
+): Promise<Result<string, EntryOmission>> => {
+  const target = await readEntryObservation(() => readlink(path), signal);
+  if (!target.ok) return target;
+  const after = await readEntryObservation(() => lstat(path), signal);
+  if (!after.ok) return after;
+  return hasSameIdentity(before, after.value, "symlink")
+    ? target
+    : err({ reason: "identity_changed", system_code: null });
 };
 
 const lstatIfPresent = async (
@@ -58,12 +121,8 @@ const lstatIfPresent = async (
     signal?.throwIfAborted();
     return stats;
   } catch (cause: unknown) {
-    if (
-      cause instanceof Error &&
-      "code" in cause &&
-      (cause.code === "ENOENT" ||
-        (previouslyObservedRoot && cause.code === "ENOTDIR"))
-    ) {
+    const code = filesystemSystemCode(cause);
+    if (code === "ENOENT" || (previouslyObservedRoot && code === "ENOTDIR")) {
       signal?.throwIfAborted();
       return undefined;
     }
@@ -80,12 +139,91 @@ export type FileHashOutcome =
       readonly system_code: string | null;
     };
 
+/** Snapshot facts retained alongside close failures from its owned reads. */
+export class ProcessCaptureSnapshotFailure extends ProcessCaptureError {
+  readonly snapshot: ProcessFilesystemSnapshot | undefined;
+  readonly cleanupLeases: readonly AnalysisCleanupLease[];
+  readonly readFailures: readonly ProcessCaptureReadFailure<unknown>[];
+
+  constructor(options: {
+    readonly cause: unknown;
+    readonly snapshot?: ProcessFilesystemSnapshot;
+    readonly cleanupLeases?: readonly AnalysisCleanupLease[];
+    readonly readFailures?: readonly ProcessCaptureReadFailure<unknown>[];
+  }) {
+    const cleanupLeases = [...new Set(options.cleanupLeases ?? [])];
+    const readFailures = [...new Set(options.readFailures ?? [])];
+    const readFailure =
+      options.cause instanceof ProcessCaptureReadFailure
+        ? options.cause
+        : undefined;
+    const primary =
+      readFailure !== undefined && Object.hasOwn(readFailure, "cause")
+        ? readFailure.cause
+        : options.cause instanceof ProcessCaptureError &&
+            options.cause.userCategory === "cancelled" &&
+            Object.hasOwn(options.cause, "cause")
+          ? options.cause.cause
+          : options.cause;
+    const cancellation =
+      readFailure?.userCategory === "cancelled" ||
+      (options.cause instanceof ProcessCaptureError &&
+        options.cause.userCategory === "cancelled");
+    const closeDetails = readFailures
+      .filter((failure) => failure.cleanupLeases.length > 0)
+      .map((failure) => {
+        const reason = failure.cleanup?.reason ?? "descriptor close failed";
+        return `${failure.path}: ${reason}`;
+      });
+    const primaryMessage =
+      describeProcessCaptureExecutionFailure(options.cause) ??
+      "snapshot read rejected without a value";
+    const message =
+      closeDetails.length === 0
+        ? `Process filesystem snapshot failed: ${primaryMessage}`
+        : `Process filesystem snapshot failed: ${primaryMessage}; ${closeDetails.join("; ")}`;
+    const cleanupReason =
+      closeDetails.join("; ") ||
+      cleanupLeases
+        .map((lease) => lease.cleanupResources ?? [])
+        .flat()
+        .join(", ") ||
+      "snapshot handle cleanup failed";
+    super(message, {
+      cause: primary,
+      ...(cancellation
+        ? { userCategory: "cancelled" as const, reason: "cancelled" as const }
+        : {}),
+      ...(cleanupLeases.length === 0
+        ? {}
+        : {
+            cleanup: {
+              reason: cleanupReason,
+              resources: [
+                ...new Set(
+                  cleanupLeases.flatMap(
+                    (lease) => lease.cleanupResources ?? [],
+                  ),
+                ),
+              ],
+            },
+          }),
+    });
+    this.snapshot = options.snapshot;
+    this.cleanupLeases = cleanupLeases;
+    this.readFailures = readFailures;
+    if (cleanupLeases.length > 0)
+      new AnalysisCleanupLeaseGroup(this, cleanupLeases);
+  }
+}
+
 /** Hash a file only when its opened descriptor still matches the captured path state. */
 export const hashFile = async (
   path: string,
   expected: Stats,
   maxBytes: number,
   signal?: AbortSignal,
+  retainer?: ProcessCaptureCleanupRetainer,
 ): Promise<FileHashOutcome> => {
   signal?.throwIfAborted();
   const noFollowAvailable =
@@ -99,84 +237,90 @@ export const hashFile = async (
         (fsConstants.O_NONBLOCK ?? 0),
     );
   } catch (cause: unknown) {
-    signal?.throwIfAborted();
     const systemCode = fileUnavailableSystemCode(cause);
     if (systemCode === undefined) throw cause;
+    signal?.throwIfAborted();
     return {
       state: "omitted",
       reason: "file_unavailable",
       system_code: systemCode,
     };
   }
-  try {
-    signal?.throwIfAborted();
-    // On hosts without O_NOFOLLOW, compare the leaf's identity with the
-    // captured regular file. Ancestor aliases do not change file identity.
-    if (!noFollowAvailable) {
-      const named = await lstat(path);
-      signal?.throwIfAborted();
-      if (!hasSameFileState(expected, named))
+  return await withProcessCaptureFile(
+    path,
+    handle,
+    signal,
+    retainer,
+    async (ownedHandle) => {
+      try {
+        signal?.throwIfAborted();
+        // On hosts without O_NOFOLLOW, compare the leaf's identity with the
+        // captured regular file. Ancestor aliases do not change file identity.
+        if (!noFollowAvailable) {
+          const named = await lstat(path);
+          signal?.throwIfAborted();
+          if (!hasSameFileState(expected, named))
+            return {
+              state: "omitted",
+              reason: "file_changed_or_short_read",
+              system_code: null,
+            };
+        }
+        const stats = await ownedHandle.stat();
+        signal?.throwIfAborted();
+        if (!hasSameFileState(expected, stats) || stats.size > maxBytes)
+          return {
+            state: "omitted",
+            reason: "file_changed_or_short_read",
+            system_code: null,
+          };
+        const hash = createHash("sha256");
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes));
+        let position = 0;
+        while (position < stats.size) {
+          signal?.throwIfAborted();
+          const { bytesRead } = await ownedHandle.read(
+            buffer,
+            0,
+            Math.min(buffer.length, stats.size - position),
+            position,
+          );
+          if (bytesRead === 0)
+            return {
+              state: "omitted",
+              reason: "file_changed_or_short_read",
+              system_code: null,
+            };
+          hash.update(buffer.subarray(0, bytesRead));
+          position += bytesRead;
+        }
+        const after = await ownedHandle.stat();
+        signal?.throwIfAborted();
+        let unchanged = hasSameFileState(stats, after);
+        if (unchanged && !noFollowAvailable) {
+          const namedAfter = await lstat(path);
+          signal?.throwIfAborted();
+          unchanged = hasSameFileState(after, namedAfter);
+        }
+        if (!unchanged)
+          return {
+            state: "omitted",
+            reason: "file_changed_or_short_read",
+            system_code: null,
+          };
+        return { state: "hashed", sha256: hash.digest("hex") };
+      } catch (cause: unknown) {
+        const systemCode = fileUnavailableSystemCode(cause);
+        if (systemCode === undefined) throw cause;
+        signal?.throwIfAborted();
         return {
           state: "omitted",
-          reason: "file_changed_or_short_read",
-          system_code: null,
+          reason: "file_unavailable",
+          system_code: systemCode,
         };
-    }
-    const stats = await handle.stat();
-    signal?.throwIfAborted();
-    if (!hasSameFileState(expected, stats) || stats.size > maxBytes)
-      return {
-        state: "omitted",
-        reason: "file_changed_or_short_read",
-        system_code: null,
-      };
-    const hash = createHash("sha256");
-    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes));
-    let position = 0;
-    while (position < stats.size) {
-      signal?.throwIfAborted();
-      const { bytesRead } = await handle.read(
-        buffer,
-        0,
-        Math.min(buffer.length, stats.size - position),
-        position,
-      );
-      if (bytesRead === 0)
-        return {
-          state: "omitted",
-          reason: "file_changed_or_short_read",
-          system_code: null,
-        };
-      hash.update(buffer.subarray(0, bytesRead));
-      position += bytesRead;
-    }
-    const after = await handle.stat();
-    signal?.throwIfAborted();
-    let unchanged = hasSameFileState(stats, after);
-    if (unchanged && !noFollowAvailable) {
-      const namedAfter = await lstat(path);
-      signal?.throwIfAborted();
-      unchanged = hasSameFileState(after, namedAfter);
-    }
-    if (!unchanged)
-      return {
-        state: "omitted",
-        reason: "file_changed_or_short_read",
-        system_code: null,
-      };
-    return { state: "hashed", sha256: hash.digest("hex") };
-  } catch (cause: unknown) {
-    signal?.throwIfAborted();
-    const systemCode = fileUnavailableSystemCode(cause);
-    if (systemCode === undefined) throw cause;
-    return {
-      state: "omitted",
-      reason: "file_unavailable",
-      system_code: systemCode,
-    };
-  } finally {
-    await handle.close();
-  }
+      }
+    },
+  );
 };
 
 /** Capture bounded, root-aliased filesystem state without following symlinks. */
@@ -184,6 +328,7 @@ export const snapshotRoots = async (
   scenario: ProcessScenario,
   signal?: AbortSignal,
   previous?: ProcessFilesystemSnapshot,
+  retainer?: ProcessCaptureCleanupRetainer,
 ): Promise<ProcessFilesystemSnapshot> => {
   // A prior root entry establishes same-run admission. Preserve initial
   // obstruction errors; a later non-directory ancestor makes it absent.
@@ -198,11 +343,58 @@ export const snapshotRoots = async (
   >();
   const enumerationOmissions: FilesystemCoverage["enumeration_omissions"] = [];
   const hashOmissions: FilesystemCoverage["hash_omissions"] = [];
+  const closeFailures: ProcessCaptureReadFailure<unknown>[] = [];
+  const omitEntry = (path: string, omission: EntryOmission): false => {
+    truncated = true;
+    enumerationReasons.add(omission.reason);
+    enumerationOmissions.push({ path, ...omission });
+    return false;
+  };
+  const recordFile = (
+    rootAlias: string,
+    relativePath: string,
+    stats: Stats,
+    outcome:
+      | FileHashOutcome
+      | {
+          readonly state: "omitted";
+          readonly reason: "file_bytes_budget";
+          readonly system_code: null;
+        },
+  ): void => {
+    let sha256: string | null = null;
+    let omission: FilesystemCoverage["hash_omissions"][number] | undefined;
+    if (outcome.state === "hashed") {
+      sha256 = outcome.sha256;
+      remainingBytes -= stats.size;
+    } else {
+      omission = {
+        path: `${rootAlias}:${relativePath}`,
+        size_bytes: stats.size,
+        remaining_budget_bytes: remainingBytes,
+        reason: outcome.reason,
+        system_code: outcome.system_code,
+      };
+    }
+    if (omission !== undefined) {
+      truncated = true;
+      hashOmissions.push(omission);
+    }
+    entries.push({
+      path: `${rootAlias}:${relativePath}`,
+      type: "file",
+      mode: stats.mode,
+      size: stats.size,
+      sha256,
+      symlink_target: null,
+    });
+  };
   const visit = async (
     root: string,
     rootAlias: string,
     path: string,
     depth: number,
+    admitted?: Stats,
   ): Promise<boolean> => {
     signal?.throwIfAborted();
     if (
@@ -216,70 +408,66 @@ export const snapshotRoots = async (
         enumerationReasons.add("depth_limit");
       return false;
     }
-    const stats = await lstatIfPresent(
-      path,
-      previousPaths.has(`${rootAlias}:.`),
-      signal,
-    );
+    const stats =
+      admitted ??
+      (await lstatIfPresent(path, previousPaths.has(`${rootAlias}:.`), signal));
     if (stats === undefined) return true;
     const relativePath = relative(root, path) || ".";
     if (stats.isSymbolicLink()) {
       // Keep the target as stored: lexical resolution can merge distinct targets.
-      const target = await readlink(path);
-      const afterRead = await lstat(path);
-      if (!hasSameIdentity(stats, afterRead, "symlink")) {
-        truncated = true;
-        enumerationReasons.add("identity_changed");
-        return false;
-      }
+      const target = await observeSymlink(path, stats, signal);
+      if (!target.ok)
+        return omitEntry(`${rootAlias}:${relativePath}`, target.error);
       entries.push({
         path: `${rootAlias}:${relativePath}`,
         type: "symlink",
         mode: stats.mode,
         size: stats.size,
         sha256: null,
-        symlink_target: target,
+        symlink_target: target.value,
       });
       return true;
     }
     if (stats.isFile()) {
-      let sha256: string | null = null;
-      let omission: FilesystemCoverage["hash_omissions"][number] | undefined;
       if (remainingBytes < stats.size) {
-        omission = {
-          path: `${rootAlias}:${relativePath}`,
-          size_bytes: stats.size,
-          remaining_budget_bytes: remainingBytes,
+        recordFile(rootAlias, relativePath, stats, {
+          state: "omitted",
           reason: "file_bytes_budget",
           system_code: null,
-        };
+        });
       } else {
-        const outcome = await hashFile(path, stats, remainingBytes, signal);
-        if (outcome.state === "hashed") {
-          sha256 = outcome.sha256;
-          remainingBytes -= stats.size;
-        } else {
-          omission = {
-            path: `${rootAlias}:${relativePath}`,
-            size_bytes: stats.size,
-            remaining_budget_bytes: remainingBytes,
-            reason: outcome.reason,
-            system_code: outcome.system_code,
-          };
+        let outcome: FileHashOutcome;
+        try {
+          outcome = await hashFile(
+            path,
+            stats,
+            remainingBytes,
+            signal,
+            retainer,
+          );
+        } catch (cause: unknown) {
+          if (
+            cause instanceof ProcessCaptureReadFailure &&
+            cause.outcome.kind === "completed" &&
+            cause.userCategory === "cancelled"
+          ) {
+            recordFile(rootAlias, relativePath, stats, cause.outcome.value);
+            if (depth === 0) completeRoots.push(rootAlias);
+            throw cause;
+          }
+          if (
+            cause instanceof ProcessCaptureReadFailure &&
+            cause.outcome.kind === "completed" &&
+            cause.cleanupLeases.length > 0
+          ) {
+            closeFailures.push(cause);
+            outcome = cause.outcome.value;
+          } else {
+            throw cause;
+          }
         }
+        recordFile(rootAlias, relativePath, stats, outcome);
       }
-      if (omission !== undefined) {
-        truncated = true;
-        hashOmissions.push(omission);
-      }
-      entries.push({
-        path: `${rootAlias}:${relativePath}`,
-        type: "file",
-        mode: stats.mode,
-        size: stats.size,
-        sha256,
-        symlink_target: null,
-      });
       return true;
     }
     const type = stats.isDirectory() ? "directory" : "other";
@@ -300,9 +488,9 @@ export const snapshotRoots = async (
     try {
       directory = await opendir(path);
     } catch (cause: unknown) {
-      signal?.throwIfAborted();
       const systemCode = fileUnavailableSystemCode(cause);
       if (systemCode === undefined) throw cause;
+      signal?.throwIfAborted();
       truncated = true;
       complete = false;
       enumerationReasons.add("directory_unavailable");
@@ -313,29 +501,60 @@ export const snapshotRoots = async (
       });
       return false;
     }
-    for await (const child of directory) {
-      signal?.throwIfAborted();
+    try {
+      await withProcessCaptureDirectory(
+        path,
+        directory,
+        signal,
+        retainer,
+        async (ownedDirectory) => {
+          while (true) {
+            signal?.throwIfAborted();
+            const child = await ownedDirectory.read();
+            if (child === null) break;
+            if (
+              children.length >= remainingEntries ||
+              depth >= scenario.limits.filesystem_depth
+            ) {
+              truncated = true;
+              complete = false;
+              if (children.length >= remainingEntries)
+                enumerationReasons.add("files_limit");
+              if (depth >= scenario.limits.filesystem_depth)
+                enumerationReasons.add("depth_limit");
+              break;
+            }
+            children.push(child.name);
+            pendingNames += 1;
+          }
+        },
+      );
+    } catch (cause: unknown) {
       if (
-        children.length >= remainingEntries ||
-        depth >= scenario.limits.filesystem_depth
+        cause instanceof ProcessCaptureReadFailure &&
+        cause.outcome.kind === "completed" &&
+        cause.cleanupLeases.length > 0
       ) {
-        truncated = true;
-        complete = false;
-        if (children.length >= remainingEntries)
-          enumerationReasons.add("files_limit");
-        if (depth >= scenario.limits.filesystem_depth)
-          enumerationReasons.add("depth_limit");
-        break;
+        if (cause.userCategory === "cancelled") {
+          throw cause;
+        }
+        closeFailures.push(cause);
+      } else {
+        throw cause;
       }
-      children.push(child.name);
-      pendingNames += 1;
     }
-    const afterRead = await lstat(path);
-    if (!hasSameIdentity(stats, afterRead, "directory")) {
+    const afterRead = await readEntryObservation(() => lstat(path), signal);
+    if (
+      !afterRead.ok ||
+      !hasSameIdentity(stats, afterRead.value, "directory")
+    ) {
       pendingNames -= children.length;
-      truncated = true;
-      enumerationReasons.add("identity_changed");
-      return false;
+      return omitEntry(
+        `${rootAlias}:${relativePath}`,
+        afterRead.ok
+          ? { reason: "identity_changed", system_code: null }
+          : afterRead.error,
+      );
     }
     children.sort().reverse();
     while (children.length > 0) {
@@ -347,18 +566,7 @@ export const snapshotRoots = async (
     }
     return complete;
   };
-  for (const [index, root] of scenario.filesystem_observation_paths.entries()) {
-    const alias = `root_${String(index)}`;
-    if (
-      (await lstatIfPresent(root, previousPaths.has(`${alias}:.`), signal)) ===
-      undefined
-    ) {
-      completeRoots.push(alias);
-      continue;
-    }
-    if (await visit(root, alias, root, 0)) completeRoots.push(alias);
-  }
-  return {
+  const buildSnapshot = (): ProcessFilesystemSnapshot => ({
     files: entries,
     truncated,
     completeRoots,
@@ -373,5 +581,55 @@ export const snapshotRoots = async (
       hashed_bytes: scenario.limits.file_bytes - remainingBytes,
       hash_omissions: hashOmissions,
     },
-  };
+  });
+  try {
+    signal?.throwIfAborted();
+    for (const [
+      index,
+      root,
+    ] of scenario.filesystem_observation_paths.entries()) {
+      const alias = `root_${String(index)}`;
+      const admitted = await lstatIfPresent(
+        root,
+        previousPaths.has(`${alias}:.`),
+        signal,
+      );
+      if (admitted === undefined) {
+        completeRoots.push(alias);
+        continue;
+      }
+      if (await visit(root, alias, root, 0, admitted))
+        completeRoots.push(alias);
+    }
+    const snapshot = buildSnapshot();
+    if (closeFailures.length > 0) {
+      const causes = closeFailures.map(({ cleanupCause }) => cleanupCause);
+      throw new ProcessCaptureSnapshotFailure({
+        cause:
+          causes.length === 1
+            ? (causes[0] as unknown)
+            : new AggregateError(causes, "Snapshot handle closes failed"),
+        snapshot,
+        cleanupLeases: closeFailures.flatMap(
+          ({ cleanupLeases }) => cleanupLeases,
+        ),
+        readFailures: closeFailures,
+      });
+    }
+    return snapshot;
+  } catch (cause: unknown) {
+    if (cause instanceof ProcessCaptureSnapshotFailure) throw cause;
+    truncated ||=
+      completeRoots.length !== scenario.filesystem_observation_paths.length;
+    const readFailures = [
+      ...closeFailures,
+      ...(cause instanceof ProcessCaptureReadFailure ? [cause] : []),
+    ];
+    throw new ProcessCaptureSnapshotFailure({
+      cause: normalizeCaptureFailure(cause, signal),
+      snapshot: buildSnapshot(),
+      cleanupLeases: readFailures.flatMap(({ cleanupLeases }) => cleanupLeases),
+      readFailures,
+    });
+  }
 };

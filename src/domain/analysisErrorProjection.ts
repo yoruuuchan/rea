@@ -52,7 +52,13 @@ export const projectAnalysisError = (
 ): AnalysisErrorProjection => {
   const composed = error;
   error = resolvedAnalysisError(error);
-  const diagnostics = error.diagnostics;
+  let diagnosticSource = error;
+  while (
+    diagnosticSource.diagnostics === undefined &&
+    diagnosticSource.cleanupPrimary !== undefined
+  )
+    diagnosticSource = diagnosticSource.cleanupPrimary;
+  const diagnostics = diagnosticSource.diagnostics;
   const capturedOutput = composed.capturedOutput ?? error.capturedOutput;
   const partialObservation =
     composed.partialObservation ?? error.partialObservation;
@@ -62,6 +68,9 @@ export const projectAnalysisError = (
   const primaryDetails = errorDetails(error);
   const details = {
     ...primaryDetails,
+    ...(composed === error || composed.cleanupReport === undefined
+      ? {}
+      : { cleanup_report: jsonValueSchema.parse(composed.cleanupReport) }),
     ...(diagnostics === undefined ? {} : { diagnostics }),
     ...(composed === error || composed.diagnostics === undefined
       ? {}

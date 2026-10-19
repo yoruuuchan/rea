@@ -13,7 +13,6 @@ import {
 import {
   resolveSemanticBindingState,
   type JavaScriptSemanticAnalysisState,
-  type JavaScriptSemanticInitializer,
 } from "./javascriptSemanticState.js";
 
 /** A reference potentially handed to a caller or generator consumer. */
@@ -24,73 +23,34 @@ export interface SemanticReturnedReference {
 
 interface Candidate {
   readonly node: t.Node;
-  readonly path: readonly (string | number | null)[];
-  readonly initializers: ReadonlySet<JavaScriptSemanticInitializer>;
+  /** `undefined` means any projection depth after different projection depths merge. */
+  readonly path: readonly (string | number | null)[] | undefined;
 }
 
-type InitializerContext = ReadonlySet<JavaScriptSemanticInitializer>;
-type CompletedExpansions = WeakMap<
-  t.Node,
-  Map<string, readonly InitializerContext[]>
->;
-
-interface ExpansionFrame {
-  readonly item: Candidate;
-  readonly node: t.Node;
-  readonly pathKey: string;
-  readonly parent: ExpansionFrame | null;
-  readonly blockers: Set<JavaScriptSemanticInitializer>;
+export interface SemanticReturnedReferenceResult {
+  readonly references: readonly SemanticReturnedReference[];
+  /** Both states close the supported source-local may-target graph. Widened joins projections without dropping represented targets; it does not claim runtime completeness. */
+  readonly precision: "exact" | "widened";
 }
 
-type ExpansionTask =
-  | {
-      readonly kind: "visit";
-      readonly item: Candidate;
-      readonly parent: ExpansionFrame | null;
-    }
-  | { readonly kind: "complete"; readonly frame: ExpansionFrame };
-
-const contextContains = (
-  context: InitializerContext,
-  required: InitializerContext,
-): boolean => {
-  for (const initializer of required)
-    if (!context.has(initializer)) return false;
-  return true;
+const joinProjection = (
+  left: Candidate["path"],
+  right: Candidate["path"],
+): Candidate["path"] => {
+  if (left === undefined || right === undefined || left.length !== right.length)
+    return undefined;
+  return left.map((key, index) => (key === right[index] ? key : null));
 };
 
-const propagateBlockers = (
-  blockers: InitializerContext,
-  parent: ExpansionFrame | null,
-): void => {
-  if (parent === null) return;
-  for (const initializer of blockers)
-    if (parent.item.initializers.has(initializer))
-      parent.blockers.add(initializer);
-};
-
-const completeExpansion = (
-  frame: ExpansionFrame,
-  expanded: CompletedExpansions,
-): void => {
-  const paths =
-    expanded.get(frame.node) ??
-    new Map<string, readonly InitializerContext[]>();
-  const contexts = paths.get(frame.pathKey) ?? [];
-  const covered = contexts.find((context) =>
-    contextContains(frame.blockers, context),
-  );
-  if (covered === undefined) {
-    paths.set(frame.pathKey, [
-      ...contexts.filter(
-        (context) => !contextContains(context, frame.blockers),
-      ),
-      frame.blockers,
-    ]);
-    expanded.set(frame.node, paths);
-  }
-  propagateBlockers(covered ?? frame.blockers, frame.parent);
-};
+const sameProjection = (
+  left: Candidate["path"],
+  right: Candidate["path"],
+): boolean =>
+  left === undefined
+    ? right === undefined
+    : right !== undefined &&
+      left.length === right.length &&
+      left.every((key, index) => key === right[index]);
 
 interface ObjectTargetIndex {
   readonly propertyByName: ReadonlyMap<
@@ -111,51 +71,45 @@ interface ObjectTargetUnknown {
 /** Resolve local result references conservatively, without claiming call execution. */
 export const createSemanticReturnedReferences = (
   state: JavaScriptSemanticAnalysisState,
-): ((callee: t.Node) => readonly SemanticReturnedReference[]) => {
-  const results = new WeakMap<t.Node, readonly SemanticReturnedReference[]>();
+): ((callee: t.Node) => SemanticReturnedReferenceResult) => {
+  const results = new WeakMap<t.Node, SemanticReturnedReferenceResult>();
   const objectTargets = new WeakMap<t.ObjectExpression, ObjectTargetIndex>();
   return (callee) => {
     const existing = results.get(callee);
     if (existing !== undefined) return existing;
-    const functions = new Set<t.Node>();
-    const work: ExpansionTask[] = [
-      {
-        kind: "visit",
-        item: { node: callee, path: [], initializers: new Set() },
-        parent: null,
-      },
-    ];
-    // Finish descendants before memoizing an expansion. Only actual external
-    // cycle blockers affect reuse; branch history is not a dependency. An
-    // acyclic expression/path is consequently expanded once across a diamond.
-    const expanded: CompletedExpansions = new WeakMap();
+    const functions = new Set<t.Function>();
+    const work: t.Node[] = [];
+    // A transition depends on the source read and current projection, not the
+    // initializer history used to reach it. Keeping history out of the key lets
+    // shared diamonds and reassignment cycles converge to the graph fixed point.
+    const projections = new WeakMap<t.Node, Candidate["path"]>();
+    const queued = new WeakSet<t.Node>();
+    const result: {
+      references: readonly SemanticReturnedReference[];
+      precision: SemanticReturnedReferenceResult["precision"];
+    } = { references: [], precision: "exact" };
+    const enqueue = (node: t.Node, path: Candidate["path"]): void => {
+      const source = unwrapJavaScriptExpression(node).node;
+      if (!projections.has(source)) {
+        projections.set(source, path);
+      } else {
+        const previous = projections.get(source);
+        const joined = joinProjection(previous, path);
+        if (sameProjection(previous, joined)) return;
+        projections.set(source, joined);
+        result.precision = "widened";
+      }
+      if (!queued.has(source)) {
+        work.push(source);
+        queued.add(source);
+      }
+    };
+    enqueue(callee, []);
     while (work.length > 0) {
-      const task = work.pop();
-      if (task === undefined) break;
-      if (task.kind === "complete") {
-        completeExpansion(task.frame, expanded);
-        continue;
-      }
-      const { item, parent } = task;
-      const node = unwrapJavaScriptExpression(item.node).node;
-      const pathKey = JSON.stringify(item.path);
-      const covered = expanded
-        .get(node)
-        ?.get(pathKey)
-        ?.find((context) => contextContains(item.initializers, context));
-      if (covered !== undefined) {
-        // Cached cycle dependencies must reach the caller's proof too.
-        propagateBlockers(covered, parent);
-        continue;
-      }
-      const frame: ExpansionFrame = {
-        item,
-        node,
-        pathKey,
-        parent,
-        blockers: new Set(),
-      };
-      work.push({ kind: "complete", frame });
+      const node = work.pop();
+      if (node === undefined) break;
+      queued.delete(node);
+      const current: Candidate = { node, path: projections.get(node) };
       const pending: Candidate[] = [];
       if (t.isIdentifier(node)) {
         const binding = resolveSemanticBindingState(state, node, node.name);
@@ -169,14 +123,12 @@ export const createSemanticReturnedReferences = (
           ...selected.initializers,
           ...selected.referenceInitializers,
         ]) {
-          if (item.initializers.has(initializer)) {
-            frame.blockers.add(initializer);
-            continue;
-          }
           pending.push({
             node: initializer.node,
-            path: [...initializer.projection, ...item.path],
-            initializers: new Set([...item.initializers, initializer]),
+            path:
+              current.path === undefined
+                ? undefined
+                : [...initializer.projection, ...current.path],
           });
         }
       } else if (
@@ -195,9 +147,12 @@ export const createSemanticReturnedReferences = (
           receiver = unwrapJavaScriptExpression(receiver.object).node;
         }
         pending.push({
-          ...item,
+          ...current,
           node: receiver,
-          path: [...path.reverse(), ...item.path],
+          path:
+            current.path === undefined
+              ? undefined
+              : [...path.reverse(), ...current.path],
         });
       } else if (
         t.isConditionalExpression(node) ||
@@ -205,90 +160,102 @@ export const createSemanticReturnedReferences = (
       ) {
         pending.push(
           {
-            ...item,
+            ...current,
             node: t.isConditionalExpression(node) ? node.consequent : node.left,
           },
           {
-            ...item,
+            ...current,
             node: t.isConditionalExpression(node) ? node.alternate : node.right,
           },
         );
       } else if (t.isSequenceExpression(node)) {
         const last = node.expressions.at(-1);
-        if (last !== undefined) pending.push({ ...item, node: last });
-      } else if (t.isFunction(node) && item.path.length === 0)
+        if (last !== undefined) pending.push({ ...current, node: last });
+      } else if (
+        t.isFunction(node) &&
+        (current.path === undefined || current.path.length === 0)
+      )
         functions.add(node);
       else if (t.isObjectExpression(node))
-        selectObjectTargets(node, item, pending, objectTargets);
+        selectObjectTargets(node, current, pending, objectTargets);
       else if (t.isArrayExpression(node)) {
-        const [key, ...path] = item.path;
+        const [key, ...path] = current.path ?? [];
         const index =
-          key === undefined || key === null ? null : semanticArrayIndex(key);
+          current.path === undefined || key === undefined || key === null
+            ? null
+            : semanticArrayIndex(key);
         let uncertainOffset = false;
         node.elements.forEach((element, offset) => {
           if (element === null) return;
           if (t.isSpreadElement(element)) {
             uncertainOffset = true;
             pending.push({
-              ...item,
+              ...current,
               node: element.argument,
-              path: [null, ...path],
+              path: current.path === undefined ? undefined : [null, ...path],
             });
           } else if (index === null || uncertainOffset || index === offset)
-            pending.push({ ...item, node: element, path });
+            pending.push({
+              ...current,
+              node: element,
+              path: current.path === undefined ? undefined : path,
+            });
         });
       } else if (t.isNewExpression(node))
-        pending.push({ ...item, node: node.callee });
+        pending.push({ ...current, node: node.callee });
       else if (t.isClass(node)) {
-        const [key, ...path] = item.path;
+        const [key, ...path] = current.path ?? [];
         for (const member of node.body.body) {
           if (t.isClassMethod(member)) {
             if (
-              (item.path.length === 0 && member.kind === "constructor") ||
+              ((current.path === undefined || current.path.length === 0) &&
+                member.kind === "constructor") ||
+              current.path === undefined ||
               (key !== undefined &&
                 (key === null ||
                   semanticStaticPropertyKey(member.key, member.computed) ===
                     String(key)))
             )
-              pending.push({ ...item, node: member, path });
+              pending.push({
+                ...current,
+                node: member,
+                path: current.path === undefined ? undefined : path,
+              });
           } else if (
             t.isClassProperty(member) &&
             member.value !== null &&
             member.value !== undefined &&
-            key !== undefined &&
-            (key === null ||
+            (key !== undefined || current.path === undefined) &&
+            (current.path === undefined ||
+              key === null ||
               semanticStaticPropertyKey(member.key, member.computed) ===
                 String(key))
           )
-            pending.push({ ...item, node: member.value, path });
+            pending.push({
+              ...current,
+              node: member.value,
+              path: current.path === undefined ? undefined : path,
+            });
         }
         if (node.superClass !== null && node.superClass !== undefined)
-          pending.push({ ...item, node: node.superClass });
+          pending.push({ ...current, node: node.superClass });
       }
       for (let index = pending.length - 1; index >= 0; index--) {
         const child = pending[index];
-        if (child !== undefined)
-          work.push({ kind: "visit", item: child, parent: frame });
+        if (child !== undefined) enqueue(child.node, child.path);
       }
     }
-    const output = [...functions].flatMap((node) => {
-      const callables = t.isClass(node)
-        ? node.body.body.filter(
-            (member) =>
-              t.isClassMethod(member) && member.kind === "constructor",
-          )
-        : [node];
-      return callables.flatMap((callable) =>
-        semanticCallableResultExpressions(callable).flatMap(
-          ({ node, delegated }) =>
-            node === null
-              ? []
-              : [{ node, projection: delegated ? [null] : [] }],
-        ),
-      );
-    });
-    results.set(callee, output);
-    return output;
+    const output = [...functions].flatMap((callable) =>
+      semanticCallableResultExpressions(callable).flatMap(
+        ({ node, delegated }) =>
+          node === null ? [] : [{ node, projection: delegated ? [null] : [] }],
+      ),
+    );
+    result.references = output;
+    results.set(callee, result);
+    if (result.precision === "widened")
+      state.returnedReferenceWidenings.add(callee);
+    return result;
   };
 };
 
@@ -298,7 +265,8 @@ const selectObjectTargets = (
   pending: Candidate[],
   indexes: WeakMap<t.ObjectExpression, ObjectTargetIndex>,
 ): void => {
-  const [key, ...path] = item.path;
+  const [key, ...path] = item.path ?? [];
+  const childPath = item.path === undefined ? undefined : path;
   if (key !== null && key !== undefined) {
     const index = objectTargetIndex(node, indexes);
     const property = index.propertyByName.get(String(key));
@@ -318,12 +286,12 @@ const selectObjectTargets = (
             : t.isObjectProperty(unknown)
               ? unknown.value
               : unknown,
-          ...(t.isSpreadElement(unknown) ? {} : { path }),
+          ...(t.isSpreadElement(unknown) ? {} : { path: childPath }),
         });
       pending.push({
         ...item,
         node: t.isObjectProperty(property) ? property.value : property,
-        path,
+        path: childPath,
       });
       return;
     }
@@ -344,8 +312,8 @@ const selectObjectTargets = (
     )
       continue;
     if (t.isObjectProperty(property))
-      pending.push({ ...item, node: property.value, path });
-    else pending.push({ ...item, node: property, path });
+      pending.push({ ...item, node: property.value, path: childPath });
+    else pending.push({ ...item, node: property, path: childPath });
     if (key !== null && key !== undefined && name === String(key))
       replaced = true;
   }

@@ -11,6 +11,12 @@ const byteRetentionSchema = z.strictObject({
   unknown_size_frames: z.number().int().nonnegative().optional(),
 });
 
+const enumerationOmissionReasonSchema = z.enum([
+  "identity_changed",
+  "directory_unavailable",
+  "entry_unavailable",
+]);
+
 /** Filesystem enumeration and whole-file digest coverage for one checkpoint. */
 export const filesystemCoverageSchema = z.strictObject({
   files_limit: z.number().int().nonnegative(),
@@ -20,14 +26,13 @@ export const filesystemCoverageSchema = z.strictObject({
     z.enum([
       "files_limit",
       "depth_limit",
-      "identity_changed",
-      "directory_unavailable",
+      ...enumerationOmissionReasonSchema.options,
     ]),
   ),
   enumeration_omissions: z.array(
     z.strictObject({
       path: z.string(),
-      reason: z.literal("directory_unavailable"),
+      reason: enumerationOmissionReasonSchema,
       system_code: z.string().nullable(),
     }),
   ),

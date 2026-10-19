@@ -253,10 +253,7 @@ it("preserves a directory read failure when closing that directory also fails", 
       bytes: Buffer.from(bytes),
     }),
   );
-  expect(result.error.partial?.entries).toContainEqual({
-    status: "failed",
-    kind: "directory",
-    path: ".",
+  expect(result.error.partial?.rootFailure).toEqual({
     code: "io",
     message: expect.stringContaining(readFailure.message),
   });

@@ -113,6 +113,45 @@ it.each([
   },
 );
 
+it("discloses widened returned-reference effects only for the affected script", () => {
+  const captured = inspection(`
+    function expose() { return Map.prototype; }
+    let cursor = { target: expose };
+    function walk(flag) {
+      while (flag) cursor = cursor.next;
+      patch(cursor.target());
+    }
+    new Map().get('/candidate');
+    fetch('/preserved');
+  `);
+  const independent = inspection(
+    "new Map().get('/intrinsic'); fetch('/independent');",
+  ).scripts.items[0];
+  if (independent === undefined) throw new Error("Missing independent script");
+  captured.scripts.items.push({ ...independent, script_key: "independent" });
+  captured.scripts.total += 1;
+  const result = analyzeCapturedWebBundle(captured);
+  expect(result.completeness).toMatchObject({
+    status: "partial",
+    parsed_scripts: 2,
+    parse_failures: 0,
+  });
+  expect(result.unknowns).toContainEqual({
+    dimension: "javascript_ast",
+    reason: expect.stringContaining("returned-reference projections"),
+    affected_script_keys: [captured.scripts.items[0]?.script_key],
+  });
+  expect(result.observations.endpoints.map(({ value }) => value)).toEqual([
+    "/preserved",
+    "/independent",
+  ]);
+  expect(
+    result.inferences
+      .filter(({ kind }) => kind === "endpoint_candidate")
+      .map(({ value }) => value),
+  ).toEqual(["/candidate"]);
+});
+
 describe("web bundle analyzer", () => {
   it("extracts graph, route, endpoint, vendor, and WebMCP evidence", () => {
     const source = `

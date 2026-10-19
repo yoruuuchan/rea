@@ -6,12 +6,16 @@ import type { JsonValue } from "../domain/jsonValue.js";
 import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import type { PromptCompletionKind } from "../contracts/promptContracts.js";
+import { addressedValue } from "../contracts/toolOutputSchemaPrimitives.js";
 import { currentMcpRequestSignal } from "./EvidenceMcpServer.js";
 import { parseArtifactInventoryEvidence } from "../domain/artifactInventoryEvidence.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { parseProcessCapture } from "../domain/process/processCaptureParsing.js";
 
 const documentListSchema = z.array(z.string().min(1));
+const procedureInventorySchema = z.array(
+  addressedValue.pick({ address: true, value: true }),
+);
 const providerStatusSchema = z.object({
   analysis_provider_candidates: z.array(
     z.object({ provider: z.object({ id: z.string().min(1) }) }),
@@ -99,7 +103,9 @@ const procedureCandidates = async (
   session: BinarySessionPort | undefined,
   document: string | undefined,
 ): Promise<readonly string[]> => {
-  const byAddress = new Map<string, string>();
+  const addresses = new Set<string>();
+  // null records proven ambiguity; later rows cannot restore uniqueness.
+  const addressByName = new Map<string, string | null>();
   const input =
     document === undefined || document.length === 0 ? {} : { document };
   const result = await completionInventoryLookup(
@@ -110,24 +116,22 @@ const procedureCandidates = async (
   );
   if (result === undefined) return [];
   if (result.ok) {
-    const parsed = z
-      .array(z.object({ address: z.string(), value: z.string() }))
-      .safeParse(result.value.result);
+    const parsed = procedureInventorySchema.safeParse(result.value.result);
     if (parsed.success)
-      for (const item of parsed.data)
-        if (!byAddress.has(item.address))
-          byAddress.set(item.address, item.value);
+      for (const { address, value: name } of parsed.data) {
+        addresses.add(address);
+        if (name.length === 0) continue;
+        const previous = addressByName.get(name);
+        addressByName.set(
+          name,
+          previous === undefined || previous === address ? address : null,
+        );
+      }
   }
 
-  const addressesByName = new Map<string, Set<string>>();
-  for (const [address, name] of byAddress) {
-    const addresses = addressesByName.get(name) ?? new Set<string>();
-    addresses.add(address);
-    addressesByName.set(name, addresses);
-  }
-  const candidates = [...byAddress.keys()];
-  for (const [name, addresses] of addressesByName)
-    if (addresses.size === 1 && name.length > 0) candidates.push(name);
+  const candidates = [...addresses];
+  for (const [name, address] of addressByName)
+    if (address !== null) candidates.push(name);
   return candidates;
 };
 

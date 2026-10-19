@@ -5,11 +5,93 @@ import { parseProcessCapture } from "./processCaptureParsing.js";
 import { partialProcessCaptureObservationSchema } from "./processCapture.js";
 import { FINALIZED_PROCESS_CAPTURE_EXAMPLE } from "./processCaptureExample.js";
 import { finalizationConsistencyIssue } from "./processCaptureValidation.js";
+import type { FilesystemCoverage } from "./processCaptureCoverage.js";
 import {
   compareUnverifiedProcessCaptures as compareProcessCaptures,
   emptyUnverifiedProcessCapture as emptyCapture,
   processCaptureIssues,
 } from "./processCapture.fixture.js";
+
+const captureWithEnumerationOmission = (
+  omission: FilesystemCoverage["enumeration_omissions"][number],
+) => {
+  const capture = emptyCapture();
+  const scenario = {
+    ...capture.manifest.scenario,
+    filesystem_observation_paths: ["/fixture/selected"],
+  };
+  return {
+    ...capture,
+    manifest: {
+      ...capture.manifest,
+      scenario,
+      full_scenario_sha256: digestProcessCommitment(scenario),
+    },
+    truncated: true,
+    filesystem_checkpoints: capture.filesystem_checkpoints.map((checkpoint) =>
+      checkpoint.name === "after_settlement"
+        ? { ...checkpoint, truncated: true }
+        : checkpoint,
+    ),
+    truncation_details: {
+      ...capture.truncation_details,
+      filesystem_after: {
+        ...capture.truncation_details.filesystem_after,
+        enumeration_truncated: true,
+        enumeration_reasons: [omission.reason],
+        enumeration_omissions: [omission],
+      },
+    },
+  };
+};
+
+it.each([
+  { path: "root_0:.", reason: "entry_unavailable", system_code: "ENOENT" },
+  { path: "root_0:.", reason: "identity_changed", system_code: null },
+] as const)("accepts a partial entry with $reason evidence", (omission) => {
+  const capture = captureWithEnumerationOmission(omission);
+  expect(parseProcessCapture(capture)).toEqual(capture);
+});
+
+it.each([
+  { path: "root_0:.", reason: "entry_unavailable", system_code: null },
+  { path: "root_0:.", reason: "identity_changed", system_code: "ENOENT" },
+  { path: "root_0:.", reason: "directory_unavailable", system_code: "ENOENT" },
+] as const)("rejects an inconsistent omission %j", (omission) => {
+  expect(() =>
+    parseProcessCapture(captureWithEnumerationOmission(omission)),
+  ).toThrow("enumeration_omissions");
+});
+
+it("requires entry-unavailability details and matching aggregate reasons", () => {
+  const capture = captureWithEnumerationOmission({
+    path: "root_0:.",
+    reason: "entry_unavailable",
+    system_code: "ENOENT",
+  });
+  for (const changes of [
+    { enumeration_omissions: [] },
+    { enumeration_reasons: ["identity_changed"] },
+    {
+      enumeration_omissions: [
+        ...capture.truncation_details.filesystem_after.enumeration_omissions,
+        ...capture.truncation_details.filesystem_after.enumeration_omissions,
+      ],
+    },
+  ])
+    expect(() =>
+      parseProcessCapture({
+        ...capture,
+        truncation_details: {
+          ...capture.truncation_details,
+          filesystem_after: {
+            ...capture.truncation_details.filesystem_after,
+            ...changes,
+          },
+        },
+      }),
+    ).toThrow("enumeration_omissions");
+});
 
 it("never considers truncated captures equivalent", () => {
   const complete = emptyCapture();

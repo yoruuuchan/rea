@@ -107,7 +107,7 @@ export abstract class AnalysisError extends Error {
   }
   /** Later typed failures retained without changing the primary error cause. */
   get secondaryFailures(): readonly AnalysisError[] {
-    return this.#secondaryFailures;
+    return [...this.#secondaryFailures];
   }
   readonly cleanupReport: ProcessCaptureCleanupReport | undefined = undefined;
 
@@ -141,13 +141,14 @@ export abstract class AnalysisError extends Error {
   /** Retain a later lifecycle failure without replacing the original typed error. */
   retainSecondaryFailure(
     failure: AnalysisError,
-    diagnostics: Readonly<Record<string, JsonValue>>,
+    diagnostics?: Readonly<Record<string, JsonValue>>,
   ): this {
     // Secondary resources remain owned by their cleanup lifecycle; preserve
     // the primary error's live cleanup status and original output.
-    Object.assign(this, {
-      diagnostics: structuredClone({ ...this.diagnostics, ...diagnostics }),
-    });
+    if (diagnostics !== undefined)
+      Object.assign(this, {
+        diagnostics: structuredClone({ ...this.diagnostics, ...diagnostics }),
+      });
     this.#secondaryFailures.push(failure);
     return this;
   }

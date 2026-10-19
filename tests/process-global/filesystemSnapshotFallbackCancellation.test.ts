@@ -7,8 +7,8 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const observation = vi.hoisted(() => ({
   path: "",
-  namedReads: 0,
-  cancelAt: 0,
+  cancelAfterDescriptorInspection: false,
+  descriptorInspected: false,
   controller: undefined as AbortController | undefined,
   reason: undefined as Error | undefined,
   handles: [] as FileHandle[],
@@ -30,14 +30,23 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     ...original,
     open: async (...args: Parameters<typeof original.open>) => {
       const handle = await original.open(...args);
-      if (args[0] === observation.path) observation.handles.push(handle);
+      if (args[0] === observation.path) {
+        observation.handles.push(handle);
+        const stat = handle.stat.bind(handle);
+        vi.spyOn(handle, "stat").mockImplementation(async (options) => {
+          const stats = await stat(options);
+          observation.descriptorInspected = true;
+          return stats;
+        });
+      }
       return handle;
     },
     lstat: async (...args: Parameters<typeof original.lstat>) => {
       const stats = await original.lstat(...args);
       if (
         args[0] === observation.path &&
-        ++observation.namedReads === observation.cancelAt
+        observation.cancelAfterDescriptorInspection &&
+        observation.descriptorInspected
       )
         observation.controller?.abort(observation.reason);
       return stats;
@@ -54,8 +63,8 @@ import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 
 afterEach(() => {
   observation.path = "";
-  observation.namedReads = 0;
-  observation.cancelAt = 0;
+  observation.cancelAfterDescriptorInspection = false;
+  observation.descriptorInspected = false;
   observation.controller = undefined;
   observation.reason = undefined;
   observation.handles.length = 0;
@@ -76,9 +85,9 @@ it.each(["hash", "snapshot"] as const)(
     observation.path = path;
     observation.controller = controller;
     observation.reason = reason;
-    // A root file snapshot first inspects presence and entry metadata, then
-    // reaches the same two named-file inspections as direct hashing.
-    observation.cancelAt = operation === "hash" ? 2 : 4;
+    // The final fallback inspection is the named lookup after the opened
+    // descriptor was inspected. Admission may perform other named lookups.
+    observation.cancelAfterDescriptorInspection = true;
     const result =
       operation === "hash"
         ? hashFile(path, expected, 1_000, controller.signal)
@@ -110,7 +119,7 @@ it("keeps an unchanged fallback digest and closes its descriptor", async () => {
     state: "hashed",
     sha256: createHash("sha256").update(bytes).digest("hex"),
   });
-  expect(observation.namedReads).toBe(2);
+  expect(observation.descriptorInspected).toBe(true);
   expect(observation.handles).toHaveLength(1);
   await expect(observation.handles[0]?.stat()).rejects.toMatchObject({
     code: "EBADF",
