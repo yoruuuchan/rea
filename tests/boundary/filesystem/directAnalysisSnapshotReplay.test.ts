@@ -118,7 +118,7 @@ const expectWorkflowQuestionsRetained = (
     expect.arrayContaining(
       result.residual_unknowns.map((question) =>
         expect.objectContaining({
-          question,
+          question: `${question} (Evidence ${evidence.evidence_id})`,
           supporting_evidence_ids: [evidence.evidence_id],
         }),
       ),

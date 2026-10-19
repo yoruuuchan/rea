@@ -92,7 +92,7 @@ without serial scheduling. Pure domain/service, composition, conformance,
 evaluation, CLI boundary, and MCP boundary projects share module graphs. Their
 tests avoid process-global state and keep resource cleanup test-scoped. Each
 MCP session still owns its resources, and CLI cases retain fresh command
-instances or subprocesses. CLI module mocks belong in `tests/process-global/`
+instances or subprocesses. CLI and MCP module mocks belong in `tests/process-global/`
 so they keep per-file isolation. Product catalog verification stays with the
 isolated filesystem boundary tests because it loads both source and compiled
 module graphs. Adapter, other boundary, acceptance, and process-global projects
@@ -250,6 +250,15 @@ opaque rejection reasons, cancellation during failed finalization, and missing
 lineage followed by a confirmed passive family census. Windows controls require
 a fresh lineage observation and do not signal cached descendant PIDs after root
 termination. Simulated Windows controls do not establish native Windows behavior.
+
+Native process-ownership controls distinguish start identity, zombie lifecycle,
+current parent/group relation, and token-read evidence. Retain generation-bound
+candidates through smaller lineage observations, table omissions, reparenting,
+group changes, and failed cleanup retries. A readable token with unavailable
+identity stays unresolved. Native UID facts, rather than an earlier process-table
+row, determine whether a token denial concerns another user. Darwin tests compile
+the helper and exercise snapshot growth, absence, lifecycle, and UID observations;
+controlled Linux procfs tests do not establish real Linux exit or PID-reuse behavior.
 
 For atomic writes, exercise cancellation on both sides of the documented commit
 point and preserve any publication receipt. A late interruption does not prove

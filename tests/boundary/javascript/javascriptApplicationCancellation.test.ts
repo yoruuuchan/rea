@@ -1,5 +1,5 @@
 import { setImmediate } from "node:timers";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
@@ -16,7 +16,16 @@ import { analyzeJavaScriptApplication } from "../../support/javascriptApplicatio
 it.each(["during cleanup", "on the next control turn"] as const)(
   "retains the final source when cancellation arrives %s after analysis",
   async (timing) => {
-    const root = await createTestTempDirectory("rea-js-cancel-handoff-");
+    const parent = await createTestTempDirectory("rea-js-cancel-handoff-");
+    const root = join(parent, "physical");
+    const selected = join(parent, "selected");
+    await mkdir(root);
+    await symlink(
+      root,
+      selected,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const resolved = await realpath(root);
     await writeFile(
       join(root, "main.js"),
       'import { readFile } from "node:fs/promises"; export { readFile };\n',
@@ -35,13 +44,22 @@ it.each(["during cleanup", "on the next control turn"] as const)(
     const scope = new CancellingCleanupScope();
     onTestFinished(() => scope.close());
     const result = await analyzeOwnedApplication(
-      { input_path: root, format: "directory" },
+      { input_path: selected, format: "directory" },
       scope,
       { signal: controller.signal },
     );
     if (result.ok) throw new Error("Cancelled handoff must not succeed");
     const projected = projectAnalysisError(result.error);
     expect(projected.code).toBe("cancelled");
+    expect(projected).toMatchObject({
+      details: {
+        partial_observation: {
+          parameters: { input_path: selected },
+          subject: { local_path: resolved },
+          normalized_result: { input_path: resolved },
+        },
+      },
+    });
     const partial = z
       .object({
         details: z.object({

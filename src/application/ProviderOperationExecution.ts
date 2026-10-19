@@ -8,6 +8,7 @@ import {
   AnalysisInputError,
 } from "../domain/analysisErrorCore.js";
 import type { Evidence } from "../domain/evidence.js";
+import { projectInputIssues } from "../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   createAnalysisExecutionEvidence,
@@ -52,7 +53,18 @@ export const executeProviderOperation = async <
     );
   const request = schema.safeParse({ operation, input });
   if (!request.success)
-    return err(new AnalysisInputError(operation, { cause: request.error }));
+    return err(
+      new AnalysisInputError(
+        operation,
+        { cause: request.error },
+        projectInputIssues(request.error.issues, { operation, input }).map(
+          (issue) =>
+            issue.path[0] === "input"
+              ? { ...issue, path: issue.path.slice(1) }
+              : issue,
+        ),
+      ),
+    );
   const executed = await provider.execute(request.data, options);
   if (!executed.ok) return executed;
   const evidence = createAnalysisExecutionEvidence(

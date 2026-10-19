@@ -1,6 +1,7 @@
 import type { WebPageInspection } from "../domain/browserObservationSchemas.js";
 import { sanitizeBrowserUrl } from "../domain/browserObservation.js";
 import { inferJsonShape } from "../domain/jsonShape.js";
+import { paddedBase64ByteLength } from "../domain/paddedBase64.js";
 import { safeResponseMetadata } from "./CdpSafeMetadata.js";
 import {
   allowedSanitizedUrl,
@@ -18,7 +19,6 @@ import {
 } from "./CdpCaptureEventBodyShapes.js";
 import {
   consolePrimitive,
-  decodeBase64,
   exclusionReasonForUrl,
   executionContextKey,
   firstCallFrame,
@@ -508,14 +508,15 @@ export const handleWebSocketFrame = (
   const response = recordValue(params.response);
   const payload = cdpStringValue(response?.payloadData) ?? "";
   const opcode = Math.max(0, Math.trunc(numberValue(response?.opcode) ?? 0));
-  const decoded = opcode === 1 ? undefined : decodeBase64(payload);
-  if (opcode !== 1 && decoded === undefined)
+  const decodedBytes =
+    opcode === 1 ? undefined : paddedBase64ByteLength(payload);
+  if (opcode !== 1 && decodedBytes === undefined)
     state.completeness.exclude("websocket_frames", "invalid_protocol_value");
   connection.events.push({
     direction,
     opcode,
     payload_bytes:
-      opcode === 1 ? Buffer.byteLength(payload) : (decoded?.byteLength ?? null),
+      opcode === 1 ? Buffer.byteLength(payload) : (decodedBytes ?? null),
     payload_shape: captureWebSocketShape(state, payload, opcode),
   });
 };

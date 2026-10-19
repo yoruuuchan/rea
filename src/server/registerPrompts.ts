@@ -1,4 +1,7 @@
-import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
+import {
+  currentMcpRequestSignal,
+  type EvidenceMcpServer,
+} from "./EvidenceMcpServer.js";
 import {
   completable,
   type RegisteredPrompt,
@@ -31,7 +34,16 @@ export const registerGuidedPrompts = (
   analysis: AnalysisOperationPort,
   session?: BinarySessionPort,
 ): GuidedPromptRegistry => {
-  const completion = createPromptCompletionSource(analysis, session);
+  const source = createPromptCompletionSource(analysis, session);
+  const completion: PromptCompletionSource = {
+    async complete(kind, value, context) {
+      // Completions can query the same providers as tools. Cancellation alone
+      // does not mean their provider cleanup has finished.
+      return server.runRequest(currentMcpRequestSignal(), () =>
+        source.complete(kind, value, context),
+      );
+    },
+  };
   const prompts = new Map<string, RegisteredPrompt>();
   for (const contract of PROMPT_CONTRACTS)
     prompts.set(contract.name, registerPrompt(server, contract, completion));

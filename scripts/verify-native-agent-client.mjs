@@ -9,6 +9,7 @@ import {
   toolContract,
 } from "../dist/contracts/toolContracts.js";
 import { exec } from "./lib/verify-package-core.mjs";
+import { assertJavaScriptApplicationInputPaths } from "./lib/javascript-application-paths.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 import { createOpenAiModelFixture } from "./verify/clients/model-fixture.mjs";
 
@@ -169,7 +170,7 @@ const validateEvidence = async (value) => {
   const evidence = toolContract(
     "analyze_javascript_application",
   ).outputSchema.parse(value);
-  assert.equal(evidence.subject.local_path, target);
+  await assertJavaScriptApplicationInputPaths(evidence, target);
   const shape = evidence.normalized_result.graph.nodes
     .flatMap((n) => n.observations)
     .map((o) => o.properties)

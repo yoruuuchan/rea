@@ -22,7 +22,7 @@ import type {
   SpawnedOwnedProviderProcess,
 } from "../../../src/process/ProviderProcess.js";
 import { stopOwnedDebuggerProcess } from "../../../src/process/ownedDebuggerSession.js";
-import { parseLinuxProcessStartTime } from "../../../src/process/ProcessOwnershipObservation.js";
+import { parseLinuxProcessStat } from "../../../src/process/LinuxProcessStat.js";
 import { expectGdbSessionStarted } from "./gdbTestHelpers.js";
 
 let directory: string | undefined;
@@ -1941,7 +1941,9 @@ it.each([
         expect(observedPid).toBe(pid);
         if (process.platform === "linux") {
           const stat = await readFile(`/proc/${observedPid}/stat`, "utf8");
-          capturedStartTime = parseLinuxProcessStartTime(stat);
+          const parsed = parseLinuxProcessStat(stat);
+          capturedStartTime =
+            parsed?.pid === Number(observedPid) ? parsed.startTime : undefined;
         } else capturedStartTime = `test-inferior-${observedPid}`;
         if (capturedStartTime === undefined)
           throw new Error("Controlled inferior identity was unreadable");
@@ -1951,7 +1953,8 @@ it.each([
         if (observedPid !== pid || !inferiorAlive) return null;
         if (process.platform === "linux") {
           const stat = await readFile(`/proc/${observedPid}/stat`, "utf8");
-          return parseLinuxProcessStartTime(stat) ?? null;
+          const parsed = parseLinuxProcessStat(stat);
+          return parsed?.pid === Number(observedPid) ? parsed.startTime : null;
         }
         return capturedStartTime ?? null;
       },

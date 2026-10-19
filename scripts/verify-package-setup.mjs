@@ -21,6 +21,7 @@ import {
 } from "./lib/verify-package-core.mjs";
 import { parse as parseJsonc } from "jsonc-parser";
 import { skillReferenceIssues } from "./lib/docs-facts.mjs";
+import { setupPlanFailureMessage } from "./verify-package-setup-plan.mjs";
 
 export const terminalModesRestored = (termios) => {
   if (typeof termios !== "string") return false;
@@ -250,23 +251,37 @@ const verifySetupPlan = async ({
   );
   const planned = json(plannedExecution.stdout);
   if (supportedSetupHost) {
+    const plannedActions = Array.isArray(planned?.plannedActions)
+      ? planned.plannedActions
+      : undefined;
+    const appliedActions = Array.isArray(planned?.appliedActions)
+      ? planned.appliedActions
+      : undefined;
     const plannedClaudeConfig = await readFile(claudeConfig, "utf8");
     const plannedCodexConfig = await readFile(codexTarget, "utf8");
     const plannedCursorConfig = await readFile(cursorConfig, "utf8");
     const plannedOpenCodeConfig = await readFile(opencodeConfig, "utf8");
     if (
-      planned.status !== "planned" ||
+      planned?.status !== "planned" ||
       plannedExecution.status !== 0 ||
-      planned.appliedActions.length !== 0 ||
-      !planned.plannedActions.some(({ kind }) => kind === "configure_client") ||
-      !planned.plannedActions.some(({ kind }) => kind === "install_skill") ||
+      plannedActions === undefined ||
+      appliedActions === undefined ||
+      appliedActions.length !== 0 ||
+      !plannedActions.some((action) => action?.kind === "configure_client") ||
+      !plannedActions.some((action) => action?.kind === "install_skill") ||
       plannedClaudeConfig !== '{"existing":true}\n' ||
       plannedCodexConfig !== CODEX_ORIGINAL ||
       plannedCursorConfig !== '{"existing":true}\n' ||
       plannedOpenCodeConfig !== opencodeOriginal
     )
       throw new Error(
-        `packaged setup plan was not read-only: ${JSON.stringify({ status: planned.status, exitCode: plannedExecution.status, plannedKinds: planned.plannedActions.map(({ kind }) => kind), appliedKinds: planned.appliedActions.map(({ kind }) => kind), claudeConfig: plannedClaudeConfig, codexConfig: plannedCodexConfig, cursorConfig: plannedCursorConfig })}`,
+        setupPlanFailureMessage({
+          planned,
+          plannedExecution,
+          plannedClaudeConfig,
+          plannedCodexConfig,
+          plannedCursorConfig,
+        }),
       );
   }
   return { planned };

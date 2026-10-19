@@ -206,6 +206,7 @@ const connectProgressClient = async (
 ): Promise<{
   readonly client: Client;
   readonly notifications: string[];
+  readonly cleanupProgress: Promise<void>;
 }> => {
   const session = createTestBinarySession(() => {
     throw new Error("Process capture must not launch a binary provider");
@@ -219,9 +220,14 @@ const connectProgressClient = async (
     version: "1",
   });
   const notifications: string[] = [];
+  let sawCleanup: (() => void) | undefined;
+  const cleanupProgress = new Promise<void>((resolve) => {
+    sawCleanup = resolve;
+  });
   if (recordNotifications) {
     client.setNotificationHandler("notifications/progress", (notification) => {
       notifications.push(JSON.stringify(notification));
+      if (notification.params.message?.startsWith("cleanup:")) sawCleanup?.();
     });
   }
   const [clientTransport, serverTransport] =
@@ -231,7 +237,7 @@ const connectProgressClient = async (
   onTestFinished(async () => {
     await Promise.allSettled([client.close(), server.close(), session.close()]);
   });
-  return { client, notifications };
+  return { client, notifications, cleanupProgress };
 };
 
 itWithCaptureCapability(
@@ -283,7 +289,7 @@ itWithCaptureCapability(
 );
 
 itWithCaptureCapability(
-  "reports unknown resource cleanup when temporary-root preparation fails",
+  "reports startup cleanup coverage when temporary storage is unavailable",
   async () => {
     const scenario = await writeScenario(
       "rea-process-progress-prepare-failed-",
@@ -306,14 +312,25 @@ itWithCaptureCapability(
     });
 
     expect(capture.exitCode).toBe(1);
+    const error = analysisCliErrorEnvelopeSchema.parse(
+      JSON.parse(capture.stdout),
+    );
+    expect(error).toMatchObject({
+      code: "process_capture_failed",
+      details: { execution_failure: expect.stringContaining(missingTempRoot) },
+    });
+    // Darwin prepares its native inspector before acquiring capture resources.
+    // Other hosts reach the capture root allocation, whose failure is accounted.
+    const cleanupState =
+      process.platform === "darwin" ? "unverified" : "not_required";
     expect(capture.lines.at(-1)?.update).toMatchObject({
       phase: "cleanup",
       terminal: true,
       details: {
         disposition: "failed",
-        owned_process_group: "unverified",
-        terminal_renderer: "unverified",
-        temporary_root: "unverified",
+        owned_process_group: cleanupState,
+        terminal_renderer: cleanupState,
+        temporary_root: cleanupState,
       },
     });
   },
@@ -590,9 +607,13 @@ itWithCaptureCapability(
       controller.abort();
       await completion;
     }
-    await expect
-      .poll(() => cancelling.notifications.join("\n"))
-      .toContain("disposition=cancelled");
+    // Client cancellation ends its wait before the server has released its
+    // process tree. Wait for the actual terminal notification under the test's
+    // existing deadline instead of giving cleanup a separate polling deadline.
+    await cancelling.cleanupProgress;
+    expect(cancelling.notifications.join("\n")).toContain(
+      "disposition=cancelled",
+    );
     expect(cancelling.notifications.join("\n")).toContain(
       "owned_process_group=cleaned",
     );

@@ -12,6 +12,7 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { exec } from "./lib/verify-package-core.mjs";
+import { assertJavaScriptApplicationInputPaths } from "./lib/javascript-application-paths.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 import {
   TOOL_CONTRACTS,
@@ -195,7 +196,7 @@ const fixture = await createOpenAiModelFixture({
         "analyze_javascript_application",
       ).outputSchema.parse(JSON.parse(artifact.toString("utf8")));
       assert(extractEvidence(evidence));
-      assert.equal(evidence.subject.local_path, target);
+      await assertJavaScriptApplicationInputPaths(evidence, target);
       const shape = evidence.normalized_result.graph.nodes
         .flatMap((n) => n.observations)
         .map((o) => o.properties)

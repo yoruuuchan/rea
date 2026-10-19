@@ -56,7 +56,7 @@ describe("executable dispatcher", () => {
         ),
         workspace.write(
           "dist/mcp/main.js",
-          'export const runEntrypoint = () => process.stdout.write(JSON.stringify({ adapter: "mcp" }));\n',
+          'export const runEntrypoint = () => process.stdout.write(JSON.stringify({ adapter: "mcp" })); export const runMcpHttpEntrypoint = (args) => process.stdout.write(JSON.stringify({ adapter: "mcp-http", args }));\n',
         ),
         workspace.write(
           "dist/cli-runtime/cli.js",
@@ -99,6 +99,24 @@ describe("executable dispatcher", () => {
       await expect(invoke(["--mcp", "extra"])).resolves.toEqual({
         adapter: "cli",
         args: ["--mcp", "extra"],
+      });
+      for (const args of [
+        ["mcp", "--http", "--port", "0"],
+        ["--mcp", "--http"],
+        ["mcp", "-h", "--http"],
+        ["mcp", "--host", "127.0.0.1", "--http"],
+      ])
+        await expect(invoke(args)).resolves.toEqual({
+          adapter: "mcp-http",
+          args: args.slice(1),
+        });
+      await expect(invoke(["mcp", "doctor", "--http"])).resolves.toEqual({
+        adapter: "mcp-doctor",
+        args: ["--http"],
+      });
+      await expect(invoke(["mcp", "add", "--http"])).resolves.toEqual({
+        adapter: "cli",
+        args: ["mcp", "add", "--http"],
       });
     },
   );

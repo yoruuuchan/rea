@@ -1,28 +1,27 @@
-import { execFile } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 
 import { Cli } from "incur";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { observeJavaScriptRuntime } from "../../../src/application/javascript/JavaScriptRuntimeObservationService.js";
-import type { JavaScriptRuntimeObservationPort } from "../../../src/application/javascript/JavaScriptRuntimeObservationPort.js";
-import { V8InspectorProvider } from "../../../src/inspector/V8InspectorProvider.js";
-import { observeJavaScriptRuntimeInputSchema } from "../../../src/domain/javascript/javascriptRuntimeObservation.js";
-import { startFakeV8Inspector } from "../../fixtures/inspector/fakeV8Inspector.js";
-import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
-import { registerJavaScriptRuntimeObservationCommands } from "../../../src/cliJavaScriptRuntimeCommands.js";
-import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
-import { ok } from "../../../src/domain/result.js";
-import { silentLogger } from "../../../src/logger.js";
+import { observeJavaScriptRuntime } from "../../src/application/javascript/JavaScriptRuntimeObservationService.js";
+import type { JavaScriptRuntimeObservationPort } from "../../src/application/javascript/JavaScriptRuntimeObservationPort.js";
+import { V8InspectorProvider } from "../../src/inspector/V8InspectorProvider.js";
+import { observeJavaScriptRuntimeInputSchema } from "../../src/domain/javascript/javascriptRuntimeObservation.js";
+import { startFakeV8Inspector } from "../fixtures/inspector/fakeV8Inspector.js";
+import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
+import { registerJavaScriptRuntimeObservationCommands } from "../../src/cliJavaScriptRuntimeCommands.js";
+import { ProviderCleanupError } from "../../src/domain/providerCleanupError.js";
+import { ok } from "../../src/domain/result.js";
+import { silentLogger } from "../../src/logger.js";
+import { cliTest } from "../support/cli/cliFixture.js";
 
 const runtimeFactory = vi.hoisted(() => ({
   provider: undefined as JavaScriptRuntimeObservationPort | undefined,
 }));
 
-vi.mock("../../../src/composition/javascriptRuntimeObservation.js", () => ({
+vi.mock("../../src/composition/javascriptRuntimeObservation.js", () => ({
   createJavaScriptRuntimeObservationProvider: () => {
     if (runtimeFactory.provider === undefined)
       throw new Error("No runtime observation provider was configured");
@@ -30,28 +29,20 @@ vi.mock("../../../src/composition/javascriptRuntimeObservation.js", () => ({
   },
 }));
 
-const execute = promisify(execFile);
 const TIMEOUT_MS = 20_000;
 
 describe("JavaScript runtime observation CLI parity", () => {
   const resources: Array<{ close(): Promise<unknown> }> = [];
-  const temporary: string[] = [];
 
   afterEach(async () => {
     runtimeFactory.provider = undefined;
     await Promise.all(resources.splice(0).map((item) => item.close()));
-    await Promise.all(
-      temporary
-        .splice(0)
-        .map((path) => rm(path, { recursive: true, force: true })),
-    );
   });
 
-  test(
+  cliTest(
     "returns the same passive Inspector Evidence contracts",
-    async () => {
+    async ({ cli }) => {
       const root = await createTestTempDirectory("rea-v8-cli-");
-      temporary.push(root);
       const entry = join(root, "entry.js");
       await writeFile(entry, "export const value = 1;\n");
       const inspector = await startFakeV8Inspector({
@@ -60,11 +51,16 @@ describe("JavaScript runtime observation CLI parity", () => {
       resources.push(inspector);
       const environment = { ...process.env };
 
-      const listed = await runCli(
-        ["list-javascript-runtime-targets", inspector.endpoint, "--json"],
+      const listed = await cli.run({
+        arguments: [
+          "list-javascript-runtime-targets",
+          inspector.endpoint,
+          "--json",
+        ],
         environment,
-      );
-      expect(listed).toMatchObject({
+      });
+      expect(listed.exitCode, listed.stderr).toBe(0);
+      expect(listed.json).toMatchObject({
         operation: "list_javascript_runtime_targets",
         provider: { id: "rea-v8-inspector" },
         normalized_result: {
@@ -72,8 +68,8 @@ describe("JavaScript runtime observation CLI parity", () => {
         },
       });
 
-      const observed = await runCli(
-        [
+      const observed = await cli.run({
+        arguments: [
           "observe-javascript-runtime",
           inspector.endpoint,
           inspector.targetId,
@@ -84,8 +80,9 @@ describe("JavaScript runtime observation CLI parity", () => {
           "--json",
         ],
         environment,
-      );
-      expect(observed).toMatchObject({
+      });
+      expect(observed.exitCode, observed.stderr).toBe(0);
+      expect(observed.json).toMatchObject({
         operation: "observe_javascript_runtime",
         provider: { id: "rea-v8-inspector" },
         normalized_result: {
@@ -99,18 +96,23 @@ describe("JavaScript runtime observation CLI parity", () => {
           },
         },
       });
-      const direct = await observeJavaScriptRuntime(
-        new V8InspectorProvider(),
-        observeJavaScriptRuntimeInputSchema.parse({
-          inspector_endpoint: inspector.endpoint,
-          target_id: inspector.targetId,
-          runtime_kind: "node",
-          observation_ms: 10,
-        }),
-      );
-      expect(direct.ok).toBe(true);
-      if (direct.ok)
-        expect(evidenceIdFrom(observed)).toBe(direct.value.evidence_id);
+      const provider = new V8InspectorProvider();
+      try {
+        const direct = await observeJavaScriptRuntime(
+          provider,
+          observeJavaScriptRuntimeInputSchema.parse({
+            inspector_endpoint: inspector.endpoint,
+            target_id: inspector.targetId,
+            runtime_kind: "node",
+            observation_ms: 10,
+          }),
+        );
+        expect(direct.ok).toBe(true);
+        if (direct.ok)
+          expect(evidenceIdFrom(observed.json)).toBe(direct.value.evidence_id);
+      } finally {
+        await provider.close();
+      }
     },
     TIMEOUT_MS,
   );
@@ -171,22 +173,6 @@ describe("JavaScript runtime observation CLI parity", () => {
     });
   });
 });
-
-const runCli = async (
-  arguments_: readonly string[],
-  environment: NodeJS.ProcessEnv,
-): Promise<unknown> => {
-  const { stdout } = await execute(
-    process.execPath,
-    ["scripts/rea.mjs", ...arguments_],
-    {
-      cwd: process.cwd(),
-      env: environment,
-      maxBuffer: 16 * 1_024 * 1_024,
-    },
-  );
-  return JSON.parse(stdout);
-};
 
 const evidenceIdFrom = (value: unknown): string => {
   if (typeof value !== "object" || value === null)

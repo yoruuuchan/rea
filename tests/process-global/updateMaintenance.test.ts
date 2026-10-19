@@ -16,6 +16,7 @@ import {
   systemUpdateHost,
 } from "../../src/application/UpdateRuntime.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
+import { cliTest } from "../support/cli/cliFixture.js";
 
 const entryPoint = resolve("scripts/rea.mjs");
 let home: string;
@@ -381,21 +382,20 @@ describe("updated executable maintenance planning", () => {
 });
 
 describe("update subprocess boundaries", () => {
-  it("exposes update as the sole CLI command", async () => {
-    const help = await runUpdateCommand(
-      [process.execPath, entryPoint, "--help"],
-      process.env,
-    );
-    expect(help.ok).toBe(true);
-    if (help.ok) {
-      expect(help.value).toMatch(/^\s{2}update\s/mu);
-      expect(help.value).not.toMatch(/^\s{2}upgrade\s/mu);
-    }
-    const removed = await runUpdateCommand(
-      [process.execPath, entryPoint, "upgrade", "--json"],
-      process.env,
-    );
-    expect(removed.ok).toBe(false);
+  cliTest("exposes update as the sole CLI command", async ({ cli }) => {
+    const help = await cli.run({
+      arguments: ["--help"],
+      environment: process.env,
+    });
+    expect(help.exitCode, help.stderr).toBe(0);
+    expect(help.stdout).toMatch(/^\s{2}update\s/mu);
+    expect(help.stdout).not.toMatch(/^\s{2}upgrade\s/mu);
+    const removed = await cli.run({
+      arguments: ["upgrade", "--json"],
+      environment: process.env,
+    });
+    expect(removed.exitCode, removed.stderr).toBe(1);
+    expect(removed.json).toMatchObject({ code: "COMMAND_NOT_FOUND" });
   });
   it("captures output through stream closure and keeps arguments literal", async () => {
     const literal = 'space and $(echo bad); & | "quotes"';

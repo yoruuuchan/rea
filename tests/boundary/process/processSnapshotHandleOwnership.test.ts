@@ -704,6 +704,9 @@ it("preserves an IO failure that arrives with cancellation before descriptor cle
     cleanupIncomplete: false,
   });
   expect((failure as ProcessCaptureReadFailure).userCategory).toBeUndefined();
+  expect((failure as ProcessCaptureReadFailure).cancellation?.reason).toBe(
+    reason,
+  );
   expect(injected.fileHandle?.fd).toBe(-1);
 });
 

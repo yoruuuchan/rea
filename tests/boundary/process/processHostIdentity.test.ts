@@ -1,3 +1,4 @@
+import { ProcessOwnershipEvidenceOwner } from "../../../src/process/ProcessOwnershipEvidence.js";
 import { expect, it } from "vitest";
 
 import { parseProcessScenario } from "../../../src/domain/process/processScenario.js";
@@ -28,13 +29,14 @@ it("uses one selected host identity for manifest and settlement", async () => {
     observeLaunchedExecutable(scenario.executable, selectedExecutable),
     selectedHost,
   );
-  const settlement = await observeSettlement(
-    "run",
-    [],
-    0,
-    () => undefined,
-    selectedHost.platform,
-  );
+  const settlement = await observeSettlement({
+    runId: "run",
+    processGroupIds: [],
+    settleMs: 0,
+    recordEvent: () => undefined,
+    platform: selectedHost.platform,
+    ownershipEvidence: new ProcessOwnershipEvidenceOwner(),
+  });
 
   expect(manifest).toMatchObject(selectedHost);
   expect(settlement).toEqual({ state: "unverifiable", elapsed_ms: 0 });

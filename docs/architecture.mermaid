@@ -1,8 +1,8 @@
 graph TD
     subgraph "Entry Points"
         CLI["src/cli.ts + src/cli/<br/>One-shot CLI adapter<br/>setup, diagnostics, analysis, decompilation"]
-        MAIN["src/main.ts + src/main/<br/>MCP stdio server adapter<br/>config, session, process lifetime"]
-        DISPATCH["scripts/rea.mjs<br/>Executable dispatcher<br/>routes mcp / one-shot"]
+        MAIN["src/main.ts + src/main/<br/>MCP server adapter: stdio default, streamable HTTP opt-in<br/>config, session, process lifetime"]
+        DISPATCH["scripts/rea.mjs<br/>Executable dispatcher<br/>routes mcp / mcp --http / one-shot"]
     end
 
     subgraph "Production Composition"
@@ -10,7 +10,7 @@ graph TD
     end
 
     subgraph "Adapters"
-        SERVER["src/server/<br/>MCP request translation<br/>createServer, tool registration, toolResult"]
+        SERVER["src/server/<br/>MCP request translation<br/>createServer, tool registration, toolResult<br/>http/: streamable HTTP listener and node:http bridge"]
         HOPPER_BRIDGE["bridge/hopper_bridge.py<br/>Runs inside Hopper<br/>adapts operations to Hopper Python API"]
         GHIDRA_BRIDGE["bridge/ghidra/ReaGhidraBridge.java<br/>Packaged HeadlessScript<br/>inventory, decompiler, references, CFG"]
         INSTALL["src/cli/ + src/application/Setup*<br/>Host installation adapters<br/>macOS: verified vendor DMG to ~/Applications<br/>Linux: verified vendor package + apt/dnf/pacman"]

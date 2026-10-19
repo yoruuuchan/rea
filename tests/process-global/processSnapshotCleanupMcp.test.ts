@@ -10,7 +10,6 @@ const injected = vi.hoisted(() => ({
   failClose: false,
   opens: 0,
   handle: undefined as Awaited<ReturnType<typeof open>> | undefined,
-  nativeClose: undefined as (() => Promise<void>) | undefined,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -23,7 +22,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       injected.opens += 1;
       injected.handle = handle;
       const nativeClose = handle.close.bind(handle);
-      injected.nativeClose = nativeClose;
       handle.close = async () => {
         if (injected.failClose)
           throw new Error("controlled file close failure");
@@ -34,14 +32,14 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-import { createTestBinarySession } from "../../fixtures/binarySession.js";
-import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
-import type { AnalysisClient } from "../../../src/application/AnalysisProvider.js";
-import { observed } from "../../fixtures/analysisExecution.js";
-import { createServer } from "../../../src/server/createServer.js";
-import { silentLogger } from "../../../src/logger.js";
-import { ToolResultDelivery } from "../../../src/server/toolResult.js";
-import { ok } from "../../../src/domain/result.js";
+import { createTestBinarySession } from "../fixtures/binarySession.js";
+import { parseMcpToolError } from "../fixtures/mcpToolError.js";
+import type { AnalysisClient } from "../../src/application/AnalysisProvider.js";
+import { observed } from "../fixtures/analysisExecution.js";
+import { createServer } from "../../src/server/createServer.js";
+import { silentLogger } from "../../src/logger.js";
+import { ToolResultDelivery } from "../../src/server/toolResult.js";
+import { ok } from "../../src/domain/result.js";
 
 const connectSession = async () => {
   const session = createTestBinarySession(
@@ -172,6 +170,5 @@ it("retains and retries the exact snapshot file handle through public MCP captur
     await rm(root, { recursive: true, force: true });
     injected.path = "";
     injected.handle = undefined;
-    injected.nativeClose = undefined;
   }
 });

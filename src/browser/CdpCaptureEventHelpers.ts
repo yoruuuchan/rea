@@ -111,10 +111,3 @@ export const consolePrimitive = (
       return undefined;
   }
 };
-
-const BASE64 = /^(?:[A-Za-z\d+/]{4})*(?:[A-Za-z\d+/]{2}==|[A-Za-z\d+/]{3}=)?$/u;
-
-export const decodeBase64 = (value: string): Buffer | undefined =>
-  value.length % 4 === 0 && BASE64.test(value)
-    ? Buffer.from(value, "base64")
-    : undefined;

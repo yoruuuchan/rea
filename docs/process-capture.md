@@ -459,6 +459,14 @@ Each filesystem checkpoint starts with a fresh `file_bytes` budget across all
 selected roots; it is not a per-file allowance. File contents are read in
 64 KiB chunks for hashing and are not embedded in capture Evidence.
 
+Ownership inspections bind run-token reads to native start identities and retain
+related generations through reparenting, group changes, omitted rows, and cleanup
+retries. The captured run keeps one evidence owner through settlement and cleanup.
+An absent or changed token leaves a previously related generation unresolved;
+current token proof is still required before signaling. Swept cleanup verifies the
+remaining family after its group signals. Coverage is bounded by the native
+snapshots and generations inspected; sampled group IDs select candidates.
+
 When the host withholds an unrelated process’s ownership token, REA leaves that
 process untouched and records its PID and reason in `cleanup.unverified_processes`
 and process residual unknowns. Successful cleanup verifies the owned group;

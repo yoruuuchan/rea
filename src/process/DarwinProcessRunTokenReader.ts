@@ -48,8 +48,23 @@ const identityResponseSchema = z.strictObject({
     z.discriminatedUnion("state", [
       z.strictObject({
         pid: z.number().int().positive(),
+        state: z.literal("absent"),
+        identity: z.null().optional(),
+        reason: z.literal("not-in-snapshot"),
+      }),
+      z.strictObject({
+        pid: z.number().int().positive(),
         state: z.literal("readable"),
         identity: z.string().min(1),
+        effective_uid: z.number().int().nonnegative().optional(),
+        lifecycle: z.enum(["non-zombie", "zombie"]).optional(),
+        relation: z
+          .strictObject({
+            state: z.literal("observed"),
+            parent_pid: z.number().int().nonnegative(),
+            process_group_id: z.number().int().nonnegative(),
+          })
+          .optional(),
         reason: z.null().optional(),
       }),
       z.strictObject({
@@ -701,8 +716,33 @@ export const createDarwinProcessRunTokenReader = (
       observations.set(
         result.pid,
         result.state === "readable"
-          ? { state: "readable", identity: result.identity }
-          : { state: "unavailable", reason: result.reason },
+          ? {
+              state: "readable",
+              identity: result.identity,
+              ...(result.effective_uid === undefined
+                ? {}
+                : { effectiveUid: result.effective_uid }),
+              ...(result.lifecycle === undefined
+                ? {}
+                : {
+                    lifecycle: {
+                      state: "observed" as const,
+                      lifecycle: result.lifecycle,
+                    },
+                  }),
+              ...(result.relation === undefined
+                ? {}
+                : {
+                    relation: {
+                      state: "observed" as const,
+                      parentPid: result.relation.parent_pid,
+                      processGroupId: result.relation.process_group_id,
+                    },
+                  }),
+            }
+          : result.state === "absent"
+            ? { state: "absent", reason: result.reason }
+            : { state: "unavailable", reason: result.reason },
       );
     }
     if (observations.size !== requested.size)

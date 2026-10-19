@@ -16,6 +16,7 @@ import {
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { artifactOccurrenceAt } from "../../fixtures/artifactEntryOrder.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { asarHeaderBytes } from "../../fixtures/asarHeader.js";
 
 describe("ZIP signature detection", () => {
   it.each([
@@ -65,30 +66,8 @@ describe("ZIP signature detection", () => {
     const textPkg = join(root, "notes.pkg");
     const dmg = join(root, "image.dmg");
     const textDmg = join(root, "notes.dmg");
-    const headerSize = 20;
-    await writeFile(
-      asar,
-      Buffer.from([
-        4,
-        0,
-        0,
-        0,
-        headerSize,
-        0,
-        0,
-        0,
-        headerSize - 4,
-        0,
-        0,
-        0,
-        2,
-        0,
-        0,
-        0,
-        0x7b,
-        0x7d,
-      ]),
-    );
+    const asarBytes = asarHeaderBytes(JSON.stringify({ files: {} }));
+    await writeFile(asar, asarBytes);
     await writeFile(textAsar, Buffer.from("not an asar"));
     await writeFile(pkg, Buffer.from("xar!"));
     await writeFile(textPkg, Buffer.from("not a pkg"));
@@ -102,6 +81,11 @@ describe("ZIP signature detection", () => {
     expect(
       (await classifyAndHashRoot(textAsar, false, await lstat(textAsar)))
         .format,
+    ).toBe("file");
+    // A valid prefix cannot admit extents outside the observed container.
+    await writeFile(asar, asarBytes.subarray(0, -1));
+    expect(
+      (await classifyAndHashRoot(asar, false, await lstat(asar))).format,
     ).toBe("file");
     expect(
       (await classifyAndHashRoot(pkg, false, await lstat(pkg))).format,

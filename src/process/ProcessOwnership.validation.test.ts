@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupOwnedProcessGroup,
   cleanupWindowsProcessTree,
@@ -10,7 +10,12 @@ import {
   observeOwnedProcessGroups,
   observeOwnedProcessLineage,
 } from "./ProcessOwnershipObservation.js";
-import { host, ownership } from "./ProcessOwnership.fixture.js";
+import { createOwnership, host } from "./ProcessOwnership.fixture.js";
+
+let ownership = createOwnership();
+beforeEach(() => {
+  ownership = createOwnership();
+});
 
 const launcher: ProcessTableEntry = {
   pid: 100,

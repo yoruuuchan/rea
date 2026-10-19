@@ -29,6 +29,8 @@ const fixture = vi.hoisted(() => ({
       readonly read: number;
       readonly pid?: number;
       readonly parent?: number;
+      readonly processGroupId?: number;
+      readonly sessionId?: number;
       readonly start?: number;
     }
   >(),
@@ -165,6 +167,7 @@ vi.mock("../ExecFileOutput.js", () => ({
 }));
 
 import { startProcessSampler } from "./ProcessSampling.js";
+import { readLinuxProcessStat } from "./LinuxProcessSampling.js";
 import type { ProcessSample } from "../../domain/process/processCapture.js";
 
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
@@ -195,8 +198,8 @@ const statLine = (pid: number, read: number): string => {
     String(
       mutation?.read === read ? (mutation.parent ?? row.parent) : row.parent,
     ),
-    "100",
-    "100",
+    String(mutation?.read === read ? (mutation.processGroupId ?? 100) : 100),
+    String(mutation?.read === read ? (mutation.sessionId ?? 100) : 100),
   ];
   while (fields.length < 19) fields.push("0");
   fields.push(
@@ -268,6 +271,28 @@ const waitFor = async (condition: () => boolean): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
 };
+
+it("rejects a mismatched stat PID and zero process-group/session IDs at sampling admission", async () => {
+  setUpFixture();
+  fixture.statMutations.set(100, { read: 1, pid: 200 });
+  const wrongPid = await readLinuxProcessStat(
+    100,
+    new AbortController().signal,
+  );
+  expect(wrongPid.value).toBeUndefined();
+
+  setUpFixture();
+  fixture.statMutations.set(100, {
+    read: 1,
+    processGroupId: 0,
+    sessionId: 0,
+  });
+  const zeroGroups = await readLinuxProcessStat(
+    100,
+    new AbortController().signal,
+  );
+  expect(zeroGroups.value).toBeUndefined();
+});
 
 const flushImmediateProcPass = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));

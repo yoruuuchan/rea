@@ -145,7 +145,12 @@ itWithCaptureCapability(
     });
 
     const equalSize = await capture("b");
-    expect(equalSize.truncated).toBe(false);
+    // This short-lived target can exit before process sampling finishes.
+    // Assert the terminal coverage that this normalization control exercises.
+    expect(equalSize.truncation_details.raw_terminal).toMatchObject({
+      observed_bytes: Buffer.byteLength(`${"a".repeat(100)}\r\n`),
+      retained_bytes: Buffer.byteLength(`${"a".repeat(100)}\r\n`),
+    });
     expect(equalSize.frames.map(({ data }) => data).join("")).toBe(
       `${"b".repeat(100)}\r\n`,
     );

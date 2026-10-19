@@ -89,6 +89,7 @@ const applicationObservation = (
 const parameters = (
   input: AnalyzeJavaScriptApplicationInput,
 ): EvidenceObservation["parameters"] => ({
+  input_path: input.input_path,
   format: input.format,
   integrity_policy: input.integrity_policy,
   ...(input.max_semantic_nodes === undefined

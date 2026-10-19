@@ -25,9 +25,10 @@ import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type {
-  OwnedProcessGroup,
+  PersistentOwnedProcessGroup,
   ProcessLineageObservation,
 } from "../process/ProcessOwnership.js";
+import { ProcessOwnershipEvidenceOwner } from "../process/ProcessOwnershipEvidence.js";
 import {
   observeOwnedProcessLineage,
   prepareProcessOwnershipInspection,
@@ -108,7 +109,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
     options: ExecutionOptions,
   ): Promise<Result<ElectronActiveObservationResult, AnalysisError>> {
     let application: ElectronApplication | undefined;
-    let ownership: OwnedProcessGroup | undefined;
+    let ownership: PersistentOwnedProcessGroup | undefined;
     let lineage: ProcessLineageObservation | undefined;
     let capture: ElectronActiveObservationResult | undefined;
     let paths: ElectronPaths | undefined;
@@ -182,6 +183,7 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         expectedParentPid: process.pid,
         expectedCommand: paths.executable,
         sweepTokenOwnedProcesses: true,
+        evidenceOwner: new ProcessOwnershipEvidenceOwner(),
         ...(captureBaseline === undefined ? {} : { captureBaseline }),
       };
       lineage = await observeOwnedProcessLineage(ownership);

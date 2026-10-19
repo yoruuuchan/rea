@@ -2,6 +2,39 @@ import { z } from "zod";
 import { localPathStringSchema } from "../localPath.js";
 import { digestSchema } from "../digests.js";
 
+/** Full logical ZIP path budget, enforced by Flutter library inventory. */
+export const MAX_FLUTTER_LIBRARY_PATH_BYTES = 1024;
+
+/**
+ * A libapp label can occupy every remaining byte of an admitted path. Its
+ * Unicode character count cannot exceed that byte count. The query permits
+ * unmatched labels; inventory owns the exact UTF-8 byte check on real paths.
+ */
+const ABI_SELECTOR_MAX_CHARACTERS =
+  MAX_FLUTTER_LIBRARY_PATH_BYTES - "lib/".length - "/libapp.so".length;
+
+/**
+ * ZIP labels are literal names, including backslashes and controls. They are
+ * never used as extraction paths. Count Unicode code points without copying
+ * the label; Zod max() counts UTF-16 units. Advertise the same code-point
+ * budget as JSON Schema maxLength, including every trailing line terminator.
+ */
+const ABI_SELECTOR_MESSAGE = `ABI must be the exact lib/ directory label: 1–${String(ABI_SELECTOR_MAX_CHARACTERS)} Unicode characters without '/'.`;
+const abiSelectorSchema = z
+  .string()
+  .min(1, ABI_SELECTOR_MESSAGE)
+  .refine(
+    (label) => {
+      const characters = label[Symbol.iterator]();
+      for (let count = 0; count <= ABI_SELECTOR_MAX_CHARACTERS; count += 1)
+        if (characters.next().done) return true;
+      return false;
+    },
+    { message: ABI_SELECTOR_MESSAGE, abort: true },
+  )
+  .regex(/^[^\/]*$/u, ABI_SELECTOR_MESSAGE)
+  .meta({ maxLength: ABI_SELECTOR_MAX_CHARACTERS });
+
 /**
  * Caller intent for Flutter build identification. This family is pure
  * parsing: it reads an APK's `lib/<abi>/libapp.so` and `libflutter.so`
@@ -15,17 +48,10 @@ export const flutterInputSchemas = {
     path: localPathStringSchema.describe(
       "Local APK file carrying a Flutter AOT payload",
     ),
-    abi: z
-      .string()
-      .min(2)
-      .max(16)
-      .regex(
-        /^[a-z0-9_\x2d]+$/u,
-        "ABI name as it appears under lib/, e.g. arm64-v8a",
-      )
+    abi: abiSelectorSchema
       .optional()
       .describe(
-        "ABI to inspect; defaults to arm64-v8a, x86_64, x86, armeabi-v7a, then remaining ABIs alphabetically",
+        "Exact lib/ directory label reported by identify_flutter_build; defaults to arm64-v8a, x86_64, x86, armeabi-v7a, then remaining ABIs alphabetically",
       ),
   }),
 } as const;

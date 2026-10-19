@@ -11,6 +11,7 @@ import { evidenceSchema, type Evidence } from "../domain/evidence.js";
 import type { Result } from "../domain/result.js";
 import { err } from "../domain/result.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { OBJDUMP_ARTIFACT_OPERATIONS } from "../domain/reverseEngineering.js";
 import { logCliCommand } from "../cliLogging.js";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
@@ -112,18 +113,16 @@ export const registerReverseEngineeringCommands = (
         .min(1)
         .describe("Path to the local artifact to inspect."),
       operation: z
-        .enum([
-          "file_headers",
-          "section_headers",
-          "symbols",
-          "relocations",
-          "dwarf",
-          "disassemble",
-          "disassemble_all",
-        ])
+        .enum(OBJDUMP_ARTIFACT_OPERATIONS)
         .describe("GNU objdump inspection operation to run."),
     }),
     options: z.object({
+      symbol: z
+        .string()
+        .optional()
+        .describe(
+          "Native symbol to select with the disassemble operation; GNU objdump controls matching and boundaries.",
+        ),
       followDebugLinks: z
         .boolean()
         .default(false)
@@ -139,6 +138,9 @@ export const registerReverseEngineeringCommands = (
               {
                 ...args,
                 follow_debug_links: options.followDebugLinks,
+                ...(options.symbol === undefined
+                  ? {}
+                  : { symbol: options.symbol }),
               },
               { signal },
             ),

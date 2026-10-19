@@ -11,6 +11,7 @@ import {
   toolContract,
 } from "../dist/contracts/toolContracts.js";
 import { exec, pathExists } from "./lib/verify-package-core.mjs";
+import { assertJavaScriptApplicationInputPaths } from "./lib/javascript-application-paths.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
 import { createOpenAiModelFixture } from "./verify/clients/model-fixture.mjs";
 
@@ -183,7 +184,7 @@ const fixture = await createOpenAiModelFixture({
       const evidence = toolContract(
         "analyze_javascript_application",
       ).outputSchema.parse(found);
-      assert.equal(evidence.subject.local_path, target);
+      await assertJavaScriptApplicationInputPaths(evidence, target);
       const shape = evidence.normalized_result.graph.nodes
         .flatMap((node) => node.observations)
         .map((observation) => observation.properties)

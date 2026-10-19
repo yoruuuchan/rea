@@ -15,7 +15,10 @@ import {
   createAnalysisExecutionEvidence,
   type AnalysisExecution,
 } from "../application/AnalysisProvider.js";
-import type { FlutterRequest } from "../domain/flutter/flutterBuildAnalysis.js";
+import {
+  MAX_FLUTTER_LIBRARY_PATH_BYTES,
+  type FlutterRequest,
+} from "../domain/flutter/flutterBuildAnalysis.js";
 import {
   AnalysisAccessDeniedError,
   AnalysisArtifactChangedError,
@@ -71,7 +74,6 @@ const APK_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 // engine labels this keeps expanded result metadata below 512 KiB for ordinary
 // ABI names, independently of the archive's compressed-byte budget.
 const MAX_FLUTTER_ABIS = 32;
-const MAX_LIBRARY_PATH_BYTES = 1024;
 const MAX_POOL_URIS = 500;
 const MAX_POOL_TOKENS = 2_000;
 /** A complete AOT image carries exactly one VM and one isolate section. */
@@ -284,7 +286,7 @@ const collectFlutterLibraries = async (
       abis.add(match[1]!);
       if (
         abis.size > MAX_FLUTTER_ABIS ||
-        Buffer.byteLength(entry.path) > MAX_LIBRARY_PATH_BYTES
+        Buffer.byteLength(entry.path) > MAX_FLUTTER_LIBRARY_PATH_BYTES
       )
         throw new AnalysisResourceConstraintError(
           operation,
@@ -292,7 +294,7 @@ const collectFlutterLibraries = async (
           "Flutter library inventory exceeds the bounded ABI projection budget",
           {
             max_flutter_abis: MAX_FLUTTER_ABIS,
-            max_library_path_bytes: MAX_LIBRARY_PATH_BYTES,
+            max_library_path_bytes: MAX_FLUTTER_LIBRARY_PATH_BYTES,
           },
         );
       libraries.push({

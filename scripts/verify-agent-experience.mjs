@@ -26,6 +26,7 @@ import {
   summarizeFactualCorrectness,
 } from "../dist/evaluation/AgentEvaluationReport.js";
 import { PRODUCT_IDENTITY } from "../dist/identity.js";
+import { closeVerifierResources } from "./lib/verifier-cleanup.mjs";
 import { completeVerifierRun, createVerifierRun } from "./lib/verifier-run.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,6 +69,7 @@ const evaluationEnvironment = {
   PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}`,
 };
 
+let primaryError;
 try {
   const codexVersion = await readCommandVersion(codex);
   await Promise.all([
@@ -391,11 +393,20 @@ try {
     throw new Error(
       `Agent routing/workflow/answer checks failed: ${failed.map(({ id }) => id).join(", ")}`,
     );
+} catch (cause) {
+  primaryError = cause;
+  throw cause;
 } finally {
   // Even a deliberately retained fixture directory must never retain auth.
-  await rm(authPath, { force: true });
-  if (process.env.REA_AGENT_EVAL_KEEP_FIXTURES !== "true")
-    await rm(evaluationRoot, { recursive: true, force: true });
+  await closeVerifierResources(
+    [
+      () => rm(authPath, { force: true }),
+      ...(process.env.REA_AGENT_EVAL_KEEP_FIXTURES === "true"
+        ? []
+        : [() => rm(evaluationRoot, { recursive: true, force: true })]),
+    ],
+    primaryError,
+  );
 }
 
 async function createTargets(root, includeManaged) {

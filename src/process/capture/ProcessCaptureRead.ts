@@ -36,6 +36,7 @@ export class ProcessCaptureReadFailure<
   readonly cleanupLeases: readonly AnalysisCleanupLease[];
   readonly cleanupCause: unknown;
   readonly retention: CloseRetention;
+  /** An observed abort is independent of whether cancellation caused the read failure. */
   readonly cancellation: Cancellation | undefined;
 
   constructor(options: {
@@ -49,13 +50,18 @@ export class ProcessCaptureReadFailure<
   }) {
     const cleanupLeases =
       options.cleanupLease === undefined ? [] : [options.cleanupLease];
-    const cancellation =
+    const primaryCancellation =
       options.outcome.kind === "failed"
         ? operationCancellation(options.outcome.cause, options.signal)
         : options.completionCancellation;
+    const cancellation =
+      primaryCancellation ??
+      (options.signal?.aborted === true
+        ? { reason: options.signal.reason }
+        : undefined);
     const primary =
-      cancellation !== undefined
-        ? cancellation.reason
+      primaryCancellation !== undefined
+        ? primaryCancellation.reason
         : options.outcome.kind === "failed"
           ? options.outcome.cause
           : options.cleanupCause;
@@ -78,7 +84,7 @@ export class ProcessCaptureReadFailure<
       `Process capture read failed for ${options.path}${reasons.length === 0 ? "" : `: ${reasons.join("; ")}`}`,
       {
         cause: primary,
-        ...(cancellation === undefined
+        ...(primaryCancellation === undefined
           ? {}
           : {
               userCategory: "cancelled" as const,

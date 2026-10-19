@@ -2,13 +2,13 @@ import { z } from "zod";
 import { canBorrowParsedJsonSnapshot } from "../immutableJson.js";
 
 import { localPathStringSchema } from "../localPath.js";
-import { CANONICAL_BASE64_PATTERN } from "../stringPatterns.js";
+import { canonicalBase64Schema } from "../stringPatterns.js";
 
 const unsignedHex = z.string().regex(/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/);
 const index = z.number().int().nonnegative();
 const scalar = z.union([z.string(), z.number().int()]);
 const range = z.strictObject({ offset: unsignedHex, bytes: unsignedHex });
-const canonicalBase64 = z.string().regex(CANONICAL_BASE64_PATTERN);
+const canonicalBase64 = canonicalBase64Schema;
 const name = z.strictObject({
   display: z.string(),
   bytes_base64: canonicalBase64.nullable(),

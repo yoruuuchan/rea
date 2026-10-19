@@ -30,7 +30,7 @@ import {
   type ProcessStartTimeReader,
   verifyOwnedInferiorsEnded,
 } from "../process/ownedDebuggerSession.js";
-import { parseLinuxProcessStartTime } from "../process/ProcessOwnershipObservation.js";
+import { parseLinuxProcessStat } from "../process/LinuxProcessStat.js";
 
 const STARTUP_TIMEOUT_MS = 10_000;
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -387,7 +387,10 @@ const verifyGdbInferiorOutputSink = async (
       "GDB cannot confirm live inferior output descriptors outside Linux /proc.",
     );
   const statPath = `/proc/${pid}/stat`;
-  const before = parseLinuxProcessStartTime(await readFile(statPath, "utf8"));
+  const expectedPid = Number(pid);
+  const beforeStat = parseLinuxProcessStat(await readFile(statPath, "utf8"));
+  const before =
+    beforeStat?.pid === expectedPid ? beforeStat.startTime : undefined;
   if (before === undefined)
     throw new Error("GDB could not establish the live inferior identity.");
   const ttyPath = await realpath(selectedTty);
@@ -408,7 +411,9 @@ const verifyGdbInferiorOutputSink = async (
         `GDB inferior descriptor ${descriptor} no longer points to the selected TTY.`,
       );
   }
-  const after = parseLinuxProcessStartTime(await readFile(statPath, "utf8"));
+  const afterStat = parseLinuxProcessStat(await readFile(statPath, "utf8"));
+  const after =
+    afterStat?.pid === expectedPid ? afterStat.startTime : undefined;
   if (after !== before)
     throw new Error(
       "The GDB inferior identity changed during descriptor readback.",

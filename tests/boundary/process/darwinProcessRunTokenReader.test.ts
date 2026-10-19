@@ -1230,6 +1230,12 @@ it.skipIf(!onDarwin)(
       expect(JSON.parse(stdout)).toEqual({
         preservedOtherErrno: true,
         retriedAfterFreshSize: true,
+        successfulSnapshotMissingPidIsAbsent: true,
+        failedSnapshotMissingPidIsUnavailable: true,
+        invalidPidIsUnavailable: true,
+        zombieLifecycleIsSeparateFromIdentity: true,
+        effectiveUidComesFromNativeIdentity: true,
+        nativeRelationIsSeparateFromIdentity: true,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

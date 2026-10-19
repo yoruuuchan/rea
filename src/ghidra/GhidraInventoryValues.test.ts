@@ -5,6 +5,30 @@ import {
   parseGhidraInventoryResult,
 } from "./GhidraInventoryValues.js";
 
+it("validates large masked byte queries at the provider boundary without changing caller spelling", () => {
+  const input = {
+    pattern: "aA??".repeat(1024 * 1024),
+    mask: "ff00".repeat(1024 * 1024),
+  };
+  const parsed = parseGhidraInventoryInput("search_bytes", input);
+  expect(parsed.ok).toBe(true);
+  if (!parsed.ok) throw parsed.error;
+  expect(parsed.value.pattern === input.pattern).toBe(true);
+  expect(parsed.value.mask === input.mask).toBe(true);
+  expect(
+    parseGhidraInventoryInput("search_bytes", {
+      ...input,
+      mask: `${input.mask.slice(0, -2)}g0`,
+    }).ok,
+  ).toBe(false);
+  expect(
+    parseGhidraInventoryInput("search_bytes", {
+      ...input,
+      mask: "00ff".repeat(1024 * 1024),
+    }).ok,
+  ).toBe(false);
+});
+
 describe("provider-owned overview boundary", () => {
   const overview = {
     document: "fixture",

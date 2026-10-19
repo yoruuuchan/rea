@@ -2,12 +2,16 @@ import { ok as resultOk } from "../../../src/domain/result.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {
   STDIO_DEFAULT_MAX_BUFFER_SIZE,
   type McpServer,
 } from "@modelcontextprotocol/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -39,6 +43,7 @@ import { registerGuidedPrompts } from "../../../src/server/registerPrompts.js";
 import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
 import { ToolResultDelivery } from "../../../src/server/toolResult.js";
 import { observed } from "../../fixtures/analysisExecution.js";
+import { serveStreamableHttp } from "../../../src/server/http/serveStreamableHttp.js";
 
 const resources: Array<{ close(): Promise<unknown> }> = [];
 const temporaryDirectories: string[] = [];
@@ -379,6 +384,97 @@ it("guided prompt completion avoids cold startup and cancels warm lookup on clos
   await lifecycle.aborted;
   expect((await pending).completion.values).toEqual([]);
 }, 10_000);
+
+it.each(["replacement", "shutdown"])(
+  "waits for cancelled completion cleanup before HTTP %s",
+  async (ending) => {
+    let release!: () => void;
+    let entered!: () => void;
+    let cancelled!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      cancelled = resolve;
+    });
+    const server = new EvidenceMcpServer(
+      { name: "http-completion-drain", version: "1" },
+      {},
+      undefined,
+      new ToolResultDelivery(STDIO_DEFAULT_MAX_BUFFER_SIZE),
+    );
+    const connections = vi.spyOn(server, "connect");
+    let calls = 0;
+    registerGuidedPrompts(server, {
+      async execute(_operation, _parameters, options) {
+        if (++calls > 1) return observed(["fresh-document"]);
+        entered();
+        try {
+          await new Promise<void>((resolve) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () => {
+                cancelled();
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        } finally {
+          await gate;
+        }
+        return observed(["old-document"]);
+      },
+    });
+    const served = await serveStreamableHttp({
+      host: "127.0.0.1",
+      port: 0,
+      createMcpServer: () => server,
+    });
+    resources.push(served);
+    const connectHttp = async () => {
+      const client = new Client({ name: "completion-http", version: "1" });
+      resources.push(client);
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(served.url)),
+      );
+      return client;
+    };
+    const first = await connectHttp();
+    let next: Client | undefined;
+    let finishing: Promise<void> | undefined;
+    try {
+      void complete(first, "document", "").catch(() => undefined);
+      await started;
+      let finished = false;
+      finishing = (
+        ending === "shutdown"
+          ? served.close()
+          : connectHttp().then((value) => {
+              next = value;
+            })
+      ).then(() => {
+        finished = true;
+      });
+      await aborted;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(connections).toHaveBeenCalledTimes(1);
+      expect(finished).toBe(false);
+      release();
+      await finishing;
+      if (next !== undefined)
+        expect(await complete(next, "document", "fresh")).toEqual([
+          "fresh-document",
+        ]);
+    } finally {
+      release();
+      await finishing?.catch(() => undefined);
+    }
+  },
+);
 
 describe("guided prompt completion lifecycle", () => {
   it("survives a cancelled completion and ignores its late result", async () => {

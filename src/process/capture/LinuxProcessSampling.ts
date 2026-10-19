@@ -1,4 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
+import { parseLinuxProcessStat } from "../LinuxProcessStat.js";
 import {
   mergeSamplingDiagnostics,
   readProcSamplingSource,
@@ -27,43 +28,21 @@ const parseProcStat = (
   pid: number,
   stat: string,
 ): SampledProcessRow | undefined => {
-  const commandStart = stat.indexOf("(");
-  const commandEnd = stat.lastIndexOf(")");
+  const parsed = parseLinuxProcessStat(stat);
   if (
-    commandStart < 0 ||
-    commandEnd <= commandStart ||
-    !/^\d+$/u.test(stat.slice(0, commandStart).trim()) ||
-    Number(stat.slice(0, commandStart).trim()) !== pid
-  )
-    return undefined;
-  const fields = stat
-    .slice(commandEnd + 2)
-    .trim()
-    .split(/\s+/u);
-  const parentPid = Number(fields[1]);
-  const processGroupId = Number(fields[2]);
-  const sessionId = Number(fields[3]);
-  const startTime = fields[19];
-  if (
-    !Number.isSafeInteger(pid) ||
-    pid <= 0 ||
-    !Number.isSafeInteger(parentPid) ||
-    parentPid < 0 ||
-    !Number.isSafeInteger(processGroupId) ||
-    processGroupId <= 0 ||
-    !Number.isSafeInteger(sessionId) ||
-    sessionId <= 0 ||
-    startTime === undefined ||
-    !/^\d+$/u.test(startTime)
+    parsed === undefined ||
+    parsed.pid !== pid ||
+    parsed.processGroupId <= 0 ||
+    parsed.sessionId <= 0
   )
     return undefined;
   return {
-    pid,
-    parent_pid: parentPid,
-    process_group_id: processGroupId,
-    session_id: sessionId,
+    pid: parsed.pid,
+    parent_pid: parsed.parentPid,
+    process_group_id: parsed.processGroupId,
+    session_id: parsed.sessionId,
     command: "",
-    startTime,
+    startTime: parsed.startTime,
   };
 };
 

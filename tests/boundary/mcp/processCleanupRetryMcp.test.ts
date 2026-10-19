@@ -30,10 +30,6 @@ const cleanupOptions = (
   const host: ProcessCaptureCleanupHost = {
     platform: process.platform,
     cleanupProcessGroup: async () => ({ cleaned: true, signaled: false }),
-    verifyTokenOwnedProcesses: async () => ({
-      cleaned: true,
-      signaled: false,
-    }),
     removeTemporaryRoot,
   };
   return {

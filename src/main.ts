@@ -21,7 +21,18 @@ import {
 } from "./composition/optionalObservationProviders.js";
 import { createToolResultDelivery } from "./server/toolResult.js";
 import { createShutdown } from "./main/shutdown.js";
-import { registerProcessShutdown } from "./main/processShutdown.js";
+import {
+  createExitStatus,
+  latchSignalShutdown,
+  registerProcessShutdown,
+  registerSignalShutdown,
+  type ExitStatus,
+  type SignalLatch,
+} from "./main/processShutdown.js";
+import {
+  parseMcpHttpEndpoint,
+  type McpHttpEndpoint,
+} from "./config/mcpHttpEndpoint.js";
 
 const runtimeDependencies = (): RuntimeDependencies => ({
   env: process.env,
@@ -33,10 +44,57 @@ const runtimeDependencies = (): RuntimeDependencies => ({
   registerShutdown: registerProcessShutdown,
 });
 
+/** Replace stdio with the streamable HTTP listener; signals alone end it, never stdin. */
+const httpRuntimeDependencies = (
+  endpoint: McpHttpEndpoint,
+  latch: SignalLatch,
+  exit: ExitStatus,
+): RuntimeDependencies => {
+  const base = runtimeDependencies();
+  return {
+    ...base,
+    setExitCode: exit.set,
+    serve: async (factory, options) => {
+      // Loaded here so the default stdio entry never loads the HTTP listener.
+      const { serveStreamableHttp } =
+        await import("./server/http/serveStreamableHttp.js");
+      const { RequestTrackingMcpServer } =
+        await import("./server/RequestTrackingMcpServer.js");
+      // The transport's factory owner closes every instance it created; the listener must not race it.
+      return serveStreamableHttp({
+        ...endpoint,
+        createMcpServer: async (context) => {
+          const server = await factory(context);
+          if (!(server instanceof RequestTrackingMcpServer))
+            throw new TypeError("HTTP MCP servers must track tool completion");
+          return server;
+        },
+        closeInstance: false,
+        ...options,
+      });
+    },
+    registerShutdown: (request) => {
+      const unregister = registerSignalShutdown((exitStatus) => {
+        exit.signal(exitStatus);
+        request();
+      });
+      // A signal that arrived during startup is honoured now that the lifecycle owner exists;
+      // its status outlives the entry's own `0`, which startup returns right after this.
+      const pending = latch.release();
+      if (pending !== undefined) {
+        exit.signal(pending);
+        request();
+      }
+      return unregister;
+    },
+  };
+};
+
 /**
  * Start the long-lived MCP adapter and install idempotent shutdown handlers.
- * The adapter owns its BinarySession for the process lifetime; EOF and process
- * signals close bridge resources without assuming ownership of the Hopper app.
+ * The adapter owns its BinarySession for the process lifetime; stdin EOF on
+ * the stdio transport and process signals on either transport close bridge
+ * resources without assuming ownership of the Hopper app.
  */
 export const run = async (
   dependencies: RuntimeDependencies = runtimeDependencies(),
@@ -97,6 +155,62 @@ export const runEntrypoint = async (
     void cause;
     writeStderr(`${SERVER_START_FAILED}\n`);
     setExitCode(1);
+  }
+};
+
+/** Process streams the dispatcher entries write to. */
+export interface EntrypointIo {
+  readonly writeStdout: (text: string) => void;
+  readonly writeStderr: (text: string) => void;
+  readonly setExitCode: (code: number) => void;
+}
+
+const processIo: EntrypointIo = {
+  writeStdout: (text) => void process.stdout.write(text),
+  writeStderr: (text) => void process.stderr.write(text),
+  setExitCode: (code) => {
+    process.exitCode = code;
+  },
+};
+
+/** Run `rea mcp --http`: parse its flags, resolve MCP_HOST/MCP_PORT, then serve over HTTP. */
+export const runMcpHttpEntrypoint = async (
+  arguments_: readonly string[],
+  io: EntrypointIo = processIo,
+): Promise<void> => {
+  const { parseMcpHttpArguments, renderMcpHttpHelp } =
+    await import("./main/mcpHttpArguments.js");
+  const parsed = parseMcpHttpArguments(arguments_);
+  if (!parsed.ok) {
+    if (parsed.help) {
+      io.writeStdout(`${renderMcpHttpHelp()}\n`);
+      io.setExitCode(0);
+      return;
+    }
+    io.writeStderr(`${parsed.message}\n`);
+    io.setExitCode(1);
+    return;
+  }
+  const endpoint = parseMcpHttpEndpoint(snapshotEnvironment(process.env), {
+    ...(parsed.host === undefined ? {} : { host: parsed.host }),
+    ...(parsed.port === undefined ? {} : { port: parsed.port }),
+  });
+  if (!endpoint.ok) {
+    io.writeStderr(`${projectAnalysisError(endpoint.error).message}\n`);
+    io.setExitCode(1);
+    return;
+  }
+  // Latched before any asynchronous startup so a signal cannot end the process without cleanup.
+  const latch = latchSignalShutdown();
+  const exit = createExitStatus(io.setExitCode);
+  try {
+    await runEntrypoint(
+      () => run(httpRuntimeDependencies(endpoint.value, latch, exit)),
+      io.writeStderr,
+      exit.set,
+    );
+  } finally {
+    latch.release();
   }
 };
 

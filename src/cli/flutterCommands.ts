@@ -4,7 +4,10 @@ import type { FlutterBuildAnalysisPort } from "../application/flutter/FlutterBui
 import { createFlutterBuildAnalysisProvider } from "../composition/flutter.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { logCliCommand } from "../cliLogging.js";
-import type { FlutterOperation } from "../domain/flutter/flutterBuildAnalysis.js";
+import {
+  flutterInputSchemas,
+  type FlutterOperation,
+} from "../domain/flutter/flutterBuildAnalysis.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
@@ -35,7 +38,7 @@ export const registerFlutterCommands = (
       description:
         "Identify a Flutter build's Dart snapshot hash and engine facts by pure APK parsing",
       argumentSchema: z.object({
-        path: z.string().min(1).describe("Local APK file to inspect"),
+        path: flutterInputSchemas.identify_flutter_build.shape.path,
       }),
       operation: "identify_flutter_build",
       toInput: (arguments_) => arguments_,
@@ -45,18 +48,10 @@ export const registerFlutterCommands = (
       description:
         "Inspect one ABI's Dart AOT snapshot: sections, headers, and the string pool",
       argumentSchema: z.object({
-        path: z
-          .string()
-          .min(1)
-          .describe("Local APK carrying a Flutter payload"),
+        path: flutterInputSchemas.inspect_dart_aot.shape.path,
       }),
       optionSchema: z.object({
-        abi: z
-          .string()
-          .min(2)
-          .max(16)
-          .optional()
-          .describe("ABI under lib/ to inspect; defaults to the preferred one"),
+        abi: flutterInputSchemas.inspect_dart_aot.shape.abi,
       }),
       operation: "inspect_dart_aot",
       toInput: (arguments_, options) => ({

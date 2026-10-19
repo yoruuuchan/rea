@@ -5,15 +5,22 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Route production MCP before importing Incur. Incur owns registration helpers
-// such as `mcp add`, while the MCP runtime serves the stdio tool catalog.
+// such as `mcp add`, while the MCP runtime serves the tool catalog over stdio
+// or, with `--http`, over streamable HTTP.
 const args = process.argv.slice(2);
 const { default: packageJson } = await import("../package.json", {
   with: { type: "json" },
 });
 process.env.REA_PACKAGE_VERSION = packageJson.version;
-const isMcpMode =
-  args.length === 1 && (args[0] === "--mcp" || args[0] === "mcp");
+const isMcpEntry = args[0] === "--mcp" || args[0] === "mcp";
+const isMcpMode = isMcpEntry && args.length === 1;
 const isMcpDoctorMode = args[0] === "mcp" && args[1] === "doctor";
+// Only flags may follow the entry: `mcp add --http` stays Incur's `mcp add`,
+// while `mcp -h --http` reaches the HTTP entry's own help.
+const isMcpHttpMode =
+  isMcpEntry &&
+  (args[1]?.startsWith("-") ?? false) &&
+  args.slice(1).includes("--http");
 /** Exit status of a writer terminated by SIGPIPE (128 + 13). */
 const SIGPIPE_EXIT_STATUS = 141;
 // Set once the reader of CLI output has closed the pipe.
@@ -40,15 +47,16 @@ if (
   process.env.PLAYWRIGHT_BROWSERS_PATH = join(cacheRoot, "ms-playwright");
 }
 
-const runtimeFiles = isMcpMode
-  ? ["dist/mcp/main.js"]
-  : isMcpDoctorMode
-    ? ["dist/mcp/main.js", "dist/cli-runtime/mcpDoctor.js"]
-    : [
-        "dist/cli-runtime/cli.js",
-        "dist/cli-runtime/cliOutput.js",
-        "dist/cli-runtime/cliResultOutput.js",
-      ];
+const runtimeFiles =
+  isMcpMode || isMcpHttpMode
+    ? ["dist/mcp/main.js"]
+    : isMcpDoctorMode
+      ? ["dist/mcp/main.js", "dist/cli-runtime/mcpDoctor.js"]
+      : [
+          "dist/cli-runtime/cli.js",
+          "dist/cli-runtime/cliOutput.js",
+          "dist/cli-runtime/cliResultOutput.js",
+        ];
 
 if (!(await compiledRuntimeExists(runtimeFiles))) {
   process.stderr.write(
@@ -58,6 +66,9 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
 } else if (isMcpMode) {
   const { runEntrypoint } = await import("../dist/mcp/main.js");
   await runEntrypoint();
+} else if (isMcpHttpMode) {
+  const { runMcpHttpEntrypoint } = await import("../dist/mcp/main.js");
+  await runMcpHttpEntrypoint(args.slice(1));
 } else if (isMcpDoctorMode) {
   guardClosedStdout();
   const { runProductionMcpDoctorCli } =

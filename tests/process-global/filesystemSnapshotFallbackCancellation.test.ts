@@ -58,7 +58,9 @@ import { parseProcessScenario } from "../../src/domain/process/processScenario.j
 import {
   hashFile,
   snapshotRoots,
+  ProcessCaptureSnapshotFailure,
 } from "../../src/process/capture/FilesystemSnapshot.js";
+import { ProcessCaptureReadFailure } from "../../src/process/capture/ProcessCaptureRead.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 
 afterEach(() => {
@@ -99,7 +101,29 @@ it.each(["hash", "snapshot"] as const)(
             }),
             controller.signal,
           );
-    await expect(result).rejects.toBe(reason);
+    const failure = await result.catch((cause: unknown) => cause);
+    if (operation === "hash") {
+      expect(failure).toBeInstanceOf(ProcessCaptureReadFailure);
+      const read = failure as ProcessCaptureReadFailure;
+      expect(read.cause).toBe(reason);
+      expect(read.userCategory).toBe("cancelled");
+      expect(read.outcome).toMatchObject({ kind: "failed", cause: reason });
+      expect(read.cleanupLeases).toEqual([]);
+      expect(read.cleanupIncomplete).toBe(false);
+    } else {
+      expect(failure).toBeInstanceOf(ProcessCaptureSnapshotFailure);
+      const snapshot = failure as ProcessCaptureSnapshotFailure;
+      expect(snapshot.cause).toBe(reason);
+      expect(snapshot.userCategory).toBe("cancelled");
+      expect(snapshot.snapshot).toMatchObject({
+        files: [],
+        completeRoots: [],
+        truncated: true,
+        coverage: { enumeration_truncated: true },
+      });
+      expect(snapshot.cleanupLeases).toEqual([]);
+      expect(snapshot.cleanupIncomplete).toBe(false);
+    }
     expect(controller.signal.aborted).toBe(true);
     expect(observation.handles).toHaveLength(1);
     await expect(observation.handles[0]?.stat()).rejects.toMatchObject({

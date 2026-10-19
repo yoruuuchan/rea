@@ -1,10 +1,11 @@
 import { inferJsonShape, type JsonShape } from "../domain/jsonShape.js";
+import { decodePaddedBase64 } from "../domain/paddedBase64.js";
 import {
   recordValue,
   cdpStringValue,
   type UnknownRecord,
 } from "./CdpCaptureValues.js";
-import { decodeBase64, isJsonContentType } from "./CdpCaptureEventHelpers.js";
+import { isJsonContentType } from "./CdpCaptureEventHelpers.js";
 import type { CdpCaptureEventsState } from "./CdpCaptureEventState.js";
 import type { NetworkState } from "./CdpCaptureEventTypes.js";
 
@@ -20,7 +21,9 @@ export const ingestResponseBodyShape = (
     invalidResponseBodyShape(state, requestId);
     return;
   }
-  const decoded = base64Encoded ? decodeBase64(body)?.toString("utf8") : body;
+  const decoded = base64Encoded
+    ? decodePaddedBase64(body)?.toString("utf8")
+    : body;
   if (decoded === undefined) {
     invalidResponseBodyShape(state, requestId);
     return;

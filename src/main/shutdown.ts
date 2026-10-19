@@ -1,11 +1,9 @@
-import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
-
 import type { BinarySession } from "../application/binary/BinarySession.js";
 import type { Logger } from "pino";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { JsonValue } from "../domain/jsonValue.js";
-import type { RuntimeDependencies } from "./types.js";
+import type { McpServerHandle, RuntimeDependencies } from "./types.js";
 import { MCP_SHUTDOWN_FAILED } from "./messages.js";
 
 interface ShutdownCleanupOwner {
@@ -13,8 +11,9 @@ interface ShutdownCleanupOwner {
   closed: boolean;
 }
 
+/** Own idempotent teardown of the transport handle, providers and session for any shutdown trigger. */
 export const createShutdown = (input: {
-  readonly handle: StdioServerHandle;
+  readonly handle: McpServerHandle;
   readonly closeAndroid?: () => Promise<void>;
   readonly closeOptionalProviders?: () => Promise<void>;
   readonly session: BinarySession;
@@ -48,6 +47,9 @@ export const createShutdown = (input: {
     if (shutdownAttempt !== undefined) return shutdownAttempt;
     const pending = cleanupOwners.filter(({ closed }) => !closed);
     const attempt = (async () => {
+      // HTTP handlers can still own provider resources after cancellation.
+      // A failed drain keeps every shared owner available for a later retry.
+      await handle.prepareShutdown?.();
       const results = await Promise.allSettled(
         pending.map(async (owner) => {
           await owner.close();

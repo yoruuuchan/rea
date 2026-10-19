@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { LosslessNumber } from "lossless-json";
 import { parseCaptureJson } from "./CaptureJson.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
+import { isCanonicalBase64 } from "../../domain/stringPatterns.js";
 import {
   WEB_NETWORK_CAPTURE_LIMITS,
   type WebNetworkCapture,
@@ -264,17 +265,11 @@ const integerLexeme = (literal: string): boolean => {
 
 const decodeHarBase64 = (value: string, pointer: string): Buffer => {
   const compact = value.replace(/[\t\n\r ]/g, "");
-  const bytes = Buffer.from(compact, "base64");
-  if (
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-      compact,
-    ) ||
-    bytes.toString("base64") !== compact
-  )
+  if (!isCanonicalBase64(compact))
     throw new CaptureFormatError(
       "format",
       "HAR content declares base64 but its text is not valid canonical base64 (ASCII whitespace is allowed).",
       pointer,
     );
-  return bytes;
+  return Buffer.from(compact, "base64");
 };

@@ -50,13 +50,14 @@ const observation = (completionStatus: "complete" | "unknown") =>
 const runObjdump = async (
   service: Partial<ReverseEngineeringService>,
   path = "/tmp/sample",
+  selection: { operation?: string; symbol?: string } = {},
 ) => {
   const commands = new Map<
     string,
     {
       run(input: {
         args: { path: string; operation: string };
-        options: { followDebugLinks: boolean };
+        options: { followDebugLinks: boolean; symbol?: string };
       }): Promise<unknown>;
     }
   >();
@@ -66,7 +67,7 @@ const runObjdump = async (
       definition: {
         run(input: {
           args: { path: string; operation: string };
-          options: { followDebugLinks: boolean };
+          options: { followDebugLinks: boolean; symbol?: string };
         }): Promise<unknown>;
       },
     ) => {
@@ -85,10 +86,30 @@ const runObjdump = async (
   if (command === undefined)
     throw new Error("objdump CLI command was not registered");
   return command.run({
-    args: { path, operation: "file_headers" },
-    options: { followDebugLinks: false },
+    args: { path, operation: selection.operation ?? "file_headers" },
+    options: {
+      followDebugLinks: false,
+      ...(selection.symbol === undefined ? {} : { symbol: selection.symbol }),
+    },
   });
 };
+
+it("forwards the selected native symbol to the shared workflow", async () => {
+  const inspectWithObjdump = vi.fn(async (_input: unknown) =>
+    ok(observation("complete")),
+  );
+  await runObjdump(
+    { inspectWithObjdump, close: async () => undefined },
+    "/tmp/sample",
+    { operation: "disassemble", symbol: "_Z3foov@@VERSION_1" },
+  );
+  expect(inspectWithObjdump.mock.calls[0]?.[0]).toEqual({
+    path: "/tmp/sample",
+    operation: "disassemble",
+    follow_debug_links: false,
+    symbol: "_Z3foov@@VERSION_1",
+  });
+});
 
 it("lists objdump architectures without inventing an artifact path", async () => {
   const evidence = observation("complete");

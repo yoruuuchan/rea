@@ -3,6 +3,7 @@ import { readdir, readFile, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, resolve } from "node:path";
 import { runOwnedCommand } from "../../../dist/process/OwnedCommand.js";
+import { assertHistoricalPidReadsAreOwnershipOnly } from "./trace-ownership.mjs";
 
 /** Check attempted syscalls, including failed attempts, on a recorded PID that collides with an owned live sentinel. */
 export async function verifyCoreInspectionTrace({
@@ -68,11 +69,22 @@ export async function verifyCoreInspectionTrace({
       { timeoutMs: 90_000, diagnosticBytes: 1024 * 1024 },
     );
     const executions = [];
-    const ownershipReads = [];
     let gdbObserved = false;
-    for (const file of await readdir(root)) {
-      if (!file.startsWith(`inspection-${mode}.trace.`)) continue;
-      const text = await readFile(join(root, file), "utf8");
+    const traces = await Promise.all(
+      (await readdir(root))
+        .filter((file) => file.startsWith(`inspection-${mode}.trace.`))
+        .map(async (file) => ({
+          file,
+          pid: Number(file.slice(`inspection-${mode}.trace.`.length)),
+          text: await readFile(join(root, file), "utf8"),
+        })),
+    );
+    const ownershipReads = assertHistoricalPidReadsAreOwnershipOnly({
+      traces,
+      sentinelPid: sentinel.pid,
+      psExecutables: psPaths,
+    });
+    for (const { file, text } of traces) {
       // Keep the source executable present: GDB 16 otherwise silently hides a
       // core-only violation when its automatic executable lookup finds nothing.
       const recordedExecutable = JSON.stringify(join(root, "fixture-program"));
@@ -80,36 +92,6 @@ export async function verifyCoreInspectionTrace({
         !text.split("\n").some((line) => line.includes(recordedExecutable)),
         `Inspection attempted access to the recorded executable: ${file}`,
       );
-      const ownershipTrace = text
-        .split("\n")
-        .some(
-          (line) =>
-            /^execve\("\/(?:usr\/)?bin\/ps",/u.test(line) &&
-            line.includes(
-              '["ps", "-axo", "pid=,ppid=,pgid=,uid=,stat=,command="]',
-            ) &&
-            line.endsWith(" = 0"),
-        );
-      const pidReads = text
-        .split("\n")
-        .filter((line) => line.includes(`/proc/${sentinel.pid}/`));
-      if (ownershipTrace) {
-        for (const line of pidReads) {
-          assert.ok(
-            new RegExp(
-              `/proc/${sentinel.pid}/(?:stat|status|cmdline|wchan|environ)"`,
-              "u",
-            ).test(line),
-            `Unexpected ownership observation of the sentinel: ${line}`,
-          );
-          ownershipReads.push(line);
-        }
-      } else
-        assert.deepEqual(
-          pidReads,
-          [],
-          `Historical PID caused a provider lookup in ${file}: ${pidReads.join("\n")}`,
-        );
       assert.ok(
         !/\bptrace\(/u.test(text),
         `Inspection attempted ptrace: ${file}`,

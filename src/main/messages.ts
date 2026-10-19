@@ -6,3 +6,5 @@ export const MCP_SHUTDOWN_FAILED =
   "REA could not close cleanly. End the REA process before starting it again.";
 export const SERVER_START_FAILED =
   "REA could not start. Run `rea doctor`, then restart REA from your MCP client.";
+export const MCP_HTTP_LISTEN_FAILED =
+  "REA could not listen for MCP HTTP connections on the selected host and port. Choose another --port or stop the process using it.";

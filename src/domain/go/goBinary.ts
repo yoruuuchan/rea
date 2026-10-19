@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
 import { localPathStringSchema } from "../localPath.js";
-import { CANONICAL_BASE64_PATTERN } from "../stringPatterns.js";
+import { canonicalBase64Schema } from "../stringPatterns.js";
 
 const sourceRangeSchema = z.strictObject({
   offset: z.number().int().nonnegative(),
@@ -25,9 +25,7 @@ export const goModuleMetadataSchema = z.strictObject({
   dependencies: z.array(goModuleSchema),
   settings: z.array(z.strictObject({ key: z.string(), value: z.string() })),
   unparsed_lines: z.array(z.string()),
-  unparsed_line_bytes_base64: z.array(
-    z.string().regex(CANONICAL_BASE64_PATTERN),
-  ),
+  unparsed_line_bytes_base64: z.array(canonicalBase64Schema),
   complete: z.boolean(),
 });
 
@@ -43,9 +41,9 @@ export const goBuildInfoSchema = z.strictObject({
   header_offset: z.number().int().nonnegative(),
   encoding: z.enum(["inline", "pointer"]),
   go_version: z.string().nullable(),
-  go_version_bytes_base64: z.string().regex(CANONICAL_BASE64_PATTERN),
+  go_version_bytes_base64: canonicalBase64Schema,
   module_text: z.string().nullable(),
-  module_bytes_base64: z.string().regex(CANONICAL_BASE64_PATTERN),
+  module_bytes_base64: canonicalBase64Schema,
   version_location: sourceRangeSchema,
   module_location: sourceRangeSchema,
   module: goModuleMetadataSchema,

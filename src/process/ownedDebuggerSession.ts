@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { parseLinuxProcessStartTime } from "./ProcessOwnershipObservation.js";
+import { parseLinuxProcessStat } from "./LinuxProcessStat.js";
 
 /** Result of terminating one debugger process owned by this application. */
 export type OwnedDebuggerStopResult =
@@ -37,10 +37,10 @@ const readLinuxProcessStartTime: ProcessStartTimeReader = async (pid) => {
       return null;
     throw cause;
   }
-  const startTime = parseLinuxProcessStartTime(stat);
-  if (startTime === undefined)
+  const parsed = parseLinuxProcessStat(stat);
+  if (parsed === undefined || parsed.pid !== Number(pid))
     throw new Error(`Inferior PID ${pid} has an unreadable process identity.`);
-  return startTime;
+  return parsed.startTime;
 };
 
 /** Confirm only that every previously identified inferior process has ended. */

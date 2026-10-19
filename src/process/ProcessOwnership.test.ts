@@ -1,12 +1,37 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupOwnedProcessGroup,
+  type ProcessIdentityObservation,
   type ProcessOwnershipHost,
+  type ProcessTableEntry,
 } from "./ProcessOwnership.js";
 import { parseProcessEnvironment } from "./ProcessOwnershipObservation.js";
 import { selectCapturedProcessGroupIds } from "./ProcessOwnershipProcessTree.js";
 import { matchesOwnedProcessCommand } from "./ProcessCommandIdentity.js";
-import { host, ownership } from "./ProcessOwnership.fixture.js";
+import { createOwnership, host } from "./ProcessOwnership.fixture.js";
+
+let ownership = createOwnership();
+beforeEach(() => {
+  ownership = createOwnership();
+});
+
+const identitiesWithRelations = (
+  processes: readonly ProcessTableEntry[],
+): ReadonlyMap<number, ProcessIdentityObservation> =>
+  new Map(
+    processes.map((entry) => [
+      entry.pid,
+      {
+        state: "readable" as const,
+        identity: `start-${String(entry.pid)}`,
+        relation: {
+          state: "observed" as const,
+          parentPid: entry.parentPid,
+          processGroupId: entry.processGroupId,
+        },
+      },
+    ]),
+  );
 describe("owned process-group cleanup discovery", () => {
   it("excludes sampled groups whose leader was outside the captured tree", () => {
     expect(
@@ -88,13 +113,11 @@ describe("opaque process neighbors during cleanup", () => {
           command: "/usr/bin/opaque-neighbor",
         },
       ].map((process) => ({ ...process, state: "S" }));
-      const signalGroup = vi.fn();
-      const identities = new Map(
-        processes.map(({ pid }) => [
-          pid,
-          { state: "readable" as const, identity: `start-${String(pid)}` },
-        ]),
-      );
+      const signalGroup = vi.fn((processGroupId: number) => {
+        for (let index = processes.length - 1; index >= 0; index -= 1)
+          if (processes[index]?.processGroupId === processGroupId)
+            processes.splice(index, 1);
+      });
       const adapter: ProcessOwnershipHost = {
         platform: "darwin",
         listProcesses: () => Promise.resolve(processes),
@@ -102,7 +125,23 @@ describe("opaque process neighbors during cleanup", () => {
           Promise.resolve({
             REA_PROCESS_RUN_ID: pid === 900 ? "unowned" : "run-token",
           }),
-        processIdentities: () => Promise.resolve(identities),
+        processIdentities: (entries) =>
+          Promise.resolve(
+            new Map(
+              entries.map((entry) => {
+                const current = processes.find(({ pid }) => pid === entry.pid);
+                return [
+                  entry.pid,
+                  current === undefined
+                    ? {
+                        state: "absent" as const,
+                        reason: "not-in-snapshot" as const,
+                      }
+                    : identitiesWithRelations([current]).get(entry.pid)!,
+                ];
+              }),
+            ),
+          ),
         runTokens: (members) =>
           Promise.resolve(
             new Map(
@@ -154,12 +193,7 @@ describe("opaque process neighbors during cleanup", () => {
       },
     ].map((process) => ({ ...process, state: "S" }));
     const signalGroup = vi.fn();
-    const identities = new Map(
-      processes.map(({ pid }) => [
-        pid,
-        { state: "readable" as const, identity: `start-${String(pid)}` },
-      ]),
-    );
+    const identities = identitiesWithRelations(processes);
     const adapter: ProcessOwnershipHost = {
       platform: "darwin",
       listProcesses: () => Promise.resolve(processes),
@@ -282,13 +316,7 @@ describe("related sweep candidates during cleanup", () => {
     let childReads = 0;
     const adapter: ProcessOwnershipHost = {
       listProcesses: async () => processes,
-      processIdentities: async (members) =>
-        new Map(
-          members.map(({ pid }) => [
-            pid,
-            { state: "readable" as const, identity: `start-${String(pid)}` },
-          ]),
-        ),
+      processIdentities: async (members) => identitiesWithRelations(members),
       environment: async () => ({}),
       runTokens: async (members) =>
         new Map(
@@ -416,12 +444,7 @@ describe("withheld process evidence during cleanup", () => {
       },
     ];
     const signalGroup = vi.fn();
-    const identities = new Map(
-      processes.map(({ pid }) => [
-        pid,
-        { state: "readable" as const, identity: `start-${String(pid)}` },
-      ]),
-    );
+    const identities = identitiesWithRelations(processes);
     const adapter: ProcessOwnershipHost = {
       listProcesses: () => Promise.resolve(processes),
       environment: (pid) =>
@@ -484,10 +507,7 @@ describe("sampled detached process groups during cleanup", () => {
       },
     ];
     const signalGroup = vi.fn();
-    const identities = new Map([
-      [100, { state: "readable" as const, identity: "start-100" }],
-      [200, { state: "readable" as const, identity: "start-200" }],
-    ]);
+    const identities = identitiesWithRelations(processes);
     const adapter: ProcessOwnershipHost = {
       listProcesses: () => Promise.resolve(processes),
       environment: (pid) =>
