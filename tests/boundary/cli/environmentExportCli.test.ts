@@ -6,7 +6,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { describe, expect } from "vitest";
 
@@ -106,7 +106,10 @@ describe("rea environment-export", () => {
       )
         .filter((entry) => entry.isFile())
         .map((entry) =>
-          join(entry.parentPath, entry.name).slice(directory.length + 1),
+          join(entry.parentPath, entry.name)
+            .slice(directory.length + 1)
+            .split(sep)
+            .join("/"),
         )
         .sort();
       expect(written).toEqual(BUNDLE_FILES);

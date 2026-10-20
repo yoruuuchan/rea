@@ -63,9 +63,15 @@ export abstract class WebNetworkProjectionAccumulator {
   }
 
   /** Reserve schema output and validation scratch while the borrowed parent stays live. */
-  admitCaptureClone(value: unknown): Result<void, AnalysisError> {
-    return admitAnalysisViewData(value, false, (bytes) =>
-      this.retain(bytes) ? ok(undefined) : this.overBudget(),
+  admitCaptureClone(
+    value: unknown,
+    options?: { readonly copiedStrings: boolean },
+  ): Result<void, AnalysisError> {
+    return admitAnalysisViewData(
+      value,
+      false,
+      (bytes) => (this.retain(bytes) ? ok(undefined) : this.overBudget()),
+      options?.copiedStrings,
     );
   }
 
@@ -107,7 +113,7 @@ export const admitHarCaptureParent = (
     );
   if (parent.operation !== "inspect_web_network_capture")
     return unsupported(
-      `View ${viewKind} is unsupported for parent operation ${parent.operation}; ${viewKind} requires inspect_web_network_capture.`,
+      `View ${viewKind} is unsupported for parent operation ${parent.operation}; ${viewKind} requires ${viewKind === "environment-manifest" ? "inspect_web_network_capture or capture_browser_scenario" : "inspect_web_network_capture"}.`,
     );
   const admitted = accumulator.admitCaptureClone(parent.normalizedResult);
   if (!admitted.ok) return admitted;

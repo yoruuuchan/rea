@@ -1,3 +1,4 @@
+import { IL2CPP_METADATA_VERSIONS } from "./il2cpp/il2cppMetadata.js";
 import { digestCanonicalValue } from "./canonicalDigest.js";
 import type { DesktopApplication, DesktopFile } from "./desktopApplication.js";
 
@@ -62,6 +63,21 @@ export const projectDesktopApplication = (
     "Managed assemblies in a Unity Data/Managed layout reference UnityEngine assemblies.",
   );
   const metadata = files.filter((file) => has(file, "il2cpp-metadata-header"));
+  for (const file of metadata)
+    if (
+      file.facts.some(
+        (fact) =>
+          fact.kind === "il2cpp-metadata-header" &&
+          IL2CPP_METADATA_VERSIONS.some(
+            (version) => version === fact.value.raw_version,
+          ),
+      )
+    )
+      probe(
+        "inspect_il2cpp_metadata",
+        file,
+        "Inventory this supported-version metadata candidate; complete validity and native binary correspondence remain unverified.",
+      );
   const il2cpp = files.filter(
     (file) =>
       has(file, "il2cpp-library-convention") &&

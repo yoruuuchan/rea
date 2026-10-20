@@ -807,6 +807,18 @@ it.each([
     { code: true, agentenv: true, runtime: false, package: false },
   ],
   [
+    "src/domain/analysisView/scenarioCaptureRecords.ts",
+    { code: true, agentenv: true, runtime: true, package: false },
+  ],
+  [
+    "src/domain/analysisView/WebNetworkProjectionAccumulator.ts",
+    { code: true, agentenv: true, runtime: true, package: false },
+  ],
+  [
+    "src/domain/analysisView/analysisViewDataAdmission.ts",
+    { code: true, agentenv: true, runtime: true, package: false },
+  ],
+  [
     "src/application/OwnedJsonInput.ts",
     { code: true, agentenv: true, runtime: true, package: false },
   ],

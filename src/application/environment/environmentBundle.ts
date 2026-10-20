@@ -239,7 +239,7 @@ export const bundleReadme = (
       : `calls \`${plan.check.tool}\` and checks the replayed \`status\` equals the recorded ${String(plan.check.status)} of record ${String(plan.check.recordOrdinal)}`;
   return `# ${plan.name}
 
-An agent environment exported by REA from one retained web network capture.
+An agent environment exported by REA from one retained ${source.captureKind === "browser-scenario" ? "browser scenario capture" : "web network capture"}.
 Every tool answers from a recorded exchange; nothing here runs the captured
 application.
 
@@ -249,7 +249,7 @@ if that content requires restricted access.
 
 ## Provenance
 
-- Capture artifact SHA-256: \`${source.captureSha256 ?? "excluded from Evidence"}\`
+- ${source.captureKind === "browser-scenario" ? "Scenario definition" : "Capture artifact"} SHA-256: \`${source.captureSha256 ?? "excluded from Evidence"}\`
 - Capture Evidence (the manifest's parent): \`${source.evidenceId}\`
 - Manifest Evidence: \`${source.manifestEvidenceId}\`
 - Manifest view digest: \`${manifest.view_digest}\`

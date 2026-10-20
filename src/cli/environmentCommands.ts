@@ -220,7 +220,7 @@ const manifestArgument = z
 const evidenceOption = z
   .string()
   .describe(
-    "Parent capture Evidence JSON path (inspect-web-network-capture output) the manifest cites",
+    "Parent capture Evidence JSON path (inspect-web-network-capture or capture-browser-scenario output) the manifest cites",
   );
 
 /** Register the one-shot bundle export command. */

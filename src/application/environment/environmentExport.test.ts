@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import * as v8 from "node:v8";
 
 import { describe, expect, it, vi } from "vitest";
@@ -26,7 +26,12 @@ vi.mock("../RegularFileRead.js", { spy: true });
 const listFiles = async (root: string): Promise<string[]> =>
   (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter((entry) => entry.isFile())
-    .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1))
+    .map((entry) =>
+      join(entry.parentPath, entry.name)
+        .slice(root.length + 1)
+        .split(sep)
+        .join("/"),
+    )
     .sort();
 
 const prepare = async (prefix: string) => {

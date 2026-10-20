@@ -960,6 +960,16 @@ it.each([
     ]);
     expect(report.next_probes).toEqual([
       expect.objectContaining({
+        operation: "inspect_il2cpp_metadata",
+        path: join(
+          await realpath(root),
+          "Game_Data/il2cpp_data/Metadata/global-metadata.dat",
+        ),
+        file_id: report.files.find((file) =>
+          file.path.endsWith("global-metadata.dat"),
+        )?.file_id,
+      }),
+      expect.objectContaining({
         operation: "open_binary",
         path: join(await realpath(root), path),
         file_id: expect.any(String),
@@ -1170,3 +1180,32 @@ it("preserves admitted Unicode and escaped AssemblyRef names in complete Evidenc
     "unity-mono",
   );
 });
+
+it.each([27, 31, 106])(
+  "suggests metadata-only inspection for supported raw version %s",
+  async (version) => {
+    const root = await createTestTempDirectory("rea-desktop-metadata-probe-");
+    const bytes = Buffer.alloc(8);
+    bytes.writeUInt32LE(0xfab11baf);
+    bytes.writeUInt32LE(version, 4);
+    await put(root, "global-metadata.dat", bytes);
+    const { report } = await inspect(root);
+    expect(report.candidates).toEqual([]);
+    expect(report.files[0]?.facts).toContainEqual({
+      kind: "il2cpp-metadata-header",
+      offset: 0,
+      value: { magic: "0xfab11baf", raw_version: version },
+    });
+    expect(report.next_probes).toEqual(
+      version === 31
+        ? [
+            expect.objectContaining({
+              operation: "inspect_il2cpp_metadata",
+              path: join(await realpath(root), "global-metadata.dat"),
+              file_id: report.files[0]?.file_id,
+            }),
+          ]
+        : [],
+    );
+  },
+);

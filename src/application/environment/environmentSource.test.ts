@@ -116,7 +116,7 @@ describe("loadEnvironmentSource", () => {
         issues: [
           {
             path: ["evidence", "operation"],
-            expected: "inspect_web_network_capture",
+            expected: "inspect_web_network_capture or capture_browser_scenario",
           },
         ],
       },

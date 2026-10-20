@@ -324,6 +324,21 @@ it("reuses authenticated file snapshots while isolating mutable public reads", a
 });
 
 describe("evidence bundle filesystem adapter", () => {
+  it.skipIf(process.platform === "win32").each(["/", "/."])(
+    "preserves the directory requirement of a missing output ending in %s",
+    async (suffix) => {
+      const directory = await createTestTempDirectory(
+        "rea-evidence-directory-",
+      );
+      const selected = `${join(directory, "report.json")}${suffix}`;
+      expect(await writeBundle(bundle(), selected, false)).toMatchObject({
+        ok: false,
+        error: { _tag: "EvidenceFileError", reason: "not-file" },
+      });
+      expect(await readdir(directory)).toEqual([]);
+    },
+  );
+
   it("round trips canonical bytes and requires explicit overwrite", async () => {
     const directory = await createTestTempDirectory("rea-evidence-");
     const path = join(directory, "bundle.json");

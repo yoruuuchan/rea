@@ -101,6 +101,11 @@ same bundle. Export writes only the caller-selected output file.
 | Unreal       | `Content/Paks` path conventions or an IoStore TOC signature; arbitrary `.pak` filenames are insufficient.                                                                                        |
 | Electron     | A `resources/app.asar` or `resources/default_app.asar` path convention; archive validity is unverified.                                                                                          |
 
+An observed metadata header with supported raw version 29, 31 or 39 offers an
+`inspect_il2cpp_metadata` follow-up at its admitted file path, including when no
+native library was found. This probe does not establish full metadata validity
+or correspondence to a native binary. See [IL2CPP metadata](il2cpp-metadata.md).
+
 Candidates are derived or inferred from these facts and do not prove loading or
 execution. BepInEx, MelonLoader, Easy Anti-Cheat and BattlEye labels identify
 path conventions only; runtime presence stays unknown. No bypass is provided.

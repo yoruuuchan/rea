@@ -10,12 +10,14 @@ const MEMBER_BYTES = 256;
 const CONTAINER_BYTES = 512;
 const textBytes = (length: number): number => 32 + length * 14;
 
-/** Inspect borrowed data without invoking accessors; only API-surface reserves bytes. */
+/** Inspect borrowed JSON without accessors and reserve copied or transformed representations. */
 export const admitAnalysisViewData = (
   value: unknown,
   inline: boolean,
   reserve?: (bytes: number) => Result<void, AnalysisError>,
+  copiedStrings = false,
 ): Result<void, AnalysisError> => {
+  const countStrings = inline || copiedStrings;
   const ancestors = new Set<object>();
   // A single bounded stack preserves diagnostics without per-node path copies.
   const path: (string | number)[] = inline
@@ -43,7 +45,9 @@ export const admitAnalysisViewData = (
       return invalid();
     const member = reserve?.(
       MEMBER_BYTES +
-        (inline && typeof item === "string" ? textBytes(item.length) : 0) +
+        (countStrings && typeof item === "string"
+          ? textBytes(item.length)
+          : 0) +
         (typeof item === "object" && item !== null ? CONTAINER_BYTES : 0),
     );
     if (member !== undefined && !member.ok) return member;
@@ -83,7 +87,7 @@ export const admitAnalysisViewData = (
       // Zod reads named fields even when they are non-enumerable.
       for (const key of Object.getOwnPropertyNames(item)) {
         // Authentication hashes strings and keys alongside the schema clone.
-        const keyAdmission = inline
+        const keyAdmission = countStrings
           ? reserve?.(textBytes(key.length))
           : undefined;
         if (keyAdmission !== undefined && !keyAdmission.ok) return keyAdmission;

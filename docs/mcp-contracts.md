@@ -218,7 +218,7 @@ no group was templated.
 See [derived API surfaces](web-network-captures.md#derived-api-surface).
 
 `inspect_analysis_view` also accepts `environment-manifest` for retained HAR capture
-Evidence, projecting the primary origin's request lines into named tools with path
+Evidence and `capture_browser_scenario` Evidence, projecting the primary origin's request lines into named tools with path
 templates, parameters, observed query names, value-free body shapes and record
 pointers, plus excluded groups and three fixed unknowns. Templates, parameters and
 names are inferences; the Evidence is inferred whenever any tool or excluded group

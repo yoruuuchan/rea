@@ -147,6 +147,7 @@ export const desktopProbeSchema = z.strictObject({
   probe_id: prefixedDigestSchema("dsp"),
   operation: z.enum([
     "inspect_managed_artifact",
+    "inspect_il2cpp_metadata",
     "open_binary",
     "analyze_javascript_application",
   ]),

@@ -1,4 +1,5 @@
 import { writeFile, type FileHandle } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -41,6 +42,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { RustBinaryProvider } from "../../src/rust/RustBinaryProvider.js";
 import { RustBinaryService } from "../../src/application/rust/RustBinaryService.js";
 import { AnalysisError } from "../../src/domain/analysisErrorBase.js";
+import { parseEvidence } from "../../src/domain/evidence.js";
+import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.js";
 import {
   AnalysisCancelledError,
   AnalysisArtifactChangedError,
@@ -55,11 +58,13 @@ import { ArtifactResourceScope } from "../../src/artifacts/ArtifactResourceScope
 import { ArtifactReaderFailure } from "../../src/artifacts/ArtifactReader.js";
 import { GoBinaryProvider } from "../../src/go/GoBinaryProvider.js";
 import { PeResourcesProvider } from "../../src/native/pe/PeResourcesProvider.js";
+import { Il2cppMetadataProvider } from "../../src/il2cpp/Il2cppMetadataProvider.js";
 import { inspectPeResourcesInputSchema } from "../../src/domain/native/peResources.js";
 import { peResourceFixture } from "../../src/native/pe/PeResources.fixture.js";
 import { createServer } from "../../src/server/createServer.js";
 import { createTestBinarySession } from "../fixtures/binarySession.js";
 import { createRustImage } from "../fixtures/rust/image.js";
+import { createIl2cppMetadataFixture } from "../fixtures/il2cpp/metadata.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { parseMcpToolError } from "../fixtures/mcpToolError.js";
 import { mcpTest } from "../support/mcp/mcpFixture.js";
@@ -77,7 +82,26 @@ const staticProviders = [
   ["Rust", () => new RustBinaryProvider()],
   ["Go", () => new GoBinaryProvider()],
   ["PE", () => new PeResourcesProvider()],
+  ["IL2CPP metadata", () => new Il2cppMetadataProvider()],
 ] as const;
+
+const expectIl2cppSource = (
+  error: AnalysisError,
+  path: string,
+  bytes: Buffer,
+) => {
+  const source = parseEvidence(error.partialObservation);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  expect(source.operation).toBe("observe_il2cpp_metadata_source");
+  expect(source.subject).toMatchObject({
+    local_path: path,
+    digest: { sha256 },
+  });
+  expect(source.normalized_result).toEqual({
+    artifact: { path, sha256, bytes: bytes.length },
+    inventory_status: "not-returned-as-complete",
+  });
+};
 
 it.each(staticProviders)(
   "preserves the exact late-close cancellation cause through %s inspection",
@@ -86,6 +110,8 @@ it.each(staticProviders)(
     const provider = makeProvider();
     if (provider instanceof PeResourcesProvider)
       await writeFile(path, peResourceFixture().bytes);
+    if (provider instanceof Il2cppMetadataProvider)
+      await writeFile(path, createIl2cppMetadataFixture().bytes);
     const controller = new AbortController();
     const reason = new Error("cancel during confirmed descriptor close");
     fault.blockNew = false;
@@ -101,7 +127,53 @@ it.each(staticProviders)(
       if (result.ok) throw new Error("Expected late cancellation");
       expect(result.error).toBeInstanceOf(AnalysisCancelledError);
       expect(result.error.cause).toBe(reason);
+      if (provider instanceof Il2cppMetadataProvider)
+        expectIl2cppSource(
+          result.error,
+          path,
+          createIl2cppMetadataFixture().bytes,
+        );
       expect(fault.handles.every((handle) => handle.fd === -1)).toBe(true);
+    } finally {
+      fault.blocked.clear();
+      await provider.close();
+    }
+  },
+);
+
+it.each([false, true])(
+  "retains completed IL2CPP source facts through failed close (cancel: %s)",
+  async (cancel) => {
+    const path = await selectedImage();
+    const { bytes } = createIl2cppMetadataFixture();
+    await writeFile(path, bytes);
+    const provider = new Il2cppMetadataProvider();
+    const controller = new AbortController();
+    const reason = new Error("cancel during failed close");
+    if (cancel) fault.onClose = () => controller.abort(reason);
+    try {
+      const result = await provider.inspect(
+        { path },
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected failed close");
+      if (cancel) {
+        expect(result.error.cleanupPrimary).toBeInstanceOf(
+          AnalysisCancelledError,
+        );
+        expect(result.error.cleanupPrimary?.cause).toBe(reason);
+      }
+      expect(result.error.cleanupIncomplete).toBe(true);
+      expectIl2cppSource(result.error, path, bytes);
+      expect(fault.handles).toHaveLength(1);
+      expect(fault.handles[0]?.fd).toBeGreaterThanOrEqual(0);
+      fault.blocked.clear();
+      await provider.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+      expect(fault.handles[0]?.fd).toBe(-1);
+      expect(
+        projectAnalysisError(result.error).details?.partial_observation,
+      ).toEqual(result.error.partialObservation);
     } finally {
       fault.blocked.clear();
       await provider.close();
@@ -150,6 +222,8 @@ it.each(
       if (result.ok) throw new Error("Expected primary read failure");
       expect(result.error).toBeInstanceOf(expected);
       expect(result.error.cause).toBe(primary);
+      if (provider instanceof Il2cppMetadataProvider)
+        expect(result.error.partialObservation).toBeUndefined();
       expect(fault.handles.every((handle) => handle.fd === -1)).toBe(true);
     } finally {
       await provider.close();
@@ -186,6 +260,8 @@ it.each(staticProviders)(
       const [original] = aggregate.errors;
       expect(original).toBeInstanceOf(AnalysisArtifactChangedError);
       expect((original as AnalysisArtifactChangedError).cause).toBe(primary);
+      if (provider instanceof Il2cppMetadataProvider)
+        expect(result.error.partialObservation).toBeUndefined();
       fault.blocked.clear();
       await provider.close();
       expect(result.error.cleanupIncomplete).toBe(false);
