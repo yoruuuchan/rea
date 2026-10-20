@@ -248,7 +248,7 @@ export const captureSqliteDatabaseSnapshot = async (
   signal?: AbortSignal,
   selectedFileSystem: StableArtifactFileSystem = fileSystem,
 ) => {
-  signal?.throwIfAborted();
+  assertArtifactReadActive(signal);
   const walPath = `${path}-wal`;
   const journalPath = `${path}-journal`;
   const paths = [path, walPath, journalPath] as const;
@@ -355,6 +355,6 @@ export const captureSqliteDatabaseSnapshot = async (
         "integrity",
         `SQLite snapshot file set changed during acquisition: ${paths[index] ?? path}`,
       );
-  signal?.throwIfAborted();
+  assertArtifactReadActive(signal);
   return { snapshotPath, artifact, wal: walArtifact };
 };

@@ -127,6 +127,41 @@ it("resolves erased wrappers through the composed application graph", async () =
 
 it.each([
   {
+    name: "earlier",
+    source: 'export const target = () => "ready", result = target();',
+    resolved: true,
+  },
+  {
+    name: "later",
+    source: 'export const result = target(), target = () => "ready";',
+    resolved: false,
+  },
+])(
+  "orders $name exported declarator reads in the composed application graph",
+  async ({ source, resolved }) => {
+    const analysis = await analyzeFiles(new Map([["app.mts", source]]));
+    const calls = analysis.semantic_graph.relations.filter(
+      ({ relation }) => relation === "calls",
+    );
+    if (resolved) {
+      expect(calls).toEqual([
+        expect.objectContaining({ resolution: "resolved" }),
+      ]);
+    } else {
+      expect(calls.some(({ resolution }) => resolution === "resolved")).toBe(
+        false,
+      );
+      expect(analysis.semantic_graph.unknowns).toContainEqual(
+        expect.objectContaining({
+          relation_kinds: expect.arrayContaining(["calls"]),
+        }),
+      );
+    }
+  },
+);
+
+it.each([
+  {
     name: "path-value wrappers",
     plain: ['"./preload.js"', '"./worker.js"', '"kept"'],
     wrapped: [

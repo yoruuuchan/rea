@@ -18,7 +18,7 @@ export const createObjcProtocolReader = (input: {
   const { readers: read, result, failures } = input;
   const visited = new Set<bigint>();
   const name = (address: bigint) => read.string(read.pointer(address + 8n));
-  const list = (address: bigint): string[] => {
+  const list = (address: bigint, onTruncated?: () => void): string[] => {
     if (address === 0n) return [];
     // `count` is plain uintptr_t data, not a pointer fixup.
     const count = read.u64(address);
@@ -26,7 +26,10 @@ export const createObjcProtocolReader = (input: {
       throw new RangeError("Protocol list exceeds 20000 entries");
     const names: string[] = [];
     for (let index = 0n; index < count; index++) {
-      if (!read.admit()) break;
+      if (!read.admit()) {
+        onTruncated?.();
+        break;
+      }
       const protocol = read.pointer(address + 8n + index * 8n);
       names.push(name(protocol));
       record(protocol);
@@ -39,6 +42,7 @@ export const createObjcProtocolReader = (input: {
     instance: boolean,
     /** Entries skipped for an empty selector, reported by the declaring protocol. */
     emptySelectors: string[],
+    onTruncated?: () => void,
   ) => {
     const output: ObjcSwiftMetadata["objc_protocols"][number]["methods"] = [];
     if (address === 0n) return output;
@@ -49,7 +53,10 @@ export const createObjcProtocolReader = (input: {
     if (stride !== (relative ? 12 : 24))
       throw new TypeError("Unsupported Objective-C protocol method entry size");
     for (let index = 0; index < count; index++) {
-      if (!read.admit()) break;
+      if (!read.admit()) {
+        onTruncated?.();
+        break;
+      }
       const entry = address + 8n + BigInt(index * stride);
       let selector = relative
         ? entry + BigInt(read.i32(entry))
@@ -84,22 +91,54 @@ export const createObjcProtocolReader = (input: {
       const protocolName = name(address);
       // Adopted protocols are independent declarations; decode them before
       // rejecting a parent whose own name is empty.
-      const adopted = list(read.pointer(address + 16n));
+      let budgetTruncated = false;
+      const onTruncated = () => {
+        budgetTruncated = true;
+      };
+      const adopted = list(read.pointer(address + 16n), onTruncated);
       if (protocolName.length === 0)
         throw new TypeError("Objective-C protocol has an empty name");
       const skipped: string[] = [];
       const required = [
-        ...methods(read.pointer(address + 24n), true, true, skipped),
-        ...methods(read.pointer(address + 32n), true, false, skipped),
+        ...methods(
+          read.pointer(address + 24n),
+          true,
+          true,
+          skipped,
+          onTruncated,
+        ),
+        ...methods(
+          read.pointer(address + 32n),
+          true,
+          false,
+          skipped,
+          onTruncated,
+        ),
       ];
       const optional = [
-        ...methods(read.pointer(address + 40n), false, true, skipped),
-        ...methods(read.pointer(address + 48n), false, false, skipped),
+        ...methods(
+          read.pointer(address + 40n),
+          false,
+          true,
+          skipped,
+          onTruncated,
+        ),
+        ...methods(
+          read.pointer(address + 48n),
+          false,
+          false,
+          skipped,
+          onTruncated,
+        ),
       ];
       for (const message of skipped)
         failures.push(
           `Protocol 0x${address.toString(16)}: Objective-C protocol ${protocolName} ${message}`,
         );
+      const decodeReasons = [
+        ...(skipped.length === 0 ? [] : ["protocol_method_selector_empty"]),
+        ...(budgetTruncated ? ["max_records_reached"] : []),
+      ];
       result.objc_protocols.push({
         name: protocolName,
         methods: required,
@@ -113,9 +152,9 @@ export const createObjcProtocolReader = (input: {
         optional_methods: optional,
         location: read.location(address),
         decode:
-          skipped.length === 0
+          decodeReasons.length === 0
             ? { status: "decoded", reason: null }
-            : { status: "partial", reason: "protocol_method_selector_empty" },
+            : { status: "partial", reason: decodeReasons.join("; ") },
         evidence: read.evidence(
           address,
           "Objective-C protocol declaration and encoded method lists; IMP fields are not handler targets",

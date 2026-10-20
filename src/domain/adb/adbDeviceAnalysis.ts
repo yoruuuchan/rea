@@ -51,6 +51,51 @@ export type AdbDeviceState = (typeof ADB_DEVICE_STATES)[number];
 
 const keyStringSchema = z.string().min(1).max(256);
 const keyPattern = /^[A-Za-z0-9._\x2d]+$/u;
+const activityExtraKeySchema = keyStringSchema
+  .regex(keyPattern, "Extra keys are identifiers")
+  .describe("Extra key");
+const activityExtraStringValueSchema = z
+  .string()
+  .max(2048)
+  .regex(/^[^\x00]*$/u, "Extra values cannot contain NUL");
+const activityExtraNonEmptyValueSchema = activityExtraStringValueSchema.min(1);
+const activityExtraSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    key: activityExtraKeySchema,
+    type: z.literal("string").describe("String extra value type"),
+    value: activityExtraStringValueSchema.describe(
+      "String extra value as text; an explicitly empty value is preserved",
+    ),
+  }),
+  z.strictObject({
+    key: activityExtraKeySchema,
+    type: z.literal("boolean").describe("Boolean extra value type"),
+    value: activityExtraNonEmptyValueSchema
+      .regex(/^(true|false)$/u, "Boolean extra values must be true or false")
+      .describe("Boolean extra value as true or false text"),
+  }),
+  z.strictObject({
+    key: activityExtraKeySchema,
+    type: z.literal("int").describe("Integer extra value type"),
+    value: activityExtraNonEmptyValueSchema
+      .regex(/^-?\d+$/u, "Integer extra values must be an integer")
+      .describe("Integer extra value as signed decimal text"),
+  }),
+  z.strictObject({
+    key: activityExtraKeySchema,
+    type: z.literal("long").describe("Long extra value type"),
+    value: activityExtraNonEmptyValueSchema
+      .regex(/^-?\d+$/u, "Long extra values must be an integer")
+      .describe("Long extra value as signed decimal text"),
+  }),
+  z.strictObject({
+    key: activityExtraKeySchema,
+    type: z.literal("float").describe("Float extra value type"),
+    value: activityExtraNonEmptyValueSchema
+      .regex(/^-?\d+(\.\d+)?$/u, "Float extra values must be a number")
+      .describe("Float extra value as decimal text"),
+  }),
+]);
 
 /**
  * Caller intent for ADB-backed device inspection and acquisition.
@@ -282,22 +327,7 @@ export const adbInputSchemas = {
       .optional()
       .describe("Explicit component to start (-n)"),
     extras: z
-      .array(
-        z.strictObject({
-          key: keyStringSchema
-            .regex(keyPattern, "Extra keys are identifiers")
-            .describe("Extra key"),
-          type: z
-            .enum(["string", "boolean", "int", "long", "float"])
-            .describe("Extra value type"),
-          value: z
-            .string()
-            .min(1)
-            .max(2048)
-            .regex(/^[^\x00]*$/u, "Extra values cannot contain NUL")
-            .describe("Extra value as text, parsed per type"),
-        }),
-      )
+      .array(activityExtraSchema)
       .max(16)
       .default([])
       .describe("Typed intent extras (--es/--ez/--ei/--el/--ef)"),

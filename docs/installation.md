@@ -1107,9 +1107,14 @@ and hyphens; at most 32 names are admitted, each at most 120 characters.
 Names must identify analyzers registered for the selected program. Unknown names
 or options that remain enabled abort the headless import before auto-analysis
 and the bridge, so an unsuccessful override cannot produce a session claiming
-that the analyzer was disabled. For Windows PE resource analysis, the exact name
-is `WindowsResourceReference`. Disabling an analyzer skips the facts it would
-have produced.
+that the analyzer was disabled. The setting applies to every import in the REA
+server. A format-specific analyzer may not be registered for another target, so
+the same override can prevent that target from opening. For mixed-target work,
+omit the override or use a separate REA server configured for the affected
+format. Changing the environment requires restarting the server; reopening a
+target alone keeps the current setting. For Windows PE resource analysis, the
+exact name is `WindowsResourceReference`. Disabling an analyzer skips the facts
+it would have produced.
 
 ### Ghidra heap and CPU controls
 

@@ -211,7 +211,7 @@ export class GoBinaryProvider implements GoBinaryPort {
 
   /** Read complete compiler/module metadata while preserving original byte identity and source ranges. */
   async inspect(
-    input: InspectGoBinaryInput,
+    input: Omit<InspectGoBinaryInput, "detail">,
     options?: ExecutionOptions,
   ): Promise<Result<GoBinary, AnalysisError>> {
     try {

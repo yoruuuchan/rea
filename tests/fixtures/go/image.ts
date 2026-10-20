@@ -135,6 +135,16 @@ export const createGoBinaryFixture = (
   return { bytes, headerOffset, versionOffset, moduleOffset, moduleBytes };
 };
 
+/** Set the first PE section's declared virtual content size in an authored fixture. */
+export const setGoPeVirtualSize = (
+  bytes: Buffer,
+  virtualSize: number,
+): void => {
+  const pe = bytes.readUInt32LE(60);
+  const section = pe + 24 + bytes.readUInt16LE(pe + 20);
+  bytes.writeUInt32LE(virtualSize, section + 8);
+};
+
 /** Two writable ELF loads, as in a PIE whose build info is in the later load. */
 export const createGoSplitElfFixture = (
   options: Parameters<typeof createGoBinaryFixture>[0] = {},

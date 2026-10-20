@@ -1298,6 +1298,52 @@ describe("Ghidra result projection", () => {
   });
 });
 
+describe("Ghidra decompiler failure projection", () => {
+  it("reports a procedure decompiler failure without blaming the environment", async () => {
+    const code = "decompile_failed";
+    const message =
+      "Ghidra decompilation failed: Low-level Error: Fixture decompiler failure";
+    const ghidra = provider(installationHost(), () => ({
+      start: () => Promise.resolve(ok(sessionInfo())),
+      callTool: () =>
+        Promise.resolve(
+          err(
+            new GhidraSessionError(
+              "remote",
+              message,
+              { remote_code: code },
+              { remoteCode: code },
+            ),
+          ),
+        ),
+      close: () => Promise.resolve(ok(null)),
+    }));
+    const client = await createElfClient(ghidra);
+    const result = await client.execute("procedure_pseudo_code", {
+      procedure: "main",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "ProviderAdapterError" },
+    });
+    if (!result.ok) {
+      const projected = projectAnalysisError(result.error);
+      expect(projected).toMatchObject({
+        code: "execution_failure",
+        retryable: false,
+        message: `${message}. Only the decompiler failed for this procedure; the Ghidra session remains usable.`,
+        details: { diagnostics: { remote_code: code } },
+      });
+      expect(projected.message).not.toContain("rea doctor");
+      expect(projected.remediation.action).toContain("analyze_function");
+      expect(projected.remediation.action).toContain(
+        "facet_availability.pseudocode",
+      );
+      expect(projected.remediation.action).not.toContain("rea doctor");
+    }
+  });
+});
+
 describe("Ghidra PE CodeView debug symbol limitations", () => {
   it.each([
     ["absent report", undefined, "load state unknown"],

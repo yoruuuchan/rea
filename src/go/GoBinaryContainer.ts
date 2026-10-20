@@ -50,7 +50,13 @@ export interface GoBinaryContainer {
   readonly architecture: string;
   readonly bits: 32 | 64;
   readonly byte_order: "little" | "big";
+  /** Declared preferred base when the container supplies one (PE). */
+  readonly image_base?: bigint;
+  /** Mach-O load-command observation; omitted for other formats. */
+  readonly macho_chained_fixups?: boolean;
   readonly mappings: readonly GoFileMapping[];
+  /** File-backed ranges the native loader marks executable; omitted if unobserved. */
+  readonly executable_mappings?: readonly GoFileMapping[];
   readonly zero_fills: readonly GoZeroFillMapping[];
   readonly sections: readonly GoImageSection[];
   readonly search: readonly GoFileMapping[];

@@ -167,6 +167,72 @@ describe("reverse engineering command services", () => {
   });
 });
 
+it.each([
+  ["file_headers", true, undefined, ["-f"], false],
+  ["section_headers", true, undefined, ["-h"], false],
+  ["symbols", true, undefined, ["-t"], false],
+  ["relocations", true, undefined, ["-r"], false],
+  ["disassemble", true, undefined, ["-d"], false],
+  ["disassemble_all", true, undefined, ["-D"], false],
+  [
+    "disassemble",
+    true,
+    "sample_symbol",
+    ["--disassemble=sample_symbol"],
+    false,
+  ],
+  ["dwarf", true, undefined, ["-W", "-WK"], true],
+  ["dwarf", false, undefined, ["-W", "-WN"], false],
+] as const)(
+  "scopes the debug-link limitation to %s when following links is %s",
+  async (operation, followDebugLinks, symbol, flags, warns) => {
+    const directory = await mkdtemp(join(tmpdir(), "rea-objdump-limitations-"));
+    const path = join(directory, "fixture.bin");
+    await writeFile(path, "inert artifact");
+    const calls: (readonly string[])[] = [];
+    const service = new ReverseEngineeringService({
+      environment: { REA_OBJDUMP_COMMAND: "/tools/objdump" },
+      run: async (_command, args) => {
+        calls.push(args);
+        return { stdout: "captured stdout", stderr: "captured stderr" };
+      },
+    });
+
+    try {
+      const result = await service.inspectWithObjdump({
+        path,
+        operation,
+        follow_debug_links: followDebugLinks,
+        ...(symbol === undefined ? {} : { symbol }),
+      });
+      if (!result.ok) throw result.error;
+      expect(calls).toEqual([[...flags, path]]);
+      expect(result.value.parameters).toMatchObject({
+        path,
+        operation,
+        follow_debug_links: followDebugLinks,
+        ...(symbol === undefined ? {} : { symbol }),
+      });
+      expect(result.value.parameters.command_arguments).toEqual(calls[0]);
+      expect(result.value.raw_result).toMatchObject({
+        stdout: "captured stdout",
+        stderr: "captured stderr",
+        exit_code: 0,
+        output_truncated: false,
+        completion_status: "complete",
+      });
+      expect(
+        result.value.limitations.some((text) =>
+          text.startsWith("DWARF output"),
+        ),
+      ).toBe(warns);
+    } finally {
+      await service.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 it("uses one selected environment snapshot for provider selection and execution", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rea-provider-environment-"));
   const path = join(directory, "fixture.bin");

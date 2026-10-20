@@ -8,13 +8,17 @@ const LARGE_PATTERN_BYTES = 4 * 1024 * 1024;
 
 const inputValidationText = (result: CallToolResult): string => {
   expect(result.isError).toBe(true);
-  const text = result.content.find((item) => item.type === "text");
-  if (text?.type !== "text") throw new Error("Input error omitted text");
-  expect(text.text).toMatch(
-    /^Input validation error: Invalid arguments for tool search_bytes:/u,
-  );
-  expect(text.text).not.toMatch(/RangeError|Maximum call stack/i);
-  return text.text;
+  const diagnostic = parseMcpToolError(result).error;
+  expect(diagnostic).toMatchObject({
+    code: "invalid_request",
+    recovery: {
+      kind: "inspect_input_contract",
+      operation: "search_bytes",
+    },
+  });
+  const text = JSON.stringify(diagnostic);
+  expect(text).not.toMatch(/RangeError|Maximum call stack/i);
+  return text;
 };
 
 it("validates large search_bytes inputs without breaking stdio MCP", async () => {

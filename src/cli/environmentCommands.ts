@@ -12,6 +12,7 @@ import {
   type McpHttpEndpoint,
 } from "../config/mcpHttpEndpoint.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import type { StreamableHttpListenError } from "../server/http/streamableHttpListenError.js";
 import {
   AnalysisCancelledError,
   AnalysisResourceConstraintError,
@@ -47,10 +48,10 @@ const untilAborted = (signal: AbortSignal): Promise<undefined> =>
       });
   });
 
-/** A listener that could not bind or failed after binding, as the command's typed refusal. */
-const transportError = (
+/** A listener failure as the command's typed refusal. */
+export const transportError = (
   endpoint: McpHttpEndpoint,
-  cause: Error,
+  cause: StreamableHttpListenError,
 ): AnalysisResourceConstraintError =>
   new AnalysisResourceConstraintError(
     CLI_COMMANDS.environmentServe,
@@ -60,10 +61,40 @@ const transportError = (
     {
       cause,
       retryable: false,
-      remediationAction:
-        "Choose another --port or MCP_PORT, or stop the process using it.",
+      diagnostics: {
+        listener_failure: cause.classification.ok
+          ? {
+              kind: cause.classification.value.kind,
+              system_code: cause.classification.value.systemCode,
+            }
+          : {
+              kind: cause.classification.error.kind,
+              ...(cause.classification.error.systemCode === undefined
+                ? {}
+                : { system_code: cause.classification.error.systemCode }),
+            },
+        listener_phase: cause.phase,
+      },
+      remediationAction: listenerRemediation(cause.classification),
     },
   );
+
+const listenerRemediation = (
+  classification: StreamableHttpListenError["classification"],
+): string => {
+  if (!classification.ok)
+    return "Check the selected listener host, port, and binding permissions, then retry.";
+  switch (classification.value.kind) {
+    case "host_lookup":
+      return "Check --host or MCP_HOST and host name resolution; correct the value or resolve the lookup failure, then retry.";
+    case "host_unavailable":
+      return "Choose an address assigned to this machine with --host or MCP_HOST, then retry.";
+    case "port_in_use":
+      return "Choose another --port or MCP_PORT, or stop the process using it.";
+    case "permission_denied":
+      return "Choose a host and port this process is permitted to bind; if the selected port is restricted, use an allowed port.";
+  }
+};
 
 interface ServeArguments {
   readonly manifest: string;
@@ -116,8 +147,9 @@ const serveEnvironmentCommand = async (
     await import("../server/http/streamableHttpListenError.js");
   if (signal.aborted) return cancelled();
   // A listener that fails after binding ends the command instead of serving nothing.
-  let failListener: (error: Error) => void = () => undefined;
-  const listenerFailed = new Promise<Error>((resolve) => {
+  let failListener: (error: StreamableHttpListenError) => void = () =>
+    undefined;
+  const listenerFailed = new Promise<StreamableHttpListenError>((resolve) => {
     failListener = resolve;
   });
   let served: import("../server/environment/serveEnvironment.js").ServedEnvironment;
@@ -130,7 +162,7 @@ const serveEnvironmentCommand = async (
         ? {}
         : { environmentName: environmentName.value }),
       logger: listenerLogger(environment, logger),
-      onerror: (error) => failListener(error),
+      onerror: failListener,
     });
     if (!started.ok) return cliError(started.error);
     served = started.value;
@@ -139,7 +171,7 @@ const serveEnvironmentCommand = async (
     if (!(cause instanceof StreamableHttpListenError)) throw cause;
     return cliError(transportError(endpoint.value, cause));
   }
-  let failure: Error | undefined;
+  let failure: StreamableHttpListenError | undefined;
   try {
     failure = await Promise.race([untilAborted(signal), listenerFailed]);
   } finally {

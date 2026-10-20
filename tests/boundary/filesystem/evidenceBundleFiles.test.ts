@@ -134,12 +134,13 @@ describe("evidence bundle export cancellation", () => {
       const path = join(root, "bundle.json");
       if (overwrite) await writeFile(path, "original");
       const controller = new AbortController();
+      const cancellationReason = new Error("cancel staged publication");
       let closed = false;
       let continued = false;
       function* parts() {
         try {
           yield "staged partial data";
-          controller.abort();
+          controller.abort(cancellationReason);
           yield "cancelled data";
           continued = true;
           yield "unreachable";
@@ -157,6 +158,7 @@ describe("evidence bundle export cancellation", () => {
         error: {
           _tag: "AnalysisCancelledError",
           operation: "export_evidence_bundle",
+          cause: cancellationReason,
         },
       });
       expect(closed).toBe(true);

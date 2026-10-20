@@ -165,7 +165,7 @@ describe("JavaScript semantic analysis: computed method keys", () => {
         const name = "m";
         const pick = () => "n";
         const obj = { [name]() { return 1; }, [pick()]() { return name; } };
-        class C { [name]() { return 2; } }
+        class C { [name]() { return 2; } [pick()]() { return 3; } }
       }
     `);
 
@@ -177,6 +177,14 @@ describe("JavaScript semantic analysis: computed method keys", () => {
       callerCallableId: outer.callableId,
       resolution: "exact",
     });
+    expect(
+      ir.callSites.filter(
+        ({ callerCallableId, calleeCallableIds, resolution }) =>
+          callerCallableId === outer.callableId &&
+          calleeCallableIds.length === 1 &&
+          resolution === "exact",
+      ),
+    ).toHaveLength(2);
     // Only the method body that reads `name` captures it; the computed keys
     // are evaluated outside every method environment.
     expect(
@@ -187,6 +195,23 @@ describe("JavaScript semantic analysis: computed method keys", () => {
         binding: bindingById(ir, bindingId)?.name,
       })),
     ).toEqual([{ owner: "method", binding: "name" }]);
+  });
+
+  it("keeps ordinary nested method-body reads uncertain", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      function outer() {
+        const pick = () => "n";
+        return { method() { return pick(); } };
+      }
+    `);
+    const pick = onlyCallable(ir, "pick");
+    const pickCall = ir.callSites.find(({ calleeCallableIds }) =>
+      calleeCallableIds.includes(pick.callableId),
+    );
+    expect(pickCall).toMatchObject({
+      resolution: "ambiguous",
+      calleeCallableIds: [pick.callableId],
+    });
   });
 
   it("keeps callables nested in a computed method key in their own frames", () => {

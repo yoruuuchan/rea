@@ -238,7 +238,8 @@ const writeTextPartsOwned = async (
       if (cause.outcome.error instanceof AnalysisCancelledError)
         return err(
           new AnalysisCancelledError(cause.outcome.error.operation, {
-            cause,
+            cause: cause.outcome.error.cause,
+            cleanupPrimary: cause.outcome.error,
             cleanup,
           }),
         );
@@ -377,7 +378,9 @@ const writeStagedParts = async (
 
 const assertWriteActive = (cancellation?: TextWriteCancellation): void => {
   if (cancellation?.signal.aborted === true)
-    throw new AnalysisCancelledError(cancellation.operation);
+    throw new AnalysisCancelledError(cancellation.operation, {
+      cause: cancellation.signal.reason,
+    });
 };
 
 const fileErrorCode = (cause: unknown): unknown =>

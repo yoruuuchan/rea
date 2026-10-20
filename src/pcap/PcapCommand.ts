@@ -10,10 +10,10 @@ import {
 import {
   OwnedCommandFailure,
   ownedCommandResources,
+  prepareOwnedCommand,
   runOwnedCommand,
 } from "../process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
-import { prepareProcessOwnershipInspection } from "../process/ProcessOwnershipObservation.js";
 import {
   isWindowsBatchFile,
   windowsBatchCommand,
@@ -99,7 +99,7 @@ export const runPcapCommand = async (options: {
           };
     // Native ownership preparation has its own bounded compiler lifecycle;
     // do not spend the tool's execution deadline rebuilding a cold SDK cache.
-    await prepareProcessOwnershipInspection(signal);
+    await prepareOwnedCommand(signal);
     const output = await runOwnedCommand(
       {
         ...boundedInvocation,
@@ -184,11 +184,11 @@ export const runPcapCommand = async (options: {
           }
         : {}),
     };
-    if (
-      signal?.aborted ||
-      (cause instanceof OwnedCommandFailure && cause.reason === "cancelled")
-    )
-      throw new AnalysisCancelledError(operation, details);
+    if (cause instanceof OwnedCommandFailure && cause.reason === "cancelled")
+      throw new AnalysisCancelledError(operation, {
+        ...details,
+        cause: cause.cancellation?.reason,
+      });
     if (
       cause instanceof OwnedCommandFailure &&
       cause.snapshot?.memoryLimitReached === true

@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { parseCapinfosOutput, parseTsharkJsonOutput } from "./PcapOutput.js";
 
 const capture = (layers: ReadonlyArray<Record<string, string[]>>) =>
@@ -156,12 +158,26 @@ it("refuses dense JSON before its expanded graph exceeds the decoding budget", a
   });
 });
 
-it("permits cancellation while validating and aggregating producer output", async () => {
-  const controller = new AbortController();
-  const result = parseTsharkJsonOutput(
-    capture([{ "ip.src": ["192.0.2.1"] }]),
-    controller.signal,
-  );
-  controller.abort(new Error("stopped"));
-  await expect(result).rejects.toThrow("stopped");
-});
+it.each([
+  null,
+  "stopped",
+  new ProviderCleanupError("caller", ["foreign-resource"], {}),
+])(
+  "preserves opaque cancellation while validating producer output: %s",
+  async (reason) => {
+    const controller = new AbortController();
+    const result = parseTsharkJsonOutput(
+      capture([{ "ip.src": ["192.0.2.1"] }]),
+      controller.signal,
+    );
+    controller.abort(reason);
+    const failure = await result.catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(AnalysisCancelledError);
+    if (!(failure instanceof AnalysisCancelledError)) throw failure;
+    expect(failure.cause).toBe(reason);
+    expect(failure.cleanupIncomplete).toBe(false);
+    expect(failure.cleanupResources).toEqual([]);
+    if (reason instanceof ProviderCleanupError)
+      expect(reason.cleanupIncomplete).toBe(true);
+  },
+);

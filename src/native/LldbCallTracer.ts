@@ -735,13 +735,28 @@ export class LldbCallTracer implements NativeCallTracer {
         }),
       );
     }
-    return ok({
+    const trace: NativeCallTrace = {
       debugger: { ...lldb, version: output.version },
       run: output,
       stdout: stdout.value,
       stderr: stderr.value,
       terminated,
-    });
+    };
+    if (exited.lateTimeout === true)
+      return err(
+        new AnalysisTimeoutError(
+          OPERATION,
+          input.duration_ms + DEADLINE_GRACE_MS,
+          {
+            partialObservation: partialObservationFromTrace(
+              request,
+              trace,
+              "timeout",
+            ),
+          },
+        ),
+      );
+    return ok(trace);
   }
 }
 
@@ -1056,6 +1071,8 @@ type LldbExit = LldbOutcome & {
   readonly targetLaunched: boolean;
   readonly targetIdentity: string | undefined;
   readonly cleanupFailure: string | undefined;
+  /** Internal deadline elapsed during cleanup after a physical LLDB exit. */
+  readonly lateTimeout?: true;
   readonly cleanupOwner?: ProviderProcessSupervisor;
 };
 
@@ -1095,17 +1112,34 @@ const runLldb = async (
   let targetIdentity: string | undefined;
   let supervisor: ProviderProcessSupervisor | undefined;
   let retained = false;
+  let processFailureBeforeInterruption:
+    | {
+        readonly exitCode: number | null;
+        readonly output: string;
+      }
+    | undefined;
   const finish = async (outcome: LldbOutcome): Promise<LldbExit> => {
+    // Select the primary result once at the owner boundary, before cleanup.
+    // An exit observed before interruption outranks an interrupted wait, while
+    // an already selected exit keeps its fuller snapshot and diagnostics.
+    const selectedOutcome =
+      outcome.kind !== "exited" &&
+      processFailureBeforeInterruption !== undefined
+        ? { kind: "exited" as const, ...processFailureBeforeInterruption }
+        : outcome;
     const stopped = await supervisor?.stop();
     retained = stopped?.status === "incomplete";
+    const lateTimeout =
+      selectedOutcome.kind === "exited" && deadline.interruption === "timeout"
+        ? true
+        : undefined;
     return {
-      ...(deadline.interruption === undefined
-        ? outcome
-        : { kind: deadline.interruption }),
+      ...selectedOutcome,
       targetLaunched: supervisor !== undefined,
       targetIdentity,
       cleanupFailure:
         stopped?.status === "incomplete" ? stopped.reason : undefined,
+      ...(lateTimeout === undefined ? {} : { lateTimeout }),
       ...(retained && supervisor !== undefined
         ? { cleanupOwner: supervisor }
         : {}),
@@ -1126,7 +1160,24 @@ const runLldb = async (
         ownsProcessLifetime: true,
         cleanup: () => cleanupOwnedProcessGroup(launched.ownership),
       },
-      { maxDiagnosticBytes: DIAGNOSTIC_BYTES },
+      {
+        maxDiagnosticBytes: DIAGNOSTIC_BYTES,
+        onDiagnostic: (event) => {
+          // Latch failure at the process event; a later snapshot cannot order it against abort.
+          if (
+            event.type === "exit" &&
+            deadline.interruption === undefined &&
+            (event.signal !== null || (event.code !== null && event.code !== 0))
+          )
+            processFailureBeforeInterruption ??= {
+              exitCode: event.code,
+              output:
+                `${event.snapshot.stdout.text}${event.snapshot.stderr.text}`.slice(
+                  -DIAGNOSTIC_BYTES,
+                ),
+            };
+        },
+      },
     );
     let identityAckWritten = false;
     while (!(await supervisor.waitForOutputClose(20))) {
@@ -1148,8 +1199,9 @@ const runLldb = async (
         identityAckWritten = true;
       }
       const interruption = deadline.interruption;
-      if (interruption !== undefined)
+      if (interruption !== undefined) {
         return await finish({ kind: interruption });
+      }
       await waitForAbortableDelay(20, deadline.signal);
     }
     const snapshot = supervisor.snapshot();

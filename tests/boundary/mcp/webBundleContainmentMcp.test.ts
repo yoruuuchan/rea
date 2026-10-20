@@ -77,7 +77,18 @@ it("retains timeout Evidence and recovers on the same MCP server", async () => {
     },
   });
   const timeout = parseMcpToolError(interrupted).error;
-  expect(timeout.code).toBe("provider_timeout");
+  expect(timeout).toMatchObject({
+    code: "provider_timeout",
+    message: expect.stringContaining("server/provider deadline"),
+    remediation: {
+      action: expect.stringContaining("MCP client"),
+    },
+    recovery: {
+      kind: "inspect_timeout_state",
+      operation: "analyze_web_bundle",
+      timeout_ms: 1,
+    },
+  });
   const timeoutDetails = z
     .object({ partial_observation: z.unknown() })
     .passthrough()

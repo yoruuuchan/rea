@@ -10,6 +10,113 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 
 cliTest(
+  "keeps unavailable source-selection scopes unknown in version comparisons",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-version-scope-");
+    const application = join(root, "application");
+    const copy = join(root, "copy");
+    await Promise.all([mkdir(application), mkdir(copy)]);
+    const files = [
+      ["lib.js", "export function shared() { return 1; }\n"],
+      ["main.js", 'export const name = "one";\n'],
+    ] as const;
+    for (const [name, contents] of files) {
+      await Promise.all([
+        writeFile(join(application, name), contents),
+        writeFile(join(copy, name), contents),
+      ]);
+    }
+
+    const analyze = async (input: string, selected: boolean) => {
+      const response = await cli.run({
+        arguments: [
+          "analyze-javascript-application",
+          input,
+          ...(selected ? ["--source-path", "main.js"] : []),
+          "--json",
+        ],
+        environment: { REA_LOG_LEVEL: "silent" },
+      });
+      expect(response.exitCode, response.stderr).toBe(0);
+      return parseEvidence(response.json);
+    };
+    const full = await analyze(application, false);
+    const selected = await analyze(application, true);
+    const fullCopy = await analyze(copy, false);
+    const selectedAnalysis = javascriptApplicationAnalysisResultSchema.parse(
+      selected.normalized_result,
+    );
+    const parseScope = selectedAnalysis.graph.nodes.find(
+      ({ kind, observations }) =>
+        kind === "unknown" &&
+        observations.some(
+          ({ properties }) =>
+            properties.path === "lib.js" &&
+            properties.operation === "select-javascript-sources",
+        ),
+    );
+    expect(parseScope?.observations[0]?.evidence).toMatchObject({
+      state: "unavailable",
+      limitations: [
+        "Source is outside the caller-selected source_paths; it was inventoried but not analyzed.",
+      ],
+    });
+
+    const compare = async (
+      left: ReturnType<typeof parseEvidence>,
+      right: ReturnType<typeof parseEvidence>,
+      name: string,
+    ) => {
+      const inputPath = join(root, `${name}.json`);
+      await writeFile(inputPath, JSON.stringify({ left, right }));
+      const response = await cli.run({
+        arguments: ["compare-application-versions", inputPath, "--json"],
+        environment: { REA_LOG_LEVEL: "silent" },
+      });
+      expect(response.exitCode, response.stderr).toBe(0);
+      return applicationVersionComparisonResultSchema.parse(
+        parseEvidence(response.json).normalized_result,
+      );
+    };
+    const forward = await compare(full, selected, "forward");
+    const reverse = await compare(selected, full, "reverse");
+    const unchangedCopy = await compare(full, fullCopy, "full-copy");
+
+    expect(
+      forward.items.find(
+        ({ right_node_id }) => right_node_id === parseScope?.node_id,
+      ),
+    ).toMatchObject({
+      status: "unknown",
+      dimensions: ["availability"],
+      limitations: [
+        "Source is outside the caller-selected source_paths; it was inventoried but not analyzed.",
+      ],
+      evidence_links: expect.arrayContaining([
+        full.evidence_id,
+        selected.evidence_id,
+      ]),
+    });
+    expect(
+      reverse.items.find(
+        ({ left_node_id }) => left_node_id === parseScope?.node_id,
+      ),
+    ).toMatchObject({
+      status: "unknown",
+      dimensions: ["availability"],
+      limitations: [
+        "Source is outside the caller-selected source_paths; it was inventoried but not analyzed.",
+      ],
+    });
+    expect(forward.summary.added).toBe(0);
+    expect(forward.summary.removed).toBe(0);
+    expect(reverse.summary.added).toBe(0);
+    expect(reverse.summary.removed).toBe(0);
+    expect(unchangedCopy.summary).toMatchObject({ added: 0, removed: 0 });
+  },
+);
+
+cliTest(
   "uses syntax-aware bundle fingerprints for changed syntax and renamed bindings",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-fingerprint-version-");

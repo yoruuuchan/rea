@@ -79,7 +79,9 @@ export class SourceMapDecoder implements WebSourceMapPort {
     const cleanupFailure = await this.#retryCleanup();
     if (cleanupFailure !== undefined) return err(cleanupFailure);
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const request = sourceMapCodecInputSchema.safeParse({
       text: input.text,
       url: input.url,
@@ -106,7 +108,9 @@ export class SourceMapDecoder implements WebSourceMapPort {
       encodedBytes += bytes;
     }
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const serialized = encoded.join("");
     const response = await runSourceMapCommand(
       serialized,
@@ -139,7 +143,9 @@ export class SourceMapDecoder implements WebSourceMapPort {
         ),
       );
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     if (reply.data.state === "failure")
       return codecFailure(input.path, reply.data.reason, reply.data.message);
     const runtimeFailure = codecRuntimeFailure(reply.data.report.runtime);

@@ -51,6 +51,8 @@ export class PlaywrightScenarioServiceWorkers {
   #released = false;
   #detached = false;
   #loadingStopped = false;
+  #stopRequested = false;
+  #stopPromise: Promise<void> | undefined;
   #removeListener: (() => void) | undefined;
   #setup = new AbortController();
 
@@ -276,9 +278,11 @@ export class PlaywrightScenarioServiceWorkers {
   private async stopMainFrame(frame: Frame): Promise<void> {
     try {
       await frame.evaluate("globalThis.stop()");
-      this.#loadingStopped = true;
     } catch (cause: unknown) {
-      if (!this.page.isClosed() && !frame.isDetached()) throw cause;
+      // A closed page no longer has an active navigation to stop. On a live
+      // page, including a detached frame, preserve failure so retry can use a
+      // fresh main-frame reference.
+      if (!this.page.isClosed()) throw cause;
     }
   }
 
@@ -313,9 +317,10 @@ export class PlaywrightScenarioServiceWorkers {
 
   close(stopLoading = false): Promise<void> {
     this.#closed = true;
+    this.#stopRequested ||= stopLoading;
     // Abort discovery/handshakes and reads, never an already-sent page mutation.
     this.#setup.abort();
-    const restoration = (this.#restoration ??= this.restore(stopLoading));
+    const restoration = (this.#restoration ??= this.restore());
     void restoration.then(
       () => {
         if (this.#restoration === restoration) this.#restoration = undefined;
@@ -324,13 +329,48 @@ export class PlaywrightScenarioServiceWorkers {
         if (this.#restoration === restoration) this.#restoration = undefined;
       },
     );
+    // Restoration completion does not discharge a stop request that arrived
+    // after that restoration began. Both paths share the owner's stop latch.
+    const completion = restoration.then(() => this.fulfillStopRequest());
     return withPlaywrightExecutionBoundary(
-      () => restoration,
+      () => completion,
       POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS,
     );
   }
 
-  private async restore(stopLoading: boolean): Promise<void> {
+  private fulfillStopRequest(): Promise<void> {
+    if (!this.#stopRequested || this.#loadingStopped) return Promise.resolve();
+    if (this.#stopPromise !== undefined) return this.#stopPromise;
+    const stopping = (async () => {
+      if (this.page.isClosed()) {
+        this.#loadingStopped = true;
+        return;
+      }
+      const session = this.#session;
+      if (
+        !this.#released &&
+        !this.#detached &&
+        session?.sessionId !== undefined
+      ) {
+        await this.send(session.sessionId, "Page.stopLoading");
+      } else {
+        await this.stopMainFrame(this.page.mainFrame());
+      }
+      this.#loadingStopped = true;
+    })();
+    this.#stopPromise = stopping;
+    void stopping.then(
+      () => {
+        if (this.#stopPromise === stopping) this.#stopPromise = undefined;
+      },
+      () => {
+        if (this.#stopPromise === stopping) this.#stopPromise = undefined;
+      },
+    );
+    return stopping;
+  }
+
+  private async restore(): Promise<void> {
     await this.#initialization?.catch(() => undefined);
     if (this.#released) return;
     const session = this.#session;
@@ -339,14 +379,7 @@ export class PlaywrightScenarioServiceWorkers {
       const mainFrame = this.page.mainFrame();
       // This owner exists even with empty storage seeds. Stopped navigation is
       // independent of storage and restoration never waits for a load event.
-      if (stopLoading && !this.#loadingStopped) {
-        if (!this.#detached && session.sessionId !== undefined) {
-          await this.send(session.sessionId, "Page.stopLoading");
-          this.#loadingStopped = true;
-        } else {
-          await this.stopMainFrame(mainFrame);
-        }
-      }
+      await this.fulfillStopRequest();
       await Promise.all(
         [...this.#targets.values()].map((target) =>
           this.settleTargetForRestore(target),

@@ -25,6 +25,7 @@ import {
   javascriptApplicationAnalysisResultSchema,
   type JavaScriptApplicationAnalysisResult,
 } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
+import { applicationVersionComparisonResultSchema } from "../../../src/domain/javascript/javascriptApplicationVersionComparisonSchemas.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { z } from "zod";
 
@@ -186,23 +187,31 @@ const expectSelfImportEvidence = (
 const analyzeThroughStdioMcp = async (
   inputPath: string,
 ): Promise<JavaScriptApplicationAnalysisResult> => {
+  const evidence = await analyzeEvidenceThroughStdioMcp(inputPath);
+  const result = javascriptApplicationAnalysisResultSchema.parse(
+    evidence.normalized_result,
+  );
+  expect(result).toMatchObject({ input_path: inputPath, format: "directory" });
+  return result;
+};
+
+const analyzeEvidenceThroughStdioMcp = async (
+  inputPath: string,
+  sourcePaths?: readonly string[],
+) => {
   const client = await connectedMcpClient();
   const response = await client.callTool({
     name: "analyze_javascript_application",
-    arguments: { input_path: inputPath },
+    arguments: {
+      input_path: inputPath,
+      ...(sourcePaths === undefined ? {} : { source_paths: [...sourcePaths] }),
+    },
   });
   expect(response.isError).not.toBe(true);
   expect(response.content).toEqual(
     expect.arrayContaining([expect.objectContaining({ type: "text" })]),
   );
-  const result = z
-    .object({ normalized_result: javascriptApplicationAnalysisResultSchema })
-    .parse(response.structuredContent).normalized_result;
-  expect(result).toMatchObject({
-    input_path: inputPath,
-    format: "directory",
-  });
-  return result;
+  return parseEvidence(response.structuredContent);
 };
 
 const expectCliAnalysisParity = async (
@@ -1217,6 +1226,73 @@ describe("application workflow CLI input", () => {
       "--json",
     ]);
     expect(result).toMatchObject({ code: "invalid_request" });
+  });
+});
+
+describe("application version source-scope MCP comparison", () => {
+  it("keeps unselected parse scopes unknown through stdio MCP", async () => {
+    const root = await createTestTempDirectory("rea-version-scope-mcp-");
+    await Promise.all([
+      writeFile(
+        join(root, "lib.js"),
+        "export function shared() { return 1; }\n",
+      ),
+      writeFile(join(root, "main.js"), 'export const name = "one";\n'),
+    ]);
+    const full = await analyzeEvidenceThroughStdioMcp(root);
+    const selected = await analyzeEvidenceThroughStdioMcp(root, ["main.js"]);
+    const selectedAnalysis = javascriptApplicationAnalysisResultSchema.parse(
+      selected.normalized_result,
+    );
+    const scope = selectedAnalysis.graph.nodes.find(
+      ({ kind, observations }) =>
+        kind === "unknown" &&
+        observations.some(
+          ({ properties }) =>
+            properties.path === "lib.js" &&
+            properties.operation === "select-javascript-sources",
+        ),
+    );
+    expect(scope?.observations[0]?.evidence).toMatchObject({
+      state: "unavailable",
+      limitations: [
+        "Source is outside the caller-selected source_paths; it was inventoried but not analyzed.",
+      ],
+    });
+    const client = await connectedMcpClient();
+    const compare = async (left: unknown, right: unknown) => {
+      const response = await client.callTool({
+        name: "compare_application_versions",
+        arguments: { left, right },
+      });
+      expect(response.isError).not.toBe(true);
+      return applicationVersionComparisonResultSchema.parse(
+        parseEvidence(response.structuredContent).normalized_result,
+      );
+    };
+    const forward = await compare(full, selected);
+    const reverse = await compare(selected, full);
+
+    expect(
+      forward.items.find(
+        ({ right_node_id }) => right_node_id === scope?.node_id,
+      ),
+    ).toMatchObject({
+      status: "unknown",
+      dimensions: ["availability"],
+      limitations: [
+        "Source is outside the caller-selected source_paths; it was inventoried but not analyzed.",
+      ],
+      evidence_links: expect.arrayContaining([
+        full.evidence_id,
+        selected.evidence_id,
+      ]),
+    });
+    expect(
+      reverse.items.find(({ left_node_id }) => left_node_id === scope?.node_id),
+    ).toMatchObject({ status: "unknown", dimensions: ["availability"] });
+    expect(forward.summary).toMatchObject({ added: 0, removed: 0 });
+    expect(reverse.summary).toMatchObject({ added: 0, removed: 0 });
   });
 });
 

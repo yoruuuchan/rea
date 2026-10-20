@@ -19,7 +19,7 @@ import { err, ok, type Result } from "../domain/result.js";
 export const GHIDRA_SEED_FORMAT = "rea-ghidra-seeds-v1";
 export const MAX_GHIDRA_SEED_BYTES = 32 * 1024 * 1024;
 export const MAX_GHIDRA_SEED_ENTRIES = 1_000_000;
-const MAX_SEED_NAME_LENGTH = 2000;
+export const MAX_GHIDRA_SEED_NAME_LENGTH = 2000;
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const count = z.number().int().nonnegative();
@@ -92,13 +92,13 @@ export const parseGhidraSeeds = (
     if (
       name !== undefined &&
       (name.length === 0 ||
-        name.length > MAX_SEED_NAME_LENGTH ||
+        name.length > MAX_GHIDRA_SEED_NAME_LENGTH ||
         /[\s\0]/u.test(name))
     )
       return err(
         seedLineError(
           number,
-          `name must be 1..${MAX_SEED_NAME_LENGTH} characters without whitespace`,
+          `name must be 1..${MAX_GHIDRA_SEED_NAME_LENGTH} characters without whitespace`,
         ),
       );
     if (kind === "label" && name === undefined)

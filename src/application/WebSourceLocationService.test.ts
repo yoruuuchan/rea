@@ -146,7 +146,8 @@ it.each([
 );
 it("honors cancellation both before acquisition and across decoder completion", async () => {
   const first = new AbortController();
-  first.abort();
+  const firstReason = { caller: "before source-map acquisition" };
+  first.abort(firstReason);
   const response = await new WebSourceLocationService(
     {
       load: () => {
@@ -156,15 +157,18 @@ it("honors cancellation both before acquisition and across decoder completion", 
     decoder,
   ).trace(args, { signal: first.signal });
   expect(response.ok).toBe(false);
+  if (!response.ok) expect(response.error.cause).toBe(firstReason);
   const controller = new AbortController();
+  const lateReason = { caller: "after source-map provider completion" };
   const late = await service(undefined, {
     trace: (input) => {
-      controller.abort();
+      controller.abort(lateReason);
       return decoder.trace(input);
     },
   }).trace(args, { signal: controller.signal });
   if (late.ok) throw new Error("expected cancellation");
   expect(late.error).toBeInstanceOf(AnalysisCancelledError);
+  expect(late.error.cause).toBe(lateReason);
   expect(parseEvidence(late.error.partialObservation)).toMatchObject({
     operation: "trace_web_source_location",
     confidence: "derived",

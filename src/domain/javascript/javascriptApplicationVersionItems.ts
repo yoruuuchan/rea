@@ -145,20 +145,28 @@ const matchedItem = (
   const relationships = compareRelationships(pair, context);
   const dimensions = changedDimensions(pair, relationships);
   const complete = graphsComplete(context);
+  const ownEvidenceUncertain =
+    ownPresenceUncertain(pair.left) || ownPresenceUncertain(pair.right);
   const observedChange =
-    dimensions.includes("content") || dimensions.includes("properties");
+    !ownEvidenceUncertain &&
+    (dimensions.includes("content") || dimensions.includes("properties"));
   // Coordinates remain comparison evidence; relocation alone is not a
   // content, property, or relationship change.
   const completeChange =
-    complete && dimensions.some((dimension) => dimension !== "location");
+    !ownEvidenceUncertain &&
+    complete &&
+    dimensions.some((dimension) => dimension !== "location");
   const status: ApplicationVersionComparisonItem["status"] =
-    observedChange || completeChange
-      ? "changed"
-      : complete && !relationships.unresolved
-        ? "unchanged"
-        : "unknown";
-  const finalDimensions =
-    status === "unknown" && !complete
+    ownEvidenceUncertain
+      ? "unknown"
+      : observedChange || completeChange
+        ? "changed"
+        : complete && !relationships.unresolved
+          ? "unchanged"
+          : "unknown";
+  const finalDimensions = ownEvidenceUncertain
+    ? []
+    : status === "unknown" && !complete
       ? [...dimensions, "coverage" as const]
       : dimensions;
   const semantic: ComparisonItemSemantic = {
@@ -170,6 +178,10 @@ const matchedItem = (
     dimensions: finalDimensions,
     evidence_links: itemEvidenceLinks(pair.left, pair.right, context),
     limitations: [
+      ...new Set([
+        ...ownAvailabilityLimitations(pair.left),
+        ...ownAvailabilityLimitations(pair.right),
+      ]),
       ...matchLimitations(pair),
       ...(status === "unknown" && !complete
         ? [
@@ -218,7 +230,20 @@ const leftOnlyItem = (
         candidate_right_node_ids: [firstCandidate, ...remainingCandidates],
       },
       dimensions: ["availability"],
-      limitations: [AMBIGUOUS_MATCH_LIMITATION],
+      limitations: [
+        ...ownAvailabilityLimitations(node),
+        AMBIGUOUS_MATCH_LIMITATION,
+      ],
+    });
+  if (ownPresenceUncertain(node))
+    return itemWithId({
+      ...common,
+      status: "unknown",
+      left_node_id: node.node_id,
+      right_node_id: null,
+      match: unmatchedMatch(),
+      dimensions: ["availability"],
+      limitations: ownAvailabilityLimitations(node),
     });
   const absenceObserved = absenceClaimable(context.rightGraph.coverage);
   return itemWithId({
@@ -230,7 +255,10 @@ const leftOnlyItem = (
     dimensions: absenceObserved
       ? ["availability"]
       : ["availability", "coverage"],
-    limitations: absenceObserved ? [] : [INCOMPLETE_GRAPH_LIMITATION],
+    limitations: [
+      ...ownAvailabilityLimitations(node),
+      ...(absenceObserved ? [] : [INCOMPLETE_GRAPH_LIMITATION]),
+    ],
   });
 };
 
@@ -258,7 +286,20 @@ const rightOnlyItem = (
         candidate_right_node_ids: [],
       },
       dimensions: ["availability"],
-      limitations: [AMBIGUOUS_MATCH_LIMITATION],
+      limitations: [
+        ...ownAvailabilityLimitations(node),
+        AMBIGUOUS_MATCH_LIMITATION,
+      ],
+    });
+  if (ownPresenceUncertain(node))
+    return itemWithId({
+      ...common,
+      status: "unknown",
+      left_node_id: null,
+      right_node_id: node.node_id,
+      match: unmatchedMatch(),
+      dimensions: ["availability"],
+      limitations: ownAvailabilityLimitations(node),
     });
   const absenceObserved = absenceClaimable(context.leftGraph.coverage);
   return itemWithId({
@@ -270,7 +311,10 @@ const rightOnlyItem = (
     dimensions: absenceObserved
       ? ["availability"]
       : ["availability", "coverage"],
-    limitations: absenceObserved ? [] : [INCOMPLETE_GRAPH_LIMITATION],
+    limitations: [
+      ...ownAvailabilityLimitations(node),
+      ...(absenceObserved ? [] : [INCOMPLETE_GRAPH_LIMITATION]),
+    ],
   });
 };
 
@@ -330,6 +374,21 @@ const AMBIGUOUS_MATCH_LIMITATION =
   "Multiple nodes share the same permitted match key; no cross-version pair was selected.";
 const INCOMPLETE_GRAPH_LIMITATION =
   "The opposite graph is incomplete, so an unmatched node cannot be classified as added or removed.";
+
+const ownPresenceUncertain = (node: ApplicationNode): boolean =>
+  node.observations.every(
+    ({ evidence }) =>
+      evidence.state === "unknown" || evidence.state === "unavailable",
+  );
+
+const ownAvailabilityLimitations = (node: ApplicationNode): string[] => {
+  const limitations = new Set<string>();
+  for (const { evidence } of node.observations)
+    if (evidence.state === "unknown" || evidence.state === "unavailable")
+      for (const limitation of evidence.limitations)
+        limitations.add(limitation);
+  return [...limitations].sort(compareUnicodeCodePoints);
+};
 
 const changedDimensions = (
   pair: ApplicationVersionNodePair,

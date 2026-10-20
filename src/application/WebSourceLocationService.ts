@@ -88,7 +88,9 @@ export class WebSourceLocationService {
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const parsed = webSourceLocationInputSchema.safeParse(rawInput);
     if (!parsed.success)
       return err(
@@ -114,7 +116,9 @@ export class WebSourceLocationService {
     if (!pairing.ok) return pairing;
     const generatedOffset = pairing.value;
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const traced = await this.decoder.trace(
       {
         text: map.text,

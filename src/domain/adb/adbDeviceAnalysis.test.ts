@@ -80,3 +80,63 @@ it("preserves ADB key, action and component admission when making advertised pat
           variant.previous.test(sample),
       );
 });
+
+it("admits empty string extras and validates typed extra text at domain admission", () => {
+  const input = {
+    serial: "emulator-5554",
+    action: "android.intent.action.VIEW",
+  };
+  expect(
+    adbInputSchemas.start_adb_activity.safeParse({
+      ...input,
+      extras: [{ key: "empty", type: "string", value: "" }],
+    }).success,
+  ).toBe(true);
+  const accepted = [
+    { type: "boolean", value: "false" },
+    { type: "int", value: "-2147483648" },
+    { type: "long", value: "9007199254740993" },
+    { type: "float", value: "-1.25" },
+  ] as const;
+  for (const { type, value } of accepted)
+    expect(
+      adbInputSchemas.start_adb_activity.safeParse({
+        ...input,
+        extras: [{ key: "value", type, value }],
+      }).success,
+      `${type}: ${value}`,
+    ).toBe(true);
+  const rejected = [
+    { type: "boolean", value: "True" },
+    { type: "int", value: "1.5" },
+    { type: "long", value: "" },
+    { type: "float", value: "1e3" },
+  ] as const;
+  for (const { type, value } of rejected) {
+    const result = adbInputSchemas.start_adb_activity.safeParse({
+      ...input,
+      extras: [{ key: "value", type, value }],
+    });
+    expect(result.success, `${type}: ${value}`).toBe(false);
+    if (!result.success)
+      expect(result.error.issues[0]?.path).toEqual(["extras", 0, "value"]);
+  }
+  expect(
+    adbInputSchemas.start_adb_activity.safeParse({
+      ...input,
+      extras: [{ key: "text", type: "string", value: "payload" }],
+    }).success,
+  ).toBe(true);
+  expect(
+    adbInputSchemas.start_adb_activity.safeParse({
+      ...input,
+      extras: [{ key: "text", type: "string", value: "x".repeat(2048) }],
+    }).success,
+  ).toBe(true);
+  expect(
+    adbInputSchemas.start_adb_activity.safeParse({
+      ...input,
+      extras: [{ key: "text", type: "string", value: "x".repeat(2049) }],
+    }).success,
+  ).toBe(false);
+});

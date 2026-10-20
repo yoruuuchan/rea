@@ -60,7 +60,7 @@ export interface ServeStreamableHttpOptions {
   readonly routes?: readonly StreamableHttpRoute[];
   readonly logger?: Logger;
   /** Reports listener failures after binding; request failures are logged instead. */
-  readonly onerror?: (error: Error) => void;
+  readonly onerror?: (error: StreamableHttpListenError) => void;
   /** Close the server instance as the last stage of `close`; false when the factory's owner closes it. */
   readonly closeInstance?: boolean;
 }
@@ -557,7 +557,9 @@ export const serveStreamableHttp = async (
     });
   });
   // Bind failures already rejected the listening wait above; only later listener errors are reported.
-  httpServer.on("error", (error) => options.onerror?.(error));
+  httpServer.on("error", (error) =>
+    options.onerror?.(new StreamableHttpListenError(error, "serving")),
+  );
   let instance: RequestTrackingMcpServer;
   try {
     instance = await options.createMcpServer({ era: "legacy" });

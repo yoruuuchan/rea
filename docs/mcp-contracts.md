@@ -71,7 +71,13 @@ Call comparison additionally retains the Evidence relationship coverage
 checks. Ghidra and Hopper declare their observed dossier facets and complete
 provider-observed caller/callee sets, including empty sets. Missing decompiler
 output remains unavailable; complete call coverage does not claim every runtime
-target. Hopper's unavailable reference-kind metadata and reported unresolved
+target. When Ghidra's decompiler fails on one function, its dossier is still
+returned: `pseudocode`, `native_api` and `native_value_flow` are unavailable
+with the decompiler's failure as the reason, while the listing-backed facets
+are collected as usual. These failed decompiler observations and workflows
+derived from them retain Evidence but skip snapshot reuse, so a later request
+can observe backend recovery; healthy dossiers keep their existing cache policy.
+`procedure_pseudo_code` still fails for that function. Hopper's unavailable reference-kind metadata and reported unresolved
 calls still prevent equality conclusions for those dimensions. Analysis profiles
 version these declarations so older snapshots are not reused as current results.
 IDA declares the facets its selected adapter cannot provide; an empty
@@ -84,12 +90,29 @@ metadata in the supported JSON payloads (`parameters`, `raw_result`,
 
 Tool execution failures return `isError: true` and the complete canonical
 `{ "error": ... }` diagnostic as JSON in text `content`. Read that diagnostic
-for the error code, target details, partial observations, and remediation.
+for the error code, target details, partial observations, remediation, and the
+optional bounded `recovery` next step. `recovery.kind=inspect_input_contract`
+names the rejected operation: re-read that operation's advertised input schema
+(call `tools/list` if the catalog may be stale), correct the listed fields, and
+do not repeat the unchanged call. `recovery.kind=inspect_timeout_state` names
+the operation and the REA server/provider deadline; inspect session/provider
+state before retrying, and raise the MCP client's tool deadline only when the
+client ended the call before REA returned this response. These hints never
+include the complete catalog or caller arguments.
 Failures omit `structuredContent`, since each advertised `outputSchema`
 describes successful results. Successful replies retain their schema-validated
 structured data and matching text projection. Oversized errors are retained
 as Evidence before delivery of a bounded diagnostic with an export reference;
 if retention is unavailable or fails, the diagnostic reports that reason.
+
+SDK-generated input validation failures are normalized into the same canonical
+`invalid_request` text when the bounded diagnostic fits the response budget.
+The complete field/type diagnostic is preserved when normalization fits the
+response budget, including request-specific rejected fields and reasons. Oversized
+SDK diagnostics keep the existing retained-Evidence recovery path. An unknown
+tool remains an MCP JSON-RPC `-32602` error, but its message directs the caller
+to `tools/list` and an advertised operation instead of repeating the unknown
+name.
 
 `get_call_graph` returns a `graph` keyed by traversal depth and a top-level
 `limitations` array with deduplicated execution caveats. Each node keeps its

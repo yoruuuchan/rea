@@ -23,6 +23,8 @@ import {
   openRootArtifact,
 } from "./hashStableRootArtifact.js";
 import type { ArtifactInventoryOptions } from "./types.js";
+import type { FatSliceHeaderEvidence } from "../../domain/apple/machoContainer.js";
+import { readMachoHeaderPrefixFacts } from "../../domain/apple/machoContainer.js";
 
 interface RootClassification {
   readonly format: ArtifactOccurrence["artifact_format"];
@@ -171,7 +173,62 @@ const classifyRootFormat = async (
     return "dmg";
   if (await locateGodotPck(handle, archiveBytes, signal, evidence.prefix))
     return "godot-pck";
-  return classifyArtifactContent(path, evidence, archiveBytes).format;
+  const fatSliceHeaders = await readRootFatSliceHeaders(
+    handle,
+    evidence.fatSliceHeaders,
+    signal,
+  );
+  return classifyArtifactContent(
+    path,
+    {
+      ...evidence,
+      ...(fatSliceHeaders === undefined ? {} : { fatSliceHeaders }),
+    },
+    archiveBytes,
+  ).format;
+};
+
+/** Read exact FAT header windows missed by the bounded prefix probe. */
+const readRootFatSliceHeaders = async (
+  handle: FileHandle,
+  existing: FatSliceHeaderEvidence | undefined,
+  signal?: AbortSignal,
+): Promise<FatSliceHeaderEvidence | undefined> => {
+  if (existing === undefined) return undefined;
+  const { header } = existing;
+  const sliceHeadersByOffset = new Map(existing.sliceHeadersByOffset);
+  for (let index = 0; index < header.slices.length; index += 1) {
+    const slice = header.slices[index];
+    const observed =
+      slice === undefined ? undefined : sliceHeadersByOffset.get(slice.offset);
+    if (
+      slice === undefined ||
+      header.rangeIssues[index] !== null ||
+      slice.size < 4 ||
+      (observed !== undefined && observed.magic !== null)
+    )
+      continue;
+    const headerLength = Math.min(12, slice.size);
+    const thinHeader = Buffer.alloc(headerLength);
+    let bytesRead = 0;
+    while (bytesRead < thinHeader.length) {
+      abortIfNeeded(signal);
+      const read = await handle.read(
+        thinHeader,
+        bytesRead,
+        thinHeader.length - bytesRead,
+        slice.offset + bytesRead,
+      );
+      abortIfNeeded(signal);
+      if (read.bytesRead === 0) break;
+      bytesRead += read.bytesRead;
+    }
+    sliceHeadersByOffset.set(
+      slice.offset,
+      readMachoHeaderPrefixFacts(thinHeader.subarray(0, bytesRead)),
+    );
+  }
+  return { header, sliceHeadersByOffset };
 };
 
 /** App Pack is a verified ZIP root role; nested .app members retain their observed format. */

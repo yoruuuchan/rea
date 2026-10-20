@@ -30,7 +30,9 @@ export class FirmwareAnalysisService {
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted === true)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const parsed = firmwareRequestSchema.safeParse({ operation, input });
     if (!parsed.success)
       return err(new AnalysisInputError(operation, { cause: parsed.error }));

@@ -788,13 +788,14 @@ export class BinarySession
       );
       const recorded = this.recordEvidence(evidence);
       if (!recorded.ok) return recorded;
-      this.recordSnapshot({
-        target: active.target,
-        profile,
-        operation: name,
-        parameters: arguments_,
-        execution: execution.value,
-      });
+      if (execution.value.cachePolicy !== "live")
+        this.recordSnapshot({
+          target: active.target,
+          profile,
+          operation: name,
+          parameters: arguments_,
+          execution: execution.value,
+        });
     }
     return execution;
   }

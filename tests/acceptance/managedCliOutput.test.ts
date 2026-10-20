@@ -128,7 +128,12 @@ cliTest(
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-managed-cli-output-");
     const path = join(root, "fixture.dll");
-    await writeFile(path, buildManagedPeFixture());
+    await writeFile(
+      path,
+      buildManagedPeFixture({
+        ilBody: Buffer.from([0x0e, 0x17, 0x26, 0x2a]),
+      }),
+    );
     const argv = ["inspect-managed-members", path, "--json"];
     const result = await cli.run({ arguments: argv });
     expect(result.exitCode).toBe(0);
@@ -137,7 +142,35 @@ cliTest(
       provider: { id: "rea-dotnet-static" },
       subject: { local_path: path },
       normalized_result: {
-        methods: [expect.objectContaining({ token: expect.any(String) })],
+        methods: [
+          expect.objectContaining({
+            token: expect.any(String),
+            body: expect.objectContaining({
+              status: "present",
+              decoded_instruction_count: 3,
+              anchors: [
+                {
+                  il_offset: 0,
+                  opcode: "ldc.i4.1",
+                  operand_kind: "none",
+                  operand: null,
+                },
+                {
+                  il_offset: 1,
+                  opcode: "pop",
+                  operand_kind: "none",
+                  operand: null,
+                },
+                {
+                  il_offset: 2,
+                  opcode: "ret",
+                  operand_kind: "none",
+                  operand: null,
+                },
+              ],
+            }),
+          }),
+        ],
       },
     });
     const filtered = await cli.run({

@@ -219,9 +219,6 @@ export const createCliResultOutput = (
     value: unknown,
     metadata: CliResultOutputMetadata,
   ): Promise<boolean> {
-    const failure = options.fullOutput
-      ? cliOperationFailurePayload(value)
-      : undefined;
     completed = {
       metadata,
       originalFailure: cliOperationFailureIdentity(value),
@@ -229,19 +226,30 @@ export const createCliResultOutput = (
     const filterPaths = options.filterOutput
       ? Filter.parse(options.filterOutput)
       : undefined;
+    const operationFailure =
+      options.fullOutput || filterPaths !== undefined
+        ? cliOperationFailurePayload(value)
+        : undefined;
+    const failure = options.fullOutput ? operationFailure : undefined;
     const filtered: unknown =
-      filterPaths === undefined ? value : Filter.apply(value, filterPaths);
+      operationFailure ??
+      (filterPaths === undefined ? value : Filter.apply(value, filterPaths));
     if (
+      operationFailure === undefined &&
       filterPaths !== undefined &&
       filterPaths.length > 0 &&
       (format === "json" || format === "jsonl") &&
       Array.isArray(filtered)
     )
       normalizeFilteredJsonArrays(filtered);
-    // Leave successful YAML and bare YAML rendering to Incur. The custom
-    // boundary is needed only for a full failure envelope, whose error
-    // sentinel otherwise drops category, remediation, and details.
-    if (format !== "json" && format !== "jsonl" && failure === undefined)
+    // Leave successful non-JSON rendering to Incur. This owner handles typed
+    // failures when full output is requested or a data filter would erase the
+    // failure projection.
+    if (
+      format !== "json" &&
+      format !== "jsonl" &&
+      operationFailure === undefined
+    )
       return false;
     if (options.tokenCount) {
       // Incur/tokenx materialize JSON. Measure its UTF-16 expansion before
@@ -322,7 +330,7 @@ export const createCliResultOutput = (
     // Once writing starts, a failed destination must not receive a second
     // document from Incur's error formatter.
     const failureText =
-      failure !== undefined && format !== "json" && format !== "jsonl"
+      operationFailure !== undefined && format !== "json" && format !== "jsonl"
         ? Formatter.format(document, format)
         : undefined;
     handled = true;

@@ -7,6 +7,7 @@ import {
 import * as t from "@babel/types";
 
 import {
+  semanticComputedMethodKey,
   semanticBranchMayBeSkipped,
   semanticIterationCardinality,
 } from "./javascriptSemanticEvaluationOrder.js";
@@ -1082,10 +1083,7 @@ function* collectDefinitionsSteps(
         needsPrototypeFacts = true;
       let parentScope = currentSemanticScope(stack);
       if (
-        parent !== null &&
-        (t.isObjectMethod(parent) || t.isClassMethod(parent)) &&
-        parent.computed &&
-        parent.key === node &&
+        semanticComputedMethodKey(parent ?? undefined, node) &&
         parentScope.parentScopeId !== null
       ) {
         // A computed method key is evaluated before entering the method's

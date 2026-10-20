@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { isAbsolute } from "node:path";
 
-import { localPathStringSchema } from "../domain/localPath.js";
+import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
+import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
 
 import { processTraceSpecificationSchema } from "../domain/process/processTraceSpecification.js";
 import { evidenceSchema } from "../domain/evidence.js";
@@ -27,15 +27,21 @@ export const addressContextInputSchema = z.strictObject({
 
 /** Session-owned Evidence bundle import options. */
 export const importEvidenceBundleInputSchema = z.strictObject({
-  path: localPathStringSchema
-    .refine(isAbsolute, {
-      message:
-        "path must be an absolute local filesystem path (for example /tmp/evidence.json or C:\\rea\\evidence.json)",
-    })
-    .describe(
-      "Absolute local filesystem path for the evidence bundle to import; relative paths are rejected.",
-    ),
+  path: absoluteLocalPathStringSchema.describe(
+    "Absolute local filesystem path for the evidence bundle to import; relative paths are rejected.",
+  ),
 });
+
+/** MCP compares files selected on the server host, so require explicit paths. */
+export const bundleComparisonMcpInputSchema =
+  bundleComparisonInputSchema.extend({
+    left_bundle_path: absoluteLocalPathStringSchema.describe(
+      "Absolute local filesystem path to the left Evidence bundle.",
+    ),
+    right_bundle_path: absoluteLocalPathStringSchema.describe(
+      "Absolute local filesystem path to the right Evidence bundle.",
+    ),
+  });
 
 /** Evidence references for deterministic process comparison. */
 export const processComparisonInputSchema = z.strictObject({

@@ -196,3 +196,60 @@ it("accepts caller-selected viewport sizes and click counts without ceilings", (
   });
   expect(parsed.actions[0]).toMatchObject({ click_count: 4 });
 });
+
+it.each([
+  {
+    field: "duration_ms",
+    action: { action: "wait_for_timeout", duration_ms: 2_147_483_648 },
+  },
+  {
+    field: "timeout_ms",
+    action: {
+      action: "wait_for",
+      locator: { kind: "css", selector: "#btn" },
+      state: "visible",
+      timeout_ms: 2_147_483_648,
+    },
+  },
+])("rejects $field at its precise owning field", ({ field, action }) => {
+  const parsed = browserScenarioSchema.safeParse({
+    browser: { mode: "launch", executable_path: "/opt/chromium" },
+    start_url: { url: "https://app.example.test/" },
+    actions: [{ step_id: "overflow", ...action }],
+  });
+  if (parsed.success)
+    throw new Error("Expected unrepresentable timer rejection");
+  expect(parsed.error.issues).toMatchObject([
+    { code: "too_big", maximum: 2_147_483_647, path: ["actions", 0, field] },
+  ]);
+});
+
+it("preserves the largest representable timers and an omitted action deadline", () => {
+  const parsed = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: "/opt/chromium" },
+    start_url: { url: "https://app.example.test/" },
+    actions: [
+      {
+        step_id: "max-wait",
+        action: "wait_for_timeout",
+        duration_ms: 2_147_483_647,
+      },
+      {
+        step_id: "max-deadline",
+        action: "wait_for",
+        locator: { kind: "css", selector: "#btn" },
+        state: "visible",
+        timeout_ms: 2_147_483_647,
+      },
+      {
+        step_id: "unbounded",
+        action: "wait_for",
+        locator: { kind: "css", selector: "#btn" },
+        state: "visible",
+      },
+    ],
+  });
+  expect(parsed.actions[0]).toMatchObject({ duration_ms: 2_147_483_647 });
+  expect(parsed.actions[1]).toMatchObject({ timeout_ms: 2_147_483_647 });
+  expect(parsed.actions[2]).not.toHaveProperty("timeout_ms");
+});

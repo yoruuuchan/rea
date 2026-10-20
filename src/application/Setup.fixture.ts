@@ -10,7 +10,12 @@ import type { SetupClient } from "./SupportedClients.js";
 import type { SetupHopperInstallResult } from "./SetupInstallFailure.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { SetupSkillInstallError } from "./SetupSkill.js";
-import type { DoctorCheck, DoctorReport, DoctorScope } from "./Doctor.js";
+import type {
+  DoctorCheck,
+  DoctorProviderInspection,
+  DoctorReport,
+  DoctorScope,
+} from "./Doctor.js";
 import type { LinuxDistribution } from "./LinuxHopper.js";
 import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
 import { CATALOG_IDENTITY } from "../catalogIdentity.js";
@@ -52,6 +57,8 @@ export class FakeSetupHost implements SetupHost {
   configuredCommands: Array<readonly string[]> = [];
   doctorHealthy: boolean | undefined;
   scopedDoctorHealthy: boolean | undefined;
+  providerInspections: readonly DoctorProviderInspection[] | undefined =
+    undefined;
   linuxDemoRuntimeMissing = false;
   unsupportedHopperVersion = false;
   hopperLauncherConfigured = false;
@@ -213,6 +220,9 @@ export class FakeSetupHost implements SetupHost {
       scope_checks: checks,
       informational_checks: [],
       ...(this.hopper === undefined ? {} : { hopperPath: this.hopper }),
+      ...(this.providerInspections === undefined
+        ? {}
+        : { providerInspections: this.providerInspections }),
       checks,
       identity: {
         cli_package_version: PRODUCT_IDENTITY.packageVersion,

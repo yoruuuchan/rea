@@ -592,6 +592,7 @@ export class ReverseEngineeringService {
           ]
         : []),
       ...(operation === "inspect_with_objdump" &&
+      parameters.operation === "dwarf" &&
       parameters.follow_debug_links === true
         ? [
             "DWARF output may include local debug-link files whose identities are not bound to Evidence.",

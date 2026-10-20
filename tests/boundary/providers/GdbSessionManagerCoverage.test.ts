@@ -7,7 +7,10 @@ import { PassThrough } from "node:stream";
 
 import { afterEach, expect, it } from "vitest";
 
-import { AnalysisTimeoutError } from "../../../src/domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisTimeoutError,
+} from "../../../src/domain/analysisErrorCore.js";
 import {
   commandMayChangeInferiorOutput,
   gdbErrorMessage,
@@ -324,20 +327,25 @@ const recordingInferiorListResponder = (groups: string) => {
 
 it("returns cancellation when GDB startup is aborted after spawn", async () => {
   const controller = new AbortController();
+  const reason = { source: "caller startup cancellation" };
   const fake = createFakeSpawner(undefined, {
-    afterSpawn: () => controller.abort(),
+    afterSpawn: () => controller.abort(reason),
   });
   const manager = managerWithFakeSpawner(fake.spawnProcess);
 
   const started = await manager.start(controller.signal);
 
   expect(started.ok).toBe(false);
-  if (!started.ok) expect(started.error._tag).toBe("AnalysisCancelledError");
+  if (!started.ok) {
+    expect(started.error._tag).toBe("AnalysisCancelledError");
+    expect(started.error.cause).toBe(reason);
+  }
   expect(fake.children[0]?.signalCode).toBe("SIGTERM");
 });
 
 it("cancels immediately after the startup prompt before sending configuration commands", async () => {
   const controller = new AbortController();
+  const reason = new Error("caller cancelled after prompt");
   const commands: string[] = [];
   const fake = createFakeSpawner(
     (child, token, command) => {
@@ -346,7 +354,7 @@ it("cancels immediately after the startup prompt before sending configuration co
     },
     {
       deferPrompt: true,
-      afterPrompt: () => controller.abort(),
+      afterPrompt: () => controller.abort(reason),
     },
   );
   const manager = managerWithFakeSpawner(fake.spawnProcess);
@@ -358,6 +366,7 @@ it("cancels immediately after the startup prompt before sending configuration co
     error: { _tag: "AnalysisCancelledError" },
   });
   expect(commands).toEqual([]);
+  if (!started.ok) expect(started.error.cause).toBe(reason);
   expect(fake.children[0]?.killSignals).toEqual(["SIGTERM"]);
 });
 
@@ -376,14 +385,41 @@ it("rejects a GDB exit queued with the final startup response", async () => {
   expect(fake.children[0]?.exitCode).toBe(7);
 });
 
+it("keeps a consumed startup failure primary when caller abort arrives during cleanup", async () => {
+  const controller = new AbortController();
+  const reason = { source: "late caller cancellation" };
+  const fake = createFakeSpawner((_child, token, command) => {
+    if (command.includes("auto-load off"))
+      _child.stdout.write(`${token}^error,msg="configuration rejected"\n`);
+  });
+  const manager = managerWithFakeSpawner(fake.spawnProcess, {
+    stopProcess: async () => {
+      controller.abort(reason);
+      return { status: "stopped" };
+    },
+  });
+
+  const started = await manager.start(controller.signal);
+
+  expect(started).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisCapabilityUnavailableError" },
+  });
+  if (!started.ok)
+    expect(started.error.cause).toMatchObject({
+      _tag: "AnalysisCapabilityUnavailableError",
+    });
+});
+
 it("cancels startup when aborted during the final readiness drain", async () => {
   const controller = new AbortController();
+  const reason = "caller cancelled during readiness drain";
   const commands: string[] = [];
   const fake = createFakeSpawner((child, token, command) => {
     commands.push(command);
     child.stdout.write(`${token}^done\n`);
     if (command.includes("auto-load off"))
-      setImmediate(() => controller.abort());
+      setImmediate(() => controller.abort(reason));
   });
   const manager = managerWithFakeSpawner(fake.spawnProcess);
 
@@ -394,15 +430,17 @@ it("cancels startup when aborted during the final readiness drain", async () => 
     error: { _tag: "AnalysisCancelledError" },
   });
   expect(commands).toEqual(["-gdb-set auto-load off"]);
+  if (!started.ok) expect(started.error.cause).toBe(reason);
   expect(fake.children[0]?.killSignals).toEqual(["SIGTERM"]);
 });
 
 it("preserves cancellation and cleanup details when startup stop is uncertain", async () => {
   const controller = new AbortController();
+  const reason = { source: "startup caller", token: 7 };
   let stopCalls = 0;
   const fake = createFakeSpawner(undefined, {
     deferPrompt: true,
-    afterPrompt: () => controller.abort(),
+    afterPrompt: () => controller.abort(reason),
   });
   const manager = managerWithFakeSpawner(fake.spawnProcess, {
     stopProcess: async (session, name) => {
@@ -426,6 +464,66 @@ it("preserves cancellation and cleanup details when startup stop is uncertain", 
       cleanup: { reason: "simulated startup cancellation cleanup uncertainty" },
     },
   });
+  if (!started.ok) expect(started.error.cause).toBe(reason);
+});
+
+it("keeps manager-close cancellation primary when caller abort arrives during startup cleanup", async () => {
+  const caller = new AbortController();
+  const callerReason = { source: "late caller abort", token: Symbol("opaque") };
+  let commandEntered!: () => void;
+  const commandStarted = new Promise<void>((resolve) => {
+    commandEntered = resolve;
+  });
+  let cleanupEntered!: () => void;
+  const cleanupStarted = new Promise<void>((resolve) => {
+    cleanupEntered = resolve;
+  });
+  let releaseCleanup!: () => void;
+  const cleanupGate = new Promise<void>((resolve) => {
+    releaseCleanup = resolve;
+  });
+  let stopCalls = 0;
+  const fake = createFakeSpawner((_child, _token, command) => {
+    if (command.includes("auto-load off")) commandEntered();
+  });
+  const manager = managerWithFakeSpawner(fake.spawnProcess, {
+    stopProcess: async () => {
+      stopCalls += 1;
+      if (stopCalls === 1) {
+        cleanupEntered();
+        await cleanupGate;
+      }
+      return {
+        status: "incomplete",
+        reason: "held fake cleanup remains uncertain",
+      };
+    },
+  });
+
+  const starting = manager.start(caller.signal);
+  await commandStarted;
+  const closing = manager.closeAll().catch(() => undefined);
+  await cleanupStarted;
+  caller.abort(callerReason);
+  releaseCleanup();
+  const started = await starting;
+
+  expect(started.ok).toBe(false);
+  if (!started.ok) {
+    expect(started.error).toBeInstanceOf(AnalysisCancelledError);
+    expect(started.error.cause).toBeInstanceOf(AnalysisCancelledError);
+    expect(started.error.cause).not.toBe(callerReason);
+    expect(started.error.cleanup).toEqual({
+      reason: "held fake cleanup remains uncertain",
+      resources: started.error.cleanupResources,
+    });
+    expect(started.error.cleanupIncomplete).toBe(true);
+  }
+  expect(stopCalls).toBeGreaterThanOrEqual(1);
+  expect(fake.children[0]?.exitCode).toBeNull();
+  await closing;
+  expect(stopCalls).toBeGreaterThanOrEqual(2);
+  expect(fake.children[0]?.exitCode).toBeNull();
 });
 
 it("classifies cancellation while asynchronous GDB ownership preparation is pending", async () => {
@@ -442,7 +540,7 @@ it("classifies cancellation while asynchronous GDB ownership preparation is pend
         entered();
         options.signal?.addEventListener(
           "abort",
-          () => reject(new Error("spawn preparation aborted")),
+          () => reject(options.signal?.reason),
           { once: true },
         );
       }),
@@ -1216,13 +1314,24 @@ afterEach(async () => {
 
 it("rejects a pre-cancelled GDB start and an unconfigured executable", async () => {
   const cancelled = new AbortController();
-  cancelled.abort();
+  const reason = new Error("caller cancelled before start");
+  cancelled.abort(reason);
   const startResult = await new GdbSessionManager({ platform: "linux" }).start(
     cancelled.signal,
   );
   expect(startResult.ok).toBe(false);
-  if (!startResult.ok)
+  if (!startResult.ok) {
     expect(startResult.error._tag).toBe("AnalysisCancelledError");
+    expect(startResult.error.cause).toBe(reason);
+  }
+
+  const nullReasonController = new AbortController();
+  nullReasonController.abort(null);
+  const nullReasonResult = await new GdbSessionManager({
+    platform: "linux",
+  }).start(nullReasonController.signal);
+  expect(nullReasonResult.ok).toBe(false);
+  if (!nullReasonResult.ok) expect(nullReasonResult.error.cause).toBeNull();
 
   const missing = await new GdbSessionManager({
     platform: "linux",
@@ -1280,6 +1389,90 @@ it("retains ownership when GDB startup fails before its prompt and stop is incom
   expect(stopCalls).toBe(1);
   expect(manager.status(retainedSessionId ?? "")?.state).toBe("closed");
 });
+
+it.each([
+  ["required auto-load configuration", "auto-load"],
+  ["caller-selected inferior TTY", "tty"],
+  ["late startup cancellation", "cancel"],
+] as const)(
+  "keeps an incompletely stopped failed startup unavailable and retriable after %s",
+  async (_label, failure) => {
+    const controller = new AbortController();
+    const commands: string[] = [];
+    let stopCalls = 0;
+    const fake = createFakeSpawner((child, token, command) => {
+      commands.push(command);
+      if (failure === "auto-load" && command.includes("auto-load off")) {
+        child.stdout.write(`${token}^error,msg="setting rejected"\n`);
+      } else if (failure === "tty" && command.includes("inferior-tty-show")) {
+        child.stdout.write(
+          `${token}^done,inferior_tty_terminal="/dev/pts/8"\n`,
+        );
+      } else {
+        child.stdout.write(`${token}^done\n`);
+      }
+      // The MI response is complete, but the startup continuation has not yet
+      // observed it. This exercises cancellation between, not during, requests.
+      if (failure === "cancel" && command.includes("auto-load off"))
+        controller.abort();
+    });
+    const manager = managerWithFakeSpawner(fake.spawnProcess, {
+      stopProcess: async (session, name) => {
+        stopCalls += 1;
+        return stopCalls === 1
+          ? {
+              status: "incomplete",
+              reason: "simulated startup stop uncertainty",
+            }
+          : stopOwnedDebuggerProcess(session, name);
+      },
+    });
+
+    const started = await manager.start(
+      failure === "cancel" ? controller.signal : undefined,
+      failure === "tty" ? { inferiorTty: "/dev/pts/7" } : {},
+    );
+
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.error._tag).toBe(
+      failure === "cancel"
+        ? "AnalysisCancelledError"
+        : "AnalysisCapabilityUnavailableError",
+    );
+    expect(started.error.cause).toBeDefined();
+    expect(started.error.partialObservation).toMatchObject({
+      predicate_type: "rea.debugger.startup-observation",
+    });
+    expect(started.error.cleanup).toMatchObject({
+      reason: "simulated startup stop uncertainty",
+    });
+    expect(started.error.cleanupIncomplete).toBe(true);
+    const [sessionId] = started.error.cleanupResources;
+    if (sessionId === undefined)
+      throw new Error("Failed startup did not retain its GDB session ID.");
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(started.error.cleanup?.resources).toEqual([sessionId]);
+    expect(stopCalls).toBe(1);
+    expect(fake.children[0]?.exitCode).toBeNull();
+    expect(manager.status(sessionId)?.state).toBe("closed");
+
+    const command = await manager.execute(sessionId, "show version");
+    expect(command).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisInputError" },
+    });
+    expect(commands).not.toContain('-interpreter-exec console "show version"');
+    expect(fake.children[0]?.exitCode).toBeNull();
+
+    expect((await manager.retryCleanupFailures()).ok).toBe(true);
+    expect(stopCalls).toBe(2);
+    expect(started.error.cleanupIncomplete).toBe(false);
+    expect(manager.status(sessionId)).toBeUndefined();
+    expect(fake.children[0]?.exitCode).toBeNull();
+    expect(fake.children[0]?.signalCode).toBe("SIGTERM");
+  },
+);
 
 it("uses a fallback message when the process launcher rejects without an Error", async () => {
   let attempts = 0;
@@ -1677,20 +1870,26 @@ it("waits for the prior command and preserves cancellation and queue failures", 
   expect(waitForGdbCommandTurn(resolved)).toBe(resolved);
 
   const preAborted = new AbortController();
-  preAborted.abort();
+  const queueReason = "queue cancelled before admission";
+  preAborted.abort(queueReason);
   await expect(
     waitForGdbCommandTurn(Promise.resolve(), preAborted.signal),
-  ).rejects.toMatchObject({ _tag: "AnalysisCancelledError" });
+  ).rejects.toMatchObject({
+    _tag: "AnalysisCancelledError",
+    cause: queueReason,
+  });
 
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {
     release = resolve;
   });
   const controller = new AbortController();
+  const activeQueueReason = { source: "active queue cancellation" };
   const cancelledWait = waitForGdbCommandTurn(pending, controller.signal);
-  controller.abort();
+  controller.abort(activeQueueReason);
   await expect(cancelledWait).rejects.toMatchObject({
     _tag: "AnalysisCancelledError",
+    cause: activeQueueReason,
   });
   release();
 
@@ -2439,18 +2638,20 @@ it("preserves a command timeout when stopping the owned process rejects", async 
   }
 });
 
-it("reports cancellation if owned-process stop rejects during an active command", async () => {
+it("retains caller cancellation and cleanup authority after active-command stop rejects", async () => {
   const controller = new AbortController();
+  const reason = { source: "console caller cancellation" };
+  const cleanupFailure = new AnalysisTimeoutError("foreign_cleanup", 17);
   let stopCalls = 0;
   const fake = createFakeSpawner((child, token, command) => {
     if (command.includes("auto-load off"))
       child.stdout.write(`${token}^done\n`);
-    else controller.abort();
+    else controller.abort(reason);
   });
   const manager = managerWithFakeSpawner(fake.spawnProcess, {
     stopProcess: async (session, name) => {
       stopCalls += 1;
-      if (stopCalls === 1) throw new Error("simulated stop rejection");
+      if (stopCalls === 1) throw cleanupFailure;
       return stopOwnedDebuggerProcess(session, name);
     },
   });
@@ -2463,9 +2664,19 @@ it("reports cancellation if owned-process stop rejects during an active command"
   );
 
   expect(cancelled.ok).toBe(false);
-  if (!cancelled.ok)
+  if (!cancelled.ok) {
     expect(cancelled.error._tag).toBe("AnalysisCancelledError");
+    expect(cancelled.error.cause).toBe(reason);
+    expect(cancelled.error.cleanup).toEqual({
+      reason: expect.stringContaining("foreign_cleanup"),
+      resources: [started.value.session_id],
+    });
+    expect(cancelled.error.cleanupIncomplete).toBe(true);
+  }
   expect(stopCalls).toBe(1);
+  expect((await manager.retryCleanupFailures()).ok).toBe(false);
+  if (!cancelled.ok) expect(cancelled.error.cleanupIncomplete).toBe(true);
+  expect(stopCalls).toBe(2);
 });
 
 it("returns a tagged cleanup failure thrown while closing", async () => {
@@ -2530,6 +2741,7 @@ it("returns partial command evidence when the active MI request times out after 
 
 it("preserves cancellation without cleanup details when stop is confirmed", async () => {
   const controller = new AbortController();
+  const reason = { source: "confirmed active command cancellation" };
   let requestToken = "";
   const fake = createFakeSpawner((_child, token, command) => {
     if (command.includes("cancel-confirmed")) requestToken = token;
@@ -2546,14 +2758,17 @@ it("preserves cancellation without cleanup details when stop is confirmed", asyn
     controller.signal,
   );
   await expect.poll(() => requestToken).not.toBe("");
-  controller.abort();
+  controller.abort(reason);
   const cancelled = await active;
 
   expect(cancelled).toMatchObject({
     ok: false,
     error: { _tag: "AnalysisCancelledError", operation: "gdb_console" },
   });
-  if (!cancelled.ok) expect(cancelled.error.cleanup).toBeUndefined();
+  if (!cancelled.ok) {
+    expect(cancelled.error.cleanup).toBeUndefined();
+    expect(cancelled.error.cause).toBe(reason);
+  }
 });
 
 it("rechecks cancellation after registering the active MI request listener", async () => {

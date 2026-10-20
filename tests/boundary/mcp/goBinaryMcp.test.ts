@@ -1,3 +1,4 @@
+import { goBinarySchema } from "../../../src/domain/go/goBinary.js";
 import type { Client } from "@modelcontextprotocol/client";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { writeFile } from "node:fs/promises";
@@ -6,7 +7,10 @@ import { expect } from "vitest";
 import { readAnalysisSnapshot } from "../../../src/application/binary/AnalysisSnapshotFiles.js";
 import { GoBinaryService } from "../../../src/application/go/GoBinaryService.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
-import { expandToolAvailability } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
+import {
+  evidenceResultOf,
+  expandToolAvailability,
+} from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { GoBinaryProvider } from "../../../src/go/GoBinaryProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -97,7 +101,7 @@ mcpTest(
       expect(inspected.isError, JSON.stringify(inspected.content)).not.toBe(
         true,
       );
-      const evidence = toolContract("inspect_go_binary").outputSchema.parse(
+      const evidence = evidenceResultOf(goBinarySchema).parse(
         inspected.structuredContent,
       );
       expect(evidence.subject?.architecture).toBe("mips");
@@ -165,7 +169,7 @@ goMcpTest(
       arguments: { path },
     });
     expect(response.isError).not.toBe(true);
-    const evidence = toolContract("inspect_go_binary").outputSchema.parse(
+    const evidence = evidenceResultOf(goBinarySchema).parse(
       response.structuredContent,
     );
     expect(evidence.normalized_result.build_info).toEqual(
@@ -256,7 +260,7 @@ goMcpTest(
       ajv.validate(outputSchema, response.structuredContent),
       JSON.stringify(ajv.errors),
     ).toBe(true);
-    const parsed = toolContract("inspect_go_binary").outputSchema.parse(
+    const parsed = evidenceResultOf(goBinarySchema).parse(
       response.structuredContent,
     );
     const evidence = parseEvidence(parsed);

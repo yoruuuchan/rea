@@ -1,7 +1,22 @@
 import { z } from "zod";
+import { BINARY_ARCHITECTURES } from "../binaryTargetTypes.js";
 import { digestSchema } from "../digests.js";
 import { localPathStringSchema } from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
+
+/** Map reader architecture names into Evidence identity; unknown names stay unknown. */
+export const goArchitectureForSubject = (architecture: string) => {
+  switch (architecture) {
+    case "386":
+      return "x86";
+    case "amd64":
+      return "x86_64";
+    default:
+      return BINARY_ARCHITECTURES.find(
+        (supported) => supported === architecture,
+      );
+  }
+};
 
 const sourceRangeSchema = z.strictObject({
   offset: z.number().int().nonnegative(),
@@ -34,6 +49,12 @@ export const inspectGoBinaryInputSchema = z.strictObject({
   path: localPathStringSchema.describe(
     "Absolute filesystem path to the selected executable or library",
   ),
+  detail: z
+    .enum(["complete", "summary"])
+    .default("complete")
+    .describe(
+      "complete returns all metadata inline; summary retains complete Evidence and returns build identity and counts for subsequent retained Go views.",
+    ),
 });
 
 /** Compiler-written build information and its original file-backed source ranges. */

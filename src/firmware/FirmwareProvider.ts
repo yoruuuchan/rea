@@ -30,6 +30,10 @@ import {
   BINWALK_PROVIDER_IDENTITY,
   UNBLOB_PROVIDER_IDENTITY,
 } from "./FirmwareRelease.js";
+import {
+  startFirmwareDeadline,
+  type FirmwareDeadline,
+} from "./FirmwareDeadline.js";
 import { admitFirmwareVersion } from "./FirmwareVersion.js";
 import {
   firmwareToolUnavailable,
@@ -47,7 +51,10 @@ import {
   normalizeUnblobReport,
 } from "./FirmwareReports.js";
 
-import { firmwareFailure, firmwareCancellation } from "./FirmwareFailures.js";
+import {
+  firmwareFailure,
+  firmwarePhaseInterruption,
+} from "./FirmwareFailures.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 
 type Outcome = Awaited<ReturnType<FirmwareAnalysisPort["execute"]>>;
@@ -186,7 +193,12 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
     try {
       await this.#files.close();
     } catch (cause: unknown) {
-      failures.push(firmwareFailure(cause, "firmware", "close_firmware"));
+      failures.push(
+        firmwareFailure(cause, {
+          engine: "firmware",
+          operation: "close_firmware",
+        }),
+      );
     }
     const workspace = await this.#retryWorkspaceCleanup();
     if (workspace.failure !== undefined) failures.push(workspace.failure);
@@ -199,7 +211,10 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
     try {
       await this.#files.retryCleanup();
     } catch (cause: unknown) {
-      fileFailure = firmwareFailure(cause, "firmware", "close_firmware");
+      fileFailure = firmwareFailure(cause, {
+        engine: "firmware",
+        operation: "close_firmware",
+      });
     }
     const workspace = await this.#retryWorkspaceCleanup();
     return {
@@ -303,11 +318,14 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
     let rootLease: AnalysisCleanupLease | undefined;
     const engineName =
       request.operation === "inspect_firmware_regions" ? "binwalk" : "unblob";
-    const deadline = AbortSignal.timeout(FIRMWARE_LIMITS.timeoutMs);
-    const signal =
+    const withCaller = (phase: FirmwareDeadline) =>
       options?.signal === undefined
-        ? deadline
-        : AbortSignal.any([options.signal, deadline]);
+        ? phase.signal
+        : AbortSignal.any([options.signal, phase.signal]);
+    // Extraction and publication have separate budgets: publication time depends on the
+    // destination filesystem, so it must not be charged to the extraction deadline.
+    let deadline = startFirmwareDeadline("analysis", FIRMWARE_LIMITS.timeoutMs);
+    let signal = withCaller(deadline);
     let outcome: Outcome;
     try {
       if (signal.aborted)
@@ -465,6 +483,19 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
           request.operation,
           signal,
         );
+        // The inventory can finish after its deadline expired; an expired
+        // extraction must not publish under the fresh publication budget.
+        const interruption = firmwarePhaseInterruption(
+          request.operation,
+          signal,
+          deadline,
+        );
+        if (interruption !== undefined) throw interruption;
+        deadline = startFirmwareDeadline(
+          "publication",
+          request.input.publication_timeout_ms,
+        );
+        signal = withCaller(deadline);
         result = await publishFirmwareExtraction({
           files: this.#files,
           workspacePath: root.path,
@@ -520,12 +551,11 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
         ),
       );
     } catch (cause: unknown) {
-      const failure = firmwareFailure(
-        cause,
-        engineName,
-        request.operation,
+      const failure = firmwareFailure(cause, {
+        engine: engineName,
+        operation: request.operation,
         deadline,
-      );
+      });
       outcome = err(failure);
     }
     const finished = await finishFirmwareWorkspace(
@@ -558,16 +588,19 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
       finished.error.cleanupResources.includes(root.path)
     )
       rootLease.bindCleanupError(finished.error);
-    if (finished.ok && signal.aborted)
-      return err(
-        firmwareCancellation(
-          request.operation,
-          signal.reason,
-          deadline,
-        ).retainPartialObservation(
-          completedFirmwareObservation(finished.value),
-        ),
+    if (finished.ok) {
+      const interruption = firmwarePhaseInterruption(
+        request.operation,
+        signal,
+        deadline,
       );
+      if (interruption !== undefined)
+        return err(
+          interruption.retainPartialObservation(
+            completedFirmwareObservation(finished.value),
+          ),
+        );
+    }
     return finished;
   }
 }
@@ -580,7 +613,7 @@ const finishFirmwareWorkspace = async (
   request: FirmwareRequest,
   rootLease: AnalysisCleanupLease | undefined,
   signal: AbortSignal,
-  deadline: AbortSignal,
+  deadline: FirmwareDeadline,
 ): Promise<Outcome> => {
   if (
     !outcome.ok &&
@@ -613,12 +646,10 @@ const finishFirmwareWorkspace = async (
       },
     );
     rootLease?.bindCleanupError(cleanup);
-    if (outcome.ok && signal.aborted) {
-      const primary = firmwareCancellation(
-        request.operation,
-        signal.reason,
-        deadline,
-      );
+    const primary = outcome.ok
+      ? firmwarePhaseInterruption(request.operation, signal, deadline)
+      : undefined;
+    if (outcome.ok && primary !== undefined) {
       primary.retainPartialObservation(
         completedFirmwareObservation(outcome.value),
       );

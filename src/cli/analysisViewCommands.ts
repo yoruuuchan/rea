@@ -71,7 +71,7 @@ export const registerAnalysisViewCommands = (
   });
   cli.command(CLI_COMMANDS.inspectAnalysisView, {
     description:
-      "Project a selected view of completed binary-layout, JavaScript application, native function/inventory, artifact-inventory, desktop-directory, WASM, Mach-O, Interface Builder, EVM, managed, Android package, Dart AOT, web network capture or pcap Evidence JSON",
+      "Project a selected view of completed Go build metadata, binary-layout, JavaScript application, native function/inventory, artifact-inventory, desktop-directory, WASM, Mach-O, Interface Builder, EVM, managed, Android package, Dart AOT, web network capture or pcap Evidence JSON",
     args: z.object({
       inputJson: z.string().describe("Inline workflow JSON or JSON file path"),
     }),

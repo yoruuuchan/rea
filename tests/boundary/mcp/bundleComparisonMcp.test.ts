@@ -4,13 +4,18 @@ import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { compareEvidenceBundlesCommand } from "../../../src/application/EvidenceBundleCommands.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
-import { bundleComparisonResultSchema } from "../../../src/domain/bundleComparison.js";
+import {
+  bundleComparisonInputSchema,
+  bundleComparisonResultSchema,
+} from "../../../src/domain/bundleComparison.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
 import {
   createEvidenceBundle,
@@ -138,6 +143,117 @@ describe("bundle comparison MCP semantic status", () => {
       await connected.close();
     }
   });
+});
+
+it("requires absolute bundle paths without changing server-cwd semantics", async () => {
+  const root = await createTestTempDirectory("rea-bundle-relative-mcp-");
+  roots.push(root);
+  const encoded = serializeEvidenceBundle(createEvidenceBundle([]));
+  await Promise.all([
+    writeFile(join(root, "left.json"), encoded),
+    writeFile(join(root, "right.json"), encoded),
+  ]);
+  const connected = await connect();
+  const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+  try {
+    const compare = (leftPath: string, rightPath: string) =>
+      connected.client.callTool({
+        name: "compare_bundles",
+        arguments: {
+          left_bundle_path: leftPath,
+          right_bundle_path: rightPath,
+        },
+      });
+    const relativeCases = [
+      ["left.json", "right.json", "left_bundle_path"],
+      ["left.json", join(root, "right.json"), "left_bundle_path"],
+      [join(root, "left.json"), "right.json", "right_bundle_path"],
+    ] as const;
+    for (const [leftPath, rightPath, rejectedField] of relativeCases) {
+      const result = await compare(leftPath, rightPath);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({
+        text: expect.stringContaining(
+          `${rejectedField}: must be an absolute local filesystem path`,
+        ),
+      });
+    }
+    expect(
+      bundleComparisonInputSchema.parse({
+        left_bundle_path: "left.json",
+        right_bundle_path: "right.json",
+      }),
+    ).toMatchObject({
+      left_bundle_path: "left.json",
+      right_bundle_path: "right.json",
+    });
+    const cliCommand = await compareEvidenceBundlesCommand({
+      leftPath: "left.json",
+      rightPath: "right.json",
+    });
+    expect(cliCommand).toMatchObject({
+      ok: true,
+      value: { status: "unchanged" },
+    });
+    const listed = await connected.client.listTools();
+    const comparisonTool = listed.tools.find(
+      ({ name }) => name === "compare_bundles",
+    );
+    if (comparisonTool === undefined)
+      throw new Error("Expected the compare_bundles MCP contract");
+    const validate = new Ajv2020({
+      strict: false,
+      validateFormats: false,
+    }).compile(comparisonTool.inputSchema);
+    const absolutePaths = {
+      left_bundle_path: join(root, "left.json"),
+      right_bundle_path: join(root, "right.json"),
+    };
+    expect(validate(absolutePaths)).toBe(true);
+    expect(validate({ ...absolutePaths, left_bundle_path: "left.json" })).toBe(
+      false,
+    );
+    expect(validate({ ...absolutePaths, left_bundle_path: "" })).toBe(false);
+    expect(
+      validate({
+        ...absolutePaths,
+        left_bundle_path: `${absolutePaths.left_bundle_path}\0suffix`,
+      }),
+    ).toBe(false);
+    const relativeImport = await connected.client.callTool({
+      name: "import_evidence_bundle",
+      arguments: { path: "left.json" },
+    });
+    expect(relativeImport.isError).toBe(true);
+    expect(relativeImport.content[0]).toMatchObject({
+      text: expect.stringContaining("absolute local filesystem path"),
+    });
+    const importTool = listed.tools.find(
+      ({ name }) => name === "import_evidence_bundle",
+    );
+    if (importTool === undefined)
+      throw new Error("Expected the import_evidence_bundle MCP contract");
+    const validateImport = new Ajv2020({
+      strict: false,
+      validateFormats: false,
+    }).compile(importTool.inputSchema);
+    expect(validateImport({ path: absolutePaths.left_bundle_path })).toBe(true);
+    expect(validateImport({ path: "left.json" })).toBe(false);
+    expect(
+      validateImport({ path: `${absolutePaths.left_bundle_path}\0` }),
+    ).toBe(false);
+    const absolute = await compare(
+      join(root, "left.json"),
+      join(root, "right.json"),
+    );
+    expect(absolute.isError).not.toBe(true);
+    expect(absolute.structuredContent).toMatchObject({
+      normalized_result: { status: "unchanged" },
+    });
+  } finally {
+    await connected.close();
+    cwd.mockRestore();
+  }
 });
 
 describe("bundle comparison MCP integration", () => {

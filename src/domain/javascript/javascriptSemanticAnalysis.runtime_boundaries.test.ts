@@ -73,6 +73,23 @@ describe("JavaScript semantic analysis: runtime boundaries 1", () => {
     ]);
   });
 
+  it("keeps an overflowing timer delay unknown in a complete semantic result", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      function greet() { return "hello"; }
+      setTimeout(() => greet(), 1e999);
+    `);
+
+    expect(ir.timerOperations).toEqual([
+      expect.objectContaining({
+        kind: "schedule",
+        method: "setTimeout",
+        delayMilliseconds: null,
+        resolution: "complete",
+      }),
+    ]);
+    expect(ir.callables.some(({ name }) => name === "greet")).toBe(true);
+  });
+
   it("does not treat shadowed timer globals as Node timers", () => {
     const ir = analyzeJavaScriptSemantics(`
       function run(setTimeout, clearTimeout) {

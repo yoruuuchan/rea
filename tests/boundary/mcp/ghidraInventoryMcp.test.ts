@@ -160,9 +160,15 @@ it("retains byte-search coverage and rejects malformed pages before creating Evi
         arguments: args,
       });
       expect(invalid.isError).toBe(true);
-      expect(JSON.stringify(invalid.content)).toContain(
-        "Input validation error",
-      );
+      expect(parseMcpToolError(invalid)).toMatchObject({
+        error: {
+          code: "invalid_request",
+          recovery: {
+            kind: "inspect_input_contract",
+            operation: "search_bytes",
+          },
+        },
+      });
     }
     expect(harness.calls).toHaveLength(calls);
   } finally {

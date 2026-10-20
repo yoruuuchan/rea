@@ -430,6 +430,101 @@ it("reports a reached process memory limit only when the handle observed one", (
   }
 });
 
+it("reports output closure synchronously with the final incomplete-output snapshot", async () => {
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const events: string[] = [];
+  let closeSnapshot: unknown;
+  const owner = new ProviderProcessSupervisor(
+    { process: producer, ownsProcessLifetime: false },
+    {
+      onDiagnostic: (event) => {
+        if (event.type === "output-close") {
+          events.push("output-close");
+          closeSnapshot = event.snapshot;
+          expect(owner.observedOutputClose()).toBe(true);
+        }
+        if (event.type === "exit")
+          queueMicrotask(() => events.push("exit-callback-microtask"));
+      },
+    },
+  );
+  try {
+    producer.stdout.emit("error", new Error("output ended unexpectedly"));
+    producer.stdout.end();
+    producer.stderr.end();
+    producer.emit("close", 0, null);
+    expect(events).toEqual(["output-close"]);
+    expect(closeSnapshot).toMatchObject({ outputIncomplete: true });
+    await Promise.resolve();
+    expect(events).toEqual(["output-close", "exit-callback-microtask"]);
+    await expect(owner.waitForOutputClose(0)).resolves.toBe(true);
+  } finally {
+    owner.dispose();
+    producer.stdout.destroy();
+    producer.stderr.destroy();
+  }
+});
+
+it("does not emit diagnostics after disposal when process close arrives", () => {
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const events: string[] = [];
+  const owner = new ProviderProcessSupervisor(
+    { process: producer, ownsProcessLifetime: false },
+    { onDiagnostic: (event) => events.push(event.type) },
+  );
+  owner.dispose();
+  producer.emit("close", 0, null);
+  expect(events).toEqual([]);
+  producer.stdout.destroy();
+  producer.stderr.destroy();
+});
+
+it("emits output-close before queued abort microtasks and promise continuations", async () => {
+  const producer = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    kill: () => false,
+  });
+  const events: string[] = [];
+  let owner!: ProviderProcessSupervisor;
+  owner = new ProviderProcessSupervisor(
+    { process: producer, ownsProcessLifetime: false },
+    {
+      onDiagnostic: (event) => {
+        if (event.type === "exit")
+          queueMicrotask(() => events.push("later-abort-microtask"));
+        if (event.type === "output-close") {
+          expect(owner.observedOutputClose()).toBe(true);
+          events.push("output-close");
+        }
+      },
+    },
+  );
+  const closeWait = owner.waitForOutputClose();
+  producer.stdout.end();
+  producer.stderr.end();
+  producer.emit("close", 0, null);
+  expect(events).toEqual(["output-close"]);
+  await closeWait;
+  await Promise.resolve();
+  expect(events).toEqual(["output-close", "later-abort-microtask"]);
+  owner.dispose();
+});
+
 it("projects provider output loss as truncated diagnostics without inventing a byte count", () => {
   const producer = Object.assign(new EventEmitter(), {
     stdout: new PassThrough(),

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import { analysisErrorRecoverySchema } from "../domain/analysisErrorRecovery.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
+import type { AnalysisErrorProjection } from "../domain/analysisErrorProjection.js";
 
 const categorySchema = z.enum([
   "invalid_input",
@@ -24,6 +26,7 @@ const common = {
   message: z.string().min(1),
   retryable: z.boolean(),
   remediation: remediationSchema,
+  recovery: analysisErrorRecoverySchema.optional(),
 };
 const genericDetails = z.record(z.string(), jsonValueSchema).optional();
 const generic = <Code extends string>(code: Code) =>
@@ -76,7 +79,7 @@ export const analysisErrorProjectionSchema = z.discriminatedUnion("code", [
   generic("configuration_invalid"),
   generic("target_unavailable"),
   generic("execution_failure"),
-]);
+]) as unknown as z.ZodType<AnalysisErrorProjection>;
 
 /** CLI label and input diagnostics surrounding the strict canonical error projection. */
 export const analysisCliErrorEnvelopeSchema = z

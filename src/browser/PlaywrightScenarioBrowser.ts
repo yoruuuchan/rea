@@ -43,9 +43,17 @@ export interface OpenedScenarioBrowser {
   readonly cleanup: PlaywrightScenarioBrowserCleanupOwner;
 }
 
+/** A retryable obligation that must hold before the browser transport closes. */
+export interface PlaywrightScenarioBrowserReleaseGate {
+  readonly revision: number;
+  run(): Promise<void>;
+}
+
 /** Provider actions retained until the owned browser and profile are released. */
 interface PlaywrightScenarioCleanupResources {
-  readonly closeBrowser: () => Promise<void>;
+  readonly closeBrowser: (
+    disconnectAtBoundary: (disconnect: () => Promise<void>) => Promise<void>,
+  ) => Promise<void>;
   readonly removeProfile: (() => Promise<void>) | undefined;
   readonly onSettled?: (browserClosed: boolean) => void;
 }
@@ -56,6 +64,7 @@ export class PlaywrightScenarioBrowserCleanupOwner {
   #profileRemoved: boolean;
   #eventFinalizationPromise: Promise<void> | undefined;
   #eventsFinalized = false;
+  #releaseGate: PlaywrightScenarioBrowserReleaseGate | undefined;
   readonly cleanupLease: AnalysisCleanupLease;
 
   /** Keep the narrow provider actions needed to release one opened browser. */
@@ -83,13 +92,20 @@ export class PlaywrightScenarioBrowserCleanupOwner {
   }
 
   /** Await actual resource release, including a late browser acknowledgement. */
-  release(finishEvents?: () => Promise<void>): Promise<void> {
+  release(
+    finishEvents?: () => Promise<void>,
+    releaseGate?: PlaywrightScenarioBrowserReleaseGate,
+  ): Promise<void> {
     this.#prepareEvents(finishEvents);
+    if (releaseGate !== undefined) this.#releaseGate = releaseGate;
     return this.cleanupLease.release();
   }
 
-  close(finishEvents?: () => Promise<void>): Promise<void> {
-    return this.#awaitCleanup(this.release(finishEvents));
+  close(
+    finishEvents?: () => Promise<void>,
+    releaseGate?: PlaywrightScenarioBrowserReleaseGate,
+  ): Promise<void> {
+    return this.#awaitCleanup(this.release(finishEvents, releaseGate));
   }
 
   #prepareEvents(finishEvents?: () => Promise<void>): void {
@@ -131,7 +147,9 @@ export class PlaywrightScenarioBrowserCleanupOwner {
     }
     if (!this.#browserClosed) {
       try {
-        await this.resources.closeBrowser();
+        await this.resources.closeBrowser((disconnect) =>
+          this.#runReleaseGate(disconnect),
+        );
         this.#browserClosed = true;
       } catch (cause: unknown) {
         failures.push(cause);
@@ -152,6 +170,25 @@ export class PlaywrightScenarioBrowserCleanupOwner {
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1)
       throw new AggregateError(failures, "Browser session cleanup failed");
+  }
+
+  async #runReleaseGate(disconnect: () => Promise<void>): Promise<void> {
+    for (;;) {
+      const gate = this.#releaseGate;
+      if (gate === undefined) {
+        await disconnect();
+        return;
+      }
+      const revision = gate.revision;
+      await gate.run();
+      if (this.#releaseGate === gate && gate.revision === revision) {
+        // Invoke the physical disconnect in the same continuation that
+        // observes a stable stop revision; no await separates the check and
+        // the operation start.
+        await disconnect();
+        return;
+      }
+    }
   }
 }
 
@@ -566,7 +603,7 @@ const openAttachedScenarioBrowser = async (
     const browser = await launcher.connectOverCDP(browserRequest.cdp_endpoint);
     const cleanup: PlaywrightScenarioBrowserCleanupOwner =
       new PlaywrightScenarioBrowserCleanupOwner({
-        closeBrowser: async () => {
+        closeBrowser: async (disconnectAtBoundary) => {
           let environmentFailure: unknown;
           const ownedEnvironment = environmentOwner;
           if (ownedEnvironment !== undefined) {
@@ -590,7 +627,7 @@ const openAttachedScenarioBrowser = async (
             }
           }
           try {
-            await browser.close();
+            await disconnectAtBoundary(() => browser.close());
             // Once target state is restored, disconnecting the transport is a
             // definitive fallback for an explicit session detach failure.
             environmentOwner = undefined;
@@ -719,7 +756,9 @@ export const openPlaywrightScenarioBrowser = async (
     }
   }
   const cleanup = new PlaywrightScenarioBrowserCleanupOwner({
-    closeBrowser: () => context.close(),
+    closeBrowser: async (disconnectAtBoundary) => {
+      await disconnectAtBoundary(() => context.close());
+    },
     removeProfile: () =>
       rm(profilePath, { recursive: true, force: true, maxRetries: 3 }),
   });

@@ -130,6 +130,22 @@ export const machoImage = (options: {
   return bytes;
 };
 
+/** Thin Mach-O with one unknown command, for width and command-size regressions. */
+export const machoImageWithUnknownCommand = (
+  wide: boolean,
+  commandSize: number,
+): Uint8Array => {
+  const command = new Uint8Array(commandSize);
+  const view = new DataView(command.buffer);
+  view.setUint32(0, 0x7f000001, true);
+  view.setUint32(4, commandSize, true);
+  return machoImage({
+    cpu: wide ? CPU.arm64 : CPU.i386,
+    wide,
+    commands: [command],
+  });
+};
+
 /**
  * A FAT container whose slices start on 4 KiB boundaries. Headers are
  * big-endian unless `littleEndian` selects the swapped FAT_CIGAM magics.
@@ -169,6 +185,25 @@ export const fatImage = (
     }
     bytes.set(slice.bytes, offset);
   });
+  return bytes;
+};
+
+/** A minimal BSD ar archive containing one inert member for container tests. */
+export const arArchive = (memberName = "fixture.o"): Uint8Array => {
+  const name = `${memberName}/`.slice(0, 16).padEnd(16, " ");
+  const header = [
+    name,
+    "0           ",
+    "0     ",
+    "0     ",
+    "100644  ",
+    "1         ",
+    "`\n",
+  ].join("");
+  const bytes = new Uint8Array(8 + 60 + 2);
+  bytes.set(encoder.encode("!<arch>\n"), 0);
+  bytes.set(encoder.encode(header), 8);
+  bytes[68] = 0x78;
   return bytes;
 };
 

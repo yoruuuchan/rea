@@ -24,6 +24,7 @@ import { snapshotRoots } from "../../../src/process/capture/FilesystemSnapshot.j
 import { ProcessCaptureError } from "../../../src/process/capture/ProcessCaptureError.js";
 import { expectUnverifiedHostCleanup } from "../../support/hostCleanup.js";
 import {
+  ProcessCaptureResourceScope,
   type ProcessCaptureCleanupHost,
   observeLaunchedExecutable,
   observeSelectedExecutable,
@@ -175,22 +176,15 @@ itWithCaptureCapability(
 
 itWithCaptureCapability(
   "keeps the process deadline bounded when the wall clock moves backward",
-  async () => {
+  async ({ signal }) => {
     let wallNow = Date.now();
     const now = vi.spyOn(Date, "now").mockImplementation(() => wallNow);
-    const controller = new AbortController();
-    let fallback: ReturnType<typeof setTimeout> | undefined;
+    const resources = new ProcessCaptureResourceScope();
     let reachedRunning = false;
-    let fallbackFired = false;
-    const clearFallback = () => {
-      clearTimeout(fallback);
-      fallback = undefined;
-    };
-    onTestFinished(() => {
-      controller.abort();
-      clearFallback();
+    onTestFinished(async () => {
       now.mockRestore();
-    });
+      await resources.close();
+    }, 10_000);
     try {
       const result = await captureProcessScenario(
         parseProcessScenario({
@@ -200,7 +194,7 @@ itWithCaptureCapability(
           timeout_ms: 100,
           idle_timeout_ms: 5_000,
         }),
-        controller.signal,
+        signal,
         process.platform,
         process.env,
         undefined,
@@ -210,30 +204,15 @@ itWithCaptureCapability(
             if (update.phase === "running" && !reachedRunning) {
               reachedRunning = true;
               wallNow -= 60_000;
-              // The deadline starts after native ownership preparation and
-              // executable inspection. Bound only the same running interval.
-              fallback = setTimeout(() => {
-                fallbackFired = true;
-                controller.abort();
-              }, 1_500);
-            } else if (
-              update.phase === "settling" ||
-              update.phase === "cleanup"
-            )
-              clearFallback();
+            }
           },
         },
+        resources,
       );
       expect(reachedRunning).toBe(true);
-      expect(
-        fallbackFired,
-        "the monotonic deadline precedes the caller safety abort",
-      ).toBe(false);
       const { capture } = captureObservations(result);
       expect(capture.exit.reason).toBe("timeout");
     } finally {
-      controller.abort();
-      clearFallback();
       now.mockRestore();
     }
   },

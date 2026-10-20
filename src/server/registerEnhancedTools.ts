@@ -270,7 +270,11 @@ const executeEnhancedTool = async (
           name !== "trace_native_ui_action" &&
           registration.allowsSnapshotReplay?.(name) === true
         ) {
-          const workflowRecord = workflowSnapshotRecord(evidence, name);
+          const workflowRecord = workflowSnapshotRecord(
+            evidence,
+            name,
+            result.value.cachePolicy,
+          );
           if (workflowRecord !== undefined) {
             const snapshot =
               registration.recordWorkflowSnapshot?.(workflowRecord);

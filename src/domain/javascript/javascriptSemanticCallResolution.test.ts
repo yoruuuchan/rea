@@ -40,6 +40,23 @@ const indexed = (source: string) => {
   };
 };
 
+it("orders exported callable initializers within their enclosing declaration", () => {
+  const ir = analyzeJavaScriptSemantics(`
+    function original() {}
+    export const first = original, second = first;
+    second();
+    export const before = later, later = original;
+    before();
+  `);
+  const original = ir.callables.find(({ name }) => name === "original");
+  if (original === undefined) throw new Error("Missing original callable");
+  expect(ir.callSites[0]).toMatchObject({
+    resolution: "exact",
+    calleeCallableIds: [original.callableId],
+  });
+  expect(ir.callSites[1]?.resolution).not.toBe("exact");
+});
+
 it.each([
   "if(flag)({make}={make:replacement});",
   "if(flag)[make]=[replacement];",
@@ -220,6 +237,123 @@ it("does not reuse a later resolved callback at an earlier read", () => {
     callableIds: [],
   });
   expect(context.resolve(after)).toMatchObject({ complete: true });
+});
+
+it("keeps a nested callback read uncertain across a later var initializer", () => {
+  const context = indexed(
+    `function target(){} function read(){cb();} read(); var cb=target;`,
+  );
+  const target = context.state.callables.find(
+    (callable) => callable.name === "target",
+  );
+  let read: t.Identifier | undefined;
+  traverseJavaScriptAst(context.state.program, {
+    enter(node) {
+      if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "cb" })
+      )
+        read = node.callee;
+    },
+  });
+  if (target === undefined || read === undefined)
+    throw new Error("Missing target or callback read");
+  expect(context.resolve(read)).toMatchObject({
+    callableIds: [target.callableId],
+    complete: false,
+  });
+});
+
+it("keeps same-activation calls after a var initializer resolved", () => {
+  const context = indexed(`function target(){} var cb=target; cb();`);
+  let read: t.Identifier | undefined;
+  traverseJavaScriptAst(context.state.program, {
+    enter(node) {
+      if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "cb" })
+      )
+        read = node.callee;
+    },
+  });
+  if (read === undefined) throw new Error("Missing callback read");
+  expect(context.resolve(read)).toMatchObject({
+    callableIds: [context.state.callables[0]?.callableId],
+    complete: true,
+  });
+});
+
+it("keeps a hoisted function declaration resolved from a nested read", () => {
+  const context = indexed(
+    `function read(){target();} read(); function target(){}`,
+  );
+  const target = context.state.callables.find(
+    (callable) => callable.name === "target",
+  );
+  let read: t.Identifier | undefined;
+  traverseJavaScriptAst(context.state.program, {
+    enter(node) {
+      if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "target" })
+      )
+        read = node.callee;
+    },
+  });
+  if (target === undefined || read === undefined)
+    throw new Error("Missing target or nested call");
+  expect(context.resolve(read)).toMatchObject({
+    callableIds: [target.callableId],
+    complete: true,
+  });
+});
+
+it("does not infer hoisting for a conditional function declaration", () => {
+  const context = indexed(
+    `if (flag) { function target(){} } function read(){target();} read();`,
+  );
+  let read: t.Identifier | undefined;
+  traverseJavaScriptAst(context.state.program, {
+    enter(node) {
+      if (
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "target" })
+      )
+        read = node.callee;
+    },
+  });
+  if (read === undefined) throw new Error("Missing conditional function read");
+  expect(context.resolve(read)).toMatchObject({ complete: false });
+});
+
+it("uses class declaration order instead of a stable initializer shortcut", () => {
+  const before = indexed("class Target {} new Target();");
+  const after = indexed("new Target(); class Target {}");
+  const exported = indexed("export class Target {} new Target();");
+  const callTarget = (context: ReturnType<typeof indexed>) => {
+    let read: t.Identifier | undefined;
+    traverseJavaScriptAst(context.state.program, {
+      enter(node) {
+        if (
+          t.isNewExpression(node) &&
+          t.isIdentifier(node.callee, { name: "Target" })
+        )
+          read = node.callee;
+      },
+    });
+    if (read === undefined) throw new Error("Missing class constructor read");
+    return context.resolve(read);
+  };
+  const beforeTarget = before.state.callables.find(
+    (callable) => callable.name === "Target",
+  );
+  if (beforeTarget === undefined) throw new Error("Missing class target");
+  expect(callTarget(before)).toMatchObject({
+    callableIds: [beforeTarget.callableId],
+    complete: true,
+  });
+  expect(callTarget(after)).toMatchObject({ complete: false });
+  expect(callTarget(exported)).toMatchObject({ complete: true });
 });
 
 it.each([false, true])(

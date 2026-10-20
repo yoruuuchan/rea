@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import {
+  open,
   chmod,
   mkdir,
   readFile,
@@ -30,6 +31,12 @@ import { hasXmlPlistSignature } from "../../../src/domain/apple/appleArchiveForm
 import { parseExecutableHeader } from "../../../src/domain/binaryTarget.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import {
+  arArchive,
+  CPU,
+  fatImage,
+  machoImage,
+} from "../../../src/artifacts/apple/MachoImage.fixture.js";
 
 it.each([0x01c0, 0x01c2, 0x01c4, 0xaa64])(
   "retains original PE COFF machine %i through file-backed target resolution",
@@ -83,6 +90,127 @@ it.each([{ cpus: [0x0100000c] }, { cpus: [0x01000007, 0x0100000c] }])(
     });
   },
 );
+
+it("reads a sparse FAT slice header beyond the bounded prefix", async () => {
+  const directory = await createTestTempDirectory("rea-sparse-fat-target-");
+  const path = join(directory, "image");
+  const sliceOffset = 64 * 1024;
+  const file = await open(path, "w+");
+  try {
+    const fatHeader = Buffer.alloc(28);
+    fatHeader.writeUInt32BE(0xcafebabe, 0);
+    fatHeader.writeUInt32BE(1, 4);
+    fatHeader.writeUInt32BE(CPU.arm64.type, 8);
+    fatHeader.writeUInt32BE(CPU.arm64.subtype, 12);
+    fatHeader.writeUInt32BE(sliceOffset, 16);
+    fatHeader.writeUInt32BE(32, 20);
+    await file.write(fatHeader, 0, fatHeader.length, 0);
+    const sliceHeader = machoImage({ cpu: CPU.arm64 }).subarray(0, 12);
+    await file.write(sliceHeader, 0, sliceHeader.length, sliceOffset);
+    await file.truncate(sliceOffset + 32);
+  } finally {
+    await file.close();
+  }
+  expect(
+    await parseBinaryTarget(path, { hostArchitecture: "arm64" }),
+  ).toMatchObject({
+    ok: true,
+    value: { format: "mach-o-universal", architecture: "arm64" },
+  });
+});
+
+it("reads the complete bounded 128-entry FAT64 table beyond the prefix", async () => {
+  const directory = await createTestTempDirectory("rea-fat64-max-table-");
+  const path = join(directory, "image");
+  const entryCount = 128;
+  const tableEnd = 8 + entryCount * 32;
+  const sliceSize = 32;
+  const file = await open(path, "w+");
+  try {
+    const table = Buffer.alloc(tableEnd);
+    table.writeUInt32BE(0xcafebabf, 0);
+    table.writeUInt32BE(entryCount, 4);
+    const thinHeader = machoImage({ cpu: CPU.arm64 }).subarray(0, 12);
+    for (let index = 0; index < entryCount; index += 1) {
+      const entry = 8 + index * 32;
+      const sliceOffset = tableEnd + index * sliceSize;
+      table.writeUInt32BE(CPU.arm64.type, entry);
+      table.writeUInt32BE(CPU.arm64.subtype, entry + 4);
+      table.writeBigUInt64BE(BigInt(sliceOffset), entry + 8);
+      table.writeBigUInt64BE(BigInt(sliceSize), entry + 16);
+      await file.write(thinHeader, 0, thinHeader.length, sliceOffset);
+    }
+    await file.write(table, 0, table.length, 0);
+    await file.truncate(tableEnd + entryCount * sliceSize);
+  } finally {
+    await file.close();
+  }
+  expect(
+    await parseBinaryTarget(path, { hostArchitecture: "arm64" }),
+  ).toMatchObject({
+    ok: true,
+    value: { format: "mach-o-universal", architecture: "arm64" },
+  });
+});
+
+it.each([0, 1])(
+  "rejects a file-backed FAT CPU mismatch in slice %i before host selection",
+  async (wrongIndex) => {
+    const directory = await createTestTempDirectory("rea-fat-cpu-mismatch-");
+    const path = join(directory, "image");
+    const bytes = fatImage([
+      { cpu: CPU.x86_64, bytes: machoImage({ cpu: CPU.x86_64 }) },
+      { cpu: CPU.arm64, bytes: machoImage({ cpu: CPU.arm64 }) },
+    ]);
+    const entry = 8 + wrongIndex * 20;
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(
+      entry,
+      wrongIndex === 0 ? CPU.arm64.type : CPU.x86_64.type,
+      false,
+    );
+    await writeFile(path, Buffer.from(bytes));
+    expect(
+      await parseBinaryTarget(path, { hostArchitecture: "arm64" }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "BinaryTargetError",
+        reason: `FAT architecture ${wrongIndex} CPU type/subtype disagrees with its Mach-O header`,
+        constraint: "file_format_rejected",
+      },
+    });
+  },
+);
+
+it.each([
+  {
+    name: "archive slices",
+    slices: [
+      { cpu: CPU.x86_64, bytes: arArchive() },
+      { cpu: CPU.arm64, bytes: arArchive("second.o") },
+    ],
+  },
+  {
+    name: "mixed Mach-O and archive slices",
+    slices: [
+      { cpu: CPU.x86_64, bytes: machoImage({ cpu: CPU.x86_64 }) },
+      { cpu: CPU.arm64, bytes: arArchive() },
+    ],
+  },
+])("refuses FAT $name before provider selection", async ({ slices }) => {
+  const directory = await createTestTempDirectory("rea-fat-archive-target-");
+  const path = join(directory, "image");
+  await writeFile(path, fatImage(slices));
+  expect(
+    await parseBinaryTarget(path, { hostArchitecture: "arm64" }),
+  ).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "BinaryTargetError",
+      constraint: "file_format_rejected",
+    },
+  });
+});
 
 describe("binary target I/O: app plist permissions and decoding", () => {
   it.each([

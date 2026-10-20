@@ -245,6 +245,16 @@ const verifySessionAndComparisonTools = async (
     },
   });
   expect(malformedComparison.isError).toBe(true);
+  expect(parseMcpToolError(malformedComparison)).toMatchObject({
+    error: {
+      code: "invalid_request",
+      recovery: {
+        kind: "inspect_input_contract",
+        operation: "compare_web_captures",
+      },
+      details: { operation: "compare_web_captures" },
+    },
+  });
   expect(JSON.stringify(malformedComparison.content)).toContain("types");
   const incompleteComparison = await connected.client.callTool({
     name: "compare_web_captures",

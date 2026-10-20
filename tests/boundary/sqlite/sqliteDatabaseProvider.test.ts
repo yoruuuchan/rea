@@ -8,6 +8,7 @@ import { expect, it as nativeTest, onTestFinished } from "vitest";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { SqliteDatabaseProvider } from "../../../src/sqlite/SqliteDatabaseProvider.js";
 import { inspectSqliteDatabaseSnapshot } from "../../../src/sqlite/SqliteDatabaseInspection.js";
+import { cleanupOwnedProcessGroup } from "../../../src/process/ProcessOwnership.js";
 import { spawnOwnedProviderProcess } from "../../../src/process/ProviderProcess.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import { waitForProviderProcessReady } from "../../fixtures/providerProcess.js";
@@ -55,6 +56,7 @@ it.each(["completed reply", "malformed reply"] as const)(
   async (replyKind) => {
     const { workspace, database } = await createFixture();
     let cleanupAttempts = 0;
+    let cleanupAllowed = false;
     let ownedRoot = "";
     const provider = new SqliteDatabaseProvider(process.env, async (spawn) => {
       ownedRoot = spawn.cwd ?? "";
@@ -85,13 +87,14 @@ it.each(["completed reply", "malformed reply"] as const)(
         ...launched,
         cleanup: async () => {
           cleanupAttempts += 1;
-          return cleanupAttempts === 1
-            ? { cleaned: false, reason: "fixture cleanup denial" }
-            : { cleaned: true, signaled: false };
+          return cleanupAllowed
+            ? { cleaned: true, signaled: false }
+            : { cleaned: false, reason: "fixture cleanup denial" };
         },
       };
     });
     onTestFinished(async () => {
+      cleanupAllowed = true;
       await provider.close();
       await removeTestWorkspace(workspace.root);
     });
@@ -128,9 +131,123 @@ it.each(["completed reply", "malformed reply"] as const)(
     });
     expect(cleanupAttempts).toBe(1);
     await expect(access(`${ownedRoot}/reply.json`)).resolves.toBeUndefined();
+    let closeFailure: unknown;
+    try {
+      await provider.close();
+    } catch (cause) {
+      closeFailure = cause;
+    }
+    expect(closeFailure).toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: expect.arrayContaining([ownedRoot]),
+      ...(replyKind === "completed reply"
+        ? {
+            partialObservation: {
+              operation: "inspect_sqlite_database",
+              confidence: "observed",
+              normalized_result: {
+                schema: { tables: expect.any(Array) },
+                rows: { returned_rows: 1 },
+              },
+            },
+          }
+        : {}),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        cleanupIncomplete: true,
+        cleanupResources: expect.arrayContaining([ownedRoot]),
+        ...(replyKind === "completed reply"
+          ? { partialObservation: { operation: "inspect_sqlite_database" } }
+          : {}),
+      },
+    });
+    cleanupAllowed = true;
     await provider.close();
-    expect(cleanupAttempts).toBe(2);
+    expect(cleanupAttempts).toBe(3);
+    expect(result).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: false, cleanupResources: [] },
+    });
+    expect(closeFailure).toMatchObject({
+      cleanupIncomplete: false,
+      cleanupResources: [],
+    });
     await expectPrivateRootRemoved(ownedRoot);
+  },
+);
+
+nativeTest(
+  "retains a typed worker output failure after exact runtime-root cleanup retry",
+  async () => {
+    const { workspace, database } = await createFixture();
+    let root: PrivateRuntimeRoot | undefined;
+    let rootCloseAttempts = 0;
+    const provider = new SqliteDatabaseProvider(
+      process.env,
+      async (spawn) => {
+        const requestPath = spawn.arguments[2];
+        if (requestPath === undefined)
+          throw new Error("SQLite request path missing");
+        const request = JSON.parse(await readFile(requestPath, "utf8")) as {
+          reply_path: string;
+        };
+        await writeFile(
+          request.reply_path,
+          JSON.stringify({ ok: true, inspection: {} }),
+          { flag: "wx", mode: 0o600 },
+        );
+        return spawnOwnedProviderProcess({
+          ...spawn,
+          arguments: ["-e", "process.exit(0)"],
+        });
+      },
+      async () => {
+        root = await PrivateRuntimeRoot.create({ parent: workspace.root });
+        const acquired = root;
+        return {
+          path: acquired.path,
+          close: async () => {
+            rootCloseAttempts += 1;
+            if (rootCloseAttempts === 1)
+              throw new Error("runtime root removal denied once");
+            await acquired.close();
+          },
+        };
+      },
+    );
+    onTestFinished(async () => {
+      await provider.close();
+      await root?.close();
+      await removeTestWorkspace(workspace.root);
+    });
+
+    const result = await provider.inspect({ path: database.path });
+    if (result.ok) throw new Error("Expected malformed worker output");
+    expect(result.error).toMatchObject({
+      _tag: "ProviderAdapterError",
+      cleanupIncomplete: true,
+      diagnostics: {
+        previous_error: {
+          code: "unreadable_output",
+        },
+      },
+    });
+    await provider.close();
+
+    expect(rootCloseAttempts).toBe(2);
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.cleanupResources).toEqual([]);
+    if (root === undefined) throw new Error("Runtime root was not acquired");
+    await expectPrivateRootRemoved(root.path);
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "unreadable_output",
+    });
+    expect(result.error.cleanupPrimary).toMatchObject({
+      _tag: "AnalysisOutputError",
+      capturedOutput: { stdout: "", stderr: "", truncated: false },
+    });
   },
 );
 
@@ -140,6 +257,9 @@ it.each(["late-cancellation", "cleanup-failure"])(
     const { workspace, database } = await createFixture();
     const original = await readFile(database.path);
     const controller = new AbortController();
+    const cancellationReason = {
+      requested: "cancel during final root cleanup",
+    };
     let cleanupAllowed = false;
     let root: PrivateRuntimeRoot | undefined;
     const provider = new SqliteDatabaseProvider(
@@ -157,7 +277,8 @@ it.each(["late-cancellation", "cleanup-failure"])(
         return {
           path: acquired.path,
           close: async () => {
-            if (scenario === "late-cancellation") controller.abort();
+            if (scenario === "late-cancellation")
+              controller.abort(cancellationReason);
             else if (!cleanupAllowed)
               throw new Error("Completed snapshot cleanup denied");
             await acquired.close();
@@ -176,9 +297,30 @@ it.each(["late-cancellation", "cleanup-failure"])(
     if (scenario === "late-cancellation") {
       expect(controller.signal.aborted).toBe(true);
       expect(result).toMatchObject({
-        ok: true,
-        value: { result: { rows: { columns: ["id"], returned_rows: 1 } } },
+        ok: false,
+        error: {
+          _tag: "AnalysisCancelledError",
+          cause: cancellationReason,
+          partialObservation: {
+            operation: "inspect_sqlite_database",
+            confidence: "observed",
+            subject: {
+              local_path: database.path,
+              digest: { sha256: digestForTest(original) },
+            },
+            parameters: {
+              path: database.path,
+              table: "records",
+              columns: ["id"],
+              row_limit: 1,
+            },
+            normalized_result: { rows: { columns: ["id"], returned_rows: 1 } },
+          },
+        },
       });
+      if (result.ok || result.error._tag !== "AnalysisCancelledError")
+        throw new Error("Expected cancellation after final root cleanup");
+      expect(result.error.cause).toBe(cancellationReason);
     } else {
       expect(result).toMatchObject({
         ok: false,
@@ -587,13 +729,90 @@ nativeTest(
   async () => {
     const { database } = await createFixture();
     const controller = new AbortController();
-    controller.abort();
-    expect(
-      await createProvider().inspect(
-        { path: database.path },
-        { signal: controller.signal },
-      ),
-    ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+    const reason = { requested: "cancel before admission" };
+    controller.abort(reason);
+    const result = await createProvider().inspect(
+      { path: database.path },
+      { signal: controller.signal },
+    );
+    if (result.ok || result.error._tag !== "AnalysisCancelledError")
+      throw new Error("Expected pre-admission cancellation");
+    expect(result.error.cause).toBe(reason);
+  },
+);
+
+nativeTest(
+  "preserves the exact caller reason when cancellation lands before snapshot work",
+  async () => {
+    const { database } = await createFixture();
+    const controller = new AbortController();
+    const reason = { requested: "cancel after admission" };
+    const provider = new SqliteDatabaseProvider({}, () => {
+      throw new Error("SQLite worker must not launch before snapshot work");
+    });
+    onTestFinished(() => provider.close());
+
+    const inspection = provider.inspect(
+      { path: database.path },
+      { signal: controller.signal },
+    );
+    controller.abort(reason);
+    const result = await inspection;
+    if (result.ok || result.error._tag !== "AnalysisCancelledError")
+      throw new Error("Expected cancellation before snapshot work");
+    expect(result.error.cause).toBe(reason);
+  },
+);
+
+nativeTest(
+  "keeps an owned worker failure primary when cancellation arrives during cleanup",
+  async () => {
+    const { database } = await createFixture();
+    const controller = new AbortController();
+    const reason = { requested: "stop after worker exit" };
+    const provider = new SqliteDatabaseProvider(process.env, async (spawn) => {
+      const launched = await spawnOwnedProviderProcess({
+        ...spawn,
+        arguments: [
+          "-e",
+          'process.stderr.write("authored SQLite worker failure"); process.exitCode = 7',
+        ],
+      });
+      const cleanup =
+        launched.cleanup ??
+        (() => cleanupOwnedProcessGroup(launched.ownership));
+      return {
+        ...launched,
+        cleanup: async () => {
+          const outcome = await cleanup();
+          controller.abort(reason);
+          return outcome;
+        },
+      };
+    });
+    onTestFinished(async () => {
+      await provider.close();
+    });
+
+    const result = await provider.inspect(
+      { path: database.path, table: "records" },
+      { signal: controller.signal },
+    );
+
+    expect(controller.signal.reason).toBe(reason);
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "ProviderAdapterError",
+        diagnostics: {
+          failure_kind: "process",
+          exit_code: 7,
+          captured_output: {
+            stderr: "authored SQLite worker failure",
+          },
+        },
+      },
+    });
   },
 );
 
@@ -709,6 +928,7 @@ nativeTest(
   async () => {
     const { database } = await createFixture();
     const controller = new AbortController();
+    const reason = { requested: "stop owned SQLite worker" };
     let ownedRoot = "";
     let pid: number | undefined;
     const provider = new SqliteDatabaseProvider(
@@ -733,7 +953,7 @@ nativeTest(
         pid = launched.process.pid;
         await waitForProviderProcessReady(launched.process);
         await access(`${ownedRoot}/reply.json`);
-        setImmediate(() => controller.abort());
+        setImmediate(() => controller.abort(reason));
         return launched;
       },
     );
@@ -745,6 +965,8 @@ nativeTest(
       ok: false,
       error: { _tag: "AnalysisCancelledError" },
     });
+    if (!result.ok && result.error._tag === "AnalysisCancelledError")
+      expect(result.error.cause).toBe(reason);
     if (pid === undefined) throw new Error("SQLite worker not acquired");
     const acquiredPid = pid;
     expect(() => process.kill(acquiredPid, 0)).toThrow();

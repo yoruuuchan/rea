@@ -143,6 +143,43 @@ describe("Mach-O tool architecture selection", () => {
   );
 });
 
+describe("Mach-O inspection container format", () => {
+  const runInspection = async (lipo: string) => {
+    const runner = new NativeFixtureRunner({ lipo });
+    return inspectNativeMacho({
+      target: nativeMachoTarget("/fixture/app"),
+      run: (tool, args) => runner.run(tool, args),
+      invocation: (capture) => ({
+        tool: capture.tool,
+        command: [capture.executable, ...capture.arguments],
+        tool_version: capture.toolVersion,
+        version_reason: capture.versionReason,
+        executable_sha256: capture.executableSha256,
+        exit: { code: capture.exitCode, signal: capture.signal },
+        stdout_bytes: capture.stdoutBytes,
+        stderr_bytes: capture.stderrBytes,
+      }),
+    });
+  };
+
+  it.each([
+    {
+      framing: "one-slice FAT",
+      lipo: `Fat header in: /fixture/app\nfat_magic 0xcafebabe\nnfat_arch 1\narchitecture arm64\n cputype CPU_TYPE_ARM64\n cpusubtype CPU_SUBTYPE_ARM64_ALL\n offset 4096\n size 128\n align 2^12\n`,
+      expected: "mach-o-universal",
+    },
+    {
+      framing: "thin",
+      lipo: "Non-fat file: /fixture/app is architecture: arm64\n",
+      expected: "mach-o",
+    },
+  ] as const)("reports parsed $framing framing", async ({ lipo, expected }) => {
+    const result = await runInspection(lipo);
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toMatchObject({ format: expected });
+  });
+});
+
 describe("Mach-O UUID reconciliation", () => {
   const validUuid = "01234567-89AB-CDEF-0123-456789ABCDEF";
 

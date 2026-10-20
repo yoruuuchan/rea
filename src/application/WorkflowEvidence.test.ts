@@ -4,6 +4,7 @@ import {
   recordWorkflowUnknowns,
   createWorkflowEvidence,
   executeComposedWorkflow,
+  workflowSnapshotRecord,
 } from "./WorkflowEvidence.js";
 import { InvestigationRecords } from "./investigation/InvestigationRecords.js";
 import { UnknownRegistryError } from "../domain/unknownRegistryError.js";
@@ -17,6 +18,53 @@ import { nativeApiBoundarySchema } from "../domain/native/nativeApiBoundary.js";
 import { projectNativeApiInspection } from "./native/NativeApiInspection.js";
 import { functionDossierSchema } from "../domain/hopperValues.js";
 import { ghidraFunctionDossier } from "../domain/ghidraValues.fixture.js";
+import { ANALYSIS_SNAPSHOT_PROFILE } from "../domain/analysisSnapshot.fixture.js";
+
+it.each([false, true])(
+  "propagates transient=%s through composed snapshot decisions while retaining Evidence",
+  async (transient) => {
+    let calls = 0;
+    const composed = await executeComposedWorkflow(
+      {
+        execute: async () =>
+          ok(
+            createAnalysisExecution(
+              "observed",
+              provider,
+              transient && calls++ === 0
+                ? { cachePolicy: "live" as const }
+                : {},
+            ),
+          ),
+      },
+      async (observed) => {
+        await observed.execute("analyze_function", { procedure: "0x1000" });
+        const last = await observed.execute("procedure_info", {
+          procedure: "0x1000",
+        });
+        return last.ok ? ok(last.value.result) : last;
+      },
+    );
+    if (!composed.ok) throw composed.error;
+    const evidence = createWorkflowEvidence({
+      target: undefined,
+      operation: "inspect_native_api",
+      parameters: {},
+      result: composed.value.result,
+      upstreamProfile: ANALYSIS_SNAPSHOT_PROFILE,
+      upstreamLimitations: composed.value.limitations,
+    });
+    expect(new InvestigationRecords().recordEvidence(evidence).ok).toBe(true);
+    expect(
+      workflowSnapshotRecord(
+        evidence,
+        "inspect_native_api",
+        composed.value.cachePolicy,
+      ) === undefined,
+    ).toBe(transient);
+    expect(evidence.normalized_result).toBe("observed");
+  },
+);
 
 const provider = { id: "fixture", name: "Fixture", version: "1" };
 

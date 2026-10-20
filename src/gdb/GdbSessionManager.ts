@@ -43,6 +43,30 @@ const DEFAULT_MAX_SESSIONS = 8;
 const MAX_PENDING_GDB_COMMANDS = 16;
 const RECENT_RECORD_TRUNCATION_MARKER = "[recent record truncated]";
 
+const cancelledWithCallerReason = (
+  operation: string,
+  signal: AbortSignal,
+  previous?: AnalysisCancelledError,
+): AnalysisCancelledError => {
+  const cancellation = new AnalysisCancelledError(operation, {
+    cause: signal.reason,
+    cleanupPrimary: previous,
+    ...(previous?.diagnostics === undefined
+      ? {}
+      : { diagnostics: previous.diagnostics }),
+    ...(previous?.capturedOutput === undefined
+      ? {}
+      : { capturedOutput: previous.capturedOutput }),
+    ...(previous?.cleanup === undefined ? {} : { cleanup: previous.cleanup }),
+    ...(previous?.partialObservation === undefined
+      ? {}
+      : { partialObservation: previous.partialObservation }),
+  });
+  if (previous?.cleanupIncomplete)
+    cancellation.bindCleanupDependencies([previous]);
+  return cancellation;
+};
+
 export const GDB_PROVIDER_IDENTITY = {
   id: "gnu.gdb",
   name: "GNU GDB",
@@ -572,7 +596,11 @@ export class GdbSessionManager {
         ]),
       );
     if (this.#closing || signal?.aborted)
-      return err(new AnalysisCancelledError("start_gdb_session"));
+      return err(
+        signal?.aborted
+          ? cancelledWithCallerReason("start_gdb_session", signal)
+          : new AnalysisCancelledError("start_gdb_session"),
+      );
     if (this.#platform !== "linux")
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -584,7 +612,12 @@ export class GdbSessionManager {
         ),
       );
     const controller = new AbortController();
-    const relayAbort = (): void => controller.abort(signal?.reason);
+    let callerAbortWon = false;
+    const relayAbort = (): void => {
+      if (controller.signal.aborted) return;
+      callerAbortWon = true;
+      controller.abort(signal?.reason);
+    };
     signal?.addEventListener("abort", relayAbort, { once: true });
     if (signal?.aborted) relayAbort();
     const tracked = Promise.resolve()
@@ -594,7 +627,20 @@ export class GdbSessionManager {
         this.#activeStarts.delete(controller);
       });
     this.#activeStarts.set(controller, tracked);
-    return tracked;
+    return tracked.then((result) =>
+      !result.ok &&
+      result.error instanceof AnalysisCancelledError &&
+      callerAbortWon &&
+      signal !== undefined
+        ? err(
+            cancelledWithCallerReason(
+              "start_gdb_session",
+              signal,
+              result.error,
+            ),
+          )
+        : result,
+    );
   }
 
   async #startWithReservation(
@@ -688,7 +734,10 @@ export class GdbSessionManager {
       };
       launched = await this.#spawnProcess(spawnOptions);
     } catch (cause) {
-      if (signal?.aborted || cause instanceof AnalysisCancelledError)
+      if (
+        (signal?.aborted && cause === signal.reason) ||
+        cause instanceof AnalysisCancelledError
+      )
         return err(new AnalysisCancelledError("start_gdb_session", { cause }));
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -808,7 +857,6 @@ export class GdbSessionManager {
         );
         startupTimer.unref();
       });
-      session.ready = true;
       if (signal?.aborted)
         throw new AnalysisCancelledError("start_gdb_session");
       const autoLoad = await this.#request(
@@ -873,8 +921,11 @@ export class GdbSessionManager {
         throw new Error(
           session.protocolError ?? "GDB exited during startup readiness.",
         );
-      // Before this point no target command can run. Once a usable session is
-      // published, the inferior state is no longer inferred from startup phase.
+      // Publish readiness only after every mandatory startup check completes.
+      // Retained failed-start owners remain addressable for cleanup, not work.
+      session.ready = true;
+      // Before publication no target command can run. Once usable, the
+      // inferior state is no longer inferred from startup phase.
       session.noInferiorVerified = false;
       this.#sessions.set(id, session);
       releaseReservation();
@@ -981,6 +1032,16 @@ export class GdbSessionManager {
       if (stopped.status === "incomplete") {
         this.#sessions.set(id, session);
         releaseReservation();
+        const cleanupFailure = this.#retainCleanupFailure(
+          session,
+          "start_gdb_session",
+          stopped.reason,
+          { cause },
+        );
+        const retainCleanup = <T extends AnalysisError>(failure: T): T =>
+          failure.bindCleanupDependencies([cleanupFailure], {
+            cleanupResources: [session.id],
+          });
         const cleanup = { reason: stopped.reason, resources: [session.id] };
         const details = {
           cause,
@@ -992,17 +1053,27 @@ export class GdbSessionManager {
         };
         if (cause instanceof AnalysisTimeoutError)
           return err(
-            new AnalysisTimeoutError(cause.operation, cause.timeoutMs, details),
+            retainCleanup(
+              new AnalysisTimeoutError(
+                cause.operation,
+                cause.timeoutMs,
+                details,
+              ),
+            ),
           );
         if (cause instanceof AnalysisCancelledError)
-          return err(new AnalysisCancelledError(cause.operation, details));
+          return err(
+            retainCleanup(new AnalysisCancelledError(cause.operation, details)),
+          );
         const startupFailureMessage = gdbErrorMessage(cause);
         return err(
-          new AnalysisCapabilityUnavailableError(
-            "gdb",
-            "start_gdb_session",
-            `GDB startup failed (${startupFailureMessage}) and its owned process could not be confirmed stopped: ${stopped.reason}`,
-            details,
+          retainCleanup(
+            new AnalysisCapabilityUnavailableError(
+              "gdb",
+              "start_gdb_session",
+              `GDB startup failed (${startupFailureMessage}) and its owned process could not be confirmed stopped: ${stopped.reason}`,
+              details,
+            ),
           ),
         );
       }
@@ -1014,7 +1085,7 @@ export class GdbSessionManager {
           : { partialObservation: startupEvidence }),
       };
       const error =
-        signal?.aborted || cause instanceof AnalysisCancelledError
+        cause instanceof AnalysisCancelledError
           ? new AnalysisCancelledError("start_gdb_session", errorDetails)
           : cause instanceof AnalysisTimeoutError
             ? new AnalysisTimeoutError(
@@ -1078,7 +1149,8 @@ export class GdbSessionManager {
           },
         ]),
       );
-    if (signal?.aborted) return err(new AnalysisCancelledError("gdb_console"));
+    if (signal?.aborted)
+      return err(cancelledWithCallerReason("gdb_console", signal));
     try {
       const completed = await this.#serialize(
         session,
@@ -2047,28 +2119,51 @@ export class GdbSessionManager {
           "A GDB MI command was cancelled; owned-session shutdown was requested because output correlation can no longer be guaranteed.";
         void this.#stopDebuggerOnly(session).then(
           (stopped) => {
-            pending.reject(
-              stopped.status === "incomplete"
-                ? new AnalysisCancelledError("gdb_console", {
-                    cause: new Error(stopped.reason),
-                    cleanup: {
-                      reason: stopped.reason,
-                      resources: [session.id],
-                    },
-                    partialObservation: evidence,
-                  })
-                : new AnalysisCancelledError("gdb_console", {
-                    partialObservation: evidence,
-                  }),
+            if (stopped.status !== "incomplete") {
+              pending.reject(
+                new AnalysisCancelledError("gdb_console", {
+                  cause: signal?.reason,
+                  partialObservation: evidence,
+                }),
+              );
+              return;
+            }
+            const cleanupFailure = this.#retainCleanupFailure(
+              session,
+              "gdb_console",
+              stopped.reason,
             );
-          },
-          (cause: unknown) =>
             pending.reject(
               new AnalysisCancelledError("gdb_console", {
-                cause,
+                cause: signal?.reason,
+                cleanup: {
+                  reason: stopped.reason,
+                  resources: [session.id],
+                },
                 partialObservation: evidence,
+              }).bindCleanupDependencies([cleanupFailure], {
+                cleanupResources: [session.id],
               }),
-            ),
+            );
+          },
+          (cause: unknown) => {
+            const reason = gdbErrorMessage(cause);
+            const cleanupFailure = this.#retainCleanupFailure(
+              session,
+              "gdb_console",
+              reason,
+              { cause },
+            );
+            pending.reject(
+              new AnalysisCancelledError("gdb_console", {
+                cause: signal?.reason,
+                cleanup: { reason, resources: [session.id] },
+                partialObservation: evidence,
+              }).bindCleanupDependencies([cleanupFailure], {
+                cleanupResources: [session.id],
+              }),
+            );
+          },
         );
       };
       signal?.addEventListener("abort", abortListener, { once: true });
@@ -2223,17 +2318,21 @@ export const commandMayChangeInferiorOutput = (command: string): boolean => {
   );
 };
 
-/** Terminate only the directly owned debugger process, never its process group or inferiors. */
+/** Await a serialized command turn, preserving the caller's cancellation reason. */
 export const waitForGdbCommandTurn = (
   previous: Promise<void>,
   signal?: AbortSignal,
 ): Promise<void> => {
   if (signal === undefined) return previous;
   if (signal.aborted)
-    return Promise.reject(new AnalysisCancelledError("gdb_console"));
+    return Promise.reject(
+      new AnalysisCancelledError("gdb_console", { cause: signal.reason }),
+    );
   return new Promise<void>((resolve, reject) => {
     const onAbort = (): void =>
-      reject(new AnalysisCancelledError("gdb_console"));
+      reject(
+        new AnalysisCancelledError("gdb_console", { cause: signal.reason }),
+      );
     signal.addEventListener("abort", onAbort, { once: true });
     previous.then(
       () => {

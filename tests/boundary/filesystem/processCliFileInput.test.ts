@@ -184,7 +184,14 @@ describe("process CLI input diagnostics", () => {
       category: "invalid_input",
       message: "Analysis input is invalid. Check the arguments and try again.",
       retryable: true,
-      remediation: { action: "Correct the listed arguments and retry." },
+      remediation: {
+        action:
+          "Read the declared input schema or CLI usage for capture_process_scenario; if using MCP and the catalog may be stale, call tools/list. Correct the listed fields, then retry. Do not repeat the unchanged call.",
+      },
+      recovery: {
+        kind: "inspect_input_contract",
+        operation: "capture_process_scenario",
+      },
       details: expect.objectContaining({
         operation: "capture_process_scenario",
         issues: expect.arrayContaining([

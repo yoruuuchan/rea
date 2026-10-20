@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { machoWithPropertyAttributes } from "../../tests/fixtures/objcPropertyMacho.js";
+import { objcRecordBudgetMacho } from "../../tests/fixtures/objcRecordBudgetMacho.js";
 import { decodeAppleDispatchMetadata } from "./AppleDispatchMetadata.js";
 
 const base = 0x100000000n;
@@ -118,6 +119,20 @@ const fixture = (
   return bytes;
 };
 const provenance = { path: "/fixture/app", sha256: "a".repeat(64) };
+
+const withProtocolListSection = (bytes: Buffer): Buffer => {
+  const pointer = (at: number, offset: number) =>
+    bytes.writeBigUInt64LE(base + BigInt(offset), at);
+  bytes.writeUInt32LE(232, 20);
+  bytes.writeUInt32LE(232, 36);
+  bytes.writeUInt32LE(2, 96);
+  bytes.write("__objc_protolist", 184);
+  bytes.write("__DATA", 200);
+  pointer(216, 0x6c0);
+  bytes.writeBigUInt64LE(8n, 224);
+  pointer(0x6c0, 0x740);
+  return bytes;
+};
 
 const partialSiblingsFixture = (
   options: {
@@ -467,6 +482,173 @@ describe("Apple dispatch coverage ownership", () => {
       reason: expect.stringContaining("category_decode_failed"),
     });
   });
+});
+
+describe("Objective-C declaration-local record-budget coverage", () => {
+  it.each(["protocol", "class"] as const)(
+    "preserves the decoded $0 method at a sufficient budget",
+    (owner) => {
+      const result = decodeAppleDispatchMetadata(
+        objcRecordBudgetMacho(owner),
+        100,
+        provenance,
+      );
+      if (owner === "protocol")
+        expect(result.objc_protocol_records).toMatchObject([
+          {
+            name: "FixtureProtocol",
+            methods: [{ selector: "protocolMethod" }],
+            decode: { status: "decoded", reason: null },
+          },
+        ]);
+      else
+        expect(result.objc_classes).toMatchObject([
+          {
+            name: "FixtureClass",
+            methods: [{ selector: "classMethod", method_type: "instance" }],
+            decode: { status: "decoded", reason: null },
+          },
+        ]);
+    },
+  );
+
+  it("marks an omitted protocol method list partial while preserving known emptiness", () => {
+    const truncated = decodeAppleDispatchMetadata(
+      withProtocolListSection(fixture()),
+      1,
+      provenance,
+    );
+    expect(truncated.objc_protocol_records).toMatchObject([
+      {
+        name: "FixtureProtocol",
+        methods: [],
+        decode: { status: "partial", reason: "max_records_reached" },
+      },
+    ]);
+
+    const emptyBytes = withProtocolListSection(fixture());
+    emptyBytes.writeBigUInt64LE(0n, 0x758);
+    emptyBytes.writeBigUInt64LE(0n, 0x768);
+    const empty = decodeAppleDispatchMetadata(emptyBytes, 1, provenance);
+    expect(empty.objc_protocol_records).toMatchObject([
+      {
+        name: "FixtureProtocol",
+        methods: [],
+        optional_methods: [],
+        decode: { status: "decoded", reason: null },
+      },
+    ]);
+  });
+
+  it("marks omitted class methods, ivars, properties, and adopted protocols partial", () => {
+    const methodBytes = fixture();
+    methodBytes.writeUInt32LE(2, 0x300);
+    methodBytes.writeBigUInt64LE(0n, 0x330);
+    methodBytes.writeBigUInt64LE(0n, 0x340);
+    const methodLimited = decodeAppleDispatchMetadata(
+      methodBytes,
+      1,
+      provenance,
+    );
+    expect(methodLimited.objc_classes[0]).toMatchObject({
+      name: "Fixture",
+      methods: [],
+      decode: { status: "partial", reason: "max_records_reached" },
+    });
+
+    const ivarBytes = fixture();
+    ivarBytes.writeBigUInt64LE(0n, 0x320);
+    ivarBytes.writeBigUInt64LE(0n, 0x328);
+    ivarBytes.writeBigUInt64LE(0n, 0x340);
+    ivarBytes.writeUInt32LE(2, 0x300);
+    const ivarsLimited = decodeAppleDispatchMetadata(ivarBytes, 1, provenance);
+    expect(ivarsLimited.objc_classes[0]).toMatchObject({
+      name: "Fixture",
+      ivar_count: 1,
+      decode: { status: "partial", reason: "max_records_reached" },
+    });
+    expect(ivarsLimited.objc_ivars).toEqual([]);
+
+    const propertyBytes = fixture();
+    propertyBytes.writeBigUInt64LE(0n, 0x320);
+    propertyBytes.writeBigUInt64LE(0n, 0x328);
+    propertyBytes.writeBigUInt64LE(0n, 0x330);
+    propertyBytes.writeUInt32LE(2, 0x300);
+    const propertiesLimited = decodeAppleDispatchMetadata(
+      propertyBytes,
+      1,
+      provenance,
+    );
+    expect(propertiesLimited.objc_classes[0]).toMatchObject({
+      name: "Fixture",
+      properties: [],
+      decode: { status: "partial", reason: "max_records_reached" },
+    });
+
+    const adoptedBytes = fixture();
+    adoptedBytes.writeBigUInt64LE(0n, 0x320);
+    adoptedBytes.writeBigUInt64LE(0n, 0x330);
+    adoptedBytes.writeBigUInt64LE(0n, 0x340);
+    adoptedBytes.writeUInt32LE(2, 0x300);
+    const adoptedLimited = decodeAppleDispatchMetadata(
+      adoptedBytes,
+      1,
+      provenance,
+    );
+    expect(adoptedLimited.objc_classes[0]).toMatchObject({
+      name: "Fixture",
+      protocols: [],
+      decode: { status: "partial", reason: "max_records_reached" },
+    });
+  });
+
+  it("keeps genuinely empty class method lists decoded at the record limit", () => {
+    const bytes = fixture();
+    bytes.writeBigUInt64LE(0n, 0x320);
+    bytes.writeBigUInt64LE(0n, 0x328);
+    bytes.writeBigUInt64LE(0n, 0x330);
+    bytes.writeBigUInt64LE(0n, 0x340);
+    bytes.writeUInt32LE(2, 0x300);
+    const result = decodeAppleDispatchMetadata(bytes, 1, provenance);
+    expect(result.objc_classes[0]).toMatchObject({
+      name: "Fixture",
+      methods: [],
+      decode: { status: "decoded", reason: null },
+    });
+  });
+});
+
+describe("Objective-C category-local record-budget coverage", () => {
+  it.each(["instance", "class"] as const)(
+    "marks category %s methods partial only when a declared entry is omitted",
+    (methodType) => {
+      const bytes = fixture(false, "partial-method");
+      const listField = methodType === "instance" ? 0xb50 : 0xb58;
+      const methodList = bytes.readBigUInt64LE(0xb50);
+      bytes.writeBigUInt64LE(0n, 0xb50);
+      bytes.writeBigUInt64LE(methodList, listField);
+      bytes.writeUInt32LE(2, 0x300);
+      bytes.writeBigUInt64LE(0n, 0x320);
+      const truncated = decodeAppleDispatchMetadata(bytes, 11, provenance);
+      expect(truncated.objc_categories).toMatchObject([
+        {
+          name: "FixtureCategory",
+          [`${methodType}_methods`]: [],
+          decode: { status: "partial", reason: "max_records_reached" },
+        },
+      ]);
+
+      bytes.writeBigUInt64LE(0n, listField);
+      const empty = decodeAppleDispatchMetadata(bytes, 11, provenance);
+      expect(empty.objc_categories).toMatchObject([
+        {
+          name: "FixtureCategory",
+          [`${methodType}_methods`]: [],
+          decode: { status: "decoded", reason: null },
+        },
+      ]);
+    },
+  );
 });
 
 describe("malformed Objective-C property records", () => {

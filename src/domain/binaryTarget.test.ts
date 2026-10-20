@@ -192,7 +192,9 @@ describe("executable header completeness", () => {
     expect(reason(bytes, 4100)).toBe(
       "FAT architecture 1 slice range extends beyond the file",
     );
-    expect(reason(bytes, 4160)).toBeNull();
+    expect(reason(bytes, 4160)).toBe(
+      "FAT slice identity is outside the bounded prefix",
+    );
     expect(parseExecutableHeader(bytes, "x64", 4100)).toMatchObject({
       ok: false,
       error: "FAT architecture 1 slice range extends beyond the file",

@@ -188,7 +188,7 @@ export const projectAppleAssetCatalogPage = (input: {
     records,
     resource_key_matches: resourceKeyMatches,
     next_offset: next < all.length ? next : null,
-    truncated: input.offset > 0 || next < all.length,
+    truncated: records.length !== all.length,
     limitations: [
       "Rendition metadata is reported as emitted by the installed assetutil version; private fields and platform-specific interpretations are not normalized.",
       "Asset catalog inspection does not decode or extract rendition image bytes.",

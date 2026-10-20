@@ -176,7 +176,13 @@ it.each(["caller", "host"] as const)(
     );
     let closing: ReturnType<NonNullable<typeof host.close>> | undefined;
     try {
-      await expect.poll(async () => (await fakeKunaCalls(kuna)).length).toBe(1);
+      // The preceding Ghidra probe may prepare Darwin process ownership before
+      // Kuna starts; keep startup separate from the bounded post-abort join.
+      await expect
+        .poll(async () => (await fakeKunaCalls(kuna)).length, {
+          timeout: 10_000,
+        })
+        .toBe(1);
       const probe = (await fakeKunaCalls(kuna))[0];
       if (probe === undefined) throw new Error("Missing Kuna version probe");
       expect(probe.argv).toEqual(["--version"]);

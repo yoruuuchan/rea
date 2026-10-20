@@ -236,6 +236,15 @@ def _name_matches(document, address, name):
     return observed == name or (not name and observed is None)
 
 
+def _bookmark_name(document, address):
+    getter = getattr(document, "getBookmarkName", None)
+    if not callable(getter):
+        raise CapabilityUnavailableError(
+            "Hopper's public Python API does not expose getBookmarkName"
+        )
+    return getter(address)
+
+
 def _address(document, value=None):
     """Keep explicit hexadecimal coordinates distinct from symbol names."""
     if value is None:
@@ -994,15 +1003,46 @@ def _dispatch(method, params):
         observed = getter(address)
         return observed == comment or (comment == "" and observed is None)
     if method == "list_bookmarks":
-        return [{"address": _hex(item), "name": document.getBookmarkName(item)} for item in document.getBookmarks()]
+        return [{"address": _hex(item), "name": _bookmark_name(document, item)} for item in document.getBookmarks()]
     if method == "set_bookmark":
         address = _address(document, params.get("address"))
         _segment(document, address)
         name = params.get("name")
         if name is not None:
             _api_text(name, "Bookmark name")
-        document.setBookmarkAtAddress(address, name)
-        return document.hasBookmarkAtAddress(address)
+        has_bookmark = getattr(document, "hasBookmarkAtAddress", None)
+        if not callable(has_bookmark):
+            raise CapabilityUnavailableError(
+                "Hopper's public Python API does not expose hasBookmarkAtAddress"
+            )
+        exists = has_bookmark(address)
+        if name is None and exists:
+            # Omission means preserve the existing bookmark and its name.
+            return True
+        if not callable(getattr(document, "getBookmarkName", None)):
+            raise CapabilityUnavailableError(
+                "Hopper's public Python API does not expose getBookmarkName"
+            )
+        if name == "" and exists:
+            rename = getattr(document, "renameBookmarkAtAddress", None)
+            if not callable(rename):
+                raise CapabilityUnavailableError(
+                    "Hopper's public Python API does not expose renameBookmarkAtAddress"
+                )
+            rename(address, name)
+        else:
+            setter = getattr(document, "setBookmarkAtAddress", None)
+            if not callable(setter):
+                raise CapabilityUnavailableError(
+                    "Hopper's public Python API does not expose setBookmarkAtAddress"
+                )
+            setter(address, name)
+        if not has_bookmark(address):
+            return False
+        observed = _bookmark_name(document, address)
+        if name is None:
+            return observed is None or observed == ""
+        return observed == name or (name == "" and observed is None)
     if method == "unset_bookmark":
         address = _address(document, params.get("address"))
         # Permit removing a legacy orphan bookmark, but do not report success

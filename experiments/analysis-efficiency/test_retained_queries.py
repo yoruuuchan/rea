@@ -111,6 +111,23 @@ assert.deepEqual((await saved()).failure,originalFailure);
 assert.deepEqual(JSON.parse(chunks.join('')),report);
 ''')
 
+    def test_transcript_failure_cannot_skip_cleanup_or_lose_original_failure(self):
+        self.run_finalization('''
+await mkdir(join(output,'transcript.json'));
+const closed=[];
+assert.equal(await finalizeRetainedQueryReceipt({...input,transcript:[{phase:'page'}],
+  client:{close:async()=>{closed.push('client');}},
+  transport:{close:async()=>{closed.push('transport');}}}),false);
+assert.deepEqual(closed,['client','transport']);
+assert.equal(serverLog.writableEnded,true);
+await assert.rejects(stat(account),error=>error.code==='ENOENT');
+assert.deepEqual(report.cleanup_failures,[]);
+assert.match(report.receipt_failures[0],/^transcript-file:/);
+assert.strictEqual(report.failure,originalFailure);
+assert.equal(report.calls[0].elapsed_ms,17);
+assert.deepEqual(await saved(),report);assert.deepEqual(JSON.parse(chunks.join('')),report);
+''')
+
     def test_report_file_refusal_preserves_the_stdout_receipt(self):
         self.run_finalization('''
 await mkdir(join(output,'report.json'));

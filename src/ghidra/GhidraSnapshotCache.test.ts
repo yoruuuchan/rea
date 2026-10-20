@@ -31,6 +31,7 @@ const fixture = (version = "12.1.4", coverage?: RelationshipCoverage) => {
   if (!config.ok) throw config.error;
   const calls: string[] = [];
   let name = "original";
+  let decompilerFailed = false;
   let cancelStarted: (() => void) | undefined;
   const cancellationReady = new Promise<void>((resolve) => {
     cancelStarted = resolve;
@@ -104,6 +105,16 @@ const fixture = (version = "12.1.4", coverage?: RelationshipCoverage) => {
         const dossier = functionDossierSchema.parse(ghidraFunctionDossier());
         dossier.procedure.name = name;
         dossier.pseudocode = `void ${name}() {}`;
+        if (decompilerFailed) {
+          dossier.pseudocode = "";
+          dossier.facet_availability = {
+            ...dossier.facet_availability,
+            pseudocode: {
+              available: false,
+              reason: "Injected backend failure",
+            },
+          };
+        }
         if (operation === "annotate_native_function")
           return ok({
             annotations: {
@@ -127,6 +138,9 @@ const fixture = (version = "12.1.4", coverage?: RelationshipCoverage) => {
             ? {
                 value,
                 limitations: [],
+                ...(operation === "analyze_function" && decompilerFailed
+                  ? { cache_policy: "live" }
+                  : {}),
                 ...(operation === "analyze_function" && coverage !== undefined
                   ? { relationship_coverage: coverage }
                   : {}),
@@ -140,6 +154,9 @@ const fixture = (version = "12.1.4", coverage?: RelationshipCoverage) => {
   return {
     calls,
     cancellationReady,
+    setDecompilerFailed: (failed: boolean) => {
+      decompilerFailed = failed;
+    },
     session: createTestBinarySession(provider),
   };
 };
@@ -151,6 +168,52 @@ const open = async (session: ReturnType<typeof fixture>["session"]) => {
 };
 
 describe("Ghidra relationship coverage replay", () => {
+  it("retains degraded Evidence without replaying transient failures after recovery or import", async () => {
+    const initial = fixture();
+    await open(initial.session);
+    initial.setDecompilerFailed(true);
+    const parameters = { procedure: "0x1000" };
+    const degraded = await initial.session.execute(
+      "analyze_function",
+      parameters,
+    );
+    if (!degraded.ok) throw degraded.error;
+    const snapshot = initial.session.exportAnalysisSnapshot();
+    if (!snapshot.ok) throw snapshot.error;
+    expect(snapshot.value.entries).toEqual([]);
+    expect(snapshot.value.evidence_bundle.records).toHaveLength(1);
+
+    initial.setDecompilerFailed(false);
+    const recovered = await initial.session.execute(
+      "analyze_function",
+      parameters,
+    );
+    if (!recovered.ok) throw recovered.error;
+    expect(
+      functionDossierSchema.parse(recovered.value.result).pseudocode,
+    ).not.toBe("");
+    expect(
+      (await initial.session.execute("analyze_function", parameters)).ok,
+    ).toBe(true);
+    expect(initial.calls).toEqual(["analyze_function", "analyze_function"]);
+    await initial.session.close();
+
+    const replay = fixture();
+    expect(replay.session.importAnalysisSnapshot(snapshot.value).ok).toBe(true);
+    await open(replay.session);
+    const imported = await replay.session.execute(
+      "analyze_function",
+      parameters,
+    );
+    if (!imported.ok) throw imported.error;
+    expect(
+      functionDossierSchema.parse(imported.value.result).pseudocode,
+    ).not.toBe("");
+    expect(replay.calls).toEqual(["analyze_function"]);
+    expect(replay.session.exportEvidenceBundle().records).toHaveLength(2);
+    await replay.session.close();
+  });
+
   it.each([
     undefined,
     { status: "complete", diagnostics: ["Resolved static references only."] },

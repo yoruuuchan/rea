@@ -55,6 +55,8 @@ export interface AnalysisExecution {
   readonly rawResult: JsonValue | null;
   readonly provider: ProviderIdentity;
   readonly analysisProfile?: AnalysisProfileCommitment;
+  /** Result-specific veto of snapshot replay; Evidence remains retainable. */
+  readonly cachePolicy?: "live";
   readonly limitations: readonly string[];
   /** Provider-owned completeness assessment for caller/callee observations. */
   readonly relationshipCoverage?: RelationshipCoverage;
@@ -72,6 +74,7 @@ export interface AnalysisExecution {
 interface CreateAnalysisExecutionOptions {
   readonly rawResult?: unknown;
   readonly analysisProfile?: AnalysisProfileCommitment;
+  readonly cachePolicy?: "live";
   readonly limitations?: readonly string[];
   readonly relationshipCoverage?: RelationshipCoverage;
   readonly referencesTruncated?: boolean;
@@ -108,6 +111,9 @@ export function createAnalysisExecution(
         ? null
         : jsonValueSchema.parse(options.rawResult),
     provider,
+    ...(options.cachePolicy === undefined
+      ? {}
+      : { cachePolicy: options.cachePolicy }),
     ...(options.analysisProfile === undefined
       ? {}
       : { analysisProfile: structuredClone(options.analysisProfile) }),
@@ -143,6 +149,12 @@ export const createAnalysisExecutionEvidence = (
     result: execution.result,
     rawResult: execution.rawResult,
     limitations: execution.limitations,
+    ...(execution.analysisProfile === undefined
+      ? {}
+      : { analysisProfile: execution.analysisProfile }),
+    ...(execution.relationshipCoverage === undefined
+      ? {}
+      : { relationshipCoverage: execution.relationshipCoverage }),
     locations: execution.locations,
     confidence,
   });

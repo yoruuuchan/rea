@@ -31,8 +31,9 @@ export const decodeObjcCategories = (input: {
     className: string,
     methodType: "instance" | "class",
     category: string,
+    onTruncated?: () => void,
   ) => string[];
-  readonly protocols: (list: bigint) => string[];
+  readonly protocols: (list: bigint, onTruncated?: () => void) => string[];
   /** Name of a class defined in this image, from its class_ro_t. */
   readonly localClassName: (address: bigint) => string;
 }): number => {
@@ -71,6 +72,43 @@ export const decodeObjcCategories = (input: {
             );
           }
         const owner = className ?? `(${name})`;
+        let budgetTruncated = false;
+        const onTruncated = () => {
+          budgetTruncated = true;
+        };
+        const instanceMethods = input.methods(
+          read.pointer(category + 16n),
+          owner,
+          "instance",
+          name,
+          onTruncated,
+        );
+        const classMethods = input.methods(
+          read.pointer(category + 24n),
+          owner,
+          "class",
+          name,
+          onTruncated,
+        );
+        const protocols = input.protocols(
+          read.pointer(category + 32n),
+          onTruncated,
+        );
+        const properties = readObjcPropertiesOf(
+          read,
+          read.pointer(category + 40n),
+          {
+            owner: `category ${name}`,
+            admit: input.admit,
+            issues: input.issues,
+            location: `0x${read.pointer(category + 40n).toString(16)}`,
+            onTruncated,
+          },
+        );
+        const decodeReasons = [
+          ...(className === null ? ["category_class_unresolved"] : []),
+          ...(budgetTruncated ? ["max_records_reached"] : []),
+        ];
         result.objc_categories.push({
           name,
           class_name: className,
@@ -80,30 +118,15 @@ export const decodeObjcCategories = (input: {
               : className === null
                 ? "unresolved"
                 : "local",
-          instance_methods: input.methods(
-            read.pointer(category + 16n),
-            owner,
-            "instance",
-            name,
-          ),
-          class_methods: input.methods(
-            read.pointer(category + 24n),
-            owner,
-            "class",
-            name,
-          ),
-          protocols: input.protocols(read.pointer(category + 32n)),
-          properties: readObjcPropertiesOf(read, read.pointer(category + 40n), {
-            owner: `category ${name}`,
-            admit: input.admit,
-            issues: input.issues,
-            location: `0x${read.pointer(category + 40n).toString(16)}`,
-          }),
+          instance_methods: instanceMethods,
+          class_methods: classMethods,
+          protocols,
+          properties,
           location: read.location(category),
           decode:
-            className === null
-              ? { status: "partial", reason: "category_class_unresolved" }
-              : { status: "decoded", reason: null },
+            decodeReasons.length === 0
+              ? { status: "decoded", reason: null }
+              : { status: "partial", reason: decodeReasons.join("; ") },
           evidence: read.evidence(category, "Objective-C category_t record"),
         });
       } catch (cause: unknown) {

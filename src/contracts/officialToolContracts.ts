@@ -220,7 +220,7 @@ export const OFFICIAL_TOOL_CONTRACTS = [
   ),
   official(
     "set_bookmark",
-    "Create or replace a bookmark at a mapped hexadecimal address and report success. This mutates navigation metadata; bookmarks are analyst-authored navigation aids, not binary evidence.",
+    "Create or update a bookmark at a mapped hexadecimal address and report readback success. Omit name to preserve an existing name or create an unnamed bookmark; an empty string clears the bookmark name. This mutates navigation metadata; bookmarks are analyst-authored navigation aids, not binary evidence.",
     z.object({ address, name: z.string().optional(), document }),
   ),
   official(

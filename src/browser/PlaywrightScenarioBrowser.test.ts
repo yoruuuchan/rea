@@ -135,9 +135,9 @@ it("keeps attached-target ownership after the cleanup response timeout", async (
     const closeResult = deferred<void>();
     const settled: boolean[] = [];
     const cleanup = new PlaywrightScenarioBrowserCleanupOwner({
-      closeBrowser: () => {
+      closeBrowser: async (disconnectAtBoundary) => {
         closeStarted.resolve(undefined);
-        return closeResult.promise;
+        await disconnectAtBoundary(() => closeResult.promise);
       },
       removeProfile: undefined,
       onSettled: (browserClosed) => settled.push(browserClosed),
@@ -396,6 +396,50 @@ it("restores its environment overrides before releasing an attached browser", as
     "media",
     "session",
     "browser",
+  ]);
+});
+
+it("checks a late stop after attached restoration and before transport disconnect", async () => {
+  const restorationStarted = deferred<void>();
+  const finishRestoration = deferred<void>();
+  const order: string[] = [];
+  const fixture = attachedBrowserFixture({
+    send: async (method, parameters) => {
+      if (
+        method === "Emulation.setTimezoneOverride" &&
+        (parameters as { timezoneId?: string }).timezoneId === ""
+      ) {
+        order.push("restore-started");
+        restorationStarted.resolve(undefined);
+        await finishRestoration.promise;
+        order.push("restore-finished");
+      }
+    },
+    closeBrowser: async () => {
+      order.push("browser-disconnected");
+    },
+  });
+  const opened = await fixture.open();
+  let revision = 0;
+  const release = opened.cleanup.release(undefined, {
+    get revision() {
+      return revision;
+    },
+    async run() {
+      order.push(`gate:${revision}`);
+    },
+  });
+
+  await restorationStarted.promise;
+  revision += 1;
+  finishRestoration.resolve(undefined);
+  await release;
+
+  expect(order).toEqual([
+    "restore-started",
+    "restore-finished",
+    "gate:1",
+    "browser-disconnected",
   ]);
 });
 
@@ -701,9 +745,12 @@ it("tracks only pending browser cleanup resources and resolves prior errors afte
   let profileDenied = true;
   let browserCloses = 0;
   const owner = new PlaywrightScenarioBrowserCleanupOwner({
-    closeBrowser: async () => {
+    closeBrowser: async (disconnectAtBoundary) => {
       browserCloses++;
-      if (browserDenied) throw new Error("controlled transport close failure");
+      await disconnectAtBoundary(async () => {
+        if (browserDenied)
+          throw new Error("controlled transport close failure");
+      });
     },
     removeProfile: async () => {
       if (profileDenied) throw new Error("controlled profile removal failure");
@@ -742,6 +789,145 @@ it("tracks only pending browser cleanup resources and resolves prior errors afte
     await owner.close();
   }
 });
+
+it("rechecks the browser release gate after finalization changes its revision", async () => {
+  const eventsStarted = deferred<void>();
+  const finishEvents = deferred<void>();
+  const gateStarted = deferred<void>();
+  const finishGate = deferred<void>();
+  const closeBrowser = vi.fn(
+    async (
+      disconnectAtBoundary: (disconnect: () => Promise<void>) => Promise<void>,
+    ) => disconnectAtBoundary(async () => undefined),
+  );
+  const owner = new PlaywrightScenarioBrowserCleanupOwner({
+    closeBrowser,
+    removeProfile: undefined,
+  });
+  let revision = 0;
+  const gateRuns: number[] = [];
+  const release = owner.release(
+    async () => {
+      eventsStarted.resolve(undefined);
+      await finishEvents.promise;
+    },
+    {
+      get revision() {
+        return revision;
+      },
+      async run() {
+        gateRuns.push(revision);
+        if (gateRuns.length === 1) {
+          gateStarted.resolve(undefined);
+          await finishGate.promise;
+        }
+      },
+    },
+  );
+
+  await eventsStarted.promise;
+  finishEvents.resolve(undefined);
+  await gateStarted.promise;
+  revision += 1;
+  finishGate.resolve(undefined);
+  await release;
+
+  expect(gateRuns).toEqual([0, 1]);
+  expect(closeBrowser).toHaveBeenCalledTimes(1);
+  expect(owner.browserClosed).toBe(true);
+});
+
+it("runs the latest stop gate after attached restoration and before disconnect", async () => {
+  const restorationStarted = deferred<void>();
+  const finishRestoration = deferred<void>();
+  const gateRevisions: number[] = [];
+  let revision = 0;
+  let disconnected = false;
+  const owner = new PlaywrightScenarioBrowserCleanupOwner({
+    closeBrowser: async (disconnectAtBoundary) => {
+      restorationStarted.resolve(undefined);
+      await finishRestoration.promise;
+      await disconnectAtBoundary(async () => {
+        disconnected = true;
+      });
+    },
+    removeProfile: undefined,
+  });
+  const release = owner.release(undefined, {
+    get revision() {
+      return revision;
+    },
+    async run() {
+      gateRevisions.push(revision);
+    },
+  });
+
+  await restorationStarted.promise;
+  revision += 1;
+  finishRestoration.resolve(undefined);
+  await release;
+
+  expect(gateRevisions).toEqual([1]);
+  expect(disconnected).toBe(true);
+  expect(owner.browserClosed).toBe(true);
+});
+
+it.each([false, true])(
+  "retains a failed release gate when its revision changes: %s",
+  async (changeRevision) => {
+    let transportClosed = false;
+    const closeBrowser = vi.fn(
+      async (
+        disconnectAtBoundary: (
+          disconnect: () => Promise<void>,
+        ) => Promise<void>,
+      ) =>
+        disconnectAtBoundary(async () => {
+          transportClosed = true;
+        }),
+    );
+    const owner = new PlaywrightScenarioBrowserCleanupOwner({
+      closeBrowser,
+      removeProfile: undefined,
+    });
+    const failure = new Error("navigation stop was not confirmed");
+    const gateStarted = deferred<void>();
+    const finishGate = deferred<void>();
+    let revision = 0;
+    let failGate = true;
+    const gate = {
+      get revision() {
+        return revision;
+      },
+      async run() {
+        if (failGate) {
+          failGate = false;
+          gateStarted.resolve(undefined);
+          await finishGate.promise;
+          throw failure;
+        }
+      },
+    };
+
+    const release = owner.release(undefined, gate).then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    );
+    await gateStarted.promise;
+    if (changeRevision) revision += 1;
+    finishGate.resolve(undefined);
+    await expect(release).resolves.toEqual({ ok: false, cause: failure });
+    expect(closeBrowser).toHaveBeenCalledTimes(1);
+    expect(transportClosed).toBe(false);
+    expect(owner.browserClosed).toBe(false);
+    expect(owner.cleanupResources).toContain("browser_transport");
+
+    await owner.release(undefined, gate);
+    expect(closeBrowser).toHaveBeenCalledTimes(2);
+    expect(transportClosed).toBe(true);
+    expect(owner.browserClosed).toBe(true);
+  },
+);
 
 it("bounds an opening failure response while retaining the same late cleanup lease", async () => {
   vi.useFakeTimers();

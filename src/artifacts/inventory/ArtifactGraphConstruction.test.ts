@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { CPU, fatImage, machoImage } from "../apple/MachoImage.fixture.js";
+import {
+  CPU,
+  arArchive,
+  fatImage,
+  machoImage,
+} from "../apple/MachoImage.fixture.js";
 import {
   createArtifactEdges,
+  classifyArtifactContent,
   createOccurrence,
   indexOccurrencesByPath,
   resolveOccurrenceParents,
 } from "./ArtifactGraphConstruction.js";
+import { createArtifactClassificationProbe } from "../ArtifactClassificationProbe.js";
 import { artifactIdForContent } from "../../domain/artifactIdentity.js";
 import type { ArtifactEntry } from "../ArtifactReader.js";
 
@@ -164,8 +171,49 @@ describe("source-map artifact relationships", () => {
 const fat = (wide = false): Buffer =>
   Buffer.from(fatImage([{ cpu: CPU.arm64, bytes: machoImage({}) }], wide));
 
+const expectStreamedFatClassification = (testCase: {
+  readonly slices: readonly {
+    readonly cpu: { readonly type: number; readonly subtype: number };
+    readonly bytes: Uint8Array;
+  }[];
+  readonly expected: string;
+}): void => {
+  const bytes = Buffer.alloc(24_128);
+  const offsets = testCase.slices.map((_, index) => 20_000 + index * 4_000);
+  bytes.writeUInt32BE(0xcafebabe, 0);
+  bytes.writeUInt32BE(testCase.slices.length, 4);
+  testCase.slices.forEach((slice, index) => {
+    const entry = 8 + index * 20;
+    const sliceOffset = offsets[index]!;
+    bytes.writeUInt32BE(slice.cpu.type, entry);
+    bytes.writeUInt32BE(slice.cpu.subtype, entry + 4);
+    bytes.writeUInt32BE(sliceOffset, entry + 8);
+    bytes.writeUInt32BE(slice.bytes.length, entry + 12);
+    bytes.writeUInt32BE(0, entry + 16);
+    Buffer.from(slice.bytes).copy(bytes, sliceOffset);
+  });
+
+  const probe = createArtifactClassificationProbe();
+  const boundaries = [
+    8_192,
+    ...offsets.flatMap((offset) => [offset + 3, offset + 4]),
+    bytes.length,
+  ].sort((left, right) => left - right);
+  let previous = 0;
+  for (const boundary of boundaries) {
+    if (boundary <= previous) continue;
+    probe.write(bytes.subarray(previous, boundary));
+    previous = boundary;
+  }
+  const evidence = probe.finish(bytes.length);
+  expect(evidence.prefix.length).toBeLessThan(bytes.length);
+  expect(classifyArtifactContent("native", evidence, bytes.length).format).toBe(
+    testCase.expected,
+  );
+};
+
 describe("bounded FAT inventory classification", () => {
-  it("requires the complete table but not slice bytes in the retained prefix", () => {
+  it("requires the complete table and an observed slice header", () => {
     const bytes = fat();
     for (const length of [4, 7, 8, 27]) {
       expect(
@@ -182,7 +230,25 @@ describe("bounded FAT inventory classification", () => {
         bytes.subarray(0, 28),
         bytes.length,
       ),
-    ).toEqual({ kind: "executable", format: "mach-o-universal" });
+    ).toEqual({ kind: "unknown", format: "unknown" });
+    expect(classifyArtifactBytesAtPath("native.class", bytes)).toEqual({
+      kind: "executable",
+      format: "mach-o-universal",
+    });
+  });
+
+  it("does not classify known-CPU FAT archive slices as Mach-O", () => {
+    const archive = arArchive();
+    const bytes = Buffer.from(
+      fatImage([
+        { cpu: CPU.x86_64, bytes: archive },
+        { cpu: CPU.arm64, bytes: archive },
+      ]),
+    );
+    expect(classifyArtifactBytesAtPath("libfat.a", bytes)).toEqual({
+      kind: "unknown",
+      format: "unknown",
+    });
   });
 
   it.each([
@@ -252,6 +318,65 @@ describe("bounded FAT inventory classification", () => {
     });
   });
 
+  it("classifies distant FAT headers from bounded streaming observations", () => {
+    const cases = [
+      {
+        name: "Mach-O",
+        slices: [{ cpu: CPU.arm64, bytes: machoImage({}) }],
+        expected: "mach-o-universal",
+      },
+      {
+        name: "archive",
+        slices: [{ cpu: CPU.arm64, bytes: arArchive() }],
+        expected: "unknown",
+      },
+      {
+        name: "mixed Mach-O and archive",
+        slices: [
+          { cpu: CPU.x86_64, bytes: machoImage({ cpu: CPU.x86_64 }) },
+          { cpu: CPU.arm64, bytes: arArchive() },
+        ],
+        expected: "unknown",
+      },
+    ] as const;
+    for (const testCase of cases) expectStreamedFatClassification(testCase);
+  });
+});
+
+describe("FAT prefix observation coverage", () => {
+  it("does not invent an observation for a header beyond the retained prefix", () => {
+    const bytes = Buffer.alloc(8_224);
+    bytes.writeUInt32BE(0xcafebabe, 0);
+    bytes.writeUInt32BE(2, 4);
+    for (const [index, slice] of [
+      { cpu: CPU.x86_64, offset: 4_096 },
+      { cpu: CPU.arm64, offset: 8_192 },
+    ].entries()) {
+      const entry = 8 + index * 20;
+      bytes.writeUInt32BE(slice.cpu.type, entry);
+      bytes.writeUInt32BE(slice.cpu.subtype, entry + 4);
+      bytes.writeUInt32BE(slice.offset, entry + 8);
+      bytes.writeUInt32BE(32, entry + 12);
+      bytes.writeUInt32BE(12, entry + 16);
+      bytes.writeUInt32LE(0xfeedfacf, slice.offset);
+      bytes.writeUInt32LE(slice.cpu.type, slice.offset + 4);
+      bytes.writeUInt32LE(slice.cpu.subtype, slice.offset + 8);
+    }
+
+    const probe = createArtifactClassificationProbe();
+    probe.write(bytes.subarray(0, 8_192));
+    const evidence = probe.finish(bytes.length);
+
+    expect(
+      evidence.fatSliceHeaders?.sliceHeadersByOffset.get(4_096)?.magic,
+    ).toBe(0xcffaedfe);
+    expect(evidence.fatSliceHeaders?.sliceHeadersByOffset.has(8_192)).toBe(
+      false,
+    );
+  });
+});
+
+describe("bounded FAT inventory classification", () => {
   it.each([NaN, Infinity, -1, 8.5, Number.MAX_SAFE_INTEGER + 1, 27])(
     "keeps invalid or contradictory file size %s unknown",
     (size) => {

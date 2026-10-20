@@ -229,6 +229,51 @@ describe("inspection without deep binding", () => {
 });
 
 describe("analysis provider registry: selection failures", () => {
+  it("offers only admitted providers for ambiguous automatic selection", async () => {
+    const alpha = candidate("alpha");
+    const beta = candidate("beta");
+    const ghidra = candidate("ghidra", {
+      available: false,
+      unconfigured: true,
+    });
+    const kuna = candidate("kuna", {
+      available: false,
+      unconfigured: true,
+    });
+    const registry = new AnalysisProviderRegistry([
+      alpha.provider,
+      beta.provider,
+      ghidra.provider,
+      kuna.provider,
+    ]);
+
+    const ambiguous = await registry.select(DATABASE_TARGET);
+    expect(ambiguous.ok).toBe(false);
+    if (!ambiguous.ok)
+      expect(projectAnalysisError(ambiguous.error)).toMatchObject({
+        details: {
+          selection_reason: "ambiguous",
+          candidate_ids: ["alpha", "beta"],
+          rejections: [
+            { provider_id: "ghidra", code: "not_configured" },
+            { provider_id: "kuna", code: "not_configured" },
+          ],
+        },
+      });
+
+    for (const selected of [
+      await registry.select(DATABASE_TARGET, "alpha"),
+      await registry.select(DATABASE_TARGET, "beta"),
+    ])
+      expect(selected).toMatchObject({ ok: true });
+    expect([
+      ...alpha.created,
+      ...beta.created,
+      ...ghidra.created,
+      ...kuna.created,
+    ]).toEqual([]);
+  });
+
   it("returns actionable unknown, unavailable, and unsupported failures", async () => {
     const unavailable = candidate("alpha", { available: false });
     const registry = new AnalysisProviderRegistry([unavailable.provider]);
@@ -465,6 +510,7 @@ const candidate = (
   id: string,
   options: {
     readonly available?: boolean;
+    readonly unconfigured?: boolean;
     readonly profile?: "resolved" | "missing" | "error";
   } = {},
 ): CandidateFixture => {
@@ -488,7 +534,7 @@ const candidate = (
           }
         : {
             status: "unavailable",
-            code: "runtime_missing",
+            code: options.unconfigured ? "not_configured" : "runtime_missing",
             reason: `${id} runtime is unavailable`,
             diagnostics: { executable_path: `/opt/${id}/bin/analyze` },
           },

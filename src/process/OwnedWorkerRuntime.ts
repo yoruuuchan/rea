@@ -14,6 +14,8 @@ export interface OwnedWorkerRuntimeOptions {
   readonly rootPrefix: string;
   readonly launcher?: typeof spawnOwnedProviderProcess;
   readonly supervisorOptions?: ProviderProcessSupervisorOptions;
+  /** Report request-stream failure at the lifecycle owner observation point. */
+  readonly onInputFailure?: (cause: Error) => void;
   /** Let a higher-level owner release its dependent resources before this root. */
   readonly retryCleanup?: () => Promise<void>;
 }
@@ -400,6 +402,7 @@ export class OwnedWorkerRuntime {
         cause instanceof Error
           ? cause
           : new Error("Owned worker request stream failed", { cause });
+      this.options.onInputFailure?.(this.#inputFailure);
     };
     const onClose = (): void => {
       stream.off("error", onError);

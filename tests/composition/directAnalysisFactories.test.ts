@@ -10,26 +10,38 @@ import type { DirectAnalysisDependencies } from "../../src/application/DirectAna
 import type { NativeToolName } from "../../src/contracts/native/nativeToolContracts.js";
 import type { BinarySession } from "../../src/application/binary/BinarySession.js";
 import { observed } from "../fixtures/analysisExecution.js";
+import { createAnalysisProfile } from "../../src/domain/analysisProfile.js";
 import {
   createBinarySessionTargets,
   createTestBinarySession,
 } from "../fixtures/binarySession.js";
 
-const recordingFactories = (failure?: Error) => {
+const recordingFactories = (
+  failure?: Error,
+  profile?: ReturnType<typeof createAnalysisProfile>,
+) => {
   const sessions: BinarySession[] = [];
   let clientsClosed = 0;
   const createSession = () => {
-    const session = createTestBinarySession(() => ({
-      execute: (operation) => {
-        if (failure !== undefined && operation === "read_bytes")
-          return Promise.reject(failure);
-        return Promise.resolve(observed({ operation }));
-      },
-      close: () => {
-        clientsClosed += 1;
-        return Promise.resolve(resultOk(null));
-      },
-    }));
+    const session = createTestBinarySession(
+      () => ({
+        execute: (operation) => {
+          if (failure !== undefined && operation === "read_bytes")
+            return Promise.reject(failure);
+          return Promise.resolve(observed({ operation }));
+        },
+        close: () => {
+          clientsClosed += 1;
+          return Promise.resolve(resultOk(null));
+        },
+      }),
+      profile === undefined
+        ? {}
+        : {
+            resolveAnalysisProfile: () =>
+              Promise.resolve(resultOk({ profile })),
+          },
+    );
     sessions.push(session);
     return session;
   };
@@ -196,4 +208,24 @@ describe("one-shot analysis factory boundary", () => {
       expect(factories.clientsClosed()).toBe(1);
     },
   );
+});
+
+it("preserves a managed execution profile in direct analysis Evidence", async () => {
+  const [path] = await createBinarySessionTargets();
+  const profile = createAnalysisProfile(
+    {
+      id: "fixture",
+      name: "Fixture analysis provider",
+      version: "1",
+    },
+    { fixture: true },
+  );
+  const factories = recordingFactories(undefined, profile);
+  const evidence = await runProviderAnalysis(
+    factories.dependencies,
+    path,
+    "inspect_managed_artifact",
+    {},
+  );
+  expect(evidence).toMatchObject({ analysis_profile: profile });
 });

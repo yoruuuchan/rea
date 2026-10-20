@@ -1,4 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
@@ -55,6 +56,54 @@ if (args[0] === "version") {
   };
 };
 
+const assertAdvertisedActivityExtras = async (
+  client: Client,
+  input: Readonly<Record<string, unknown>>,
+  calls: () => Promise<string[]>,
+) => {
+  const advertised = (await client.listTools()).tools.find(
+    ({ name }) => name === "start_adb_activity",
+  );
+  if (advertised === undefined) throw new Error("Missing ADB activity tool");
+  const ajv = new Ajv2020({ strict: false, validateFormats: false });
+  expect(ajv.validateSchema(advertised.inputSchema)).toBe(true);
+  const validateInput = ajv.compile(advertised.inputSchema);
+  expect(validateInput(input)).toBe(true);
+  expect(
+    validateInput({
+      ...input,
+      extras: [
+        { key: "bool", type: "boolean", value: "false" },
+        { key: "int", type: "int", value: "-3" },
+        { key: "long", type: "long", value: "9007199254740993" },
+        { key: "float", type: "float", value: "-1.25" },
+      ],
+    }),
+  ).toBe(true);
+  for (const [type, value] of [
+    ["boolean", ""],
+    ["boolean", "yes"],
+    ["int", "1.5"],
+    ["long", ""],
+    ["float", "1e3"],
+  ])
+    expect(
+      validateInput({ ...input, extras: [{ key: "invalid", type, value }] }),
+      `${type}: ${value}`,
+    ).toBe(false);
+
+  const callsBeforeInvalidExtra = await calls();
+  const invalidExtra = await client.callTool({
+    name: "start_adb_activity",
+    arguments: {
+      ...input,
+      extras: [{ key: "invalid", type: "boolean", value: "yes" }],
+    },
+  });
+  expect(invalidExtra.isError).toBe(true);
+  expect(await calls()).toEqual(callsBeforeInvalidExtra);
+};
+
 it
   .skipIf(process.platform === "win32")
   .each(["start_adb_app", "start_adb_activity"] as const)(
@@ -97,7 +146,10 @@ it
             action: "android.intent.action.MAIN",
             data_uri: "https://example.invalid/launch",
             component: "com.example/.Main",
-            extras: [{ key: "mode", type: "string" as const, value: "test" }],
+            extras: [
+              { key: "mode", type: "string" as const, value: "test" },
+              { key: "empty", type: "string" as const, value: "" },
+            ],
           };
     const success = await client.callTool({
       name: operation,
@@ -114,6 +166,9 @@ it
       reported_status: "ok",
     });
     expect(evidence.raw_result).toEqual({ stdout, stderr });
+
+    if (operation === "start_adb_activity")
+      await assertAdvertisedActivityExtras(client, input, fakeAdb.calls);
 
     stdout = `${starting}Status: timeout\nActivity: com.example/.Main\nWaitTime: 10004\nComplete\n`;
     await fakeAdb.setReport(stdout, stderr);
@@ -181,6 +236,7 @@ it
                 "-d https://example.invalid/launch",
                 "-n com.example/.Main",
                 "--es mode test",
+                "--es empty ''",
               ]),
         ].join(" "),
       ),

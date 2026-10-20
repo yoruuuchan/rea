@@ -107,6 +107,7 @@ export const readObjcPropertyList = (
   read: ObjcPropertyReaders,
   list: bigint,
   admit: () => boolean,
+  onTruncated?: () => void,
 ): {
   readonly properties: ObjcProperty[];
   readonly issues: PropertyListIssue[];
@@ -121,7 +122,10 @@ export const readObjcPropertyList = (
       `Unsupported Objective-C property entry size ${entrySize}`,
     );
   for (let index = 0; index < count; index++) {
-    if (!admit()) break;
+    if (!admit()) {
+      onTruncated?.();
+      break;
+    }
     const entry = list + 8n + BigInt(index * entrySize);
     const location = `0x${entry.toString(16)}`;
     try {
@@ -158,6 +162,7 @@ export const readObjcPropertiesOf = (
     readonly admit: () => boolean;
     readonly issues: DecodeIssue[];
     readonly location?: string;
+    readonly onTruncated?: () => void;
   },
 ): ObjcProperty[] => {
   try {
@@ -165,6 +170,7 @@ export const readObjcPropertiesOf = (
       read,
       list,
       context.admit,
+      context.onTruncated,
     );
     for (const item of issues)
       context.issues.push(

@@ -5,6 +5,7 @@ import {
 } from "./MachoArchitectureSelection.js";
 import { machoCpuSubtypeBase } from "../domain/apple/machoCpuIdentity.js";
 import {
+  machoLoadCommandAlignment,
   readFatSliceDeclarations,
   validateFatSlice,
   type FatSliceDeclaration,
@@ -192,7 +193,11 @@ export const parseMachoLayout = (
       kind: bytes.readUInt32LE(cursor),
       size: bytes.readUInt32LE(cursor + 4),
     };
-    if (command.size < 8 || cursor + command.size > commandEnd)
+    if (
+      command.size < 8 ||
+      command.size % machoLoadCommandAlignment(true) !== 0 ||
+      cursor + command.size > commandEnd
+    )
       throw new RangeError("Invalid load command size");
     if (command.kind === 0x19) collectSegment(bytes, command, state);
     else collectFixupCommand(bytes, command, state);

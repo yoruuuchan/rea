@@ -65,7 +65,7 @@ vi.mock("./PlaywrightScenarioStorage.js", () => ({
 vi.mock("./PlaywrightScenarioEvents.js", () => ({
   PlaywrightScenarioEvents: class {
     finish() {
-      mocks.finishEvents();
+      return mocks.finishEvents();
     }
 
     result() {
@@ -114,6 +114,25 @@ const scenario = browserScenarioSchema.parse({
   },
 });
 
+const deferred = () => {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+};
+
+const connectedScenario = (serviceWorkers: "block" | "allow") =>
+  browserScenarioSchema.parse({
+    ...scenario,
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "target",
+    },
+    environment: { service_workers: serviceWorkers },
+  });
+
 const fixture = () => {
   const page = Object.assign(new EventEmitter(), {
     url: () => "about:blank",
@@ -137,10 +156,22 @@ const fixture = () => {
     version: () => "Chrome 154",
   });
   let browserClosed = false;
-  const close = vi.fn(async (finishEvents?: () => Promise<void>) => {
-    await finishEvents?.();
-    browserClosed = true;
-  });
+  const close = vi.fn(
+    async (
+      finishEvents?: () => Promise<void>,
+      releaseGate?: { readonly revision: number; run(): Promise<void> },
+    ) => {
+      await finishEvents?.();
+      if (releaseGate !== undefined) {
+        for (;;) {
+          const revision = releaseGate.revision;
+          await releaseGate.run();
+          if (releaseGate.revision === revision) break;
+        }
+      }
+      browserClosed = true;
+    },
+  );
   const cleanup = {
     close,
     release: close,
@@ -226,8 +257,10 @@ it("stops attached navigation without storage and retries rejected policy cleanu
   expect(cleanup.close).toHaveBeenCalledTimes(1);
 });
 
-it("assigns attached navigation stopping to the storage owner once", async () => {
-  const { cleanup, storage } = fixture();
+it("stops attached navigation when cancellation precedes the first close", async () => {
+  const { cleanup, page } = fixture();
+  mocks.storage = undefined;
+  const cancellation = new AbortController();
   const attached = browserScenarioSchema.parse({
     ...scenario,
     browser: {
@@ -236,7 +269,32 @@ it("assigns attached navigation stopping to the storage owner once", async () =>
       target_id: "target",
     },
     environment: { service_workers: "block" },
+    storage: {},
   });
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  cancellation.abort();
+
+  await expect(session.close()).resolves.toBe("disconnected-external");
+  expect(
+    mocks.policySend.mock.calls.filter(
+      ([method]) => method === "Page.stopLoading",
+    ),
+  ).toHaveLength(1);
+  expect(
+    page.evaluate.mock.calls.filter(
+      ([script]) => script === "globalThis.stop()",
+    ),
+  ).toHaveLength(0);
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+});
+
+it("assigns attached navigation stopping to the storage owner once", async () => {
+  const { cleanup, storage } = fixture();
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
 
   await expect(session.close(true)).resolves.toBe("disconnected-external");
@@ -254,15 +312,7 @@ it("transfers attached navigation stopping after storage cleanup fails", async (
   const storageFailure = new Error("storage stop unconfirmed");
   storage?.close.mockRejectedValueOnce(storageFailure);
   const policyFailure = new Error("policy stop unconfirmed");
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   mocks.policySend.mockRejectedValueOnce(policyFailure);
 
@@ -285,15 +335,7 @@ it("transfers a late stop request after storage has already released", async () 
   const { cleanup, storage } = fixture();
   const cancellation = new AbortController();
   storage?.close.mockResolvedValue({ loadingStopped: false });
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(
     attached,
     {},
@@ -318,10 +360,447 @@ it("transfers a late stop request after storage has already released", async () 
   expect(cleanup.close).not.toHaveBeenCalled();
   cancellation.abort();
   await expect(session.close()).resolves.toBe("disconnected-external");
-  expect(storage?.close.mock.calls).toEqual([[false], [true]]);
+  expect(storage?.close.mock.calls).toEqual([[false]]);
   expect(
     mocks.policySend.mock.calls.filter(
       ([method]) => method === "Page.stopLoading",
+    ),
+  ).toHaveLength(1);
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+});
+
+it.each(["pending", "settled"] as const)(
+  "honors a late stop after policy restoration is %s",
+  async (phase) => {
+    const { cleanup, page, storage } = fixture();
+    const cancellation = new AbortController();
+    storage?.close.mockResolvedValue({ loadingStopped: false });
+    const attached = connectedScenario("block");
+    const session = await PlaywrightScenarioSession.open(
+      attached,
+      {},
+      { signal: cancellation.signal },
+    );
+    const { promise: held, resolve: finishRestoration } = deferred();
+    const { promise: started, resolve: restorationStarted } = deferred();
+    const { promise: transportClosed, resolve: signalTransportClosed } =
+      deferred();
+    mocks.policyTransportClose.mockImplementation(async () => {
+      signalTransportClosed();
+    });
+    mocks.policySend.mockImplementation(async (method: string) => {
+      if (method === "Runtime.evaluate") {
+        restorationStarted();
+        await held;
+      }
+      return policyResponse(method);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const firstClose = session.close(false).then(
+        () => ({ ok: true as const }),
+        (cause: unknown) => ({ ok: false as const, cause }),
+      );
+      await started;
+      await vi.advanceTimersByTimeAsync(5_001);
+      await expect(firstClose).resolves.toMatchObject({
+        ok: false,
+        cause: { cleanupIncomplete: true },
+      });
+      expect(cleanup.close).not.toHaveBeenCalled();
+
+      if (phase === "settled") {
+        finishRestoration();
+        await transportClosed;
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      cancellation.abort();
+      const retry = session.close();
+      if (phase === "pending") {
+        finishRestoration();
+        await transportClosed;
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      await expect(retry).resolves.toBe("disconnected-external");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(storage?.close.mock.calls).toEqual([[false]]);
+    const policyStops = mocks.policySend.mock.calls.filter(
+      ([method]) => method === "Page.stopLoading",
+    ).length;
+    const frameStops = page.evaluate.mock.calls.filter(
+      ([script]) => script === "globalThis.stop()",
+    ).length;
+    expect(policyStops + frameStops).toBe(1);
+    expect(cleanup.close).toHaveBeenCalledTimes(1);
+    expect(mocks.policyTransportClose).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("transfers cancellation to a no-stop cleanup already in progress", async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: false });
+  const attached = connectedScenario("block");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: held, resolve: finishRestoration } = deferred();
+  const { promise: started, resolve: restorationStarted } = deferred();
+  let browserWasOpenAtStop = false;
+  page.evaluate.mockImplementation(async (script: unknown) => {
+    if (script === "globalThis.stop()")
+      browserWasOpenAtStop = cleanup.browserClosed === false;
+    return null;
+  });
+  mocks.policySend.mockImplementation(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      restorationStarted();
+      await held;
+    }
+    if (method === "Page.stopLoading")
+      browserWasOpenAtStop = cleanup.browserClosed === false;
+    return policyResponse(method);
+  });
+
+  const firstClose = session.close(false);
+  await started;
+  cancellation.abort();
+  const retry = session.close();
+  finishRestoration();
+  await expect(Promise.all([firstClose, retry])).resolves.toEqual([
+    "disconnected-external",
+    "disconnected-external",
+  ]);
+
+  const policyStops = mocks.policySend.mock.calls.filter(
+    ([method]) => method === "Page.stopLoading",
+  ).length;
+  const frameStops = page.evaluate.mock.calls.filter(
+    ([script]) => script === "globalThis.stop()",
+  ).length;
+  expect(policyStops + frameStops).toBe(1);
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+  expect(browserWasOpenAtStop).toBe(true);
+});
+
+it("does not repeat a stop confirmed by storage during a late retry", async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: true });
+  const attached = connectedScenario("block");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: held, resolve: finishRestoration } = deferred();
+  const { promise: started, resolve: restorationStarted } = deferred();
+  mocks.policySend.mockImplementation(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      restorationStarted();
+      await held;
+    }
+    return policyResponse(method);
+  });
+
+  const firstClose = session.close(false);
+  await started;
+  cancellation.abort();
+  const retry = session.close();
+  finishRestoration();
+  await expect(Promise.all([firstClose, retry])).resolves.toEqual([
+    "disconnected-external",
+    "disconnected-external",
+  ]);
+
+  expect(storage?.close).toHaveBeenCalledWith(false);
+  expect(
+    mocks.policySend.mock.calls.filter(
+      ([method]) => method === "Page.stopLoading",
+    ),
+  ).toHaveLength(0);
+  expect(
+    page.evaluate.mock.calls.filter(
+      ([script]) => script === "globalThis.stop()",
+    ),
+  ).toHaveLength(0);
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+});
+
+it.each(["block", "allow"] as const)(
+  "transfers cancellation during final event cleanup with service workers set to %s",
+  async (serviceWorkers) => {
+    const { cleanup, page, storage } = fixture();
+    const cancellation = new AbortController();
+    storage?.close.mockResolvedValue({ loadingStopped: false });
+    const attached = connectedScenario(serviceWorkers);
+    const session = await PlaywrightScenarioSession.open(
+      attached,
+      {},
+      { signal: cancellation.signal },
+    );
+    const { promise: heldEvents, resolve: finishEvents } = deferred();
+    const { promise: eventsStarted, resolve: finishStarted } = deferred();
+    mocks.finishEvents.mockImplementation(async () => {
+      finishStarted();
+      await heldEvents;
+    });
+    let browserWasOpenAtStop = false;
+    page.evaluate.mockImplementation(async (script: unknown) => {
+      if (script === "globalThis.stop()")
+        browserWasOpenAtStop = cleanup.browserClosed === false;
+      return null;
+    });
+
+    const firstClose = session.close(false);
+    await eventsStarted;
+    cancellation.abort();
+    const retry = session.close();
+    finishEvents();
+    await expect(Promise.all([firstClose, retry])).resolves.toEqual([
+      "disconnected-external",
+      "disconnected-external",
+    ]);
+
+    expect(page.evaluate).toHaveBeenCalledWith("globalThis.stop()");
+    if (serviceWorkers === "allow")
+      expect(page.evaluate).toHaveBeenCalledTimes(1);
+    expect(storage?.close).toHaveBeenCalledWith(false);
+    expect(browserWasOpenAtStop).toBe(true);
+    expect(cleanup.close).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("stops a connected page without storage or a service-worker policy owner", async () => {
+  const { cleanup, page } = fixture();
+  mocks.storage = undefined;
+  const cancellation = new AbortController();
+  const attached = connectedScenario("allow");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: heldEvents, resolve: finishEvents } = deferred();
+  const { promise: eventsStarted, resolve: finishStarted } = deferred();
+  mocks.finishEvents.mockImplementation(async () => {
+    finishStarted();
+    await heldEvents;
+  });
+
+  const firstClose = session.close(false);
+  await eventsStarted;
+  cancellation.abort();
+  const retry = session.close();
+  finishEvents();
+  await expect(Promise.all([firstClose, retry])).resolves.toEqual([
+    "disconnected-external",
+    "disconnected-external",
+  ]);
+
+  expect(page.evaluate).toHaveBeenCalledWith("globalThis.stop()");
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+});
+
+it("retries a failed connected-page stop when service workers are allowed", async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: false });
+  const attached = connectedScenario("allow");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: heldEvents, resolve: finishEvents } = deferred();
+  const { promise: eventsStarted, resolve: finishStarted } = deferred();
+  mocks.finishEvents.mockImplementation(async () => {
+    finishStarted();
+    await heldEvents;
+  });
+  const failedFrame = {
+    isDetached: () => false,
+    evaluate: vi.fn(async () => {
+      throw new Error("main frame stop failed");
+    }),
+  } as unknown as ReturnType<typeof page.mainFrame>;
+  const freshFrame = {
+    isDetached: () => false,
+    evaluate: vi.fn(async () => undefined),
+  } as unknown as ReturnType<typeof page.mainFrame>;
+  vi.spyOn(page, "mainFrame")
+    .mockReturnValueOnce(failedFrame)
+    .mockReturnValue(freshFrame);
+
+  const firstClose = session.close(false);
+  await eventsStarted;
+  cancellation.abort();
+  const concurrentClose = session.close();
+  finishEvents();
+  await expect(
+    Promise.allSettled([firstClose, concurrentClose]),
+  ).resolves.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ status: "rejected" }),
+      expect.objectContaining({ status: "rejected" }),
+    ]),
+  );
+
+  expect(cleanup.browserClosed).toBe(false);
+  await expect(session.close()).resolves.toBe("disconnected-external");
+  expect(failedFrame.evaluate).toHaveBeenCalledTimes(1);
+  expect(freshFrame.evaluate).toHaveBeenCalledTimes(1);
+  expect(storage?.close).toHaveBeenCalledTimes(1);
+  expect(cleanup.close).toHaveBeenCalledTimes(2);
+});
+
+it("retains a late fallback stop failure for retry", async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: false });
+  const attached = connectedScenario("block");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: held, resolve: finishRestoration } = deferred();
+  const { promise: started, resolve: restorationStarted } = deferred();
+  const { promise: transportClosed, resolve: signalTransportClosed } =
+    deferred();
+  mocks.policyTransportClose.mockImplementation(async () => {
+    signalTransportClosed();
+  });
+  mocks.policySend.mockImplementation(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      restorationStarted();
+      await held;
+    }
+    return policyResponse(method);
+  });
+
+  vi.useFakeTimers();
+  try {
+    const firstClose = session.close(false).then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    );
+    await started;
+    await vi.advanceTimersByTimeAsync(5_001);
+    await expect(firstClose).resolves.toMatchObject({ ok: false });
+    finishRestoration();
+    await transportClosed;
+    await vi.advanceTimersByTimeAsync(0);
+
+    cancellation.abort();
+    const stopFailure = new Error("late main-frame stop failed");
+    const detachedFrame = {
+      evaluate: vi.fn(async () => {
+        throw stopFailure;
+      }),
+      isDetached: () => true,
+    } as unknown as ReturnType<typeof page.mainFrame>;
+    const freshFrame = {
+      evaluate: vi.fn(async () => null),
+      isDetached: () => false,
+    } as unknown as ReturnType<typeof page.mainFrame>;
+    vi.spyOn(page, "mainFrame")
+      .mockReturnValueOnce(detachedFrame)
+      .mockReturnValue(freshFrame);
+    const failedRetry = session.close().then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    );
+    await expect(failedRetry).resolves.toMatchObject({
+      ok: false,
+      cause: { cleanupIncomplete: true },
+    });
+    expect(cleanup.close).not.toHaveBeenCalled();
+
+    await expect(session.close()).resolves.toBe("disconnected-external");
+    expect(detachedFrame.evaluate).toHaveBeenCalledWith("globalThis.stop()");
+    expect(freshFrame.evaluate).toHaveBeenCalledWith("globalThis.stop()");
+  } finally {
+    vi.useRealTimers();
+  }
+
+  expect(cleanup.close).toHaveBeenCalledTimes(1);
+});
+
+it("coalesces concurrent late-stop close retries", async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: false });
+  const attached = connectedScenario("block");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: held, resolve: finishRestoration } = deferred();
+  const { promise: started, resolve: restorationStarted } = deferred();
+  const { promise: transportClosed, resolve: signalTransportClosed } =
+    deferred();
+  mocks.policyTransportClose.mockImplementation(async () => {
+    signalTransportClosed();
+  });
+  mocks.policySend.mockImplementation(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      restorationStarted();
+      await held;
+    }
+    return policyResponse(method);
+  });
+
+  vi.useFakeTimers();
+  try {
+    const firstClose = session.close(false).then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    );
+    await started;
+    await vi.advanceTimersByTimeAsync(5_001);
+    await expect(firstClose).resolves.toMatchObject({ ok: false });
+    finishRestoration();
+    await transportClosed;
+    await vi.advanceTimersByTimeAsync(0);
+
+    cancellation.abort();
+    const { promise: heldStop, resolve: finishStop } = deferred();
+    const { promise: startedStop, resolve: stopStarted } = deferred();
+    page.evaluate.mockImplementation(async (script: unknown) => {
+      if (script === "globalThis.stop()") {
+        stopStarted();
+        await heldStop;
+      }
+      return null;
+    });
+    const firstRetry = session.close();
+    await startedStop;
+    const secondRetry = session.close();
+    expect(
+      page.evaluate.mock.calls.filter(
+        ([script]) => script === "globalThis.stop()",
+      ),
+    ).toHaveLength(1);
+    finishStop();
+    await expect(Promise.all([firstRetry, secondRetry])).resolves.toEqual([
+      "disconnected-external",
+      "disconnected-external",
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+
+  expect(
+    page.evaluate.mock.calls.filter(
+      ([script]) => script === "globalThis.stop()",
     ),
   ).toHaveLength(1);
   expect(cleanup.close).toHaveBeenCalledTimes(1);
@@ -346,15 +825,7 @@ it("retains transferred navigation stopping after setup cleanup fails", async ()
     return policyResponse(method);
   });
   let retainedCleanup: AnalysisCleanupLease | undefined;
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
 
   await expect(
     PlaywrightScenarioSession.open(
@@ -394,14 +865,8 @@ it("allows the bounded policy cleanup chain to cross one second", async () => {
     storage: {},
   });
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
-  let releaseStop: () => void = () => undefined;
-  let stopStarted: () => void = () => undefined;
-  const stopped = new Promise<void>((resolve) => {
-    releaseStop = resolve;
-  });
-  const started = new Promise<void>((resolve) => {
-    stopStarted = resolve;
-  });
+  const { promise: stopped, resolve: releaseStop } = deferred();
+  const { promise: started, resolve: stopStarted } = deferred();
   mocks.policySend.mockImplementation(async (method: string) => {
     if (method === "Page.stopLoading") {
       stopStarted();
@@ -448,14 +913,8 @@ it("does not await policy initialization after its child target detaches", async
     storage: {},
   });
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
-  let childStarted: () => void = () => undefined;
-  let releaseChild: () => void = () => undefined;
-  const started = new Promise<void>((resolve) => {
-    childStarted = resolve;
-  });
-  const held = new Promise<void>((resolve) => {
-    releaseChild = resolve;
-  });
+  const { promise: started, resolve: childStarted } = deferred();
+  const { promise: held, resolve: releaseChild } = deferred();
   mocks.policySend.mockImplementation(
     async (method: string, _params: unknown, target: string) => {
       if (method === "Page.enable" && target === "child-session") {
@@ -521,15 +980,7 @@ it("rejects an init script accepted by CDP when the live realm is unprotected", 
   page.evaluate
     .mockResolvedValueOnce(null)
     .mockResolvedValueOnce("policy_unprotected");
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   await expect(
     PlaywrightScenarioSession.open(attached, {}, {}),
   ).rejects.toMatchObject({
@@ -555,15 +1006,7 @@ it("restores an owned policy script after later setup fails", async () => {
     if (method === "Target.setAutoAttach") throw setupFailure;
     return policyResponse(method);
   });
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
 
   await expect(PlaywrightScenarioSession.open(attached, {}, {})).rejects.toBe(
     setupFailure,
@@ -584,15 +1027,7 @@ it("restores an owned policy script after later setup fails", async () => {
 
 it("retains an owned script identifier after rejected removal", async () => {
   const { cleanup } = fixture();
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   const failure = new Error("removeScript rejected");
   mocks.policySend.mockRejectedValueOnce(failure);
@@ -613,15 +1048,7 @@ it("retains an owned script identifier after rejected removal", async () => {
 
 it("retries transport close without detaching an already released policy session", async () => {
   fixture();
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
   const failure = new Error("transport close rejected");
   mocks.policyTransportClose.mockRejectedValueOnce(failure);
@@ -736,15 +1163,7 @@ it("uses browser disconnect as terminal storage release after detach failure", a
 
 it("leaves attached service-worker state alone when the policy allows it", async () => {
   const { cleanup, page } = fixture();
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "allow" },
-  });
+  const attached = connectedScenario("allow");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
 
   expect(mocks.openBrowser).toHaveBeenCalledWith(
@@ -760,15 +1179,7 @@ it("leaves attached service-worker state alone when the policy allows it", async
 
 it("blocks new attached service-worker registration without removing existing registrations", async () => {
   const { cleanup, page } = fixture();
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
   const session = await PlaywrightScenarioSession.open(attached, {}, {});
 
   expect(page.evaluate).toHaveBeenCalledTimes(3);
@@ -830,10 +1241,7 @@ it("retains the attached connection when registration restoration fails", async 
 it("cancels a stalled policy preflight without allowing late setup", async () => {
   const { cleanup, page } = fixture();
   let release: () => void = () => undefined;
-  let entered: () => void = () => undefined;
-  const started = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
+  const { promise: started, resolve: entered } = deferred();
   page.evaluate.mockImplementationOnce(async () => {
     entered();
     await new Promise<void>((resolve) => {
@@ -843,15 +1251,7 @@ it("cancels a stalled policy preflight without allowing late setup", async () =>
   });
   const cancellation = new AbortController();
   const opening = PlaywrightScenarioSession.open(
-    browserScenarioSchema.parse({
-      ...scenario,
-      browser: {
-        mode: "connect",
-        cdp_endpoint: "http://127.0.0.1:9222",
-        target_id: "target",
-      },
-      environment: { service_workers: "block" },
-    }),
+    connectedScenario("block"),
     {},
     { signal: cancellation.signal },
   );
@@ -870,14 +1270,8 @@ it("cancels a stalled policy preflight without allowing late setup", async () =>
 
 it("waits for a pending registration installation before cancelled cleanup", async () => {
   const { cleanup, page } = fixture();
-  let releaseInstallation: () => void = () => undefined;
-  let installationStarted: () => void = () => undefined;
-  const installed = new Promise<void>((resolve) => {
-    releaseInstallation = resolve;
-  });
-  const started = new Promise<void>((resolve) => {
-    installationStarted = resolve;
-  });
+  const { promise: installed, resolve: releaseInstallation } = deferred();
+  const { promise: started, resolve: installationStarted } = deferred();
   mocks.policySend.mockImplementation(async (method: string) => {
     if (method === "Page.addScriptToEvaluateOnNewDocument") {
       installationStarted();
@@ -888,15 +1282,7 @@ it("waits for a pending registration installation before cancelled cleanup", asy
   });
   const cancellation = new AbortController();
   const opening = PlaywrightScenarioSession.open(
-    browserScenarioSchema.parse({
-      ...scenario,
-      browser: {
-        mode: "connect",
-        cdp_endpoint: "http://127.0.0.1:9222",
-        target_id: "target",
-      },
-      environment: { service_workers: "block" },
-    }),
+    connectedScenario("block"),
     {},
     { signal: cancellation.signal },
   );
@@ -927,15 +1313,7 @@ it("waits for a pending registration installation before cancelled cleanup", asy
 it("rejects attached block when caller-owned registrations already exist", async () => {
   const { cleanup, page } = fixture();
   page.evaluate.mockResolvedValueOnce("service_worker_blocked");
-  const attached = browserScenarioSchema.parse({
-    ...scenario,
-    browser: {
-      mode: "connect",
-      cdp_endpoint: "http://127.0.0.1:9222",
-      target_id: "target",
-    },
-    environment: { service_workers: "block" },
-  });
+  const attached = connectedScenario("block");
 
   await expect(
     PlaywrightScenarioSession.open(attached, {}, {}),

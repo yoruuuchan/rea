@@ -9,7 +9,7 @@ import {
   parseGhidraJavaOutput,
   type GhidraJavaObservation,
 } from "./GhidraJavaProbe.js";
-import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -150,6 +150,112 @@ it.skipIf(process.platform === "win32")(
         process.platform,
       ),
     ).toBeUndefined();
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "uses a same-installation Homebrew opt alias for doctor registration and survives keg rotation",
+  async () => {
+    const temporaryRoot = await createTestTempDirectory("rea-ghidra-homebrew-");
+    const prefix = join(temporaryRoot, "brew\n雪");
+    await mkdir(prefix);
+    const pathDirectory = join(prefix, "bin");
+    const optDirectory = join(prefix, "opt");
+    const optAlias = join(optDirectory, "ghidra");
+    const firstKeg = join(prefix, "Cellar", "ghidra", "12.1.4");
+    const secondKeg = join(prefix, "Cellar", "ghidra", "12.1.5");
+    const foreignKeg = join(prefix, "Cellar", "other-ghidra", "12.1.4");
+
+    const createKeg = async (keg: string) => {
+      const libexec = join(keg, "libexec");
+      await mkdir(join(libexec, "Ghidra"), { recursive: true });
+      await mkdir(join(libexec, "support"), { recursive: true });
+      await writeFile(
+        join(libexec, "Ghidra", "application.properties"),
+        `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=${String(SUPPORTED_GHIDRA_JAVA_MAJOR)}\n`,
+      );
+      await writeFile(join(libexec, "ghidraRun"), "launcher\n");
+      await writeFile(
+        join(libexec, "support", "analyzeHeadless"),
+        "headless\n",
+      );
+      await chmod(join(libexec, "ghidraRun"), 0o700);
+      await chmod(join(libexec, "support", "analyzeHeadless"), 0o700);
+      return libexec;
+    };
+
+    const firstRoot = await createKeg(firstKeg);
+    const secondRoot = await createKeg(secondKeg);
+    await createKeg(foreignKeg);
+    await mkdir(pathDirectory, { recursive: true });
+    await mkdir(optDirectory, { recursive: true });
+    await symlink(firstKeg, optAlias);
+    await symlink(
+      join(optAlias, "libexec", "ghidraRun"),
+      join(pathDirectory, "ghidra"),
+    );
+
+    const environment = { PATH: pathDirectory };
+    const registeredRoot = join(optAlias, "libexec");
+    expect(
+      discoverGhidraInstallationOnPath(environment, process.platform),
+    ).toBe(registeredRoot);
+    const inspection = await inspectGhidraInstallation(
+      {
+        environment,
+        resourceOwner: inspectionResources.owner,
+        platform: "darwin",
+        architecture: "arm64",
+      },
+      host({
+        discoverInstallDirOnPath: discoverGhidraInstallationOnPath,
+        readText: (path) =>
+          path === join(registeredRoot, "Ghidra", "application.properties")
+            ? `application.version=${SUPPORTED_GHIDRA_VERSION}\napplication.java.min=${String(SUPPORTED_GHIDRA_JAVA_MAJOR)}\n`
+            : undefined,
+        executable: (path) =>
+          path === join(registeredRoot, "support", "analyzeHeadless") ||
+          path ===
+            join(
+              registeredRoot,
+              "Ghidra",
+              "Features",
+              "Decompiler",
+              "os",
+              "mac_arm_64",
+              "decompile",
+            ),
+        probeJava: () =>
+          javaProbeOk({ ...JAVA, osArch: "aarch64", osName: "Mac OS X" }),
+      }),
+    );
+    expect(inspection.status).toBe("available");
+    expect(inspection.installDir).toBe(registeredRoot);
+    expect(
+      projectGhidraDoctorInspection(inspection).registrationEnvironment
+        .GHIDRA_INSTALL_DIR,
+    ).toBe(registeredRoot);
+
+    await unlink(optAlias);
+    await symlink(secondKeg, optAlias);
+    await rm(firstKeg, { recursive: true });
+    expect(
+      discoverGhidraInstallationOnPath(environment, process.platform),
+    ).toBe(registeredRoot);
+    expect(
+      discoverGhidraInstallationOnPath(environment, process.platform),
+    ).not.toBe(firstRoot);
+
+    await unlink(join(pathDirectory, "ghidra"));
+    await symlink(join(secondRoot, "ghidraRun"), join(pathDirectory, "ghidra"));
+    await unlink(optAlias);
+    expect(
+      discoverGhidraInstallationOnPath(environment, process.platform),
+    ).toBe(secondRoot);
+    await symlink(foreignKeg, optAlias);
+    expect(
+      discoverGhidraInstallationOnPath(environment, process.platform),
+    ).toBe(secondRoot);
   },
 );
 

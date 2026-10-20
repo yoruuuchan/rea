@@ -5,7 +5,10 @@ import { logCliCommand } from "../cliLogging.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
-import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
+import {
+  analysisEvidenceDeliveryOptions,
+  deliverCliAnalysisEvidence,
+} from "./analysisEvidenceDelivery.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** Resolve caller paths and inspect static build metadata through the shared workflow. */
@@ -16,24 +19,27 @@ export const registerGoCommands = (cli: CliInstance, logger: Logger): void => {
     args: z.object({
       path: z.string().describe("Local ELF, PE or thin Mach-O image"),
     }),
-    run: ({ args }) =>
+    options: z.object(analysisEvidenceDeliveryOptions),
+    run: ({ args, options }) =>
       withCommandCancellation(async (signal) => {
         const service = createGoBinaryService();
         return await logCliCommand(
           logger,
           CLI_COMMANDS.inspectGoBinary,
           async () =>
-            finishAnalysisCommand(
-              () =>
+            deliverCliAnalysisEvidence({
+              run: () =>
                 service.inspect(
                   { path: absoluteCallerPath(args.path) },
                   { signal },
                 ),
               service,
-              "go-build-info",
-              "inspect_go_binary",
+              providerId: "go-build-info",
+              operation: "inspect_go_binary",
               signal,
-            ),
+              detail: options.detail,
+              evidenceOutput: options.evidence_output,
+            }),
         );
       }),
   });

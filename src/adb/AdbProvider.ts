@@ -2762,32 +2762,6 @@ export class AdbProvider {
       long: "--el",
       float: "--ef",
     };
-    for (const extra of input.extras)
-      if (extra.type === "boolean" && !/^(true|false)$/u.test(extra.value))
-        return err(
-          new AnalysisInputError(operation, {
-            cause: new Error(
-              `Boolean extra ${extra.key} must be true or false`,
-            ),
-          }),
-        );
-      else if (
-        (extra.type === "int" || extra.type === "long") &&
-        !/^-?\d+$/u.test(extra.value)
-      )
-        return err(
-          new AnalysisInputError(operation, {
-            cause: new Error(
-              `${extra.type === "int" ? "Integer" : "Long"} extra ${extra.key} must be an integer`,
-            ),
-          }),
-        );
-      else if (extra.type === "float" && !/^-?\d+(\.\d+)?$/u.test(extra.value))
-        return err(
-          new AnalysisInputError(operation, {
-            cause: new Error(`Float extra ${extra.key} must be a number`),
-          }),
-        );
     const arguments_ = [
       "-a",
       input.action,

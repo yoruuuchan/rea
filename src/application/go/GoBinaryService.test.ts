@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { GoBinaryService } from "./GoBinaryService.js";
 import {
+  AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
   AnalysisInputError,
   AnalysisOutputError,
@@ -42,6 +43,25 @@ it("rejects invalid paths and extra caller arguments before invoking the reader"
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBeInstanceOf(AnalysisInputError);
   }
+  expect(calls).toBe(0);
+});
+
+it("requires a complete Evidence retention path before starting summary inspection", async () => {
+  let calls = 0;
+  const service = new GoBinaryService({
+    identity,
+    inspect: async () => {
+      calls++;
+      return ok(report);
+    },
+  });
+  const result = await service.inspect({
+    path: report.artifact.path,
+    detail: "summary",
+  });
+  expect(result.ok).toBe(false);
+  if (!result.ok)
+    expect(result.error).toBeInstanceOf(AnalysisCapabilityUnavailableError);
   expect(calls).toBe(0);
 });
 

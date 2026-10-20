@@ -1181,7 +1181,7 @@ it("preserves admitted Unicode and escaped AssemblyRef names in complete Evidenc
   );
 });
 
-it.each([27, 31, 106])(
+it.each([27, 28, 31, 106])(
   "suggests metadata-only inspection for supported raw version %s",
   async (version) => {
     const root = await createTestTempDirectory("rea-desktop-metadata-probe-");
@@ -1197,7 +1197,7 @@ it.each([27, 31, 106])(
       value: { magic: "0xfab11baf", raw_version: version },
     });
     expect(report.next_probes).toEqual(
-      version === 31
+      version === 27 || version === 31
         ? [
             expect.objectContaining({
               operation: "inspect_il2cpp_metadata",

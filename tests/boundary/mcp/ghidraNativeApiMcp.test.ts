@@ -88,6 +88,60 @@ it.each([
 );
 
 describe("Ghidra MCP native API evidence", () => {
+  it("retains transient failure Evidence without freezing the composed API inspection", async () => {
+    let failed = true;
+    const harness = await connectGhidraMcp(
+      "ghidra-native-api-recovery",
+      async (operation) => {
+        if (operation !== "analyze_function")
+          throw new Error(`Unexpected operation: ${operation}`);
+        const dossier = functionDossierSchema.parse(ghidraFunctionDossier());
+        if (failed)
+          dossier.native_api = {
+            available: false,
+            reason: "Injected backend failure",
+            residual_unknowns: ["Retry after recovery."],
+          };
+        return ok(
+          jsonValueSchema.parse({
+            value: dossier,
+            limitations: [],
+            ...(failed ? { cache_policy: "live" } : {}),
+          }),
+        );
+      },
+    );
+    try {
+      const inspect = async () => {
+        const reply = await harness.mcp.callTool({
+          name: "inspect_native_api",
+          arguments: { procedure: "fixture_main" },
+        });
+        expect(reply.isError, JSON.stringify(reply.content)).not.toBe(true);
+        return sessionEvidence(harness.session, reply.structuredContent);
+      };
+      const degraded = await inspect();
+      expect(degraded.normalized_result).toMatchObject({
+        boundary: { available: false },
+      });
+      const snapshot = harness.session.exportAnalysisSnapshot();
+      if (!snapshot.ok) throw snapshot.error;
+      expect(snapshot.value.entries).toEqual([]);
+      expect(snapshot.value.workflow_entries).toEqual([]);
+      expect(harness.session.evidenceById(degraded.evidence_id)).toEqual(
+        degraded,
+      );
+      failed = false;
+      expect((await inspect()).normalized_result).toMatchObject({
+        boundary: { available: true },
+      });
+      await inspect();
+      expect(harness.calls).toEqual(["analyze_function", "analyze_function"]);
+    } finally {
+      await harness.close();
+    }
+  }, 30_000);
+
   it("returns complete native API boundaries without output-cap unknowns", async () => {
     const harness = await connectGhidraMcp("ghidra-native-api");
     const { mcp, session } = harness;

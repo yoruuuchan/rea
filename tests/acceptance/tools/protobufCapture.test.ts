@@ -556,3 +556,76 @@ captureTest(
     });
   },
 );
+
+const trailerCases = [
+  ["valid", "grpc-status", "0", "complete"],
+  ["uppercase", "Grpc-Status", "0", "partial"],
+  ["nul", "grpc-status", "0\u0000bad", "partial"],
+  ["lf", "grpc-status", "0\nbad", "partial"],
+  ["cr", "grpc-status", "0\rbad", "partial"],
+  ["vt", "grpc-status", "0\u000bbad", "partial"],
+  ["del", "grpc-status", "0\u007fbad", "partial"],
+] as const;
+
+captureTest.for(
+  (["grpc-web", "grpc-web-text"] as const).flatMap((framing) =>
+    trailerCases.map(([name, headerName, value, status]) => ({
+      framing,
+      name,
+      headerName,
+      value,
+      status,
+    })),
+  ),
+)(
+  "preserves $framing trailer case $name through CLI and MCP without changing capture bytes",
+  async ({ framing, name, headerName, value, status }, { cli, mcp }) => {
+    const root = await createTestTempDirectory("rea-grpc-web-trailers-");
+    const path = join(root, `${framing}-${name}.har`);
+    const trailer = Buffer.from(`${headerName}: ${value}\r\n`);
+    const body = Buffer.concat([
+      protobufFrame(Buffer.from([8, 1])),
+      protobufFrame(trailer, 128),
+    ]);
+    const original = protobufHar(
+      framing === "grpc-web-text" ? Buffer.from(body.toString("base64")) : body,
+      `application/${framing}`,
+    );
+    await writeFile(path, original);
+    const response = await cli.run({
+      arguments: [
+        "inspect-web-network-capture",
+        path,
+        "har",
+        "--record",
+        "0",
+        "--protobuf-framing",
+        "auto",
+        "--json",
+      ],
+    });
+    expect(response.exitCode, response.stdout + response.stderr).toBe(0);
+    const evidence = parseEvidence(response.json);
+    const report = webNetworkCaptureSchema.parse(evidence.normalized_result);
+    expect(report.protobuf_coverage?.status, name).toBe(status);
+    expect(report.records[0]?.protobuf?.[0]).toMatchObject({
+      status,
+      framing,
+      examined_bytes: body.length,
+      frames: [
+        { kind: "data", status: "complete", examined_bytes: 2 },
+        { kind: "trailer", status, examined_bytes: trailer.length },
+      ],
+      fields: [{ number: 1, wire_type: "varint", value: "1" }],
+    });
+    const reply = await mcp.call("inspect_web_network_capture", {
+      capture_path: path,
+      format: "har",
+      record_ordinals: [0],
+      protobuf: { framing: "auto" },
+    });
+    expect(reply.isError, JSON.stringify(reply)).not.toBe(true);
+    expect(reply.structuredContent).toEqual(response.json);
+    expect(await readFile(path, "utf8")).toBe(original);
+  },
+);

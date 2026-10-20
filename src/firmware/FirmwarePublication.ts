@@ -1,16 +1,16 @@
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
-import { firmwareFailure } from "./FirmwareFailures.js";
+import {
+  firmwareFailure,
+  firmwarePhaseInterruption,
+} from "./FirmwareFailures.js";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { z } from "zod";
 import { SafeOutputTree } from "../artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../artifacts/SafeOutputTreeCreationFailure.js";
-import {
-  AnalysisOutputError,
-  AnalysisCancelledError,
-} from "../domain/analysisErrorCore.js";
+import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { firmwareResultSchemas } from "../domain/firmware/firmwareAnalysis.js";
@@ -40,6 +40,7 @@ const UNNAMED_DEPENDENCY_CONTINUATION =
   "The producer reported a missing extractor dependency without naming it; its identity is unavailable in this evidence. No specific installation or rerun can be prescribed from this report. Retain the gap as unextracted unless additional provider evidence establishes the dependency. REA installs nothing.";
 
 import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
+import type { FirmwareDeadline } from "./FirmwareDeadline.js";
 
 /** The depth ceiling cannot be raised past the input schema maximum. */
 const MAX_EXTRACTION_DEPTH = 10;
@@ -89,7 +90,7 @@ const gapSortKey = (gap: ExtractionGap): string =>
 export const publishFirmwareExtraction = async (context: {
   files: FirmwareFileAccess;
   workspacePath: string;
-  deadline: AbortSignal;
+  deadline: FirmwareDeadline;
   outputDirectory: string;
   entries: readonly FirmwareEntry[];
   normalized: ReturnType<typeof normalizeUnblobReport>;
@@ -108,12 +109,20 @@ export const publishFirmwareExtraction = async (context: {
   let result:
     | z.infer<typeof firmwareResultSchemas.extract_firmware>
     | undefined;
+  const files: z.infer<typeof firmwareResultSchemas.extract_firmware>["files"] =
+    [];
+  let totalFiles = 0;
+  const progress = () => ({
+    output_directory: context.outputDirectory,
+    verified_files: files.length,
+    total_files: totalFiles,
+  });
   try {
-    const materialized = new Set(
-      context.entries
-        .filter((entry) => entry.kind === "file")
-        .map((entry) => `$output/${entry.relativePath}`),
-    );
+    const materialized = new Set<string>();
+    for (const entry of context.entries)
+      if (entry.kind === "file")
+        materialized.add(`$output/${entry.relativePath}`);
+    totalFiles = materialized.size;
     for (const path of context.normalized.files.keys()) {
       if (path !== "$input" && !materialized.has(path))
         throw new AnalysisOutputError(
@@ -121,7 +130,6 @@ export const publishFirmwareExtraction = async (context: {
           `Reported regular file is absent from materialized output: ${path}`,
         );
     }
-    const files = [];
     const unpublished = [];
     tree = await SafeOutputTree.create(context.outputDirectory);
     for (const entry of context.entries) {
@@ -180,10 +188,13 @@ export const publishFirmwareExtraction = async (context: {
       ),
       published_bytes: files.reduce((sum, file) => sum + file.size, 0),
     });
-    if (context.signal.aborted)
-      throw new AnalysisCancelledError("extract_firmware", {
-        cause: context.signal.reason,
-      });
+    const interruption = firmwarePhaseInterruption(
+      "extract_firmware",
+      context.signal,
+      context.deadline,
+      progress(),
+    );
+    if (interruption !== undefined) throw interruption;
     await tree.commit(context.signal);
     return result;
   } catch (cause: unknown) {
@@ -195,13 +206,13 @@ export const publishFirmwareExtraction = async (context: {
         : new AnalysisCleanupLease(async () => {
             await ownedTree.rollback();
           });
-    const primary = firmwareFailure(
-      cause,
-      "unblob",
-      "extract_firmware",
-      context.deadline,
-      treeLease,
-    );
+    const primary = firmwareFailure(cause, {
+      engine: "unblob",
+      operation: "extract_firmware",
+      deadline: context.deadline,
+      treeCleanupLease: treeLease,
+      publication: progress(),
+    });
     try {
       await treeLease?.release();
     } catch (cleanupCause: unknown) {

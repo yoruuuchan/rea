@@ -46,7 +46,7 @@ const keyedArchive = (nested: boolean) =>
   });
 
 cliTest.skipIf(process.platform !== "darwin")(
-  "retains recognized NIBArchive resource keys and provenance through CLI and MCP without a catalog",
+  "retains resource keys and complete empty inventory through CLI and MCP at a positive offset",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-asset-resource-keys-");
     const { call } = await connectLocalToolsMcp();
@@ -91,13 +91,20 @@ cliTest.skipIf(process.platform !== "darwin")(
         [field]: "Toolbar",
       });
       const inspected = await cli.run({
-        arguments: ["inspect-asset-catalog", app, "--json"],
+        arguments: ["inspect-asset-catalog", app, "--offset", "1", "--json"],
       });
       expect(inspected.exitCode, inspected.stderr).toBe(0);
       const result = appleAssetCatalogResultSchema.parse(
         parseEvidence(inspected.json).normalized_result,
       );
       expect(result.catalogs).toEqual([]);
+      expect(result).toMatchObject({
+        total_records: 0,
+        offset: 1,
+        records: [],
+        next_offset: null,
+        truncated: false,
+      });
       expect(result.resource_key_matches).toEqual(
         !recognized
           ? []
@@ -117,7 +124,7 @@ cliTest.skipIf(process.platform !== "darwin")(
       );
       const opened = await call("open_binary", { path: app });
       expect(opened.isError).not.toBe(true);
-      const mcp = await call("inspect_asset_catalog", {});
+      const mcp = await call("inspect_asset_catalog", { offset: 1 });
       expect(mcp.isError).not.toBe(true);
       expect(parseEvidence(mcp.structuredContent).normalized_result).toEqual(
         result,

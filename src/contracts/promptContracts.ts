@@ -273,7 +273,7 @@ export const PROMPT_CONTRACTS = [
       target_path: optional(
         "Absolute target path; omit when the intended target is already open",
       ),
-      document: optional("Open Hopper document to inspect", "document"),
+      document: optional("Active target's provider document name", "document"),
       procedure: optional(
         "Known crash-adjacent procedure name or address",
         "procedure",

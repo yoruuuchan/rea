@@ -59,6 +59,30 @@ type WebBundleResultDescriptor = Extract<
   { readonly kind: "complete" }
 >["result"];
 
+type WebBundleObservedFailure =
+  | { readonly kind: "input"; readonly cause: Error }
+  | { readonly kind: "protocol"; readonly cause: unknown }
+  | { readonly kind: "incomplete-output" }
+  | {
+      readonly kind: "frame";
+      readonly frame: Extract<
+        WebBundleWorkerMessage,
+        { readonly kind: "failure" }
+      >;
+      readonly resultBudgetBytes: number;
+    }
+  | {
+      readonly kind: "exit";
+      readonly code: number | null;
+      readonly signal: NodeJS.Signals | null;
+      readonly heapExhaustion: boolean;
+    };
+
+type WebBundleActiveJob = {
+  readonly id: string;
+  readonly resultBudgetBytes: number;
+};
+
 const stableSnapshotValue = (
   value: unknown,
 ): StableArtifactSnapshot | undefined => {
@@ -90,9 +114,15 @@ export class WebBundleAnalysisWorker {
   #pending = "";
   #frames: WebBundleWorkerMessage[] = [];
   #protocolFailure: unknown;
+  #observedFailure: WebBundleObservedFailure | undefined;
+  #activeDeadline: ProviderStartupDeadline | undefined;
+  #activeJob: WebBundleActiveJob | undefined;
+  #activeTerminalResponseObserved = false;
+  readonly #frameWaiters = new Set<(outcome: "frame" | "failure") => void>();
   #retainedResultBytes = 0;
   #ready = false;
   readonly #stdout = (chunk: Buffer | string): void => {
+    if (this.#activeDeadline?.interruption !== undefined) return;
     if (this.#protocolFailure !== undefined) return;
     try {
       // Refuse the chunk before appending it to any retained control text.
@@ -113,11 +143,15 @@ export class WebBundleAnalysisWorker {
             JSON.parse(this.#pending.slice(0, end)),
           ),
         );
+        this.#observeFrame(this.#frames.at(-1)!);
         this.#pending = this.#pending.slice(end + 1);
       }
+      this.#wakeFrameWaiters("frame");
     } catch (cause) {
       this.#pending = "";
       this.#protocolFailure = cause;
+      this.#latchFailure({ kind: "protocol", cause });
+      this.#wakeFrameWaiters("failure");
     }
   };
 
@@ -133,9 +167,53 @@ export class WebBundleAnalysisWorker {
       rootPrefix: "rea-web-bundle-analysis-",
       launcher,
       retryCleanup: () => this.close(),
+      onInputFailure: (cause) => {
+        if (this.#activeDeadline?.interruption !== undefined) return;
+        this.#latchFailure({ kind: "input", cause });
+        this.#wakeFrameWaiters("failure");
+      },
       supervisorOptions: {
         captureStdout: false,
         maxDiagnosticBytes: 256 * 1024,
+        onDiagnostic: (event) => {
+          if (this.#activeDeadline?.interruption !== undefined) return;
+          if (
+            event.type === "exit" &&
+            (event.code !== 0 || event.signal !== null)
+          ) {
+            const stderr = event.snapshot.stderr.text;
+            this.#latchFailure({
+              kind: "exit",
+              code: event.code,
+              signal: event.signal,
+              heapExhaustion:
+                event.snapshot.memoryLimitReached === true ||
+                /heap out of memory|heap limit|allocation failed/iu.test(
+                  stderr,
+                ),
+            });
+          } else if (event.type === "output-close") {
+            if (
+              this.#activeDeadline !== undefined &&
+              (this.#activeJob === undefined ||
+                !this.#activeTerminalResponseObserved)
+            )
+              this.#latchFailure({ kind: "incomplete-output" });
+            this.#wakeFrameWaiters("failure");
+          } else if (event.type === "output") {
+            const failure = this.#observedFailure;
+            if (
+              failure?.kind === "exit" &&
+              (this.#runtime.supervisor?.snapshot().memoryLimitReached ===
+                true ||
+                (event.stream === "stderr" &&
+                  /heap out of memory|heap limit|allocation failed/iu.test(
+                    this.#runtime.supervisor?.snapshot().stderr.text ?? "",
+                  )))
+            )
+              this.#observedFailure = { ...failure, heapExhaustion: true };
+          }
+        },
       },
     });
     const owner = this;
@@ -161,6 +239,9 @@ export class WebBundleAnalysisWorker {
   ): Promise<Result<WebBundleScriptAnalysis, WebBundleScriptAnalysisFailure>> {
     let deadline: ProviderStartupDeadline | undefined;
     const id = randomUUID();
+    this.#observedFailure = undefined;
+    this.#activeJob = undefined;
+    this.#activeTerminalResponseObserved = false;
     let result: Result<WebBundleScriptAnalysis, AnalysisError>;
     let completed: WebBundleScriptAnalysis | null = null;
     let continuation: "result_capacity_exhausted" | undefined;
@@ -199,6 +280,7 @@ export class WebBundleAnalysisWorker {
       }
       await prepareProcessOwnershipInspection(signal);
       deadline = new ProviderStartupDeadline(timeoutMs, signal);
+      this.#activeDeadline = deadline;
       await this.#start(deadline);
       if (this.#frames.length > 0 || this.#pending !== "")
         throw new AnalysisOutputError(
@@ -223,6 +305,8 @@ export class WebBundleAnalysisWorker {
       const stdin = supervisor.launch.process.stdin;
       if (stdin === null || stdin === undefined)
         throw new TypeError("Web analyzer request stream is unavailable");
+      this.#activeJob = { id, resultBudgetBytes: resultBudget };
+      this.#activeTerminalResponseObserved = false;
       await new Promise<void>((resolve, reject) =>
         stdin.write(frame, (error) =>
           error == null ? resolve() : reject(error),
@@ -311,25 +395,33 @@ export class WebBundleAnalysisWorker {
                     : deadline?.signal.reason,
                 })
               : undefined;
+      const observedFailure =
+        this.#observedFailure === undefined
+          ? undefined
+          : this.#projectObservedFailure();
+      if (observedFailure !== undefined && interrupted !== undefined)
+        observedFailure.retainSecondaryFailure(interrupted);
       const failure =
         cause instanceof ArtifactFileCleanupFailure &&
         cause.fileCleanupFailure.outcome.kind === "completed"
           ? this.#cleanupFailure(cause, interrupted)
-          : (interrupted ??
-            (cause instanceof PrivateRuntimeRootUnavailableError
-              ? new AnalysisCapabilityUnavailableError(
-                  PROVIDER,
-                  OPERATION,
-                  cause.message,
-                  { cause, retryable: cause.retryable },
-                )
-              : cause instanceof AnalysisError
-                ? cause
-                : new AnalysisOutputError(
+          : interrupted !== undefined && observedFailure !== undefined
+            ? observedFailure
+            : (interrupted ??
+              (cause instanceof PrivateRuntimeRootUnavailableError
+                ? new AnalysisCapabilityUnavailableError(
+                    PROVIDER,
                     OPERATION,
-                    "Owned web-script analysis failed",
-                    { cause },
-                  )));
+                    cause.message,
+                    { cause, retryable: cause.retryable },
+                  )
+                : cause instanceof AnalysisError
+                  ? cause
+                  : new AnalysisOutputError(
+                      OPERATION,
+                      "Owned web-script analysis failed",
+                      { cause },
+                    )));
       result = err(failure);
       try {
         const stopped = await this.#runtime.stop();
@@ -339,7 +431,10 @@ export class WebBundleAnalysisWorker {
         result = err(this.#cleanupFailure(cleanupCause, failure));
       }
     } finally {
+      this.#activeDeadline = undefined;
       deadline?.dispose();
+      this.#activeJob = undefined;
+      this.#activeTerminalResponseObserved = false;
     }
     // Never remove job files while a failed descriptor or child remains owned.
     if (!result.ok && result.error.cleanupIncomplete)
@@ -455,43 +550,129 @@ export class WebBundleAnalysisWorker {
           cause: deadline.signal.reason,
         });
       deadline.signal.throwIfAborted();
-      if (this.#runtime.inputFailure !== undefined)
-        throw new AnalysisOutputError(
-          OPERATION,
-          "Web analyzer request stream failed",
-          { cause: this.#runtime.inputFailure },
-        );
-      if (this.#protocolFailure !== undefined)
-        throw new AnalysisOutputError(
-          OPERATION,
-          "Invalid web analyzer control frame",
-          { cause: this.#protocolFailure },
-        );
       const frame = this.#frames.shift();
       if (frame !== undefined) return frame;
+      if (this.#runtime.inputFailure !== undefined)
+        this.#latchFailure({
+          kind: "input",
+          cause: this.#runtime.inputFailure,
+        });
+      if (this.#protocolFailure !== undefined)
+        this.#latchFailure({ kind: "protocol", cause: this.#protocolFailure });
+      if (
+        this.#observedFailure !== undefined &&
+        this.#observedFailure.kind !== "exit"
+      )
+        throw this.#projectObservedFailure();
       const supervisor = this.#runtime.supervisor;
       const snapshot = supervisor?.snapshot();
       if (
         snapshot !== undefined &&
         (snapshot.exitCode !== undefined || snapshot.signal !== undefined)
       ) {
-        if (!(await supervisor?.waitForOutputClose(10))) continue;
-        if (this.#frames.length > 0) continue;
-        const finalSnapshot = supervisor?.snapshot() ?? snapshot;
-        const capturedOutput = {
-          stdout: "",
-          stderr: finalSnapshot.stderr.text,
-          truncated: finalSnapshot.diagnosticTruncated ?? false,
-          exit_code: finalSnapshot.exitCode ?? null,
-          signal: finalSnapshot.signal ?? null,
-        };
-        if (
-          supervisor?.launch.process.memoryLimitReached === true ||
-          /heap out of memory|heap limit|allocation failed/iu.test(
-            finalSnapshot.stderr.text,
-          )
-        )
-          throw new AnalysisResourceConstraintError(
+        if (supervisor === undefined) continue;
+        const outcome = await this.#waitForFrameOrOutputClose(
+          supervisor,
+          deadline,
+        );
+        if (outcome === "interrupted") {
+          const completedFrame = this.#frames.shift();
+          if (completedFrame !== undefined) return completedFrame;
+          throw deadline.interruption === "timeout"
+            ? new AnalysisTimeoutError(OPERATION, deadline.timeoutMs)
+            : new AnalysisCancelledError(OPERATION, {
+                cause: deadline.signal.reason,
+              });
+        }
+        const completedFrame = this.#frames.shift();
+        if (completedFrame !== undefined) return completedFrame;
+        if (outcome === "failure") throw this.#projectObservedFailure();
+        if (outcome === "frame") continue;
+        if (this.#observedFailure !== undefined)
+          throw this.#projectObservedFailure();
+        throw new AnalysisOutputError(
+          OPERATION,
+          "Owned web analyzer exited before completing this script",
+          { capturedOutput: this.#capturedOutput() },
+        );
+      }
+      await deadline.wait(10);
+    }
+  }
+
+  #latchFailure(failure: WebBundleObservedFailure): void {
+    if (
+      this.#observedFailure === undefined &&
+      this.#activeDeadline?.interruption === undefined
+    )
+      this.#observedFailure = failure;
+  }
+
+  #observeFrame(frame: WebBundleWorkerMessage): void {
+    if (
+      this.#activeDeadline?.interruption !== undefined ||
+      this.#activeJob === undefined ||
+      frame.kind === "ready" ||
+      frame.id !== this.#activeJob.id
+    )
+      return;
+    if (frame.kind === "complete" || frame.kind === "failure")
+      this.#activeTerminalResponseObserved = true;
+    if (frame.kind !== "failure") return;
+    this.#latchFailure({
+      kind: "frame",
+      frame,
+      resultBudgetBytes: this.#activeJob.resultBudgetBytes,
+    });
+  }
+
+  #projectObservedFailure(): AnalysisError {
+    const failure = this.#observedFailure;
+    if (failure === undefined)
+      return new AnalysisOutputError(
+        OPERATION,
+        "Owned web analyzer exited before completing this script",
+        { capturedOutput: this.#capturedOutput() },
+      );
+    const capturedOutput = this.#capturedOutput();
+    switch (failure.kind) {
+      case "input":
+        return new AnalysisOutputError(
+          OPERATION,
+          "Web analyzer request stream failed",
+          { cause: failure.cause, capturedOutput },
+        );
+      case "protocol":
+        return new AnalysisOutputError(
+          OPERATION,
+          "Invalid web analyzer control frame",
+          { cause: failure.cause, capturedOutput },
+        );
+      case "incomplete-output":
+        return new AnalysisOutputError(
+          OPERATION,
+          "Owned web analyzer output closed before completing this script",
+          { capturedOutput },
+        );
+      case "frame":
+        return failure.frame.reason === "resource"
+          ? new AnalysisResourceConstraintError(
+              OPERATION,
+              "memory",
+              failure.frame.message,
+              {
+                result_budget_bytes: failure.resultBudgetBytes,
+              },
+              { capturedOutput },
+            )
+          : new AnalysisOutputError(
+              OPERATION,
+              `Web script analysis failed (${failure.frame.reason}): ${failure.frame.message}`,
+              { capturedOutput },
+            );
+      case "exit":
+        if (failure.heapExhaustion)
+          return new AnalysisResourceConstraintError(
             OPERATION,
             "memory",
             "Owned web analyzer exhausted its configured memory limit",
@@ -502,13 +683,63 @@ export class WebBundleAnalysisWorker {
             },
             { capturedOutput },
           );
-        throw new AnalysisOutputError(
+        return new AnalysisOutputError(
           OPERATION,
           "Owned web analyzer exited before completing this script",
           { capturedOutput },
         );
-      }
-      await deadline.wait(10);
+    }
+  }
+
+  #capturedOutput() {
+    const supervisor = this.#runtime.supervisor;
+    const snapshot = supervisor?.snapshot();
+    return {
+      stdout: "",
+      stderr: snapshot?.stderr.text ?? "",
+      truncated:
+        snapshot?.diagnosticTruncated === true ||
+        snapshot?.outputIncomplete === true ||
+        (supervisor !== undefined && !supervisor.observedOutputClose()),
+      exit_code: snapshot?.exitCode ?? null,
+      signal: snapshot?.signal ?? null,
+    };
+  }
+
+  #wakeFrameWaiters(outcome: "frame" | "failure"): void {
+    for (const wake of this.#frameWaiters) wake(outcome);
+    this.#frameWaiters.clear();
+  }
+
+  async #waitForFrameOrOutputClose(
+    supervisor: NonNullable<OwnedWorkerRuntime["supervisor"]>,
+    deadline: ProviderStartupDeadline,
+  ): Promise<"frame" | "failure" | "closed" | "interrupted"> {
+    if (this.#frames.length > 0) return "frame";
+    let wakeFrame!: (outcome: "frame" | "failure") => void;
+    const frameAvailable = new Promise<"frame" | "failure">((resolve) => {
+      wakeFrame = resolve;
+      this.#frameWaiters.add(wakeFrame);
+    });
+    const outputCloseController = new AbortController();
+    const interruptOutputClose = () =>
+      outputCloseController.abort(deadline.signal.reason);
+    if (deadline.signal.aborted) interruptOutputClose();
+    else
+      deadline.signal.addEventListener("abort", interruptOutputClose, {
+        once: true,
+      });
+    try {
+      const outputClose = supervisor
+        .waitForOutputClose(undefined, outputCloseController.signal)
+        .then((closed): "closed" | "interrupted" =>
+          closed ? "closed" : "interrupted",
+        );
+      return await Promise.race([frameAvailable, outputClose]);
+    } finally {
+      outputCloseController.abort();
+      deadline.signal.removeEventListener("abort", interruptOutputClose);
+      this.#frameWaiters.delete(wakeFrame);
     }
   }
 
@@ -566,6 +797,11 @@ export class WebBundleAnalysisWorker {
     this.#pending = "";
     this.#decoder = new StringDecoder("utf8");
     this.#protocolFailure = undefined;
+    this.#observedFailure = undefined;
+    this.#activeDeadline = undefined;
+    this.#activeJob = undefined;
+    this.#activeTerminalResponseObserved = false;
+    this.#wakeFrameWaiters("failure");
   }
 
   #cleanupFailure(cause: unknown, primary?: AnalysisError): AnalysisError {

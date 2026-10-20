@@ -96,7 +96,14 @@ export async function verifyHopperBoundaryContracts(
     ...(await verifyHopperSearch(call, invalid, procedure)),
     ...(await verifyHopperRegexIsolation(client, options, call, address)),
   };
+  const originalBookmark = (await call("list_bookmarks")).find(
+    (item) => item.address === address,
+  );
+  let bookmarkReplacement;
+  const boundaryFailures = [];
   try {
+    if (originalBookmark !== undefined)
+      assert.equal(await call("unset_bookmark", { address }), true);
     if (foreignDocument !== undefined) {
       await invalid(
         "read_bytes",
@@ -127,6 +134,49 @@ export async function verifyHopperBoundaryContracts(
         ),
       );
     }
+
+    assert.equal(
+      await call("set_bookmark", {
+        address,
+        name: "REA boundary bookmark before clear",
+      }),
+      true,
+    );
+    const beforeClear = (await call("list_bookmarks")).find(
+      (item) => item.address === address,
+    );
+    assert.deepEqual(beforeClear, {
+      address,
+      name: "REA boundary bookmark before clear",
+    });
+    assert.equal(await call("set_bookmark", { address, name: "" }), true);
+    const afterClear = (await call("list_bookmarks")).find(
+      (item) => item.address === address,
+    );
+    assert.deepEqual(afterClear, { address, name: null });
+
+    const replacementName = "REA boundary bookmark replacement";
+    assert.equal(
+      await call("set_bookmark", { address, name: replacementName }),
+      true,
+    );
+    const afterReplacement = (await call("list_bookmarks")).find(
+      (item) => item.address === address,
+    );
+    assert.deepEqual(afterReplacement, { address, name: replacementName });
+    assert.equal(await call("set_bookmark", { address }), true);
+    const afterOmittedName = (await call("list_bookmarks")).find(
+      (item) => item.address === address,
+    );
+    assert.deepEqual(afterOmittedName, {
+      address,
+      name: replacementName,
+    });
+    bookmarkReplacement = {
+      existingNameCleared: afterClear?.name === null,
+      nonemptyNameReplaced: afterReplacement?.name === replacementName,
+      omittedNamePreserved: afterOmittedName?.name === replacementName,
+    };
 
     for (const [setter, getter] of [
       ["set_comment", "comment"],
@@ -283,14 +333,51 @@ export async function verifyHopperBoundaryContracts(
       "idle",
       "a live GUI bridge must remain healthy after its launcher helper exits",
     );
+  } catch (error) {
+    boundaryFailures.push(error);
+    throw error;
   } finally {
-    await call("set_address_name", { address, name: originalName ?? "" });
-    await call("set_comment", { address, comment: originalComment ?? "" });
-    await call("set_inline_comment", {
-      address,
-      comment: originalInlineComment ?? "",
-    });
-    await call("unset_bookmark", { address });
+    const restorations = [
+      () => call("set_address_name", { address, name: originalName ?? "" }),
+      () => call("set_comment", { address, comment: originalComment ?? "" }),
+      () =>
+        call("set_inline_comment", {
+          address,
+          comment: originalInlineComment ?? "",
+        }),
+      async () => {
+        await call("unset_bookmark", { address });
+        if (originalBookmark === undefined) return;
+        assert.equal(
+          await call("set_bookmark", {
+            address,
+            ...(originalBookmark.name === null
+              ? {}
+              : { name: originalBookmark.name }),
+          }),
+          true,
+          "Could not restore the original disposable-target bookmark",
+        );
+        const restored = (await call("list_bookmarks")).find(
+          (item) => item.address === address,
+        );
+        assert.deepEqual(restored, originalBookmark);
+      },
+    ];
+    const restorationErrors = [];
+    for (const restore of restorations) {
+      try {
+        await restore();
+      } catch (error) {
+        restorationErrors.push(error);
+      }
+    }
+    if (restorationErrors.length > 0) {
+      throw new AggregateError(
+        [...boundaryFailures, ...restorationErrors],
+        "Could not restore all disposable Hopper boundary state",
+      );
+    }
   }
   return {
     schemaCount: catalog.tools.length,
@@ -301,6 +388,7 @@ export async function verifyHopperBoundaryContracts(
     navigationAndText,
     workflows,
     search,
+    bookmarkReplacement,
   };
 }
 

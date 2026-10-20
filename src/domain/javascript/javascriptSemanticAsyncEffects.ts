@@ -368,7 +368,11 @@ const timerDelay = (candidate: TimerCandidate): number | null => {
   if (candidate.kind !== "schedule" || candidate.method === "setImmediate")
     return null;
   const delay = candidate.node.arguments[1];
-  return t.isNumericLiteral(delay) ? delay.value : null;
+  // An overflowing literal such as 1e999 parses to Infinity, which JSON
+  // Evidence cannot carry; keep that delay unknown like any other.
+  return t.isNumericLiteral(delay) && Number.isFinite(delay.value)
+    ? delay.value
+    : null;
 };
 
 const timerId = (candidate: TimerCandidate): string =>

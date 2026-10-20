@@ -14,7 +14,10 @@ import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
 import type { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
-import { evmInterfaceModule } from "../composition/evm.js";
+import {
+  evmInterfaceModule,
+  evmLimiterAvailability,
+} from "../composition/evm.js";
 import { registerEvmTools } from "./registerEvmTools.js";
 import type { SqliteDatabaseService } from "../application/sqlite/SqliteDatabaseService.js";
 import { createSqliteDatabaseService } from "../composition/sqlite.js";
@@ -252,6 +255,12 @@ const installSessionToolAvailability = (
   };
   return {
     policy,
+    ...(options.evmInterface !== undefined || !linuxX64
+      ? {}
+      : {
+          evmLimiterAvailability: (signal: AbortSignal) =>
+            evmLimiterAvailability(environment, { signal }),
+        }),
   };
 };
 
@@ -617,6 +626,9 @@ export const createServer = (
       ...(availability === undefined
         ? {}
         : { availabilityPolicy: availability.policy }),
+      ...(availability?.evmLimiterAvailability === undefined
+        ? {}
+        : { evmLimiterAvailability: availability.evmLimiterAvailability }),
       androidAnalysisAvailability: (signal) =>
         android.inspectAvailability(signal),
       adbAnalysisAvailability: (signal) =>
@@ -729,6 +741,7 @@ const registerConfiguredAnalysisTools = (
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
+    evidenceById,
   );
   registerIl2cppTools(
     server,

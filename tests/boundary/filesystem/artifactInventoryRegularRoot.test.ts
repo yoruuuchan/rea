@@ -81,6 +81,34 @@ it("keeps unavailable container traversal distinct from observed root bytes", as
   });
 });
 
+it("admits a FAT root when a valid slice header starts at the prefix boundary", async () => {
+  const root = await createTestTempDirectory("rea-fat-root-header-boundary-");
+  const path = join(root, "universal");
+  const bytes = Buffer.alloc(8_224);
+  bytes.writeUInt32BE(0xcafebabe, 0);
+  bytes.writeUInt32BE(2, 4);
+  const slices = [
+    { cpu: 0x01000007, subtype: 3, offset: 4_096 },
+    { cpu: 0x0100000c, subtype: 0, offset: 8_192 },
+  ];
+  for (const [index, slice] of slices.entries()) {
+    const entry = 8 + index * 20;
+    bytes.writeUInt32BE(slice.cpu, entry);
+    bytes.writeUInt32BE(slice.subtype, entry + 4);
+    bytes.writeUInt32BE(slice.offset, entry + 8);
+    bytes.writeUInt32BE(32, entry + 12);
+    bytes.writeUInt32BE(12, entry + 16);
+    bytes.writeUInt32LE(0xfeedfacf, slice.offset);
+    bytes.writeUInt32LE(slice.cpu, slice.offset + 4);
+    bytes.writeUInt32LE(slice.subtype, slice.offset + 8);
+    bytes.writeUInt32LE(2, slice.offset + 12);
+  }
+  await writeFile(path, bytes);
+
+  const classified = await classifyAndHashRoot(path, false, await lstat(path));
+  expect(classified.format).toBe("mach-o-universal");
+});
+
 it("recognizes a root ASAR when its exact JSON extent has legal surrounding whitespace", async () => {
   const root = await createTestTempDirectory("rea-asar-root-whitespace-");
   const path = join(root, "app.asar");

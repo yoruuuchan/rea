@@ -23,6 +23,7 @@ import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { isExactJsonNumber } from "../../domain/exactJsonNumber.js";
 import { safeParseJson } from "../../domain/safeJson.js";
 import type { AnalysisResourceConstraintError } from "../../domain/analysisErrorCore.js";
+import type { StreamableHttpListenError } from "../http/streamableHttpListenError.js";
 import { ok, type Result } from "../../domain/result.js";
 import { PRODUCT_IDENTITY } from "../../identity.js";
 import {
@@ -212,7 +213,7 @@ export interface ServeEnvironmentOptions {
   readonly environmentName?: string;
   readonly logger?: Logger;
   /** Reports a listener failure after binding; the failure is logged either way. */
-  readonly onerror?: (error: Error) => void;
+  readonly onerror?: (error: StreamableHttpListenError) => void;
 }
 
 /** A listening agent environment and the card it serves. */

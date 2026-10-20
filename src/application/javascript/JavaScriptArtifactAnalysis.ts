@@ -11,9 +11,11 @@ import { projectJavaScriptModuleSemantics } from "../../domain/javascript/javasc
 import { parseJavaScriptSource } from "../../domain/javascript/javascriptSourceParser.js";
 import { hasValidSourceMapContents } from "../../domain/sourceMapContents.js";
 import {
-  flattenSourceMapLeaves,
+  inspectSourceMapEnvelope,
   sourceMapJsonText,
+  sourceMapMappingsSchema,
 } from "../../domain/sourceMapEnvelope.js";
+import type { SourceMapLeaf } from "../../domain/sourceMapEnvelope.js";
 import type { JavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
 import { failedJavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import type {
@@ -592,60 +594,109 @@ const parseSourceMap = (
     void cause;
     return invalidSourceMap(file, "Source map is not valid JSON.");
   }
-  const maps = flattenSourceMapLeaves(value);
-  if (maps === undefined)
-    return invalidSourceMap(file, "Source map is not a version 3 map.");
-  return collectSourceMapOriginals(file, maps);
+  const envelope = inspectSourceMapEnvelope(value);
+  if (envelope.status === "invalid")
+    return invalidSourceMap(file, envelope.reason);
+  const observation = collectSourceMapOriginals(file, envelope.leaves);
+  if (envelope.status === "included") return observation;
+  const envelopeLimitations = [
+    ...envelope.invalid_sections.map(
+      ({ section_path, reason }) =>
+        `Indexed source-map section at [${section_path.join(",")}]: ${reason}`,
+    ),
+    ...envelope.external_sections.map(
+      ({ url }) => `External source-map section URL is not fetched: ${url}`,
+    ),
+  ];
+  const limitation = [
+    ...(observation.status === "invalid" ? [observation.limitation] : []),
+    ...envelopeLimitations,
+  ].join("; ");
+  return {
+    ...observation,
+    status: "invalid",
+    limitation,
+    ...(envelope.external_sections.length === 0
+      ? {}
+      : { external_sections: envelope.external_sections }),
+    ...(envelope.invalid_sections.length === 0
+      ? {}
+      : { invalid_sections: envelope.invalid_sections }),
+  };
 };
 
 const collectSourceMapOriginals = (
   file: JavaScriptArtifactFile,
-  maps: readonly Readonly<Record<string, unknown>>[],
+  leaves: readonly SourceMapLeaf[],
 ): JavaScriptSourceMapObservation => {
   const sources: JavaScriptSourceMapOriginal[] = [];
+  const limitations: string[] = [];
   let declarationIndex = 0;
-  for (const map of maps) {
+  for (const { map, section_path } of leaves) {
+    const location =
+      section_path.length === 0
+        ? ""
+        : ` in section [${section_path.join(",")}]`;
     const names = map.sources;
-    if (!Array.isArray(names))
-      return invalidSourceMap(file, "Source map has no sources array.");
+    if (!Array.isArray(names)) {
+      limitations.push(`Source map has no sources array${location}.`);
+      continue;
+    }
     const contents = map.sourcesContent;
     if (!hasValidSourceMapContents(contents))
-      return invalidSourceMap(
-        file,
-        "Source map sourcesContent must be an array of strings or null entries.",
+      limitations.push(
+        `Source map sourcesContent must be an array of strings or null entries${location}.`,
       );
-    if (map.sourceRoot != null && typeof map.sourceRoot !== "string")
-      return invalidSourceMap(
-        file,
-        "Source map sourceRoot must be a string or null.",
+    if (map.sourceRoot != null && typeof map.sourceRoot !== "string") {
+      limitations.push(
+        `Source map sourceRoot must be a string or null${location}.`,
       );
+      continue;
+    }
     const root = typeof map.sourceRoot === "string" ? map.sourceRoot : null;
-    const sourceNames: (string | null)[] = [];
-    for (const raw of names) {
-      if (raw !== null && typeof raw !== "string")
-        return invalidSourceMap(
-          file,
-          "Source map contains a non-string source name.",
+    const sourceDeclarations: {
+      readonly index: number;
+      readonly name: string | null;
+    }[] = [];
+    for (const [index, raw] of names.entries()) {
+      if (raw !== null && typeof raw !== "string") {
+        limitations.push(
+          `Source map contains a non-string source name at index ${String(index)}${location}.`,
         );
-      sourceNames.push(raw);
+        continue;
+      }
+      sourceDeclarations.push({ index, name: raw });
     }
     const references = resolveJavaScriptSourceMapReferences(
-      sourceNames,
+      sourceDeclarations.map(({ name }) => name),
       root,
       file.path,
     );
     for (const [index, reference] of references.entries()) {
-      const rawContent = Array.isArray(contents) ? contents[index] : undefined;
+      const declaration = sourceDeclarations[index];
+      if (declaration === undefined) continue;
+      const rawContent = Array.isArray(contents)
+        ? contents[declaration.index]
+        : undefined;
       const content = typeof rawContent === "string" ? rawContent : null;
       sources.push({
-        source_index: index,
+        source_index: declaration.index,
         declaration_index: declarationIndex++,
         reference,
         content,
         content_sha256: content === null ? null : sha256(content),
+        section_path,
       });
     }
+    if (!sourceMapMappingsSchema.safeParse(map.mappings).success)
+      limitations.push(`Source map has no mappings string${location}.`);
   }
+  if (limitations.length > 0)
+    return invalidSourceMap(
+      file,
+      [...new Set(limitations)].join("; "),
+      sources,
+    );
   return {
     path: file.path,
     sha256: file.sha256,
@@ -689,11 +740,12 @@ const unavailableSourceMap = (
 const invalidSourceMap = (
   file: JavaScriptArtifactFile,
   limitation: string,
+  sources: readonly JavaScriptSourceMapOriginal[] = [],
 ): JavaScriptSourceMapObservation => ({
   path: file.path,
   sha256: file.sha256,
   status: "invalid",
-  sources: [],
+  sources,
   limitation,
 });
 

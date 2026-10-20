@@ -65,6 +65,29 @@ describe("Ghidra unresolved call locations", () => {
 });
 
 describe("Ghidra function-analysis result values", () => {
+  it.each(["snapshot", null, 1])(
+    "rejects invalid result-specific cache policy %j",
+    (cachePolicy) => {
+      expect(
+        parseGhidraFunctionResult("analyze_function", {
+          value: ghidraFunctionDossier(),
+          limitations: [],
+          cache_policy: cachePolicy,
+        }).ok,
+      ).toBe(false);
+    },
+  );
+
+  it("rejects result-specific cache policy outside the dossier operation", () => {
+    expect(
+      parseGhidraFunctionResult("procedure_pseudo_code", {
+        value: "void main() {}",
+        limitations: [],
+        cache_policy: "live",
+      }).ok,
+    ).toBe(false);
+  });
+
   it("preserves unresolved Swift jump omissions", () => {
     const dossier = {
       ...functionDossierSchema.parse(ghidraFunctionDossier()),

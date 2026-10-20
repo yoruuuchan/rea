@@ -13,6 +13,10 @@ import { expect, it } from "vitest";
 import { z } from "zod";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import {
+  createSingleEntryZip,
+  rewriteSingleEntryZipName,
+} from "../../fixtures/zipNames.js";
 
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { ArtifactProvider } from "../../../src/artifacts/ArtifactProvider.js";
@@ -139,6 +143,58 @@ it("extracts an active archive through MCP when requested", async () => {
     await Promise.allSettled([client.close(), server.close(), session.close()]);
     if (outputRoot !== undefined)
       await rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+it("preserves raw legacy ZIP name bytes and CP437 path interpretation through MCP", async () => {
+  const root = await createTestTempDirectory("rea-legacy-zip-name-mcp-");
+  const archive = join(root, "legacy-name.zip");
+  const rawName = Buffer.from([0xc7, 0xd1, 0xb1, 0xdb, 0x2e, 0x74, 0x78, 0x74]);
+  await writeFile(
+    archive,
+    rewriteSingleEntryZipName(
+      await createSingleEntryZip("name.txt"),
+      "name.txt",
+      rawName,
+      false,
+    ),
+  );
+
+  const session = createTestBinarySession(new ArtifactProvider(process.env));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "legacy-zip-name-test", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const opened = await client.callTool({
+      name: "open_binary",
+      arguments: { path: archive },
+    });
+    expect(opened.isError).not.toBe(true);
+    const inspected = await client.callTool({
+      name: "inspect_artifact",
+      arguments: {},
+    });
+    expect(inspected.isError).not.toBe(true);
+    const result = toolEvidence(inspected.structuredContent);
+    const inspection = z
+      .object({ substeps: z.array(z.object({ evidence: z.unknown() })) })
+      .parse(result.normalized_result);
+    const inventory = z
+      .object({ normalized_result: artifactInventoryResultSchema })
+      .parse(inspection.substeps[0]?.evidence).normalized_result;
+    expect(inventory.occurrences).toContainEqual(
+      expect.objectContaining({
+        logical_path: "╟╤▒█.txt",
+        limitations: [
+          "ZIP name uses CP437 fallback; source encoding unverified; raw hex: c7d1b1db2e747874.",
+        ],
+      }),
+    );
+  } finally {
+    await Promise.all([client.close(), server.close(), session.close()]);
   }
 });
 

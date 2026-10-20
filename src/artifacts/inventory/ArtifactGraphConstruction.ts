@@ -33,6 +33,7 @@ import {
 import {
   classifyFatContainerIdentity,
   readFatContainerHeader,
+  readMachoHeaderPrefixFacts,
 } from "../../domain/apple/machoContainer.js";
 
 /** Mutable internal occurrence used until root-bound IDs are known. */
@@ -191,6 +192,7 @@ export const createRootNode = (input: {
     readonly sha256: string;
     readonly bytes: number;
     readonly prefix: Buffer;
+    readonly fatSliceHeaders?: ArtifactClassificationEvidence["fatSliceHeaders"];
   } | null;
   readonly occurrences: readonly MutableOccurrence[];
 }): ArtifactNode =>
@@ -215,7 +217,11 @@ export const createRootNode = (input: {
     format:
       input.digest === null
         ? "directory"
-        : classifyArtifactBytes(input.digest.prefix, input.digest.bytes),
+        : classifyArtifactBytes(
+            input.digest.prefix,
+            input.digest.bytes,
+            input.digest.fatSliceHeaders,
+          ),
     contentState: "materialized",
   });
 
@@ -498,8 +504,8 @@ export const classifyArtifactContent = (
   readonly kind: ArtifactOccurrence["artifact_kind"];
   readonly format: ArtifactOccurrence["artifact_format"];
 } => {
-  const { prefix, asarHeader } = evidence;
-  const format = classifyArtifactBytes(prefix, fileSize);
+  const { prefix, asarHeader, fatSliceHeaders } = evidence;
+  const format = classifyArtifactBytes(prefix, fileSize, fatSliceHeaders);
   const byPath = classifyArtifactPath(path);
   if (
     format === "plist" &&
@@ -550,12 +556,13 @@ const artifactRoleForFormat = (
 export const classifyArtifactBytes = (
   prefix: Buffer,
   fileSize = prefix.length,
+  fatSliceHeaders?: ArtifactClassificationEvidence["fatSliceHeaders"],
 ): ArtifactNode["format"] => {
   if (hasZipSignature(prefix)) return "zip";
   if (hasGodotPckHeader(prefix)) return "godot-pck";
   if (hasBinaryPlistSignature(prefix)) return "plist";
   if (hasXmlPlistSignature(prefix)) return "plist";
-  const fatFormat = classifyFatArtifact(prefix, fileSize);
+  const fatFormat = classifyFatArtifact(prefix, fileSize, fatSliceHeaders);
   if (fatFormat !== null) return fatFormat;
   if (prefix.length >= 4) {
     const magic = prefix.readUInt32BE(0);
@@ -592,15 +599,27 @@ export const classifyArtifactBytes = (
 const classifyFatArtifact = (
   prefix: Buffer,
   fileSize: number,
+  fatSliceHeaders?: ArtifactClassificationEvidence["fatSliceHeaders"],
 ): ArtifactNode["format"] | null => {
-  const fatHeader = readFatContainerHeader(prefix, fileSize);
+  const fatHeader =
+    fatSliceHeaders?.header ?? readFatContainerHeader(prefix, fileSize);
   if (fatHeader.state === "needs-data" || fatHeader.state === "malformed")
     return "unknown";
   if (fatHeader.state === "not-fat") return null;
   const identity = classifyFatContainerIdentity(fatHeader, (offset) => {
-    if (offset >= prefix.length) return undefined;
-    if (offset + 4 > prefix.length) return null;
-    return prefix.readUInt32BE(offset);
+    if (fatSliceHeaders?.sliceHeadersByOffset.has(offset) === true)
+      return fatSliceHeaders.sliceHeadersByOffset.get(offset)?.magic;
+    const slice = fatHeader.slices.find(
+      (candidate) => candidate.offset === offset,
+    );
+    if (slice === undefined || offset >= prefix.length) return undefined;
+    const available = Math.max(
+      0,
+      Math.min(slice.size, prefix.length - offset, 12),
+    );
+    return readMachoHeaderPrefixFacts(
+      prefix.subarray(offset, offset + available),
+    ).magic;
   });
   return identity.state === "mach-o" ? "mach-o-universal" : "unknown";
 };

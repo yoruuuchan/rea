@@ -103,6 +103,7 @@ export const decodeObjcDispatchFacets = (input: {
     className: string,
     methodType: "instance" | "class",
     category?: string,
+    onTruncated?: () => void,
   ): string[] => {
     const selectors: string[] = [];
     if (list === 0n) return selectors;
@@ -113,7 +114,10 @@ export const decodeObjcDispatchFacets = (input: {
     if (stride !== (relative ? 12 : 24))
       throw new TypeError(`Unsupported method stride/flags at ${hex(list)}`);
     for (let index = 0; index < count; index++) {
-      if (!budget.admit()) break;
+      if (!budget.admit()) {
+        onTruncated?.();
+        break;
+      }
       const entry = list + 8n + BigInt(index * stride);
       const rel = (field: bigint) => {
         const displacement = bytes.readInt32LE(read.offset(field, 4));
@@ -279,6 +283,10 @@ export const decodeObjcDispatchFacets = (input: {
       );
     const ivarList = read.pointer(ro + 48n);
     let ivarCount: number | null = meta ? null : 0;
+    let classListTruncated = false;
+    const onTruncated = () => {
+      classListTruncated = true;
+    };
     if (ivarList !== 0n && !meta) {
       const stride = read.u32(ivarList),
         count = read.u32(ivarList + 4n);
@@ -286,7 +294,10 @@ export const decodeObjcDispatchFacets = (input: {
         throw new TypeError("Unsupported Objective-C ivar entry size");
       ivarCount = count;
       for (let index = 0; index < count; index++) {
-        if (!budget.admit()) break;
+        if (!budget.admit()) {
+          classListTruncated = true;
+          break;
+        }
         const entry = ivarList + 8n + BigInt(index * stride);
         const encodedOffset = read.pointer(entry);
         let value: number | null = null;
@@ -326,7 +337,27 @@ export const decodeObjcDispatchFacets = (input: {
         });
       }
     }
-    methods(read.pointer(ro + 32n), name, meta ? "class" : "instance");
+    methods(
+      read.pointer(ro + 32n),
+      name,
+      meta ? "class" : "instance",
+      undefined,
+      onTruncated,
+    );
+    const properties = readObjcPropertiesOf(read, read.pointer(ro + 64n), {
+      owner: name,
+      admit: () => budget.admit(),
+      issues: categoryIssues,
+      location: hex(read.pointer(ro + 64n)),
+      onTruncated,
+    });
+    const protocols = protocolReader.list(read.pointer(ro + 40n), onTruncated);
+    const classDecodeReasons = [
+      ...(superclass.name === null && !root
+        ? ["superclass_binding_unresolved"]
+        : []),
+      ...(classListTruncated ? ["max_records_reached"] : []),
+    ];
     result.objc_classes.push({
       name,
       super_class: superclass.name,
@@ -350,22 +381,17 @@ export const decodeObjcDispatchFacets = (input: {
           is_required: null,
           is_optional: null,
         })),
-      properties: readObjcPropertiesOf(read, read.pointer(ro + 64n), {
-        owner: name,
-        admit: () => budget.admit(),
-        issues: categoryIssues,
-        location: hex(read.pointer(ro + 64n)),
-      }),
-      protocols: protocolReader.list(read.pointer(ro + 40n)),
+      properties,
+      protocols,
       ivar_count: ivarCount,
       instance_size: read.u32(ro + 8n),
       location: read.location(address),
       superclass_address: superclass.address,
       metaclass_address: meta ? null : hex(read.pointer(address)),
       decode:
-        superclass.name === null && !root
-          ? { status: "partial", reason: "superclass_binding_unresolved" }
-          : decoded,
+        classDecodeReasons.length === 0
+          ? decoded
+          : { status: "partial", reason: classDecodeReasons.join("; ") },
       evidence: read.evidence(
         address,
         "Objective-C class and class_ro_t records",
@@ -422,7 +448,7 @@ export const decodeObjcDispatchFacets = (input: {
     issues: categoryIssues,
     admit: () => budget.admit(),
     methods,
-    protocols: (list) => protocolReader.list(list),
+    protocols: (list, onTruncated) => protocolReader.list(list, onTruncated),
     localClassName: (address) => readLocalClass(read, address).name,
   });
   return {

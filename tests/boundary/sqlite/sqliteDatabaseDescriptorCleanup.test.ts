@@ -267,13 +267,15 @@ it("retains cancellation diagnostics and the interrupt exit code through CLI shu
 it("retains reply-read cancellation and retries the failed reply descriptor close", async () => {
   const selected = await fixture("reply");
   const controller = new AbortController();
-  descriptorCleanup.onOpen = () =>
-    controller.abort(new Error("requested cancellation during reply read"));
+  const reason = { requested: "cancel during reply read" };
+  descriptorCleanup.onOpen = () => controller.abort(reason);
   const result = await selected.provider.inspect(
     { path: selected.database.path },
     { signal: controller.signal },
   );
   if (result.ok) throw new Error("Expected cancelled reply read");
+  expect(result.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+  expect(result.error.cause).toBe(reason);
   const cancelled = {
     code: "cleanup_incomplete",
     details: {
@@ -378,12 +380,13 @@ it.each(["database", "WAL", "journal"] as const)(
   async (member) => {
     const selected = await fixture(member);
     const controller = new AbortController();
-    descriptorCleanup.onOpen = () =>
-      controller.abort(new Error("requested caller cancellation"));
+    const reason = { requested: `cancel while reading ${member}` };
+    descriptorCleanup.onOpen = () => controller.abort(reason);
     const result = await selected.provider.inspect(
       { path: selected.database.path },
       { signal: controller.signal },
     );
+    if (result.ok) throw new Error("Expected caller cancellation");
     expect(result).toMatchObject({
       ok: false,
       error: {
@@ -391,5 +394,17 @@ it.each(["database", "WAL", "journal"] as const)(
         diagnostics: { previous_error: { code: "cancelled" } },
       },
     });
+    descriptorCleanup.denied = false;
+    await selected.provider.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "cancelled",
+    });
+    expect(result.error.cleanupPrimary).toMatchObject({
+      _tag: "AnalysisCancelledError",
+    });
+    expect(result.error.cleanupPrimary?.cause).toBe(reason);
+    for (const root of selected.roots)
+      await expect(access(root.path)).rejects.toMatchObject({ code: "ENOENT" });
   },
 );

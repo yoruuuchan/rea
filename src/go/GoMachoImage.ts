@@ -8,6 +8,7 @@ import {
   type GoImageSection,
   type GoZeroFillMapping,
 } from "./GoBinaryContainer.js";
+import { machoLoadCommandAlignment } from "../domain/apple/machoContainer.js";
 
 /** Read thin Mach-O images, retaining the slice's exact file-backed mappings. */
 export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
@@ -31,20 +32,27 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
       "Mach-O command count exceeds its load-command range",
     );
   const mappings: GoFileMapping[] = [];
+  const executableMappings: GoFileMapping[] = [];
   const zeroFills: GoZeroFillMapping[] = [];
   const sections: GoImageSection[] = [];
   const named: GoFileMapping[] = [];
   let fallback: GoFileMapping | null = null;
   let offset = commandStart;
+  let chainedFixups = false;
   const end = commandStart + commandBytes;
   for (let index = 0; index < count; index++) {
     const command = reader.u32(offset);
     const size = reader.u32(offset + 4);
-    if (size < 8 || size % 4 !== 0 || size > end - offset)
+    if (
+      size < 8 ||
+      size % machoLoadCommandAlignment(bits === 64) !== 0 ||
+      size > end - offset
+    )
       throw new GoBinaryFormatFailure(
         "malformed",
         "Mach-O load command size is invalid or truncated",
       );
+    if (command === 0x80000034) chainedFixups = true;
     if (command === 1 || command === 0x19) {
       const wide = command === 0x19;
       if (wide !== (bits === 64))
@@ -91,8 +99,10 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
       const name = fixedName(
         reader.range(offset + 8, 16, "Mach-O segment name"),
       );
-      if (mapping !== undefined && name !== "__PAGEZERO")
+      if (mapping !== undefined && name !== "__PAGEZERO") {
         mappings.push(mapping);
+        if ((protection & 4) !== 0) executableMappings.push(mapping);
+      }
       if (memorySize > fileSize && name !== "__PAGEZERO")
         zeroFills.push({
           address: address + fileSize,
@@ -187,10 +197,12 @@ export const readGoMachoImage = (bytes: Buffer): GoBinaryContainer => {
   ]);
   return {
     format: "macho",
+    macho_chained_fixups: chainedFixups,
     architecture: names.get(cpu) ?? `macho-cpu-${cpu}`,
     bits,
     byte_order: little ? "little" : "big",
     mappings,
+    executable_mappings: executableMappings,
     zero_fills: zeroFills,
     sections,
     search: named.length > 0 ? named : fallback === null ? [] : [fallback],

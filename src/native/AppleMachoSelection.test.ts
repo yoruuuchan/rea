@@ -6,6 +6,7 @@ import {
   dylibCommand,
   fatImage,
   machoImage,
+  machoImageWithUnknownCommand,
 } from "../artifacts/apple/MachoImage.fixture.js";
 import { parseMachoLayout, selectMachoSlice } from "./AppleMachoSelection.js";
 import { decodeAppleDispatchMetadata } from "./AppleDispatchMetadata.js";
@@ -15,6 +16,24 @@ const ARM64E_X1 = { type: 0x0100000c, subtype: 0x8000000c } as const;
 const X86_64H = { type: 0x01000007, subtype: 8 } as const;
 
 describe("native Mach-O slice selection", () => {
+  it("rejects misaligned load commands", () => {
+    expect(() =>
+      parseMachoLayout(
+        Buffer.from(machoImageWithUnknownCommand(true, 12)),
+        "arm64",
+      ),
+    ).toThrow(/Invalid load command size/u);
+  });
+
+  it("accepts an aligned load command", () => {
+    expect(
+      parseMachoLayout(
+        Buffer.from(machoImageWithUnknownCommand(true, 16)),
+        "arm64",
+      ).segments,
+    ).toEqual([]);
+  });
+
   it("preserves high-bit section-name bytes instead of ASCII-folding metadata names", () => {
     const segment = Buffer.alloc(152);
     segment.writeUInt32LE(0x19, 0);

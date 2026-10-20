@@ -25,6 +25,8 @@ import {
   ProviderProcessSupervisor,
   spawnOwnedProviderProcess,
   type OwnedProviderProcessSpawnOptions,
+  type ProviderProcessExitObservation,
+  type ProviderProcessSnapshot,
   type SpawnedOwnedProviderProcess,
 } from "../../process/ProviderProcess.js";
 import { prepareProcessOwnershipInspection } from "../../process/ProcessOwnershipObservation.js";
@@ -58,6 +60,25 @@ export interface SourceMapCleanupOwner {
   ): Promise<ProviderCleanupError | undefined>;
 }
 
+type CodecPhysicalObservation =
+  | {
+      readonly kind: "exit";
+      readonly exit: ProviderProcessExitObservation;
+    }
+  | {
+      readonly kind: "process-error";
+      readonly message: string;
+      readonly cause: Error;
+    }
+  | { readonly kind: "output-limit" };
+type CodecOutcome =
+  | {
+      readonly kind: "physical";
+      readonly observation: CodecPhysicalObservation;
+    }
+  | { readonly kind: "cancelled"; readonly callerReason: unknown }
+  | { readonly kind: "timeout" };
+
 export class SourceMapCleanupFailure extends ProviderCleanupError {
   constructor(
     readonly cleanupOwner: SourceMapCleanupOwner,
@@ -82,7 +103,9 @@ export const runSourceMapCommand = async (
   } catch (cause: unknown) {
     return err(
       options?.signal?.aborted === true
-        ? new AnalysisCancelledError(OPERATION)
+        ? new AnalysisCancelledError(OPERATION, {
+            cause: options.signal.reason,
+          })
         : new ProviderAdapterError(PROVIDER, OPERATION, {
             cause,
             diagnostics: {
@@ -105,12 +128,15 @@ export const runSourceMapCommand = async (
   } catch (cause: unknown) {
     result = err(command.failure(cause));
   } finally {
+    command.dispose();
     deadline.dispose();
   }
   const cleanup = await command.close(result.ok ? null : result.error.message);
   if (cleanup !== undefined) return err(cleanup);
   return result.ok && options?.signal?.aborted
-    ? err(new AnalysisCancelledError(OPERATION))
+    ? err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      )
     : result;
 };
 
@@ -118,13 +144,26 @@ class OwnedCodec implements SourceMapCleanupOwner {
   readonly #runId = `rea-source-map-${randomUUID()}`;
   #runtime: SourceMapCodecRuntime | undefined;
   #supervisor: ProviderProcessSupervisor | undefined;
-  #oversized = false;
-  #processError: string | undefined;
+  #outcome: CodecOutcome | undefined;
+  #drainStop: CodecPhysicalObservation | undefined;
+  readonly #onInterruption: () => void;
   constructor(
     readonly path: string,
     readonly dependencies: SourceMapDecoderDependencies,
     readonly deadline: ProviderStartupDeadline,
-  ) {}
+  ) {
+    this.#onInterruption = () => this.#observeInterruption();
+    if (deadline.signal.aborted) this.#observeInterruption();
+    else
+      deadline.signal.addEventListener("abort", this.#onInterruption, {
+        once: true,
+      });
+  }
+
+  /** Stop recording event order after an outcome has been selected. */
+  dispose(): void {
+    this.deadline.signal.removeEventListener("abort", this.#onInterruption);
+  }
 
   async start(request: string): Promise<void> {
     this.check();
@@ -175,16 +214,33 @@ class OwnedCodec implements SourceMapCleanupOwner {
           (() => cleanupOwnedProcessGroup(spawned.ownership)),
       },
       {
+        maxDiagnosticBytes: WEB_SOURCE_MAP_LIMITS.outputBytes + 1024 * 1024,
         onDiagnostic: (event) => {
-          if (event.type === "error") this.#processError = event.message;
+          if (
+            event.type === "exit" &&
+            (event.code !== 0 || event.signal !== null)
+          )
+            this.#recordPhysicalFailure({
+              kind: "exit",
+              exit: { code: event.code, signal: event.signal },
+            });
+          if (event.type === "error") {
+            this.#recordPhysicalFailure({
+              kind: "process-error",
+              message: event.message,
+              cause: event.cause ?? new Error(event.message),
+            });
+          }
           if (
             event.type === "output" &&
-            event.totalBytes >
-              (event.stream === "stdout"
-                ? WEB_SOURCE_MAP_LIMITS.outputBytes
-                : 1024 * 1024)
-          )
-            this.#oversized = true;
+            (event.truncated === true ||
+              event.totalBytes >
+                (event.stream === "stdout"
+                  ? WEB_SOURCE_MAP_LIMITS.outputBytes
+                  : 1024 * 1024))
+          ) {
+            this.#recordPhysicalFailure({ kind: "output-limit" });
+          }
         },
       },
     );
@@ -194,61 +250,50 @@ class OwnedCodec implements SourceMapCleanupOwner {
     const supervisor = this.#supervisor;
     if (supervisor === undefined)
       throw new Error("Codec process was not acquired");
-    while (!(await supervisor.waitForOutputClose(50))) this.check();
+    while (!(await supervisor.waitForOutputClose(50))) {
+      const outcome = this.#outcome;
+      if (
+        outcome?.kind !== "physical" ||
+        outcome.observation.kind !== "exit" ||
+        this.deadline.signal.aborted ||
+        this.#drainStop !== undefined
+      )
+        this.check();
+    }
     this.check();
     const snapshot = supervisor.snapshot();
     // No partial codec result exists; a reached limit fails the whole trace.
     if (snapshot.memoryLimitReached === true)
-      throw new AnalysisResourceConstraintError(
-        OPERATION,
-        "memory",
-        `Source-map codec reached its ${SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES === null ? "" : `${String(SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES)}-byte `}process memory limit for ${this.path}; no partial evidence was returned.`,
-        {
-          codec_process_memory_limit_bytes: SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES,
-        },
-        {
-          capturedOutput: {
-            stdout: "",
-            stderr: snapshot.stderr.text,
-            truncated: snapshot.diagnosticTruncated ?? false,
-          },
-        },
-      );
-    if (snapshot.exitCode !== 0 || snapshot.signal !== null)
-      throw new ProviderAdapterError(PROVIDER, OPERATION, {
-        diagnostics: {
-          map_path: this.path,
-          exit_code: snapshot.exitCode ?? null,
-          signal: snapshot.signal ?? null,
-          stderr: snapshot.stderr.text,
-        },
-      });
+      throw this.#memoryLimitFailure(snapshot);
     return snapshot.stdout.text;
   }
 
   check(): void {
-    if (this.deadline.interruption === "cancelled")
-      throw new AnalysisCancelledError(OPERATION);
-    if (this.deadline.interruption === "timeout")
+    this.#observeInterruption();
+    const outcome = this.#outcome;
+    if (outcome?.kind === "physical")
+      throw this.#physicalFailure(outcome.observation);
+    if (outcome?.kind === "cancelled")
+      throw new AnalysisCancelledError(OPERATION, {
+        cause: outcome.callerReason,
+      });
+    if (outcome?.kind === "timeout")
       throw new AnalysisTimeoutError(
         OPERATION,
         WEB_SOURCE_MAP_LIMITS.decodeTimeoutMs,
       );
-    if (this.#oversized)
-      throw new AnalysisOutputError(
-        OPERATION,
-        "Codec output exceeds its complete-evidence or diagnostic budget.",
-      );
-    if (this.#processError !== undefined)
-      throw new ProviderAdapterError(PROVIDER, OPERATION, {
-        diagnostics: { map_path: this.path, error_message: this.#processError },
-      });
   }
 
   failure(cause: unknown): AnalysisError {
-    if (this.deadline.interruption === "cancelled")
-      return new AnalysisCancelledError(OPERATION);
-    if (this.deadline.interruption === "timeout")
+    this.#observeInterruption();
+    const outcome = this.#outcome;
+    if (outcome?.kind === "physical")
+      return this.#physicalFailure(outcome.observation);
+    if (outcome?.kind === "cancelled")
+      return new AnalysisCancelledError(OPERATION, {
+        cause: outcome.callerReason,
+      });
+    if (outcome?.kind === "timeout")
       return new AnalysisTimeoutError(
         OPERATION,
         WEB_SOURCE_MAP_LIMITS.decodeTimeoutMs,
@@ -265,6 +310,144 @@ class OwnedCodec implements SourceMapCleanupOwner {
           cause,
           diagnostics: { map_path: this.path, error_message: message(cause) },
         });
+  }
+
+  #observeInterruption(): void {
+    if (this.#outcome !== undefined) return;
+    if (!this.deadline.signal.aborted) return;
+    const interruption = this.deadline.interruption;
+    if (interruption === undefined) return;
+    this.#outcome =
+      interruption === "cancelled"
+        ? { kind: "cancelled", callerReason: this.deadline.signal.reason }
+        : { kind: "timeout" };
+  }
+
+  #recordPhysicalFailure(observation: CodecPhysicalObservation): void {
+    this.#observeInterruption();
+    if (this.#outcome === undefined)
+      this.#outcome = { kind: "physical", observation };
+    else if (observation.kind !== "exit" && this.#drainStop === undefined)
+      this.#drainStop = observation;
+  }
+
+  #physicalFailure(observation: CodecPhysicalObservation): AnalysisError {
+    const snapshot = this.#supervisor?.snapshot();
+    if (observation.kind === "exit") {
+      if (snapshot?.memoryLimitReached === true)
+        return this.#memoryLimitFailure(snapshot);
+      return this.#exitFailure(observation.exit, snapshot);
+    }
+    if (observation.kind === "process-error")
+      return this.#processErrorFailure(observation, snapshot);
+    return this.#outputLimitFailure(snapshot);
+  }
+
+  #exitFailure(
+    exit: ProviderProcessExitObservation,
+    snapshot: ProviderProcessSnapshot | undefined,
+  ): AnalysisError {
+    const outputComplete = this.#supervisor?.observedOutputClose() ?? false;
+    const capturedOutput = this.#capturedOutput(snapshot, exit, outputComplete);
+    return new ProviderAdapterError(PROVIDER, OPERATION, {
+      diagnostics: {
+        map_path: this.path,
+        exit_code: exit.code,
+        signal: exit.signal,
+        output_complete: outputComplete,
+        stderr: snapshot?.stderr.text ?? "",
+        ...(this.#drainStop?.kind === "output-limit"
+          ? { output_limit_reached: true }
+          : {}),
+        ...(this.#drainStop?.kind === "process-error"
+          ? { drain_error_message: this.#drainStop.message }
+          : {}),
+      },
+      ...(capturedOutput === undefined ? {} : { capturedOutput }),
+    });
+  }
+
+  #processErrorFailure(
+    observation: Extract<CodecPhysicalObservation, { kind: "process-error" }>,
+    snapshot: ProviderProcessSnapshot | undefined,
+  ): AnalysisError {
+    const outputComplete = this.#supervisor?.observedOutputClose() ?? false;
+    const capturedOutput = this.#capturedOutput(
+      snapshot,
+      undefined,
+      outputComplete,
+    );
+    return new ProviderAdapterError(PROVIDER, OPERATION, {
+      cause: observation.cause,
+      diagnostics: {
+        map_path: this.path,
+        error_message: observation.message,
+        output_complete: outputComplete,
+      },
+      ...(capturedOutput === undefined ? {} : { capturedOutput }),
+    });
+  }
+
+  #outputLimitFailure(
+    snapshot: ProviderProcessSnapshot | undefined,
+  ): AnalysisError {
+    const outputComplete = this.#supervisor?.observedOutputClose() ?? false;
+    const capturedOutput = this.#capturedOutput(
+      snapshot,
+      undefined,
+      outputComplete,
+    );
+    return new AnalysisOutputError(
+      OPERATION,
+      "Codec output exceeds its complete-evidence or diagnostic budget.",
+      {
+        capturedOutput: {
+          stdout: capturedOutput?.stdout ?? "",
+          stderr: capturedOutput?.stderr ?? "",
+          stdout_bytes: capturedOutput?.stdout_bytes ?? 0,
+          stderr_bytes: capturedOutput?.stderr_bytes ?? 0,
+          truncated: true,
+        },
+      },
+    );
+  }
+
+  #capturedOutput(
+    snapshot: ProviderProcessSnapshot | undefined,
+    exit: ProviderProcessExitObservation | undefined,
+    outputComplete: boolean,
+  ) {
+    if (snapshot === undefined) return undefined;
+    return {
+      stdout: snapshot.stdout.text,
+      stderr: snapshot.stderr.text,
+      truncated: snapshot.diagnosticTruncated === true || !outputComplete,
+      stdout_bytes: snapshot.stdout.observedBytes,
+      stderr_bytes: snapshot.stderr.observedBytes,
+      ...(exit === undefined
+        ? {}
+        : { exit_code: exit.code, signal: exit.signal }),
+    };
+  }
+
+  #memoryLimitFailure(snapshot: ProviderProcessSnapshot): AnalysisError {
+    return new AnalysisResourceConstraintError(
+      OPERATION,
+      "memory",
+      `Source-map codec reached its ${SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES === null ? "" : `${String(SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES)}-byte `}process memory limit for ${this.path}; no partial evidence was returned.`,
+      {
+        codec_process_memory_limit_bytes: SOURCE_MAP_CODEC_MEMORY_LIMIT_BYTES,
+      },
+      {
+        capturedOutput: {
+          stdout: "",
+          stderr: snapshot.stderr.text,
+          truncated:
+            snapshot.diagnosticTruncated === true ||
+            !(this.#supervisor?.observedOutputClose() ?? false),
+        },
+      },
+    );
   }
 
   async close(

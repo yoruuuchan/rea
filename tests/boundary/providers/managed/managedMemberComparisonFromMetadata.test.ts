@@ -13,6 +13,94 @@ import {
   managedPeFixtureTarget,
 } from "../../../../src/dotnet/ManagedPe.fixture.js";
 
+describe("managed operand-free instruction structural matching", () => {
+  it("preserves operand-free opcode order when remapping renamed methods", () => {
+    const observe = (
+      methodName: string,
+      fieldToken: number,
+      swapImplicitConstants: boolean,
+      path: string,
+    ) => {
+      const il = Buffer.from([
+        0x7b,
+        0,
+        0,
+        0,
+        0, // ldfld token
+        0x26, // pop
+        swapImplicitConstants ? 0x18 : 0x17, // ldc.i4.1 or ldc.i4.2
+        0x26, // pop
+        swapImplicitConstants ? 0x17 : 0x18, // the other implicit constant
+        0x26, // pop
+        0x2a, // ret
+      ]);
+      il.writeUInt32LE(fieldToken, 1);
+      return inspect(
+        buildManagedPeFixture({
+          methodName,
+          ilBody: Buffer.concat([Buffer.from([(il.length << 2) | 2]), il]),
+        }),
+        path,
+      );
+    };
+    const left = observe(
+      "OldMethod",
+      0x04000001,
+      false,
+      "/tmp/implicit-order-left.dll",
+    );
+    const sameOrder = observe(
+      "NewMethod",
+      0x04000002,
+      false,
+      "/tmp/implicit-order-same.dll",
+    );
+    const swapped = observe(
+      "NewMethod",
+      0x04000002,
+      true,
+      "/tmp/implicit-order-swapped.dll",
+    );
+
+    expect(left.result.methods[0]?.body.opcode_counts).toEqual(
+      swapped.result.methods[0]?.body.opcode_counts,
+    );
+    expect(left.result.methods[0]?.body.il_sha256).not.toBe(
+      sameOrder.result.methods[0]?.body.il_sha256,
+    );
+    expect(left.result.methods[0]?.body.il_sha256).not.toBe(
+      swapped.result.methods[0]?.body.il_sha256,
+    );
+    const sameOrderComparison = compareManagedMembers(left, sameOrder);
+    expect(sameOrderComparison.methods).toContainEqual(
+      expect.objectContaining({
+        status: "changed",
+        match: expect.objectContaining({
+          status: "matched",
+          basis: "structural-method-shape",
+        }),
+      }),
+    );
+
+    const swappedComparison = compareManagedMembers(left, swapped);
+    expect(swappedComparison.methods.map(({ status }) => status)).toEqual([
+      "removed",
+      "added",
+    ]);
+    expect(
+      swappedComparison.methods.some(
+        ({ match }) => match.basis === "structural-method-shape",
+      ),
+    ).toBe(false);
+    expect(
+      left.result.methods[0]?.body.anchors.map(({ opcode }) => opcode),
+    ).toEqual(["ldfld", "pop", "ldc.i4.1", "pop", "ldc.i4.2", "pop", "ret"]);
+    expect(
+      swapped.result.methods[0]?.body.anchors.map(({ opcode }) => opcode),
+    ).toEqual(["ldfld", "pop", "ldc.i4.2", "pop", "ldc.i4.1", "pop", "ret"]);
+  });
+});
+
 describe("managed member structural matching", () => {
   it("keeps unequal constants from becoming a structural remap", () => {
     const observe = (
@@ -287,6 +375,13 @@ describe("managed member comparison floating-point constants", () => {
           status: "present",
           anchors: [
             { il_offset: 0, opcode, operand_kind: "constant", operand },
+            // ldc.r4 spans 5 bytes and ldc.r8 spans 9 before the ret.
+            {
+              il_offset: opcode === "ldc.r4" ? 5 : 9,
+              opcode: "ret",
+              operand_kind: "none",
+              operand: null,
+            },
           ],
         });
       }

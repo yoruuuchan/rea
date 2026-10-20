@@ -59,14 +59,20 @@ export const sqliteDatabaseFailure = (
         cause instanceof ArtifactFileCleanupFailure
           ? cause.fileCleanupFailure.outcome
           : undefined;
-      const previous =
-        physicalRead?.kind === "failed"
-          ? sqliteDatabaseFailure(physicalRead.cause, path, phase)
-          : signal?.aborted
-            ? new AnalysisCancelledError(operation, { cause: signal.reason })
-            : physicalRead?.kind === "completed" || cause.cause === undefined
-              ? undefined
-              : sqliteDatabaseFailure(cause.cause, path, phase);
+      let previous: AnalysisError | undefined;
+      if (physicalRead?.kind === "failed")
+        previous = sqliteDatabaseFailure(physicalRead.cause, path, phase);
+      else if (cause.reason === "cancelled")
+        previous = new AnalysisCancelledError(operation, {
+          cause: artifactFileCancellationCause(cause),
+        });
+      else if (physicalRead?.kind === "completed") previous = undefined;
+      else if (cause.cause !== undefined)
+        previous = sqliteDatabaseFailure(cause.cause, path, phase);
+      else if (signal?.aborted)
+        previous = new AnalysisCancelledError(operation, {
+          cause: signal.reason,
+        });
       const error = new ProviderCleanupError(
         SQLITE_PROVIDER_IDENTITY.id,
         cause.cleanup.resources,
@@ -75,7 +81,11 @@ export const sqliteDatabaseFailure = (
           previous_error:
             previous === undefined ? null : projectAnalysisError(previous),
         },
-        { operation, cause },
+        {
+          operation,
+          cause,
+          ...(previous === undefined ? {} : { cleanupPrimary: previous }),
+        },
       );
       bindArtifactFileCleanup(cause, error);
       return error;
@@ -99,7 +109,12 @@ export const sqliteDatabaseFailure = (
     ]);
   }
   if (cause instanceof Error && cause.name === "AbortError")
-    return new AnalysisCancelledError(operation, { cause });
+    return new AnalysisCancelledError(operation, {
+      cause:
+        signal?.aborted === true && cause.cause === signal.reason
+          ? signal.reason
+          : cause,
+    });
   if (cause instanceof OwnedCommandFailure) {
     const projected = ownedCommandFailure(cause);
     if (projected !== undefined) return projected;
@@ -183,7 +198,11 @@ const ownedCommandFailure = (
       { operation, cause },
     );
   if (cause.reason === "cancelled")
-    return new AnalysisCancelledError(operation, options);
+    return new AnalysisCancelledError(operation, {
+      ...options,
+      cause:
+        cause.cancellation === undefined ? cause : cause.cancellation.reason,
+    });
   if (cause.reason === "timeout")
     return new AnalysisTimeoutError(
       operation,

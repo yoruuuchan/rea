@@ -13,6 +13,15 @@ export type JavaScriptSemanticIterationCardinality =
   | "nonempty"
   | "unknown";
 
+/** Whether a method's computed key executes in the enclosing environment. */
+export const semanticComputedMethodKey = (
+  parent: t.Node | undefined,
+  child: t.Node,
+): boolean =>
+  (t.isObjectMethod(parent) || t.isClassMethod(parent)) &&
+  parent.computed &&
+  parent.key === child;
+
 /** Exact source-only cardinality for literal loop heads. */
 export const semanticIterationCardinality = (
   loop: t.ForInStatement | t.ForOfStatement,

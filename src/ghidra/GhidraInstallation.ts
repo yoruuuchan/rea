@@ -1034,13 +1034,49 @@ export const discoverGhidraInstallationOnPath = (
       );
       try {
         if (statSync(properties).isFile() && executablePath(headless))
-          return root;
+          return stableGhidraInstallationRoot(root, platform);
       } catch (cause: unknown) {
         void cause;
       }
     }
   }
   return undefined;
+};
+
+/**
+ * Keep a Homebrew Ghidra registration stable across keg upgrades when its
+ * `opt` alias resolves to this exact, already validated installation.
+ */
+const stableGhidraInstallationRoot = (
+  root: string,
+  platform: NodeJS.Platform,
+): string => {
+  if (platform !== "darwin") return root;
+  const parsed = posix.parse(root);
+  const segments = root.slice(parsed.root.length).split(posix.sep);
+  const cellarIndex = segments.length - 4;
+  const formula = segments[cellarIndex + 1];
+  const version = segments[cellarIndex + 2];
+  if (
+    cellarIndex < 0 ||
+    segments[cellarIndex] !== "Cellar" ||
+    formula === undefined ||
+    formula.length === 0 ||
+    version === undefined ||
+    version.length === 0 ||
+    segments[cellarIndex + 3] !== "libexec"
+  )
+    return root;
+
+  const prefix = posix.join(parsed.root, ...segments.slice(0, cellarIndex));
+  const candidate = posix.join(prefix, "opt", formula, "libexec");
+  try {
+    return realpathSync(candidate) === root ? candidate : root;
+  } catch (cause: unknown) {
+    // An absent or unresolved alias cannot establish a stable installation identity.
+    void cause;
+    return root;
+  }
 };
 
 const executablePath = (path: string): boolean => {

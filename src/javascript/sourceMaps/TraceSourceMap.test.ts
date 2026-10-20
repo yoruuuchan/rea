@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 import { traceSourceMap } from "./TraceSourceMap.js";
+import { inspectSourceMap, SourceMapFormatFailure } from "./SourceMapFormat.js";
 
 const url = "https://app.test/maps/app.js.map?v=2#map";
 const point = { line: 1, column: 0 };
@@ -14,6 +15,76 @@ const leaf = {
 };
 const trace = (map: unknown, position = point) =>
   traceSourceMap(JSON.stringify(map), url, position);
+
+it("classifies external indexed sections as unsupported with their exact URL", () => {
+  const externalUrl = "https://app.test/maps/part.map?revision=7";
+  try {
+    inspectSourceMap(
+      JSON.stringify({
+        version: 3,
+        sections: [{ offset: { line: 0, column: 0 }, url: externalUrl }],
+      }),
+    );
+    throw new Error("Expected external section rejection");
+  } catch (error: unknown) {
+    expect(error).toBeInstanceOf(SourceMapFormatFailure);
+    expect(error).toMatchObject({
+      reason: "unsupported",
+      message: `External source-map section URL is not fetched: ${externalUrl}`,
+    });
+  }
+});
+
+it("uses the same conservative section classification for URL-plus-map and malformed URLs", () => {
+  const externalUrl = "https://app.test/maps/part.map";
+  const external = () =>
+    inspectSourceMap(
+      JSON.stringify({
+        version: 3,
+        sections: [
+          { offset: { line: 0, column: 0 }, url: externalUrl, map: leaf },
+        ],
+      }),
+    );
+  expect(external).toThrow(
+    expect.objectContaining({
+      reason: "unsupported",
+      message: `External source-map section URL is not fetched: ${externalUrl}`,
+    }),
+  );
+
+  const malformed = () =>
+    inspectSourceMap(
+      JSON.stringify({
+        version: 3,
+        sections: [{ offset: { line: 0, column: 0 }, url: 12, map: leaf }],
+      }),
+    );
+  expect(malformed).toThrow(
+    expect.objectContaining({
+      reason: "format",
+      message: "External source-map section URL must be a string.",
+    }),
+  );
+});
+
+it("rejects a present non-array sections member through the shared section-list rule", () => {
+  const malformed = () =>
+    inspectSourceMap(
+      JSON.stringify({
+        version: 3,
+        sections: null,
+        sources: ["ignored.ts"],
+        mappings: "AAAA",
+      }),
+    );
+  expect(malformed).toThrow(
+    expect.objectContaining({
+      reason: "format",
+      message: "Indexed source-map sections must be an array.",
+    }),
+  );
+});
 
 it("traces BOM-prefixed maps with a source-map transport prefix ending in CR", () => {
   const text = `\uFEFF)]}'transport prefix\r${JSON.stringify(leaf)}`;

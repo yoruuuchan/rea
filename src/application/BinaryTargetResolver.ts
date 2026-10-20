@@ -53,6 +53,12 @@ import {
   peRvaToFileOffset,
   type ExecutableMetadata,
 } from "../domain/binaryTarget.js";
+import {
+  readFatContainerHeader,
+  readMachoHeaderPrefixFacts,
+  type FatSliceHeaderEvidence,
+  type MachoHeaderPrefixFacts,
+} from "../domain/apple/machoContainer.js";
 import type { PeCodeViewRecord } from "../domain/binaryTargetTypes.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
@@ -532,25 +538,19 @@ const readExecutableMetadata = async (
       signatureBytes,
     );
   }
-  if (bytes.length >= 8) {
-    const magic = bytes.readUInt32BE(0);
-    if ([0xcafebabf, 0xbfbafeca].includes(magic)) {
-      const little = magic === 0xbfbafeca;
-      const count = little ? bytes.readUInt32LE(4) : bytes.readUInt32BE(4);
-      const required = 8 + count * 32;
-      if (count <= 128 && required > bytes.length) {
-        const header = Buffer.alloc(required);
-        const headerRead = await handle.read(header, 0, header.length, 0);
-        throwIfTargetResolutionCancelled(signal);
-        return parseExecutableHeader(
-          header.subarray(0, headerRead.bytesRead),
-          hostArchitecture,
-          fileSize,
-        );
-      }
-    }
-  }
-  const parsed = parseExecutableHeader(bytes, hostArchitecture, fileSize);
+  const fatEvidence = await readFatSliceHeaderEvidence(
+    handle,
+    bytes,
+    fileSize,
+    signal,
+  );
+  const parsed = parseExecutableHeader(
+    bytes,
+    hostArchitecture,
+    fileSize,
+    undefined,
+    fatEvidence,
+  );
   if (
     !parsed.ok ||
     parsed.value.architecture !== "mips" ||
@@ -577,6 +577,69 @@ const readExecutableMetadata = async (
         : { limitations: declarations.value.limitations }),
     },
   });
+};
+
+/** Read the validated FAT table and bounded thin-header identity prefixes. */
+const readFatSliceHeaderEvidence = async (
+  handle: FileHandle,
+  prefix: Buffer,
+  fileSize: number,
+  signal?: AbortSignal,
+): Promise<FatSliceHeaderEvidence | undefined> => {
+  let header = readFatContainerHeader(prefix, fileSize);
+  if (header.state === "needs-data") {
+    // readFatContainerHeader enforces the 128-entry format bound before this
+    // allocation; this is only the table, never a synthesized file image.
+    const table = Buffer.alloc(header.requiredBytes);
+    let bytesRead = 0;
+    while (bytesRead < table.length) {
+      throwIfTargetResolutionCancelled(signal);
+      const read = await handle.read(
+        table,
+        bytesRead,
+        table.length - bytesRead,
+        bytesRead,
+      );
+      throwIfTargetResolutionCancelled(signal);
+      if (read.bytesRead === 0) break;
+      bytesRead += read.bytesRead;
+    }
+    header = readFatContainerHeader(table.subarray(0, bytesRead), fileSize);
+  }
+  if (header.state !== "parsed") return undefined;
+
+  const sliceHeadersByOffset = new Map<number, MachoHeaderPrefixFacts>();
+  for (let index = 0; index < header.slices.length; index += 1) {
+    const slice = header.slices[index];
+    if (slice === undefined) continue;
+    if (header.rangeIssues[index] !== null) {
+      sliceHeadersByOffset.set(
+        slice.offset,
+        readMachoHeaderPrefixFacts(Buffer.alloc(0)),
+      );
+      continue;
+    }
+    const observedLength = Math.min(12, slice.size);
+    const thinHeader = Buffer.alloc(observedLength);
+    let bytesRead = 0;
+    while (bytesRead < thinHeader.length) {
+      throwIfTargetResolutionCancelled(signal);
+      const read = await handle.read(
+        thinHeader,
+        bytesRead,
+        thinHeader.length - bytesRead,
+        slice.offset + bytesRead,
+      );
+      throwIfTargetResolutionCancelled(signal);
+      if (read.bytesRead === 0) break;
+      bytesRead += read.bytesRead;
+    }
+    sliceHeadersByOffset.set(
+      slice.offset,
+      readMachoHeaderPrefixFacts(thinHeader.subarray(0, bytesRead)),
+    );
+  }
+  return { header, sliceHeadersByOffset };
 };
 
 const readPeMetadata = async (

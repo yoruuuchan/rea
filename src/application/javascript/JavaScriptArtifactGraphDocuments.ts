@@ -144,6 +144,7 @@ export const addJavaScriptSourceMapOriginals = (
             label: reference?.source_name || null,
             source_map_reference: reference,
             properties: {
+              section_path: [...original.section_path],
               source_index: original.source_index,
               declaration_index: original.declaration_index,
               source_name_available: reference !== null,
@@ -166,6 +167,7 @@ export const addJavaScriptSourceMapOriginals = (
         target_node_id: node.node_id,
         relation: "contains",
         properties: {
+          section_path: [...original.section_path],
           source_index: original.source_index,
           declaration_index: original.declaration_index,
           original_source: reference?.source_name ?? null,

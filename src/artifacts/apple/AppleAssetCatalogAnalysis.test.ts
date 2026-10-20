@@ -64,33 +64,42 @@ describe("Apple asset catalog application workflow", () => {
     ]);
   });
 
-  it("reports an app without compiled catalogs as an empty observed inventory", async () => {
-    const bundle = await createTestTempDirectory("rea-asset-catalog-absent-");
-    await mkdir(join(bundle, "Contents", "Resources"), { recursive: true });
-    await writeFile(join(bundle, "Contents", "Resources", "icon.icns"), "");
-    // Names that merely end in Assets.car are ordinary resources.
-    await mkdir(join(bundle, "Contents", "Resources", "NotAssets.car"));
-    await writeFile(join(bundle, "Contents", "Resources", "OldAssets.car"), "");
-    const result = await analyzeAppleAssetCatalogs({
-      environment: {},
-      bundlePath: bundle,
-      targetSha256: "a".repeat(64),
-      runAssetUtil: () => {
-        throw new Error("assetutil must not run without a catalog");
-      },
-    });
-    expect(result).toMatchObject({
-      catalogs: [],
-      total_records: 0,
-      records: [],
-      resource_key_matches: [],
-      next_offset: null,
-      truncated: false,
-    });
-    expect(result.limitations).toContain(
-      "No compiled Assets.car catalog was found among the app bundle's regular files (symlinks are not followed); any resource keys are reported as unmatched.",
-    );
-  });
+  it.each([0, 1, 5])(
+    "reports an app without compiled catalogs as empty at offset %i",
+    async (offset) => {
+      const bundle = await createTestTempDirectory("rea-asset-catalog-absent-");
+      await mkdir(join(bundle, "Contents", "Resources"), { recursive: true });
+      await writeFile(join(bundle, "Contents", "Resources", "icon.icns"), "");
+      // Names that merely end in Assets.car are ordinary resources.
+      await mkdir(join(bundle, "Contents", "Resources", "NotAssets.car"));
+      await writeFile(
+        join(bundle, "Contents", "Resources", "OldAssets.car"),
+        "",
+      );
+      const result = await analyzeAppleAssetCatalogs({
+        environment: {},
+        bundlePath: bundle,
+        targetSha256: "a".repeat(64),
+        page: { offset },
+        runAssetUtil: () => {
+          throw new Error("assetutil must not run without a catalog");
+        },
+      });
+      expect(result).toMatchObject({
+        catalogs: [],
+        total_records: 0,
+        offset,
+        limit: 1_000,
+        records: [],
+        resource_key_matches: [],
+        next_offset: null,
+        truncated: false,
+      });
+      expect(result.limitations).toContain(
+        "No compiled Assets.car catalog was found among the app bundle's regular files (symlinks are not followed); any resource keys are reported as unmatched.",
+      );
+    },
+  );
 
   it("does not report absence when the only catalog entry is a symlink", async () => {
     const bundle = await createTestTempDirectory("rea-asset-catalog-link-");
@@ -136,6 +145,31 @@ describe("Apple asset catalog application workflow", () => {
     );
   });
 });
+
+it.each([0, 1, 5])(
+  "keeps an empty assetutil inventory complete at offset %i",
+  async (offset) => {
+    const bundle = await createTestTempDirectory("rea-asset-catalog-empty-");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    await writeFile(join(resources, "Assets.car"), "inert catalog fixture");
+    const result = await analyzeAppleAssetCatalogs({
+      environment: {},
+      bundlePath: bundle,
+      targetSha256: "a".repeat(64),
+      page: { offset, limit: 2 },
+      runAssetUtil: () => Promise.resolve("[]"),
+    });
+    expect(result).toMatchObject({
+      total_records: 0,
+      offset,
+      limit: 2,
+      records: [],
+      next_offset: null,
+      truncated: false,
+    });
+  },
+);
 
 it.each([1, 2])(
   "joins NIBArchive keys against %i supplied assetutil renditions",

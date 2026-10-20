@@ -534,7 +534,9 @@ export class AnalysisProviderRegistry {
       reason,
       selection.requestedProviderId,
       selection.candidates,
-      operation,
+      {
+        operation,
+      },
     );
   }
 
@@ -652,7 +654,14 @@ export class AnalysisProviderRegistry {
         candidates: statuses,
       });
     if (usable.length > 1)
-      return err(selectionError("ambiguous", "auto", statuses));
+      return err(
+        selectionError(
+          "ambiguous",
+          "auto",
+          usable.map(({ status }) => status),
+          { rejectionCandidates: statuses },
+        ),
+      );
     const selected = usable[0];
     if (selected === undefined)
       throw new TypeError("Usable provider selection disappeared");
@@ -757,15 +766,20 @@ const replaceCandidate = (
 const selectionError = (
   reason: ProviderSelectionFailureReason,
   requestedProviderId: string,
-  candidates: readonly AnalysisProviderCandidateStatus[],
-  operation = "open_binary",
+  candidateChoices: readonly AnalysisProviderCandidateStatus[],
+  options: {
+    readonly operation?: string;
+    readonly rejectionCandidates?: readonly AnalysisProviderCandidateStatus[];
+  } = {},
 ): ProviderSelectionError =>
   new ProviderSelectionError({
-    operation,
+    operation: options.operation ?? "open_binary",
     reason,
     requestedProviderId,
-    candidateIds: candidates.map(({ provider }) => provider.id),
-    rejections: candidateRejections(candidates),
+    candidateIds: candidateChoices.map(({ provider }) => provider.id),
+    rejections: candidateRejections(
+      options.rejectionCandidates ?? candidateChoices,
+    ),
   });
 
 const candidateRejections = (

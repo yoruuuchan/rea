@@ -206,51 +206,72 @@ it.runIf(!unsupportedHost).each(["completed", "malformed-reply"] as const)(
   async (scenario) => {
     const { path } = await fixture();
     let ownedRoot = "";
+    let denyRootClose = true;
     let launches = 0;
     let mayClean = false;
-    const provider = new EvmoleInterfaceProvider({}, async (spawn) => {
-      launches += 1;
-      ownedRoot = spawn.cwd ?? "";
-      const requestPath = spawn.arguments.at(-1);
-      if (requestPath === undefined) throw new Error("Request missing");
-      const request = requestSchema.parse(
-        JSON.parse(await readFile(requestPath, "utf8")),
-      );
-      if (scenario === "malformed-reply")
-        await writeFile(request.reply_path, "malformed worker reply");
-      else {
-        const bytes = Buffer.from("60006000f3", "hex");
-        await writeFile(
-          request.reply_path,
-          JSON.stringify({
-            ok: true,
-            version: "0.9.3",
-            bytecode: {
-              sha256: createHash("sha256").update(bytes).digest("hex"),
-              bytes: bytes.length,
-              hex: bytes.toString("hex"),
-            },
-            raw: { functions: [] },
-          }),
+    const provider = new EvmoleInterfaceProvider(
+      {},
+      async (spawn) => {
+        launches += 1;
+        ownedRoot = spawn.cwd ?? "";
+        const requestPath = spawn.arguments.at(-1);
+        if (requestPath === undefined) throw new Error("Request missing");
+        const request = requestSchema.parse(
+          JSON.parse(await readFile(requestPath, "utf8")),
         );
-      }
-      const launched = await spawnOwnedProviderProcess({
-        ...spawn,
-        command: process.execPath,
-        arguments: ["-e", 'process.stderr.write("worker completed")'],
-      });
-      const cleanup =
-        launched.cleanup ??
-        (() => cleanupOwnedProcessGroup(launched.ownership));
-      return {
-        ...launched,
-        cleanup: async () => {
-          const stopped = await cleanup();
-          if (!mayClean) throw new Error("injected retained cleanup failure");
-          return stopped;
-        },
-      };
-    });
+        if (scenario === "malformed-reply")
+          await writeFile(request.reply_path, "malformed worker reply");
+        else {
+          const bytes = Buffer.from("60006000f3", "hex");
+          await writeFile(
+            request.reply_path,
+            JSON.stringify({
+              ok: true,
+              version: "0.9.3",
+              bytecode: {
+                sha256: createHash("sha256").update(bytes).digest("hex"),
+                bytes: bytes.length,
+                hex: bytes.toString("hex"),
+              },
+              raw: { functions: [] },
+            }),
+          );
+        }
+        const launched = await spawnOwnedProviderProcess({
+          ...spawn,
+          command: process.execPath,
+          arguments: ["-e", 'process.stderr.write("worker completed")'],
+        });
+        const cleanup =
+          launched.cleanup ??
+          (() => cleanupOwnedProcessGroup(launched.ownership));
+        return {
+          ...launched,
+          cleanup: async () => {
+            const stopped = await cleanup();
+            if (!mayClean) throw new Error("injected retained cleanup failure");
+            return stopped;
+          },
+        };
+      },
+      async () => {
+        const root = await PrivateRuntimeRoot.create({
+          prefix: "rea-evm-mixed-cleanup-",
+        });
+        ownedRoot = root.path;
+        const close = root.close.bind(root);
+        return {
+          path: root.path,
+          close: async () => {
+            if (denyRootClose) {
+              denyRootClose = false;
+              throw new Error("injected retained root cleanup failure");
+            }
+            await close();
+          },
+        };
+      },
+    );
     onTestFinished(async () => {
       mayClean = true;
       await provider.close();
@@ -282,7 +303,20 @@ it.runIf(!unsupportedHost).each(["completed", "malformed-reply"] as const)(
     expect(blocked.ok).toBe(false);
     expect(launches).toBe(1);
     mayClean = true;
+    await expect(provider.close()).rejects.toMatchObject({
+      cleanupIncomplete: true,
+      cleanupResources: [ownedRoot],
+    });
+    expect(result.error.cleanupIncomplete).toBe(true);
+    expect(result.error.cleanupResources).toContain(ownedRoot);
     await provider.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.cleanupResources).toEqual([]);
+    expect(projectAnalysisError(result.error).code).toBe(
+      scenario === "malformed-reply"
+        ? "unreadable_output"
+        : "execution_failure",
+    );
     await expect(access(ownedRoot)).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
@@ -747,6 +781,14 @@ it
     if (scenario === "late-cancellation")
       expect(result.error.cause).toBe(reason);
     else expect(result.error.cleanupIncomplete).toBe(true);
+    if (scenario === "cancelled-cleanup-failure") {
+      expect(result.error.cleanupPrimary?.cause).toBe(reason);
+      denyClose = false;
+      await provider.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+      expect(projectAnalysisError(result.error).category).toBe("cancelled");
+      expect(result.error.cleanupPrimary?.cause).toBe(reason);
+    }
     const forwarded = await new EvmInterfaceService({
       inspect: async () => result,
     }).inspect({ path, encoding: "hex" });

@@ -179,6 +179,10 @@ export type ProviderProcessDiagnostic =
       readonly snapshot: ProviderProcessSnapshot;
     }
   | {
+      readonly type: "output-close";
+      readonly snapshot: ProviderProcessSnapshot;
+    }
+  | {
       readonly type: "error";
       readonly message: string;
       readonly cause?: Error;
@@ -360,6 +364,11 @@ export class ProviderProcessSupervisor {
   ): void => {
     this.#recordExit(code, signal);
     this.#outputClosed = true;
+    if (!this.#disposed)
+      this.#options.onDiagnostic?.({
+        type: "output-close",
+        snapshot: this.snapshot(),
+      });
     this.#outputClose.resolve(undefined);
   };
   readonly #onError = (cause: Error): void => {

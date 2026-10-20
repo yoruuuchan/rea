@@ -98,7 +98,7 @@ const buildMetadataSchema = z.object({
 });
 
 export const inspectMachoSchema = z.object({
-  format: z.literal("mach-o"),
+  format: z.enum(["mach-o", "mach-o-universal"]),
   /** Exact lipo slice selected for inspection and its offset in the input container. */
   selected_architecture: z.object({
     name: z
