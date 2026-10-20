@@ -528,6 +528,17 @@ concrete version, selection source, and complete analysis profile through
 choices return typed selection details. A selected provider is never replaced
 automatically after a runtime failure.
 
+`open_bundle_resources` selects a separate read-only app resource session
+without resolving `CFBundleExecutable`, including when it is absent or
+unresolvable. `binary_session` reports `session_kind: "bundle_resources"` and the
+caller and canonical resource-root paths; it does not report a binary target or
+deep-provider binding. `inspect_plist`, `decode_interface_builder`,
+`inspect_asset_catalog`, and `inspect_keyed_archive` retain resource-root
+provenance and use a null Evidence subject when executable identity is unknown.
+Binary-only operations and binary analysis snapshots do not apply in this
+session. `open_binary` can switch back to executable analysis, and
+`close_binary` retires either session kind.
+
 Each provider client receives `binary_session.analysis_run.run_id` before any
 provider startup, including clients whose startup fails. `process_lineage` is
 `not_observed` until a dynamic provider starts, then becomes `snapshots` with

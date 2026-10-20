@@ -45,6 +45,7 @@ import {
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
@@ -194,6 +195,10 @@ const apktoolCommandFailure = (
       {
         cause,
         ...(capturedOutput === undefined ? {} : { capturedOutput }),
+        ...fixedAllowanceOptions(
+          "The apktool output capture allowance",
+          "capture",
+        ),
       },
     );
   // A physical launcher/capture failure does not establish target refusal.

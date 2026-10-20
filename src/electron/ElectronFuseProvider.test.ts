@@ -575,8 +575,15 @@ it("enforces the 32 sentinel boundary with typed and public limit details", asyn
         expect(result.error._tag).toBe("AnalysisResourceConstraintError");
         expect(projectAnalysisError(result.error)).toMatchObject({
           code: "resource_constraint",
+          retryable: false,
           details: { reported_limits: { maximum_sentinels_per_slice: 32 } },
+          remediation: {
+            action: expect.stringContaining("sentinel inventory"),
+          },
         });
+        expect(
+          projectAnalysisError(result.error).remediation.action,
+        ).not.toMatch(/Wait for an active analysis/u);
       }
     }
   }
@@ -593,7 +600,11 @@ it("rejects a sparse artifact over 1 GiB before scanning", async () => {
     expect(result.error._tag).toBe("AnalysisResourceConstraintError");
     expect(projectAnalysisError(result.error)).toMatchObject({
       code: "resource_constraint",
+      retryable: false,
       details: { reported_limits: { maximum_input_bytes: 1024 * 1024 * 1024 } },
+      remediation: {
+        action: expect.stringContaining("does not admit this input"),
+      },
     });
   }
 });

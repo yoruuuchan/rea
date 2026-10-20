@@ -78,6 +78,7 @@ import { jsonObjectSchema, jsonValueSchema } from "../jsonValue.js";
 import { err, ok, type Result } from "../result.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { safeParseOwnedBinaryLayout } from "../native/binaryLayout.js";
+import { bundleResourceRootSchema } from "../apple/bundleResourceRoot.js";
 import { functionDossierSchema } from "../hopperValues.js";
 import {
   artifactGraphManifestSchema,
@@ -346,7 +347,9 @@ const coverageSchema = z.strictObject({
 const artifactSchema = z.strictObject({
   path: z
     .string()
-    .describe("Exact recorded artifact path, including an empty string."),
+    .describe(
+      "Selected artifact path, or the canonical resource root when resource-only Evidence has no executable subject.",
+    ),
   sha256: digestSchema.nullable(),
 });
 
@@ -524,6 +527,7 @@ export const machoSummaryViewResultSchema = z.strictObject({
 export const interfaceBuilderSummaryViewResultSchema = z.strictObject({
   ...summaryViewResultBase,
   parent_operation: z.literal("decode_interface_builder"),
+  resource_root: bundleResourceRootSchema.optional(),
   summary: interfaceBuilderSummarySchema,
 });
 
@@ -782,6 +786,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     view: interfaceBuilderViewRequestSchema,
     items: interfaceBuilderViewItemsSchema,
     ...viewResultBase,
+    resource_root: bundleResourceRootSchema.optional(),
     ...interfaceBuilderViewContextSchema.shape,
     parent_operation: z.literal("decode_interface_builder"),
   }),

@@ -16,7 +16,6 @@ import {
 } from "../../domain/evidenceErrors.js";
 import { projectInputIssues } from "../../domain/inputIssueProjection.js";
 import { readJsonFile } from "../JsonFiles.js";
-import { RegularFileCleanupFailure } from "../RegularFileRead.js";
 
 /** The request's cancellation and the scope that owns descriptors whose close failed. */
 export interface EvidenceFileReadOptions {
@@ -79,25 +78,27 @@ export const readEvidenceFileSource = async (
 ): Promise<Result<Evidence, AnalysisError>> => {
   const { signal, resources } = options;
   if (signal?.aborted)
-    return err(new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION));
-  const loaded = await readJsonFile(path, signal, resources).catch(
-    (cause: unknown) => {
-      // A failed close transfers a live handle owner; preserve that failure.
-      if (
-        signal?.aborted === true &&
-        !(cause instanceof RegularFileCleanupFailure)
-      )
-        return err(
-          new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
-            cause,
-          }),
-        );
-      throw cause;
-    },
-  );
-  if (!loaded.ok) return loaded;
+    return err(
+      new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
+        cause: signal.reason,
+      }),
+    );
+  const loaded = await readJsonFile(path, signal, resources);
+  if (!loaded.ok) {
+    if (loaded.error instanceof AnalysisCancelledError)
+      return err(
+        new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
+          cause: loaded.error.cause,
+        }),
+      );
+    return loaded;
+  }
   if (signal?.aborted)
-    return err(new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION));
+    return err(
+      new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
+        cause: signal.reason,
+      }),
+    );
   const headroom = requireAuthenticationHeadroom(loaded.value, path);
   if (!headroom.ok) return headroom;
   try {

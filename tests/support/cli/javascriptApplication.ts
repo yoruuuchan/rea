@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
-import type { TestCli } from "./cliFixture.js";
+import type { SharedMcpCall, TestCli } from "./cliFixture.js";
 
 const execute = promisify(execFile);
 
@@ -21,6 +21,20 @@ export const runNodeJsonControl = async (
   return JSON.parse(stdout) as unknown;
 };
 
+/**
+ * Use an explicit caller when the test owns the server. Otherwise reuse the
+ * file-scoped session from `cliTest`, and start a fresh server only for
+ * drivers created outside that fixture.
+ */
+export const resolveJavaScriptApplicationMcpCall = async (
+  cli: TestCli,
+  mcpCall: SharedMcpCall | undefined,
+): Promise<SharedMcpCall> => {
+  if (mcpCall !== undefined) return mcpCall;
+  if (cli.sharedMcpCall !== undefined) return cli.sharedMcpCall();
+  return (await connectLocalToolsMcp()).call;
+};
+
 /** Analyze a directory; a supplied MCP caller reuses its test-owned connection. */
 export const analyzeJavaScriptDirectory = async (
   surface: "CLI" | "stdio MCP",
@@ -31,9 +45,7 @@ export const analyzeJavaScriptDirectory = async (
     mcpCall,
   }: {
     readonly sourcePaths?: readonly string[];
-    readonly mcpCall?:
-      | Awaited<ReturnType<typeof connectLocalToolsMcp>>["call"]
-      | undefined;
+    readonly mcpCall?: SharedMcpCall | undefined;
   } = {},
 ) => {
   let document: unknown;
@@ -51,7 +63,7 @@ export const analyzeJavaScriptDirectory = async (
     expect(response.exitCode, response.stderr).toBe(0);
     document = response.json;
   } else {
-    const call = mcpCall ?? (await connectLocalToolsMcp()).call;
+    const call = await resolveJavaScriptApplicationMcpCall(cli, mcpCall);
     const response = await call("analyze_javascript_application", {
       input_path: root,
       format: "directory",

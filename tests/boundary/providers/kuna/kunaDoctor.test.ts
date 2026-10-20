@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises";
+import { join, sep as separator } from "node:path";
 
 import { expect, it as test } from "vitest";
 
@@ -97,10 +97,16 @@ it("reports a cache root REA cannot use without creating anything", async () => 
     REA_KUNA_CACHE_DIR: existing,
   });
 
+  expect(blocked.available).toBe(false);
+  expect(blocked.checks[0]).toMatchObject({ name: "installation", ok: true });
   expect(blocked.checks[1]).toMatchObject({
     name: "cache",
     ok: false,
     code: "open_options_invalid",
+  });
+  expect(blocked.registrationEnvironment).toMatchObject({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: occupied,
   });
   expect(ready.checks[1]).toMatchObject({
     name: "cache",
@@ -137,6 +143,93 @@ it("reports a cache root REA cannot create under its nearest existing parent", a
     // stat reports ENOTDIR for a path beneath a regular file.
     detail: expect.stringContaining("not a directory"),
   });
+});
+
+it("reports a dangling cache link as unusable and accepts a resolving link", async () => {
+  const root = await createTestTempDirectory("rea-kuna-doctor-link-");
+  const kuna = await writeFakeKuna(root);
+  const dangling = join(root, "dangling");
+  const missing = join(root, "missing-target");
+  await symlink(missing, dangling);
+  const target = join(root, "target");
+  await mkdir(target);
+  const resolving = join(root, "resolving");
+  await symlink(target, resolving);
+
+  const direct = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: dangling,
+  });
+  const trailing = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: `${dangling}${separator}`,
+  });
+  const beneath = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: join(dangling, "nested", "cache"),
+  });
+  const ready = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: resolving,
+  });
+  const readyTrailing = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: `${resolving}${separator}`,
+  });
+
+  for (const blocked of [direct, trailing, beneath]) {
+    expect(blocked.available).toBe(false);
+    expect(blocked.checks[1]).toMatchObject({
+      name: "cache",
+      ok: false,
+      code: "open_options_invalid",
+      detail: expect.stringContaining(
+        `${dangling} is a symbolic link whose target does not exist.`,
+      ),
+    });
+  }
+  expect(trailing.checks[1]).toMatchObject({
+    detail: expect.stringContaining(`${dangling}${separator}`),
+    details: { cache_root: `${dangling}${separator}` },
+  });
+  for (const usable of [ready, readyTrailing]) {
+    expect(usable.available).toBe(true);
+    expect(usable.checks[1]).toMatchObject({
+      name: "cache",
+      ok: true,
+      detail: expect.stringContaining("cached in"),
+    });
+  }
+  expect(ready.checks[1]?.detail).toContain(resolving);
+  // Diagnosis neither creates the cache nor repairs the link.
+  expect(await readlink(dangling)).toBe(missing);
+  await expect(lstat(missing)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(lstat(join(dangling, "nested"))).rejects.toThrow();
+});
+
+it("keeps a trailing backslash as part of a POSIX cache path", async () => {
+  const root = await createTestTempDirectory("rea-kuna-doctor-backslash-");
+  const kuna = await writeFakeKuna(root);
+  const directory = join(root, "cache");
+  await mkdir(directory);
+  const named = `${directory}\\`;
+  await writeFile(named, "not-a-directory");
+
+  const inspection = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: named,
+  });
+
+  expect(inspection.available).toBe(false);
+  expect(inspection.checks[1]).toMatchObject({
+    name: "cache",
+    ok: false,
+    code: "open_options_invalid",
+    detail: expect.stringContaining(`${named} exists but is not a directory.`),
+    details: expect.objectContaining({ cache_root: named }),
+  });
+  expect((await lstat(directory)).isDirectory()).toBe(true);
+  expect((await lstat(named)).isFile()).toBe(true);
 });
 
 const doctorEnvironment = (root: string, kuna: string): NodeJS.ProcessEnv => ({

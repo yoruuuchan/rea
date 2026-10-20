@@ -220,7 +220,17 @@ export const webBundleAnalysisSchema = z.object({
       z.object({
         name: z.string().nullable(),
         description: z.string().nullable(),
-        schema_property_names: z.array(z.string()),
+        schema_property_names: z
+          .array(z.string())
+          .describe(
+            "Statically known own property names from the declared schema projection; a partial list may omit unresolved members.",
+          ),
+        schema_property_names_coverage: z
+          .enum(["complete", "partial", "unknown", "not_present"])
+          .optional()
+          .describe(
+            "Coverage of the schema property-name projection. Missing means unknown for historical observations. Not a schema-validity result.",
+          ),
         trust: z.literal("page-declared-untrusted"),
         location: sourceLocationSchema,
       }),

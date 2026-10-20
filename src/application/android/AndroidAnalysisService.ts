@@ -45,16 +45,22 @@ export class AndroidAnalysisService {
     if (!executed.ok) return executed;
     const execution = executed.value;
     return completeProviderEvidence(
-      createEvidence(execution.subject ?? target.value, execution.provider, {
-        operation,
-        parameters: jsonObjectSchema.parse(request.data.input),
-        result: execution.result,
-        rawResult: execution.rawResult,
-        limitations: execution.limitations,
-        locations: execution.locations,
-        confidence:
-          operation === "inspect_android_method" ? "derived" : "observed",
-      }),
+      createEvidence(
+        execution.subject === undefined
+          ? target.value
+          : (execution.subject ?? undefined),
+        execution.provider,
+        {
+          operation,
+          parameters: jsonObjectSchema.parse(request.data.input),
+          result: execution.result,
+          rawResult: execution.rawResult,
+          limitations: execution.limitations,
+          locations: execution.locations,
+          confidence:
+            operation === "inspect_android_method" ? "derived" : "observed",
+        },
+      ),
       options?.signal,
     );
   }

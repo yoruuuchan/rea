@@ -106,14 +106,19 @@ export const nativeInvestigationCoverageSchema = z.strictObject({
   omitted: z.number().int().nonnegative(),
 });
 
+export const nativeInvestigationProviderSchema = z.strictObject({
+  id: z.string().min(1),
+  version: z.string().nullable(),
+  tool_version: z.string().min(1),
+});
+
 /** Complete provider-neutral graph bound to one immutable target identity. */
 export const nativeInvestigationGraphSchema = z.strictObject({
-  target_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  provider: z.strictObject({
-    id: z.string().min(1),
-    version: z.string().nullable(),
-    tool_version: z.string().min(1),
-  }),
+  target_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable(),
+  provider: nativeInvestigationProviderSchema,
   nodes: z.array(nativeInvestigationNodeSchema),
   edges: z.array(nativeInvestigationEdgeSchema),
   coverage: z.array(nativeInvestigationCoverageSchema),
@@ -137,8 +142,11 @@ export type NativeInvestigationTraceLimits = z.infer<
 
 /** Exact graph route and any unresolved edges encountered along the route. */
 export const nativeInvestigationTraceSchema = z.strictObject({
-  target_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  provider: nativeInvestigationGraphSchema.shape.provider,
+  target_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable(),
+  provider: nativeInvestigationProviderSchema,
   start: z.string().min(1),
   direction: z.enum(["forward", "backward"]),
   nodes: z.array(nativeInvestigationNodeSchema),

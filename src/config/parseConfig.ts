@@ -39,16 +39,35 @@ export const defaultHopperLauncherPath = (
   );
 };
 
+/**
+ * Environment native analysis admits. JEB validates its own timeout during
+ * optional provider composition; that setting must not block unrelated
+ * CLI/MCP startup. Registration validation still checks it directly.
+ */
+const nativeAnalysisEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string | undefined>> => {
+  const { REA_JEB_MCP_TIMEOUT_MS: _jebTimeout, ...appEnvironment } =
+    environment;
+  return appEnvironment;
+};
+
+/**
+ * The configuration error native commands return, without probing launchers.
+ * Doctor uses this so readiness and analysis admit the same settings.
+ */
+export const nativeAnalysisConfigurationError = (
+  environment: Readonly<Record<string, string | undefined>>,
+): ConfigurationError | undefined => {
+  const parsed = parseEnvironment(nativeAnalysisEnvironment(environment));
+  return parsed.ok ? undefined : parsed.error;
+};
+
 /** Parse provider configuration and runtime prerequisites at the composition root. */
 export const parseConfig = (
   environment: Readonly<Record<string, string | undefined>>,
 ): Result<AppConfig, ConfigurationError> => {
-  // JEB validates its own timeout during optional provider composition. It is
-  // not an AppConfig setting and must not prevent unrelated CLI/MCP startup.
-  // Registration validation still checks the complete environment directly.
-  const { REA_JEB_MCP_TIMEOUT_MS: _jebTimeout, ...appEnvironment } =
-    environment;
-  const parsed = parseEnvironment(appEnvironment);
+  const parsed = parseEnvironment(nativeAnalysisEnvironment(environment));
   if (!parsed.ok) return parsed;
   const env = parsed.value;
   return ok({

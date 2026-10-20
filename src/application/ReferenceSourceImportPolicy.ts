@@ -5,6 +5,7 @@ import ignore from "ignore";
 import {
   readRegularFileText,
   RegularFileCleanupFailure,
+  RegularFileReadFailure,
   retryRegularFileCleanup,
 } from "./RegularFileRead.js";
 
@@ -17,6 +18,7 @@ import {
   type ReferenceSourceImportOptions,
 } from "./ReferenceSourceImportTypes.js";
 import { rootFilesystemFailure } from "../reference/ReferenceSourceReaderErrors.js";
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 
 /** Validated inputs ready for filesystem traversal. */
 export interface PreparedReferenceSourceImport {
@@ -33,6 +35,25 @@ const failure = (
   code,
   message,
 });
+
+class IgnorePolicyReadCancelled extends Error {
+  constructor(readonly reason: unknown) {
+    super("Reference source ignore policy read was cancelled", {
+      cause: reason,
+    });
+    this.name = "IgnorePolicyReadCancelled";
+  }
+}
+
+const isIgnorePolicyCancellation = (cause: unknown): boolean =>
+  cause instanceof IgnorePolicyReadCancelled;
+
+const ignorePolicyCause = (cause: unknown): unknown =>
+  cause instanceof IgnorePolicyReadCancelled
+    ? cause.reason
+    : cause instanceof RegularFileReadFailure
+      ? cause.operationCause
+      : cause;
 
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 
@@ -102,30 +123,46 @@ const buildIgnored = async (
       throw cause;
     present = false;
   }
-  signal?.throwIfAborted();
+  if (signal?.aborted === true)
+    throw new IgnorePolicyReadCancelled(signal.reason);
   if (present) {
     let text: string;
     try {
-      text = await readRegularFileText(policyPath, { signal });
+      text = await readRegularFileText(policyPath, {
+        signal,
+        cancellationFailure: (reason) => new IgnorePolicyReadCancelled(reason),
+      });
     } catch (cause: unknown) {
-      if (signal?.aborted === true && cause === signal.reason) throw cause;
+      if (cause instanceof IgnorePolicyReadCancelled) throw cause;
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
       const retry = await retryRegularFileCleanup(cause, resources, signal);
+      const operationCancellation =
+        cause.outcome.kind === "failed"
+          ? regularFileCancellation(cause)
+          : undefined;
       if (retry.cleanup !== undefined) {
         const primary =
           retry.outcome.kind === "failed"
             ? retry.outcome.cause
             : cause.cleanupCause;
+        const primaryCause = ignorePolicyCause(primary);
         return err({
           ...failure(
-            signal?.aborted === true ? "cancelled" : "io",
-            `Reference source ignore policy could not be read at ${policyPath}: ${errorMessage(primary)}`,
+            isIgnorePolicyCancellation(primary) ||
+              operationCancellation !== undefined
+              ? "cancelled"
+              : "io",
+            `Reference source ignore policy could not be read at ${policyPath}: ${errorMessage(primaryCause)}`,
           ),
           cleanup: retry.cleanup,
-          cause: primary,
+          cause: primaryCause,
         });
       }
-      if (retry.outcome.kind === "failed") throw retry.outcome.cause;
+      if (retry.outcome.kind === "failed") {
+        if (operationCancellation !== undefined)
+          throw new IgnorePolicyReadCancelled(operationCancellation.reason);
+        throw retry.outcome.cause;
+      }
       text = retry.outcome.value;
     }
     addMarkedPatterns(ignored, [text], "project-ignored");
@@ -166,12 +203,13 @@ export const prepareReferenceSourceImport = async (
           secrets: ignore().add([...options.policy.secretPatterns]),
         });
       } catch (cause: unknown) {
+        const causeValue = ignorePolicyCause(cause);
         return err({
           ...failure(
-            options.signal?.aborted === true ? "cancelled" : "io",
-            `Reference source ignore policy could not be read at ${join(root.value, ".gitignore")}: ${errorMessage(cause)}`,
+            isIgnorePolicyCancellation(cause) ? "cancelled" : "io",
+            `Reference source ignore policy could not be read at ${join(root.value, ".gitignore")}: ${errorMessage(causeValue)}`,
           ),
-          cause,
+          cause: causeValue,
         });
       }
     });

@@ -6,10 +6,12 @@ import {
   interfaceBuilderAnalysisSchema,
   interfaceBuilderDocumentSchema,
 } from "../apple/interfaceBuilderGraph.js";
+import { bundleResourceRootSchema } from "../apple/bundleResourceRoot.js";
 import {
   nativeInvestigationCoverageSchema,
   nativeInvestigationEdgeSchema,
   nativeInvestigationNodeSchema,
+  nativeInvestigationProviderSchema,
 } from "../native/nativeInvestigationGraph.js";
 import { err, ok, type Result } from "../result.js";
 import { parseAnalysisViewResult } from "./analysisViewParent.js";
@@ -67,9 +69,12 @@ const countsSchema = z.record(z.string(), z.number().int().positive());
 
 /** Every decoded document with graph counts; rows and evidence stay retained. */
 export const interfaceBuilderSummarySchema = z.strictObject({
-  target_sha256: interfaceBuilderAnalysisSchema.shape.target_sha256,
-  provider: interfaceBuilderAnalysisSchema.shape.graph.shape.provider,
-  documents: interfaceBuilderAnalysisSchema.shape.documents,
+  target_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable(),
+  provider: nativeInvestigationProviderSchema,
+  documents: interfaceBuilderDocumentSchema.array().max(64),
   available_counts: z.strictObject({
     nodes: z.number().int().nonnegative(),
     edges: z.number().int().nonnegative(),
@@ -132,7 +137,7 @@ const summarizeInterfaceBuilder = (
     graph.edges.length +
     graph.coverage.length;
   return {
-    summary: {
+    summary: interfaceBuilderSummarySchema.parse({
       target_sha256: report.target_sha256,
       provider: graph.provider,
       documents: report.documents,
@@ -146,7 +151,7 @@ const summarizeInterfaceBuilder = (
       coverage_statuses: tally(graph.coverage.map((row) => row.status)),
       truncated: graph.truncated,
       limitation_count: limitationCount,
-    },
+    }),
     coverage: completeWithinViewCoverage(total, total),
   };
 };
@@ -180,9 +185,15 @@ export const projectInterfaceBuilderView = (
     parent_operation: "decode_interface_builder" as const,
     parent_digest: parent.evidenceId.slice(3),
     artifact: {
-      path: parent.subject?.local_path ?? "",
+      path:
+        parent.subject?.local_path ??
+        report.resource_root?.canonical_path ??
+        "",
       sha256: report.target_sha256,
     },
+    ...(report.resource_root === undefined
+      ? {}
+      : { resource_root: report.resource_root }),
     limitations,
     unknowns: [
       "Rows describe recognized archive objects and connections only; unrecognized classes, fields and runtime-created UI remain unknown.",

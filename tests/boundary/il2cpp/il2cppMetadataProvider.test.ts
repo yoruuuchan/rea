@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   AnalysisCancelledError,
+  AnalysisCapabilityUnavailableError,
   AnalysisResourceConstraintError,
 } from "../../../src/domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { Il2cppMetadataProvider } from "../../../src/il2cpp/Il2cppMetadataProvider.js";
 import {
   createElfFixture,
@@ -188,6 +190,41 @@ it("admits a report whose escaped names fit the budget exactly", async () => {
   }
 });
 
+it("keeps observed source facts with a complete-report refusal", async () => {
+  const root = await createTestTempDirectory("rea-il2cpp-report-evidence-");
+  const path = join(root, "global-metadata.dat");
+  const bytes = createIl2cppMetadataFixture().bytes;
+  await writeFile(path, bytes);
+  const result = await inspectMetadata(path, 256);
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected report allowance refusal");
+  expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
+  expect(result.error.partialObservation).toMatchObject({
+    operation: "observe_il2cpp_metadata_source",
+    normalized_result: {
+      artifact: {
+        path,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        bytes: bytes.length,
+      },
+      inventory_status: "not-returned-as-complete",
+    },
+  });
+  const projected = projectAnalysisError(result.error);
+  expect(projected.retryable).toBe(false);
+  expect(projected.code).toBe("resource_constraint");
+  expect(projected.remediation.action).toContain(
+    "No complete metadata inventory is retained",
+  );
+  expect(projected.remediation.action).toContain(
+    "Source facts already observed stay with this refusal",
+  );
+  expect(projected.remediation.action).not.toMatch(
+    /does not leave a completed report or Evidence record/u,
+  );
+  expect(projected.remediation.action).not.toMatch(/worker memory/u);
+});
+
 it("refuses from row counts before decoding any row", async () => {
   const root = await createTestTempDirectory("rea-il2cpp-provider-counts-");
   const path = join(root, "global-metadata.dat");
@@ -288,8 +325,17 @@ it("bounds concurrent snapshots and retains active decoding until close complete
   try {
     const refused = await provider.inspect({ path });
     expect(refused.ok).toBe(false);
-    if (!refused.ok)
-      expect(refused.error).toBeInstanceOf(AnalysisResourceConstraintError);
+    if (!refused.ok) {
+      expect(refused.error).toBeInstanceOf(AnalysisCapabilityUnavailableError);
+      expect(projectAnalysisError(refused.error)).toMatchObject({
+        code: "capability_unavailable",
+        retryable: false,
+        details: { reason: "IL2CPP metadata reader is closed" },
+      });
+      expect(
+        projectAnalysisError(refused.error).remediation.action,
+      ).not.toMatch(/retry/i);
+    }
     await setImmediate();
     expect(closed).toBe(false);
   } finally {
@@ -298,7 +344,53 @@ it("bounds concurrent snapshots and retains active decoding until close complete
   }
   expect((await active).ok).toBe(true);
   expect(closed).toBe(true);
-  expect((await provider.inspect({ path })).ok).toBe(false);
+  const afterClose = await provider.inspect({ path });
+  expect(afterClose.ok).toBe(false);
+  if (!afterClose.ok) {
+    expect(afterClose.error).toBeInstanceOf(AnalysisCapabilityUnavailableError);
+    expect(projectAnalysisError(afterClose.error).retryable).toBe(false);
+  }
+});
+
+it("keeps occupied capacity retryable while the reader remains open", async () => {
+  const root = await createTestTempDirectory("rea-il2cpp-provider-occupied-");
+  const path = join(root, "global-metadata.dat");
+  await writeFile(path, createIl2cppMetadataFixture().bytes);
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    markEntered = resolve;
+  });
+  let resume!: () => void;
+  const release = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const provider = new Il2cppMetadataProvider(undefined, () => {
+    markEntered();
+    return release;
+  });
+  const active = provider.inspect({ path });
+  await entered;
+  try {
+    const refused = await provider.inspect({ path });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.error).toBeInstanceOf(AnalysisResourceConstraintError);
+      expect(projectAnalysisError(refused.error)).toMatchObject({
+        retryable: true,
+        details: {
+          resource: "capacity",
+          reported_limits: { maximum_concurrent_inspections: 1 },
+        },
+        remediation: {
+          action: expect.stringContaining("active IL2CPP metadata inspection"),
+        },
+      });
+    }
+  } finally {
+    resume();
+    await active;
+    await provider.close();
+  }
 });
 
 it.each([false, true])(

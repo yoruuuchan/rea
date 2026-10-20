@@ -175,6 +175,84 @@ it("rebinds replayed target subjects while preserving child artifact subjects", 
   ).toMatchObject(childSubject);
 });
 
+it("binds an omitted subject to the selected target in snapshot replay", () => {
+  const cache = new AnalysisSnapshotCache();
+  const target = ANALYSIS_SNAPSHOT_TARGET;
+  const profile = ANALYSIS_SNAPSHOT_PROFILE;
+  const relocatedTarget = { ...target, path: "/tmp/relocated-default-target" };
+  const parameters = { address: "0x2a00" };
+  const execution = createAnalysisExecution(
+    { name: "default-bound" },
+    ANALYSIS_SNAPSHOT_PROVIDER,
+    { analysisProfile: profile },
+  );
+  expect(execution).not.toHaveProperty("subject");
+  cache.record({
+    target,
+    profile,
+    operation: "procedure_info",
+    parameters,
+    execution,
+  });
+
+  const snapshot = cache.export(
+    target,
+    profile,
+    createEvidenceBundle([
+      createEvidence(target, ANALYSIS_SNAPSHOT_PROVIDER, {
+        operation: "procedure_info",
+        parameters,
+        result: { name: "default-bound" },
+        analysisProfile: profile,
+      }),
+    ]),
+  );
+  if (!snapshot.ok) throw snapshot.error;
+  expect(snapshot.value.entries[0]?.execution.subject?.path).toBe(target.path);
+  const reparsed = parseAnalysisSnapshot(
+    JSON.parse(serializeAnalysisSnapshot(snapshot.value)),
+  );
+  expect(reparsed.entries[0]?.execution.subject?.path).toBe(target.path);
+  cache.clear();
+  const imported = cache.import(
+    reparsed,
+    { target: relocatedTarget, profile },
+    () => ok(0),
+  );
+  expect(imported.ok).toBe(true);
+  expect(
+    cache.lookup(relocatedTarget, profile, "procedure_info", parameters)
+      ?.subject?.path,
+  ).toBe(relocatedTarget.path);
+});
+
+it("preserves an explicitly unbound subject through snapshot replay", () => {
+  const cache = new AnalysisSnapshotCache();
+  const target = ANALYSIS_SNAPSHOT_TARGET;
+  const profile = ANALYSIS_SNAPSHOT_PROFILE;
+  const parameters = { address: "0x3000" };
+  cache.record({
+    target,
+    profile,
+    operation: "procedure_info",
+    parameters,
+    execution: createAnalysisExecution(
+      { name: "unbound" },
+      ANALYSIS_SNAPSHOT_PROVIDER,
+      { subject: null, analysisProfile: profile },
+    ),
+  });
+
+  expect(
+    cache.lookup(
+      { ...target, path: "/tmp/relocated-unbound-target" },
+      profile,
+      "procedure_info",
+      parameters,
+    )?.subject,
+  ).toBeNull();
+});
+
 describe("analysis snapshot cache capacity", () => {
   it("shares capacity across query kinds while allowing replacements and fresh partitions", () => {
     const cache = new AnalysisSnapshotCache();

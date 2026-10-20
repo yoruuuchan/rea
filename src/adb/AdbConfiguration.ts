@@ -12,6 +12,7 @@ import {
 } from "../process/ExecFileOutput.js";
 import type { ProviderAvailability } from "../application/AnalysisProvider.js";
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { adbCommandCapturedOutput } from "./AdbCommand.js";
 
@@ -146,7 +147,13 @@ export const inspectAdbClient = async (
         "memory",
         `adb version output exceeded the ${String(VERSION_MAX_OUTPUT_BYTES)}-byte capture budget`,
         { max_output_bytes: VERSION_MAX_OUTPUT_BYTES },
-        options,
+        {
+          ...options,
+          ...fixedAllowanceOptions(
+            "The adb version-output capture allowance",
+            "capture",
+          ),
+        },
       );
     if (failure?.code === "ETIMEDOUT")
       throw new AnalysisTimeoutError(

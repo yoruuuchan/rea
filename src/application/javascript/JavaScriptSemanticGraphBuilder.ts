@@ -60,6 +60,7 @@ import {
   projectSemanticFrontiers,
   projectSemanticPromises,
   projectSemanticReturnValues,
+  semanticObjectReadOccurrence,
   type SemanticFlowProjectionContext,
 } from "./JavaScriptSemanticGraphFlowProjection.js";
 import {
@@ -828,6 +829,15 @@ const projectCalls = (context: FileContext): void => {
               ? "resolved"
               : "candidate",
         });
+      addRelation(context.state, {
+        source: semanticObjectReadOccurrence(
+          context,
+          argument.valueExpressionLocation,
+        ),
+        target: argumentNode,
+        relation: "aliases",
+        resolution: "resolved",
+      });
     }
   }
   for (const flow of context.ir.argumentFlows) {

@@ -278,6 +278,7 @@ export const registerSessionTools = (
   options: SessionToolOptions,
 ): void => {
   const openContract = toolContract("open_binary");
+  const openBundleResourcesContract = toolContract("open_bundle_resources");
   const closeContract = toolContract("close_binary");
   const statusContract = toolContract("binary_session");
   const exportContract = toolContract("export_evidence_bundle");
@@ -289,6 +290,39 @@ export const registerSessionTools = (
   const compareBundlesContract = toolContract("compare_bundles");
   const snapshotContract = toolContract("get_evidence_bundle");
   const processResources = new ProcessCaptureResourceScope();
+  server.registerTool(
+    openBundleResourcesContract.name,
+    toolRegistrationOptions(openBundleResourcesContract),
+    async (input, context) => {
+      const opened = await logToolExecution(
+        logger,
+        openBundleResourcesContract.name,
+        () =>
+          session.openBundleResources(input.path, {
+            signal: context.mcpReq.signal,
+          }),
+      );
+      if (!opened.ok)
+        return server.delivery.toCallToolResult(
+          opened,
+          openBundleResourcesContract,
+        );
+      const root = opened.value;
+      return server.delivery.toCallToolResult(
+        {
+          ok: true,
+          value: {
+            caller_path: root.callerPath,
+            canonical_path: root.canonicalPath,
+            info_plist_path: root.infoPlistPath,
+            layout: root.layout,
+            executable_sha256: root.executableSha256,
+          },
+        },
+        openBundleResourcesContract,
+      );
+    },
+  );
   registerLifecycleTools(
     {
       ...options,

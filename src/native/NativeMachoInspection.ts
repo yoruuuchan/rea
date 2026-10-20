@@ -324,7 +324,11 @@ const normalizeMacho = (
     architectures: covered(architectures, true),
     build_metadata: covered(load.builds, true),
     load_commands: covered(load.commands, true),
-    dependencies: covered(load.dependencies, true),
+    dependencies: covered(
+      load.dependencies,
+      load.omittedDependencyCommands.length === 0,
+      dependencyPayloadLimitations(load.omittedDependencyCommands),
+    ),
     imports: covered(imports, false, [
       "dyld_info textual imports may omit chained or toolchain-unsupported metadata.",
       ...(missingImportsUuid ? [missingUuidLimitation("imports")] : []),
@@ -404,6 +408,21 @@ const parseNmExports = (output: string) =>
       reexport: null,
       source: "nm",
     }));
+
+const dependencyPayloadLimitations = (
+  commands: readonly string[],
+): string[] => {
+  if (commands.length === 0) return [];
+  const counts = new Map<string, number>();
+  for (const command of commands)
+    counts.set(command, (counts.get(command) ?? 0) + 1);
+  const described = [...counts].map(
+    ([command, count]) => `${count} ${command}`,
+  );
+  return [
+    `Dependency inventory omits ${described.join(", ")} because otool -l does not print that command's linkedit install name. trace_dylib_resolution reads the payload.`,
+  ];
+};
 
 const covered = <Value>(
   items: readonly Value[],

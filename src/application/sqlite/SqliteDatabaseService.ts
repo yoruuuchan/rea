@@ -71,7 +71,11 @@ export class SqliteDatabaseService {
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, {
+          cause: options.signal.reason,
+        }),
+      );
     const input = inspectSqliteDatabaseInputSchema.safeParse(rawInput);
     if (!input.success)
       return err(
@@ -95,7 +99,7 @@ export class SqliteDatabaseService {
     const report = sqliteDatabaseSchema.safeParse(execution.result);
     if (
       !report.success ||
-      execution.subject === null ||
+      execution.subject == null ||
       !matchesSelectedDatabase(report.data, input.data, execution.subject)
     )
       return err(

@@ -58,8 +58,7 @@ export async function artifactCliEvidence(
   return evidence;
 }
 
-/** Run a real stdio MCP subprocess, owning and closing its transport. */
-export async function withArtifactMcp(target, verify) {
+const withOpenedArtifactMcp = async (target, openTool, verify) => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [fileURLToPath(new URL("../rea.mjs", import.meta.url)), "mcp"],
@@ -70,15 +69,27 @@ export async function withArtifactMcp(target, verify) {
   try {
     await client.connect(transport);
     const opened = await client.callTool({
-      name: "open_binary",
+      name: openTool,
       arguments: { path: target },
     });
     assert.notEqual(opened.isError, true, JSON.stringify(opened));
+    if (openTool === "open_bundle_resources")
+      assert.equal(opened.structuredContent?.result?.caller_path, target);
     await verify(client);
   } finally {
     await client.close();
     await transport.close();
   }
+};
+
+/** Run a real stdio MCP subprocess with an explicitly opened binary target. */
+export async function withArtifactMcp(target, verify) {
+  return withOpenedArtifactMcp(target, "open_binary", verify);
+}
+
+/** Run a real stdio MCP subprocess with an explicitly opened bundle resource root. */
+export async function withBundleResourcesMcp(target, verify) {
+  return withOpenedArtifactMcp(target, "open_bundle_resources", verify);
 }
 
 /** Require a successful structured MCP tool result rather than its text rendering. */

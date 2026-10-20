@@ -65,6 +65,11 @@ export const openBinaryInputSchema = z
     });
   });
 
+/** Open only app resources when no declared executable is available. */
+export const openBundleResourcesInputSchema = z.strictObject({
+  path: binaryTargetPathSchema,
+});
+
 /** Input contract for closing a target after an optional atomic snapshot. */
 export const closeBinaryInputSchema = z.strictObject({
   snapshot_path: snapshotPathSchema.optional(),

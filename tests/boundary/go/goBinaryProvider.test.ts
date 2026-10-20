@@ -7,9 +7,11 @@ import {
   AnalysisResourceConstraintError,
   AnalysisUnsupportedTargetError,
 } from "../../../src/domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import {
   createGoBinaryDiagnosticFixtures,
   createGoBinaryFixture,
+  createGoOverlappingElfFixture,
 } from "../../fixtures/go/image.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -67,6 +69,34 @@ it("preserves the actual build-info byte guard as a resource failure", async () 
     boundary: "build-info",
     maximum_bytes: 1024 * 1024,
   });
+  const projected = projectAnalysisError(result.error);
+  expect(projected.retryable).toBe(false);
+  expect(projected.remediation.action).toContain(
+    "Go build-info string allowance",
+  );
+  expect(projected.remediation.action).not.toMatch(/available host memory/u);
+});
+
+it("keeps the header-search budget distinct from a worker CPU limit", async () => {
+  const root = await createTestTempDirectory("rea-go-search-");
+  const path = join(root, "overlapping.elf");
+  await writeFile(path, createGoOverlappingElfFixture());
+  const result = await new GoBinaryProvider().inspect({ path });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Overlapping header search must be refused");
+  const projected = projectAnalysisError(result.error);
+  expect(projected).toMatchObject({
+    retryable: false,
+    details: {
+      resource: "cpu",
+      reported_limits: {
+        boundary: "search",
+        maximum_bytes: 256 * 1024 * 1024,
+      },
+    },
+  });
+  expect(projected.remediation.action).toContain("header-search allowance");
+  expect(projected.remediation.action).not.toMatch(/observed signal/u);
 });
 
 it.skipIf(process.platform === "win32")(

@@ -27,6 +27,10 @@ export type DecodedPointer =
   | {
       readonly kind: "bind";
       readonly symbol: string;
+      /** Producer stream, which is part of lookup identity for weak binds. */
+      readonly binding_source: "chained" | "bind" | "weak" | "lazy";
+      /** Signed dyld library ordinal; 0 and negative values are special scopes. */
+      readonly library_ordinal: number;
       readonly library: string | null;
       readonly weak: boolean;
       readonly addend: bigint;
@@ -66,6 +70,8 @@ const signed = (value: bigint, width: number): bigint =>
 
 interface Import {
   readonly symbol: string;
+  readonly binding_source: "chained" | "bind" | "weak" | "lazy";
+  readonly library_ordinal: number;
   readonly library: string | null;
   readonly weak: boolean;
   readonly addend: bigint;
@@ -75,15 +81,26 @@ interface BindRun {
   readonly start: bigint;
   count: bigint;
   readonly stride: bigint;
-  readonly binding: Import;
+  readonly binding:
+    | { readonly kind: "bind"; readonly value: Import }
+    | { readonly kind: "unsupported"; readonly reason: string };
 }
 
-/** Library ordinal to install name; 0 and negative ordinals are special lookups. */
+/** Resolve only valid dylib ordinals; preserve special scopes as raw ordinals. */
 const libraryName = (
   ordinal: number,
   dylibs: readonly string[],
 ): string | null => {
-  if (ordinal > 0) return dylibs[ordinal - 1] ?? null;
+  if (!Number.isSafeInteger(ordinal) || ordinal < -3)
+    throw new RangeError(`Unsupported dylib ordinal ${String(ordinal)}`);
+  if (ordinal > 0) {
+    const name = dylibs[ordinal - 1];
+    if (name === undefined)
+      throw new RangeError(
+        `Dylib ordinal ${ordinal} exceeds the ${dylibs.length} declared dependencies`,
+      );
+    return name;
+  }
   return null;
 };
 
@@ -132,6 +149,8 @@ const readImport = (
         base + header.symbols + Number(bits(word, 32, 32)),
         end,
       ),
+      binding_source: "chained",
+      library_ordinal: ordinal,
       library: libraryName(ordinal, dylibs),
       weak: bits(word, 16, 1) === 1n,
       addend: bytes.readBigInt64LE(at + 8),
@@ -143,6 +162,8 @@ const readImport = (
     encodedOrdinal > 0xf0 ? encodedOrdinal - 0x100 : encodedOrdinal;
   return {
     symbol: cString(bytes, base + header.symbols + (word >>> 9), end),
+    binding_source: "chained",
+    library_ordinal: ordinal,
     library: libraryName(ordinal, dylibs),
     weak: ((word >>> 8) & 1) === 1,
     addend: header.format === 2 ? BigInt(bytes.readInt32LE(at + 4)) : 0n,
@@ -549,6 +570,7 @@ const sleb = (bytes: Buffer, cursor: { at: number }, end: number): bigint => {
 /** Registers of the `LC_DYLD_INFO` bind state machine. */
 interface BindState {
   ordinal: number;
+  ordinalFailure: string | null;
   segmentIndex: number;
   symbol: string;
   weak: boolean;
@@ -569,12 +591,23 @@ const setBindRegister = (
   switch (byte & 0xf0) {
     case 0x10:
       state.ordinal = immediate;
+      state.ordinalFailure = null;
       return true;
     case 0x20:
-      state.ordinal = Number(uleb(bytes, cursor, end));
+      {
+        const ordinal = uleb(bytes, cursor, end);
+        if (ordinal > BigInt(Number.MAX_SAFE_INTEGER)) {
+          state.ordinal = 0;
+          state.ordinalFailure = `Dylib ordinal ${ordinal} exceeds the safe integer range`;
+        } else {
+          state.ordinal = Number(ordinal);
+          state.ordinalFailure = null;
+        }
+      }
       return true;
     case 0x30:
       state.ordinal = immediate === 0 ? 0 : immediate - 16;
+      state.ordinalFailure = null;
       return true;
     case 0x40: {
       const stop = bytes.indexOf(0, cursor.at);
@@ -621,6 +654,7 @@ const readBindStream = (
   const cursor = { at: range.offset };
   const state: BindState = {
     ordinal: 0,
+    ordinalFailure: null,
     segmentIndex: -1,
     symbol: "",
     weak: false,
@@ -641,24 +675,48 @@ const readBindStream = (
     if (count === 0n) return;
     preflightRun(count, skip);
     const stride = 8n + skip;
-    const binding: Import = {
-      symbol: state.symbol,
-      library:
-        range.stream === "weak"
-          ? null
-          : libraryName(state.ordinal, image.dylibs),
-      weak: state.weak,
-      addend: state.addend,
-    };
+    let binding: BindRun["binding"];
+    try {
+      if (state.ordinalFailure !== null)
+        throw new RangeError(state.ordinalFailure);
+      const resolvedLibrary = libraryName(state.ordinal, image.dylibs);
+      binding = {
+        kind: "bind",
+        value: {
+          symbol: state.symbol,
+          binding_source: range.stream,
+          library_ordinal: state.ordinal,
+          library: range.stream === "weak" ? null : resolvedLibrary,
+          weak: state.weak,
+          addend: state.addend,
+        },
+      };
+    } catch (cause: unknown) {
+      binding = {
+        kind: "unsupported",
+        reason: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
     const previous = binds.at(-1);
+    const sameBinding = (
+      left: BindRun["binding"],
+      right: BindRun["binding"],
+    ) =>
+      left.kind === "unsupported" && right.kind === "unsupported"
+        ? left.reason === right.reason
+        : left.kind === "bind" && right.kind === "bind"
+          ? left.value.symbol === right.value.symbol &&
+            left.value.binding_source === right.value.binding_source &&
+            left.value.library_ordinal === right.value.library_ordinal &&
+            left.value.library === right.value.library &&
+            left.value.weak === right.value.weak &&
+            left.value.addend === right.value.addend
+          : false;
     if (
       previous !== undefined &&
       previous.stride === stride &&
       previous.start + previous.count * stride === state.address &&
-      previous.binding.symbol === binding.symbol &&
-      previous.binding.library === binding.library &&
-      previous.binding.weak === binding.weak &&
-      previous.binding.addend === binding.addend
+      sameBinding(previous.binding, binding)
     ) {
       previous.count += count;
     } else {
@@ -769,7 +827,9 @@ export const parsePointerFixups = (
       }
       return match === undefined
         ? { kind: "rebase", target: raw }
-        : { kind: "bind", ...match.binding };
+        : match.binding.kind === "unsupported"
+          ? match.binding
+          : { kind: "bind", ...match.binding.value };
     },
   };
 };

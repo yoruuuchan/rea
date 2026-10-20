@@ -4,6 +4,18 @@ import { z } from "zod";
 import { ConfigurationError } from "./domain/configurationErrors.js";
 import { err, ok, type Result } from "./domain/result.js";
 
+/**
+ * Settings the executable rejects before a command starts. MCP startup rejects
+ * the same values. Doctor requires them in every readiness scope.
+ */
+export const PROCESS_START_CONFIGURATION_SETTINGS = ["REA_LOG_LEVEL"] as const;
+
+/** True when `setting` prevents the REA process from starting. */
+export const blocksProcessStart = (setting: string): boolean =>
+  PROCESS_START_CONFIGURATION_SETTINGS.some(
+    (candidate) => candidate === setting,
+  );
+
 /** Supported structured log levels at the process boundary. */
 export type LogLevel = z.infer<typeof logLevelSchema>;
 

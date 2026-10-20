@@ -46,7 +46,7 @@ export class FirmwareAnalysisService {
     const executed = await this.provider.execute(parsed.data, options);
     if (!executed.ok) return executed;
     const execution = executed.value;
-    if (execution.subject === null)
+    if (execution.subject == null)
       return err(
         new AnalysisOutputError(
           operation,

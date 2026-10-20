@@ -130,6 +130,79 @@ type StaticObjectProperty =
   | { readonly status: "missing" | "dynamic" }
   | { readonly status: "explicit"; readonly property: t.ObjectProperty };
 
+type StaticObjectMember =
+  | { readonly kind: "unknown" }
+  | { readonly kind: "prototype-setter" }
+  | {
+      readonly kind: "property";
+      readonly property: t.ObjectProperty | t.ObjectMethod;
+    };
+
+const UNKNOWN_STATIC_OBJECT_MEMBER: StaticObjectMember = { kind: "unknown" };
+
+const isObjectPrototypeSetter = (property: t.ObjectProperty): boolean =>
+  !property.computed &&
+  !property.shorthand &&
+  semanticStaticPropertyKey(property.key, false) === "__proto__";
+
+/** Expand only bounded literal spreads, preserving unknown writes in order. */
+const appendStaticObjectMembers = (
+  members: StaticObjectMember[],
+  object: t.ObjectExpression,
+  depth: number,
+  isNullish?: (node: t.Node) => boolean,
+): void => {
+  for (const property of object.properties) {
+    if (!t.isSpreadElement(property)) {
+      if (t.isObjectProperty(property) && isObjectPrototypeSetter(property)) {
+        // A top-level setter changes lookup inheritance but is never an own
+        // key; one copied through object spread has no effect on the target.
+        if (depth === 0) members.push({ kind: "prototype-setter" });
+        continue;
+      }
+      members.push({ kind: "property", property });
+      continue;
+    }
+    const { node: spread, depth: wrappers } = unwrapJavaScriptExpression(
+      property.argument,
+    );
+    if (t.isObjectExpression(spread)) {
+      const nextDepth = depth + wrappers + 1;
+      // Copying a getter can run code that changes another source key.
+      if (
+        nextDepth > SEMANTIC_EXPRESSION_DEPTH_LIMIT ||
+        spread.properties.some((entry) =>
+          t.isObjectMethod(entry, { kind: "get" }),
+        )
+      ) {
+        members.push(UNKNOWN_STATIC_OBJECT_MEMBER);
+        continue;
+      }
+      appendStaticObjectMembers(members, spread, nextDepth, isNullish);
+      continue;
+    }
+    // These primitive boxes have no own keys; strings can own index keys.
+    if (
+      t.isBooleanLiteral(spread) ||
+      t.isNumericLiteral(spread) ||
+      t.isBigIntLiteral(spread) ||
+      isNullish?.(property.argument) === true
+    )
+      continue;
+    members.push(UNKNOWN_STATIC_OBJECT_MEMBER);
+  }
+};
+
+const staticObjectMembers = (
+  object: t.ObjectExpression,
+  depth: number,
+  isNullish?: (node: t.Node) => boolean,
+): readonly StaticObjectMember[] => {
+  const members: StaticObjectMember[] = [];
+  appendStaticObjectMembers(members, object, depth, isNullish);
+  return members;
+};
+
 /** Find the effective explicit property, preserving unresolved overrides. */
 export const staticObjectProperty = (
   object: t.Node | undefined,
@@ -138,49 +211,57 @@ export const staticObjectProperty = (
 ): StaticObjectProperty => {
   if (object === undefined) return { status: "missing" };
   if (!t.isObjectExpression(object)) return { status: "dynamic" };
-  const lookup = (
-    current: t.ObjectExpression,
-    depth: number,
-  ): StaticObjectProperty => {
-    for (const property of current.properties.toReversed()) {
-      if (t.isSpreadElement(property)) {
-        const { node: spread, depth: wrappers } = unwrapJavaScriptExpression(
-          property.argument,
-        );
-        if (t.isObjectExpression(spread)) {
-          const nextDepth = depth + wrappers + 1;
-          // Copying a getter can run code that changes another source key.
-          if (
-            nextDepth > SEMANTIC_EXPRESSION_DEPTH_LIMIT ||
-            spread.properties.some((entry) =>
-              t.isObjectMethod(entry, { kind: "get" }),
-            )
-          )
-            return { status: "dynamic" };
-          const found = lookup(spread, nextDepth);
-          if (found.status === "missing") continue;
-          return found;
-        }
-        // These primitive boxes have no own keys; strings can own index keys.
-        if (
-          t.isBooleanLiteral(spread) ||
-          t.isNumericLiteral(spread) ||
-          t.isBigIntLiteral(spread) ||
-          isNullish?.(property.argument) === true
-        )
-          continue;
-        return { status: "dynamic" };
-      }
-      const key = semanticStaticPropertyKey(property.key, property.computed);
-      if (key === null) return { status: "dynamic" };
-      if (key !== name) continue;
-      return t.isObjectProperty(property)
-        ? { status: "explicit", property }
-        : { status: "dynamic" };
+  let prototypeMaySupply = false;
+  for (const member of staticObjectMembers(object, 0, isNullish).toReversed()) {
+    if (member.kind === "prototype-setter") {
+      prototypeMaySupply = true;
+      continue;
     }
-    return { status: "missing" };
-  };
-  return lookup(object, 0);
+    if (member.kind === "unknown") return { status: "dynamic" };
+    const { property } = member;
+    const key = semanticStaticPropertyKey(property.key, property.computed);
+    if (key === null) return { status: "dynamic" };
+    if (key !== name) continue;
+    return t.isObjectProperty(property)
+      ? { status: "explicit", property }
+      : { status: "dynamic" };
+  }
+  return prototypeMaySupply ? { status: "dynamic" } : { status: "missing" };
+};
+
+export type StaticObjectPropertyNames =
+  | { readonly status: "missing" | "dynamic" }
+  | { readonly status: "partial"; readonly names: readonly string[] }
+  | { readonly status: "complete"; readonly names: readonly string[] };
+
+/** Retain known own names and report unresolved object membership separately. */
+export const staticObjectPropertyNames = (
+  object: t.Node | undefined,
+  isNullish?: (node: t.Node) => boolean,
+): StaticObjectPropertyNames => {
+  if (object === undefined) return { status: "missing" };
+  if (!t.isObjectExpression(object)) return { status: "dynamic" };
+  const names = new Set<string>();
+  let complete = true;
+  for (const member of staticObjectMembers(object, 0, isNullish)) {
+    if (member.kind === "prototype-setter") continue;
+    if (member.kind === "unknown") {
+      complete = false;
+      continue;
+    }
+    const key = semanticStaticPropertyKey(
+      member.property.key,
+      member.property.computed,
+    );
+    if (key === null) {
+      complete = false;
+      continue;
+    }
+    names.add(key);
+  }
+  return complete
+    ? { status: "complete", names: [...names] }
+    : { status: "partial", names: [...names] };
 };
 
 /** Later properties own a key; an intervening dynamic write leaves it unknown. */

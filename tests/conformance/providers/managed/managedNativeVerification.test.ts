@@ -263,6 +263,22 @@ it("keeps name candidates unresolved when a required module identity is absent",
     );
   }
 
+  for (const path of [
+    "/examples/lib.dylib",
+    "/examples/lib.so",
+    "/examples/foo.dll",
+  ]) {
+    const extensionOnly = verifyManagedNativeBoundaries({
+      ...inputWithImportScope(".dll"),
+      native_observations: [nativeEvidenceWithExports(["open_native"], path)],
+    });
+    expect(extensionOnly.pinvoke_imports[0]).toMatchObject({
+      status: "unresolved",
+      basis: "module-identity-unknown",
+      candidates: [{ name: "open_native", module_path: path }],
+    });
+  }
+
   const subjectless = verifyManagedNativeBoundaries({
     ...inputWithImportScope("nativehelper.dll"),
     native_observations: [

@@ -60,32 +60,138 @@ export async function readTestDurations(
   }
 }
 
-type TimedItem<T> = { item: T; key: string; duration: number | undefined };
+/**
+ * Case counts from the competing-loader file before it was split: 54 cases
+ * stayed in the original file and 46 moved into each of the three new files.
+ * History that still names only the original path is that combined cost.
+ */
+const LOADER_HISTORY_SOURCE =
+  "tests/acceptance/applications/javascriptLiteralPercentPaths.test.ts";
+const LOADER_HISTORY_PARTS = [
+  "tests/acceptance/applications/javascriptLiteralLoaderOwnershipEarly.test.ts",
+  "tests/acceptance/applications/javascriptLiteralLoaderOwnershipMiddle.test.ts",
+  "tests/acceptance/applications/javascriptLiteralLoaderOwnershipLate.test.ts",
+] as const;
+const LOADER_HISTORY_REMAINDER_CASES = 54;
+const LOADER_HISTORY_PART_CASES = 46;
+const LOADER_HISTORY_CASES =
+  LOADER_HISTORY_REMAINDER_CASES +
+  LOADER_HISTORY_PART_CASES * LOADER_HISTORY_PARTS.length;
 
-// process-boundary runs its files one at a time. Other projects overlap up to
-// the runner worker cap, so equal file-duration sums are not equal wall time.
-const PARALLEL_TEST_WORKERS = 2;
-
-export function estimatedShardCost(
-  project: string,
-  durationMs: number,
-): number {
-  if (project === "process-boundary") return durationMs;
-  return durationMs / PARALLEL_TEST_WORKERS;
+/**
+ * Give the split loader files a share of the pre-split duration. Once history
+ * records any of the new paths, their published durations stand.
+ */
+export function seedSplitLoaderDurations(
+  durations: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const combined = durations.get(LOADER_HISTORY_SOURCE);
+  if (
+    combined === undefined ||
+    LOADER_HISTORY_PARTS.some((path) => durations.has(path))
+  )
+    return new Map(durations);
+  const seeded = new Map(durations);
+  seeded.set(
+    LOADER_HISTORY_SOURCE,
+    (combined * LOADER_HISTORY_REMAINDER_CASES) / LOADER_HISTORY_CASES,
+  );
+  for (const path of LOADER_HISTORY_PARTS)
+    seeded.set(
+      path,
+      (combined * LOADER_HISTORY_PART_CASES) / LOADER_HISTORY_CASES,
+    );
+  return seeded;
 }
 
-/** Weight raw durations, filling gaps from the raw median before worker sharing. */
-export function weightFileDurations(
-  entries: readonly { project: string; duration: number | undefined }[],
-): (number | undefined)[] {
-  const known = entries
-    .flatMap(({ duration }) => (duration === undefined ? [] : [duration]))
-    .sort((left, right) => left - right);
-  if (!known.length) return entries.map(() => undefined);
-  const lower = known[Math.floor((known.length - 1) / 2)]!;
-  const median = lower + (known[Math.floor(known.length / 2)]! - lower) / 2;
-  return entries.map(({ project, duration }) =>
-    estimatedShardCost(project, duration ?? median),
+type TimedItem<T> = {
+  item: T;
+  key: string;
+  duration: number | undefined;
+  /**
+   * Workers for this file's sequence group. The file still occupies one worker
+   * for its full duration; the other lanes only overlap its peers.
+   */
+  laneWidth?: number;
+  /**
+   * Vitest sequence group. Groups run from lowest to highest, so a later group
+   * adds its own makespan instead of overlapping an earlier one.
+   */
+  groupOrder?: number;
+};
+
+type Phase = { laneWidth: number; lanes: number[] };
+
+const laneWidthOf = <T>(entry: TimedItem<T>): number => {
+  const laneWidth = entry.laneWidth ?? 1;
+  if (!Number.isInteger(laneWidth) || laneWidth < 1)
+    throw new RangeError("laneWidth must be a positive integer");
+  return laneWidth;
+};
+
+const groupOrderOf = <T>(entry: TimedItem<T>): number => {
+  const groupOrder = entry.groupOrder ?? 0;
+  if (!Number.isInteger(groupOrder) || groupOrder < 0)
+    throw new RangeError("groupOrder must be a non-negative integer");
+  return groupOrder;
+};
+
+const durationOf = <T>(entry: TimedItem<T>, unknownMs: number): number => {
+  const duration = entry.duration ?? unknownMs;
+  if (!Number.isFinite(duration) || duration <= 0)
+    throw new RangeError("duration must be positive");
+  return duration;
+};
+
+const wallOf = (phases: ReadonlyMap<number, Phase>): number => {
+  let wall = 0;
+  for (const phase of phases.values())
+    wall += phase.lanes.reduce((max, lane) => Math.max(max, lane), 0);
+  return wall;
+};
+
+/** Place one whole file on the least-loaded lane of its sequence group. */
+const place = <T>(
+  phases: ReadonlyMap<number, Phase>,
+  entry: TimedItem<T>,
+  duration: number,
+): Map<number, Phase> => {
+  const groupOrder = groupOrderOf(entry);
+  const laneWidth = laneWidthOf(entry);
+  const existing = phases.get(groupOrder);
+  if (existing && existing.laneWidth !== laneWidth)
+    throw new RangeError("one sequence group must keep a single lane width");
+  const lanes = existing
+    ? existing.lanes.slice()
+    : Array.from({ length: laneWidth }, () => 0);
+  let shortest = 0;
+  for (let index = 1; index < lanes.length; index += 1)
+    if (lanes[index]! < lanes[shortest]!) shortest = index;
+  lanes[shortest] = lanes[shortest]! + duration;
+  const next = new Map(phases);
+  next.set(groupOrder, { laneWidth, lanes });
+  return next;
+};
+
+/**
+ * Wall time of one shard. Each file keeps its full duration on one worker.
+ * Files overlap only inside a sequence group, up to that group's lane width,
+ * and later groups run after earlier ones.
+ */
+export function scheduleWall<T>(
+  items: readonly TimedItem<T>[],
+  unknownMs: number,
+): number {
+  const ordered = items.toSorted(
+    (left, right) =>
+      durationOf(right, unknownMs) - durationOf(left, unknownMs) ||
+      (left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+  );
+  return wallOf(
+    ordered.reduce(
+      (phases, entry) => place(phases, entry, durationOf(entry, unknownMs)),
+      new Map<number, Phase>(),
+    ),
   );
 }
 
@@ -104,19 +210,29 @@ export function allocateByDuration<T>(
   const median = lower + (known[Math.floor(known.length / 2)]! - lower) / 2;
   const ordered = items.toSorted(
     (left, right) =>
-      (right.duration ?? median) - (left.duration ?? median) ||
+      durationOf(right, median) - durationOf(left, median) ||
       (left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
   );
   const shards = Array.from({ length: shardCount }, () => ({
-    duration: 0,
+    phases: new Map<number, Phase>(),
     items: [] as T[],
   }));
   for (const entry of ordered) {
-    const lightest = shards.reduce((left, right) =>
-      right.duration < left.duration ? right : left,
-    );
-    lightest.items.push(entry.item);
-    lightest.duration += entry.duration ?? median;
+    const duration = durationOf(entry, median);
+    let chosen = shards[0]!;
+    let chosenPhases = place(chosen.phases, entry, duration);
+    let chosenWall = wallOf(chosenPhases);
+    for (const candidate of shards.slice(1)) {
+      const phases = place(candidate.phases, entry, duration);
+      const wall = wallOf(phases);
+      if (wall < chosenWall) {
+        chosen = candidate;
+        chosenPhases = phases;
+        chosenWall = wall;
+      }
+    }
+    chosen.phases = chosenPhases;
+    chosen.items.push(entry.item);
   }
   return shards.map(({ items }) => items);
 }
@@ -129,26 +245,29 @@ export class CiTestSequencer extends BaseSequencer {
     const shard = this.ctx.config.shard;
     if (!historyPath || !shard) return super.shard(files);
     const root = this.ctx.config.root;
-    const durations = await readTestDurations(historyPath, root);
-    if (!durations) return super.shard(files);
+    const recorded = await readTestDurations(historyPath, root);
+    if (!recorded) return super.shard(files);
+    const durations = seedSplitLoaderDurations(recorded);
 
-    const timed = files.map((item) => {
+    const weighted = files.map((item) => {
       const path = relative(root, resolve(root, item.moduleId))
         .split(sep)
         .join("/");
+      const projectWorkers = item.project.config.maxWorkers;
+      const laneWidth =
+        typeof projectWorkers === "number" &&
+        Number.isInteger(projectWorkers) &&
+        projectWorkers >= 1
+          ? projectWorkers
+          : 1;
       return {
         item,
         key: path + "\0" + item.project.name + "\0" + item.pool,
-        project: item.project.name,
         duration: durations.get(path),
+        laneWidth,
+        groupOrder: item.project.config.sequence.groupOrder,
       };
     });
-    const costs = weightFileDurations(timed);
-    const weighted = timed.map((entry, index) => ({
-      item: entry.item,
-      key: entry.key,
-      duration: costs[index],
-    }));
     const shards = allocateByDuration(weighted, shard.count);
     return shards ? shards[shard.index - 1]! : super.shard(files);
   }

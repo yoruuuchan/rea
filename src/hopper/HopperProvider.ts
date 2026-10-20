@@ -24,6 +24,14 @@ import type { JsonValue } from "../domain/jsonValue.js";
 import type { Logger } from "pino";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 import { err, ok } from "../domain/result.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
+import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
+import { AnalysisCleanupLeaseGroup } from "../artifacts/AnalysisCleanupLease.js";
+import {
+  ArtifactResourceRetryFailure,
+  ArtifactResourceScope,
+} from "../artifacts/ArtifactResourceScope.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { HopperApplicationLauncher } from "./BridgeLauncher.js";
 import {
   hopperDeclinedArchitectureReason,
@@ -44,6 +52,16 @@ import {
 /** Concrete analysis provider backed by REA's private Hopper bridge. */
 export class HopperProvider implements AnalysisProviderCandidate {
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
+  readonly #ownedResources = new ArtifactResourceScope();
+  readonly #inspectionOwner: RetainedResourceScope = {
+    retain: (owner, resource) =>
+      this.#ownedResources.retain({
+        kind: "lease",
+        resource,
+        lease: AnalysisCleanupLease.forCloseOwner(owner, resource),
+      }),
+    run: (operation) => this.#ownedResources.run(operation),
+  };
 
   /**
    * Host platform, injected so availability and launch-mode decisions can be
@@ -169,12 +187,35 @@ export class HopperProvider implements AnalysisProviderCandidate {
     target: BinaryTarget,
     options?: AnalysisProfileResolutionOptions,
   ) {
+    const resourceScope = options?.resourceScope ?? this.#inspectionOwner;
     return resolveHopperAnalysisProfile(target, {
       launcherPath: this.config.hopperLauncherPath,
       loaderArgsOverride: this.config.hopperLoaderArgs,
       provider: HOPPER_PROVIDER_IDENTITY,
+      resourceScope,
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
     });
+  }
+
+  hasPendingOwnedResources(): boolean {
+    return this.#ownedResources.hasPending;
+  }
+
+  async closeOwnedResources() {
+    try {
+      await this.#ownedResources.close();
+      return ok(null);
+    } catch (cause: unknown) {
+      const failure = new ProviderCleanupError(
+        HOPPER_PROVIDER_IDENTITY.id,
+        this.#ownedResources.cleanupResources,
+        { reason: cause instanceof Error ? cause.message : String(cause) },
+        { cause, operation: "close_owned_resources" },
+      );
+      if (cause instanceof ArtifactResourceRetryFailure)
+        new AnalysisCleanupLeaseGroup(failure, cause.cleanupLeases);
+      return err(failure);
+    }
   }
 
   createClient(
@@ -287,7 +328,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
           ...(preparedImage === undefined
             ? []
             : [
-                "REA loaded a verified thin Mach-O slice from the original FAT source. Identity and file offsets refer to the original file. The owned temporary image and its Hopper document close together, including on MCP shutdown.",
+                "REA loaded a verified thin Mach-O image prepared from the original source. Identity and file offsets refer to the original file. The owned temporary image and its Hopper document close together, including on MCP shutdown.",
               ]),
           ...(CAPABILITIES.find(
             (descriptor) => descriptor.operation === operation,

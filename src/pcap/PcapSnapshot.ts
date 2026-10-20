@@ -11,6 +11,7 @@ import {
   AnalysisInputError,
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import {
@@ -156,6 +157,10 @@ export class PcapSnapshot {
           "file-size",
           "Capture exceeds the owned-snapshot disk budget",
           { max_capture_bytes: MAX_CAPTURE_BYTES },
+          fixedAllowanceOptions(
+            "the owned capture snapshot allowance",
+            "input",
+          ),
         );
       const destination = this.own(
         new OwnedFileHandle(await open(this.path, "wx", 0o600)),

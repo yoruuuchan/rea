@@ -30,13 +30,11 @@ export const attestGhidraDosSnapshot = async (
   signal?: AbortSignal,
 ) => {
   const headerBytes = Math.min(fileBytes, 64);
-  const header = await readBoundedFileBytes(
-    handle,
-    headerBytes,
+  const header = await readBoundedFileBytes(handle, headerBytes, {
     signal,
-    headerBytes,
-    cancelled,
-  );
+    expectedSize: headerBytes,
+    cancellationFailure: cancelled,
+  });
   if (header === undefined || header.length !== headerBytes)
     throw new RegularFileChangedError(path);
   const extent = dosMzImageByteLength(header);

@@ -55,7 +55,8 @@ const MAX_REPORTED_OMITTED_ARCHIVES = 64;
 /** Decode compiled Interface Builder archives from a local app bundle. */
 export const analyzeInterfaceBuilderBundle = async (input: {
   readonly bundlePath: string;
-  readonly targetSha256: string;
+  readonly targetSha256: string | null;
+  readonly resourceRoot?: import("../../domain/apple/bundleResourceRoot.js").BundleResourceRoot;
   readonly limits?: unknown;
   readonly signal?: AbortSignal;
 }) => {
@@ -205,6 +206,9 @@ export const analyzeInterfaceBuilderBundle = async (input: {
   }
   const result = buildInterfaceBuilderAnalysis({
     targetSha256: input.targetSha256,
+    ...(input.resourceRoot === undefined
+      ? {}
+      : { resourceRoot: input.resourceRoot }),
     toolVersion: "rea-interface-builder/1",
     documents,
     limits,

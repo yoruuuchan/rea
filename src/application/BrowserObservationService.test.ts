@@ -3,9 +3,19 @@ import type { BrowserObservationPort } from "./BrowserObservationPort.js";
 import { listBrowserTargets } from "./BrowserObservationService.js";
 import type { BrowserTargetList } from "../domain/browserObservationSchemas.js";
 import { parseEvidence } from "../domain/evidence.js";
-import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisOutputError,
+} from "../domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import {
+  expectDroppedPartial,
+  expectKeptPartial,
+  expectOutputError,
+  expectOwnerError,
+} from "./ownerObservationExpectation.fixture.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
-import { ok } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
 import { passiveNetworkCapture } from "../../tests/fixtures/passiveNetworkCapture.js";
 import { inspectWebPage } from "./BrowserObservationService.js";
 import { analyzeWebBundleInputSchema } from "../domain/webBundleAnalysis.js";
@@ -71,11 +81,7 @@ it("does not let late cancellation hide invalid completed browser output", async
     provider(async () => ok(malformed)),
     input,
   );
-  expect(output).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisOutputError" },
-  });
-  if (!output.ok) expect(output.error).toBeInstanceOf(AnalysisOutputError);
+  expectOutputError(output);
 
   const controller = new AbortController();
   const late = await listBrowserTargets(
@@ -86,11 +92,7 @@ it("does not let late cancellation hide invalid completed browser output", async
     input,
     { signal: controller.signal },
   );
-  expect(late).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisOutputError" },
-  });
-  if (!late.ok) expect(late.error).toBeInstanceOf(AnalysisOutputError);
+  expectOutputError(late);
 });
 
 it("converts a raw page inspection retained after browser cleanup failure", async () => {
@@ -215,3 +217,162 @@ it("preserves a prior caller reason without admitting browser work", async () =>
   expect(result.error._tag).toBe("AnalysisCancelledError");
   expect(result.error.cause).toBe(reason);
 });
+
+it("keeps page cancellation when the retained inspection is incomplete", async () => {
+  const reason = { requested: "stop during page inspection" };
+  const partial = {
+    target: { target_id: "page" },
+    network: {},
+    capture_window: {},
+  };
+  const failure = new AnalysisCancelledError("inspect_web_page", {
+    cause: reason,
+    partialObservation: partial as never,
+  });
+  const browser = {
+    ...provider(async () => ok(report)),
+    inspectPage: async () => err(failure),
+  } as unknown as BrowserObservationPort;
+  const pageInput = inspectWebPageInputSchema.parse({
+    cdp_endpoint: input.cdp_endpoint.recorded,
+    allowed_origins: [],
+    target_id: "page",
+    observation_ms: 0,
+    include_script_sources: false,
+  });
+  const result = await inspectWebPage(browser, pageInput);
+  expectKeptPartial(expectOwnerError(result, failure, reason), partial);
+});
+
+it("keeps bundle cancellation and an earlier failure when retained facts are incomplete", async () => {
+  const reason = { requested: "stop during bundle analysis" };
+  const partial = { observations: [], capture: { status: "partial" } };
+  const cancelled = new AnalysisCancelledError("analyze_web_bundle", {
+    cause: reason,
+    partialObservation: partial as never,
+  });
+  const timedOut = new BrowserObservationError(
+    "analyze_web_bundle",
+    "timeout",
+    { partialObservation: partial as never },
+  );
+  const selected = analyzeWebBundleInputSchema.parse({
+    cdp_endpoint: input.cdp_endpoint.recorded,
+    target_id: "page",
+    observation_ms: 0,
+  });
+  for (const failure of [cancelled, timedOut]) {
+    const browser = {
+      ...provider(async () => ok(report)),
+      analyzeBundle: async () => err(failure),
+    } as unknown as BrowserObservationPort;
+    const result = await analyzeWebBundle(browser, selected);
+    expectKeptPartial(
+      expectOwnerError(result, failure, failure.cause),
+      partial,
+      failure === timedOut ? "provider_timeout" : "cancelled",
+    );
+  }
+  expect(projectAnalysisError(cancelled).code).toBe("cancelled");
+});
+
+const pageInput = () =>
+  inspectWebPageInputSchema.parse({
+    cdp_endpoint: input.cdp_endpoint.recorded,
+    allowed_origins: [],
+    target_id: "page",
+    observation_ms: 0,
+    include_script_sources: false,
+  });
+
+const bundleInput = () =>
+  analyzeWebBundleInputSchema.parse({
+    cdp_endpoint: input.cdp_endpoint.recorded,
+    target_id: "page",
+    observation_ms: 0,
+  });
+
+const browserReturning = (
+  failure: BrowserObservationError | AnalysisCancelledError,
+) =>
+  ({
+    ...provider(async () => ok(report)),
+    inspectPage: async () => err(failure),
+    analyzeBundle: async () => err(failure),
+  }) as unknown as BrowserObservationPort;
+
+it.each([
+  {
+    name: "bundle bytes",
+    operation: "analyze_web_bundle" as const,
+    partial: { observations: [], capture: { bytes: Number.NaN } },
+  },
+  {
+    name: "bundle observations",
+    operation: "analyze_web_bundle" as const,
+    partial: { observations: [undefined], capture: {} },
+  },
+  {
+    name: "page requests",
+    operation: "inspect_web_page" as const,
+    partial: {
+      target: { target_id: "page" },
+      network: { requests: Number.NaN },
+      capture_window: {},
+    },
+  },
+])(
+  "drops a non-JSON $name partial and keeps cancellation primary",
+  async ({ operation, partial }) => {
+    const reason = { requested: `stop ${operation}` };
+    const failure = new AnalysisCancelledError(operation, {
+      cause: reason,
+      partialObservation: partial as never,
+    });
+    const result =
+      operation === "inspect_web_page"
+        ? await inspectWebPage(browserReturning(failure), pageInput())
+        : await analyzeWebBundle(browserReturning(failure), bundleInput());
+    const error = expectOwnerError(result, failure, reason);
+    expectDroppedPartial(
+      error,
+      "Browser provider retained a non-JSON incomplete observation.",
+    );
+    expect(projectAnalysisError(error).details).not.toHaveProperty(
+      "partial_observation",
+    );
+  },
+);
+
+it.each([
+  {
+    name: "schema-shaped page",
+    partial: {
+      target: { target_id: "page" },
+      network: { requests: Number.NaN },
+      capture_window: {},
+    },
+  },
+  {
+    name: "shapeless page",
+    partial: { requests: Number.NaN },
+  },
+])(
+  "drops a non-JSON $name partial and keeps timeout primary",
+  async ({ partial }) => {
+    const failure = new BrowserObservationError("inspect_web_page", "timeout", {
+      partialObservation: partial as never,
+    });
+    const error = expectOwnerError(
+      await inspectWebPage(browserReturning(failure), pageInput()),
+      failure,
+      undefined,
+    );
+    expectDroppedPartial(
+      error,
+      "Browser provider retained a non-JSON incomplete observation.",
+      "provider_timeout",
+    );
+    expect(projectAnalysisError(error).category).toBe("timeout");
+  },
+);

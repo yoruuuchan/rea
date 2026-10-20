@@ -94,6 +94,10 @@ explicit path or endpoint and do not need it.
 - Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX or DMG):
   `open_binary` with the supplied local path; use `inspect_artifact` when its
   graph and findings help answer the question.
+- Apple app plist, Interface Builder, asset catalog, or keyed archive resources:
+  `open_bundle_resources`, then the selected resource tool. This does not
+  require `CFBundleExecutable` or a deep provider. Resource sessions have no
+  executable digest or binary snapshot; use `open_binary` for native code.
 - Android APK code, classes, methods, or incoming references:
   `inspect_android_package`, then focused Android tools when advertised.
   Archive member inventory still uses the archive route above.

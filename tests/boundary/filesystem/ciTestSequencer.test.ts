@@ -8,10 +8,10 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import {
   allocateByDuration,
-  estimatedShardCost,
   parseTestDurations,
   readTestDurations,
-  weightFileDurations,
+  scheduleWall,
+  seedSplitLoaderDurations,
 } from "../../ciTestSequencer.js";
 
 describe("CI test history", () => {
@@ -86,28 +86,43 @@ describe("CI test history", () => {
   });
 });
 
+describe("split loader history", () => {
+  const source =
+    "tests/acceptance/applications/javascriptLiteralPercentPaths.test.ts";
+  const parts = [
+    "tests/acceptance/applications/javascriptLiteralLoaderOwnershipEarly.test.ts",
+    "tests/acceptance/applications/javascriptLiteralLoaderOwnershipMiddle.test.ts",
+    "tests/acceptance/applications/javascriptLiteralLoaderOwnershipLate.test.ts",
+  ];
+
+  it("divides a pre-split duration across the four current files", () => {
+    const seeded = seedSplitLoaderDurations(
+      new Map([
+        [source, 192_000],
+        ["tests/other.test.ts", 10],
+      ]),
+    );
+    expect(seeded.get(source)).toBe(54_000);
+    for (const path of parts) expect(seeded.get(path)).toBe(46_000);
+    expect(seeded.get("tests/other.test.ts")).toBe(10);
+    expect(
+      [...seeded.values()].reduce((sum, duration) => sum + duration, 0),
+    ).toBe(192_000 + 10);
+  });
+
+  it("keeps published durations once any split file is in history", () => {
+    const recorded = new Map([
+      [source, 20_000],
+      [parts[0]!, 30_000],
+    ]);
+    expect(seedSplitLoaderDurations(recorded)).toEqual(recorded);
+    expect(
+      seedSplitLoaderDurations(new Map([["tests/other.test.ts", 10]])),
+    ).toEqual(new Map([["tests/other.test.ts", 10]]));
+  });
+});
+
 describe("duration shard allocation", () => {
-  it("charges serial process-boundary files their full duration and other projects one worker share", () => {
-    expect(estimatedShardCost("process-boundary", 400)).toBe(400);
-    expect(estimatedShardCost("domain", 400)).toBe(200);
-    expect(estimatedShardCost("adapters", 400)).toBe(200);
-  });
-
-  it("fills unknown files from the raw median before serial and shared weighting", () => {
-    expect(
-      weightFileDurations([
-        { project: "domain", duration: 400 },
-        { project: "process-boundary", duration: undefined },
-        { project: "adapters", duration: undefined },
-      ]),
-    ).toEqual([200, 400, 200]);
-    expect(
-      weightFileDurations([
-        { project: "process-boundary", duration: undefined },
-      ]),
-    ).toEqual([undefined]);
-  });
-
   it.prop([
     fc.uniqueArray(fc.integer({ min: 0, max: 10_000 }), {
       minLength: 1,
@@ -187,5 +202,73 @@ describe("duration shard allocation", () => {
     expect(reversedShards).toEqual(shards);
     expect(shards!.flat()).toHaveLength(items.length);
     expect(new Set(shards!.flat()).size).toBe(items.length);
+  });
+
+  it("keeps each file whole and runs the serial group after the parallel group", () => {
+    const parallel = (id: string, duration: number) => ({
+      item: id,
+      key: id,
+      duration,
+      laneWidth: 2,
+      groupOrder: 0,
+    });
+    const serial = (id: string, duration: number) => ({
+      item: id,
+      key: id,
+      duration,
+      laneWidth: 1,
+      groupOrder: 1,
+    });
+    const paired = [
+      parallel("wide", 300),
+      parallel("peer", 300),
+      parallel("third", 300),
+    ];
+    expect(scheduleWall(paired.slice(0, 1), 1)).toBe(300);
+    expect(scheduleWall(paired.slice(0, 2), 1)).toBe(300);
+    expect(scheduleWall(paired, 1)).toBe(600);
+    expect(
+      scheduleWall([parallel("ordinary", 100), serial("tail", 60)], 1),
+    ).toBe(160);
+    expect(() =>
+      scheduleWall(
+        [parallel("wide", 10), { ...parallel("wide", 10), laneWidth: 1 }],
+        1,
+      ),
+    ).toThrow(RangeError);
+
+    const packed = [
+      parallel("ordinary", 100),
+      serial("tail-a", 60),
+      serial("tail-b", 60),
+    ];
+    expect(allocateByDuration(packed, 2)).toEqual([
+      ["ordinary"],
+      ["tail-a", "tail-b"],
+    ]);
+    const spread = [
+      parallel("wide", 300),
+      serial("tail-a", 100),
+      serial("tail-b", 100),
+      parallel("small", 40),
+    ];
+    const shards = allocateByDuration(spread, 2);
+    expect(shards).toEqual([["wide"], ["tail-a", "tail-b", "small"]]);
+    expect(
+      scheduleWall(
+        spread.filter((entry) => entry.item === "wide"),
+        1,
+      ),
+    ).toBe(300);
+    expect(
+      Math.max(
+        ...shards!.map((ids) =>
+          scheduleWall(
+            spread.filter((entry) => ids.includes(entry.item)),
+            1,
+          ),
+        ),
+      ),
+    ).toBe(300);
   });
 });

@@ -22,6 +22,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -362,7 +363,13 @@ export class ArtifactAnalysisResources {
         "memory",
         cause.message,
         { output_bytes: limits.output_bytes },
-        detail,
+        {
+          ...detail,
+          ...fixedAllowanceOptions(
+            "The retained command-output allowance",
+            "capture",
+          ),
+        },
       );
     if (
       cause.reason === "process" &&

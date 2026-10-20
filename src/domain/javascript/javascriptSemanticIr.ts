@@ -109,6 +109,11 @@ export interface JavaScriptSemanticReturnSite {
   readonly returnSiteId: string;
   readonly location: JavaScriptSourceRange;
   readonly identityReferenceLocation: JavaScriptSourceRange | null;
+  /**
+   * Range of the unwrapped returned expression. Null when the return has no
+   * value. This is the value's syntax, which may be wider than an identifier.
+   */
+  readonly valueExpressionLocation: JavaScriptSourceRange | null;
   readonly value: JavaScriptSemanticValue;
 }
 
@@ -128,6 +133,8 @@ export interface JavaScriptSemanticCallSite {
 export interface JavaScriptSemanticCallArgument {
   readonly index: number;
   readonly location: JavaScriptSourceRange;
+  /** Unwrapped value expression; null for a spread or non-expression slot. */
+  readonly valueExpressionLocation: JavaScriptSourceRange | null;
   readonly spread: boolean;
 }
 

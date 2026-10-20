@@ -491,6 +491,47 @@ it.each([false, true])(
   },
 );
 
+it("treats a fixed command-output cap as a non-retryable capture allowance", async () => {
+  const resources = new ArtifactAnalysisResources(
+    "fixture",
+    "inspect_packet_fields",
+    readStableArtifact,
+    readLinuxResourceLimits,
+    { message: "busy", details: {} },
+  );
+  const failure = new OwnedCommandFailure(
+    "output-limit",
+    "command output exceeded the retained limit",
+    null,
+  );
+  try {
+    const error = resources.commandFailure(
+      failure,
+      { command_timeout_ms: 100, output_bytes: 1024 },
+      undefined,
+    );
+    expect(error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      resource: "memory",
+      reportedLimits: { output_bytes: 1024 },
+      retryable: false,
+    });
+    const projected = projectAnalysisError(error);
+    expect(projected.retryable).toBe(false);
+    expect(projected.remediation.action).toContain(
+      "The retained command-output allowance",
+    );
+    expect(projected.remediation.action).not.toMatch(
+      /Review the reported worker memory limits/u,
+    );
+    expect(projected.remediation.action).not.toMatch(
+      /available host memory\. Retry/u,
+    );
+  } finally {
+    await resources.close();
+  }
+});
+
 it("retains a physical command failure when the owner also observed late cancellation", async () => {
   const resources = new ArtifactAnalysisResources(
     "fixture",

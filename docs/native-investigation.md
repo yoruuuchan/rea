@@ -466,6 +466,21 @@ complete observation.
   that operation is unavailable; runtime failures remain failures rather than
   being replaced by symbol-only results.
 
+`get_objc_classes` keeps names from the provider inventory. It coalesces rows
+only when their exact selected-image pointer slots decode to the same class
+import, including its binding stream, raw library ordinal, resolved library, weak status, and addend. A literal filter is
+applied to the original names before that join; if the filter selects only an
+alias, the output keeps that exact row. `identity_coverage` distinguishes a
+complete selected-inventory scan from partial, unsupported, and unknown cases.
+Recognized Mach-O formats outside the native metadata reader's support retain
+the provider's class labels with unknown import identity; malformed headers and
+read failures remain errors.
+The join also requires matching whole-artifact digests and matching provider-
+owned selected-image facts: container, byte range, full raw CPU type/subtype,
+and FAT table digest when present. A missing or overridden loader selection
+remains unknown; the result describes agreement on the selected artifact image,
+not an atomic observation of a running process or whole-program class coverage.
+
 ## Native desktop observation
 
 `observe_native_ui` captures one explicitly selected existing PID/window ID.

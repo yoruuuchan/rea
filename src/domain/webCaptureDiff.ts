@@ -367,6 +367,26 @@ const networkInventoryComplete = (
     (section) => inspection.completeness.dropped_events[section] === 0,
   );
 
+type WebSocketEvent =
+  WebPageInspection["network"]["websocket_connections"][number]["events"][number];
+
+const webSocketEventHasOpcode = (
+  event: WebSocketEvent | undefined,
+): event is WebSocketEvent => event !== undefined && event.opcode !== null;
+
+const webSocketEventHasPayloadBytes = (
+  event: WebSocketEvent | undefined,
+): boolean => webSocketEventHasOpcode(event) && event.payload_bytes !== null;
+
+const webSocketEventHasPayloadShape = (
+  event: WebSocketEvent | undefined,
+): boolean => webSocketEventHasOpcode(event) && event.payload_shape !== null;
+
+const webSocketOpcodesKnown = (inspection: WebPageInspection): boolean =>
+  inspection.network.websocket_connections.every((connection) =>
+    connection.events.every(webSocketEventHasOpcode),
+  );
+
 const networkDimension = (
   before: WebPageInspection,
   after: WebPageInspection,
@@ -374,11 +394,12 @@ const networkDimension = (
   const requestsComplete = [before, after].every((inspection) =>
     networkInventoryComplete(inspection, ["network_requests"]),
   );
-  const webSocketInventoryComplete = [before, after].every((inspection) =>
-    networkInventoryComplete(inspection, [
-      "websocket_connections",
-      "websocket_frames",
-    ]),
+  const webSocketInventoryComplete = [before, after].every(
+    (inspection) =>
+      networkInventoryComplete(inspection, [
+        "websocket_connections",
+        "websocket_frames",
+      ]) && webSocketOpcodesKnown(inspection),
   );
   const requestIdentities = networkIdentityCoverage(before, after);
   const metadata = sharedNetworkMetadata(before, after);
@@ -432,12 +453,12 @@ const networkDimension = (
       (inspection) =>
         sectionsComplete(inspection, ["websocket_shapes"]) &&
         inspection.network.websocket_connections.every((connection) =>
-          connection.events.every((event) => event.payload_shape !== null),
+          connection.events.every(webSocketEventHasPayloadShape),
         ),
     );
   const webSocketPayloadBytesComplete = [before, after].every((inspection) =>
     inspection.network.websocket_connections.every((connection) =>
-      connection.events.every((event) => event.payload_bytes !== null),
+      connection.events.every(webSocketEventHasPayloadBytes),
     ),
   );
   const beforeWebSockets = webSocketGroups(before);
@@ -633,11 +654,11 @@ const webSocketPayloadMaps = (
     const comparableShapes = new Set<number>();
     for (let index = 0; index < eventCount; index += 1) {
       if (
-        beforeGroup.connections.every(
-          (connection) => connection.events[index]?.payload_bytes !== null,
+        beforeGroup.connections.every((connection) =>
+          webSocketEventHasPayloadBytes(connection.events[index]),
         ) &&
-        afterGroup.connections.every(
-          (connection) => connection.events[index]?.payload_bytes !== null,
+        afterGroup.connections.every((connection) =>
+          webSocketEventHasPayloadBytes(connection.events[index]),
         )
       )
         comparableBytes.add(index);
@@ -645,11 +666,11 @@ const webSocketPayloadMaps = (
       // on both sides; this avoids assigning an unknown shape to a known one.
       if (
         selected &&
-        beforeGroup.connections.every(
-          (connection) => connection.events[index]?.payload_shape !== null,
+        beforeGroup.connections.every((connection) =>
+          webSocketEventHasPayloadShape(connection.events[index]),
         ) &&
-        afterGroup.connections.every(
-          (connection) => connection.events[index]?.payload_shape !== null,
+        afterGroup.connections.every((connection) =>
+          webSocketEventHasPayloadShape(connection.events[index]),
         )
       )
         comparableShapes.add(index);

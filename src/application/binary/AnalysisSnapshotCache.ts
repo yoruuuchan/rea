@@ -254,7 +254,7 @@ export class AnalysisSnapshotCache {
       readonly limitations: readonly string[];
       readonly relationshipCoverage?: AnalysisExecution["relationshipCoverage"];
       readonly locations: AnalysisExecution["locations"];
-      readonly subject: AnalysisExecution["subject"];
+      readonly subject: NonNullable<AnalysisExecution["subject"]> | null;
     };
   }): void {
     this.select(input.target, input.profile);
@@ -292,7 +292,7 @@ export class AnalysisSnapshotCache {
     if (cached === undefined) return undefined;
     const cachedSubject = cached.execution.subject;
     const subject =
-      cachedSubject === null
+      cachedSubject == null
         ? null
         : rebindEvidenceSubjectTargetPath(
             {
@@ -328,7 +328,7 @@ export class AnalysisSnapshotCache {
               relationshipCoverage: cached.execution.relationship_coverage,
             }),
       locations: cached.execution.locations,
-      subject,
+      subject: subject ?? null,
     });
   }
 
@@ -357,7 +357,20 @@ export class AnalysisSnapshotCache {
       binding: snapshotBinding(profile),
       operation,
       parameters,
-      execution,
+      execution: {
+        ...execution,
+        subject:
+          execution.subject === undefined
+            ? {
+                path: target.path,
+                sha256: target.sha256,
+                format: target.format,
+                ...(target.architecture === undefined
+                  ? {}
+                  : { architecture: target.architecture }),
+              }
+            : execution.subject,
+      },
     });
     this.#entries.set(entry.query_id, entry);
   }

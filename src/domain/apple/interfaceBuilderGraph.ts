@@ -1,5 +1,10 @@
 import { z } from "zod";
 import {
+  bundleResourceRootSchema,
+  bundleResourceBoundResultSchema,
+  type BundleResourceRoot,
+} from "./bundleResourceRoot.js";
+import {
   createPlistNumberProjection,
   type PlistNumberLiterals,
 } from "./plistNumbers.js";
@@ -27,12 +32,14 @@ export const interfaceBuilderDocumentSchema = z.strictObject({
 });
 
 /** Normalized read-only Interface Builder graph with archive provenance. */
-export const interfaceBuilderAnalysisSchema = z.strictObject({
-  target_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  documents: z.array(interfaceBuilderDocumentSchema).max(64),
-  graph: nativeInvestigationGraphSchema,
-  limitations: z.array(z.string()),
-});
+export const interfaceBuilderAnalysisSchema = bundleResourceBoundResultSchema(
+  z.string().regex(/^[a-f0-9]{64}$/u),
+  {
+    documents: z.array(interfaceBuilderDocumentSchema).max(64),
+    graph: nativeInvestigationGraphSchema,
+    limitations: z.array(z.string()),
+  },
+);
 
 export interface InterfaceBuilderDocumentInput {
   readonly relativePath: string;
@@ -50,7 +57,8 @@ type InvestigationEdge = z.infer<typeof nativeInvestigationEdgeSchema>;
 
 /** Build the graph returned by the static Interface Builder archive decoder. */
 export const buildInterfaceBuilderAnalysis = (input: {
-  readonly targetSha256: string;
+  readonly targetSha256: string | null;
+  readonly resourceRoot?: BundleResourceRoot;
   readonly toolVersion: string;
   readonly documents: readonly InterfaceBuilderDocumentInput[];
   readonly limits: z.output<typeof interfaceBuilderLimitsSchema>;
@@ -581,6 +589,9 @@ export const buildInterfaceBuilderAnalysis = (input: {
     });
   return interfaceBuilderAnalysisSchema.parse({
     target_sha256: input.targetSha256,
+    ...(input.resourceRoot === undefined
+      ? {}
+      : { resource_root: input.resourceRoot }),
     documents: summaries,
     graph: {
       target_sha256: input.targetSha256,

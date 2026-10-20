@@ -3,7 +3,7 @@ import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdir, writeFile, rm, access } from "node:fs/promises";
+import { mkdir, writeFile, rm, access, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import type {
@@ -14,6 +14,7 @@ import type {
 } from "playwright-core";
 
 import { browserScenarioSchema } from "../domain/browserScenario.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import {
   attachedScenarioLeaseKey,
   failBrowserScenarioOperation,
@@ -90,6 +91,49 @@ it("passes the selected environment to the actual browser launch boundary", asyn
     PATH: "/selected/bin",
   });
 });
+
+it.skipIf(process.platform === "win32")(
+  "passes the caller-selected symlink-parent executable to the launch boundary",
+  async () => {
+    const root = await createTestTempDirectory("rea-browser-caller-path-");
+    try {
+      await mkdir(join(root, "real/inner"), { recursive: true });
+      await symlink(join(root, "real/inner"), join(root, "link"));
+      const selected = absoluteCallerPath("link/../browser", { cwd: root });
+      let launchedExecutable: string | undefined;
+      const scenario = browserScenarioSchema.parse({
+        browser: { mode: "launch", executable_path: selected },
+        start_url: { url: "https://example.test" },
+        actions: [
+          { step_id: "settle", action: "wait_for_timeout", duration_ms: 1 },
+        ],
+      });
+
+      await expect(
+        openPlaywrightScenarioBrowser(
+          scenario,
+          {},
+          {
+            launcher: {
+              connectOverCDP: async () => {
+                throw new Error("Unexpected connection");
+              },
+              launchPersistentContext: async (_profile, options) => {
+                launchedExecutable = options?.executablePath;
+                throw new Error("fake launch boundary reached");
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow("fake launch boundary reached");
+
+      expect(launchedExecutable).toBe(selected);
+      expect(selected).toBe(`${root}/link/../browser`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 it("keeps Termux execution support when launching Chromium on Android", async () => {
   Object.defineProperty(process, "platform", { value: "android" });

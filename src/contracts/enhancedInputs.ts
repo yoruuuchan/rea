@@ -6,6 +6,7 @@ const traceLiteralInputSchema = z.strictObject({
 });
 
 export const DEFAULT_CALL_RELATIONSHIP_DIRECTION = "forward";
+export const MAX_ENHANCED_RECORDS = 20_000;
 const callRelationshipDirectionSchema = z
   .enum(["forward", "backward"])
   .default(DEFAULT_CALL_RELATIONSHIP_DIRECTION);
@@ -17,7 +18,25 @@ export type CallRelationshipDirection = z.output<
 export const enhancedInputSchemas = {
   trace_native_values: nativeValueTraceInputSchema,
   inspect_native_dispatch_metadata: z.strictObject({
-    max_records: z.number().int().min(1).max(20_000).default(5_000),
+    max_records: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_ENHANCED_RECORDS)
+      .default(5_000),
+    objc_class_import_addresses: z
+      .array(z.string())
+      .max(MAX_ENHANCED_RECORDS)
+      .describe(
+        "Optional exact pointer-slot addresses from the selected name inventory; used to report decoded Objective-C class import bindings.",
+      )
+      .optional(),
+    objc_class_import_addresses_complete: z
+      .boolean()
+      .describe(
+        "Whether the candidate addresses include every selected class-label row; false keeps binding coverage partial when the existing record budget truncates the scan.",
+      )
+      .optional(),
   }),
   get_objc_classes: z.strictObject({ pattern: z.string().default("") }),
   get_objc_protocols: z.strictObject({}),

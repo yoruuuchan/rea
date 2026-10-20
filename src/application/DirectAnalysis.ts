@@ -24,10 +24,14 @@ import {
 } from "../domain/evidenceErrors.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { readAnalysisSnapshot } from "./binary/AnalysisSnapshotFiles.js";
 import { requiresNativeSourceAdmissionBeforeReplay } from "./binary/AnalysisSnapshotCache.js";
-import { parseBinaryTarget } from "./BinaryTargetResolver.js";
+import {
+  classifyBinaryTargetFilesystemFailure,
+  parseBinaryTarget,
+} from "./BinaryTargetResolver.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
   snapshotEvidenceForQuery,
@@ -56,11 +60,13 @@ import type { AnalysisProviderSelector } from "../contracts/providerSelection.js
 import { artifactInspectionResultSchema } from "../domain/artifactInspection.js";
 import { resolveXrefsAddress } from "./XrefsAddressResolution.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import type { BinaryTargetError } from "../domain/configurationErrors.js";
 import {
   directAnalysisCleanupFailure,
   managedAnalysisCleanupFailure,
   withSessionCleanup,
 } from "./DirectAnalysisCleanup.js";
+import { BUNDLE_RESOURCE_OPERATIONS } from "./binary/BundleResourceSession.js";
 
 type DirectAnalysisTool =
   | "annotate_native_function"
@@ -97,7 +103,6 @@ const NATIVE_INSPECTION_OPERATIONS: ReadonlySet<string> = new Set([
 const ARTIFACT_ANALYSIS_OPERATION_SET: ReadonlySet<string> = new Set(
   ARTIFACT_ANALYSIS_OPERATIONS,
 );
-
 /**
  * Open one binary, execute one tool, and always release provider resources.
  * Unlike MCP mode, every CLI invocation is intentionally isolated and does not
@@ -249,6 +254,24 @@ const runAnalysis = async (
   return withSessionCleanup(
     session,
     async () => {
+      let isDirectory = false;
+      if (BUNDLE_RESOURCE_OPERATIONS.has(tool)) {
+        const inspected = await inspectBundleResourceInput(path);
+        if (!inspected.ok) return cliError(inspected.error);
+        isDirectory = inspected.value;
+      }
+      if (BUNDLE_RESOURCE_OPERATIONS.has(tool) && isDirectory) {
+        const opened = await session.openBundleResources(path, { signal });
+        if (!opened.ok) return cliError(opened.error);
+        const execution = await session.execute(tool, arguments_, { signal });
+        if (!execution.ok) return cliError(execution.error);
+        return createAnalysisExecutionEvidence(
+          tool,
+          arguments_,
+          execution.value,
+          "observed",
+        );
+      }
       const prepared = await prepareSnapshot({
         path,
         snapshotPath,
@@ -493,7 +516,9 @@ const executeAnalysisTool = async (input: {
   }
   if (!result.ok) return { output: cliError(result.error) };
   const evidence = createEvidence(
-    result.value.subject ?? input.openedTarget,
+    result.value.subject === undefined
+      ? input.openedTarget
+      : (result.value.subject ?? undefined),
     result.value.provider,
     {
       operation: tool,
@@ -575,6 +600,19 @@ const prepareSnapshot = async (options: {
       ),
     );
   return ok({ snapshot: loaded.value, target: target.value });
+};
+
+const inspectBundleResourceInput = async (
+  path: string,
+): Promise<Result<boolean, BinaryTargetError>> => {
+  const callerPath = absoluteCallerPath(path);
+  try {
+    return ok((await stat(callerPath)).isDirectory());
+  } catch (cause: unknown) {
+    const failure = classifyBinaryTargetFilesystemFailure(callerPath, cause);
+    if (failure !== undefined) return err(failure);
+    throw cause;
+  }
 };
 
 const allowsSnapshotReplay = (

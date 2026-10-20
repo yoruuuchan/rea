@@ -66,7 +66,7 @@ cliTest(
     try {
       await client.connect(transport);
       const opened = await client.callTool({
-        name: "open_binary",
+        name: "open_bundle_resources",
         arguments: { path: app },
       });
       expect(opened.isError, JSON.stringify(opened)).not.toBe(true);

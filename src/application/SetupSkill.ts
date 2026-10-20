@@ -53,12 +53,9 @@ const readSkillFileState = async (
   withRegularFile(
     path,
     async (handle, stats) => {
-      const bytes = await readBoundedFileBytes(
-        handle,
-        stats.size,
-        undefined,
-        stats.size,
-      );
+      const bytes = await readBoundedFileBytes(handle, stats.size, {
+        expectedSize: stats.size,
+      });
       if (bytes === undefined || bytes.length !== stats.size)
         throw new RegularFileChangedError(path);
       return { bytes, mode: stats.mode & 0o7777 };

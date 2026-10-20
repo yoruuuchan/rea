@@ -1,4 +1,7 @@
-import { AnalysisInputError } from "../../../src/domain/analysisErrorCore.js";
+import {
+  AnalysisInputError,
+  AnalysisResourceConstraintError,
+} from "../../../src/domain/analysisErrorCore.js";
 import { expect, it } from "vitest";
 import { parseGhidraSeeds } from "../../../src/ghidra/GhidraAnalysisSeeds.js";
 import {
@@ -175,7 +178,23 @@ it("bounds folded-name retention against the actual Ghidra file admission", () =
     })),
     method_addresses: Array.from({ length: count }, () => address("0x100")),
   };
-  expect(() => il2cppGhidraSeeds(repeated, 0n)).toThrow(/byte admission/);
+  let caught: unknown;
+  try {
+    il2cppGhidraSeeds(repeated, 0n);
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(AnalysisResourceConstraintError);
+  if (!(caught instanceof AnalysisResourceConstraintError))
+    throw new Error("Expected seed-file allowance refusal");
+  expect(caught.message).toMatch(/byte admission/);
+  expect(caught.remediationAction).toContain(
+    "The IL2CPP Ghidra seed-file allowance",
+  );
+  expect(caught.remediationAction).toContain("fixed byte allowance");
+  expect(caught.remediationAction).not.toContain("fixed count");
+  expect(caught.remediationAction).not.toContain("seed-name allowance");
+  expect(caught.retryable).toBe(false);
 });
 it("refuses cyclic type ancestry before emitting a seed", () => {
   const cyclic = {
@@ -200,5 +219,20 @@ it("refuses names the real Ghidra seed parser cannot admit", () => {
     ...report,
     methods: [{ name: "M".repeat(2001), declaring_type: 0 }],
   };
-  expect(() => il2cppGhidraSeeds(oversized, 0n)).toThrow(/character admission/);
+  let caught: unknown;
+  try {
+    il2cppGhidraSeeds(oversized, 0n);
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(AnalysisResourceConstraintError);
+  if (!(caught instanceof AnalysisResourceConstraintError))
+    throw new Error("Expected seed-name allowance refusal");
+  expect(caught.message).toMatch(/character admission/);
+  expect(caught.remediationAction).toContain(
+    "The IL2CPP Ghidra seed-name allowance",
+  );
+  expect(caught.remediationAction).toContain("fixed count");
+  expect(caught.remediationAction).not.toContain("fixed byte allowance");
+  expect(caught.retryable).toBe(false);
 });

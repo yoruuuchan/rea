@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import {
   semanticStaticPropertyKey,
   staticObjectProperty,
+  staticObjectPropertyNames,
 } from "./javascriptAstValues.js";
 import { SEMANTIC_EXPRESSION_DEPTH_LIMIT } from "./javascriptSemanticResourceLimits.js";
 
@@ -69,4 +70,189 @@ it("bounds nested inline object spreads without losing a shallow final property"
     staticObjectProperty(t.objectExpression([t.spreadElement(object)]), "stdio")
       .status,
   ).toBe("dynamic");
+});
+
+it("collects complete own-key sets through bounded literal spreads", () => {
+  const names = staticObjectPropertyNames(
+    t.objectExpression([
+      t.spreadElement(
+        t.objectExpression([
+          t.objectProperty(t.identifier("query"), t.objectExpression([])),
+          t.objectProperty(t.identifier("shared"), t.numericLiteral(1)),
+        ]),
+      ),
+      t.objectProperty(t.identifier("direct"), t.objectExpression([])),
+      t.objectProperty(t.identifier("shared"), t.numericLiteral(2)),
+    ]),
+  );
+  expect(names).toEqual({
+    status: "complete",
+    names: ["query", "shared", "direct"],
+  });
+});
+
+it("keeps key enumeration unknown when object membership is unresolved", () => {
+  const dynamicSpread = t.identifier("dynamicProperties");
+  const computedKey = t.identifier("propertyName");
+  const cases = [
+    t.objectExpression([
+      t.spreadElement(dynamicSpread),
+      t.objectProperty(t.identifier("direct"), t.objectExpression([])),
+    ]),
+    t.objectExpression([
+      t.objectProperty(computedKey, t.objectExpression([]), true),
+      t.objectProperty(t.identifier("direct"), t.objectExpression([])),
+    ]),
+    t.objectExpression([
+      t.spreadElement(
+        t.objectExpression([
+          t.objectMethod(
+            "get",
+            t.identifier("query"),
+            [],
+            t.blockStatement([]),
+          ),
+        ]),
+      ),
+    ]),
+  ];
+  for (const object of cases)
+    expect(staticObjectPropertyNames(object).status).toBe("partial");
+});
+
+it("retains known keys alongside unresolved object membership", () => {
+  expect(
+    staticObjectPropertyNames(
+      t.objectExpression([
+        t.spreadElement(t.identifier("dynamicProperties")),
+        t.objectProperty(t.identifier("direct"), t.objectExpression([])),
+        t.objectProperty(
+          t.identifier("propertyName"),
+          t.objectExpression([]),
+          true,
+        ),
+      ]),
+    ),
+  ).toEqual({ status: "partial", names: ["direct"] });
+});
+
+it("does not claim a complete key set after exceeding spread depth", () => {
+  let object = t.objectExpression([
+    t.objectProperty(t.identifier("query"), t.objectExpression([])),
+  ]);
+  for (let depth = 0; depth < SEMANTIC_EXPRESSION_DEPTH_LIMIT; depth++)
+    object = t.objectExpression([t.spreadElement(object)]);
+  expect(staticObjectPropertyNames(object).status).toBe("complete");
+  expect(
+    staticObjectPropertyNames(t.objectExpression([t.spreadElement(object)]))
+      .status,
+  ).toBe("partial");
+});
+
+it("enumerates a wide inline spread without a variadic call overflow", () => {
+  const properties = Array.from({ length: 130_000 }, (_, index) =>
+    t.objectProperty(t.identifier(`key${index}`), t.numericLiteral(index)),
+  );
+  const result = staticObjectPropertyNames(
+    t.objectExpression([t.spreadElement(t.objectExpression(properties))]),
+  );
+  expect(result.status).toBe("complete");
+  if (result.status === "complete") {
+    expect(result.names).toHaveLength(properties.length);
+    expect(result.names[0]).toBe("key0");
+    expect(result.names.at(-1)).toBe("key129999");
+  }
+});
+
+it("excludes prototype setters from own keys but preserves other __proto__ forms", () => {
+  const setter = t.objectProperty(
+    t.identifier("__proto__"),
+    t.objectExpression([
+      t.objectProperty(t.identifier("inherited"), t.numericLiteral(1)),
+    ]),
+  );
+  expect(
+    staticObjectPropertyNames(
+      t.objectExpression([
+        setter,
+        t.objectProperty(t.identifier("own"), t.numericLiteral(2)),
+      ]),
+    ),
+  ).toEqual({ status: "complete", names: ["own"] });
+
+  const ownForms = [
+    t.objectProperty(t.stringLiteral("__proto__"), t.numericLiteral(1), true),
+    t.objectProperty(
+      t.identifier("__proto__"),
+      t.identifier("__proto__"),
+      false,
+      true,
+    ),
+    t.objectMethod(
+      "method",
+      t.identifier("__proto__"),
+      [],
+      t.blockStatement([]),
+    ),
+  ];
+  for (const member of ownForms)
+    expect(staticObjectPropertyNames(t.objectExpression([member]))).toEqual({
+      status: "complete",
+      names: ["__proto__"],
+    });
+});
+
+it("keeps inherited lookup uncertain after a top-level prototype setter", () => {
+  const setter = t.objectProperty(
+    t.identifier("__proto__"),
+    t.objectExpression([
+      t.objectProperty(t.identifier("inherited"), t.numericLiteral(1)),
+    ]),
+  );
+  expect(
+    staticObjectProperty(t.objectExpression([setter]), "inherited").status,
+  ).toBe("dynamic");
+  expect(
+    staticObjectProperty(
+      t.objectExpression([
+        setter,
+        t.objectProperty(t.identifier("inherited"), t.numericLiteral(2)),
+      ]),
+      "inherited",
+    ).status,
+  ).toBe("explicit");
+  expect(
+    staticObjectProperty(
+      t.objectExpression([
+        t.objectProperty(t.identifier("inherited"), t.numericLiteral(2)),
+        setter,
+      ]),
+      "inherited",
+    ).status,
+  ).toBe("explicit");
+  const spreadSource = t.objectExpression([
+    setter,
+    t.objectProperty(t.identifier("visible"), t.numericLiteral(3)),
+  ]);
+  expect(
+    staticObjectProperty(
+      t.objectExpression([t.spreadElement(spreadSource)]),
+      "inherited",
+    ).status,
+  ).toBe("missing");
+});
+
+it("omits prototype setters copied by literal object spread", () => {
+  const source = t.objectExpression([
+    t.objectProperty(
+      t.identifier("__proto__"),
+      t.objectExpression([
+        t.objectProperty(t.identifier("hidden"), t.numericLiteral(1)),
+      ]),
+    ),
+    t.objectProperty(t.identifier("visible"), t.numericLiteral(2)),
+  ]);
+  expect(
+    staticObjectPropertyNames(t.objectExpression([t.spreadElement(source)])),
+  ).toEqual({ status: "complete", names: ["visible"] });
 });

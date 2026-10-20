@@ -1,7 +1,11 @@
-import { resolve } from "node:path";
+import { absoluteCallerPath } from "./filesystem/callerPath.js";
 
 import { sealOwnedJsonInput } from "./application/OwnedJsonInput.js";
-import { readJsonInputFile } from "./application/JsonInputFile.js";
+import {
+  JsonInputCancellationFailure,
+  JsonInputPhysicalReadFailure,
+  readJsonInputFile,
+} from "./application/JsonInputFile.js";
 import { NonRegularFileReadError } from "./filesystem/RegularFile.js";
 import {
   AnalysisAccessDeniedError,
@@ -22,14 +26,18 @@ export const parseCliJsonInput = async (
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: JsonValue }
 > => {
-  const cancelled = () => ({
+  const cancelled = (cause: unknown) => ({
     ok: false as const,
     error: {
       error: "Application workflow failed",
-      ...projectAnalysisError(new AnalysisCancelledError(operation)),
+      ...projectAnalysisError(
+        new AnalysisCancelledError(operation, {
+          cause,
+        }),
+      ),
     },
   });
-  if (signal?.aborted) return cancelled();
+  if (signal?.aborted) return cancelled(signal.reason);
   try {
     const inline = safeParseJson(value);
     if (inline.ok) {
@@ -52,7 +60,7 @@ export const parseCliJsonInput = async (
       undefined,
       options?.snapshot ?? false,
     );
-    if (parsed.ok && signal?.aborted) return cancelled();
+    if (parsed.ok && signal?.aborted) return cancelled(signal.reason);
     return parsed.ok
       ? { ok: true, value: parsed.value }
       : {
@@ -68,12 +76,17 @@ export const parseCliJsonInput = async (
           },
         };
   } catch (cause: unknown) {
-    if (
-      signal?.aborted &&
-      (cause === signal.reason ||
-        (cause instanceof Error && cause.name === "AbortError"))
-    )
-      return cancelled();
+    if (cause instanceof JsonInputCancellationFailure)
+      return cancelled(cause.reason);
+    if (cause instanceof JsonInputPhysicalReadFailure) {
+      const physicalCause = cause.physicalCause;
+      const systemCode = accessDeniedSystemCode(physicalCause);
+      return systemCode === undefined
+        ? jsonFileError(value, operation, "read-failed", physicalCause)
+        : jsonAccessDeniedError(value, operation, systemCode, physicalCause);
+    }
+    if (signal?.aborted && isJsonInputCancellation(cause, signal))
+      return cancelled(signal.reason);
     const systemCode = accessDeniedSystemCode(cause);
     if (systemCode !== undefined)
       return jsonAccessDeniedError(value, operation, systemCode, cause);
@@ -92,6 +105,17 @@ export const parseCliJsonInput = async (
     return jsonFileError(value, operation, "read-failed", cause);
   }
 };
+
+const isJsonInputCancellation = (
+  cause: unknown,
+  signal: AbortSignal,
+): boolean =>
+  cause === signal.reason ||
+  (cause instanceof Error &&
+    cause.name === "AbortError" &&
+    "code" in cause &&
+    cause.code === "ABORT_ERR" &&
+    cause.cause === signal.reason);
 
 const accessDeniedSystemCode = (
   cause: unknown,
@@ -141,7 +165,7 @@ const resolveJsonPath = (
           typeof entry === "string" &&
           entry.trim().length > 0 &&
           !URL_REFERENCE.test(entry)
-            ? resolve(entry)
+            ? absoluteCallerPath(entry)
             : entry,
         ];
       return [key, resolveJsonPath(entry, tail)];

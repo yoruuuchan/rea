@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bundleResourceBoundResultSchema } from "./bundleResourceRoot.js";
 import { AnalysisInputError } from "../analysisErrorCore.js";
 import { jsonValueSchema, type JsonValue } from "../jsonValue.js";
 import { localPathStringSchema } from "../localPath.js";
@@ -35,37 +36,44 @@ const linkSchema = z.strictObject({
   raw: jsonValueSchema,
 });
 /** Archive object identity is its original $objects index, never a recursive copy. */
-export const keyedArchiveResultSchema = z.strictObject({
-  target_sha256: z.string(),
-  archive_path: z.string(),
-  archive_sha256: z.string(),
-  archive_format: z.enum(["binary-plist", "xml-plist"]),
-  roots: z.record(z.string(), jsonValueSchema),
-  objects: z.array(
-    z.strictObject({
-      id: z.number().int().nonnegative(),
-      kind: z.enum([
-        "nil",
-        "scalar",
-        "array",
-        "dictionary",
-        "class-descriptor",
-        "archived-object",
-      ]),
-      class_id: z.number().int().nonnegative().nullable(),
-      class_name: z.string().nullable(),
-      status: z.enum(["observed", "unknown-class", "unresolved-class", "nil"]),
-      value: jsonValueSchema,
-    }),
-  ),
-  references: z.array(linkSchema),
-  total_objects: z.number().int().nonnegative(),
-  total_references: z.number().int().nonnegative(),
-  offset: z.number().int().nonnegative(),
-  next_offset: z.number().int().nonnegative().nullable(),
-  truncated: z.boolean(),
-  limitations: z.array(z.string()),
-});
+export const keyedArchiveResultSchema = bundleResourceBoundResultSchema(
+  z.string(),
+  {
+    archive_path: z.string(),
+    archive_sha256: z.string(),
+    archive_format: z.enum(["binary-plist", "xml-plist"]),
+    roots: z.record(z.string(), jsonValueSchema),
+    objects: z.array(
+      z.strictObject({
+        id: z.number().int().nonnegative(),
+        kind: z.enum([
+          "nil",
+          "scalar",
+          "array",
+          "dictionary",
+          "class-descriptor",
+          "archived-object",
+        ]),
+        class_id: z.number().int().nonnegative().nullable(),
+        class_name: z.string().nullable(),
+        status: z.enum([
+          "observed",
+          "unknown-class",
+          "unresolved-class",
+          "nil",
+        ]),
+        value: jsonValueSchema,
+      }),
+    ),
+    references: z.array(linkSchema),
+    total_objects: z.number().int().nonnegative(),
+    total_references: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    next_offset: z.number().int().nonnegative().nullable(),
+    truncated: z.boolean(),
+    limitations: z.array(z.string()),
+  },
+);
 
 const record = (
   value: JsonValue | undefined,

@@ -11,7 +11,10 @@ import type {
 } from "./javascriptSemanticIr.js";
 import { semanticReferenceRole } from "./javascriptSemanticProjection.js";
 import { createSemanticCallableStack } from "./javascriptSemanticCallableStack.js";
-import { semanticStaticPropertyKey } from "./javascriptAstValues.js";
+import {
+  semanticStaticPropertyKey,
+  unwrapJavaScriptExpression,
+} from "./javascriptAstValues.js";
 import {
   resolveSemanticBindingState,
   isUnshadowedGlobal,
@@ -210,9 +213,14 @@ const retainedArguments = (
   for (const [index, node] of nodes.entries()) {
     // Babel recovery can leave null slots; retain the other argument positions.
     if (node === null) continue;
+    const valueNode =
+      t.isExpression(node) && !t.isSpreadElement(node)
+        ? unwrapJavaScriptExpression(node).node
+        : null;
     retained.push({
       index,
       location: range(node),
+      valueExpressionLocation: valueNode === null ? null : range(valueNode),
       spread: t.isSpreadElement(node),
     });
   }

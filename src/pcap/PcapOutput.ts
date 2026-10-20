@@ -5,6 +5,7 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { parseRecordedTransportUrl } from "../domain/recordedTransportUrl.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 const OPERATION = "inspect_pcap_capture";
@@ -161,6 +162,7 @@ export const parseTsharkJsonOutput = async (
       "memory",
       "tshark JSON exceeds the bounded decoding budget",
       { max_json_bytes: TSHARK_JSON_MAX_BYTES },
+      fixedAllowanceOptions("The tshark JSON decoding allowance", "capture"),
     );
   // The selected-field protocol has five container levels. Reject deeper
   // graphs before materializing them; quoted brackets are string data.
@@ -192,6 +194,7 @@ export const parseTsharkJsonOutput = async (
         "memory",
         "tshark JSON expansion exceeds the decoding budget",
         { max_decoded_bytes: MAX_DECODED_BYTES },
+        fixedAllowanceOptions("The tshark JSON expansion allowance", "capture"),
       );
   }
   let packets: unknown;
@@ -220,6 +223,10 @@ export const parseTsharkJsonOutput = async (
         "memory",
         "Packet inventory exceeds the retained-fact budget",
         { max_retained_bytes: MAX_RETAINED_BYTES },
+        fixedAllowanceOptions(
+          "The packet-inventory retained-fact allowance",
+          "capture",
+        ),
       );
   };
   const add = (set: Set<string>, value: string): void => {

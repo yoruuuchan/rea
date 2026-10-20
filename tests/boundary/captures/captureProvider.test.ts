@@ -1,3 +1,4 @@
+import { AnalysisResourceConstraintError } from "../../../src/domain/analysisErrorCore.js";
 import { packetFieldsCatalogSchema } from "../../../src/domain/captures/packetFields.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import { it, expect, onTestFinished } from "vitest";
@@ -613,11 +614,22 @@ it.each([
     });
   if (mode === "invalid-json")
     expect(result.error.capturedOutput?.stdout).toBe("not json\n");
-  if (mode === "overflow")
+  if (mode === "overflow") {
+    expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
+    if (!(result.error instanceof AnalysisResourceConstraintError))
+      throw new Error("Expected command-output allowance refusal");
     expect(result.error).toMatchObject({
       resource: "memory",
       reportedLimits: { output_bytes: 32 * 1024 * 1024 },
+      retryable: false,
     });
+    expect(result.error.remediationAction).toContain(
+      "The retained command-output allowance",
+    );
+    expect(result.error.remediationAction).not.toMatch(
+      /Review the reported worker memory limits/u,
+    );
+  }
 });
 
 it("retains completed discovery on late cancellation and cleanup failure", async () => {

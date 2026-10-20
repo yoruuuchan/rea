@@ -13,6 +13,7 @@ import {
 import { connectLocalToolsMcp } from "../fixtures/localToolsMcp.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
+import { nativeObjcClassImportMachO } from "../fixtures/nativeObjcClassImportMachO.js";
 
 cliTest.skipIf(process.platform !== "darwin")(
   "retains and reopens profileless native dispatch workflow snapshots through CLI and stdio MCP",
@@ -115,4 +116,81 @@ cliTest.skipIf(process.platform !== "darwin")(
     await client.ping();
   },
   30000,
+);
+
+cliTest.skipIf(process.platform !== "darwin")(
+  "reports exact Objective-C class imports through the compiled native MCP adapter",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-objc-import-mcp-");
+    const target = join(root, "class-import.macho");
+    const fixture = nativeObjcClassImportMachO();
+    await writeFile(target, fixture.bytes);
+    const environment = {
+      PATH: process.env.PATH ?? "",
+      REA_ANALYSIS_PROVIDER: "auto",
+      HOPPER_LAUNCHER_PATH: "/rea-unconfigured-deep-provider/hopper",
+      GHIDRA_INSTALL_DIR: "/rea-unconfigured-deep-provider/ghidra",
+      JAVA_HOME: "/rea-unconfigured-deep-provider/java",
+      REA_IDA_MCP_CONFIG: "/rea-unconfigured-deep-provider/ida-mcp.json",
+      REA_KUNA_COMMAND: "/rea-unconfigured-deep-provider/kuna",
+      REA_KUNA_CACHE_DIR: "/rea-unconfigured-deep-provider/kuna-cache",
+      REA_LOG_LEVEL: "silent",
+    };
+
+    const cliResult = await cli.run({
+      arguments: ["inspect-native-dispatch-metadata", target, "--json"],
+      environment,
+    });
+    expect(cliResult.exitCode, cliResult.stderr).toBe(0);
+    const cliEvidence = toolContract(
+      "inspect_native_dispatch_metadata",
+    ).outputSchema.parse(cliResult.json);
+    expect(cliEvidence.normalized_result).toMatchObject({
+      result: {
+        target_selection: {
+          container: "thin",
+          offset: 0,
+          cpu_type: CPU.arm64.type,
+          cpu_subtype: CPU.arm64.subtype,
+        },
+      },
+    });
+
+    const { client, call } = await connectLocalToolsMcp(environment);
+    const opened = await call("open_binary", { path: target });
+    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
+    const inspected = await call("inspect_native_dispatch_metadata", {
+      max_records: 100,
+      objc_class_import_addresses: [fixture.address, fixture.unboundAddress],
+      objc_class_import_addresses_complete: true,
+    });
+    expect(inspected.isError, JSON.stringify(inspected)).not.toBe(true);
+    const evidence = parseEvidence(inspected.structuredContent);
+    expect(evidence.normalized_result).toMatchObject({
+      target_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      target_architecture: "arm64",
+      provider: { id: "native-macos" },
+      result: {
+        target_selection: {
+          container: "thin",
+          offset: 0,
+          cpu_type: CPU.arm64.type,
+          cpu_subtype: CPU.arm64.subtype,
+        },
+        objc_class_import_bindings: [
+          {
+            requested_address: fixture.address,
+            symbol: "_OBJC_CLASS_$_Document",
+            library: "/System/Library/Frameworks/AppKit.framework/AppKit",
+          },
+        ],
+        objc_class_import_binding_coverage: {
+          status: "complete",
+          examined: 2,
+          decoded: 1,
+        },
+      },
+    });
+    await client.ping();
+  },
 );

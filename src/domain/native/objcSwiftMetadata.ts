@@ -1,8 +1,13 @@
 import { z } from "zod";
-import { isMachOFormat, type BinaryTarget } from "../binaryTargetTypes.js";
+import {
+  BINARY_ARCHITECTURES,
+  isMachOFormat,
+  type BinaryTarget,
+} from "../binaryTargetTypes.js";
 import { providerSchema } from "../evidence.js";
 import { isSwiftMangledSymbolName } from "../swiftSymbolClassification.js";
 import { nativeCallReferenceSchema } from "./nativeCallReference.js";
+import { machoTargetSelectionSchema } from "../apple/machoTargetSelection.js";
 
 import {
   compareUnicodeCodePoints,
@@ -248,6 +253,33 @@ export const nativeMetadataCoverageSchema = z.strictObject({
   decoded: z.number().int().nonnegative(),
 });
 
+/** Exact Mach-O import binding observed at a caller-selected pointer slot. */
+export const objcClassImportBindingSchema = z.strictObject({
+  requested_address: z.string().min(1),
+  symbol: z.string().min(1),
+  binding_source: z.enum(["chained", "bind", "weak", "lazy"]),
+  library_ordinal: z.number().int().min(-3).max(Number.MAX_SAFE_INTEGER),
+  library: z.string().nullable(),
+  weak: z.boolean(),
+  addend: z.string().regex(/^-?\d+$/u),
+});
+export const objcClassImportIdentitySchema = objcClassImportBindingSchema.omit({
+  requested_address: true,
+});
+export const objcClassImportBindingCoverageSchema = z.strictObject({
+  facet: z.literal("objc_class_import_bindings"),
+  status: z.enum(["complete", "partial", "unsupported", "not_requested"]),
+  reason: z.string().nullable(),
+  examined: z.number().int().nonnegative(),
+  decoded: z.number().int().nonnegative(),
+});
+export type ObjcClassImportBinding = z.infer<
+  typeof objcClassImportBindingSchema
+>;
+export type ObjcClassImportBindingCoverage = z.infer<
+  typeof objcClassImportBindingCoverageSchema
+>;
+
 /** Swift declaration kind. */
 export const swiftDeclKindSchema = z.enum([
   "class",
@@ -316,6 +348,10 @@ export const objcSwiftMetadataSchema = z.strictObject({
   swift_conformances: z.array(swiftConformanceSchema).default([]),
   swift_dispatch_slots: z.array(swiftDispatchSlotSchema).default([]),
   swift_symbols: z.array(swiftSymbolSchema).default([]),
+  objc_class_import_bindings: z.array(objcClassImportBindingSchema).optional(),
+  objc_class_import_binding_coverage:
+    objcClassImportBindingCoverageSchema.optional(),
+  target_selection: machoTargetSelectionSchema.optional(),
   relative_pointers: z.array(relativePointerSchema).default([]),
   coverage: z.array(nativeMetadataCoverageSchema).default([]),
   db_save_result: dbSaveResultSchema.nullable(),
@@ -328,6 +364,7 @@ export const nativeDispatchMetadataResultSchema = z.strictObject({
     .string()
     .regex(/^[a-f0-9]{64}$/u)
     .nullable(),
+  target_architecture: z.enum(BINARY_ARCHITECTURES).nullable().optional(),
   provider: z.strictObject({
     id: z.string().min(1),
     name: z.string().min(1),

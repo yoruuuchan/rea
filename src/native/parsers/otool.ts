@@ -41,6 +41,7 @@ interface ParsedLoadCommands {
   }>;
   uuid: string | null;
   readonly flags: Set<string>;
+  readonly omittedDependencyCommands: string[];
 }
 
 const DYLIB_COMMANDS = new Set([
@@ -51,6 +52,11 @@ const DYLIB_COMMANDS = new Set([
   "LC_LAZY_LOAD_DYLIB",
   "LC_LOAD_UPWARD_DYLIB",
 ]);
+/**
+ * Dependency commands whose install name is not in the otool command text.
+ * `LC_LAZY_LOAD_DYLIB_INFO` stores it in a linkedit payload.
+ */
+const PAYLOAD_DEPENDENCY_COMMANDS = new Set(["LC_LAZY_LOAD_DYLIB_INFO"]);
 
 const DYLIB_FIELDS = [
   "cmd",
@@ -142,6 +148,7 @@ export const parseOtoolLoadCommands = (raw: string) => {
     commands: state.commands,
     segments: state.segments,
     dependencies: state.dependencies,
+    omittedDependencyCommands: state.omittedDependencyCommands,
     entrypoints: state.entrypoints,
     builds: state.builds,
   };
@@ -265,6 +272,7 @@ const createLoadCommandState = (
   builds: [],
   uuid: null,
   flags: new Set(headerFlags ?? []),
+  omittedDependencyCommands: [],
 });
 
 const parseLoadCommand = (block: string, state: ParsedLoadCommands): void => {
@@ -290,6 +298,8 @@ const parseLoadCommand = (block: string, state: ParsedLoadCommands): void => {
   collectEntrypoint(kind, fields, state);
   collectBuild(kind, block, fields, state);
   collectDependency(kind, fields, state);
+  if (PAYLOAD_DEPENDENCY_COMMANDS.has(kind))
+    state.omittedDependencyCommands.push(kind);
   collectSegment(kind, block, fields, state);
 };
 
@@ -473,8 +483,13 @@ const parseField = (rawLine: string): readonly [string, string] | undefined => {
   const option = /^\s*(string #[1-9]\d*)(?: (.*))?$/u.exec(rawLine);
   if (option?.[1] !== undefined) return [option[1], option[2] ?? ""];
   const line = rawLine.trim();
-  // Match time stamp as a whole without swallowing `name stamp plugin.dylib`.
-  const match = /^((?:time stamp)|\S+(?:\s+version)?)(?:\s+(.+))?$/u.exec(line);
+  // These are the compound field labels used by otool. Keeping this list
+  // explicit prevents a one-word field value such as `sectname version` from
+  // being consumed as an invented `sectname version` key.
+  const match =
+    /^(time stamp|current version|compatibility version|\S+)(?:\s+(.+))?$/u.exec(
+      line,
+    );
   return match?.[1] === undefined
     ? undefined
     : [match[1], match[2]?.trim() ?? ""];

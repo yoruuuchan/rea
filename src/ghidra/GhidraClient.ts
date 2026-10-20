@@ -414,12 +414,16 @@ export class GhidraClient {
         const bytes = await readBoundedFileBytes(
           handle,
           maximumBytes ?? initial.size,
-          signal,
-          initial.size,
-          (reason) =>
-            new ArtifactReaderFailure("cancelled", "Snapshot read cancelled", {
-              cause: reason,
-            }),
+          {
+            signal,
+            expectedSize: initial.size,
+            cancellationFailure: (reason) =>
+              new ArtifactReaderFailure(
+                "cancelled",
+                "Snapshot read cancelled",
+                { cause: reason },
+              ),
+          },
         );
         if (bytes === undefined || bytes.length !== initial.size)
           throw new RegularFileChangedError(path);

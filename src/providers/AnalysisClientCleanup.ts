@@ -12,21 +12,25 @@ export const closeAnalysisClient = async (
   providerId: string,
   options: Pick<ExecutionOptions, "progress"> & {
     readonly retainDocument?: boolean;
+    readonly onCleanupFailure?: (failure: AnalysisError) => void;
   } = {},
 ): Promise<Result<null, AnalysisError>> => {
   try {
-    return await client.close(options);
+    const result = await client.close(options);
+    if (!result.ok) options.onCleanupFailure?.(result.error);
+    return result;
   } catch (cause: unknown) {
     // A typed cleanup failure already names its leftover resources.
-    if (cause instanceof AnalysisError && cause.cleanupIncomplete)
-      return err(cause);
-    return err(
-      new ProviderCleanupError(
-        providerId,
-        ["provider-client"],
-        { reason: "provider client close rejected unexpectedly" },
-        { cause },
-      ),
-    );
+    const failure =
+      cause instanceof AnalysisError && cause.cleanupIncomplete
+        ? cause
+        : new ProviderCleanupError(
+            providerId,
+            ["provider-client"],
+            { reason: "provider client close rejected unexpectedly" },
+            { cause },
+          );
+    options.onCleanupFailure?.(failure);
+    return err(failure);
   }
 };

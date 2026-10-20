@@ -12,6 +12,11 @@ import { AnalysisProviderRegistry } from "../application/binary/AnalysisProvider
 import { composeBinarySession } from "../application/binary/BinarySessionComposition.js";
 import { LazyAnalysisProvider } from "../application/binary/LazyAnalysisProvider.js";
 import { ManagedStaticProvider } from "../dotnet/ManagedStaticProvider.js";
+import {
+  BUNDLE_ARTIFACT_RESOURCE_OPERATIONS,
+  BUNDLE_NATIVE_RESOURCE_OPERATIONS,
+  combineBundleResourceClients,
+} from "../application/binary/BundleResourceSession.js";
 
 /**
  * Compose the target-switching runtime shared directly by CLI and MCP adapters.
@@ -67,7 +72,47 @@ const composeDeepBinarySession = (
     auxiliaryDeclarations.map(
       (declaration) => new LazyAnalysisProvider(declaration),
     ),
+    createBundleResourceFactory(environment, process.platform),
   );
+};
+
+const createBundleResourceFactory = (
+  environment: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform,
+) => {
+  return {
+    createClient: async (
+      root: import("../application/AppBundleExecutable.js").ResolvedAppBundleResourceRoot,
+    ) => {
+      const [{ ArtifactProvider }, { NativeMacOSProvider }] = await Promise.all(
+        [
+          import("../artifacts/ArtifactProvider.js"),
+          import("../native/NativeMacOSProvider.js"),
+        ],
+      );
+      const artifact = new ArtifactProvider(environment, platform);
+      const native = new NativeMacOSProvider(environment, undefined, platform);
+      const capabilities = [
+        ...artifact
+          .capabilities()
+          .filter(({ operation }) =>
+            BUNDLE_ARTIFACT_RESOURCE_OPERATIONS.has(operation),
+          ),
+        ...native
+          .capabilities()
+          .filter(({ operation }) =>
+            BUNDLE_NATIVE_RESOURCE_OPERATIONS.has(operation),
+          ),
+      ];
+      return {
+        client: combineBundleResourceClients(
+          artifact.createBundleResourceClient(root),
+          native.createBundleResourceClient(root),
+        ),
+        capabilities,
+      };
+    },
+  };
 };
 
 /** Compose an execution-free managed session without native provider selection. */
@@ -82,12 +127,19 @@ export const createArtifactBinarySession = (
   platform: NodeJS.Platform = process.platform,
 ): Promise<BinarySession> =>
   import("../artifacts/ArtifactProvider.js").then(({ ArtifactProvider }) =>
-    composeBinarySession(new AnalysisProviderRegistry([]), [
-      new ArtifactProvider(
+    composeBinarySession(
+      new AnalysisProviderRegistry([]),
+      [
+        new ArtifactProvider(
+          snapshotEnvironment(selectedEnvironment, platform),
+          platform,
+        ),
+      ],
+      createBundleResourceFactory(
         snapshotEnvironment(selectedEnvironment, platform),
         platform,
       ),
-    ]),
+    ),
   );
 
 /** Compose native inspection utilities without candidates for deep analysis. */
@@ -96,11 +148,18 @@ export const createNativeBinarySession = (
   platform: NodeJS.Platform = process.platform,
 ): Promise<BinarySession> =>
   import("../native/NativeMacOSProvider.js").then(({ NativeMacOSProvider }) =>
-    composeBinarySession(new AnalysisProviderRegistry([]), [
-      new NativeMacOSProvider(
+    composeBinarySession(
+      new AnalysisProviderRegistry([]),
+      [
+        new NativeMacOSProvider(
+          snapshotEnvironment(selectedEnvironment, platform),
+          undefined,
+          platform,
+        ),
+      ],
+      createBundleResourceFactory(
         snapshotEnvironment(selectedEnvironment, platform),
-        undefined,
         platform,
       ),
-    ]),
+    ),
   );

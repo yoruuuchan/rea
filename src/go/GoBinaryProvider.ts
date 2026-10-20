@@ -27,6 +27,7 @@ import {
   type InspectGoBinaryInput,
 } from "../domain/go/goBinary.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -62,7 +63,17 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
       cause.boundary === "search" ? "cpu" : "memory",
       `Selected artifact ${path}: ${cause.message}`,
       { boundary: cause.boundary, maximum_bytes: cause.maximum_bytes },
-      { cause },
+      {
+        cause,
+        ...fixedAllowanceOptions(
+          cause.boundary === "search"
+            ? "The Go build-info header-search allowance"
+            : cause.boundary === "build-info"
+              ? "The Go build-info string allowance"
+              : "The Go structural decoding allowance",
+          cause.boundary === "search" ? "work" : "parser",
+        ),
+      },
     );
   if (cause instanceof GoBinaryFormatFailure)
     return cause.kind === "unsupported"
@@ -152,6 +163,7 @@ const outputLimit = (path: string) =>
     "transport",
     `Complete Go metadata for ${path} exceeds the inline output budget; no partial success is returned.`,
     { maximum_output_bytes: OUTPUT_BYTES },
+    fixedAllowanceOptions("The Go complete-report allowance", "report"),
   );
 
 /** Fixed reader boundaries plus unknowns left by the observed metadata. */

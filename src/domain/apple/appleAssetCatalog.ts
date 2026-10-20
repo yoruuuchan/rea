@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bundleResourceBoundResultSchema } from "./bundleResourceRoot.js";
 
 import { jsonValueSchema } from "../jsonValue.js";
 import { AnalysisOutputError } from "../analysisErrorCore.js";
@@ -66,18 +67,20 @@ const resourceKeyMatchSchema = z.strictObject({
 });
 
 /** Normalized result returned by asset catalog inspection. */
-export const appleAssetCatalogResultSchema = z.strictObject({
-  target_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  catalogs: z.array(catalogSchema),
-  total_records: z.number().int().nonnegative(),
-  offset: z.number().int().nonnegative(),
-  limit: z.number().int().positive(),
-  records: z.array(recordSchema),
-  resource_key_matches: z.array(resourceKeyMatchSchema),
-  next_offset: z.number().int().nonnegative().nullable(),
-  truncated: z.boolean(),
-  limitations: z.array(z.string()),
-});
+export const appleAssetCatalogResultSchema = bundleResourceBoundResultSchema(
+  z.string().regex(/^[a-f0-9]{64}$/u),
+  {
+    catalogs: z.array(catalogSchema),
+    total_records: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive(),
+    records: z.array(recordSchema),
+    resource_key_matches: z.array(resourceKeyMatchSchema),
+    next_offset: z.number().int().nonnegative().nullable(),
+    truncated: z.boolean(),
+    limitations: z.array(z.string()),
+  },
+);
 
 export type AppleAssetCatalogRecord = z.infer<typeof recordSchema>;
 
@@ -106,7 +109,8 @@ export const parseAppleAssetCatalogRecords = (
 
 /** Project catalog records and apply stable global pagination. */
 export const projectAppleAssetCatalogPage = (input: {
-  readonly targetSha256: string;
+  readonly targetSha256: string | null;
+  readonly resourceRoot?: import("./bundleResourceRoot.js").BundleResourceRoot;
   readonly catalogs: readonly {
     readonly path: string;
     readonly sha256: string;
@@ -175,6 +179,9 @@ export const projectAppleAssetCatalogPage = (input: {
   });
   return appleAssetCatalogResultSchema.parse({
     target_sha256: input.targetSha256,
+    ...(input.resourceRoot === undefined
+      ? {}
+      : { resource_root: input.resourceRoot }),
     catalogs: input.catalogs.map(
       ({ path, sha256, records: catalogRecords }) => ({
         path,

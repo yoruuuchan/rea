@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analysisViewResultSchema,
   projectAnalysisView,
   type AnalysisViewParent,
 } from "./analysisView.js";
 
 const target = "a".repeat(64);
+const resourceRoot = {
+  caller_path: "/Applications/Keyless.app",
+  canonical_path: "/Applications/Keyless.app",
+  info_plist_path: "/Applications/Keyless.app/Info.plist",
+  layout: "root" as const,
+  executable_sha256: null,
+};
 const evidence = (artifact_path: string) => [
   {
     kind: "interface_builder_resource" as const,
@@ -68,6 +76,15 @@ const report = (truncated = false) => ({
   },
   limitations: ["Recognized archive fields only."],
 });
+const resourceReport = () => {
+  const decoded = report();
+  return {
+    ...decoded,
+    target_sha256: null,
+    resource_root: resourceRoot,
+    graph: { ...decoded.graph, target_sha256: null },
+  };
+};
 const parent = (
   normalizedResult: unknown = report(),
   sha256 = target,
@@ -86,6 +103,33 @@ const parent = (
 });
 
 describe("Interface Builder analysis views", () => {
+  it("keeps resource-root provenance in both summary and detail views without a subject", () => {
+    const source: AnalysisViewParent = {
+      ...parent(resourceReport()),
+      subject: null,
+    };
+    const summary = projectAnalysisView(source, { kind: "summary" });
+    const detail = projectAnalysisView(source, {
+      kind: "interface-builder",
+      collection: "documents",
+      offset: 0,
+      limit: 64,
+    });
+    if (!summary.ok) throw summary.error;
+    if (!detail.ok) throw detail.error;
+
+    expect(analysisViewResultSchema.parse(summary.value)).toMatchObject({
+      artifact: { path: resourceRoot.canonical_path, sha256: null },
+      resource_root: resourceRoot,
+      summary: { target_sha256: null },
+    });
+    expect(analysisViewResultSchema.parse(detail.value)).toMatchObject({
+      artifact: { path: resourceRoot.canonical_path, sha256: null },
+      resource_root: resourceRoot,
+      items: report().documents,
+    });
+  });
+
   it("summarizes documents and graph counts without rows", () => {
     const projected = projectAnalysisView(parent(), { kind: "summary" });
     if (!projected.ok) throw projected.error;

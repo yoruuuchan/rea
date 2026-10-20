@@ -82,7 +82,7 @@ export class JavaScriptRecoveryService {
     const result = javascriptRecoveryResultSchema.safeParse(
       execution.value.result,
     );
-    if (!result.success || execution.value.subject === null)
+    if (!result.success || execution.value.subject == null)
       return err(
         new AnalysisOutputError(
           OPERATION,

@@ -9,6 +9,7 @@ import type {
   AnalysisCapturedOutput,
   AnalysisError,
 } from "../domain/analysisErrorBase.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   execFileBytes,
@@ -86,6 +87,11 @@ export const adbArguments = (
 export interface AdbRunLimits {
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
+  /**
+   * Live device observations can shrink between calls. Mutation commands omit
+   * this so a truncated result stays non-retryable.
+   */
+  readonly volatileOutput?: boolean;
 }
 
 /** Keep the selected device separate from the file addressed by the command. */
@@ -139,7 +145,14 @@ export const runAdbCapture = async (
           "memory",
           `adb output exceeded the ${String(limits.maxOutputBytes)}-byte capture budget`,
           { max_output_bytes: limits.maxOutputBytes },
-          { cause },
+          {
+            cause,
+            ...fixedAllowanceOptions(
+              "The adb output capture allowance",
+              limits.volatileOutput === true ? "live" : "capture",
+            ),
+            ...(limits.volatileOutput === true ? { retryable: true } : {}),
+          },
         ),
       );
     const stderr = failure.stderr.trim();
@@ -268,7 +281,7 @@ export const probeAdbPathExistence = async (
     { device: serial, path },
     binary,
     adbArguments(serial, ["shell", "test", "-e", path]),
-    limits,
+    { ...limits, volatileOutput: true },
     signal,
   );
   if (probed.ok) {

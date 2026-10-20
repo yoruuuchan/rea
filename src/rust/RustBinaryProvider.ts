@@ -26,6 +26,7 @@ import {
   type InspectRustBinaryInput,
   type RustBinary,
 } from "../domain/rust/rustBinary.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { readRustBinaryImage } from "./RustBinaryImage.js";
@@ -120,6 +121,7 @@ const outputLimit = (path: string) =>
     "transport",
     `Complete Rust metadata for ${path} exceeds the inline output budget; no partial success is returned.`,
     { maximum_output_bytes: RUST_OUTPUT_BYTES },
+    fixedAllowanceOptions("The Rust complete-report allowance", "report"),
   );
 
 const limitationsFor = (
@@ -186,7 +188,21 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
       cause.constraint.resource,
       `Selected artifact ${path}: ${cause.message}`,
       cause.constraint.reported_limits,
-      { cause },
+      {
+        cause,
+        ...fixedAllowanceOptions(
+          cause.constraint.resource === "capacity"
+            ? "The rustc commit-path inventory"
+            : cause.constraint.resource === "transport"
+              ? "The Rust complete-report allowance"
+              : "This Rust inspection allowance",
+          cause.constraint.resource === "capacity"
+            ? "count"
+            : cause.constraint.resource === "transport"
+              ? "report"
+              : "parser",
+        ),
+      },
     );
   if (cause instanceof RustAuditableFormatFailure)
     return cause.kind === "unsupported"
@@ -274,7 +290,10 @@ const artifactReaderFailure = (
       "file-size",
       cause.message,
       { maximum_input_bytes: RUST_BINARY_INPUT_BYTES },
-      { cause },
+      {
+        cause,
+        ...fixedAllowanceOptions("the fixed Rust input allowance", "input"),
+      },
     );
   if (cause.reason === "path")
     return new AnalysisInputError(OPERATION, { cause }, [

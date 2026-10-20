@@ -1,4 +1,5 @@
 import {
+  appendFile,
   chmod,
   mkdir,
   readFile,
@@ -65,6 +66,58 @@ it("retains the admitted tarball descriptor and refuses a pathname replacement d
     expect(
       await readFile(join(directory, "envs/grafana-example/rea-agents.tgz")),
     ).toEqual(originalBytes);
+  } finally {
+    writer.mockRestore();
+  }
+});
+
+it("keeps tarball ownership when the admitted inode grows during output", async () => {
+  const root = await createTestTempDirectory("rea-tarball-growth-");
+  const files = await writeEnvironmentServeFiles(root);
+  const inputs = await readEnvironmentExportInputs(
+    files.manifestPath,
+    files.capturePath,
+  );
+  if (!inputs.ok) throw inputs.error;
+  const tarball = join(root, "package.tgz");
+  await writeFile(tarball, Buffer.alloc(2 * 1024 * 1024, 0x41));
+  const directory = join(root, "bundle");
+  const original = SafeOutputTree.prototype.write;
+  let grown = false;
+  const writer = vi
+    .spyOn(SafeOutputTree.prototype, "write")
+    .mockImplementation(async function (
+      this: SafeOutputTree,
+      ...args: Parameters<SafeOutputTree["write"]>
+    ) {
+      const [relative] = args;
+      if (!grown && relative === "envs/grafana-example/rea-agents.tgz") {
+        grown = true;
+        await appendFile(tarball, Buffer.alloc(1024 * 1024, 0x42));
+      }
+      return original.apply(this, args);
+    });
+  try {
+    const result = await exportEnvironmentBundle({
+      ...inputs.value,
+      source: environmentServeSource(),
+      directory,
+      packageTarball: tarball,
+    });
+    expect(grown).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisOutputError",
+        operation: "environment-export",
+        reason:
+          "Extracted content exceeds the inventoried size: envs/grafana-example/rea-agents.tgz",
+      },
+    });
+    if (result.ok)
+      throw new Error("Expected the changed tarball to be refused");
+    expect(result.error.cleanup).toBeUndefined();
+    expect(result.error.message).not.toContain("invalidated");
   } finally {
     writer.mockRestore();
   }

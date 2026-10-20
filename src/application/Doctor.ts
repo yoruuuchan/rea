@@ -11,7 +11,10 @@ import { constants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { RetainedResourceScope } from "./AnalysisProvider.js";
+import { nativeAnalysisConfigurationError } from "../config/parseConfig.js";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
+import type { ConfigurationSettingIssue } from "../domain/configurationErrors.js";
+import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { join } from "node:path";
 
 import { analysisErrorRemediationAction } from "../domain/analysisErrorPresentation.js";
@@ -109,6 +112,11 @@ export interface DoctorHost {
   readonly homeDirectory: string;
   readonly configuredHopperPath?: string;
   readonly configuredHopperStartupTimeout?: string;
+  /**
+   * Settings `parseConfig` rejects before native analysis starts.
+   * Undefined means this host did not run that admission.
+   */
+  readonly configurationIssues?: readonly ConfigurationSettingIssue[];
   readonly configuredIlspyCmdPath?: string;
   macosVersion(): Promise<string | undefined>;
   linuxDistribution(): Promise<LinuxDistribution | undefined>;
@@ -508,6 +516,9 @@ export const systemDoctorHost = (
   const platform = options.platform ?? process.platform;
   const architecture = options.architecture ?? process.arch;
   const environment = options.environment ?? process.env;
+  const configurationError = nativeAnalysisConfigurationError(
+    snapshotEnvironment(environment, platform),
+  );
   const hostExecFileOutput = options.execFileOutput ?? execFileOutput;
   const homeDirectory = homeDirectoryFromEnvironment(environment, platform);
   const commandEnvironment = { env: environment };
@@ -548,6 +559,7 @@ export const systemDoctorHost = (
           configuredHopperStartupTimeout:
             environment.REA_HOPPER_STARTUP_TIMEOUT_MS,
         }),
+    configurationIssues: configurationError?.settings ?? [],
     ...(environment.REA_ILSPY_CMD_PATH === undefined
       ? {}
       : { configuredIlspyCmdPath: environment.REA_ILSPY_CMD_PATH }),

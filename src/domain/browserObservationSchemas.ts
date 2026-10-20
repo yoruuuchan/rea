@@ -161,7 +161,12 @@ const browserNetworkRequestSchema = z.object({
 });
 const browserConsoleEventSchema = z.object({
   type: z.string(),
-  timestamp: z.number(),
+  timestamp: z
+    .number()
+    .nullable()
+    .describe(
+      "CDP Runtime.Timestamp in milliseconds since Unix epoch; null when the producer value is absent or invalid.",
+    ),
   argument_types: z.array(z.string()),
   url: z.string().nullable(),
   line: z.number().int().min(0).nullable(),
@@ -180,7 +185,7 @@ const browserConsoleEventSchema = z.object({
 });
 const browserWebSocketFrameSchema = z.object({
   direction: z.enum(["sent", "received"]),
-  opcode: z.number().int().min(0),
+  opcode: z.number().int().min(0).max(15).nullable(),
   payload_bytes: z.number().int().min(0).nullable(),
   payload_shape: z
     .object({

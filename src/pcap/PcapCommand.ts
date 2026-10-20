@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
@@ -223,7 +224,13 @@ export const runPcapCommand = async (options: {
         "memory",
         "Tool output exceeded its complete-output budget",
         { max_output_bytes: limits.maxOutputBytes },
-        details,
+        {
+          ...details,
+          ...fixedAllowanceOptions(
+            "The packet-tool output capture allowance",
+            "capture",
+          ),
+        },
       );
     if (
       cause instanceof WindowsBatchCommandError ||

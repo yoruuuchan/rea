@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { chmod, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { add, commit, init } from "isomorphic-git";
@@ -8,6 +8,11 @@ import { describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { normalizeHistoricalSourceParseFailures } from "../../../src/application/ReferenceSourceImport.js";
+import { prepareReferenceSourceImport } from "../../../src/application/ReferenceSourceImportPolicy.js";
+import {
+  readRegularFileText,
+  RegularFileReadFailure,
+} from "../../../src/application/RegularFileRead.js";
 import { importReferenceSource } from "../../support/referenceSourceResourceScope.js";
 import {
   parseReferenceSourceEntries,
@@ -15,6 +20,9 @@ import {
 } from "../../../src/application/ReferenceSourceImportEntries.js";
 import type { ReferenceSourceRead } from "../../../src/reference/ReferenceSourceReaderTypes.js";
 import { createHistoricalSourceManifest } from "../../../src/domain/referenceSourceGraph.js";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
+import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 
 const fixture = async (parent: string, name: string): Promise<string> => {
   const root = join(parent, name);
@@ -84,6 +92,260 @@ describe("reference source import projections", () => {
         "Observed entry failure at /owned/fixture/path",
       );
       expect(message).toMatch(/Check|try again|when ready|Exclude/u);
+    }
+  });
+});
+
+describe("reference source ignore policy read failures", () => {
+  it("preserves a late-aborted physical admission failure identical to the reason", async () => {
+    const root = await createTestTempDirectory("rea-reference-admission-read-");
+    const path = join(root, "input.txt");
+    await writeFile(path, "source\n");
+    const controller = new AbortController();
+    const physical = Object.assign(new Error("controlled admission failure"), {
+      code: "EIO",
+    });
+    const result = readRegularFileText(path, {
+      signal: controller.signal,
+      cancellationFailure: (reason) =>
+        new Error("owned cancellation checkpoint", { cause: reason }),
+      admit: () => {
+        controller.abort(physical);
+        throw physical;
+      },
+    });
+
+    await expect(result).rejects.toMatchObject({
+      _tag: new RegularFileReadFailure(physical)._tag,
+      operationCause: physical,
+      cause: physical,
+    });
+  });
+
+  it.each([
+    {
+      name: "distinct physical I/O failure",
+      physical: "error" as const,
+      sameAsAbortReason: false,
+      expected: "io",
+    },
+    {
+      name: "physical failure identical to the abort reason",
+      physical: "error" as const,
+      sameAsAbortReason: true,
+      expected: "io",
+    },
+    {
+      name: "non-Error physical failure",
+      physical: "string" as const,
+      sameAsAbortReason: false,
+      expected: "io",
+    },
+    {
+      name: "cancellation after a successful physical read",
+      physical: "cancel-after-read" as const,
+      sameAsAbortReason: false,
+      expected: "cancelled",
+    },
+  ])(
+    "preserves $name when the signal is aborted",
+    async ({ physical, sameAsAbortReason, expected }) => {
+      const root = await createTestTempDirectory("rea-reference-ignore-read-");
+      const path = join(root, ".gitignore");
+      await writeFile(path, "ignored/\n");
+      const controller = new AbortController();
+      const abortReason = new Error("caller cancelled");
+      const readFailure: unknown =
+        physical === "string"
+          ? "controlled non-Error read failure"
+          : Object.assign(new Error("controlled read failure"), {
+              code: "EIO",
+            });
+      const probe = await open(path, "r");
+      const identity = await probe.stat();
+      const prototype = probe.constructor.prototype as {
+        read: (...arguments_: never[]) => Promise<unknown>;
+      };
+      await probe.close();
+      const originalRead = prototype.read;
+      let intercepted = false;
+      const read = async function (
+        this: typeof probe,
+        ...arguments_: never[]
+      ): Promise<unknown> {
+        if (!intercepted) {
+          const state = await this.stat();
+          if (state.dev === identity.dev && state.ino === identity.ino) {
+            intercepted = true;
+            if (physical === "cancel-after-read") {
+              controller.abort(abortReason);
+              return originalRead.apply(this, arguments_);
+            }
+            controller.abort(sameAsAbortReason ? readFailure : abortReason);
+            throw readFailure;
+          }
+        }
+        return originalRead.apply(this, arguments_);
+      };
+      prototype.read = read;
+      try {
+        const result = await prepareReferenceSourceImport(
+          {
+            root,
+            caller: "reference-import-test",
+            policy: { secretPatterns: [] },
+            signal: controller.signal,
+          },
+          new ArtifactResourceScope(),
+        );
+        expect(intercepted).toBe(true);
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("Expected ignore policy read failure");
+        expect(result.error.code).toBe(expected);
+        expect(result.error.cause).toBe(
+          physical === "cancel-after-read" ? abortReason : readFailure,
+        );
+      } finally {
+        prototype.read = originalRead;
+      }
+    },
+  );
+});
+
+describe("reference source ignore policy cleanup ownership", () => {
+  it("keeps a physical read primary when ignore-file cleanup remains pending", async () => {
+    const root = await createTestTempDirectory("rea-reference-ignore-cleanup-");
+    const path = join(root, ".gitignore");
+    await writeFile(path, "ignored/\n");
+    const controller = new AbortController();
+    const physical = Object.assign(new Error("controlled read failure"), {
+      code: "EIO",
+    });
+    const probe = await open(path, "r");
+    const identity = await probe.stat();
+    const prototype = probe.constructor.prototype as {
+      read: (...arguments_: never[]) => Promise<unknown>;
+    };
+    await probe.close();
+    const originalRead = prototype.read;
+    const ownerPrototype = OwnedFileHandle.prototype;
+    const originalClose = ownerPrototype.close;
+    let interceptedRead = false;
+    let closeFailures = 0;
+    prototype.read = async function (
+      this: typeof probe,
+      ...arguments_: never[]
+    ): Promise<unknown> {
+      const state = await this.stat();
+      if (
+        !interceptedRead &&
+        state.dev === identity.dev &&
+        state.ino === identity.ino
+      ) {
+        interceptedRead = true;
+        controller.abort(physical);
+        throw physical;
+      }
+      return originalRead.apply(this, arguments_);
+    };
+    ownerPrototype.close = async function (
+      this: OwnedFileHandle,
+    ): Promise<void> {
+      const state = await this.handle.stat();
+      if (
+        state.dev === identity.dev &&
+        state.ino === identity.ino &&
+        closeFailures < 2
+      ) {
+        closeFailures += 1;
+        throw new Error(`controlled close failure ${closeFailures}`);
+      }
+      return originalClose.call(this);
+    };
+    const resources = new ArtifactResourceScope();
+    try {
+      const result = await prepareReferenceSourceImport(
+        {
+          root,
+          caller: "reference-import-test",
+          policy: { secretPatterns: [] },
+          signal: controller.signal,
+        },
+        resources,
+      );
+      expect(interceptedRead).toBe(true);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected ignore policy read failure");
+      expect(result.error.code).toBe("io");
+      expect(result.error.cause).toBe(physical);
+      expect(closeFailures).toBe(2);
+      expect(result.error.cleanup?.resources).toContain(path);
+      expect(resources.hasPending).toBe(true);
+    } finally {
+      await resources.retryCleanup();
+      prototype.read = originalRead;
+      ownerPrototype.close = originalClose;
+    }
+    expect(resources.hasPending).toBe(false);
+  });
+
+  it("does not transfer cleanup ownership for a physical read shaped like a foreign cleanup failure", async () => {
+    const root = await createTestTempDirectory("rea-reference-ignore-opaque-");
+    const path = join(root, ".gitignore");
+    const foreignPath = join(root, "foreign.txt");
+    await writeFile(path, "ignored/\n");
+    await writeFile(foreignPath, "foreign bytes");
+    const foreignOwner = new OwnedFileHandle(await open(foreignPath, "r"));
+    const reason = new RegularFileCleanupFailure(
+      foreignPath,
+      foreignOwner,
+      { kind: "completed", value: "foreign value" },
+      new Error("foreign cleanup failure"),
+    );
+    const controller = new AbortController();
+    const probe = await open(path, "r");
+    const identity = await probe.stat();
+    const prototype = probe.constructor.prototype as {
+      read: (...arguments_: never[]) => Promise<unknown>;
+    };
+    await probe.close();
+    const originalRead = prototype.read;
+    let intercepted = false;
+    prototype.read = async function (
+      this: typeof probe,
+      ...arguments_: never[]
+    ): Promise<unknown> {
+      const state = await this.stat();
+      if (
+        !intercepted &&
+        state.dev === identity.dev &&
+        state.ino === identity.ino
+      ) {
+        intercepted = true;
+        controller.abort(reason);
+        throw reason;
+      }
+      return originalRead.apply(this, arguments_);
+    };
+    try {
+      const result = await prepareReferenceSourceImport(
+        {
+          root,
+          caller: "reference-import-test",
+          policy: { secretPatterns: [] },
+          signal: controller.signal,
+        },
+        new ArtifactResourceScope(),
+      );
+      expect(intercepted).toBe(true);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected ignore policy read failure");
+      expect(result.error.code).toBe("io");
+      expect(result.error.cause).toBe(reason);
+      expect(foreignOwner.handle.fd).toBeGreaterThanOrEqual(0);
+    } finally {
+      prototype.read = originalRead;
+      await foreignOwner.close();
     }
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   defaultHopperLauncherPath,
+  nativeAnalysisConfigurationError,
   parseConfig,
 } from "./config/parseConfig.js";
 import {
@@ -96,6 +97,28 @@ describe("runtime configuration", () => {
     });
     for (const invalid of ["", "Auto", "ghidra_1", "ghidra "])
       expect(parseConfig({ REA_ANALYSIS_PROVIDER: invalid }).ok).toBe(false);
+  });
+
+  it("shares native admission with doctor and ignores the JEB-only timeout", () => {
+    expect(nativeAnalysisConfigurationError({})).toBeUndefined();
+    expect(
+      nativeAnalysisConfigurationError({ REA_JEB_MCP_TIMEOUT_MS: "abc" }),
+    ).toBeUndefined();
+    expect(parseConfig({ REA_JEB_MCP_TIMEOUT_MS: "abc" }).ok).toBe(true);
+    const rejected = nativeAnalysisConfigurationError({
+      REA_ANALYSIS_PROVIDER: "Hopper",
+      REA_GHIDRA_STARTUP_TIMEOUT_MS: "abc",
+    });
+    expect(rejected?.settings.map(({ setting }) => setting)).toEqual([
+      "REA_ANALYSIS_PROVIDER",
+      "REA_GHIDRA_STARTUP_TIMEOUT_MS",
+    ]);
+    expect(
+      parseConfig({
+        REA_ANALYSIS_PROVIDER: "Hopper",
+        REA_GHIDRA_STARTUP_TIMEOUT_MS: "abc",
+      }).ok,
+    ).toBe(false);
   });
 
   it("parses absolute BYO Ghidra and optional Java paths", () => {

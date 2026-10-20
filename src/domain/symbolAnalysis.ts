@@ -1,5 +1,9 @@
 import type { JsonValue } from "./jsonValue.js";
 import type { AddressedName } from "./hopperValues.js";
+import type {
+  ObjcClassImportBinding,
+  ObjcClassImportBindingCoverage,
+} from "./native/objcSwiftMetadata.js";
 import {
   classifySwiftSymbol,
   isSwiftMangledSymbolName,
@@ -18,12 +22,25 @@ const LEGACY_OBJC_CLASS_PREFIX = "l_OBJC_CLASS_" as const;
  */
 const OBJC_PROTOCOL_MARKER = "OBJC_PROTOCOL_$_" as const;
 
-/** Select and deduplicate Objective-C class labels. */
-export const discoverObjcClasses = (
+export interface ObjcClassDiscoveryCoverage {
+  readonly status:
+    | ObjcClassImportBindingCoverage["status"]
+    | "unknown"
+    | "not_applicable";
+  readonly reason: string | null;
+}
+
+export interface ObjcClassImportBindingScan {
+  readonly bindings: readonly ObjcClassImportBinding[];
+  readonly coverage: ObjcClassDiscoveryCoverage;
+}
+
+/** Select class labels and apply the caller's literal filter before identity joins. */
+export const selectObjcClassCandidates = (
   names: readonly AddressedName[],
   pattern: string,
-): JsonValue => {
-  const classes = uniqueByName(
+): AddressedName[] =>
+  uniqueByAddressAndName(
     names
       .filter(
         ({ name, objc_class_label }) =>
@@ -35,11 +52,42 @@ export const discoverObjcClasses = (
       )
       .filter(({ name }) => pattern.length === 0 || name.includes(pattern)),
   );
+
+/** Project selected class labels, coalescing only exact proven import identities. */
+export const projectObjcClassCandidates = (
+  candidates: readonly AddressedName[],
+  bindingScan: ObjcClassImportBindingScan = {
+    bindings: [],
+    coverage: {
+      status: candidates.length === 0 ? "not_applicable" : "unknown",
+      reason:
+        candidates.length === 0
+          ? null
+          : "Exact class-import binding identity is unavailable.",
+    },
+  },
+): JsonValue => {
+  const classes = coalesceBoundClassAliases(candidates, bindingScan.bindings);
   return {
     count: classes.length,
-    classes: classes.map(toJsonEntry),
+    classes: classes.map(toObjcClassEntry),
+    identity_coverage: {
+      status: bindingScan.coverage.status,
+      reason: bindingScan.coverage.reason,
+    },
   };
 };
+
+/** Select, then project Objective-C class labels for provider-neutral callers. */
+export const discoverObjcClasses = (
+  names: readonly AddressedName[],
+  pattern: string,
+  bindingScan?: ObjcClassImportBindingScan,
+): JsonValue =>
+  projectObjcClassCandidates(
+    selectObjcClassCandidates(names, pattern),
+    bindingScan,
+  );
 
 /** Select and deduplicate Objective-C and Swift protocol labels. */
 export const discoverObjcProtocols = (
@@ -184,6 +232,144 @@ const uniqueByName = (entries: readonly AddressedName[]): AddressedName[] => {
     return true;
   });
 };
+
+/** Keep same-named rows at distinct locations until slot identity is examined. */
+const uniqueByAddressAndName = (
+  entries: readonly AddressedName[],
+): AddressedName[] => {
+  const seen = new Set<string>();
+  return entries.filter(({ address, name }) => {
+    const key = JSON.stringify([address, name]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+interface ObjcClassOutputEntry extends AddressedName {
+  readonly binding_identity?: Omit<
+    ObjcClassImportBinding,
+    "requested_address"
+  > & {
+    readonly slot_addresses: readonly string[];
+  };
+}
+
+const coalesceBoundClassAliases = (
+  candidates: readonly AddressedName[],
+  bindings: readonly ObjcClassImportBinding[],
+): ObjcClassOutputEntry[] => {
+  const bindingsByAddress = new Map(
+    bindings.map((binding) => [binding.requested_address, binding]),
+  );
+  const bindingKey = (binding: ObjcClassImportBinding) =>
+    JSON.stringify([
+      binding.symbol,
+      binding.binding_source,
+      binding.library_ordinal,
+      binding.library,
+      binding.weak,
+      binding.addend,
+    ]);
+  const groupedBindings = new Map<string, ObjcClassImportBinding[]>();
+  for (const binding of bindings) {
+    const key = bindingKey(binding);
+    const existing = groupedBindings.get(key);
+    if (existing === undefined) groupedBindings.set(key, [binding]);
+    else existing.push(binding);
+  }
+
+  const groupedCandidates = new Map<string, AddressedName[]>();
+  const ordered: Array<AddressedName | { readonly group: string }> = [];
+  for (const candidate of candidates) {
+    const binding = bindingsByAddress.get(candidate.address);
+    if (binding === undefined) {
+      ordered.push(candidate);
+      continue;
+    }
+    const key = bindingKey(binding);
+    let group = groupedCandidates.get(key);
+    if (group === undefined) {
+      group = [];
+      groupedCandidates.set(key, group);
+      ordered.push({ group: key });
+    }
+    group.push(candidate);
+  }
+
+  const output: ObjcClassOutputEntry[] = [];
+  for (const entry of ordered) {
+    if ("group" in entry) {
+      const key = entry.group;
+      const facts = groupedBindings.get(key) ?? [];
+      const group = groupedCandidates.get(key) ?? [];
+      const identity = facts[0];
+      const canonicalName =
+        identity === undefined
+          ? undefined
+          : classNameFromImport(identity.symbol);
+      const representative =
+        (canonicalName === undefined
+          ? undefined
+          : group.find(
+              ({ name }) => classNameFromDisplayName(name) === canonicalName,
+            )) ?? group[0];
+      if (representative === undefined || identity === undefined) continue;
+      output.push({
+        ...representative,
+        binding_identity: {
+          symbol: identity.symbol,
+          binding_source: identity.binding_source,
+          library_ordinal: identity.library_ordinal,
+          library: identity.library,
+          weak: identity.weak,
+          addend: identity.addend,
+          slot_addresses: [
+            ...new Set(facts.map(({ requested_address }) => requested_address)),
+          ],
+        },
+      });
+    } else {
+      const candidate = entry;
+      output.push(candidate);
+    }
+  }
+  return output;
+};
+
+const classNameFromImport = (symbol: string): string | undefined => {
+  const canonical = symbol.startsWith("_") ? symbol.slice(1) : symbol;
+  return canonical.startsWith(OBJC_CLASS_MARKER) &&
+    canonical.length > OBJC_CLASS_MARKER.length
+    ? canonical
+    : undefined;
+};
+
+const classNameFromDisplayName = (name: string): string | undefined =>
+  name.startsWith(OBJC_CLASS_MARKER) && name.length > OBJC_CLASS_MARKER.length
+    ? name
+    : name.startsWith(`_${OBJC_CLASS_MARKER}`) &&
+        name.length > OBJC_CLASS_MARKER.length + 1
+      ? name.slice(1)
+      : undefined;
+
+const toObjcClassEntry = (entry: ObjcClassOutputEntry): JsonValue => ({
+  address: entry.address,
+  name: entry.name,
+  ...(entry.binding_identity === undefined
+    ? {}
+    : {
+        binding_identity: {
+          symbol: entry.binding_identity.symbol,
+          binding_source: entry.binding_identity.binding_source,
+          library_ordinal: entry.binding_identity.library_ordinal,
+          library: entry.binding_identity.library,
+          weak: entry.binding_identity.weak,
+          addend: entry.binding_identity.addend,
+          slot_addresses: [...entry.binding_identity.slot_addresses],
+        },
+      }),
+});
 
 const toJsonEntry = ({ address, name }: AddressedName): JsonValue => ({
   address,

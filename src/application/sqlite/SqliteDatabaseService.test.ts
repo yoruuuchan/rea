@@ -145,3 +145,25 @@ it("preserves completed observed evidence when cancellation arrives after provid
     value: { normalized_result: value },
   });
 });
+
+it("preserves the exact caller reason when inspection is already aborted", async () => {
+  const reason = Object.freeze({ requested: "stop" });
+  const controller = new AbortController();
+  controller.abort(reason);
+  let calls = 0;
+  const service = new SqliteDatabaseService({
+    inspect: () => {
+      calls += 1;
+      return Promise.reject(new Error("provider must not run"));
+    },
+  });
+  const result = await service.inspect(
+    { path: "/selected.db" },
+    { signal: controller.signal },
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(reason);
+  expect(calls).toBe(0);
+});

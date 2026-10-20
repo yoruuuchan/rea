@@ -10,6 +10,7 @@ import {
 import {
   RegularFileCleanupFailure,
   RegularFileCancelled,
+  regularFileCancellation,
   withOwnedRegularFile,
   type RegularFileOperationOutcome,
 } from "../filesystem/OwnedRegularFile.js";
@@ -24,6 +25,18 @@ export interface RegularFileReadOptions {
   readonly resources?: ArtifactResourceScope;
   /** Runs on the opened file's own state before any byte is read; throw to refuse the read. */
   readonly admit?: (state: Stats) => void;
+  /** Tags cancellation at the bounded reader's cooperative checkpoints. */
+  readonly cancellationFailure?: (reason: unknown) => Error;
+}
+
+/** A regular-file failure returned alongside an enabled cancellation factory. */
+export class RegularFileReadFailure extends Error {
+  readonly _tag = "RegularFileReadFailure";
+
+  constructor(readonly operationCause: unknown) {
+    super("Regular file operation failed", { cause: operationCause });
+    this.name = this._tag;
+  }
 }
 
 export class InvalidUtf8FileError extends TypeError {
@@ -153,21 +166,40 @@ export const withRegularFile = async <Value>(
       // Caller reasons are opaque, including objects shaped like file failures.
       // They do not transfer ownership of any descriptor to this operation.
       if (signal?.aborted === true && cause === signal.reason) throw cause;
-      if (cause instanceof RegularFileOperationCancelled) throw cause.reason;
+      if (cause instanceof RegularFileReadFailure) throw cause;
       if (
         cause instanceof RegularFileCancelled &&
-        cause.owner.handle === admitted
-      )
-        throw cause.reason;
-      if (
-        !(cause instanceof RegularFileCleanupFailure) ||
-        resources === undefined
+        cause.owner.handle !== admitted
       )
         throw cause;
-      const retry = await retryRegularFileCleanup(cause, resources, signal);
-      if (retry.cleanup !== undefined) throw cause;
-      if (retry.outcome.kind === "failed") throw retry.outcome.cause;
-      return retry.outcome.value;
+      if (cause instanceof RegularFileCleanupFailure) {
+        if (resources === undefined) throw cause;
+        const retry = await retryRegularFileCleanup(cause, resources, signal);
+        if (retry.cleanup !== undefined) throw cause;
+        if (retry.outcome.kind === "failed") {
+          if (signal?.aborted === true && retry.outcome.cause === signal.reason)
+            throw signal.reason;
+          const cancellation =
+            regularFileCancellation(retry.outcome.cause) ??
+            regularFileCancellation(cause);
+          if (cancellation !== undefined) {
+            if (options.cancellationFailure !== undefined)
+              throw options.cancellationFailure(cancellation.reason);
+            throw cancellation.reason;
+          }
+          throw retry.outcome.cause;
+        }
+        return retry.outcome.value;
+      }
+      const cancellation = regularFileCancellation(cause);
+      if (cancellation !== undefined) {
+        if (options.cancellationFailure !== undefined)
+          throw options.cancellationFailure(cancellation.reason);
+        throw cancellation.reason;
+      }
+      if (options.cancellationFailure !== undefined)
+        throw new RegularFileReadFailure(cause);
+      throw cause;
     }
   };
   const value = await (resources === undefined
@@ -175,6 +207,8 @@ export const withRegularFile = async <Value>(
     : resources.run(operation));
   // A retained close may have recovered after the descriptor owner's outcome
   // was captured. Include that retry and the scope's finalization in cancellation.
+  if (signal?.aborted === true && options.cancellationFailure !== undefined)
+    throw options.cancellationFailure(signal.reason);
   signal?.throwIfAborted();
   return value;
 };
@@ -225,15 +259,26 @@ const readRegularFileContent = <Value>(
   withRegularFile(
     path,
     async (handle, stats) => {
-      options.admit?.(stats);
-      const bytes = await readBoundedFileBytes(
-        handle,
-        stats.size,
-        options.signal,
-      );
-      if (bytes === undefined || bytes.length !== stats.size)
-        throw new RegularFileChangedError(path);
-      return decode(bytes, stats);
+      try {
+        options.admit?.(stats);
+        const bytes = await readBoundedFileBytes(handle, stats.size, {
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          cancellationFailure: (reason) =>
+            new RegularFileOperationCancelled(reason),
+          operationFailure: (cause) => new RegularFileReadFailure(cause),
+        });
+        if (bytes === undefined || bytes.length !== stats.size)
+          throw new RegularFileChangedError(path);
+        return decode(bytes, stats);
+      } catch (cause: unknown) {
+        if (
+          options.cancellationFailure !== undefined &&
+          !(cause instanceof RegularFileOperationCancelled) &&
+          !(cause instanceof RegularFileReadFailure)
+        )
+          throw new RegularFileReadFailure(cause);
+        throw cause;
+      }
     },
     options,
   );

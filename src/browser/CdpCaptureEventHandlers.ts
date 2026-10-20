@@ -452,9 +452,12 @@ export const handleConsoleAPICalled = (
     return;
   }
   const arguments_ = recordsValue(params.args);
+  const timestamp = numberValue(params.timestamp);
+  if (timestamp === undefined)
+    state.completeness.exclude("console_events", "invalid_protocol_value");
   state.console.push({
     type: cdpStringValue(params.type) ?? "unknown",
-    timestamp: numberValue(params.timestamp) ?? 0,
+    timestamp: timestamp ?? null,
     argument_types: arguments_.map(
       (argument) => cdpStringValue(argument.type) ?? "unknown",
     ),
@@ -506,28 +509,41 @@ export const handleWebSocketFrame = (
   const connection = state.webSocketConnectionsById.get(requestId);
   if (connection === undefined) return;
   const response = recordValue(params.response);
-  const payload = cdpStringValue(response?.payloadData) ?? "";
-  const opcode = Math.max(0, Math.trunc(numberValue(response?.opcode) ?? 0));
-  const decodedBytes =
-    opcode === 1 ? undefined : paddedBase64ByteLength(payload);
-  if (opcode !== 1 && decodedBytes === undefined)
+  const opcodeValue = numberValue(response?.opcode);
+  // RFC 6455 encodes opcodes in four bits; keep reserved values as observed data.
+  const opcode =
+    opcodeValue !== undefined &&
+    Number.isInteger(opcodeValue) &&
+    opcodeValue >= 0 &&
+    opcodeValue <= 15
+      ? opcodeValue
+      : null;
+  const payload = cdpStringValue(response?.payloadData);
+  const payloadBytes =
+    opcode === null || payload === undefined
+      ? null
+      : opcode === 1
+        ? Buffer.byteLength(payload)
+        : (paddedBase64ByteLength(payload) ?? null);
+  if (opcode === null || payloadBytes === null)
     state.completeness.exclude("websocket_frames", "invalid_protocol_value");
   connection.events.push({
     direction,
     opcode,
-    payload_bytes:
-      opcode === 1 ? Buffer.byteLength(payload) : (decodedBytes ?? null),
+    payload_bytes: payloadBytes,
     payload_shape: captureWebSocketShape(state, payload, opcode),
   });
 };
 
 const captureWebSocketShape = (
   state: CdpCaptureEventsState,
-  payload: string,
-  opcode: number,
+  payload: string | undefined,
+  opcode: number | null,
 ): WebPageInspection["network"]["websocket_connections"][number]["events"][number]["payload_shape"] => {
   if (!state.input.include_websocket_shapes) return null;
+  if (opcode === null) return null;
   if (opcode !== 1) return { format: "binary", json_shape: null };
+  if (payload === undefined) return null;
   const shape = inferJsonShape(payload);
   return {
     format: shape === null ? "text" : "json",

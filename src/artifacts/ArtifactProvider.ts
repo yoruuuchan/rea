@@ -44,6 +44,9 @@ import { createEvidence } from "../domain/evidence.js";
 import { freezeJsonSnapshot } from "../domain/immutableJson.js";
 import { createArtifactInspection } from "../domain/artifactInspection.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import type { ResolvedAppBundleResourceRoot } from "../application/AppBundleExecutable.js";
+import type { BundleResourceRoot } from "../domain/apple/bundleResourceRoot.js";
+import { BUNDLE_ARTIFACT_RESOURCE_OPERATIONS } from "../application/binary/BundleResourceSession.js";
 
 /** Read-only inventory and exclusively owned extraction provider. */
 export class ArtifactProvider implements AnalysisProvider {
@@ -70,6 +73,120 @@ export class ArtifactProvider implements AnalysisProvider {
 
   createClient(target: BinaryTarget): AnalysisClient {
     return new ArtifactClient(target, this.environment, this.#platform);
+  }
+
+  createBundleResourceClient(
+    root: ResolvedAppBundleResourceRoot,
+  ): AnalysisClient {
+    return new BundleResourceArtifactClient(
+      root,
+      this.environment,
+      this.#platform,
+    );
+  }
+}
+
+const serializedResourceRoot = (
+  root: ResolvedAppBundleResourceRoot,
+): BundleResourceRoot => ({
+  caller_path: root.callerPath,
+  canonical_path: root.canonicalPath,
+  info_plist_path: root.infoPlistPath,
+  layout: root.layout,
+  executable_sha256: root.executableSha256,
+});
+
+class BundleResourceArtifactClient implements AnalysisClient {
+  readonly #resourceScope = new ArtifactResourceScope();
+
+  constructor(
+    private readonly root: ResolvedAppBundleResourceRoot,
+    private readonly environment: Readonly<NodeJS.ProcessEnv>,
+    private readonly platform: NodeJS.Platform,
+  ) {}
+
+  async execute(
+    operation: AnalysisOperation,
+    parameters: Readonly<Record<string, JsonValue>>,
+    options?: ExecutionOptions,
+  ) {
+    if (operation === "health")
+      return ok(createAnalysisExecution(null, ARTIFACT_GRAPH_PROVIDER));
+    if (!BUNDLE_ARTIFACT_RESOURCE_OPERATIONS.has(operation))
+      return err(
+        new AnalysisCapabilityUnavailableError(
+          ARTIFACT_GRAPH_PROVIDER.id,
+          operation,
+          "The app resource reader supports only plist, Interface Builder, asset catalog, and keyed archive inspection.",
+        ),
+      );
+    try {
+      const resourceRoot = serializedResourceRoot(this.root);
+      const result =
+        operation === "decode_interface_builder"
+          ? await analyzeInterfaceBuilderBundle({
+              bundlePath: this.root.canonicalPath,
+              targetSha256: null,
+              resourceRoot,
+              limits: interfaceBuilderLimitsSchema.parse(parameters),
+              ...(options?.signal === undefined
+                ? {}
+                : { signal: options.signal }),
+            })
+          : operation === "inspect_keyed_archive"
+            ? await inspectBundleKeyedArchive({
+                bundlePath: this.root.canonicalPath,
+                targetSha256: null,
+                resourceRoot,
+                parameters,
+                platform: this.platform,
+                ...(options?.signal === undefined
+                  ? {}
+                  : { signal: options.signal }),
+              })
+            : operation === "inspect_asset_catalog"
+              ? await analyzeAppleAssetCatalogs({
+                  bundlePath: this.root.canonicalPath,
+                  targetSha256: null,
+                  resourceRoot,
+                  environment: this.environment,
+                  page: parameters,
+                  ...(options?.signal === undefined
+                    ? {}
+                    : { signal: options.signal }),
+                })
+              : (() => {
+                  throw new AnalysisCapabilityUnavailableError(
+                    ARTIFACT_GRAPH_PROVIDER.id,
+                    operation,
+                    "Property list inspection requires a platform-native reader.",
+                  );
+                })();
+      return ok(
+        createAnalysisExecution(result, ARTIFACT_GRAPH_PROVIDER, {
+          limitations: "limitations" in result ? result.limitations : [],
+        }),
+      );
+    } catch (cause: unknown) {
+      return err(
+        translateArtifactFailure(operation as ArtifactAnalysisOperation, cause),
+      );
+    }
+  }
+
+  close(): Promise<Result<null, AnalysisError>> {
+    return this.#resourceScope.close().then(
+      () => ok(null),
+      (cause: unknown) =>
+        err(
+          new ProviderCleanupError(
+            ARTIFACT_GRAPH_PROVIDER.id,
+            ["app bundle resource reader"],
+            { reason: cause instanceof Error ? cause.message : String(cause) },
+            { cause, operation: "close_binary" },
+          ),
+        ),
+    );
   }
 }
 
@@ -225,7 +342,9 @@ class ArtifactClient implements AnalysisClient {
         }),
       );
     } catch (cause: unknown) {
-      return err(translateArtifactFailure(operation, cause));
+      return err(
+        translateArtifactFailure(operation as ArtifactAnalysisOperation, cause),
+      );
     }
   }
 

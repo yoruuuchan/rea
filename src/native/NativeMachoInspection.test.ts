@@ -178,6 +178,59 @@ describe("Mach-O inspection container format", () => {
     if (!result.ok) throw result.error;
     expect(result.value.result).toMatchObject({ format: expected });
   });
+
+  it("does not call a lazy-info payload dependency exhaustive", async () => {
+    const runner = new NativeFixtureRunner({
+      lipo: "Non-fat file: /fixture/app is architecture: arm64\n",
+      "otool:-h": withOtoolMachHeader(
+        [
+          "Load command 0",
+          "      cmd LC_LOAD_DYLIB",
+          "  cmdsize 56",
+          "         name /usr/lib/libSystem.B.dylib (offset 24)",
+          "   time stamp 2 Thu Jan  1 00:00:02 1970",
+          "      current version 1.0.0",
+          "compatibility version 1.0.0",
+          "Load command 1",
+          "      cmd LC_LAZY_LOAD_DYLIB_INFO",
+          "  cmdsize 16",
+          "    dataoff 49304",
+          "   datasize 56",
+        ].join("\n"),
+      ),
+    });
+    const result = await inspectNativeMacho({
+      target: nativeMachoTarget("/fixture/app"),
+      run: (tool, args) => runner.run(tool, args),
+      invocation: (captured) => ({
+        tool: captured.tool,
+        command: [captured.executable, ...captured.arguments],
+        tool_version: captured.toolVersion,
+        version_reason: captured.versionReason,
+        executable_sha256: captured.executableSha256,
+        exit: { code: captured.exitCode, signal: captured.signal },
+        stdout_bytes: captured.stdoutBytes,
+        stderr_bytes: captured.stderrBytes,
+      }),
+    });
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toMatchObject({
+      load_commands: {
+        items: [{ kind: "LC_LOAD_DYLIB" }, { kind: "LC_LAZY_LOAD_DYLIB_INFO" }],
+      },
+      dependencies: {
+        exhaustive: false,
+        total: null,
+        items: [
+          {
+            path: "/usr/lib/libSystem.B.dylib",
+            kind: "LC_LOAD_DYLIB",
+          },
+        ],
+        limitations: [expect.stringContaining("1 LC_LAZY_LOAD_DYLIB_INFO")],
+      },
+    });
+  });
 });
 
 describe("Mach-O UUID reconciliation", () => {

@@ -113,7 +113,7 @@ export const traceNativeValues = async (
       continue;
     }
     const parsed = functionDossierSchema.safeParse(execution.value.result);
-    if (!parsed.success || execution.value.subject === null)
+    if (!parsed.success || execution.value.subject == null)
       return err(
         new AnalysisOutputError(
           "trace_native_values",

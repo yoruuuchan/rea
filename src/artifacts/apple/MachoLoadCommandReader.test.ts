@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -14,12 +14,18 @@ import {
   dylibCommand,
   dylibUseCommand,
   fatImage,
+  lazyLoadDylibInfoCommand,
+  lazyLoadDylibInfoPayload,
   machoImage,
+  machoImageWithLazyLoadDylibInfo,
+  segmentCommand,
   readerOf,
   rpathCommand,
   versionMinCommand,
 } from "./MachoImage.fixture.js";
 import {
+  MAX_LAZY_INFO_DEPENDENCIES,
+  MAX_LAZY_INFO_SYMBOL_REFERENCES,
   MAX_LOAD_COMMAND_BYTES,
   hasMachoMagic,
   readMachoImage,
@@ -350,6 +356,650 @@ describe("Mach-O load command reader: decodes thin-image load commands", () => {
         delayed: false,
       },
     ]);
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO payload", () => {
+  it("reads install names from the linkedit payload in load-command order", async () => {
+    const payload = lazyLoadDylibInfoPayload({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+    });
+    expect(payload).toHaveLength(56);
+    const image = machoImageWithLazyLoadDylibInfo({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+      commandsBefore: [
+        dylibCommand(LC.LOAD_DYLIB, "/usr/lib/libSystem.B.dylib"),
+      ],
+      commandsAfter: [dylibCommand(LC.LOAD_DYLIB, "@rpath/libafter.dylib")],
+    });
+    const facts = await read(image);
+    if (facts.status !== "parsed")
+      throw new Error(
+        facts.status === "not-mach-o" ? facts.status : facts.reason,
+      );
+    expect(
+      facts.slices[0]?.dependencies.map(
+        ({ command, install_name: name, encoding, weak, current_version }) => ({
+          command,
+          name,
+          encoding,
+          weak,
+          current_version,
+        }),
+      ),
+    ).toEqual([
+      {
+        command: "LC_LOAD_DYLIB",
+        name: "/usr/lib/libSystem.B.dylib",
+        encoding: "dylib_command",
+        weak: false,
+        current_version: "1.0.0",
+      },
+      {
+        command: "LC_LAZY_LOAD_DYLIB_INFO",
+        name: "@rpath/libl.dylib",
+        encoding: "lazy_load_dylib_info",
+        weak: false,
+        current_version: null,
+      },
+      {
+        command: "LC_LOAD_DYLIB",
+        name: "@rpath/libafter.dylib",
+        encoding: "dylib_command",
+        weak: false,
+        current_version: "1.0.0",
+      },
+    ]);
+    const weak = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        flags: 0x1,
+      }),
+    );
+    if (weak.status !== "parsed")
+      throw new Error(weak.status === "not-mach-o" ? weak.status : weak.reason);
+    expect(weak.slices[0]?.dependencies[0]).toMatchObject({ weak: true });
+    const universal = await read(
+      fatImage([
+        {
+          cpu: CPU.arm64,
+          bytes: machoImageWithLazyLoadDylibInfo({
+            path: "@rpath/libl.dylib",
+            symbols: ["_lf"],
+          }),
+        },
+      ]),
+    );
+    if (universal.status !== "parsed")
+      throw new Error(
+        universal.status === "not-mach-o" ? universal.status : universal.reason,
+      );
+    expect(universal.slices[0]?.dependencies[0]?.install_name).toBe(
+      "@rpath/libl.dylib",
+    );
+  });
+
+  it("rejects a lazy-info payload that is truncated, mis-pointed, or has unknown flags", async () => {
+    const outside = machoImageWithLazyLoadDylibInfo({
+      path: "@rpath/libl.dylib",
+    });
+    const view = new DataView(outside.buffer);
+    const commandAt = 32;
+    view.setUint32(commandAt + 8, outside.length, true);
+    expect((await read(outside)).status).toBe("malformed");
+
+    const badPayload = lazyLoadDylibInfoPayload({
+      path: "@rpath/libl.dylib",
+    });
+    const badPath = machoImageWithLazyLoadDylibInfo({
+      path: "@rpath/libl.dylib",
+    });
+    const payloadAt = badPath.length - badPayload.length;
+    new DataView(badPath.buffer).setUint32(payloadAt, badPath.length, true);
+    expect(await read(badPath)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("load path"),
+    });
+
+    const unknownFlags = machoImageWithLazyLoadDylibInfo({
+      path: "@rpath/libl.dylib",
+      flags: 0x2,
+    });
+    expect(await read(unknownFlags)).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("unrecognized bits"),
+    });
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO image offsets", () => {
+  it("rejects flag and chain-start offsets outside the slice VM range", async () => {
+    const beyondPage = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        flagImageOffset: 0x4001,
+      }),
+    );
+    expect(beyondPage).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("flag image offset 0x4001"),
+    });
+    const beyondChain = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        chainStartImageOffset: 0x4001,
+      }),
+    );
+    expect(beyondChain).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("chain start image offset 0x4001"),
+    });
+    const onPage = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        flagImageOffset: 0x4000,
+        chainStartImageOffset: 0x4000,
+      }),
+    );
+    expect(onPage.status).toBe("parsed");
+  });
+
+  it("measures the VM range from __TEXT and ignores __LINKEDIT", async () => {
+    const text = segmentCommand({
+      name: "__TEXT",
+      vmaddr: 0x100000000n,
+      vmsize: 0x8000n,
+    });
+    const inside = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        flagImageOffset: 0x8000,
+        commandsBefore: [text],
+      }),
+    );
+    expect(inside.status).toBe("parsed");
+    const outside = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        chainStartImageOffset: 0x8001,
+        commandsBefore: [text],
+      }),
+    );
+    expect(outside).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("slice VM range 0x8000"),
+    });
+    const linkedit = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        flagImageOffset: 0x4001,
+        commandsBefore: [
+          segmentCommand({
+            name: "__LINKEDIT",
+            vmaddr: 0n,
+            vmsize: 0x100000n,
+          }),
+        ],
+      }),
+    );
+    expect(linkedit.status).toBe("malformed");
+  });
+
+  it("keeps a short segment parseable until a lazy-info command needs its VM range", async () => {
+    const short = new Uint8Array(16);
+    const view = new DataView(short.buffer);
+    view.setUint32(0, 0x19, true);
+    view.setUint32(4, short.length, true);
+    expect((await read(machoImage({ commands: [short] }))).status).toBe(
+      "parsed",
+    );
+    const withLazy = await read(
+      machoImageWithLazyLoadDylibInfo({
+        path: "@rpath/libl.dylib",
+        commandsBefore: [short],
+      }),
+    );
+    expect(withLazy).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("slice VM range"),
+    });
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO payload budget", () => {
+  it("reads one shared payload range once", async () => {
+    const payload = lazyLoadDylibInfoPayload({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+    });
+    const dataOffset = 32 + 16 + 16 + 16;
+    const image = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(dataOffset, payload.length),
+        lazyLoadDylibInfoCommand(dataOffset, payload.length),
+      ],
+    });
+    const bytes = new Uint8Array(image.length + payload.length);
+    bytes.set(image);
+    bytes.set(payload, image.length);
+    let payloadReads = 0;
+    const facts = await readMachoImage(async (offset, length) => {
+      if (offset === image.length && length === payload.length)
+        payloadReads += 1;
+      return bytes.subarray(offset, offset + length);
+    }, bytes.length);
+    expect(payloadReads).toBe(1);
+    expect(facts).toMatchObject({
+      status: "parsed",
+      slices: [
+        {
+          dependencies: [
+            { install_name: "@rpath/libl.dylib" },
+            { install_name: "@rpath/libl.dylib" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("refuses distinct lazy-info payloads whose combined size exceeds the aggregate limit", async () => {
+    const payload = lazyLoadDylibInfoPayload({ path: "@rpath/libl.dylib" });
+    const dataOffset = 32 + 16 + 32;
+    const image = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(dataOffset, payload.length),
+        lazyLoadDylibInfoCommand(0, MAX_LOAD_COMMAND_BYTES),
+      ],
+    });
+    const bytes = new Uint8Array(MAX_LOAD_COMMAND_BYTES);
+    bytes.set(image);
+    bytes.set(payload, image.length);
+    expect(await read(bytes)).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("aggregate limit"),
+    });
+  });
+
+  it("does not reread a payload range contained in an earlier read", async () => {
+    const payload = lazyLoadDylibInfoPayload({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+    });
+    const image = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(0, payload.length + 8),
+        lazyLoadDylibInfoCommand(0, payload.length),
+      ],
+    });
+    const bytes = new Uint8Array(image.length + payload.length + 8);
+    bytes.set(image);
+    bytes.set(payload, image.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(32 + 8, image.length, true);
+    view.setUint32(48 + 8, image.length, true);
+    let payloadReads = 0;
+    const facts = await readMachoImage(async (offset, length) => {
+      if (offset === image.length) payloadReads += 1;
+      return bytes.subarray(offset, offset + length);
+    }, bytes.length);
+    expect(payloadReads).toBe(1);
+    expect(facts).toMatchObject({
+      status: "parsed",
+      slices: [
+        {
+          dependencies: [
+            { install_name: "@rpath/libl.dylib" },
+            { install_name: "@rpath/libl.dylib" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("parses distinct non-nested lazy-info payloads under the dependency limit", async () => {
+    const count = 8;
+    const payloadSize = 26;
+    const payload = new Uint8Array(payloadSize);
+    new DataView(payload.buffer).setUint32(0, 24, true);
+    new DataView(payload.buffer).setUint32(20, 24, true);
+    const dataOffset = 32 + 16 + count * 16;
+    const commands = Array.from({ length: count }, (_, index) =>
+      lazyLoadDylibInfoCommand(dataOffset + index * payloadSize, payloadSize),
+    );
+    const image = machoImage({ commands });
+    const bytes = new Uint8Array(image.length + count * payloadSize);
+    bytes.set(image);
+    for (let index = 0; index < count; index += 1)
+      bytes.set(payload, image.length + index * payloadSize);
+    const facts = await read(bytes);
+    if (facts.status !== "parsed")
+      throw new Error(
+        facts.status === "not-mach-o" ? facts.status : facts.reason,
+      );
+    expect(facts.slices[0]?.dependencies).toHaveLength(count);
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO dependency limit", () => {
+  it("retains one result per command until the dependency limit", async () => {
+    const payload = lazyLoadDylibInfoPayload({ path: "@rpath/libl.dylib" });
+    const imageFor = (count: number) => {
+      const dataOffset = 32 + 16 + count * 16;
+      const image = machoImage({
+        commands: Array.from({ length: count }, () =>
+          lazyLoadDylibInfoCommand(dataOffset, payload.length),
+        ),
+      });
+      const bytes = new Uint8Array(image.length + payload.length);
+      bytes.set(image);
+      bytes.set(payload, image.length);
+      return bytes;
+    };
+    const atLimit = await read(imageFor(MAX_LAZY_INFO_DEPENDENCIES));
+    if (atLimit.status !== "parsed")
+      throw new Error(
+        atLimit.status === "not-mach-o" ? atLimit.status : atLimit.reason,
+      );
+    expect(atLimit.slices[0]?.dependencies).toHaveLength(
+      MAX_LAZY_INFO_DEPENDENCIES,
+    );
+    expect(await read(imageFor(MAX_LAZY_INFO_DEPENDENCIES + 1))).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("dependency limit"),
+    });
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO string bounds", () => {
+  it("does not reuse a cached path that extends past a shorter payload", async () => {
+    const payload = new Uint8Array(48);
+    const view = new DataView(payload.buffer);
+    const path = new TextEncoder().encode("@rpath/libl.dylib");
+    view.setUint32(0, 24, true);
+    view.setUint32(20, 24, true);
+    payload.set(path, 24);
+    const image = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(0, payload.length),
+        lazyLoadDylibInfoCommand(0, 24),
+      ],
+    });
+    const bytes = new Uint8Array(image.length + payload.length);
+    bytes.set(image);
+    bytes.set(payload, image.length);
+    const patched = new DataView(bytes.buffer);
+    patched.setUint32(32 + 8, image.length, true);
+    patched.setUint32(48 + 8, image.length, true);
+    expect(await read(bytes)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("outside the payload"),
+    });
+    const truncated = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(0, payload.length),
+        lazyLoadDylibInfoCommand(0, 40),
+      ],
+    });
+    const truncatedBytes = new Uint8Array(truncated.length + payload.length);
+    truncatedBytes.set(truncated);
+    truncatedBytes.set(payload, truncated.length);
+    const truncatedView = new DataView(truncatedBytes.buffer);
+    truncatedView.setUint32(32 + 8, truncated.length, true);
+    truncatedView.setUint32(48 + 8, truncated.length, true);
+    expect(await read(truncatedBytes)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("unterminated"),
+    });
+  });
+
+  it("rejects a load path taken from the payload header", async () => {
+    const payload = new Uint8Array(24);
+    const view = new DataView(payload.buffer);
+    view.setUint32(0, 4, true);
+    view.setUint32(20, 24, true);
+    const image = machoImage({
+      commands: [lazyLoadDylibInfoCommand(0, payload.length)],
+    });
+    const bytes = new Uint8Array(image.length + payload.length);
+    bytes.set(image);
+    bytes.set(payload, image.length);
+    new DataView(bytes.buffer).setUint32(32 + 8, image.length, true);
+    expect(await read(bytes)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("inside the payload header"),
+    });
+    const symbolPayload = lazyLoadDylibInfoPayload({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+    });
+    new DataView(symbolPayload.buffer).setUint32(24, 4, true);
+    const symbolImage = machoImage({
+      commands: [lazyLoadDylibInfoCommand(0, symbolPayload.length)],
+    });
+    const symbolBytes = new Uint8Array(
+      symbolImage.length + symbolPayload.length,
+    );
+    symbolBytes.set(symbolImage);
+    symbolBytes.set(symbolPayload, symbolImage.length);
+    new DataView(symbolBytes.buffer).setUint32(
+      32 + 8,
+      symbolImage.length,
+      true,
+    );
+    expect(await read(symbolBytes)).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("symbol 0"),
+    });
+  });
+
+  it("charges repeated and overlapping symbol scans against the string budget", async () => {
+    const path = new TextEncoder().encode("@rpath/libl.dylib");
+    const stringBytes = 64 * 1024;
+    const imageFor = (symbolCount: number, step: number) => {
+      const pathOffset = 24 + symbolCount * 4;
+      const stringOffset = pathOffset + path.length + 1;
+      const payload = new Uint8Array(stringOffset + stringBytes + 1);
+      const view = new DataView(payload.buffer);
+      view.setUint32(0, pathOffset, true);
+      view.setUint32(16, symbolCount, true);
+      view.setUint32(20, 24, true);
+      payload.set(path, pathOffset);
+      payload.fill(0x61, stringOffset, stringOffset + stringBytes);
+      for (let symbol = 0; symbol < symbolCount; symbol += 1)
+        view.setUint32(
+          24 + symbol * 4,
+          stringOffset + (step === 0 ? 0 : symbol % 8),
+          true,
+        );
+      const image = machoImage({
+        commands: [lazyLoadDylibInfoCommand(0, payload.length)],
+      });
+      const bytes = new Uint8Array(image.length + payload.length);
+      bytes.set(image);
+      bytes.set(payload, image.length);
+      new DataView(bytes.buffer).setUint32(32 + 8, image.length, true);
+      return bytes;
+    };
+    expect(imageFor(2, 0).length).toBeLessThan(MAX_LOAD_COMMAND_BYTES);
+    expect(await read(imageFor(2, 0))).toMatchObject({
+      status: "parsed",
+      slices: [{ dependencies: [{ install_name: "@rpath/libl.dylib" }] }],
+    });
+    const over = Math.floor(MAX_LOAD_COMMAND_BYTES / (stringBytes + 1)) + 2;
+    expect(await read(imageFor(over, 0))).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("string validation"),
+    });
+    expect(await read(imageFor(over, 1))).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("string validation"),
+    });
+  });
+});
+
+const lazyInfoPayloadWithSymbolCount = (
+  symbolCount: number,
+  pathText: string,
+): Uint8Array => {
+  const path = new TextEncoder().encode(pathText);
+  const pathOffset = 24 + symbolCount * 4;
+  // One byte after the path NUL, because a load-path terminator in the
+  // payload's final byte is unterminated.
+  const payload = new Uint8Array(pathOffset + path.length + 2);
+  const view = new DataView(payload.buffer);
+  view.setUint32(0, pathOffset, true);
+  view.setUint32(16, symbolCount, true);
+  view.setUint32(20, 24, true);
+  payload.set(path, pathOffset);
+  const emptySymbol = pathOffset + path.length;
+  for (let symbol = 0; symbol < symbolCount; symbol += 1)
+    view.setUint32(24 + symbol * 4, emptySymbol, true);
+  return payload;
+};
+
+const imageWithLazyPayload = (payload: Uint8Array): Uint8Array => {
+  const image = machoImage({
+    commands: [lazyLoadDylibInfoCommand(0, payload.length)],
+  });
+  const bytes = new Uint8Array(image.length + payload.length);
+  bytes.set(image);
+  bytes.set(payload, image.length);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(32 + 8, image.length, true);
+  view.setUint32(32 + 12, payload.length, true);
+  return bytes;
+};
+
+describe("LC_LAZY_LOAD_DYLIB_INFO symbol cardinality", () => {
+  it("stops before caching one string for every symbol offset", async () => {
+    const atLimit = lazyInfoPayloadWithSymbolCount(
+      MAX_LAZY_INFO_SYMBOL_REFERENCES,
+      "@rpath/libl.dylib",
+    );
+    expect(await read(imageWithLazyPayload(atLimit))).toMatchObject({
+      status: "parsed",
+      slices: [{ dependencies: [{ install_name: "@rpath/libl.dylib" }] }],
+    });
+    const overLimit = lazyInfoPayloadWithSymbolCount(
+      MAX_LAZY_INFO_SYMBOL_REFERENCES + 1,
+      "@rpath/libl.dylib",
+    );
+    expect(await read(imageWithLazyPayload(overLimit))).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("65536-reference limit"),
+    });
+  });
+
+  it("counts symbol references across distinct lazy-info payloads", async () => {
+    const first = lazyInfoPayloadWithSymbolCount(
+      MAX_LAZY_INFO_SYMBOL_REFERENCES,
+      "@rpath/libl.dylib",
+    );
+    const second = lazyInfoPayloadWithSymbolCount(1, "@rpath/libm.dylib");
+    const image = machoImage({
+      commands: [
+        lazyLoadDylibInfoCommand(0, first.length),
+        lazyLoadDylibInfoCommand(0, second.length),
+      ],
+    });
+    const bytes = new Uint8Array(image.length + first.length + second.length);
+    bytes.set(image);
+    bytes.set(first, image.length);
+    bytes.set(second, image.length + first.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(32 + 8, image.length, true);
+    view.setUint32(32 + 12, first.length, true);
+    view.setUint32(48 + 8, image.length + first.length, true);
+    view.setUint32(48 + 12, second.length, true);
+    expect(await read(bytes)).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("65536-reference limit"),
+    });
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO path terminator", () => {
+  it("rejects a load path whose NUL is the payload's final byte", async () => {
+    const payload = new Uint8Array(27);
+    const view = new DataView(payload.buffer);
+    view.setUint32(0, 24, true);
+    view.setUint32(20, 24, true);
+    payload[24] = 0x61;
+    const imageFor = (size: number) => {
+      const image = machoImage({
+        commands: [lazyLoadDylibInfoCommand(0, size)],
+      });
+      const bytes = new Uint8Array(image.length + payload.length);
+      bytes.set(image);
+      bytes.set(payload, image.length);
+      new DataView(bytes.buffer).setUint32(32 + 8, image.length, true);
+      new DataView(bytes.buffer).setUint32(32 + 12, size, true);
+      return bytes;
+    };
+    expect((await read(imageFor(payload.length))).status).toBe("parsed");
+    expect(await read(imageFor(26))).toMatchObject({
+      status: "malformed",
+      reason: expect.stringContaining("unterminated"),
+    });
+  });
+});
+
+describe("LC_LAZY_LOAD_DYLIB_INFO resolution", () => {
+  it("reports the lazy edge and does not treat an absent image as a launch failure", async () => {
+    const root = await createTestTempDirectory("rea-lazy-info-");
+    const executablePath = "lazy";
+    const dylibPath = "lib/libl.dylib";
+    const executable = machoImageWithLazyLoadDylibInfo({
+      path: "@rpath/libl.dylib",
+      symbols: ["_lf"],
+      commandsBefore: [
+        buildVersionCommand(1),
+        rpathCommand("@executable_path/lib"),
+        dylibCommand(LC.LOAD_DYLIB, "/usr/lib/libSystem.B.dylib"),
+      ],
+    });
+    const dylib = machoImage({
+      fileType: FILE_TYPE.dylib,
+      commands: [
+        buildVersionCommand(1),
+        dylibCommand(LC.ID_DYLIB, "@rpath/libl.dylib"),
+        dylibCommand(LC.LOAD_DYLIB, "@rpath/libdeep.dylib"),
+      ],
+    });
+    await mkdir(join(root, "lib"));
+    await writeFile(join(root, executablePath), executable);
+    await writeFile(join(root, dylibPath), dylib);
+    const trace = () =>
+      traceDylibResolution({
+        rootPath: root,
+        targetPath: join(root, executablePath),
+        targetSha256: createHash("sha256").update(executable).digest("hex"),
+        enumerateRoots: false,
+        parameters: { roots: [executablePath] },
+      });
+    const present = await trace();
+    expect(present.coverage.status).toBe("complete");
+    expect(present.edges.map(({ install_name: name }) => name)).toEqual([
+      "/usr/lib/libSystem.B.dylib",
+      "@rpath/libl.dylib",
+    ]);
+    expect(present.edges[1]).toMatchObject({
+      command: "LC_LAZY_LOAD_DYLIB_INFO",
+      encoding: "lazy_load_dylib_info",
+      current_version: null,
+      compatibility_version: null,
+      resolution: { status: "resolved", image: dylibPath },
+    });
+    expect(present.findings).toEqual([]);
+    await rename(join(root, dylibPath), `${join(root, dylibPath)}.moved`);
+    const absent = await trace();
+    expect(absent.coverage.status).toBe("complete");
+    expect(absent.findings.map(({ kind }) => kind)).toEqual([
+      "lazy-load-unresolved",
+    ]);
+    expect(absent.edges[1]?.resolution.status).toBe("unresolved");
   });
 });
 

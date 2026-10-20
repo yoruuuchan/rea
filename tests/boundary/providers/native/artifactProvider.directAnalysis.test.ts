@@ -48,7 +48,9 @@ it("runs static .app decoding without registering native analysis engines", asyn
     evidence.normalized_result,
   );
   expect(result.documents).toEqual([]);
-  expect(result.graph.target_sha256).toBe(evidence.subject?.digest.sha256);
+  expect(result.graph.target_sha256).toBe(
+    evidence.subject?.digest.sha256 ?? null,
+  );
 });
 
 it("inspects an artifact through the direct CLI workflow without an REA grant", async () => {

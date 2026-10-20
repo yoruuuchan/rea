@@ -25,9 +25,11 @@ import type { ExecutionOptions } from "./AnalysisProvider.js";
 import type { BrowserObservationPort } from "./BrowserObservationPort.js";
 import { createBrowserEvidence } from "./BrowserEvidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
-import { completeProviderEvidence } from "./ProviderOperationExecution.js";
+import {
+  completeProviderEvidence,
+  keepIncompleteObservation,
+} from "./ProviderOperationExecution.js";
 import { webPageInspectionSchema } from "../domain/browserObservationSchemas.js";
-import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 
 /** List browser targets within the endpoint and origin scope in the request. */
 export const listBrowserTargets = async (
@@ -275,7 +277,10 @@ const browserEvidence = (
   );
 };
 
-/** Retain the completed capture or bundle facts under their actual operation. */
+const NON_JSON_BROWSER_OBSERVATION =
+  "Browser provider retained a non-JSON incomplete observation.";
+
+/** Promote completed page or bundle facts; keep only a JSON-safe incomplete observation. */
 const retainBrowserObservation = (
   error: AnalysisError,
   input: InspectWebPageInput | AnalyzeWebBundleInput,
@@ -291,59 +296,42 @@ const retainBrowserObservation = (
     "capture" in partial
   ) {
     const bundle = webBundleAnalysisSchema.safeParse(partial);
-    if (!bundle.success) {
-      const malformed = new AnalysisOutputError(
-        errorOperation,
-        "Browser provider retained malformed completed bundle facts.",
-        { cause: bundle.error },
+    if (bundle.success) {
+      error.partialObservation = createBrowserEvidence(
+        "analyze_web_bundle",
+        input,
+        bundle.data,
+        provider.identity(),
       );
-      return err(
-        error.cleanupIncomplete
-          ? analysisErrorWithCleanupFailure(
-              malformed,
-              error,
-              errorOperation,
-            ).bindCleanupDependencies([malformed, error])
-          : malformed,
-      );
+      return err(error);
     }
-    error.partialObservation = createBrowserEvidence(
-      "analyze_web_bundle",
-      input,
-      bundle.data,
-      provider.identity(),
-    );
-    return err(error);
-  }
-  if (
-    partial === undefined ||
-    "evidence_id" in partial ||
-    !("target" in partial) ||
-    !("network" in partial) ||
-    !("capture_window" in partial)
-  )
-    return err(error);
-  const inspection = webPageInspectionSchema.safeParse(partial);
-  if (!inspection.success) {
-    if (error instanceof AnalysisCancelledError)
-      return err(
-        new AnalysisOutputError(
-          errorOperation,
-          "Browser provider retained a malformed completed page inspection.",
-          { cause: inspection.error },
-        ),
+  } else if (
+    partial !== undefined &&
+    !("evidence_id" in partial) &&
+    "target" in partial &&
+    "network" in partial &&
+    "capture_window" in partial
+  ) {
+    const inspection = webPageInspectionSchema.safeParse(partial);
+    if (inspection.success) {
+      const pageInput: InspectWebPageInput =
+        "fetch_source_maps" in input
+          ? (({ fetch_source_maps: _fetchSourceMaps, ...page }) => page)(input)
+          : input;
+      error.partialObservation = createBrowserEvidence(
+        "inspect_web_page",
+        pageInput,
+        inspection.data,
+        provider.identity(),
       );
-    return err(error);
+      return err(error);
+    }
   }
-  const pageInput: InspectWebPageInput =
-    "fetch_source_maps" in input
-      ? (({ fetch_source_maps: _fetchSourceMaps, ...page }) => page)(input)
-      : input;
-  error.partialObservation = createBrowserEvidence(
-    "inspect_web_page",
-    pageInput,
-    inspection.data,
-    provider.identity(),
+  return err(
+    keepIncompleteObservation(
+      error,
+      errorOperation,
+      NON_JSON_BROWSER_OBSERVATION,
+    ),
   );
-  return err(error);
 };

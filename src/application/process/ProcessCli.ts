@@ -238,17 +238,16 @@ const readJson = async (
   operation: "capture_process_scenario" | "compare_process_captures",
   signal?: AbortSignal,
 ): Promise<unknown> => {
-  if (signal?.aborted) throw new AnalysisCancelledError(operation);
-  const loaded = await readJsonFile(path, signal).catch((cause: unknown) => {
-    if (
-      signal?.aborted === true &&
-      !(cause instanceof RegularFileCleanupFailure)
-    )
-      throw new AnalysisCancelledError(operation, { cause });
-    throw cause;
-  });
-  if (signal?.aborted) throw new AnalysisCancelledError(operation);
-  if (loaded.ok) return loaded.value;
+  if (signal?.aborted)
+    throw new AnalysisCancelledError(operation, { cause: signal.reason });
+  const loaded = await readJsonFile(path, signal);
+  if (!loaded.ok && loaded.error instanceof AnalysisCancelledError)
+    throw new AnalysisCancelledError(operation, { cause: loaded.error.cause });
+  if (loaded.ok) {
+    if (signal?.aborted)
+      throw new AnalysisCancelledError(operation, { cause: signal.reason });
+    return loaded.value;
+  }
   if (loaded.error._tag !== "EvidenceFileError") throw loaded.error;
   if (loaded.error.reason === "io") throw loaded.error;
   const detail = describeValidationFailure(loaded.error.cause);

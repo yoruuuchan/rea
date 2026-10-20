@@ -1,8 +1,13 @@
 import { expect, it } from "vitest";
 import { createEvidence } from "../../domain/evidence.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { wasmInterfaceComparisonSchema } from "../../contracts/wasm/wasmComparisonContracts.js";
 import { compareWasmInterfaces } from "./WasmInterfaceComparisonService.js";
-import type { WasmInterface } from "../../domain/wasm/wasmInterface.js";
+import {
+  WASM_INTERFACE_REPRESENTATION_BYTES,
+  wasmInterfaceEntryRepresentationBytes,
+  type WasmInterface,
+} from "../../domain/wasm/wasmInterface.js";
 import { wasmArtifactFixture } from "../../../tests/fixtures/wasm/artifact.js";
 
 const facts = (
@@ -177,6 +182,72 @@ it("resolves exact retained references and permits cancellation between comparis
     ok: false,
     error: { _tag: "AnalysisCancelledError" },
   });
+});
+
+/** One inventory under the comparison cap; two of them exceed it together. */
+const admittedInventory = (label: string): WasmInterface => {
+  const base = facts(label).entries[0]!;
+  const minimum = Math.floor(WASM_INTERFACE_REPRESENTATION_BYTES / 2) + 4096;
+  let low = 0;
+  let high = 4_000_000;
+  let best = 0;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const name = `${label}-${"n".repeat(mid)}`;
+    const bytes = wasmInterfaceEntryRepresentationBytes({
+      ...base,
+      name,
+      wat_form: `(export "${name}" (func 0))`,
+    });
+    if (bytes >= minimum) {
+      best = mid;
+      high = mid - 1;
+    } else low = mid + 1;
+  }
+  const name = `${label}-${"n".repeat(best)}`;
+  const entry = {
+    ...base,
+    name,
+    wat_form: `(export "${name}" (func 0))`,
+  };
+  const bytes = wasmInterfaceEntryRepresentationBytes(entry);
+  if (
+    bytes >= WASM_INTERFACE_REPRESENTATION_BYTES ||
+    bytes + 512 >= WASM_INTERFACE_REPRESENTATION_BYTES
+  )
+    throw new Error("Sized inventory is not individually admitted");
+  return { state: "complete", issues: [], entries: [entry] };
+};
+
+it("refuses two admitted inventories that together exceed the comparison cap", async () => {
+  const left = admittedInventory("left");
+  const right = admittedInventory("right");
+  const empty: WasmInterface = { state: "complete", issues: [], entries: [] };
+  const alone = await compareWasmInterfaces({
+    left: evidence(left),
+    right: evidence(empty),
+    scope: "both",
+  });
+  expect(alone.ok).toBe(true);
+  const combined = await compareWasmInterfaces({
+    left: evidence(left),
+    right: evidence(right),
+    scope: "both",
+  });
+  expect(combined.ok).toBe(false);
+  if (combined.ok) throw new Error("Expected comparison allowance refusal");
+  const projected = projectAnalysisError(combined.error);
+  expect(projected.retryable).toBe(false);
+  expect(projected.code).toBe("resource_constraint");
+  expect(combined.error).toMatchObject({ resource: "capacity" });
+  expect(projected.remediation.action).toContain(
+    "The WASM interface comparison inventory",
+  );
+  expect(projected.remediation.action).toContain("fixed byte allowance");
+  expect(projected.remediation.action).not.toContain("fixed count");
+  expect(projected.remediation.action).not.toMatch(
+    /Wait for an active analysis/u,
+  );
 });
 
 it.each([false, true])(

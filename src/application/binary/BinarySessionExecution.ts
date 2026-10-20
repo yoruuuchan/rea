@@ -134,6 +134,7 @@ export const bindExecutionTarget = (
       : { architecture: target.architecture }),
   };
   if (
+    result.value.subject !== undefined &&
     result.value.subject !== null &&
     result.value.subject.sha256 !== target.sha256 &&
     !isArtifactBundleSubject(operation, result.value.subject, target)
@@ -144,7 +145,9 @@ export const bindExecutionTarget = (
         `${operation}:subject`,
       ),
     );
-  return ok({ ...result.value, subject: result.value.subject ?? subject });
+  return result.value.subject === undefined
+    ? ok({ ...result.value, subject })
+    : result;
 };
 
 const isArtifactBundleSubject = (

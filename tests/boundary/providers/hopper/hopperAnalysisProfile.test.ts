@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
+import { createInspectionResources } from "../../../fixtures/inspectionResources.js";
 
 import type { BinaryTarget } from "../../../../src/domain/binaryTargetTypes.js";
 import {
@@ -12,9 +13,12 @@ import {
 } from "../../../../src/hopper/HopperAnalysisProfile.js";
 import { HOPPER_PROVIDER_IDENTITY } from "../../../../src/hopper/HopperProviderCapabilities.js";
 
+let inspectionResources = createInspectionResources();
 let directory: string | undefined;
 
 afterEach(async () => {
+  await inspectionResources.close();
+  inspectionResources = createInspectionResources();
   if (directory !== undefined)
     await rm(directory, { recursive: true, force: true });
   directory = undefined;
@@ -70,6 +74,7 @@ describe("Hopper analysis profiles", () => {
         launcherPath: "/missing/hopper",
         loaderArgsOverride: [],
         provider: HOPPER_PROVIDER_IDENTITY,
+        resourceScope: inspectionResources.owner,
       },
     );
     expect(resolved).toEqual({
@@ -99,6 +104,7 @@ describe("Hopper analysis profiles", () => {
           launcherPath,
           loaderArgsOverride: scenario.override,
           provider: HOPPER_PROVIDER_IDENTITY,
+          resourceScope: inspectionResources.owner,
         },
       );
       expect(resolved).toMatchObject({
@@ -128,6 +134,7 @@ describe("Hopper analysis profiles", () => {
       launcherPath: launcher,
       loaderArgsOverride: [],
       provider: HOPPER_PROVIDER_IDENTITY,
+      resourceScope: inspectionResources.owner,
       signal: controller.signal,
     });
 

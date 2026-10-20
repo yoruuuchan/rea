@@ -1,3 +1,4 @@
+import { fixedAllowanceOptions } from "../../domain/fixedAllowanceRemediation.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import {
@@ -25,7 +26,10 @@ import {
 import { err, ok } from "../../domain/result.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import { PE_RESOURCES_PROVIDER } from "../../application/InvestigationProviders.js";
-import { parsePeResources } from "./PeResourceParser.js";
+import {
+  parsePeResources,
+  PE_RESOURCE_METADATA_BYTES,
+} from "./PeResourceParser.js";
 
 /** Portable parser over one bounded, identity-checked regular file. */
 export class PeResourcesProvider implements PeResourcesPort {
@@ -118,7 +122,8 @@ const peResourcesFailurePrimary = (
   if (cause instanceof ArtifactReaderFailure) {
     // An input byte budget is a file-size bound, not a memory constraint, and
     // an entry budget is a capacity bound. Report what was actually exceeded.
-    if (cause.reason === "limit")
+    if (cause.reason === "limit") {
+      const metadata = cause.boundary === "memory";
       return new AnalysisResourceConstraintError(
         operation,
         cause.boundary ?? "memory",
@@ -126,22 +131,31 @@ const peResourcesFailurePrimary = (
         {
           max_file_bytes: input.max_file_bytes,
           max_entries: input.max_entries,
+          ...(metadata
+            ? { maximum_metadata_bytes: PE_RESOURCE_METADATA_BYTES }
+            : {}),
         },
         {
           cause,
-          // Both bounds are caller-selected and deterministic for the same
-          // input, so waiting for an active analysis cannot help.
-          ...(cause.boundary === undefined || cause.boundary === "memory"
+          // Caller-selected budgets and the fixed metadata allowance are
+          // deterministic for the same input, so waiting cannot help.
+          ...(cause.boundary === undefined
             ? {}
-            : {
-                retryable: false,
-                remediationAction: inputBudgetRemediation(
-                  cause.boundary,
-                  input,
-                ),
-              }),
+            : metadata
+              ? fixedAllowanceOptions(
+                  "The PE resource metadata allowance",
+                  "parser",
+                )
+              : {
+                  retryable: false as const,
+                  remediationAction: inputBudgetRemediation(
+                    cause.boundary,
+                    input,
+                  ),
+                }),
         },
       );
+    }
     if (cause.reason === "path" || cause.reason === "format")
       return new AnalysisInputError(operation, { cause }, [
         {

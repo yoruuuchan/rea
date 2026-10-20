@@ -21,7 +21,8 @@ const MAX_TOTAL_METADATA_BYTES = 64 * 1024 * 1024;
 /** Inspect compiled asset catalog metadata without extracting rendition bytes. */
 export const analyzeAppleAssetCatalogs = async (input: {
   readonly bundlePath: string;
-  readonly targetSha256: string;
+  readonly targetSha256: string | null;
+  readonly resourceRoot?: import("../../domain/apple/bundleResourceRoot.js").BundleResourceRoot;
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly page?: unknown;
   readonly signal?: AbortSignal;
@@ -46,6 +47,9 @@ export const analyzeAppleAssetCatalogs = async (input: {
   )({
     bundlePath: input.bundlePath,
     targetSha256: input.targetSha256,
+    ...(input.resourceRoot === undefined
+      ? {}
+      : { resourceRoot: input.resourceRoot }),
     signal:
       input.signal === undefined
         ? interfaceBuilderCancel.signal
@@ -71,6 +75,9 @@ export const analyzeAppleAssetCatalogs = async (input: {
   );
   const result = projectAppleAssetCatalogPage({
     targetSha256: input.targetSha256,
+    ...(input.resourceRoot === undefined
+      ? {}
+      : { resourceRoot: input.resourceRoot }),
     catalogs,
     offset: page.offset,
     limit: page.limit,

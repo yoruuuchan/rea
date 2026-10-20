@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import {
   artifactCliEvidence,
   artifactMcpResult,
   withArtifactMcp,
+  withBundleResourcesMcp,
 } from "../../lib/artifact-e2e.mjs";
 
 const exec = promisify(execFile);
@@ -49,13 +51,29 @@ try {
     appPath,
   );
   const decoded = evidence.normalized_result;
-  await withArtifactMcp(appPath, async (client) => {
+  const executableSha256 = createHash("sha256")
+    .update(await readFile(executablePath))
+    .digest("hex");
+  await withBundleResourcesMcp(appPath, async (client) => {
     const mcp = await artifactMcpResult(client, "decode_interface_builder");
     assert.deepEqual(
       mcp,
       decoded,
       "CLI and MCP compiled archive results differ",
     );
+  });
+  const { resource_root, target_sha256, ...resourcePayload } = decoded;
+  assert.equal(resource_root.executable_sha256, null);
+  assert.equal(target_sha256, null);
+  await withArtifactMcp(appPath, async (client) => {
+    const binary = await artifactMcpResult(client, "decode_interface_builder");
+    assert.equal(binary.target_sha256, executableSha256);
+    assert.equal(binary.graph.target_sha256, executableSha256);
+    assert.deepEqual(binary, {
+      ...resourcePayload,
+      target_sha256: executableSha256,
+      graph: { ...decoded.graph, target_sha256: executableSha256 },
+    });
   });
   assert.equal(decoded.documents.length, 1);
   assert.equal(

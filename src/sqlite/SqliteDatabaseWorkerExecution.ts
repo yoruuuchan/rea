@@ -8,6 +8,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import type { AnalysisCapturedOutput } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
@@ -97,7 +98,10 @@ const rejectedReply = (
         sqlite_value_or_record_bytes: SQLITE_DATABASE_LIMITS.outputBytes,
         worker_reply_bytes: SQLITE_DATABASE_LIMITS.outputBytes,
       },
-      { capturedOutput },
+      {
+        capturedOutput,
+        ...fixedAllowanceOptions("The SQLite worker reply allowance", "report"),
+      },
     );
   return new AnalysisInputError(operation, { capturedOutput }, [
     {

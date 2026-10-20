@@ -928,7 +928,11 @@ it.each(["identify_flutter_build", "inspect_dart_aot"] as const)(
     const result = await provider.execute({ operation, input: { path } });
     if (result.ok) throw new Error("expected a size refusal");
     expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
-    expect(projectAnalysisError(result.error).code).toBe("resource_constraint");
+    const projected = projectAnalysisError(result.error);
+    expect(projected.code).toBe("resource_constraint");
+    expect(projected.retryable).toBe(false);
+    expect(projected.remediation.action).toContain("APK snapshot allowance");
+    expect(projected.remediation.action).not.toMatch(/evidence reply/u);
     expect(result.error).toMatchObject({
       operation,
       reportedLimits: {

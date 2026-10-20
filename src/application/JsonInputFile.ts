@@ -1,5 +1,6 @@
 import { constants } from "node:buffer";
 import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { getHeapStatistics } from "node:v8";
@@ -10,10 +11,17 @@ import parser from "stream-json/parser.js";
 import streamValues from "stream-json/streamers/stream-values.js";
 import streamArray from "stream-json/streamers/stream-array.js";
 
-import { RegularFileChangedError } from "../filesystem/RegularFile.js";
+import {
+  assertRegularFileActive,
+  RegularFileChangedError,
+} from "../filesystem/RegularFile.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { sealOwnedJsonInput } from "./OwnedJsonInput.js";
-import { withRegularFile } from "./RegularFileRead.js";
+import {
+  RegularFileReadFailure,
+  withRegularFile,
+  type RegularFileReadOptions,
+} from "./RegularFileRead.js";
 import {
   JSON_BYTE_ORDER_MARK_MESSAGE,
   JSON_INPUT_RESOURCE_REMEDIATION,
@@ -33,6 +41,74 @@ const PACKED_TOKEN_PART_CODE_UNITS = 64 * 1024;
 // Retain native-parser speed for modest inputs while bounding its extra copies.
 // This selects an implementation; larger files remain accepted through streaming.
 const NATIVE_PARSE_READ_BUDGET = 8 * 1024 * 1024;
+
+/** Physical descriptor failure remains primary if cancellation arrives afterward. */
+export class JsonInputPhysicalReadFailure extends Error {
+  readonly _tag = "JsonInputPhysicalReadFailure";
+  readonly physicalCause: unknown;
+  constructor(physicalCause: unknown) {
+    super("JSON input descriptor read failed");
+    this.physicalCause = physicalCause;
+  }
+}
+
+/** Explicit cancellation fact; the caller's value is opaque and retained as data. */
+export class JsonInputCancellationFailure extends Error {
+  readonly _tag = "JsonInputCancellationFailure";
+  constructor(readonly reason: unknown) {
+    super(
+      reason instanceof Error ? reason.message : "JSON input read cancelled",
+    );
+  }
+}
+
+interface JsonInputPhysicalReadObservation {
+  failure?: JsonInputPhysicalReadFailure;
+}
+
+const readPhysicalJsonInput = async <Value>(
+  observation: JsonInputPhysicalReadObservation,
+  read: () => Promise<Value>,
+): Promise<Value> => {
+  try {
+    return await read();
+  } catch (physicalCause: unknown) {
+    const failure = new JsonInputPhysicalReadFailure(physicalCause);
+    observation.failure = failure;
+    throw failure;
+  }
+};
+
+const withJsonInputFile = <Value>(
+  path: string,
+  read: (handle: FileHandle, stats: Stats) => Promise<Value>,
+  options: Pick<RegularFileReadOptions, "signal" | "resources">,
+): Promise<Value> =>
+  withRegularFile(path, read, {
+    ...options,
+    cancellationFailure: (reason) => new JsonInputCancellationFailure(reason),
+  }).catch((cause: unknown) => {
+    if (cause instanceof RegularFileReadFailure) throw cause.operationCause;
+    throw cause;
+  });
+
+const withJsonInputPipeline = async <Value>(
+  signal: AbortSignal | undefined,
+  run: (signal?: AbortSignal) => Promise<Value>,
+): Promise<Value> => {
+  if (signal === undefined) return run();
+  const controller = new AbortController();
+  const cancel = (): void => {
+    controller.abort(new JsonInputCancellationFailure(signal.reason));
+  };
+  if (signal.aborted) cancel();
+  else signal.addEventListener("abort", cancel, { once: true });
+  try {
+    return await run(controller.signal);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+};
 
 /** Heap a whole-file native JSON.parse may need: the assembler's 64x container expansion plus byte and text copies. */
 export const nativeJsonParseRequiredBytes = (
@@ -66,10 +142,11 @@ export const readJsonObjectFile = (
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
 ): Promise<Result<void, JsonInputFileFailure>> =>
-  withRegularFile(
+  withJsonInputFile(
     path,
     async (handle, stats) => {
       let previousDigest: string | undefined;
+      const physicalRead: JsonInputPhysicalReadObservation = {};
       try {
         const native = await readNativeJson(
           handle,
@@ -77,6 +154,8 @@ export const readJsonObjectFile = (
           path,
           operation,
           signal,
+          false,
+          physicalRead,
         );
         if (native !== undefined) {
           if (!native.ok) return native;
@@ -92,7 +171,7 @@ export const readJsonObjectFile = (
           for (const members of scans)
             for (const [key, member] of members) {
               if (!Object.hasOwn(value, key)) continue;
-              signal?.throwIfAborted();
+              assertRegularFileActive(signal);
               member.begin();
               const selected: unknown = Reflect.get(value, key);
               if (member.mode === "array" && !Array.isArray(selected)) {
@@ -105,7 +184,7 @@ export const readJsonObjectFile = (
               Array.isArray(selected)
                 ? selected
                 : [selected]) {
-                signal?.throwIfAborted();
+                assertRegularFileActive(signal);
                 try {
                   await member.accept(item);
                 } catch (cause: unknown) {
@@ -123,68 +202,80 @@ export const readJsonObjectFile = (
           let consume:
             | ((token: parser.Token) => typeof none | Promise<typeof none>)
             | undefined;
-          await pipeline(
-            decodedChunks(handle, stats.size, path, signal, (bytes) => {
-              hash.update(bytes);
-            }),
-            asStream(
-              fun(
-                parser({
-                  jsonStreaming: false,
-                  streamValues: false,
-                  packKeys: false,
-                  packStrings: false,
-                  packNumbers: false,
-                }),
-                packJsonScalars(operation, stats.size, path),
-                (token: parser.Token): typeof none | Promise<typeof none> => {
-                  const opens =
-                    token.name === "startObject" || token.name === "startArray";
-                  const closes =
-                    token.name === "endObject" || token.name === "endArray";
-                  if (depth === 0) {
-                    rootObject = token.name === "startObject";
-                  } else if (
-                    rootObject &&
-                    depth === 1 &&
-                    token.name === "keyValue"
-                  ) {
-                    key = token.value;
-                  } else if (rootObject && depth === 1 && !closes) {
-                    const member =
-                      key === undefined ? undefined : members.get(key);
-                    consume = undefined;
-                    if (member !== undefined) {
-                      member.begin();
-                      if (
-                        member.mode === "array" &&
-                        token.name !== "startArray"
-                      ) {
-                        member.reject(
-                          new TypeError(`JSON member ${key} must be an array`),
-                        );
-                      } else {
-                        consume = memberConsumer(
-                          member,
-                          operation,
-                          stats.size,
-                          path,
-                        );
-                      }
-                    }
-                    key = undefined;
-                  }
-                  const selected = consume;
-                  if (opens) depth += 1;
-                  if (closes) depth -= 1;
-                  if (rootObject && depth === 1 && token.name !== "keyValue")
-                    consume = undefined;
-                  if (selected === undefined) return none;
-                  return selected(token);
+          await withJsonInputPipeline(signal, (pipelineSignal) =>
+            pipeline(
+              decodedChunks(
+                handle,
+                stats.size,
+                path,
+                signal,
+                (bytes) => {
+                  hash.update(bytes);
                 },
+                physicalRead,
               ),
+              asStream(
+                fun(
+                  parser({
+                    jsonStreaming: false,
+                    streamValues: false,
+                    packKeys: false,
+                    packStrings: false,
+                    packNumbers: false,
+                  }),
+                  packJsonScalars(operation, stats.size, path),
+                  (token: parser.Token): typeof none | Promise<typeof none> => {
+                    const opens =
+                      token.name === "startObject" ||
+                      token.name === "startArray";
+                    const closes =
+                      token.name === "endObject" || token.name === "endArray";
+                    if (depth === 0) {
+                      rootObject = token.name === "startObject";
+                    } else if (
+                      rootObject &&
+                      depth === 1 &&
+                      token.name === "keyValue"
+                    ) {
+                      key = token.value;
+                    } else if (rootObject && depth === 1 && !closes) {
+                      const member =
+                        key === undefined ? undefined : members.get(key);
+                      consume = undefined;
+                      if (member !== undefined) {
+                        member.begin();
+                        if (
+                          member.mode === "array" &&
+                          token.name !== "startArray"
+                        ) {
+                          member.reject(
+                            new TypeError(
+                              `JSON member ${key} must be an array`,
+                            ),
+                          );
+                        } else {
+                          consume = memberConsumer(
+                            member,
+                            operation,
+                            stats.size,
+                            path,
+                          );
+                        }
+                      }
+                      key = undefined;
+                    }
+                    const selected = consume;
+                    if (opens) depth += 1;
+                    if (closes) depth -= 1;
+                    if (rootObject && depth === 1 && token.name !== "keyValue")
+                      consume = undefined;
+                    if (selected === undefined) return none;
+                    return selected(token);
+                  },
+                ),
+              ),
+              pipelineSignal === undefined ? {} : { signal: pipelineSignal },
             ),
-            signal === undefined ? {} : { signal },
           );
           if (!rootObject)
             return err(
@@ -197,6 +288,7 @@ export const readJsonObjectFile = (
         }
         return ok(undefined);
       } catch (cause: unknown) {
+        if (physicalRead.failure !== undefined) throw physicalRead.failure;
         const failure = jsonReadFailure(cause, operation, stats.size, path);
         if (failure !== undefined) return err(failure);
         throw cause;
@@ -256,11 +348,12 @@ export const readJsonInputFile = (
   resources?: ArtifactResourceScope,
   snapshot = false,
 ): Promise<Result<unknown, JsonInputFileFailure>> =>
-  withRegularFile(
+  withJsonInputFile(
     path,
     async (handle, stats) => {
       let found = false;
       let value: unknown;
+      const physicalRead: JsonInputPhysicalReadObservation = {};
       try {
         const native = await readNativeJson(
           handle,
@@ -269,44 +362,59 @@ export const readJsonInputFile = (
           operation,
           signal,
           snapshot,
+          physicalRead,
         );
         if (native !== undefined)
           return native.ok && snapshot
             ? await sealOwnedJsonInput(native.value, operation, signal)
             : native;
-        await pipeline(
-          decodedChunks(handle, stats.size, path, signal),
-          // Fuse synchronous token stages so only file chunks cross the async
-          // stream boundary. Admission still precedes scalar/value assembly.
-          asStream(
-            fun(
-              parser({
-                jsonStreaming: false,
-                streamValues: false,
-                packKeys: false,
-                packStrings: false,
-                packNumbers: false,
-              }),
-              packJsonScalars(operation, stats.size, path),
-              admitJsonAssembly(operation, stats.size, path, snapshot ? 2 : 1),
-              streamValues(),
-              (row: unknown): typeof none => {
-                if (
-                  found ||
-                  typeof row !== "object" ||
-                  row === null ||
-                  !("key" in row) ||
-                  row.key !== 0 ||
-                  !("value" in row)
-                )
-                  throw new Error("Unexpected JSON parser result");
-                found = true;
-                value = row.value;
-                return none;
-              },
+        await withJsonInputPipeline(signal, (pipelineSignal) =>
+          pipeline(
+            decodedChunks(
+              handle,
+              stats.size,
+              path,
+              signal,
+              undefined,
+              physicalRead,
             ),
+            // Fuse synchronous token stages so only file chunks cross the async
+            // stream boundary. Admission still precedes scalar/value assembly.
+            asStream(
+              fun(
+                parser({
+                  jsonStreaming: false,
+                  streamValues: false,
+                  packKeys: false,
+                  packStrings: false,
+                  packNumbers: false,
+                }),
+                packJsonScalars(operation, stats.size, path),
+                admitJsonAssembly(
+                  operation,
+                  stats.size,
+                  path,
+                  snapshot ? 2 : 1,
+                ),
+                streamValues(),
+                (row: unknown): typeof none => {
+                  if (
+                    found ||
+                    typeof row !== "object" ||
+                    row === null ||
+                    !("key" in row) ||
+                    row.key !== 0 ||
+                    !("value" in row)
+                  )
+                    throw new Error("Unexpected JSON parser result");
+                  found = true;
+                  value = row.value;
+                  return none;
+                },
+              ),
+            ),
+            pipelineSignal === undefined ? {} : { signal: pipelineSignal },
           ),
-          signal === undefined ? {} : { signal },
         );
         return found
           ? snapshot
@@ -314,6 +422,7 @@ export const readJsonInputFile = (
             : ok(value)
           : err(invalidJson(operation, "JSON document is empty"));
       } catch (cause: unknown) {
+        if (physicalRead.failure !== undefined) throw physicalRead.failure;
         const failure = jsonReadFailure(cause, operation, stats.size, path);
         if (failure !== undefined) return err(failure);
         throw cause;
@@ -526,6 +635,7 @@ async function* decodedChunks(
   path: string,
   signal: AbortSignal | undefined,
   observe?: (bytes: Uint8Array) => void,
+  physicalRead: JsonInputPhysicalReadObservation = {},
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let leading = true;
@@ -539,14 +649,16 @@ async function* decodedChunks(
   const bytes = Buffer.allocUnsafe(READ_CHUNK_BYTES);
   let observedBytes = 0;
   while (true) {
-    signal?.throwIfAborted();
-    const read = await handle.read(
-      bytes,
-      0,
-      Math.min(bytes.length, admittedBytes - observedBytes + 1),
-      observedBytes,
+    assertRegularFileActive(signal);
+    const read = await readPhysicalJsonInput(physicalRead, () =>
+      handle.read(
+        bytes,
+        0,
+        Math.min(bytes.length, admittedBytes - observedBytes + 1),
+        observedBytes,
+      ),
     );
-    signal?.throwIfAborted();
+    assertRegularFileActive(signal);
     if (read.bytesRead === 0) break;
     observedBytes += read.bytesRead;
     if (observedBytes > admittedBytes) throw new RegularFileChangedError(path);
@@ -569,13 +681,16 @@ const readPrefix = async (
   handle: FileHandle,
   size: number,
   signal: AbortSignal | undefined,
+  physicalRead: JsonInputPhysicalReadObservation,
 ): Promise<{ readonly bytes: Buffer; readonly complete: boolean }> => {
   const bytes = Buffer.allocUnsafe(size);
   let offset = 0;
   while (offset < bytes.length) {
-    signal?.throwIfAborted();
-    const read = await handle.read(bytes, offset, bytes.length - offset, null);
-    signal?.throwIfAborted();
+    assertRegularFileActive(signal);
+    const read = await readPhysicalJsonInput(physicalRead, () =>
+      handle.read(bytes, offset, bytes.length - offset, null),
+    );
+    assertRegularFileActive(signal);
     if (read.bytesRead === 0)
       return { bytes: bytes.subarray(0, offset), complete: true };
     offset += read.bytesRead;
@@ -591,9 +706,10 @@ const readNativeJson = async (
   operation: string,
   signal?: AbortSignal,
   snapshot = false,
+  physicalRead: JsonInputPhysicalReadObservation = {},
 ): Promise<Result<unknown, JsonInputFileFailure> | undefined> => {
   if (!nativeParseFits(size, snapshot)) return undefined;
-  const prefix = await readPrefix(handle, size + 1, signal);
+  const prefix = await readPrefix(handle, size + 1, signal, physicalRead);
   if (!prefix.complete || prefix.bytes.length !== size)
     throw new RegularFileChangedError(path);
   const parsed = parseUtf8Json(

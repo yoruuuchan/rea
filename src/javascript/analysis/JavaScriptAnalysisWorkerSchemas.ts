@@ -630,6 +630,7 @@ const callable = z.strictObject({
       returnSiteId: z.string(),
       location: range,
       identityReferenceLocation: range.nullable(),
+      valueExpressionLocation: range.nullable(),
       value: semanticValue,
     }),
   ),

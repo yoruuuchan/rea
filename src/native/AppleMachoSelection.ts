@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { FixupCommands } from "./AppleMachoFixups.js";
 import {
   MACHO_ARCHITECTURE_POLICIES,
@@ -46,6 +48,15 @@ export interface MachoSlice {
 export interface MachoLayout {
   segments: Segment[];
   sections: Section[];
+  /** CPU identity and exact byte range selected from this source artifact. */
+  selectedImage: {
+    readonly container: "thin" | "fat";
+    readonly offset: number;
+    readonly byteLength: number;
+    readonly cpuType: number;
+    readonly cpuSubtype: number;
+    readonly containerTableSha256: string | null;
+  };
   /** Fixup load commands and dependent dylibs of the selected slice. */
   fixups: FixupCommands;
   /** VM address of the segment that maps file offset 0 (the preferred load address). */
@@ -135,18 +146,20 @@ export const selectMachoSlice = (
     sliceEnd: best.offset + best.size,
     fatDeclaration: { ...best, tableEnd: headerEnd },
   };
-  if (selected.slice + 4 > bytes.length)
-    throw malformed("Truncated Mach-O header");
-  const sliceMagic = bytes.readUInt32LE(selected.slice);
-  if (sliceMagic === MH_MAGIC || sliceMagic === MH_CIGAM)
-    throw invalid(
-      `Unsupported 32-bit Mach-O metadata for requested CPU type ${architecture}`,
-    );
   return selected;
 };
 
 const MH_MAGIC = 0xfeedface;
 const MH_CIGAM = 0xcefaedfe;
+const MH_CIGAM_64 = 0xcffaedfe;
+
+/** A recognized Mach-O class outside this metadata reader's supported formats. */
+export class UnsupportedMachoMetadataFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedMachoMetadataFormatError";
+  }
+}
 
 /** Parse segments/sections for a little-endian 64-bit Mach-O architecture slice. */
 export const parseMachoLayout = (
@@ -156,19 +169,50 @@ export const parseMachoLayout = (
   if (bytes.length < 4) throw new RangeError("Truncated Mach-O header");
   const selection = selectMachoSlice(bytes, architecture);
   const { slice, sliceEnd } = selection;
-  if (slice === 0 && sliceEnd === bytes.length && bytes.length < 32)
+  if (slice + 4 > sliceEnd) throw new RangeError("Truncated Mach-O header");
+  const selectedMagic = bytes.readUInt32LE(slice);
+  const is32Bit = selectedMagic === MH_MAGIC || selectedMagic === MH_CIGAM;
+  const isBigEndian =
+    selectedMagic === MH_CIGAM || selectedMagic === MH_CIGAM_64;
+  const headerSize = is32Bit ? 28 : 32;
+  const recognizedMagic =
+    is32Bit || selectedMagic === 0xfeedfacf || selectedMagic === MH_CIGAM_64;
+  if (!recognizedMagic && slice + 32 > sliceEnd)
     throw new RangeError("Truncated Mach-O header");
-  if (slice + 32 > sliceEnd || bytes.readUInt32LE(slice) !== 0xfeedfacf)
+  if (!recognizedMagic)
     throw new TypeError(
       "Only little-endian 64-bit Mach-O metadata is supported",
     );
+  if (slice + headerSize > sliceEnd)
+    throw new RangeError("Truncated Mach-O header");
+  const readHeaderUInt32 = isBigEndian
+    ? (offset: number) => bytes.readUInt32BE(offset)
+    : (offset: number) => bytes.readUInt32LE(offset);
+  const cpuType = readHeaderUInt32(slice + 4);
+  const cpuSubtype = readHeaderUInt32(slice + 8);
   const fat = selection.fatDeclaration;
   if (fat !== undefined) {
     const issue = validateFatSlice(fat, bytes.length, fat.tableEnd, {
-      cpuType: bytes.readUInt32LE(slice + 4),
-      cpuSubtype: bytes.readUInt32LE(slice + 8),
+      cpuType,
+      cpuSubtype,
     });
     if (issue !== null) throw new TypeError(issue);
+  }
+  if (is32Bit) {
+    if (MACHO_ARCHITECTURE_POLICIES[architecture]?.cpuType !== cpuType)
+      throw new TypeError(
+        `Mach-O CPU type does not match requested architecture ${architecture}`,
+      );
+    throw new UnsupportedMachoMetadataFormatError(
+      `Unsupported 32-bit Mach-O metadata for requested CPU type ${architecture}`,
+    );
+  }
+  if (selectedMagic === MH_CIGAM_64) {
+    if (cpuType !== 0x01000012)
+      throw new TypeError("Unsupported big-endian Mach-O CPU type");
+    throw new UnsupportedMachoMetadataFormatError(
+      "Unsupported big-endian 64-bit PowerPC Mach-O metadata",
+    );
   }
   const commands = bytes.readUInt32LE(slice + 16);
   const commandEnd = slice + 32 + bytes.readUInt32LE(slice + 20);
@@ -221,6 +265,19 @@ export const parseMachoLayout = (
   return {
     segments,
     sections,
+    selectedImage: {
+      container: fat === undefined ? "thin" : "fat",
+      offset: slice,
+      byteLength: sliceEnd - slice,
+      cpuType,
+      cpuSubtype,
+      containerTableSha256:
+        fat === undefined
+          ? null
+          : createHash("sha256")
+              .update(bytes.subarray(0, fat.tableEnd))
+              .digest("hex"),
+    },
     offset,
     fixups: { chained, binds, rebases, dylibs },
     baseAddress: state.baseAddress ?? 0n,

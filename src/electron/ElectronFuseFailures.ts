@@ -17,6 +17,7 @@ import {
   AnalysisResourceConstraintError,
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ZodError } from "zod";
 import {
@@ -93,7 +94,15 @@ export const electronFuseFailure = (
       cause.boundary === "file-size"
         ? { maximum_input_bytes: 1024 * 1024 * 1024 }
         : { maximum_sentinels_per_slice: 32 },
-      { cause },
+      {
+        cause,
+        ...fixedAllowanceOptions(
+          cause.boundary === "file-size"
+            ? "the 1 GiB Electron fuse input allowance"
+            : "The Electron fuse sentinel inventory",
+          cause.boundary === "file-size" ? "input" : "count",
+        ),
+      },
     );
   if (cause instanceof ElectronFuseFormatFailure)
     return cause.kind === "unsupported"

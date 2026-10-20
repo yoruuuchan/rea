@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixedAllowanceOptions } from "../fixedAllowanceRemediation.js";
 import {
   AnalysisResourceConstraintError,
   AnalysisUnsupportedTargetError,
@@ -58,6 +59,10 @@ export abstract class WebNetworkProjectionAccumulator {
         "memory",
         `${this.budgetSubject} retained state and temporary work exceed the projection representation budget.`,
         { output_bytes: this.maximumBytes },
+        fixedAllowanceOptions(
+          "The analysis-view projection allowance",
+          "parser",
+        ),
       ),
     );
   }

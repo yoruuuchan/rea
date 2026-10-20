@@ -8,7 +8,7 @@ import { cliTest } from "../../support/cli/cliFixture.js";
 import { writeFakeKuna } from "../providers/kuna/fakeKuna.js";
 
 cliTest.skipIf(process.platform === "win32").for(["blocked", "ready"] as const)(
-  "setup dry-run advertises Kuna only with a %s cache",
+  "setup dry-run reports Kuna readiness for a %s cache",
   async (cache, { cli }) => {
     const root = await createTestTempDirectory("rea-setup-provider-readiness-");
     const home = join(root, "home");
@@ -37,7 +37,7 @@ cliTest.skipIf(process.platform === "win32").for(["blocked", "ready"] as const)(
         providerInspections: expect.arrayContaining([
           expect.objectContaining({
             id: "kuna",
-            available: true,
+            available: cache === "ready",
             checks: expect.arrayContaining([
               expect.objectContaining({
                 name: "cache",

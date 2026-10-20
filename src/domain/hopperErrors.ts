@@ -60,8 +60,14 @@ export class HopperTimeoutError extends HopperError {
 export class HopperCancelledError extends HopperError {
   readonly _tag = "HopperCancelledError";
 
-  constructor() {
-    super("Hopper operation was cancelled");
+  constructor(
+    cause?: unknown,
+    options: Omit<AnalysisErrorOptions, "cause"> = {},
+  ) {
+    super(
+      "Hopper operation was cancelled",
+      cause === undefined ? options : { ...options, cause },
+    );
   }
 }
 
@@ -167,7 +173,7 @@ export class HopperStartError extends HopperError {
   readonly launchRejection: HopperLaunchRejection | undefined;
 
   constructor(
-    options?: ErrorOptions & {
+    options?: AnalysisErrorOptions & {
       readonly userMessage?: string;
       readonly ownerRunId?: string;
       readonly launcherFailure?: HopperLauncherOutcome;

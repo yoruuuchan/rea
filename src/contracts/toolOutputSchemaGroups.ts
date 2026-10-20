@@ -26,6 +26,7 @@ import { nativeFunctionAnnotationsSchema } from "../domain/native/nativeFunction
 import { nativeLoadImageSchema } from "../domain/native/nativeLoadImage.js";
 import { nativeUiResultSchema } from "../domain/native/nativeUiObservation.js";
 import { nativeValueTraceSchema } from "../domain/native/nativeValueTrace.js";
+import { bundleResourceRootSchema } from "../domain/apple/bundleResourceRoot.js";
 import { nativeDataTypeSchema } from "../domain/native/nativeDataType.js";
 import { nativeCallObservationResultSchema } from "../domain/native/nativeCallObservation.js";
 import {
@@ -87,6 +88,7 @@ import {
   lifecycleResultOf,
   nullableText,
   procedureInfoOutput,
+  objcClassDiscoveryOutput,
   evidenceResultOf,
   segmentOutput,
   sessionProvider,
@@ -308,7 +310,7 @@ export const enhancedOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
   ),
   trace_native_values: evidenceResultOf(nativeValueTraceSchema),
   trace_native_ui_action: evidenceResultOf(nativeInvestigationTraceSchema),
-  get_objc_classes: symbolDiscoveryOutput("classes"),
+  get_objc_classes: objcClassDiscoveryOutput,
   get_objc_protocols: symbolDiscoveryOutput("protocols"),
   batch_decompile: evidenceResultOf(
     z.object({
@@ -511,6 +513,7 @@ export const sessionOutputSchemas = {
       rawLifecycleTargetSchema,
     ]),
   ),
+  open_bundle_resources: lifecycleResultOf(bundleResourceRootSchema),
   close_binary: lifecycleResultOf(
     z.union([
       z.null(),
@@ -540,6 +543,11 @@ export const sessionOutputSchemas = {
   binary_session: lifecycleResultOf(
     z.union([
       sessionProvider.extend({ open: z.literal(false) }),
+      sessionProvider.extend({
+        open: z.literal(true),
+        session_kind: z.literal("bundle_resources"),
+        resource_root: bundleResourceRootSchema,
+      }),
       sessionProvider.extend({
         open: z.literal(true),
         ...detectedLifecycleTargetSchema.shape,

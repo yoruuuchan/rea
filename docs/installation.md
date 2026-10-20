@@ -340,6 +340,13 @@ A scoped report has `scope.mode: "explicit"`. Its `scope_checks` determine
 `environment_healthy` summarizes the full audit. `--target` adds a target check,
 but the report remains audit-wide unless a scope option is also supplied.
 
+An invalid `REA_LOG_LEVEL` fails every scope, including one client or the
+installed skill, because the executable rejects it before any command. A
+selected client also fails for every other setting that MCP startup rejects,
+including `REA_GHIDRA_STARTUP_TIMEOUT_MS` and `REA_HOPPER_STARTUP_TIMEOUT_MS`.
+Those settings still fail a selected provider and the audit-wide result. A
+skill-only report leaves them informational.
+
 Follow the remediation for the failed check. If a native target has several
 available providers, choose one with `--provider` on the CLI or `provider_id`
 on `open_binary`. A `capability_unavailable` failure carries

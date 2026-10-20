@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { withArtifactResourceScope } from "../../fixtures/artifactInventory.js";
+import { createInspectionResources } from "../../fixtures/inspectionResources.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import { writeAnalysisSnapshot } from "../../../src/application/binary/AnalysisSnapshotFiles.js";
@@ -21,9 +22,13 @@ import {
   workflowAnalysisProfile,
 } from "../../../src/application/InvestigationProviders.js";
 import { HOPPER_PROVIDER_IDENTITY } from "../../../src/hopper/HopperProviderCapabilities.js";
+
 import { resolveHopperAnalysisProfile } from "../../../src/hopper/HopperAnalysisProfile.js";
 
+let inspectionResources = createInspectionResources();
 afterEach(async () => {
+  await inspectionResources.close();
+  inspectionResources = createInspectionResources();
   vi.unstubAllEnvs();
 });
 
@@ -67,6 +72,7 @@ describe("direct analysis snapshot files", () => {
       launcherPath,
       loaderArgsOverride: [],
       provider: HOPPER_PROVIDER_IDENTITY,
+      resourceScope: inspectionResources.owner,
     });
     if (!resolved.ok || resolved.value.profile === null)
       throw new Error("fixture Hopper profile did not resolve");

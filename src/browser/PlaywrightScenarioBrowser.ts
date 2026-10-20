@@ -7,7 +7,7 @@ import {
 } from "../artifacts/AnalysisCleanupLease.js";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import type {
   Browser,
@@ -717,7 +717,7 @@ export const openPlaywrightScenarioBrowser = async (
   try {
     await chmod(profilePath, 0o700);
     context = await launcher.launchPersistentContext(profilePath, {
-      executablePath: resolve(scenario.browser.executable_path),
+      executablePath: scenario.browser.executable_path,
       headless: scenario.browser.headless,
       acceptDownloads: false,
       viewport: {

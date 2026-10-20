@@ -22,7 +22,6 @@ import {
   canonicalJsonParts,
 } from "../domain/jsonSerialization.js";
 import { readJsonFile, writeTextParts } from "./JsonFiles.js";
-import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
 type EvidenceReadFailure =
@@ -58,23 +57,27 @@ const readBundle = async (
   resources?: ArtifactResourceScope,
 ): Promise<Result<EvidenceBundle, EvidenceReadFailure>> => {
   if (signal?.aborted)
-    return err(new AnalysisCancelledError("import_evidence_bundle"));
-  const loaded = await readJsonFile(path, signal, resources).catch(
-    (cause: unknown) => {
-      // A failed close transfers a live handle owner; preserve that failure.
-      if (
-        signal?.aborted === true &&
-        !(cause instanceof RegularFileCleanupFailure)
-      )
-        return err(
-          new AnalysisCancelledError("import_evidence_bundle", { cause }),
-        );
-      throw cause;
-    },
-  );
-  if (!loaded.ok) return loaded;
+    return err(
+      new AnalysisCancelledError("import_evidence_bundle", {
+        cause: signal.reason,
+      }),
+    );
+  const loaded = await readJsonFile(path, signal, resources);
+  if (!loaded.ok) {
+    if (loaded.error instanceof AnalysisCancelledError)
+      return err(
+        new AnalysisCancelledError("import_evidence_bundle", {
+          cause: loaded.error.cause,
+        }),
+      );
+    return loaded;
+  }
   if (signal?.aborted)
-    return err(new AnalysisCancelledError("import_evidence_bundle"));
+    return err(
+      new AnalysisCancelledError("import_evidence_bundle", {
+        cause: signal.reason,
+      }),
+    );
   let bundle: EvidenceBundle;
   try {
     bundle = parseBundle(loaded.value);

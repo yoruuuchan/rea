@@ -429,6 +429,54 @@ it("rejects ambiguous layout names with candidate indexes", () => {
   });
 });
 
+it("counts JavaScript summary coverage in module units", () => {
+  const analysis = analysisViewJavaScriptAnalysisWithSource();
+  const moduleNode = analysis.graph.nodes[0];
+  const observation = moduleNode?.observations[0];
+  if (moduleNode === undefined || observation === undefined)
+    throw new Error("missing module observation");
+  const packageNode = createJavaScriptApplicationNode({
+    kind: "artifact",
+    identity: moduleNode.identity,
+    observations: moduleNode.observations.map((item) => ({
+      label: item.label,
+      properties: item.properties,
+      evidence: item.evidence,
+      ...(item.source_map_reference === null
+        ? {}
+        : { source_map_reference: item.source_map_reference }),
+    })),
+  });
+  const graph = createJavaScriptApplicationGraph({
+    schema: "JavaScriptApplicationGraph",
+    root_node_ids: [moduleNode.node_id],
+    nodes: [moduleNode, packageNode],
+    edges: [],
+    coverage: analysis.graph.coverage,
+    limitations: analysis.graph.limitations,
+  });
+  const parent = javascriptParent(
+    analysisViewBindJavaScriptGraphs(analysis, graph),
+  );
+  const summary = projectAnalysisView(parent, { kind: "summary" });
+  if (!summary.ok) throw summary.error;
+  expect(summary.value.coverage).toEqual({
+    status: "complete-within-view",
+    examined: 1,
+    total: 1,
+    next_offset: null,
+    exhausted: true,
+  });
+  const page = projectAnalysisView(parent, {
+    kind: "page",
+    collection: "modules",
+    offset: 0,
+    limit: 8,
+  });
+  if (!page.ok) throw page.error;
+  expect(page.value.coverage).toMatchObject({ examined: 1, total: 1 });
+});
+
 it("projects JavaScript summary and preserves selected module observations", () => {
   const analysis = analysisViewJavaScriptAnalysisWithSource();
   const parent = javascriptParent(analysis);

@@ -19,7 +19,9 @@ type Range = { offset: number; bytes: number };
 type OccupiedRange = Range & {
   kind: "directory" | "name" | "data-entry" | "payload";
 };
-const METADATA_BYTES = 8 * 1024 * 1024;
+/** Complete PE resource result retained before a refusal. */
+export const PE_RESOURCE_METADATA_BYTES = 8 * 1024 * 1024;
+const METADATA_BYTES = PE_RESOURCE_METADATA_BYTES;
 const limit = (message: string, boundary: ArtifactReaderBoundary): never => {
   throw new ArtifactReaderFailure("limit", message, { boundary });
 };

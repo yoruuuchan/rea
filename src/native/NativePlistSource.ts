@@ -4,6 +4,7 @@ import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { FileHandle } from "node:fs/promises";
 import type { z } from "zod";
 import type { inspectPlistSchema } from "../domain/native/nativeInspection.js";
+import type { ResolvedAppBundleResourceRoot } from "../application/AppBundleExecutable.js";
 import type {
   AnalysisError,
   AnalysisErrorOptions,
@@ -66,6 +67,21 @@ export const resolveNativePlistSelection = async (
       new ProviderAdapterError(IDENTITY.id, "inspect_plist", { cause }),
     );
   }
+};
+
+/** Resolve a plist selection from the separately identified app resource root. */
+export const resolveBundleResourcePlistSelection = (
+  root: ResolvedAppBundleResourceRoot,
+  requested: string | undefined,
+): Result<NativePlistSelection, AnalysisError> => {
+  if (requested === undefined)
+    return ok({ path: root.infoPlistPath, origin: "default" });
+  return ok({
+    path: isAbsolute(requested)
+      ? resolve(requested)
+      : resolve(root.canonicalPath, requested),
+    origin: "selected",
+  });
 };
 
 /** The bundle whose Contents/MacOS directory directly holds the program. */

@@ -10,7 +10,7 @@ import { parseEvidence } from "../../../src/domain/evidence.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 import { createTestMcp } from "../../support/mcp/mcpFixture.js";
-import { openArtifactTarget } from "../../support/mcp/artifactSession.js";
+import { openBundleResourcesTarget } from "../../support/mcp/artifactSession.js";
 
 const verifyMcpParity = async (
   app: string,
@@ -18,7 +18,7 @@ const verifyMcpParity = async (
 ): Promise<void> => {
   const mcp = createTestMcp();
   onTestFinished(async () => mcp.close());
-  const client = await openArtifactTarget(mcp, onTestFinished, app);
+  const client = await openBundleResourcesTarget(mcp, onTestFinished, app);
   const complete = await client.callTool({
     name: "decode_interface_builder",
     arguments: { max_objects: 2 },

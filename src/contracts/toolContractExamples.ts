@@ -53,6 +53,7 @@ export const TOOL_EXAMPLE_OVERRIDES: Readonly<
   trace_call_path: { start: "0x1000", goal: "0x1100" },
   trace_native_ui_action: { action: "buildTapped:" },
   open_binary: { path: "/tmp/fixture" },
+  open_bundle_resources: { path: "/tmp/Fixture.app" },
   export_evidence_bundle: { path: "/tmp/evidence.json" },
   get_evidence_bundle: {
     detail: "summary",

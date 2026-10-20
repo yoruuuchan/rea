@@ -216,6 +216,51 @@ const policyResponse = (method: string): unknown =>
       ? { result: { value: null } }
       : {};
 
+const prepareLateStopRetry = async () => {
+  const { cleanup, page, storage } = fixture();
+  const cancellation = new AbortController();
+  storage?.close.mockResolvedValue({ loadingStopped: false });
+  const attached = connectedScenario("block");
+  const session = await PlaywrightScenarioSession.open(
+    attached,
+    {},
+    { signal: cancellation.signal },
+  );
+  const { promise: held, resolve: finishRestoration } = deferred();
+  const { promise: started, resolve: restorationStarted } = deferred();
+  const { promise: transportClosed, resolve: signalTransportClosed } =
+    deferred();
+  mocks.policyTransportClose.mockImplementation(async () => {
+    signalTransportClosed();
+  });
+  mocks.policySend.mockImplementation(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      restorationStarted();
+      await held;
+    }
+    return policyResponse(method);
+  });
+
+  vi.useFakeTimers();
+  try {
+    const firstClose = session.close(false).then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    );
+    await started;
+    await vi.advanceTimersByTimeAsync(5_001);
+    await expect(firstClose).resolves.toMatchObject({ ok: false });
+    finishRestoration();
+    await transportClosed;
+    await vi.advanceTimersByTimeAsync(0);
+    cancellation.abort();
+    return { cleanup, page, session };
+  } catch (cause) {
+    vi.useRealTimers();
+    throw cause;
+  }
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.policySend.mockReset();
@@ -661,44 +706,8 @@ it("retries a failed connected-page stop when service workers are allowed", asyn
 });
 
 it("retains a late fallback stop failure for retry", async () => {
-  const { cleanup, page, storage } = fixture();
-  const cancellation = new AbortController();
-  storage?.close.mockResolvedValue({ loadingStopped: false });
-  const attached = connectedScenario("block");
-  const session = await PlaywrightScenarioSession.open(
-    attached,
-    {},
-    { signal: cancellation.signal },
-  );
-  const { promise: held, resolve: finishRestoration } = deferred();
-  const { promise: started, resolve: restorationStarted } = deferred();
-  const { promise: transportClosed, resolve: signalTransportClosed } =
-    deferred();
-  mocks.policyTransportClose.mockImplementation(async () => {
-    signalTransportClosed();
-  });
-  mocks.policySend.mockImplementation(async (method: string) => {
-    if (method === "Runtime.evaluate") {
-      restorationStarted();
-      await held;
-    }
-    return policyResponse(method);
-  });
-
-  vi.useFakeTimers();
+  const { cleanup, page, session } = await prepareLateStopRetry();
   try {
-    const firstClose = session.close(false).then(
-      () => ({ ok: true as const }),
-      (cause: unknown) => ({ ok: false as const, cause }),
-    );
-    await started;
-    await vi.advanceTimersByTimeAsync(5_001);
-    await expect(firstClose).resolves.toMatchObject({ ok: false });
-    finishRestoration();
-    await transportClosed;
-    await vi.advanceTimersByTimeAsync(0);
-
-    cancellation.abort();
     const stopFailure = new Error("late main-frame stop failed");
     const detachedFrame = {
       evaluate: vi.fn(async () => {
@@ -734,44 +743,8 @@ it("retains a late fallback stop failure for retry", async () => {
 });
 
 it("coalesces concurrent late-stop close retries", async () => {
-  const { cleanup, page, storage } = fixture();
-  const cancellation = new AbortController();
-  storage?.close.mockResolvedValue({ loadingStopped: false });
-  const attached = connectedScenario("block");
-  const session = await PlaywrightScenarioSession.open(
-    attached,
-    {},
-    { signal: cancellation.signal },
-  );
-  const { promise: held, resolve: finishRestoration } = deferred();
-  const { promise: started, resolve: restorationStarted } = deferred();
-  const { promise: transportClosed, resolve: signalTransportClosed } =
-    deferred();
-  mocks.policyTransportClose.mockImplementation(async () => {
-    signalTransportClosed();
-  });
-  mocks.policySend.mockImplementation(async (method: string) => {
-    if (method === "Runtime.evaluate") {
-      restorationStarted();
-      await held;
-    }
-    return policyResponse(method);
-  });
-
-  vi.useFakeTimers();
+  const { cleanup, page, session } = await prepareLateStopRetry();
   try {
-    const firstClose = session.close(false).then(
-      () => ({ ok: true as const }),
-      (cause: unknown) => ({ ok: false as const, cause }),
-    );
-    await started;
-    await vi.advanceTimersByTimeAsync(5_001);
-    await expect(firstClose).resolves.toMatchObject({ ok: false });
-    finishRestoration();
-    await transportClosed;
-    await vi.advanceTimersByTimeAsync(0);
-
-    cancellation.abort();
     const { promise: heldStop, resolve: finishStop } = deferred();
     const { promise: startedStop, resolve: stopStarted } = deferred();
     page.evaluate.mockImplementation(async (script: unknown) => {

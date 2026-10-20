@@ -1,4 +1,5 @@
 import type { JavaScriptSemanticGraphNode } from "../../domain/javascript/javascriptSemanticGraphSchemas.js";
+import { javaScriptSemanticNodeId } from "../../domain/javascript/javascriptSemanticGraph.js";
 import type { JavaScriptSemanticIr } from "../../domain/javascript/javascriptSemanticIr.js";
 import { sourceRangesEqual } from "../../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import type { JavaScriptSourceRange } from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
@@ -190,6 +191,57 @@ const addPromiseUnknown = (
   });
 };
 
+interface ObjectReadIndex {
+  readonly state: SemanticGraphProjectionState;
+  readonly nodes: ReadonlyMap<string, JavaScriptSemanticGraphNode>;
+}
+
+const objectReadIndexes = new WeakMap<JavaScriptSemanticIr, ObjectReadIndex>();
+
+const objectReadRangeKey = (location: JavaScriptSourceRange): string =>
+  `${String(location.start.line)}:${String(location.start.column)}:${String(location.end.line)}:${String(location.end.column)}`;
+
+/**
+ * The object projection owns a member read's occurrence. Index it once per
+ * file so return and argument flow can connect that expression without
+ * scanning every property read again.
+ */
+const objectReadOccurrences = (
+  context: SemanticFlowProjectionContext,
+): ReadonlyMap<string, JavaScriptSemanticGraphNode> => {
+  const cached = objectReadIndexes.get(context.ir);
+  if (cached !== undefined && cached.state === context.state)
+    return cached.nodes;
+  const nodes = new Map<string, JavaScriptSemanticGraphNode>();
+  for (const operation of context.ir.objectOperations) {
+    if (operation.kind !== "read") continue;
+    const node = context.state.nodes.get(
+      javaScriptSemanticNodeId({
+        kind: "expression",
+        identity: {
+          artifact_sha256: context.file.sha256,
+          module_path: context.file.path,
+          source_range: operation.location,
+          role_key: operation.objectOperationId,
+        },
+      }),
+    );
+    if (node !== undefined)
+      nodes.set(objectReadRangeKey(operation.location), node);
+  }
+  objectReadIndexes.set(context.ir, { state: context.state, nodes });
+  return nodes;
+};
+
+/** Return the retained read occurrence for one unwrapped member expression. */
+export const semanticObjectReadOccurrence = (
+  context: SemanticFlowProjectionContext,
+  location: JavaScriptSourceRange | null,
+): JavaScriptSemanticGraphNode | undefined =>
+  location === null
+    ? undefined
+    : objectReadOccurrences(context).get(objectReadRangeKey(location));
+
 /** Link direct return expressions to their retained semantic references. */
 export const projectSemanticReturnValues = (
   context: SemanticFlowProjectionContext,
@@ -212,6 +264,15 @@ export const projectSemanticReturnValues = (
               ? "resolved"
               : "candidate",
         });
+      addSemanticGraphRelation(context.state, {
+        source: semanticObjectReadOccurrence(
+          context,
+          site.valueExpressionLocation,
+        ),
+        target: returnNode,
+        relation: "aliases",
+        resolution: "resolved",
+      });
     }
 };
 

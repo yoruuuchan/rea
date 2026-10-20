@@ -1,3 +1,4 @@
+import { AnalysisResourceConstraintError } from "../../../src/domain/analysisErrorCore.js";
 import { signalDecodersSchema } from "../../../src/domain/signals/signalDecoders.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import { it, expect, onTestFinished } from "vitest";
@@ -568,6 +569,21 @@ it.each([
       stdout: "sigrok-cli 0.7.1\n",
       stderr: "version warning\n",
     });
+  if (mode === "overflow") {
+    expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
+    if (!(result.error instanceof AnalysisResourceConstraintError))
+      throw new Error("Expected command-output allowance refusal");
+    expect(result.error).toMatchObject({
+      resource: "memory",
+      retryable: false,
+    });
+    expect(result.error.remediationAction).toContain(
+      "The retained command-output allowance",
+    );
+    expect(result.error.remediationAction).not.toMatch(
+      /Review the reported worker memory limits/u,
+    );
+  }
 });
 
 it("retains completed discovery when cleanup fails, then retries before accepting work", async () => {

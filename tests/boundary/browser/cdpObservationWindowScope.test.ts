@@ -2,17 +2,39 @@ import { expect, it } from "vitest";
 
 import { CdpBrowserProvider } from "../../../src/browser/CdpBrowserProvider.js";
 import { observeWebSessionInputSchema } from "../../../src/domain/browserSession.js";
-import { startFakeCdpBrowser } from "../../fixtures/fakeCdpBrowser.js";
+import {
+  startFakeCdpBrowser,
+  type FakeOptions,
+} from "../../fixtures/fakeCdpBrowser.js";
 import { trackBrowser } from "./cdpBrowserProvider.support.js";
 
-it("fails closed on an untimestamped cross-origin main-frame commit during clock sampling", async () => {
+const observeDuringClockSampling = async (
+  commandEvents: NonNullable<FakeOptions["commandEvents"]>,
+) => {
   const browser = await startFakeCdpBrowser({
     eventsBeforeReply: ["Performance.getMetrics"],
     commandResult: (command) =>
       command.method === "Performance.getMetrics"
         ? { metrics: [{ name: "Timestamp", value: 20 }] }
         : undefined,
-    commandEvents: (command) => {
+    commandEvents,
+  });
+  trackBrowser(browser);
+  const result = await new CdpBrowserProvider().observeSession(
+    observeWebSessionInputSchema.parse({
+      cdp_endpoint: browser.endpoint,
+      allowed_origins: [browser.allowedOrigin],
+      target_id: "allowed-page",
+      observation_ms: 20,
+    }),
+  );
+  if (!result.ok) throw result.error;
+  return { browser, observation: result.value };
+};
+
+it("fails closed on an untimestamped cross-origin main-frame commit during clock sampling", async () => {
+  const { observation } = await observeDuringClockSampling(
+    (command, origin) => {
       if (command.method !== "Performance.getMetrics") return undefined;
       return [
         {
@@ -34,27 +56,17 @@ it("fails closed on an untimestamped cross-origin main-frame commit during clock
             timestamp: 21,
             type: "Document",
             frameId: "frame-main",
-            redirectResponse: { url: `${browser.allowedOrigin}/prior` },
-            request: { url: `${browser.allowedOrigin}/later` },
+            redirectResponse: { url: `${origin}/prior` },
+            request: { url: `${origin}/later` },
           },
         },
       ];
     },
-  });
-  trackBrowser(browser);
-  const result = await new CdpBrowserProvider().observeSession(
-    observeWebSessionInputSchema.parse({
-      cdp_endpoint: browser.endpoint,
-      allowed_origins: [browser.allowedOrigin],
-      target_id: "allowed-page",
-      observation_ms: 20,
-    }),
   );
 
-  if (!result.ok) throw result.error;
-  expect(result.value.window.end_reason).toBe("target_left_scope");
-  expect(result.value.target.final_url).toBeNull();
-  expect(result.value.timeline).toContainEqual(
+  expect(observation.window.end_reason).toBe("target_left_scope");
+  expect(observation.target.final_url).toBeNull();
+  expect(observation.timeline).toContainEqual(
     expect.objectContaining({
       type: "navigation_committed",
       loader_id: "outside-loader",
@@ -63,19 +75,14 @@ it("fails closed on an untimestamped cross-origin main-frame commit during clock
       url: null,
     }),
   );
-  expect(result.value.timeline).not.toContainEqual(
+  expect(observation.timeline).not.toContainEqual(
     expect.objectContaining({ request_id: "later-in-window-request" }),
   );
 });
 
 it("fails closed on an untimestamped out-of-scope main-frame request during clock sampling", async () => {
-  const browser = await startFakeCdpBrowser({
-    eventsBeforeReply: ["Performance.getMetrics"],
-    commandResult: (command) =>
-      command.method === "Performance.getMetrics"
-        ? { metrics: [{ name: "Timestamp", value: 20 }] }
-        : undefined,
-    commandEvents: (command, origin) => {
+  const { observation } = await observeDuringClockSampling(
+    (command, origin) => {
       if (command.method !== "Performance.getMetrics") return undefined;
       return [
         {
@@ -101,20 +108,10 @@ it("fails closed on an untimestamped out-of-scope main-frame request during cloc
         },
       ];
     },
-  });
-  trackBrowser(browser);
-  const result = await new CdpBrowserProvider().observeSession(
-    observeWebSessionInputSchema.parse({
-      cdp_endpoint: browser.endpoint,
-      allowed_origins: [browser.allowedOrigin],
-      target_id: "allowed-page",
-      observation_ms: 20,
-    }),
   );
 
-  if (!result.ok) throw result.error;
-  expect(result.value.window.end_reason).toBe("target_left_scope");
-  expect(result.value.timeline).toContainEqual(
+  expect(observation.window.end_reason).toBe("target_left_scope");
+  expect(observation.timeline).toContainEqual(
     expect.objectContaining({
       type: "navigation_requested",
       timestamp: null,
@@ -122,19 +119,14 @@ it("fails closed on an untimestamped out-of-scope main-frame request during cloc
       url: null,
     }),
   );
-  expect(result.value.timeline).not.toContainEqual(
+  expect(observation.timeline).not.toContainEqual(
     expect.objectContaining({ request_id: "later-in-window-request" }),
   );
 });
 
 it("fails closed on an untimestamped out-of-scope redirect during clock sampling", async () => {
-  const browser = await startFakeCdpBrowser({
-    eventsBeforeReply: ["Performance.getMetrics"],
-    commandResult: (command) =>
-      command.method === "Performance.getMetrics"
-        ? { metrics: [{ name: "Timestamp", value: 20 }] }
-        : undefined,
-    commandEvents: (command, origin) => {
+  const { observation } = await observeDuringClockSampling(
+    (command, origin) => {
       if (command.method !== "Performance.getMetrics") return undefined;
       return [
         {
@@ -162,21 +154,11 @@ it("fails closed on an untimestamped out-of-scope redirect during clock sampling
         },
       ];
     },
-  });
-  trackBrowser(browser);
-  const result = await new CdpBrowserProvider().observeSession(
-    observeWebSessionInputSchema.parse({
-      cdp_endpoint: browser.endpoint,
-      allowed_origins: [browser.allowedOrigin],
-      target_id: "allowed-page",
-      observation_ms: 20,
-    }),
   );
 
-  if (!result.ok) throw result.error;
-  expect(result.value.window.end_reason).toBe("target_left_scope");
-  expect(result.value.target.final_url).toBeNull();
-  expect(result.value.timeline).toContainEqual(
+  expect(observation.window.end_reason).toBe("target_left_scope");
+  expect(observation.target.final_url).toBeNull();
+  expect(observation.timeline).toContainEqual(
     expect.objectContaining({
       type: "redirect",
       request_id: "unknown-time-outside-redirect",
@@ -185,7 +167,7 @@ it("fails closed on an untimestamped out-of-scope redirect during clock sampling
       url: null,
     }),
   );
-  expect(result.value.timeline).not.toContainEqual(
+  expect(observation.timeline).not.toContainEqual(
     expect.objectContaining({ request_id: "later-in-window-request" }),
   );
 });

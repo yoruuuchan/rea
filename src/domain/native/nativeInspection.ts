@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bundleResourceRootSchema } from "../apple/bundleResourceRoot.js";
 import { jsonValueSchema } from "../jsonValue.js";
 
 const hexAddress = z.string().regex(/^0x[a-fA-F0-9]+$/u);
@@ -170,6 +171,7 @@ export const inspectPlistSchema = z.object({
     short_version: z.string().nullable(),
   }),
   source_path: z.string(),
+  resource_root: bundleResourceRootSchema.optional(),
   provenance: z.array(nativeCommandInvocationSchema),
   limitations: z.array(z.string()),
 });

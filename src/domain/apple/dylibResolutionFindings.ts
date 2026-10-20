@@ -1,8 +1,15 @@
 import type {
   DylibEdge as Edge,
   DylibFinding as Finding,
+  MachoDependency,
   MachoSlice,
 } from "./dylibResolution.js";
+
+/** Both lazy encodings load on first use and are not process-launch dependencies. */
+export const isLazyLoadCommand = (
+  command: MachoDependency["command"],
+): boolean =>
+  command === "LC_LAZY_LOAD_DYLIB" || command === "LC_LAZY_LOAD_DYLIB_INFO";
 
 /** One traced process root with the exact slice it was traced from. */
 export interface TracedRootSlice {
@@ -62,16 +69,17 @@ const unresolvedFinding = (edge: Edge, index: number): Finding => {
     image: edge.loader,
     basis: "derived",
   } as const;
-  const missing = `No candidate for ${edge.command === "LC_LAZY_LOAD_DYLIB" ? "lazily loaded " : edge.weak ? "weak dependency " : ""}${edge.install_name} exists in the analyzed root`;
+  const lazy = isLazyLoadCommand(edge.command);
+  const missing = `No candidate for ${dependencyPhrase(edge, lazy)} exists in the analyzed root`;
   // Below a conditional fallback, every consequence applies only if it loads.
   const when = edge.loader_conditional
     ? `. ${edge.loader} loads only conditionally; if it loads, `
     : "; ";
-  if (edge.command === "LC_LAZY_LOAD_DYLIB")
+  if (lazy)
     return {
       ...base,
       kind: "lazy-load-unresolved",
-      explanation: `${missing}${when}dyld loads it on first use, which would fail unless the image is supplied elsewhere.`,
+      explanation: `${missing}${when}${lazyConsequence(edge.weak)}`,
     };
   return edge.weak
     ? {
@@ -86,8 +94,26 @@ const unresolvedFinding = (edge: Edge, index: number): Finding => {
       };
 };
 
+/** Name the dependency the way the finding's consequence treats it. */
+const dependencyPhrase = (edge: Edge, lazy: boolean): string => {
+  if (lazy && edge.weak)
+    return `lazily loaded weak dependency ${edge.install_name}`;
+  if (lazy) return `lazily loaded ${edge.install_name}`;
+  if (edge.weak) return `weak dependency ${edge.install_name}`;
+  return edge.install_name;
+};
+
+/**
+ * A may-be-missing lazy image is optional. Every other lazy image fails
+ * when first use cannot find it.
+ */
+const lazyConsequence = (weak: boolean): string =>
+  weak
+    ? "dyld loads it on first use and continues if it is absent."
+    : "dyld loads it on first use, which would fail unless the image is supplied elsewhere.";
+
 export const DYLIB_RESOLUTION_LIMITATIONS = [
-  "LC_LAZY_LOAD_DYLIB dependencies are resolved but not traversed, because dyld loads them only on first use.",
+  "LC_LAZY_LOAD_DYLIB and LC_LAZY_LOAD_DYLIB_INFO dependencies are resolved but not traversed, because dyld loads them only on first use.",
   "Slices are matched by dyld's graded architectures (an x86_64h process also loads x86_64). arm64e processes that disable pointer authentication can also load arm64 slices; that fallback is not modeled.",
   "Absolute install names and rpaths are outside the analyzed root and are not evaluated, including /System and /usr/lib libraries that the dyld shared cache usually provides.",
   "Leaf and relative install names depend on dyld fallback paths, DYLD_* variables, and the working directory; they are undetermined.",

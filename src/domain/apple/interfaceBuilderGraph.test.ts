@@ -9,6 +9,33 @@ import { parseInterfaceBuilderRecords } from "./interfaceBuilderKeyedArchive.js"
 
 const hash = "a".repeat(64);
 
+it("requires resource-root provenance when executable identity is unknown", () => {
+  const resourceRoot = {
+    caller_path: "/tmp/Fixture.app",
+    canonical_path: "/tmp/Fixture.app",
+    info_plist_path: "/tmp/Fixture.app/Info.plist",
+    layout: "root" as const,
+    executable_sha256: null,
+  };
+  const result = buildInterfaceBuilderAnalysis({
+    targetSha256: null,
+    resourceRoot,
+    toolVersion: "test",
+    documents: [],
+    limits: interfaceBuilderLimitsSchema.parse({}),
+  });
+  expect(result.target_sha256).toBeNull();
+  expect(result.resource_root).toEqual(resourceRoot);
+  expect(() =>
+    buildInterfaceBuilderAnalysis({
+      targetSha256: null,
+      toolVersion: "test",
+      documents: [],
+      limits: interfaceBuilderLimitsSchema.parse({}),
+    }),
+  ).toThrow();
+});
+
 describe("compiled Interface Builder graph projection", () => {
   it("normalizes object, hierarchy, action, outlet, and segue facts", () => {
     const raw = {

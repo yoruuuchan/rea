@@ -140,8 +140,12 @@ const verifyParserConformance = async (app, trace) => {
         join(app, image.path),
         slice.architecture,
       );
+      // otool -l prints LC_LAZY_LOAD_DYLIB_INFO without its linkedit install
+      // name, so this comparison cannot expect that edge. The structural
+      // reader tests own the payload.
       const edges = trace.edges.filter(
-        ({ loader, architecture, root }) =>
+        ({ loader, architecture, root, command }) =>
+          command !== "LC_LAZY_LOAD_DYLIB_INFO" &&
           loader === image.path &&
           architecture === slice.architecture &&
           root ===

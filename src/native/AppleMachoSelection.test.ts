@@ -8,12 +8,32 @@ import {
   machoImage,
   machoImageWithUnknownCommand,
 } from "../artifacts/apple/MachoImage.fixture.js";
-import { parseMachoLayout, selectMachoSlice } from "./AppleMachoSelection.js";
+import {
+  parseMachoLayout,
+  selectMachoSlice,
+  UnsupportedMachoMetadataFormatError,
+} from "./AppleMachoSelection.js";
 import { decodeAppleDispatchMetadata } from "./AppleDispatchMetadata.js";
 
 /** macOS 27 system binaries ship CPU_SUBTYPE_ARM64E_X1 (12) with the PAC ABI bit. */
 const ARM64E_X1 = { type: 0x0100000c, subtype: 0x8000000c } as const;
 const X86_64H = { type: 0x01000007, subtype: 8 } as const;
+
+it("keeps unknown magic distinct from recognized unsupported Mach-O formats", () => {
+  expect(() => parseMachoLayout(Buffer.alloc(10), "arm64")).toThrow(
+    "Truncated Mach-O header",
+  );
+
+  const unknown = Buffer.alloc(32);
+  let failure: unknown;
+  try {
+    parseMachoLayout(unknown, "arm64");
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure).not.toBeInstanceOf(UnsupportedMachoMetadataFormatError);
+});
 
 describe("native Mach-O slice selection", () => {
   it("rejects misaligned load commands", () => {
@@ -54,6 +74,43 @@ describe("native Mach-O slice selection", () => {
   it("accepts a FAT slice whose table identity and embedded header agree", () => {
     const fat = fatImage([{ cpu: CPU.arm64, bytes: machoImage({}) }]);
     expect(parseMachoLayout(Buffer.from(fat), "arm64").segments).toEqual([]);
+  });
+
+  it("retains the selected image range and complete raw CPU identity", () => {
+    const thin = Buffer.from(machoImage({ cpu: CPU.arm64e }));
+    expect(parseMachoLayout(thin, "arm64").selectedImage).toEqual({
+      container: "thin",
+      offset: 0,
+      byteLength: thin.length,
+      cpuType: CPU.arm64e.type,
+      cpuSubtype: CPU.arm64e.subtype,
+      containerTableSha256: null,
+    });
+
+    const fat = Buffer.from(
+      fatImage([{ cpu: ARM64E_X1, bytes: machoImage({ cpu: ARM64E_X1 }) }]),
+    );
+    const selection = parseMachoLayout(fat, "arm64").selectedImage;
+    expect(selection).toMatchObject({
+      container: "fat",
+      cpuType: ARM64E_X1.type,
+      cpuSubtype: ARM64E_X1.subtype,
+    });
+    expect(selection.offset).toBeGreaterThan(0);
+    expect(selection.byteLength).toBeGreaterThan(0);
+    expect(selection.containerTableSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("rejects a FAT 32-bit declaration whose embedded CPU identity disagrees", () => {
+    const fat = fatImage([
+      { cpu: CPU.i386, bytes: machoImage({ cpu: CPU.i386, wide: false }) },
+    ]);
+    const sliceOffset = new DataView(fat.buffer).getUint32(16, false);
+    new DataView(fat.buffer).setUint32(sliceOffset + 4, CPU.arm64.type, true);
+
+    expect(() => parseMachoLayout(Buffer.from(fat), "x86")).toThrow(
+      /FAT architecture 0 CPU type\/subtype disagrees with its Mach-O header/u,
+    );
   });
 
   it("selects only the admitted CPU type and rejects a 32-bit slice", () => {

@@ -43,6 +43,7 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { createEvidence } from "../domain/evidence.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { windowAnnotationText } from "../domain/signals/annotationTextWindow.js";
 import {
@@ -439,6 +440,10 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
           ...(observedOutput === undefined
             ? {}
             : { capturedOutput: observedOutput }),
+          ...fixedAllowanceOptions(
+            "The sigrok decoder-discovery line allowance",
+            "capture",
+          ),
         },
       );
     const reason = cause instanceof Error ? cause.message : String(cause);
@@ -520,7 +525,10 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
         "file-size",
         reason,
         { input_bytes: LIMITS.input_bytes },
-        { cause },
+        {
+          cause,
+          ...fixedAllowanceOptions("the fixed sigrok input allowance", "input"),
+        },
       );
     if (cause instanceof ArtifactReaderFailure && cause.reason === "integrity")
       return new AnalysisArtifactChangedError(operation, path, reason, {

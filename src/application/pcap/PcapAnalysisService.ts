@@ -24,7 +24,11 @@ export class PcapAnalysisService {
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted === true)
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, {
+          cause: options.signal.reason,
+        }),
+      );
     const request = pcapRequestSchema.safeParse({ operation, input });
     if (!request.success)
       return err(new AnalysisInputError(operation, { cause: request.error }));

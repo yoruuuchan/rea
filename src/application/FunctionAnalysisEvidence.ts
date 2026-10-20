@@ -39,19 +39,25 @@ export const executeFunctionAnalysisEvidence = async (
   if (!dossier.ok) return dossier;
   const observation = execution.value;
   return ok(
-    createEvidence(observation.subject ?? target, observation.provider, {
-      operation: "analyze_function",
-      parameters: arguments_,
-      result: dossier.value,
-      rawResult: observation.rawResult,
-      limitations: observation.limitations,
-      locations: observation.locations,
-      ...(observation.relationshipCoverage === undefined
-        ? {}
-        : { relationshipCoverage: observation.relationshipCoverage }),
-      ...(observation.analysisProfile === undefined
-        ? {}
-        : { analysisProfile: observation.analysisProfile }),
-    }),
+    createEvidence(
+      observation.subject === undefined
+        ? target
+        : (observation.subject ?? undefined),
+      observation.provider,
+      {
+        operation: "analyze_function",
+        parameters: arguments_,
+        result: dossier.value,
+        rawResult: observation.rawResult,
+        limitations: observation.limitations,
+        locations: observation.locations,
+        ...(observation.relationshipCoverage === undefined
+          ? {}
+          : { relationshipCoverage: observation.relationshipCoverage }),
+        ...(observation.analysisProfile === undefined
+          ? {}
+          : { analysisProfile: observation.analysisProfile }),
+      },
+    ),
   );
 };

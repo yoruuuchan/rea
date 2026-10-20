@@ -343,8 +343,9 @@ export const reconstructJavaScriptArtifact = async (
 const OPERATION = "analyze_javascript_application";
 
 /**
- * Resolve the caller-selected input. A missing or unreadable selection is a
- * caller or host-permission failure, not a damaged artifact.
+ * Resolve the caller-selected input. A missing, looping, overlong, or
+ * unreadable selection is a caller or host-resolution failure, not a damaged
+ * artifact.
  */
 const resolveSelectedInput = async (inputPath: string): Promise<string> => {
   try {
@@ -366,9 +367,25 @@ const resolveSelectedInput = async (inputPath: string): Promise<string> => {
           message: `No file or directory exists at the selected input path (${code}): ${inputPath}`,
         },
       ]);
+    if (code === "ELOOP" || code === "ENAMETOOLONG")
+      throw new AnalysisInputError(OPERATION, { cause }, [
+        {
+          path: ["input_path"],
+          reason: "invalid_value",
+          message: selectedInputResolutionMessage(code, inputPath),
+        },
+      ]);
     throw cause;
   }
 };
+
+const selectedInputResolutionMessage = (
+  code: "ELOOP" | "ENAMETOOLONG",
+  inputPath: string,
+): string =>
+  code === "ENAMETOOLONG"
+    ? `Selected input path exceeds the host path or component length limit (ENAMETOOLONG): ${inputPath}`
+    : `Selected input path could not be resolved because symbolic-link traversal looped or exceeded the host limit (ELOOP): ${inputPath}`;
 
 /** The selected input's kind, checked against the caller's requested format. */
 const resolveFormat = async (

@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, chmod, rm, writeFile } from "node:fs/promises";
+import { access, chmod, open, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,8 @@ import { err, ok } from "../../../../src/domain/result.js";
 import { HopperReleaseError } from "../../../../src/application/HopperReleaseFeed.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
+import { AnalysisCleanupLease } from "../../../../src/artifacts/AnalysisCleanupLease.js";
+import { ArtifactReaderFailure } from "../../../../src/artifacts/ArtifactReader.js";
 import { PrivateRuntimeRoot } from "../../../../src/process/PrivateRuntimeRoot.js";
 import { HopperClient } from "../../../../src/hopper/HopperClient.js";
 
@@ -62,6 +64,140 @@ const options = (launcherPath: string): HopperApplicationLauncherOptions => ({
   bridgeScriptPath: "/rea/hopper_bridge.py",
   launchMode: "verified_linux_demo",
   demoHelperPath: "/rea/hopper-demo-x11.py",
+});
+
+it("resolves mixed image and publisher cleanup only after each owner releases", async () => {
+  const directory = await createTestTempDirectory("rea-hopper-mixed-cleanup-");
+  const targetPath = join(directory, "target.macho");
+  const source = Buffer.alloc(64);
+  source.writeUInt32BE(0xfeedfacf, 0);
+  source.writeUInt32BE(0x0100000c, 4);
+  source.writeUInt32BE(0x80000002, 8);
+  await writeFile(targetPath, source);
+
+  let allowImageClose = false;
+  let imageCloseAttempts = 0;
+  const imageFileSystem = {
+    async open(
+      path: Parameters<typeof open>[0],
+      flags: Parameters<typeof open>[1],
+      mode?: Parameters<typeof open>[2],
+    ) {
+      const handle = await open(path, flags, mode);
+      if (String(path) === targetPath && flags === "r") {
+        const close = handle.close.bind(handle);
+        handle.close = async () => {
+          imageCloseAttempts += 1;
+          if (!allowImageClose)
+            throw new Error("Fixture image source close unavailable");
+          await close();
+        };
+      }
+      return handle;
+    },
+  };
+
+  let allowPublisherClose = false;
+  let publisherCloseAttempts = 0;
+  const publisherOwner = {
+    async close() {
+      publisherCloseAttempts += 1;
+      if (!allowPublisherClose)
+        throw new Error("Fixture publisher close unavailable");
+    },
+  };
+  const publisherLease = AnalysisCleanupLease.forCloseOwner(
+    publisherOwner,
+    "hopper-publisher-verification",
+  );
+  const retryPublisherCleanup = async () => {
+    try {
+      await publisherLease.release();
+    } catch (cause: unknown) {
+      const failure = new ArtifactReaderFailure(
+        "unavailable",
+        "Publisher verification cleanup remains incomplete",
+        {
+          cause,
+          cleanup: {
+            reason: cause instanceof Error ? cause.message : String(cause),
+            resources: ["hopper-publisher-verification"],
+          },
+          cleanupLeases: [publisherLease],
+        },
+      );
+      throw failure;
+    }
+  };
+  const launcher = new HopperApplicationLauncher(
+    {
+      ...options("/missing/hopper"),
+      targetPath,
+      preparedImage: {
+        image: {
+          method: "thin_verified_copy",
+          byte_length: source.length,
+          cpu_type: 0x0100000c,
+          cpu_subtype: 0x80000002,
+        },
+        sourceSha256: createHash("sha256").update(source).digest("hex"),
+      },
+    },
+    {
+      platform: "win32",
+      imageFileSystem,
+      retryPublisherCleanup,
+    },
+  );
+  const session = {
+    directory,
+    socketPath: join(directory, "bridge.sock"),
+    token: "fixture-token",
+    runId: "fixture-run",
+  };
+
+  try {
+    const launched = await launcher.launch(session);
+    expect(launched).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: true },
+    });
+
+    const first = await launcher.cleanup();
+    expect(first).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: true },
+    });
+    if (first.ok) throw new Error("Expected mixed cleanup to remain pending");
+    const originalAggregate = first.error;
+    expect(originalAggregate.cleanupResources).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("hopper-image-source:"),
+        "hopper-publisher-verification",
+      ]),
+    );
+
+    allowImageClose = true;
+    const publisherOnly = await launcher.cleanup();
+    expect(publisherOnly).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: true },
+    });
+    expect(originalAggregate.cleanupIncomplete).toBe(true);
+    const closedImageAttempts = imageCloseAttempts;
+    expect(closedImageAttempts).toBeGreaterThan(1);
+
+    allowPublisherClose = true;
+    expect(await launcher.cleanup()).toEqual({ ok: true, value: null });
+    expect(originalAggregate.cleanupIncomplete).toBe(false);
+    expect(imageCloseAttempts).toBe(closedImageAttempts);
+    expect(publisherCloseAttempts).toBe(3);
+  } finally {
+    allowImageClose = true;
+    allowPublisherClose = true;
+    await launcher.cleanup();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 it("retains cancelled verification cleanup through client shutdown and retries it", async () => {

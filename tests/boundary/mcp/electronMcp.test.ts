@@ -29,7 +29,7 @@ import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { AsarArtifactReader } from "../../../src/artifacts/AsarArtifactReader.js";
 import { toolAvailabilityInventory } from "../../../src/contracts/toolOutputSchemaPrimitives.js";
 import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
-import { classifyBrowserCompleteness } from "../../../src/domain/browserCompleteness.js";
+import { emptyElectronPageCoverage } from "../../../src/domain/javascript/electronPageInspection.fixture.js";
 import type { ElectronPageInspection } from "../../../src/domain/javascript/electronObservation.js";
 import { err } from "../../../src/domain/result.js";
 
@@ -115,33 +115,7 @@ it("records completed Electron facts after final detach as server Evidence", asy
       file_path: "/tmp/index.html",
       attached: true,
     },
-    capture_window: {
-      started_at: "2026-01-01T00:00:00.000Z",
-      ended_at: "2026-01-01T00:00:00.001Z",
-      observation_ms: 1,
-    },
-    completeness: classifyBrowserCompleteness({
-      policyFilteredSections: new Set(),
-      attachLimitedSections: new Set(),
-      truncatedSections: new Set(),
-      unavailableSections: new Set(),
-      excluded: [],
-      droppedEvents: {
-        scripts: 0,
-        network_requests: 0,
-        console_events: 0,
-        websocket_connections: 0,
-        websocket_frames: 0,
-        webmcp_tools: 0,
-        timeline_events: 0,
-      },
-    }),
-    frames: [],
-    dom: { total_nodes: 0, nodes: [] },
-    scripts: { total: 0, items: [] },
-    resources: [],
-    workers: [],
-    limitations: [],
+    ...emptyElectronPageCoverage(1),
   };
   const provider: ElectronObservationPort = {
     identity: () => ({

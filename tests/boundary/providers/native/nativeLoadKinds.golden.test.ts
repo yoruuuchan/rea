@@ -165,6 +165,48 @@ it("retains the empty segment name of a Mach-O object file", () => {
   ).toThrow("otool field vmaddr has no value");
 });
 
+it.each([
+  { label: "segment", segmentName: "version", sectionName: "__mysect" },
+  { label: "section", segmentName: "__DATA", sectionName: "version" },
+])(
+  "preserves a legal $label name equal to a compound field word",
+  ({ segmentName, sectionName }) => {
+    const output = [
+      "Load command 0",
+      "      cmd LC_SEGMENT_64",
+      "  cmdsize 152",
+      `  segname ${segmentName}`,
+      "   vmaddr 0x0000000000000000",
+      "   vmsize 0x0000000000000018",
+      "  fileoff 0",
+      " filesize 24",
+      "  maxprot 0x00000007",
+      " initprot 0x00000007",
+      "   nsects 1",
+      "    flags 0x0",
+      "Section",
+      `  sectname ${sectionName}`,
+      `   segname ${segmentName}`,
+      "      addr 0x0000000000000000",
+      "      size 0x0000000000000018",
+      "    offset 0",
+      "     align 2^2 (4)",
+      "    flags 0x80000400",
+      "",
+    ].join("\n");
+
+    const parsed = parseOtoolLoadCommands(withOtoolMachHeader(output));
+
+    expect(parsed.commands[0]?.fields.segname).toBe(segmentName);
+    expect(parsed.segments).toMatchObject([
+      {
+        name: segmentName,
+        sections: [{ segment: segmentName, name: sectionName }],
+      },
+    ]);
+  },
+);
+
 it("preserves dependency install names that begin with the word stamp", () => {
   const load = parseOtoolLoadCommands(
     withOtoolMachHeader(

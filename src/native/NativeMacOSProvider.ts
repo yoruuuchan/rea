@@ -55,6 +55,7 @@ import {
   AnalysisResourceConstraintError,
   AnalysisTimeoutError,
 } from "../domain/analysisErrorCore.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import {
@@ -120,6 +121,8 @@ import {
   type NativeUiHelperRuntime,
 } from "./NativeUiHelperRuntime.js";
 import { NativeUiInterruptionControl } from "./NativeUiInterruptionControl.js";
+import type { ResolvedAppBundleResourceRoot } from "../application/AppBundleExecutable.js";
+import { resolveBundleResourcePlistSelection } from "./NativePlistSource.js";
 
 type SignatureRuntimeRootFactory = () => Promise<
   Pick<PrivateRuntimeRoot, "path" | "close">
@@ -165,6 +168,23 @@ export class NativeMacOSProvider implements AnalysisProvider {
       this.#privateRuntimeRootFactory,
     );
   }
+
+  createBundleResourceClient(
+    root: ResolvedAppBundleResourceRoot,
+  ): AnalysisClient {
+    const plistAvailable = this.#capabilities.some(
+      ({ operation, available }) => operation === "inspect_plist" && available,
+    );
+    return new NativeMacOSClient(
+      undefined,
+      this.runner,
+      this.#tracerFactory(),
+      this.#environment,
+      this.#privateRuntimeRootFactory,
+      root,
+      plistAvailable,
+    );
+  }
 }
 
 class NativeMacOSClient implements AnalysisClient {
@@ -178,14 +198,22 @@ class NativeMacOSClient implements AnalysisClient {
   #closed = false;
 
   constructor(
-    private readonly target: BinaryTarget,
+    private readonly activeTarget: BinaryTarget | undefined,
     private readonly runner: NativeCommandRunner,
     private readonly tracer: NativeCallTracer,
     private readonly environment: Readonly<NodeJS.ProcessEnv>,
     private readonly privateRuntimeRootFactory:
       | SignatureRuntimeRootFactory
       | undefined,
+    private readonly bundleResourceRoot?: ResolvedAppBundleResourceRoot,
+    private readonly bundlePlistAvailable = true,
   ) {}
+
+  private get target(): BinaryTarget {
+    if (this.activeTarget === undefined)
+      throw new Error("This provider client has no executable target");
+    return this.activeTarget;
+  }
 
   async execute(
     operation: AnalysisOperation,
@@ -206,6 +234,22 @@ class NativeMacOSClient implements AnalysisClient {
       );
     if (operation === "health")
       return ok(createAnalysisExecution(null, IDENTITY));
+    if (this.activeTarget === undefined && operation !== "inspect_plist")
+      return err(
+        new AnalysisCapabilityUnavailableError(
+          IDENTITY.id,
+          operation,
+          "This client is bound to app resource access only.",
+        ),
+      );
+    if (this.bundleResourceRoot !== undefined && !this.bundlePlistAvailable)
+      return err(
+        new AnalysisCapabilityUnavailableError(
+          IDENTITY.id,
+          "inspect_plist",
+          "Property list inspection requires a macOS host.",
+        ),
+      );
     if (operation === "inspect_native_dispatch_metadata") {
       const input = toolContract(operation).inputSchema.safeParse(parameters);
       if (!input.success)
@@ -234,6 +278,8 @@ class NativeMacOSClient implements AnalysisClient {
             input.data.max_records,
             this.#dispatchResources,
             options?.signal,
+            input.data.objc_class_import_addresses,
+            input.data.objc_class_import_addresses_complete ?? true,
           ),
         );
         return ok(
@@ -805,10 +851,13 @@ class NativeMacOSClient implements AnalysisClient {
     try {
       return await this.#plistResources.run(async () => {
         try {
-          const plist = await resolveNativePlistSelection(
-            this.target,
-            requested,
-          );
+          const plist =
+            this.bundleResourceRoot === undefined
+              ? await resolveNativePlistSelection(this.target, requested)
+              : resolveBundleResourcePlistSelection(
+                  this.bundleResourceRoot,
+                  requested,
+                );
           if (!plist.ok) return plist;
           const fileInput = {
             selection: plist.value,
@@ -897,6 +946,17 @@ class NativeMacOSClient implements AnalysisClient {
             value: parsed.value.value,
             bundle: parsed.value.bundle,
             source_path: plist.value.path,
+            ...(this.bundleResourceRoot === undefined
+              ? {}
+              : {
+                  resource_root: {
+                    caller_path: this.bundleResourceRoot.callerPath,
+                    canonical_path: this.bundleResourceRoot.canonicalPath,
+                    info_plist_path: this.bundleResourceRoot.infoPlistPath,
+                    layout: this.bundleResourceRoot.layout,
+                    executable_sha256: this.bundleResourceRoot.executableSha256,
+                  },
+                }),
             provenance,
             limitations: parsed.value.limitations,
           });
@@ -1216,7 +1276,13 @@ const translateCommandFailure = (
         "memory",
         `Native command output exceeded ${String(NATIVE_COMMAND_OUTPUT_BUDGET_BYTES)} bytes; complete output is required for analysis.`,
         { max_output_bytes: NATIVE_COMMAND_OUTPUT_BUDGET_BYTES },
-        errorOptions,
+        {
+          ...errorOptions,
+          ...fixedAllowanceOptions(
+            "The native command output capture allowance",
+            "capture",
+          ),
+        },
       ),
     );
   return bindCleanup(

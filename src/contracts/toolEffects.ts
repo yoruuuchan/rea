@@ -679,6 +679,7 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   project_apple_application_graph: evidence,
   project_harmony_application_graph: evidence,
   open_binary: effects({ mutatesSession: true, launchesProcess: true }),
+  open_bundle_resources: effects({ mutatesSession: true }),
   close_binary: effects({
     mutatesSession: true,
     writesFilesystem: true,

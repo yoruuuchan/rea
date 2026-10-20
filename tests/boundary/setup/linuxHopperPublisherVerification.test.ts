@@ -27,6 +27,7 @@ import {
   linuxHopperReleaseCacheDirectory,
   retryLinuxHopperPublisherCleanup,
 } from "../../../src/application/LinuxHopperPublisher.js";
+import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import {
   HOPPER_LINUX_PRIMARY_FINGERPRINT,
   type LinuxHopperRelease,
@@ -108,6 +109,21 @@ const fixture = async (family: "deb" | "arch" = "deb") => {
   };
 };
 
+const verifyFixtureArchive = async (
+  f: Awaited<ReturnType<typeof fixture>>,
+  family: "deb" | "arch" = "deb",
+) => {
+  const result = await f.publisher.verifyArchive(
+    family,
+    f.release,
+    f.archive,
+    undefined,
+    f.publicKey,
+  );
+  if (!result.ok) throw result.error;
+  return result.value;
+};
+
 const admitFixturePublisher = (
   fingerprint: string,
   module: typeof signatures = signatures,
@@ -173,16 +189,9 @@ describe("Linux signed package retention boundary", () => {
       });
       vi.stubGlobal("fetch", network);
       try {
-        const verified = await f.publisher.verifyArchive(
-          family,
-          f.release,
-          f.archive,
-          undefined,
-          f.publicKey,
-        );
-        if (!verified.ok) throw verified.error;
+        const verifiedArchive = await verifyFixtureArchive(f, family);
         expect(
-          await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+          await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
         ).toEqual({ ok: true, value: undefined });
         await f.publisher.close();
         // A new instance alone still shares process-local cryptographic proofs.
@@ -240,16 +249,9 @@ linux.each([
   const f = await fixture();
   admitFixturePublisher(f.fingerprint);
   try {
-    const verified = await f.publisher.verifyArchive(
-      "deb",
-      f.release,
-      f.archive,
-      undefined,
-      f.publicKey,
-    );
-    if (!verified.ok) throw verified.error;
+    const verifiedArchive = await verifyFixtureArchive(f, "deb");
     const retained = await f.publisher.retainVerifiedArchive(
-      verified.value,
+      verifiedArchive,
       f.archive,
     );
     if (!retained.ok) throw retained.error;
@@ -300,7 +302,7 @@ linux.each([
     // An explicitly approved fresh package can repair this entry while
     // preserving the original evidence and keeping ordinary reads strict.
     expect(
-      await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+      await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
     ).toEqual({ ok: true, value: undefined });
     const backups = (await readdir(f.publisher.cacheRoot)).filter((name) =>
       name.startsWith(`${f.release.main_exe_hash}.backup-`),
@@ -321,7 +323,7 @@ linux.each([
       ok: true,
     });
     expect(
-      await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+      await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
     ).toEqual({ ok: true, value: undefined });
     expect(
       (await readdir(f.publisher.cacheRoot)).filter((name) =>
@@ -345,16 +347,9 @@ linux.each([false, true])(
       | ReturnType<LinuxHopperPublisher["retainVerifiedArchive"]>
       | undefined;
     try {
-      const verified = await f.publisher.verifyArchive(
-        "deb",
-        f.release,
-        f.archive,
-        undefined,
-        f.publicKey,
-      );
-      if (!verified.ok) throw verified.error;
+      const verifiedArchive = await verifyFixtureArchive(f, "deb");
       expect(
-        await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+        await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
       ).toEqual({ ok: true, value: undefined });
       const staged = join(f.publisher.cacheRoot, "authenticated-fixture-stage");
       await cp(f.cache, staged, { recursive: true });
@@ -399,7 +394,7 @@ linux.each([false, true])(
         },
       );
       retention = f.publisher.retainVerifiedArchive(
-        verified.value,
+        verifiedArchive,
         f.archive,
         controller.signal,
       );
@@ -450,16 +445,9 @@ linux("restores old evidence when replacement publication fails", async () => {
   const f = await fixture();
   admitFixturePublisher(f.fingerprint);
   try {
-    const verified = await f.publisher.verifyArchive(
-      "deb",
-      f.release,
-      f.archive,
-      undefined,
-      f.publicKey,
-    );
-    if (!verified.ok) throw verified.error;
+    const verifiedArchive = await verifyFixtureArchive(f, "deb");
     expect(
-      await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+      await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
     ).toEqual({ ok: true, value: undefined });
     const broken = "{interrupted cache metadata";
     await writeFile(join(f.cache, "release.json"), broken);
@@ -479,7 +467,7 @@ linux("restores old evidence when replacement publication fails", async () => {
     syncBuiltinESMExports();
     try {
       const result = await f.publisher.retainVerifiedArchive(
-        verified.value,
+        verifiedArchive,
         f.archive,
       );
       expect(result).toMatchObject({
@@ -506,7 +494,7 @@ linux("restores old evidence when replacement publication fails", async () => {
       syncBuiltinESMExports();
     }
     expect(
-      await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+      await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
     ).toEqual({ ok: true, value: undefined });
     expect(await f.publisher.inspectLauncher(f.launcher)).toMatchObject({
       ok: true,
@@ -522,16 +510,9 @@ linux(
     const f = await fixture();
     admitFixturePublisher(f.fingerprint);
     try {
-      const verified = await f.publisher.verifyArchive(
-        "deb",
-        f.release,
-        f.archive,
-        undefined,
-        f.publicKey,
-      );
-      if (!verified.ok) throw verified.error;
+      const verifiedArchive = await verifyFixtureArchive(f, "deb");
       expect(
-        await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+        await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
       ).toEqual({ ok: true, value: undefined });
       await writeFile(join(f.cache, "public-key.asc"), f.publicKey + "\n");
       const metadata = await readFile(join(f.cache, "release.json"));
@@ -539,7 +520,7 @@ linux(
         .spyOn(nativeCommands, "execFileOutput")
         .mockRejectedValue(new Error("Fixture native inspection unavailable"));
       expect(
-        await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+        await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
       ).toMatchObject({
         ok: false,
         error: { reason: "verification_unavailable" },
@@ -621,16 +602,9 @@ linux(
       },
     );
     try {
-      const verified = await f.publisher.verifyArchive(
-        "deb",
-        f.release,
-        f.archive,
-        undefined,
-        f.publicKey,
-      );
-      if (!verified.ok) throw verified.error;
+      const verifiedArchive = await verifyFixtureArchive(f, "deb");
       expect(
-        await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+        await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
       ).toMatchObject({ ok: false, error: { reason: "cleanup_failed" } });
       const input = {
         cacheDirectory: f.publisher.cacheRoot,
@@ -889,16 +863,9 @@ portableTar(
   async () => {
     const f = await fixture("arch");
     admitFixturePublisher(f.fingerprint);
-    const verified = await f.publisher.verifyArchive(
-      "arch",
-      f.release,
-      f.archive,
-      undefined,
-      f.publicKey,
-    );
-    if (!verified.ok) throw verified.error;
+    const verifiedArchive = await verifyFixtureArchive(f, "arch");
     expect(
-      await f.publisher.retainVerifiedArchive(verified.value, f.archive),
+      await f.publisher.retainVerifiedArchive(verifiedArchive, f.archive),
     ).toMatchObject({ ok: true });
 
     let reachedMetadataClose!: () => void;
@@ -964,6 +931,7 @@ linux(
         controller.abort();
         throw new Error("Fixture cleanup unavailable after cancellation");
       });
+    let retryFailure: unknown;
     try {
       expect(
         await f.publisher.verifyArchive(
@@ -977,10 +945,22 @@ linux(
         ok: false,
         error: { reason: "cleanup_failed" },
       });
-      await expect(retryLinuxHopperPublisherCleanup()).rejects.toMatchObject({
+      try {
+        await retryLinuxHopperPublisherCleanup();
+      } catch (cause: unknown) {
+        retryFailure = cause;
+      }
+      expect(retryFailure).toBeInstanceOf(ArtifactReaderFailure);
+      expect(retryFailure).toMatchObject({
         cleanup: {
           resources: [expect.stringContaining("rea-hopper-publisher-")],
         },
+        cleanupLeases: [expect.objectContaining({ released: false })],
+      });
+      cleanup.mockRestore();
+      await retryLinuxHopperPublisherCleanup();
+      expect(retryFailure).toMatchObject({
+        cleanupLeases: [expect.objectContaining({ released: true })],
       });
     } finally {
       cleanup.mockRestore();

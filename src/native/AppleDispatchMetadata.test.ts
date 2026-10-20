@@ -1048,20 +1048,26 @@ describe("byte-swapped universal Apple dispatch metadata", () => {
     },
   );
 
-  it("validates the selected thin slice's own byte order", () => {
+  it("reads the selected thin slice's CPU identity in its own byte order", () => {
     const bytes = wrapped(false);
     bytes.writeUInt32BE(0xfeedfacf, 256);
+    bytes.writeUInt32BE(0x0100000c, 260);
+    bytes.writeUInt32BE(0, 264);
     expect(() => decodeAppleDispatchMetadata(bytes, 100, provenance)).toThrow(
-      "Only little-endian 64-bit Mach-O metadata is supported",
+      "Unsupported big-endian Mach-O CPU type",
     );
   });
 
   it("rejects a 32-bit slice payload inside a little-endian container", () => {
     const bytes = wrapped(false);
-    bytes.writeUInt32BE(0xfeedface, 256);
-    expect(() => decodeAppleDispatchMetadata(bytes, 100, provenance)).toThrow(
-      "Unsupported 32-bit Mach-O metadata for requested CPU type arm64 (FAT header byte order: little-endian)",
-    );
+    bytes.writeUInt32LE(12, 8);
+    bytes.writeUInt32LE(0, 12);
+    bytes.writeUInt32LE(0xfeedface, 256);
+    bytes.writeUInt32LE(12, 260);
+    bytes.writeUInt32LE(0, 264);
+    expect(() =>
+      decodeAppleDispatchMetadata(bytes, 100, provenance, "arm"),
+    ).toThrow("Unsupported 32-bit Mach-O metadata for requested CPU type arm");
   });
 
   it("checks the full little-endian FAT64 slice extent", () => {
