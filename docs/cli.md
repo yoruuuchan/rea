@@ -30,6 +30,13 @@ jq -c '{source: {kind: "inline", evidence: .}, view: {kind: "summary"}}' app-evi
 rea inspect-analysis-view app-view.json
 ```
 
+The request can also name the saved file instead of embedding it:
+`{"source": {"kind": "evidence-file", "path": "app-evidence.json"}, "view": {"kind": "summary"}}`.
+The CLI resolves a relative path against the working directory; MCP clients
+pass an absolute path. REA reads and authenticates the file, then projects it
+like retained Evidence, so a large file is bounded by the file reader rather
+than charged as inline input.
+
 For example, a 334 MB Obsidian application Evidence file yields a summary view
 of about 10 KB. Replace the view with
 `{"kind": "page", "collection": "modules", "offset": 0, "limit": 32}` for a
@@ -84,6 +91,17 @@ rea inspect-go-binary /absolute/path/to/program --json
 The shared CLI/MCP workflow reports compiler version, modules, replacements,
 build settings, original bytes and SHA-256. See [Go binaries](go-binaries.md)
 for supported containers and absent or malformed metadata.
+
+Inspect a Godot PCK without running the game:
+
+```sh
+rea inspect-artifact game.pck --detail summary --evidence_output evidence.json --json
+rea extract-artifact game.pck --json
+```
+
+Formats 2, 3 and 4 retain header, directory and integrity facts. Compact delivery
+keeps complete Evidence in the requested bundle. See [Godot PCK](godot-pck.md)
+for embedded packs, batch queries and unknown encrypted coverage.
 
 Inspect Unity IL2CPP metadata names without Unity or a disassembler:
 

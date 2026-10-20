@@ -1,4 +1,10 @@
 import {
+  canBorrowParsedJsonSnapshot,
+  isImmutableJsonSnapshot,
+  freezeJsonSnapshot,
+  immutableJsonSnapshotMember,
+} from "./immutableJson.js";
+import {
   artifactInventoryResultSchema,
   type ArtifactInventoryCoverage,
   type ArtifactInventoryResult,
@@ -100,13 +106,29 @@ const parseInspectionInventoryPayload = (
   readonly pages: readonly ArtifactInventoryResult[];
   readonly evidenceIds: readonly string[];
 } => {
-  const inspection = artifactInspectionResultSchema.parse(input);
+  const parsedInspection = artifactInspectionResultSchema.parse(input);
+  const inspection = canBorrowParsedJsonSnapshot(input, parsedInspection)
+    ? input
+    : isImmutableJsonSnapshot(input)
+      ? freezeJsonSnapshot(parsedInspection)
+      : parsedInspection;
+  const sealedSubsteps = immutableJsonSnapshotMember(inspection, "substeps");
   if (inspection.coverage.substeps_completed !== inspection.substeps.length)
     throw new TypeError(
       "Artifact inspection substep count does not match its coverage declaration",
     );
-  const substeps = inspection.substeps.map((step) => {
-    const evidence = parseEvidence(step.evidence);
+  const substeps = inspection.substeps.map((step, index) => {
+    const sealedStep = immutableJsonSnapshotMember(
+      sealedSubsteps,
+      String(index),
+    );
+    const sourceEvidence =
+      immutableJsonSnapshotMember(sealedStep, "evidence") ?? step.evidence;
+    const parsedEvidence = parseEvidence(sourceEvidence);
+    const evidence = canBorrowParsedJsonSnapshot(sourceEvidence, parsedEvidence)
+      ? sourceEvidence
+      : parsedEvidence;
+    immutableJsonSnapshotMember(evidence, "normalized_result");
     if (step.evidence_id !== evidence.evidence_id)
       throw new TypeError(
         "Artifact inspection substep evidence ID does not match nested Evidence",
@@ -164,7 +186,12 @@ const parseInventoryPage = (
   input: unknown,
   subject: Evidence["subject"],
 ): ArtifactInventoryResult => {
-  const inventory = artifactInventoryResultSchema.parse(input);
+  const parsed = artifactInventoryResultSchema.parse(input);
+  const inventory = canBorrowParsedJsonSnapshot(input, parsed)
+    ? input
+    : isImmutableJsonSnapshot(input)
+      ? freezeJsonSnapshot(parsed)
+      : parsed;
   validateArtifactInventorySubject(subject, inventory.manifest);
   validateInventoryPage(inventory);
   return inventory;
@@ -391,8 +418,7 @@ const validateCompleteInventory = (inventory: InventorySet): void => {
     const expectedId = artifactContradictionId({
       rootArtifactId: inventory.manifest.root_artifact_id,
       logicalPath: contradiction.logical_path,
-      declaredSha256: contradiction.declared_sha256,
-      observedSha256: contradiction.observed_sha256,
+      integrity: contradiction,
     });
     if (contradiction.contradiction_id !== expectedId)
       throw new TypeError(

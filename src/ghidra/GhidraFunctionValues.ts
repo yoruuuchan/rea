@@ -437,6 +437,7 @@ const functionObservationEnvelope = z.strictObject({
 
 export interface ParsedGhidraFunctionResult {
   readonly value: JsonValue;
+  readonly rawResult?: JsonValue;
   readonly limitations: readonly string[];
   readonly locations?: readonly EvidenceLocation[];
   readonly relationshipCoverage?: RelationshipCoverage;
@@ -488,6 +489,8 @@ export const parseGhidraFunctionResult = (
         ...(observation.selection === undefined
           ? {}
           : {
+              // Generic locations retain coordinates but not their mapping roles.
+              rawResult: value,
               locations: [
                 {
                   kind: "file-offset" as const,

@@ -22,6 +22,14 @@ directly to `compare_functions`, and `inspect_artifact` Evidence to
 `compare_artifacts`. Use `get_evidence_bundle` when the task needs broader
 retained session history or an explicit bundle for transfer.
 
+Ghidra inventories and function replies use `raw_result: null` when their facts
+are already preserved in `normalized_result`, limitations, locations and
+relationship coverage. Distinct overview details, measured load-image
+observations, file-offset selection roles and database types supplemented with
+derived metadata keep their upstream representation. Read function results from
+`normalized_result`; older retained Evidence keeps its original representation
+and identity.
+
 Artifact inventories declare `coverage.scope` (`root` or `container-entries`)
 and `coverage.status` (`complete` or `unknown`) independently of diagnostic
 wording. Comparison requires matching scopes, complete graph members and complete
@@ -224,6 +232,13 @@ pointers, plus excluded groups and three fixed unknowns. Templates, parameters a
 names are inferences; the Evidence is inferred whenever any tool or excluded group
 is templated, and derived otherwise.
 See [environment manifests](web-network-captures.md#environment-manifest).
+
+`inspect_analysis_view` also accepts `environment-state` for the same parents,
+extracting the initial state the recorded reads observed: entity types with an
+identity field, entities, documents for written non-entity paths, and a render
+plan per read tool that reproduces its recordings from the state or names why it
+cannot. Types and identity are inferences, so the Evidence is always inferred.
+See [environment state](web-network-captures.md#environment-state).
 
 `inspect_analysis_view` projects a caller-selected view of already completed
 `inspect_binary_layout`, `analyze_javascript_application`, or `analyze_function`

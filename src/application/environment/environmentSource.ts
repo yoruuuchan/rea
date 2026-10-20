@@ -5,6 +5,10 @@ import {
   type AnalysisViewResult,
 } from "../../domain/analysisView/analysisView.js";
 import { scenarioCaptureRecords } from "../../domain/analysisView/scenarioCaptureRecords.js";
+import {
+  readRecordedResponseBody,
+  type RecordedResponseBody,
+} from "../../domain/analysisView/recordedResponseBody.js";
 import { readRecordedRequestLine } from "../../domain/analysisView/webNetworkRouteTemplates.js";
 import { browserScenarioCaptureSchema } from "../../domain/browserScenarioCapture.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
@@ -30,27 +34,18 @@ export type EnvironmentManifest = Extract<
 >;
 export type EnvironmentManifestTool = EnvironmentManifest["tools"][number];
 
-/** One retained parent record reduced to what a replay returns. */
-export interface RecordedExchange {
+/** One retained parent record reduced to what a replay returns; a cut body is reported truncated. */
+export interface RecordedExchange extends RecordedResponseBody {
   readonly ordinal: number;
   readonly path: string;
   /** WHATWG query spelling including `?`, or null when the request had none. */
   readonly query: string | null;
   readonly status: number | null;
   readonly contentType: string | null;
-  /** Producer-decoded response text, or null when the record retained none. */
-  readonly bodyText: string | null;
-  /** Set when the retained bytes are not UTF-8, so `bodyText` holds their base64 rather than a lossy decoding. */
-  readonly bodyEncoding?: "base64";
-  /** Set when only a prefix of a large base64 body was decoded; replay reports it truncated. */
-  readonly bodyCut?: true;
 }
 
 /** Replayed bodies larger than this are cut at a UTF-8 boundary and flagged. */
 export const REPLAY_BODY_LIMIT_BYTES = 256 * 1024;
-
-/** Base64 characters that decode to just over the replay limit, so a cut prefix still fills it. */
-const BASE64_PREFIX_CHARS = Math.ceil((REPLAY_BODY_LIMIT_BYTES + 4) / 3) * 4;
 
 /** A HAR inspected by inspect_web_network_capture, or a session recorded by capture_browser_scenario. */
 export type EnvironmentCaptureKind = "web-network-capture" | "browser-scenario";
@@ -107,52 +102,6 @@ const parseEvidenceFile = (
   }
 };
 
-const contentTextSchema = z.object({
-  response: z.object({
-    content: z.object({
-      text: z.unknown().optional(),
-      encoding: z.unknown().optional(),
-    }),
-  }),
-});
-
-/** Strict, and keeping a leading byte-order mark, so replay returns the recorded text unchanged. */
-const strictUtf8 = (): TextDecoder =>
-  new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-/** The retained response text of one record, decoding HAR base64 content when the decoder kept it as valid UTF-8. */
-const recordedBody = (
-  record: WebNetworkCaptureRecord,
-): Pick<RecordedExchange, "bodyText" | "bodyEncoding"> => {
-  const content = contentTextSchema.safeParse(record.reported);
-  if (!content.success) return { bodyText: null };
-  const { text, encoding } = content.data.response.content;
-  if (typeof text !== "string") return { bodyText: null };
-  if (encoding !== "base64") return { bodyText: text };
-  const binary = record.binary_fields.find(
-    (field) =>
-      field.pointer === "/response/content/text" && field.state === "retained",
-  );
-  if (binary === undefined || binary.content_base64 === null)
-    return { bodyText: null };
-  // Replay returns at most REPLAY_BODY_LIMIT_BYTES, so a large body is decoded only that far.
-  const cut = binary.content_base64.length > BASE64_PREFIX_CHARS;
-  const encoded = cut
-    ? binary.content_base64.slice(0, BASE64_PREFIX_CHARS)
-    : binary.content_base64;
-  const flags = cut ? { bodyCut: true as const } : {};
-  try {
-    // A cut prefix may end inside a character; streaming leaves that tail undecoded.
-    const text = strictUtf8().decode(Buffer.from(encoded, "base64"), {
-      stream: cut,
-    });
-    return { bodyText: text, ...flags };
-  } catch {
-    // Binary or non-UTF-8 bytes: keep them exactly, as base64, instead of inventing replacement characters.
-    return { bodyText: encoded, bodyEncoding: "base64", ...flags };
-  }
-};
-
 const recordedExchange = (
   record: WebNetworkCaptureRecord,
 ): RecordedExchange | undefined => {
@@ -164,7 +113,7 @@ const recordedExchange = (
     query: line.query === undefined || line.query === "" ? null : line.query,
     status: line.status,
     contentType: line.rawMime === "" ? null : line.rawMime,
-    ...recordedBody(record),
+    ...readRecordedResponseBody(record, REPLAY_BODY_LIMIT_BYTES),
   };
 };
 

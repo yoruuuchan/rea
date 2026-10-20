@@ -453,7 +453,7 @@ const artifactEntry = (
     executable: hostExecutableMarking(absolute, metadata),
     encrypted: false,
     byteOffset: null,
-    declaredSha256: null,
+    declaredIntegrity: null,
     unpacked: false,
     limitations:
       kind === "symlink"

@@ -158,7 +158,56 @@ it("reserves retained request-body expansion before schema decoding or projectio
         normalizedResult: capture,
         limitations: [],
       },
+      "environment-manifest",
       new EnvironmentManifestAccumulator(128 * 1024),
+    );
+    expect(projected).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
+    });
+    expect(decoder).not.toHaveBeenCalled();
+  } finally {
+    decoder.mockRestore();
+  }
+});
+
+it("reserves request text even when another event's body was not captured", () => {
+  const capture = scenarioCaptureFixture([
+    {
+      method: "GET",
+      url: "/api/items",
+      status: 200,
+      mediaType: "application/json",
+      body: "[]",
+    },
+    {
+      method: "POST",
+      url: "/api/items",
+      status: 201,
+      mediaType: "application/json",
+      body: "{}",
+      requestMediaType: "application/json",
+      requestBody: JSON.stringify({ value: "x".repeat(2 * 1024 * 1024) }),
+    },
+  ]);
+  // The first response's body has no content, as a body that was not requested has.
+  const items = capture.events.items.map((event) =>
+    event.kind === "network-content" && event.transaction_id === "request-1"
+      ? { ...event, body: { state: "not_requested" as const } }
+      : event,
+  );
+  const decoder = vi.spyOn(TextDecoder.prototype, "decode");
+  try {
+    // The capture's containers fit this budget; only its request text does not.
+    const projected = admitScenarioCaptureParent(
+      {
+        evidenceId: `ev_${"a".repeat(64)}`,
+        operation: "capture_browser_scenario",
+        normalizedResult: { ...capture, events: { ...capture.events, items } },
+        limitations: [],
+      },
+      "environment-manifest",
+      new EnvironmentManifestAccumulator(8 * 1024 * 1024),
     );
     expect(projected).toMatchObject({
       ok: false,

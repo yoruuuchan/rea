@@ -309,7 +309,7 @@ export const projectJavaScriptApplicationView = (
   analysis: JavaScriptApplicationAnalysisResult,
   view: Exclude<
     AnalysisViewRequest,
-    { kind: "api-surface" | "environment-manifest" }
+    { kind: "api-surface" | "environment-manifest" | "environment-state" }
   >,
 ): Result<UnsignedAnalysisView, AnalysisError> => {
   if (

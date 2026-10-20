@@ -15,6 +15,7 @@ import type { WebNetworkCaptureRecord } from "../webNetworkCapture.js";
 import { analysisViewInputError } from "./analysisViewErrors.js";
 import type { AnalysisViewParent } from "./analysisView.js";
 import type { WebNetworkProjectionAccumulator } from "./WebNetworkProjectionAccumulator.js";
+import { textBytes } from "./webNetworkRouteTemplates.js";
 
 type RequestEvent = Extract<BrowserScenarioEvent, { kind: "request" }>;
 type ResponseEvent = Extract<BrowserScenarioEvent, { kind: "response" }>;
@@ -262,17 +263,50 @@ export const scenarioCaptureRecords = (
   };
 };
 
-/** Admit a capture_browser_scenario parent whose network content identifies response media types. */
+/** An own data member of admitted parent data; the clone admission already refused accessors. */
+const member = (value: unknown, key: string): unknown =>
+  typeof value === "object" && value !== null && Object.hasOwn(value, key)
+    ? (value as Readonly<Record<string, unknown>>)[key]
+    : undefined;
+
+/**
+ * Bytes the manifest derives from a borrowed scenario: validation decodes and re-encodes one body at
+ * a time (two bytes per base64 character), and projection keeps the decoded text of every request
+ * body. Response bodies stay borrowed, as HAR response text does.
+ */
+const derivedTextBytes = (value: unknown): number => {
+  const items = member(member(value, "events"), "items");
+  let largestBody = 0;
+  let requestText = 0;
+  // Each event is read on its own, so a body without content leaves the others counted.
+  for (const event of Array.isArray(items) ? items : []) {
+    const content = member(member(event, "body"), "content");
+    if (
+      member(event, "kind") !== "network-content" ||
+      typeof content !== "string"
+    )
+      continue;
+    largestBody = Math.max(largestBody, content.length);
+    if (member(event, "phase") === "request")
+      requestText += textBytes(Math.ceil((content.length * 3) / 4));
+  }
+  return 64 + largestBody * 2 + requestText;
+};
+
+/** Admit a capture_browser_scenario parent whose network content identifies response media types; state also needs bodies. */
 export const admitScenarioCaptureParent = (
   parent: AnalysisViewParent,
+  viewKind: "environment-manifest" | "environment-state",
   accumulator: WebNetworkProjectionAccumulator,
 ): Result<ScenarioCaptureRecords, AnalysisError> => {
-  // Body validation decodes base64, and projection constructs UTF-8 request text.
-  // Reserve their expanded strings before either allocation, even for retained parents.
-  const admitted = accumulator.admitCaptureClone(parent.normalizedResult, {
-    copiedStrings: true,
-  });
+  const admitted = accumulator.admitCaptureClone(parent.normalizedResult);
   if (!admitted.ok) return admitted;
+  // Reserve body validation and request text before either allocation, even for a parent read from
+  // a file, without charging the borrowed response bodies a large capture is made of.
+  const derived = accumulator.admitDerivedBytes(
+    derivedTextBytes(parent.normalizedResult),
+  );
+  if (!derived.ok) return derived;
   const parsed = browserScenarioCaptureSchema.safeParse(
     parent.normalizedResult,
   );
@@ -288,13 +322,19 @@ export const admitScenarioCaptureParent = (
       ]),
     );
   const content = parsed.data.scenario.network_content;
-  // Tools are chosen by response media type, which only bodies or header values carry.
-  if (!content.response_body && !content.header_values)
+  // Tools are chosen by response media type, which only bodies or header values carry; state is read from bodies.
+  if (
+    viewKind === "environment-state"
+      ? !content.response_body
+      : !content.response_body && !content.header_values
+  )
     return err(
       new AnalysisUnsupportedTargetError(
         "inspect_analysis_view",
         parent.evidenceId,
-        "environment-manifest needs a capture_browser_scenario capture with capture.network.response_body or header_values selected.",
+        viewKind === "environment-state"
+          ? "environment-state needs a capture_browser_scenario capture with capture.network.response_body selected."
+          : "environment-manifest needs a capture_browser_scenario capture with capture.network.response_body or header_values selected.",
       ),
     );
   return ok(scenarioCaptureRecords(parsed.data, "manifest"));

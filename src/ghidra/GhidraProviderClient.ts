@@ -120,6 +120,13 @@ export type GhidraProviderClientFactory = (
 
 type GhidraProviderClientInstance = ReturnType<GhidraProviderClientFactory>;
 
+interface GhidraExecutionMetadata {
+  readonly rawResult?: JsonValue;
+  readonly limitations?: readonly string[];
+  readonly locations?: readonly EvidenceLocation[];
+  readonly relationshipCoverage?: RelationshipCoverage;
+}
+
 /** Build one AnalysisClient for an admitted Ghidra target and profile. */
 export const createGhidraProviderClient = (input: {
   readonly config: AppConfig;
@@ -499,19 +506,14 @@ export const createGhidraProviderClient = (input: {
   const projectExecution = (
     operation: AnalysisOperation,
     normalized: JsonValue,
-    rawResult: JsonValue,
-    observationLimitations: readonly string[] = [],
-    locations: readonly EvidenceLocation[] = [],
-    relationshipCoverage?: RelationshipCoverage,
+    observation: GhidraExecutionMetadata = {},
   ) => {
     return createAnalysisExecution(normalized, committedProfile.provider, {
-      rawResult,
-      locations,
+      ...observation,
       analysisProfile: committedProfile,
-      ...(relationshipCoverage === undefined ? {} : { relationshipCoverage }),
       limitations: [
         ...limitationsFor(operation),
-        ...observationLimitations,
+        ...(observation.limitations ?? []),
         ...sessionLimitations(),
       ],
     });
@@ -531,12 +533,14 @@ export const createGhidraProviderClient = (input: {
       );
     const parsed = parseGhidraInventoryResult(operation, called.value);
     if (!parsed.ok) return parsed;
-    return ok(projectExecution(operation, parsed.value, called.value));
+    const { value, ...observation } = parsed.value;
+    return ok(projectExecution(operation, value, observation));
   };
   const loadImageExecution = async (raw: JsonValue, signal?: AbortSignal) => {
     const operation = "inspect_native_load_image";
     const measured = parseGhidraInventoryResult(operation, raw);
     if (!measured.ok) return measured;
+    const { value: observed, ...observation } = measured.value;
     let derived: NativeAotPeResult | undefined;
     if (target.format === "pe") {
       if (nativeAotOwner === undefined)
@@ -549,7 +553,7 @@ export const createGhidraProviderClient = (input: {
           }),
         );
       const result = await nativeAotOwner.derive(
-        measured.value.image_base,
+        observed.image_base,
         operation,
         signal,
         raw,
@@ -560,7 +564,7 @@ export const createGhidraProviderClient = (input: {
     const attested = await attestGhidraNativeLoadImage({
       target,
       operation,
-      measured: measured.value,
+      measured: observed,
       client,
       mapSessionError: (failure) =>
         projectSessionError(
@@ -577,7 +581,7 @@ export const createGhidraProviderClient = (input: {
           projectExecution(
             operation,
             jsonValueSchema.parse(attested.value),
-            raw,
+            observation,
           ),
         )
       : attested;
@@ -662,22 +666,11 @@ export const createGhidraProviderClient = (input: {
         );
       if (operation === "inspect_native_load_image")
         return loadImageExecution(called.value, options?.signal);
-      let normalized: JsonValue;
-      let observationLimitations: readonly string[] = [];
-      let observationLocations: readonly EvidenceLocation[] = [];
-      let relationshipCoverage: RelationshipCoverage | undefined;
-      if (isGhidraFunctionOperation(operation)) {
-        const result = parseGhidraFunctionResult(operation, called.value);
-        if (!result.ok) return result;
-        normalized = result.value.value;
-        observationLimitations = result.value.limitations;
-        observationLocations = result.value.locations ?? [];
-        relationshipCoverage = result.value.relationshipCoverage;
-      } else {
-        const result = parseGhidraInventoryResult(operation, called.value);
-        if (!result.ok) return result;
-        normalized = result.value;
-      }
+      const result = isGhidraFunctionOperation(operation)
+        ? parseGhidraFunctionResult(operation, called.value)
+        : parseGhidraInventoryResult(operation, called.value);
+      if (!result.ok) return result;
+      let { value: normalized, ...observation } = result.value;
       if (
         operation === "inspect_native_data_type" &&
         normalized !== null &&
@@ -712,23 +705,17 @@ export const createGhidraProviderClient = (input: {
             if (!derived.ok) return derived;
           }
           const metadata = nativeAotOwner?.readTypeDetail(address);
-          if (metadata !== undefined)
+          if (metadata !== undefined) {
+            // Preserve the database reply independently of the derived overlay.
+            observation = { ...observation, rawResult: called.value };
             normalized = jsonValueSchema.parse({
               ...normalized,
               metadata_recovery: metadata,
             });
+          }
         }
       }
-      return ok(
-        projectExecution(
-          operation,
-          normalized,
-          called.value,
-          observationLimitations,
-          observationLocations,
-          relationshipCoverage,
-        ),
-      );
+      return ok(projectExecution(operation, normalized, observation));
     },
     executeIfReady: async (operation, parameters, options) => {
       if (operation !== "list_documents" && operation !== "list_procedures")

@@ -1,7 +1,8 @@
 import { z } from "incur";
-import type { Evidence } from "../domain/evidence.js";
+import { parseEvidence, type Evidence } from "../domain/evidence.js";
+import type { JsonValue } from "../domain/jsonValue.js";
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import type { AnalysisErrorProjection } from "../domain/analysisErrorProjection.js";
 import type { Result } from "../domain/result.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
@@ -25,20 +26,42 @@ export const analysisEvidenceDeliveryOptions = {
     ),
 };
 
-const isEvidence = (
-  value: Evidence | AnalysisErrorProjection,
-): value is Evidence => "evidence_id" in value && "normalized_result" in value;
+const isEvidence = (value: JsonValue): value is Evidence =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  "evidence_id" in value &&
+  "normalized_result" in value;
 
-/** One-shot delivery owns report publication; analysis keeps its own cleanup owner. */
-export const deliverCliAnalysisEvidence = async (input: {
-  readonly run: () => Promise<Result<Evidence, AnalysisError>>;
-  readonly service: { close(): Promise<void> };
+interface CliEvidenceDelivery {
   readonly providerId: string;
   readonly operation: string;
   readonly signal: AbortSignal;
   readonly detail: "complete" | "summary";
   readonly evidenceOutput: string | undefined;
-}) => {
+}
+
+export const cliEvidenceDeliveryInputError = (
+  input: Pick<CliEvidenceDelivery, "detail" | "evidenceOutput" | "operation">,
+): AnalysisInputError | undefined =>
+  input.detail === "summary" && input.evidenceOutput === undefined
+    ? new AnalysisInputError(input.operation, undefined, [
+        {
+          path: ["evidence_output"],
+          reason: "invalid_value",
+          message:
+            "Summary delivery requires --evidence_output so complete source Evidence remains available.",
+        },
+      ])
+    : undefined;
+
+/** One-shot delivery owns report publication; analysis keeps its own cleanup owner. */
+export const deliverCliAnalysisEvidence = async (
+  input: CliEvidenceDelivery & {
+    readonly run: () => Promise<Result<Evidence, AnalysisError>>;
+    readonly service: { close(): Promise<void> };
+  },
+) => {
   const {
     run,
     service,
@@ -48,19 +71,10 @@ export const deliverCliAnalysisEvidence = async (input: {
     detail,
     evidenceOutput,
   } = input;
-  if (detail === "summary" && evidenceOutput === undefined)
+  const inputError = cliEvidenceDeliveryInputError(input);
+  if (inputError !== undefined)
     return finishAnalysisCommand(
-      async () => ({
-        ok: false,
-        error: new AnalysisInputError(operation, undefined, [
-          {
-            path: ["evidence_output"],
-            reason: "invalid_value",
-            message:
-              "Summary delivery requires --evidence_output so complete source Evidence remains available.",
-          },
-        ]),
-      }),
+      async () => ({ ok: false, error: inputError }),
       service,
       providerId,
       operation,
@@ -73,7 +87,29 @@ export const deliverCliAnalysisEvidence = async (input: {
     operation,
     signal,
   );
-  if (!isEvidence(complete) || evidenceOutput === undefined) return complete;
+  return publishCliAnalysisEvidence(complete, {
+    providerId,
+    operation,
+    signal,
+    detail,
+    evidenceOutput,
+  });
+};
+
+/** Publish already finalized CLI analysis without opening a second provider/session. */
+export const publishCliAnalysisEvidence = async (
+  value: JsonValue,
+  input: CliEvidenceDelivery,
+) => {
+  const { providerId, operation, signal, detail, evidenceOutput } = input;
+  if (!isEvidence(value)) return value;
+  const complete = parseEvidence(value);
+  const inputError = cliEvidenceDeliveryInputError(input);
+  if (inputError !== undefined) {
+    inputError.retainPartialObservation(complete);
+    return projectAnalysisError(inputError);
+  }
+  if (evidenceOutput === undefined) return complete;
   const resources = new ArtifactResourceScope();
   let receipt: { readonly path: string; readonly bytes: number } | undefined;
   const delivered = await finishAnalysisCommand(

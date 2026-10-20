@@ -1,3 +1,4 @@
+import { artifactIntegrityDetails } from "../domain/artifactIntegrity.js";
 import { constants, createWriteStream, type Stats } from "node:fs";
 import {
   lstat,
@@ -100,11 +101,11 @@ export class AsarArtifactReader implements ArtifactReader {
         executable: metadata.executable === true,
         encrypted: false,
         byteOffset: null,
-        declaredSha256:
+        declaredIntegrity:
           metadata.integrity !== undefined &&
           metadata.integrity.algorithm === "SHA256" &&
           /^[a-f0-9]{64}$/u.test(metadata.integrity.hash)
-            ? metadata.integrity.hash
+            ? { algorithm: "sha256", digest: metadata.integrity.hash }
             : null,
         unpacked: "unpacked" in metadata && metadata.unpacked === true,
         limitations:
@@ -481,12 +482,12 @@ export class AsarArtifactReader implements ArtifactReader {
           "integrity",
           `ASAR unpacked entry changed before read: ${entry.path}`,
           {},
-          {
-            logicalPath: entry.path,
-            declaredSha256: entry.declaredSha256,
-            calculatedSha256: null,
-            unpacked: true,
-          },
+          artifactIntegrityDetails(
+            entry.path,
+            entry.declaredIntegrity,
+            null,
+            true,
+          ),
         );
       }
       abortIfNeeded(signal);
@@ -636,12 +637,7 @@ const asarUnpackedEntryFailure = (
       "unavailable",
       `ASAR unpacked entry bytes are unavailable: ${entry.path}`,
       { cause },
-      {
-        logicalPath: entry.path,
-        declaredSha256: entry.declaredSha256,
-        calculatedSha256: null,
-        unpacked: true,
-      },
+      artifactIntegrityDetails(entry.path, entry.declaredIntegrity, null, true),
     );
   return asarFailure(archivePath, `read ${entry.path}`, cause);
 };

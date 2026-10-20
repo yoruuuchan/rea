@@ -159,7 +159,7 @@ export const projectBinaryLayoutView = (
   layout: BinaryLayout,
   view: Exclude<
     AnalysisViewRequest,
-    { kind: "api-surface" | "environment-manifest" }
+    { kind: "api-surface" | "environment-manifest" | "environment-state" }
   >,
 ): Result<UnsignedAnalysisView, AnalysisError> => {
   const shared = parentFields(parent, layout);

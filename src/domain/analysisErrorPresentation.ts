@@ -440,7 +440,9 @@ const artifactMessage = ({
     return "Artifact processing is unavailable for the current target or host. Check artifact support and required tools.";
   if (reason === "integrity" && INTEGRITY_POLICY_OPERATIONS.has(operation))
     return `${
-      details?.unpacked === true && details.calculatedSha256 !== null
+      details?.unpacked === true &&
+      "calculatedSha256" in details &&
+      details.calculatedSha256 !== null
         ? `Declared ASAR integrity for unpacked entry ${details.logicalPath} contradicts its companion file; packaging tools commonly sign or strip unpacked native binaries after writing the archive.`
         : "Artifact bytes contradict declared integrity."
     } If expected, rerun ${operation === "inventory_artifact" ? "inspect_artifact" : operation} with integrity_policy=record-and-continue (CLI: --integrity-policy record-and-continue) to retain observed bytes as untrusted; otherwise get a fresh copy.`;

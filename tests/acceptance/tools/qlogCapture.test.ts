@@ -302,7 +302,11 @@ it("runs built CLI and real stdio SDK with exact evidence parity, selection, ret
     covered_ranges: [{ start: "10", end: "15" }],
   });
   // An unsupported view over an existing retained parent proves lookup without pretending qlog is HAR.
-  for (const kind of ["api-surface", "environment-manifest"] as const) {
+  for (const kind of [
+    "api-surface",
+    "environment-manifest",
+    "environment-state",
+  ] as const) {
     const retained = await call("inspect_analysis_view", {
       source: { kind: "retained-evidence", evidence_id: mcp.evidence_id },
       view: { kind },

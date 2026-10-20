@@ -1,9 +1,12 @@
+import { locateGodotPck } from "../GodotPckLocation.js";
+import { withArtifactRegularFile } from "../ArtifactFileOperation.js";
 import type { ArtifactCleanupAttempt } from "../ArtifactResourceScope.js";
 import { lstat, realpath } from "node:fs/promises";
 
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import { digestCanonicalValue } from "../../domain/canonicalDigest.js";
 import { AsarArtifactReader } from "../AsarArtifactReader.js";
+import { GodotPckArtifactReader } from "../GodotPckArtifactReader.js";
 import {
   ArtifactPathRegistry,
   normalizeArtifactPath,
@@ -65,7 +68,7 @@ const extractArtifactInScope = async (
   // Cancellation wins over every later refusal, including unsupported formats.
   abortIfNeeded(signal);
   const sourcePath = await realpath(input.inputPath);
-  await requireExtractableFormat(sourcePath, input);
+  await requireExtractableFormat(sourcePath, input, signal);
   const snapshot = await scanArtifactInventoryInScope(sourcePath, {
     resourceScope: input.resourceScope,
     signal,
@@ -99,6 +102,18 @@ const materializeArtifactInventoryInScope = async (
   signal?: AbortSignal,
 ): Promise<ArtifactExtractionResult> => {
   abortIfNeeded(signal);
+  const containerMetadata = snapshot.occurrences.find(
+    (row) => row.logical_path === ".",
+  )?.format_metadata;
+  if (
+    containerMetadata?.kind === "godot-pck" &&
+    containerMetadata.directory_status !== "available"
+  )
+    throw new AnalysisUnsupportedTargetError(
+      "extract_artifact",
+      input.inputPath,
+      `Godot PCK directory is ${containerMetadata.directory_status}; its complete contents cannot be extracted`,
+    );
   const selectedOccurrences = snapshot.occurrences.filter(
     (occurrence) =>
       (occurrence.entry_kind === "file" || occurrence.entry_kind === "slice") &&
@@ -225,7 +240,11 @@ const materializeSelection = async ({
       );
     byPath.set(path, item);
   }
-  const reader = await createReader(sourcePath, input);
+  const reader = await createReader(
+    sourcePath,
+    input,
+    inventory.manifest.root_format,
+  );
   const readerOwner: ArtifactResourceOwner = {
     kind: "reader" as const,
     reader,
@@ -236,6 +255,7 @@ const materializeSelection = async ({
   let completed: ArtifactExtractionResult | undefined;
   const extracted: ExtractedOccurrence[] = [];
   try {
+    await reader.prepareContainer?.(inventory.manifest.root_sha256, signal);
     try {
       output = await SafeOutputTree.create(input.outputRoot);
     } catch (cause: unknown) {
@@ -405,21 +425,35 @@ interface ExtractionInventory {
  */
 const requireExtractableFormat = async (
   path: string,
-  input: Pick<ArtifactExtractionInput, "inputPath" | "inputFormat">,
+  input: Pick<
+    ArtifactExtractionInput,
+    "inputPath" | "inputFormat" | "resourceScope"
+  >,
+  signal?: AbortSignal,
 ): Promise<boolean> => {
   const format = input.inputFormat;
   const directory = (await lstat(path)).isDirectory();
   if (
     !directory &&
     format !== "asar" &&
+    format !== "godot-pck" &&
     !isMachOFormat(format) &&
     !isZipPackageFormat(format)
-  )
-    throw new AnalysisUnsupportedTargetError(
-      "extract_artifact",
-      input.inputPath,
-      `Artifact format has no extraction reader: ${format}`,
+  ) {
+    const pack = await withArtifactRegularFile(
+      path,
+      input.resourceScope,
+      signal,
+      async (handle) =>
+        locateGodotPck(handle, (await handle.stat()).size, signal),
     );
+    if (pack === undefined)
+      throw new AnalysisUnsupportedTargetError(
+        "extract_artifact",
+        input.inputPath,
+        `Artifact format has no extraction reader: ${format}`,
+      );
+  }
   return directory;
 };
 
@@ -427,10 +461,12 @@ const createReader = async (
   path: string,
   input: Pick<
     ArtifactExtractionInput,
-    "inputPath" | "inputFormat" | "environment"
+    "inputPath" | "inputFormat" | "environment" | "resourceScope"
   >,
+  containerFormat: ArtifactGraphManifest["root_format"],
 ): Promise<ArtifactReader> => {
   const format = input.inputFormat;
+  if (containerFormat === "godot-pck") return new GodotPckArtifactReader(path);
   if (await requireExtractableFormat(path, input))
     return new DirectoryArtifactReader(path);
   if (format === "asar") return new AsarArtifactReader(path);

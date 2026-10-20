@@ -6,7 +6,12 @@ import {
   RAW_ONLY_ARCHITECTURES,
   type BinaryTarget,
 } from "./binaryTargetTypes.js";
-import { createEvidence, evidenceSchema, parseEvidence } from "./evidence.js";
+import {
+  createEvidence,
+  evidenceSchema,
+  parseEvidence,
+  immutableEvidence,
+} from "./evidence.js";
 import { MAX_JSON_DEPTH, type JsonValue } from "./jsonValue.js";
 import { createEvidenceBundle } from "./evidenceBundle.js";
 import { freezeJsonSnapshot } from "./immutableJson.js";
@@ -603,4 +608,20 @@ it("preserves prototype-named raw and normalized results with aligned identity",
     rawResult: { constructor: "ordinary" },
   });
   expect(stripped.evidence_id).not.toBe(evidence.evidence_id);
+});
+
+it("borrows a previously sealed envelope only after authenticating all semantic fields", () => {
+  const original = freezeJsonSnapshot(
+    createEvidence(TARGET, PROVIDER, {
+      operation: "inspect",
+      parameters: {},
+      result: { fact: 1 },
+    }),
+  );
+  expect(immutableEvidence(original)).toBe(original);
+  const changed = freezeJsonSnapshot({
+    ...original,
+    normalized_result: { fact: 2 },
+  });
+  expect(() => immutableEvidence(changed)).toThrow();
 });

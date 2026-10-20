@@ -433,7 +433,7 @@ class TraversalReader implements ArtifactReader {
       executable: false,
       encrypted: false,
       byteOffset: null,
-      declaredSha256: null,
+      declaredIntegrity: null,
       unpacked: false,
       limitations: [],
       adapterKey: "/tmp/escape.js",

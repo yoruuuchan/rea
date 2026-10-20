@@ -1,10 +1,14 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import {
   analysisViewCaptureFixture,
   analysisViewCaptureEvidence,
   analysisViewObjectDenseCapture,
   environmentManifestCaptureFixture,
+  environmentStateCaptureFixture,
 } from "../../../tests/fixtures/analysisView.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "../../contracts/javascript/javascriptRuntimeReconciliationExample.js";
 import { createEvidence, parseEvidence } from "../../domain/evidence.js";
@@ -19,6 +23,7 @@ import {
 import {
   inspectAnalysisView,
   inspectAnalysisViewValidated,
+  inspectAnalysisViewWithFiles,
   summarizeRetainedAnalysis,
 } from "./AnalysisViewService.js";
 import type { Evidence } from "../../domain/evidence.js";
@@ -27,6 +32,16 @@ import { err, ok } from "../../domain/result.js";
 import { EvidenceLedger } from "../investigation/EvidenceLedger.js";
 import { WEB_NETWORK_CAPTURE_LIMITS } from "../../domain/webNetworkCapture.js";
 import { isImmutableJsonSnapshot } from "../../domain/immutableJson.js";
+import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
+import {
+  SCENARIO_EXCHANGES,
+  scenarioCaptureEvidence,
+  scenarioCaptureFixture,
+} from "../../../tests/fixtures/browserScenarioCapture.js";
+import { readEvidenceFileSource } from "./evidenceFileSource.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
+
+vi.mock("./evidenceFileSource.js", { spy: true });
 
 it.each(["layout", "javascript"])(
   "carries the retained %s source snapshot into repeatable shared views",
@@ -450,6 +465,7 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
   for (const view of [
     { kind: "api-surface", limit: 1 },
     { kind: "environment-manifest" },
+    { kind: "environment-state" },
   ] as const) {
     const result = inspectAnalysisView(
       {
@@ -522,42 +538,75 @@ it("seals an inferred environment manifest and a derived manifest without templa
   });
 });
 
-it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
-  "rejects inline accessors before parsing a %s view",
-  (kind) => {
-    let accessed = false;
-    const evidence = {
-      get normalized_result() {
-        accessed = true;
-        throw new Error("Evidence must be admitted before parsing");
-      },
-    };
-    const input = {
-      source: { kind: "inline", evidence },
-      view: { kind },
-    };
-    const parsed = inspectAnalysisViewInputSchema.parse(input);
-    if (parsed.source.kind !== "inline")
-      throw new Error("Expected inline input");
-    expect(parsed.source.evidence).toBe(evidence);
-    expect(inspectAnalysisView(input)).toMatchObject({
-      ok: false,
-      error: {
-        _tag: "AnalysisInputError",
-        issues: [{ path: ["source", "evidence", "normalized_result"] }],
-      },
-    });
-    expect(accessed).toBe(false);
-    expect(
-      inspectAnalysisView({
-        source: { kind: "inline", evidence: analysisViewCaptureEvidence() },
-        view: { kind },
-      }).ok,
-    ).toBe(true);
-  },
-);
+it("seals an inferred environment state whose values are the recorded ones", () => {
+  const parent = analysisViewCaptureEvidence(environmentStateCaptureFixture());
+  const sealed = inspectAnalysisView({
+    source: { kind: "inline", evidence: parent },
+    view: { kind: "environment-state", template_rules: ["opaque-token"] },
+  });
+  if (!sealed.ok) throw sealed.error;
+  expect(sealed.value.confidence).toBe("inferred");
+  expect(sealed.value.authority).toBe(parent.authority);
+  expect(sealed.value.evidence_links).toEqual([parent.evidence_id]);
+  expect(sealed.value.parameters).toMatchObject({
+    view: { kind: "environment-state", template_rules: ["opaque-token"] },
+  });
+  expect(sealed.value.normalized_result).toMatchObject({
+    kind: "environment-state",
+    name: "grafana-example",
+    parent_evidence_id: parent.evidence_id,
+    timeline: "recorded-start-time",
+  });
+  expect(JSON.stringify(sealed.value.normalized_result)).toContain(
+    "probe folder",
+  );
+  expect(parseEvidence(sealed.value)).toEqual(sealed.value);
+});
 
-it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
+it.each([
+  "summary",
+  "capture",
+  "api-surface",
+  "environment-manifest",
+  "environment-state",
+] as const)("rejects inline accessors before parsing a %s view", (kind) => {
+  let accessed = false;
+  const evidence = {
+    get normalized_result() {
+      accessed = true;
+      throw new Error("Evidence must be admitted before parsing");
+    },
+  };
+  const input = {
+    source: { kind: "inline", evidence },
+    view: { kind },
+  };
+  const parsed = inspectAnalysisViewInputSchema.parse(input);
+  if (parsed.source.kind !== "inline") throw new Error("Expected inline input");
+  expect(parsed.source.evidence).toBe(evidence);
+  expect(inspectAnalysisView(input)).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisInputError",
+      issues: [{ path: ["source", "evidence", "normalized_result"] }],
+    },
+  });
+  expect(accessed).toBe(false);
+  expect(
+    inspectAnalysisView({
+      source: { kind: "inline", evidence: analysisViewCaptureEvidence() },
+      view: { kind },
+    }).ok,
+  ).toBe(true);
+});
+
+it.each([
+  "summary",
+  "capture",
+  "api-surface",
+  "environment-manifest",
+  "environment-state",
+] as const)(
   "rejects nested, hidden and inherited inline accessors for %s",
   (kind) => {
     const parent = analysisViewCaptureEvidence();
@@ -639,6 +688,7 @@ it.each([
       "capture",
       "api-surface",
       "environment-manifest",
+      "environment-state",
     ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
@@ -675,6 +725,7 @@ it("rejects callable array overrides and subclass species before parsing", () =>
       "capture",
       "api-surface",
       "environment-manifest",
+      "environment-state",
     ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
@@ -688,26 +739,29 @@ it("rejects callable array overrides and subclass species before parsing", () =>
   expect(invoked).toBe(false);
 });
 
-it.each(["summary", "capture", "api-surface", "environment-manifest"] as const)(
-  "preserves ordinary inline Evidence for %s",
-  (kind) => {
-    const parent = analysisViewCaptureEvidence();
-    const before = JSON.stringify(parent);
-    const result = inspectAnalysisView({
-      source: { kind: "inline", evidence: parent },
-      view: { kind },
-    });
-    if (!result.ok) throw result.error;
-    expect(parseEvidence(result.value)).toEqual(result.value);
-    expect(result.value.evidence_links).toEqual([parent.evidence_id]);
-    expect(result.value.normalized_result).toMatchObject({
-      kind,
-      parent_evidence_id: parent.evidence_id,
-    });
-    expect(JSON.stringify(parent)).toBe(before);
-    expect(Object.isFrozen(parent)).toBe(false);
-  },
-);
+it.each([
+  "summary",
+  "capture",
+  "api-surface",
+  "environment-manifest",
+  "environment-state",
+] as const)("preserves ordinary inline Evidence for %s", (kind) => {
+  const parent = analysisViewCaptureEvidence();
+  const before = JSON.stringify(parent);
+  const result = inspectAnalysisView({
+    source: { kind: "inline", evidence: parent },
+    view: { kind },
+  });
+  if (!result.ok) throw result.error;
+  expect(parseEvidence(result.value)).toEqual(result.value);
+  expect(result.value.evidence_links).toEqual([parent.evidence_id]);
+  expect(result.value.normalized_result).toMatchObject({
+    kind,
+    parent_evidence_id: parent.evidence_id,
+  });
+  expect(JSON.stringify(parent)).toBe(before);
+  expect(Object.isFrozen(parent)).toBe(false);
+});
 
 it("rejects executable constructor values before schema plain-object checks", () => {
   const parent = analysisViewCaptureEvidence();
@@ -724,6 +778,7 @@ it("rejects executable constructor values before schema plain-object checks", ()
     "capture",
     "api-surface",
     "environment-manifest",
+    "environment-state",
   ] as const) {
     expect(
       inspectAnalysisView({
@@ -757,6 +812,7 @@ it("rejects inline proxy values before reflection or parsing can run traps", () 
       "capture",
       "api-surface",
       "environment-manifest",
+      "environment-state",
     ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: value } },
@@ -801,6 +857,7 @@ it("keeps ignored array metadata inert through parsing and projection", () => {
     "capture",
     "api-surface",
     "environment-manifest",
+    "environment-state",
   ] as const) {
     const result = inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
@@ -848,7 +905,11 @@ it("admits raw_result and parameters before authenticating a portable capture", 
   const dense = analysisViewObjectDenseCapture();
   const parent = analysisViewCaptureEvidence();
   for (const field of ["raw_result", "parameters"] as const)
-    for (const kind of ["api-surface", "environment-manifest"] as const) {
+    for (const kind of [
+      "api-surface",
+      "environment-manifest",
+      "environment-state",
+    ] as const) {
       const result = inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, [field]: dense } },
         view: { kind },
@@ -859,4 +920,222 @@ it("admits raw_result and parameters before authenticating a portable capture", 
         error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
       });
     }
+});
+
+const manifestView = { kind: "environment-manifest" } as const;
+const writeEvidenceFile = async (value: unknown): Promise<string> => {
+  const root = await createTestTempDirectory("rea-analysis-view-file-");
+  const path = join(root, "capture.json");
+  await writeFile(path, JSON.stringify(value));
+  return path;
+};
+
+describe("inspectAnalysisViewWithFiles", () => {
+  const view = manifestView;
+
+  it("projects an Evidence file exactly as the same Evidence inline", async () => {
+    const parent = analysisViewCaptureEvidence(
+      environmentManifestCaptureFixture(),
+    );
+    const fromFile = await inspectAnalysisViewWithFiles({
+      source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
+      view,
+    });
+    const inline = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view,
+    });
+    if (!fromFile.ok) throw fromFile.error;
+    if (!inline.ok) throw inline.error;
+    expect(fromFile.value.normalized_result).toEqual(
+      inline.value.normalized_result,
+    );
+    expect(fromFile.value.parameters).toEqual(inline.value.parameters);
+  });
+
+  it("accepts from a file a capture whose response text exceeds the inline budget", async () => {
+    const capture = environmentManifestCaptureFixture();
+    const reported = capture.records[0]!.reported as {
+      response: { content: { text: string } };
+    };
+    // Inline admission charges about 14 bytes per character; this body alone overruns it.
+    reported.response.content.text = "a".repeat(
+      Math.ceil(WEB_NETWORK_CAPTURE_LIMITS.outputBytes / 14) + 1024,
+    );
+    const parent = analysisViewCaptureEvidence(capture);
+    expect(
+      inspectAnalysisView({
+        source: { kind: "inline", evidence: parent },
+        view,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
+    });
+    const fromFile = await inspectAnalysisViewWithFiles({
+      source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
+      view,
+    });
+    if (!fromFile.ok) throw fromFile.error;
+    expect(fromFile.value.parameters).toMatchObject({
+      parent_evidence_id: parent.evidence_id,
+    });
+  });
+
+  it("refuses a relative path, a missing file and JSON that is not Evidence", async () => {
+    expect(
+      await inspectAnalysisViewWithFiles({
+        source: { kind: "evidence-file", path: "capture.json" },
+        view,
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
+    const missing = join(
+      await createTestTempDirectory("rea-analysis-view-missing-"),
+      "absent.json",
+    );
+    expect(
+      await inspectAnalysisViewWithFiles({
+        source: { kind: "evidence-file", path: missing },
+        view,
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "EvidenceFileError" } });
+    const notEvidence = await inspectAnalysisViewWithFiles({
+      source: {
+        kind: "evidence-file",
+        path: await writeEvidenceFile({ hello: 1 }),
+      },
+      view,
+    });
+    expect(notEvidence).toMatchObject({
+      ok: false,
+      error: { _tag: "EvidenceFileError", reason: "wrong-kind" },
+    });
+    if (notEvidence.ok) throw new Error("Expected invalid Evidence file");
+    expect(projectAnalysisError(notEvidence.error)).toMatchObject({
+      details: {
+        content_issues: expect.arrayContaining([
+          {
+            path: ["evidence_id"],
+            reason: "missing_argument",
+            expected: "string",
+          },
+        ]),
+      },
+    });
+  });
+
+  it("returns typed cancellation for a cancelled file request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const parent = analysisViewCaptureEvidence(
+      environmentManifestCaptureFixture(),
+    );
+    expect(
+      await inspectAnalysisViewWithFiles(
+        {
+          source: {
+            kind: "evidence-file",
+            path: await writeEvidenceFile(parent),
+          },
+          view,
+        },
+        undefined,
+        { signal: controller.signal },
+      ),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  });
+
+  it("returns typed cancellation when a running file request is aborted", async () => {
+    const controller = new AbortController();
+    const parent = analysisViewCaptureEvidence(
+      environmentManifestCaptureFixture(),
+    );
+    const path = await writeEvidenceFile(parent);
+    const running = inspectAnalysisViewWithFiles(
+      { source: { kind: "evidence-file", path }, view },
+      undefined,
+      { signal: controller.signal },
+    );
+    // Queued before the request yields after its synchronous work, so it is seen even if the read already finished.
+    setImmediate(() => controller.abort());
+    expect(await running).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError" },
+    });
+  });
+
+  it("leaves file sources to the file-aware entry point", () => {
+    expect(
+      inspectAnalysisView({
+        source: { kind: "evidence-file", path: "/tmp/capture.json" },
+        view,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCapabilityUnavailableError" },
+    });
+  });
+});
+
+describe("inspectAnalysisViewWithFiles scenario parents and cancellation", () => {
+  const view = manifestView;
+
+  it("accepts from a file a scenario capture whose response bodies exceed the inline budget", async () => {
+    const blob = "a".repeat(
+      Math.ceil(WEB_NETWORK_CAPTURE_LIMITS.outputBytes / 14) + 1024,
+    );
+    const parent = scenarioCaptureEvidence(
+      scenarioCaptureFixture(
+        SCENARIO_EXCHANGES.map((exchange, index) =>
+          index === 1 ? { ...exchange, body: `{"blob":"${blob}"}` } : exchange,
+        ),
+      ),
+    );
+    expect(
+      inspectAnalysisView({
+        source: { kind: "inline", evidence: parent },
+        view,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
+    });
+    const fromFile = await inspectAnalysisViewWithFiles({
+      source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
+      view,
+    });
+    if (!fromFile.ok) throw fromFile.error;
+    expect(fromFile.value.parameters).toMatchObject({
+      parent_evidence_id: parent.evidence_id,
+    });
+  });
+
+  it("reports cancellation rather than the authentication failure of a file aborted while it is authenticated", async () => {
+    const controller = new AbortController();
+    const parent = analysisViewCaptureEvidence(
+      environmentManifestCaptureFixture(),
+    );
+    const path = await writeEvidenceFile({
+      ...parent,
+      evidence_id: `ev_${"0".repeat(64)}`,
+    });
+    const { readEvidenceFileSource: read } = await vi.importActual<
+      typeof import("./evidenceFileSource.js")
+    >("./evidenceFileSource.js");
+    // The abort arrives once the read has finished, while the stale ID is being authenticated.
+    vi.mocked(readEvidenceFileSource).mockImplementationOnce(
+      async (...args) => {
+        const loaded = await read(...args);
+        controller.abort();
+        return loaded;
+      },
+    );
+    expect(
+      await inspectAnalysisViewWithFiles(
+        { source: { kind: "evidence-file", path }, view },
+        undefined,
+        { signal: controller.signal },
+      ),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  });
 });

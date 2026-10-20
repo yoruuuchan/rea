@@ -8,7 +8,7 @@ import { err, ok, type Result } from "../result.js";
 import {
   webNetworkCaptureRecordSchema,
   webNetworkCaptureBinaryDescriptorSchema,
-  webNetworkCaptureSchema,
+  safeParseOwnedWebNetworkCapture,
   webNetworkCaptureArtifactSchema,
   webNetworkCaptureDecoderSchema,
   WEB_NETWORK_CAPTURE_FORMATS,
@@ -388,7 +388,7 @@ const preview = (record: WebNetworkCaptureRecord, format: string) => {
 const parseCaptureParent = (
   parent: AnalysisViewParent,
 ): Result<WebNetworkCapture, AnalysisError> => {
-  const parsed = webNetworkCaptureSchema.safeParse(parent.normalizedResult);
+  const parsed = safeParseOwnedWebNetworkCapture(parent.normalizedResult);
   if (!parsed.success)
     return err(
       analysisInputErrorFromIssues(
@@ -437,7 +437,7 @@ export const projectWebNetworkCaptureView = (
           path: ["view"],
           reason: "invalid_value",
           message:
-            "Historical captures support summary, capture record pages, qlog fact pages and admitted api-surface or environment-manifest views.",
+            "Historical captures support summary, capture record pages, qlog fact pages and admitted api-surface, environment-manifest or environment-state views.",
         },
       ]),
     );

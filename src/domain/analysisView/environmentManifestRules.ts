@@ -9,6 +9,7 @@ export const TEMPLATE_RULES = [
   "after-uid-literal",
   "opaque-token",
   "sibling-variance",
+  "sibling-pair-variance",
 ] as const;
 export type TemplateRule = (typeof TEMPLATE_RULES)[number];
 export type ManifestRule = RouteRule | TemplateRule;
@@ -35,6 +36,8 @@ export interface ParamPart {
   readonly kind: "param";
   readonly rule: ManifestRule;
   readonly values: ReadonlySet<string>;
+  /** Which half of a sibling-pair-variance pair; fixed when the pair forms so later merges cannot change it. */
+  readonly pairRole?: "namespace" | "name";
 }
 export type RoutePart = LiteralPart | ParamPart;
 
@@ -113,16 +116,18 @@ const mergeGroups = (
     parts: shape.parts.map((part, index) =>
       part.kind === "literal"
         ? part
-        : param(
-            part.rule,
-            groups.flatMap((group) => {
-              const sibling = group.parts[index];
-              if (sibling === undefined) return [];
-              return sibling.kind === "param"
-                ? [...sibling.values]
-                : [sibling.value];
-            }),
-          ),
+        : {
+            ...part,
+            values: new Set(
+              groups.flatMap((group) => {
+                const sibling = group.parts[index];
+                if (sibling === undefined) return [];
+                return sibling.kind === "param"
+                  ? [...sibling.values]
+                  : [sibling.value];
+              }),
+            ),
+          },
     ),
     positions: groups
       .flatMap((group) => group.positions)
@@ -287,6 +292,105 @@ const mergeSiblingVariance = (groups: readonly ToolGroup[]): ToolGroup[] => {
   return [...current, ...beyondLimit];
 };
 
+/** Fewest distinct literal pairs that make two adjacent positions one templated pair. */
+export const SIBLING_PAIR_MINIMUM = 3;
+
+/**
+ * Both positions are literals that are neither stop words nor versions, right after a plural literal
+ * and before another literal: a trailing pair such as `/users/alice/followers` names a sub-resource.
+ */
+const pairCandidate = (group: ToolGroup, position: number): boolean => {
+  const previous = group.parts[position - 1];
+  const first = group.parts[position];
+  const second = group.parts[position + 1];
+  return (
+    previous?.kind === "literal" &&
+    previous.value.endsWith("s") &&
+    !STOP_WORDS.has(previous.value) &&
+    first?.kind === "literal" &&
+    second?.kind === "literal" &&
+    group.parts[position + 2]?.kind === "literal" &&
+    [first.value, second.value].every(
+      (value) => !STOP_WORDS.has(value) && !VERSION_TOKEN.test(value),
+    )
+  );
+};
+
+/** Merge one bucket when its pairs are distinct enough and both positions vary; otherwise keep its tools. */
+const mergePairBucket = (
+  bucket: readonly ToolGroup[],
+  position: number,
+): ToolGroup[] => {
+  const pairs = new Set(
+    bucket.map((group) =>
+      compositeKey([
+        literalAt(group, position),
+        literalAt(group, position + 1),
+      ]),
+    ),
+  );
+  const firsts = new Set(bucket.map((group) => literalAt(group, position)));
+  const seconds = new Set(
+    bucket.map((group) => literalAt(group, position + 1)),
+  );
+  if (pairs.size < SIBLING_PAIR_MINIMUM || firsts.size < 2 || seconds.size < 2)
+    return [...bucket];
+  const first = earliest(bucket);
+  const shape = withParts(
+    first,
+    first.parts.map((part, index) =>
+      index === position || index === position + 1
+        ? {
+            ...param("sibling-pair-variance", [literalAt(first, index)]),
+            pairRole: index === position ? "namespace" : "name",
+          }
+        : part,
+    ),
+  );
+  return [
+    mergeGroups(
+      bucket.map((group) => (group === first ? shape : group)),
+      shape,
+    ),
+  ];
+};
+
+/** Merge groups that differ in two adjacent literals after a plural literal, such as `/repos/{owner}/{repo}/…`. */
+const mergeSiblingPairs = (groups: readonly ToolGroup[]): ToolGroup[] => {
+  const beyondLimit = groups.filter(
+    (group) => group.parts.length > SIBLING_VARIANCE_SEGMENT_LIMIT,
+  );
+  let current = groups.filter(
+    (group) => group.parts.length <= SIBLING_VARIANCE_SEGMENT_LIMIT,
+  );
+  const longest = Math.max(0, ...current.map((group) => group.parts.length));
+  for (let position = 2; position + 1 < longest; position += 1) {
+    const buckets = new Map<string, ToolGroup[]>();
+    const output: ToolGroup[] = [];
+    for (const group of current) {
+      if (!pairCandidate(group, position)) {
+        output.push(group);
+        continue;
+      }
+      const key = compositeKey([
+        group.method,
+        group.origin,
+        group.parts.length,
+        ...group.parts.map((part, index) =>
+          index === position || index === position + 1 ? null : partKey(part),
+        ),
+      ]);
+      const bucket = buckets.get(key);
+      if (bucket === undefined) buckets.set(key, [group]);
+      else bucket.push(group);
+    }
+    for (const bucket of buckets.values())
+      output.push(...mergePairBucket(bucket, position));
+    current = output;
+  }
+  return [...current, ...beyondLimit];
+};
+
 /** Apply the selected opt-in rules in fixed order; every merge is an inference. */
 export const applyTemplateRules = (
   groups: readonly ToolGroup[],
@@ -302,6 +406,9 @@ export const applyTemplateRules = (
       withParts(group, templateOpaqueTokens(group.parts)),
     );
   current = rebucket(current);
+  // Pairs merge first: a single-position merge could otherwise template one
+  // half of a pair and leave too few literal pairs to recognize.
+  if (rules.has("sibling-pair-variance")) current = mergeSiblingPairs(current);
   if (rules.has("sibling-variance")) current = mergeSiblingVariance(current);
   return current;
 };
@@ -342,6 +449,14 @@ const paramBaseName = (parts: readonly RoutePart[], index: number): string => {
           ? sanitizeToken(singular(previous.value))
           : "";
       return stem.length > 0 ? `${stem}_id` : "id";
+    }
+    case "sibling-pair-variance": {
+      // The role was fixed when the pair formed; the plural literal precedes the pair's first half.
+      const role = part.pairRole ?? "namespace";
+      const plural = parts[role === "name" ? index - 2 : index - 1];
+      const stem =
+        plural?.kind === "literal" ? sanitizeToken(singular(plural.value)) : "";
+      return stem.length > 0 ? `${stem}_${role}` : role;
     }
   }
 };

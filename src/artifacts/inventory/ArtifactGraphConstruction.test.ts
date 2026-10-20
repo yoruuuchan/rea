@@ -20,7 +20,7 @@ const entry = (path: string, kind: ArtifactEntry["kind"]): ArtifactEntry => ({
   executable: false,
   encrypted: false,
   byteOffset: null,
-  declaredSha256: null,
+  declaredIntegrity: null,
   unpacked: false,
   limitations: [],
   adapterKey: path,

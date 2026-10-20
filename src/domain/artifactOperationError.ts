@@ -1,4 +1,8 @@
 import {
+  projectArtifactIntegrityDetails,
+  type ArtifactIntegrityDetails,
+} from "./artifactIntegrity.js";
+import {
   AnalysisError,
   type AnalysisErrorOptions,
 } from "./analysisErrorBase.js";
@@ -30,12 +34,7 @@ export class ArtifactOperationError extends AnalysisError {
       | "path"
       | "unavailable"
       | "io",
-    readonly artifactDetails?: Readonly<{
-      logicalPath: string;
-      declaredSha256: string | null;
-      calculatedSha256: string | null;
-      unpacked: boolean;
-    }>,
+    readonly artifactDetails?: ArtifactIntegrityDetails,
     /** The specific constraint that failed, such as the colliding path. */
     readonly detail?: string,
     options?: AnalysisErrorOptions,
@@ -43,8 +42,20 @@ export class ArtifactOperationError extends AnalysisError {
     super(
       artifactDetails === undefined
         ? `Artifact ${operation} failed: ${reason}`
-        : `Artifact ${operation} failed: ${reason} at ${artifactDetails.logicalPath} (declared_sha256=${artifactDetails.declaredSha256 ?? "unavailable"}, calculated_sha256=${artifactDetails.calculatedSha256 ?? "unavailable"}, unpacked=${String(artifactDetails.unpacked)})`,
+        : artifactDetailsMessage(operation, reason, artifactDetails),
       options,
     );
   }
 }
+
+const artifactDetailsMessage = (
+  operation: string,
+  reason: string,
+  details: ArtifactIntegrityDetails,
+): string => {
+  const { logical_path, ...facts } = projectArtifactIntegrityDetails(details);
+  const description = Object.entries(facts)
+    .map(([key, value]) => `${key}=${String(value ?? "unavailable")}`)
+    .join(", ");
+  return `Artifact ${operation} failed: ${reason} at ${logical_path} (${description})`;
+};

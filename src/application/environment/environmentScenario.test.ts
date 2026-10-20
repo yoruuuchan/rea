@@ -69,7 +69,7 @@ describe("environment manifests from capture_browser_scenario parents", () => {
     });
   });
 
-  it("names the one view a scenario capture supports when another is requested", () => {
+  it("names the views a scenario capture supports when another is requested", () => {
     const refused = inspectAnalysisView({
       source: {
         kind: "inline",
@@ -81,7 +81,7 @@ describe("environment manifests from capture_browser_scenario parents", () => {
     expect(projectAnalysisError(refused.error)).toMatchObject({
       code: "unsupported_target",
       message: expect.stringContaining(
-        "supports only the environment-manifest view",
+        "supports only the environment-manifest and environment-state views",
       ),
     });
   });

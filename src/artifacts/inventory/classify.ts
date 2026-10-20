@@ -1,3 +1,4 @@
+import { locateGodotPck } from "../GodotPckLocation.js";
 import { sameRegularFileState } from "../../filesystem/RegularFile.js";
 import type { FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
@@ -109,7 +110,9 @@ export const classifyAndHashRootForInventory = async (
       options.signal,
     );
     const retainSource =
-      isZipPackageFormat(format) || format === "mach-o-universal";
+      isZipPackageFormat(format) ||
+      format === "mach-o-universal" ||
+      format === "godot-pck";
     outcome = {
       kind: "completed",
       value: {
@@ -166,6 +169,8 @@ const classifyRootFormat = async (
     (await hasKolyTrailer(handle, archiveBytes, signal))
   )
     return "dmg";
+  if (await locateGodotPck(handle, archiveBytes, signal, evidence.prefix))
+    return "godot-pck";
   return classifyArtifactContent(path, evidence, archiveBytes).format;
 };
 

@@ -31,9 +31,12 @@ change.
   unrepresented records, as HAR records without a usable request line are.
 - The response media type is the captured body's `media_type`, or the
   `content-type` header value when only headers were captured.
-- The existing projection representation budget accounts for copied and
-  transformed strings before schema body validation or request-body decoding,
-  including retained Evidence parents. Over-budget captures return
+- The existing projection representation budget reserves, before schema body
+  validation or request-body decoding and for retained and file parents alike,
+  the scratch of validating the largest body (two bytes per base64 character)
+  and the decoded text of every request body; response bodies stay borrowed,
+  as HAR response text does, so a large capture read from its file is not
+  charged per character for them. Over-budget captures return
   `resource_constraint` before those allocations. Replay projection omits the
   request text used only for manifest body-shape inference; retained response
   bytes and their integrity checks are unchanged.

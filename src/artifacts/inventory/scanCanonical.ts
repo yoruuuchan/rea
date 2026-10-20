@@ -220,6 +220,7 @@ const buildInventorySnapshot = async (
     executable: hostExecutableMarking(path, metadata),
     format: rootFormat,
     path,
+    formatMetadata: reader?.formatMetadata?.(),
   });
   for (const occurrence of input.occurrences)
     if (
@@ -312,14 +313,12 @@ const buildIntegrityContradictions = (
       contradiction_id: artifactContradictionId({
         rootArtifactId: rootNode.artifact_id,
         logicalPath: occurrence.logical_path,
-        declaredSha256: contradiction.declaredSha256,
-        observedSha256: contradiction.observedSha256,
+        integrity: contradiction.integrity,
       }),
       occurrence_id: occurrence.occurrence_id,
       parent_artifact_id: parentArtifactId,
       logical_path: occurrence.logical_path,
-      declared_sha256: contradiction.declaredSha256,
-      observed_sha256: contradiction.observedSha256,
+      ...contradiction.integrity,
       entry_kind: contradiction.entryKind,
       unpacked: contradiction.unpacked,
       trust: "observed-untrusted",

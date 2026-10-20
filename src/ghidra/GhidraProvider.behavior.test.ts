@@ -1142,7 +1142,7 @@ describe("Ghidra client projection", () => {
         },
         analysisProfile: resolved.value.profile,
         result: [{ address: "0x1000", value: "fixture_main" }],
-        rawResult: [{ procedure: { external: false, thunk: false } }],
+        rawResult: null,
       },
     });
     expect(startCount).toBe(0);
@@ -1181,10 +1181,7 @@ describe("Ghidra result projection", () => {
     if (!execution.ok) throw execution.error;
     expect(execution.value.result).toBe("void main() {}");
     expect(execution.value.limitations).toContain(limitation);
-    expect(execution.value.rawResult).toEqual({
-      value: "void main() {}",
-      limitations: [limitation],
-    });
+    expect(execution.value.rawResult).toBeNull();
     await client.close();
   });
 
@@ -1672,6 +1669,7 @@ it("returns read-only NativeAOT metadata inline and drills down by derived Metho
     expect(detail).toMatchObject({
       ok: true,
       value: {
+        rawResult: unavailableNativeAotDatabaseType("0x140002280"),
         result: {
           status: "unavailable",
           source: "analysis-database",

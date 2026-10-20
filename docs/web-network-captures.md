@@ -300,7 +300,15 @@ exclusions and deduplicated limitations. It scans path spans without splitting
 literal paths into arrays. Before schema parsing, it reserves the capture clone
 and validation scratch by walking the parent without cloning it. Inline requests
 borrow the Evidence value through CLI/MCP envelope validation; the application
-admits the entire portable envelope before authenticated parsing or hashing.
+admits the entire portable envelope before authenticated parsing or hashing. An
+`evidence-file` source is read and authenticated first and then admitted like
+retained Evidence, so its strings are not charged as inline envelope text: a
+capture too large to project inline can be projected from its file. Before
+authentication REA checks that live heap headroom holds its copies of the parsed
+Evidence, and over MCP the read follows the request's cancellation.
+An invalid Evidence file returns `EvidenceFileError` with the selected `path`
+and `content_issues` relative to the file's JSON root; those locations do not
+refer to the request's `source.path` string.
 The envelope clone, hash scratch and capture clone stay charged during grouping.
 Temporary URL/path/MIME/query work and retained state must
 fit together within a 96 MiB projection representation budget. A whole group or
@@ -374,11 +382,12 @@ template and `params` carry the four format rules with names `id`, `uuid`,
 only when listed, each at most once (a repeated rule is an `invalid_request`),
 in this order:
 
-| Rule                | Applies to                                                                                                                                                                                                                                                                                      | Parameter                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `after-uid-literal` | The literal segment right after a literal `uid`, unless it is a stop word                                                                                                                                                                                                                       | `uid`                                           |
-| `opaque-token`      | A lowercase alphanumeric segment of twelve or more characters mixing letters and digits that is not a `v1`-style version                                                                                                                                                                        | `uid`                                           |
-| `sibling-variance`  | Groups equal in method, origin and segment count that differ in one literal at index 2 or later; the siblings whose literal is identifier-like (a digit or `:`, or three or more hyphenated names under a plural literal) merge, never a stop word, and the other literals stay their own tools | singular previous literal plus `_id`, else `id` |
+| Rule                    | Applies to                                                                                                                                                                                                                                                                                                         | Parameter                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| `after-uid-literal`     | The literal segment right after a literal `uid`, unless it is a stop word                                                                                                                                                                                                                                          | `uid`                                                   |
+| `opaque-token`          | A lowercase alphanumeric segment of twelve or more characters mixing letters and digits that is not a `v1`-style version                                                                                                                                                                                           | `uid`                                                   |
+| `sibling-pair-variance` | Groups equal in method, origin and segment count that differ in two adjacent literals right after a plural literal at index 2 or later and followed by a literal, with at least three distinct pairs and both positions varying (`/repos/{owner}/{repo}/issues`); stop words and `v1`-style versions never qualify | singular plural literal plus `_namespace`, then `_name` |
+| `sibling-variance`      | Groups equal in method, origin and segment count that differ in one literal at index 2 or later; the siblings whose literal is identifier-like (a digit or `:`, or three or more hyphenated names under a plural literal) merge, never a stop word, and the other literals stay their own tools                    | singular previous literal plus `_id`, else `id`         |
 
 With `sibling-variance` selected, literal siblings within its comparison scope
 fold into existing opt-in parameters as observed values unless they are stop words.
@@ -395,7 +404,7 @@ cut to their first label, `_by_<params>` appended when parameters exist,
 sanitized to `[a-z0-9_]`, at most 60 characters and made unique with numeric
 suffixes: `get_dashboards_by_uid`, `get_plugins_settings_by_plugin_id`.
 
-`sibling-variance` compares routes of at most 32 segments; longer routes keep
+`sibling-variance` and `sibling-pair-variance` compare routes of at most 32 segments; longer routes keep
 their grouped templates and the manifest says so in a limitation. `body_shape`
 is derived for `POST`, `PUT` and `PATCH` from the tool's earliest record when it
 carries an `application/json` or `application/*+json` request body: top-level
@@ -413,11 +422,113 @@ transaction whose URL was redacted is left unrepresented, and a response body
 keeps the capture's redaction markers, which a manifest limitation counts.
 
 The manifest accumulator shares the api-surface admission model: the capture
-clone, the inline envelope, record pointers, groups, every route part, observed
+clone, the inline envelope (for an inline source), record pointers, groups, every route part, observed
 values, query names and body-shape keys are admitted before allocation, and each
 recorded body is charged as temporary bytes before it is parsed. Retained state and
 temporary work must fit together within the 96 MiB projection representation
 budget; exceeding it returns `resource_constraint` without a partial manifest.
+Name a large capture with `{"kind": "evidence-file", "path": "/abs/capture.json"}`
+rather than inline: response bodies the manifest never reads are then charged
+once per value in the capture clone, not per character. A
+`capture_browser_scenario` parent is also charged, before validation, for
+checking its largest body and for the decoded text of its request bodies.
+
+## Environment state
+
+Pass the same parent to `inspect_analysis_view` with
+`view: {"kind":"environment-state"}` to extract the initial state the
+capture's reads observed, and a render plan per read tool that reproduces those
+reads from it. Where the environment manifest names an application's tools, the
+state holds its data: entities by type and identity, plus documents for written
+paths whose reads are not entities. Use the `template_rules` of the manifest the
+state accompanies so tool names match; the view groups records the same way.
+
+```json
+{
+  "name": "inspect_analysis_view",
+  "arguments": {
+    "source": { "kind": "retained-evidence", "evidence_id": "ev_..." },
+    "view": {
+      "kind": "environment-state",
+      "template_rules": [
+        "after-uid-literal",
+        "opaque-token",
+        "sibling-variance"
+      ]
+    }
+  }
+}
+```
+
+Records on the primary origin are ordered by recorded start time, or by record
+order when any start time is missing (`timeline`), as for a
+`capture_browser_scenario` parent. A `POST`, `PUT`, `PATCH` or `DELETE` with a
+2xx or 3xx status, or no status, may change state, unless it is a `POST` whose
+path has a segment such as `search`, `query`, `list`, `find`, `fuzzy`,
+`count` or `stats`, which queries state instead. A type's state comes from its
+successful reads that finished before the first such write under the same root:
+the path's API base (the literal segments every tool sharing its first segment
+has), any `v1`-style version segments, then one more segment. A read that
+overlaps that write in time is left out. A write whose URL a scenario redacted
+has an unknown target, so it ends the state of every type, and a limitation
+counts such writes. Values from a `capture_browser_scenario` parent keep the
+capture's redaction markers in place of declared secrets; the state is not
+refused for them, as the manifest is not.
+
+Each `GET` tool whose template ends in a parameter is an item tool, and its
+type's `collection_template` is the template without that parameter; any other
+`GET` tool is a list tool of its own template. An item tool proves its type's
+`id_field` when every initial response carries the requested path value in the
+same field, at the root or in one wrapper member (`id_basis: "path-parameter"`).
+Otherwise the field is the first of `id`, `uid`, `uuid`, `_id`, `ID`, `UID`,
+`Id`, `guid`, `key`, `slug` and `name` that every listed item carries as a
+distinct string or number (`id_basis: "field-name"`). A list is the response
+array, or the one array of objects in an envelope that is not itself an entity.
+
+`entities` merge every initial observation of one identity within one
+collection path: an item view's latest values win over a list view's, a view
+whose latest values differ keeps them in `view_fields`, and a field whose value
+changed between one tool's observations with no recorded write between is named
+in the type's `volatile_fields`, keeping the latest value. A value that changed
+across a write under another root may be that write's effect, so every tool of
+its type is a recorded view with reason `fields-differ`; so is a value one tool
+read before a write and another tool read after it. Repeated reads of one full request line also keep the type recorded when list membership changes across a write, including transitions to or from an empty list, or when entity fields are added or removed. Different query strings remain distinct request lines. Sparse responses do not erase the last observation of a field supplied by another request line. Entities are ordered
+by type, collection and first sighting; that order is a list's state order.
+Every entity cites its `record_ordinals`.
+
+`views` lists one plan per read tool in tool order:
+
+| Shape      | Plan                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `item`     | The entity object at `pointer` (the root or one member), the ordered `fields` the view shows and the `required_fields` every recording had, and `envelope_ordinal`: the recording whose response, with the entity replaced, every item response shares                                                                                                                                                                                                                                                                      |
+| `list`     | The array at `pointer`, its `fields`, `membership` (`all`: every entity of the collection in state order, when each recording listed exactly that, had no query, no item-total member (`total`, `count`, `totalCount`, `item_count`, `totalcount`, `itemcount`, but not `total_pages` or `per_page`; a number or a string of digits) differing from the number listed, and no `has_more`, `next` or next-page token member set; `recorded`: the entities each recording listed) and `counters` that equal the number listed |
+| `document` | The path's latest initial value, held in `documents`                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `recorded` | A `reason` the tool replays its recordings instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+An item or list plan is kept only when it reproduces the latest initial
+recording of each request line from the state, comparing JSON values without
+regard to member order; a volatile field compares its recorded value. Each
+plan lists the `checked_record_ordinals`. Otherwise the tool is a recorded view
+with reason `envelope-varies`, `fields-differ` or `list-differs`; the other
+reasons are `query-body` (a query `POST`), `no-init-recording`,
+`body-unusable`, `not-entity`, `no-identity` and `query-varies` (a document
+read under several queries). Documents are held only for list-shaped paths
+that a `POST`, `PUT` or `PATCH` tool writes: a non-entity read of an item path
+such as `/api/files/{id}`, or of a path that is only deleted, stays recorded
+with `no-identity` or `not-entity`. A body is usable when its content type is
+JSON-like, it is UTF-8 text of at most 256 KiB, every number survives native
+conversion exactly, and no member is named `__proto__`.
+
+Values in the state are recorded data, so the view refuses the same parents as
+the manifest, including those inspected with `sensitive_values`, and a
+`capture_browser_scenario` parent must have selected response bodies. Types and
+identity are inferences, so the Evidence is always inferred. `unknowns` states
+that the state establishes no authorization model, no way the application
+computes responses or derived values, and no effects of writes. The state
+accumulator charges the manifest's admission and grouping, every record line,
+each body as temporary bytes before it is decoded and parsed, and every value
+it keeps, within the same 96 MiB budget. The view performs no network activity
+and serves nothing.
 
 ## Resource and lifecycle boundaries
 

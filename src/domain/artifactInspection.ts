@@ -1,3 +1,8 @@
+import {
+  artifactIntegrityPairOf,
+  artifactSha256PairSchema,
+  artifactMd5PairSchema,
+} from "./artifactIntegrity.js";
 import { z } from "zod";
 
 import {
@@ -30,14 +35,18 @@ const inspectionHypothesisSchema = z.strictObject({
   limitation: textSchema,
 });
 
-const inspectionContradictionSchema = z.strictObject({
+const inspectionContradictionBaseSchema = z.strictObject({
   contradiction_id: prefixedDigestSchema("aic"),
   statement: textSchema,
   occurrence_id: prefixedDigestSchema("occ"),
-  declared_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  observed_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+
   evidence_id: evidenceIdSchema,
 });
+
+const inspectionContradictionSchema = z.union([
+  inspectionContradictionBaseSchema.extend(artifactSha256PairSchema.shape),
+  inspectionContradictionBaseSchema.extend(artifactMd5PairSchema.shape),
+]);
 
 const nextProbeSchema = z.strictObject({
   operation: textSchema,
@@ -269,8 +278,7 @@ const contradictions = (
     const semantic = {
       statement: `Declared integrity for ${value.logical_path} contradicts observed bytes.`,
       occurrence_id: value.occurrence_id,
-      declared_sha256: value.declared_sha256,
-      observed_sha256: value.observed_sha256,
+      ...artifactIntegrityPairOf(value),
       evidence_id: evidenceId,
     };
     return {

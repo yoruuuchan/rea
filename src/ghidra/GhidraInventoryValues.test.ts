@@ -53,7 +53,41 @@ describe("provider-owned overview boundary", () => {
       parseGhidraInventoryResult("read_binary_inventory_summary", overview),
     ).toEqual({
       ok: true,
-      value: { ...overview, segment_count: 0 },
+      value: { value: { ...overview, segment_count: 0 }, rawResult: overview },
+    });
+  });
+
+  it("keeps the independent segment permissions and provenance behind an overview", () => {
+    const reported = {
+      ...overview,
+      segments: [
+        {
+          name: ".text",
+          start: "0x1000",
+          end: "0x100f",
+          readable: true,
+          writable: false,
+          executable: true,
+          permissions: { available: true, source: "ghidra-memory-block" },
+          provenance: "ghidra-memory-block",
+          address_space: "ram",
+          image_base: "0x1000",
+          initialized: true,
+          overlay: false,
+          sections: [],
+        },
+      ],
+    };
+    const parsed = parseGhidraInventoryResult(
+      "read_binary_inventory_summary",
+      reported,
+    );
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.rawResult).toEqual(reported);
+    expect(parsed.value.value).toMatchObject({
+      procedure_count: 0,
+      string_count: 0,
+      segments: [{ name: ".text", start: "0x1000", end: "0x100f" }],
     });
   });
 

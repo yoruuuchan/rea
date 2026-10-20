@@ -1,8 +1,12 @@
+import { freezeJsonSnapshot } from "./immutableJson.js";
 import { expect, it } from "vitest";
 
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../contracts/artifactComparisonExample.js";
 import { createArtifactInspection } from "./artifactInspection.js";
-import { parseArtifactInventoryEvidence } from "./artifactInventoryEvidence.js";
+import {
+  parseArtifactInventoryEvidence,
+  parseArtifactInspectionInventoryResult,
+} from "./artifactInventoryEvidence.js";
 import { createEvidence } from "./evidence.js";
 import { jsonValueSchema } from "./jsonValue.js";
 
@@ -71,5 +75,14 @@ it("rejects a substep evidence ID that disagrees with its authenticated nested E
     parseArtifactInventoryEvidence(inspectionEvidence(mismatched)),
   ).toThrow(
     "Artifact inspection substep evidence ID does not match nested Evidence",
+  );
+});
+
+it("retains the authenticated parent's nested facts without a second inventory copy", () => {
+  const owned = freezeJsonSnapshot(createArtifactInspection(inventoryEvidence));
+  const parsed = parseArtifactInspectionInventoryResult(owned, target);
+  expect(parsed.inspection).toBe(owned);
+  expect(parsed.inventory.nodes[0]).toBe(
+    owned.substeps[0]!.evidence.normalized_result.nodes[0],
   );
 });

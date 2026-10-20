@@ -357,28 +357,47 @@ const resultSchemas = {
   set_addresses_names: z.record(z.string(), z.boolean()),
 } satisfies Readonly<Record<GhidraInventoryOperation, z.ZodType>>;
 
-/** Validate exact Java-bridge output before creating Evidence. */
+/** The format owner retains raw output only when projection omits reported facts. */
+export interface ParsedGhidraInventoryResult<Value = JsonValue> {
+  readonly value: Value;
+  readonly rawResult?: JsonValue;
+}
+
+/** Validate exact Java-bridge output and own its Evidence representation. */
 export function parseGhidraInventoryResult(
   operation: "inspect_native_load_image",
   value: JsonValue,
-): Result<NativeLoadImageObservation, AnalysisOutputError>;
+): Result<
+  ParsedGhidraInventoryResult<NativeLoadImageObservation>,
+  AnalysisOutputError
+>;
 export function parseGhidraInventoryResult(
   operation: GhidraInventoryOperation,
   value: JsonValue,
-): Result<JsonValue, AnalysisOutputError>;
+): Result<ParsedGhidraInventoryResult, AnalysisOutputError>;
 export function parseGhidraInventoryResult(
   operation: GhidraInventoryOperation,
   value: JsonValue,
-): Result<JsonValue | NativeLoadImageObservation, AnalysisOutputError> {
+): Result<
+  ParsedGhidraInventoryResult<JsonValue | NativeLoadImageObservation>,
+  AnalysisOutputError
+> {
   if (operation === "inspect_native_load_image") {
     const parsed = resultSchemas.inspect_native_load_image.safeParse(value);
     return parsed.success
-      ? ok(parsed.data)
+      ? ok({ value: parsed.data, rawResult: value })
       : err(inventoryOutputFailure(operation, parsed.error));
   }
   const parsed = resultSchemas[operation].safeParse(value);
   return parsed.success
-    ? ok(jsonValueSchema.parse(parsed.data))
+    ? ok({
+        value: jsonValueSchema.parse(parsed.data),
+        // The overview omits detailed segment permissions, sections and provenance.
+        // Load-image observations above undergo separate local attestation.
+        ...(operation === "read_binary_inventory_summary"
+          ? { rawResult: value }
+          : {}),
+      })
     : err(inventoryOutputFailure(operation, parsed.error));
 }
 

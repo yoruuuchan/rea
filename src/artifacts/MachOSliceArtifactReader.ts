@@ -186,7 +186,7 @@ export class MachOSliceArtifactReader implements ArtifactReader {
         executable: true,
         encrypted: false,
         byteOffset: offset,
-        declaredSha256: null,
+        declaredIntegrity: null,
         unpacked: false,
         limitations: [
           ...(structural.status === "not-mach-o"

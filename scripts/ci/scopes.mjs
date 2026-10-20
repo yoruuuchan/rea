@@ -448,7 +448,7 @@ export const SCOPES = {
     "src/server/http/**",
     "src/{cli,cliCommandNames,cli/environmentCommands}.ts",
     "src/config/{environmentName,mcpHttpEndpoint}.ts",
-    "src/domain/analysisView/{environmentManifest*,EnvironmentManifest*,scenarioCaptureRecords,WebNetworkProjectionAccumulator,analysisViewDataAdmission}.ts",
+    "src/domain/analysisView/{environmentManifest*,EnvironmentManifest*,environmentState*,EnvironmentState*,recordedResponseBody,scenarioCaptureRecords,WebNetworkProjectionAccumulator,analysisViewDataAdmission}.ts",
     "src/process/{OwnedCommand,ProviderProcess,PrivateRuntimeRoot}.ts",
     "src/process/ProcessOwnership*.ts",
     "tests/fixtures/historicalHar.ts",

@@ -193,7 +193,7 @@ describe("Ghidra relationship metadata validation", () => {
   it("preserves file-offset resolution in Evidence locations and rejects inexact offsets", () => {
     const selection = {
       file_offset: 0x210,
-      mapped_address: "0x140001010",
+      mapped_address: "0x140001014",
       procedure_address: "0x140001010",
     };
     const wire = { value: "return 42;", limitations: [], selection };
@@ -204,9 +204,10 @@ describe("Ghidra relationship metadata validation", () => {
     if (!parsed.ok) throw parsed.error;
     expect(parsed.value.locations).toEqual([
       { kind: "file-offset", offset: 0x210 },
-      { kind: "address", address: "0x140001010" },
+      { kind: "address", address: "0x140001014" },
       { kind: "address", address: "0x140001010" },
     ]);
+    expect(parsed.value.rawResult).toEqual(wire);
     expect(
       parseGhidraFunctionResult("procedure_pseudo_code", {
         ...wire,

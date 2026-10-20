@@ -540,6 +540,138 @@ it("merges identifier-like siblings at index two or later and never folds stop w
   ).toEqual(["blue-two", "green-three", "red-one"]);
 });
 
+it("templates two adjacent literals after a plural literal as a pair when three pairs vary in both positions", () => {
+  const projected = manifest(
+    ["sibling-pair-variance"],
+    syntheticCapture([
+      [
+        "GET",
+        "https://g.test/api/v1/repos/lighthouse-rota/lamp-room-log/issues",
+      ],
+      ["GET", "https://g.test/api/v1/repos/granite-ledger/ledger-core/issues"],
+      [
+        "GET",
+        "https://g.test/api/v1/repos/blue-heron-kitchen/recipe-book/issues",
+      ],
+      [
+        "GET",
+        "https://g.test/api/v1/repos/lighthouse-rota/tide-tables/issues/4",
+      ],
+      [
+        "GET",
+        "https://g.test/api/v1/repos/granite-ledger/audit-trail/issues/9",
+      ],
+      [
+        "GET",
+        "https://g.test/api/v1/repos/saltmarsh-depot/crate-tracker/issues/2",
+      ],
+      ["GET", "https://g.test/api/v1/teams/one/alpha/members"],
+      ["GET", "https://g.test/api/v1/teams/two/beta/members"],
+      ["GET", "https://g.test/api/v1/orgs/acme/x1/hooks"],
+      ["GET", "https://g.test/api/v1/orgs/acme/x2/hooks"],
+      ["GET", "https://g.test/api/v1/orgs/acme/x3/hooks"],
+    ]),
+  );
+  expect(projected.tools.map((tool) => tool.path_template)).toEqual([
+    "/api/v1/orgs/acme/x1/hooks",
+    "/api/v1/orgs/acme/x2/hooks",
+    "/api/v1/orgs/acme/x3/hooks",
+    "/api/v1/repos/{repo_namespace}/{repo_name}/issues",
+    "/api/v1/repos/{repo_namespace}/{repo_name}/issues/{numeric}",
+    "/api/v1/teams/one/alpha/members",
+    "/api/v1/teams/two/beta/members",
+  ]);
+  expect(
+    projected.tools.find(
+      (tool) =>
+        tool.path_template ===
+        "/api/v1/repos/{repo_namespace}/{repo_name}/issues",
+    ),
+  ).toMatchObject({
+    name: "get_repos_issues_by_repo_namespace_repo_name",
+    params: [
+      {
+        name: "repo_namespace",
+        rule: "sibling-pair-variance",
+        observed_values: [
+          "blue-heron-kitchen",
+          "granite-ledger",
+          "lighthouse-rota",
+        ],
+      },
+      {
+        name: "repo_name",
+        rule: "sibling-pair-variance",
+        observed_values: ["lamp-room-log", "ledger-core", "recipe-book"],
+      },
+    ],
+    record_ordinals: [0, 1, 2],
+  });
+  expect(
+    projected.tools
+      .find((tool) => tool.path_template.endsWith("/issues/{numeric}"))
+      ?.params.map((param) => [param.name, param.rule]),
+  ).toEqual([
+    ["repo_namespace", "sibling-pair-variance"],
+    ["repo_name", "sibling-pair-variance"],
+    ["id", "numeric"],
+  ]);
+});
+
+it("keeps a trailing pair literal because its second half names a sub-resource", () => {
+  const projected = manifest(
+    ["sibling-pair-variance"],
+    syntheticCapture([
+      ["GET", "https://g.test/api/v1/users/alice/followers"],
+      ["GET", "https://g.test/api/v1/users/bob/following"],
+      ["GET", "https://g.test/api/v1/users/carol/starred"],
+    ]),
+  );
+  expect(projected.tools.map((tool) => tool.path_template)).toEqual([
+    "/api/v1/users/alice/followers",
+    "/api/v1/users/bob/following",
+    "/api/v1/users/carol/starred",
+  ]);
+});
+
+it("merges pairs before sibling-variance so the two rules compose", () => {
+  const routes = syntheticCapture([
+    ["GET", "https://g.test/api/repos/alice-1/common/issues"],
+    ["GET", "https://g.test/api/repos/bob-2/common/issues"],
+    ["GET", "https://g.test/api/repos/carol-3/other/issues"],
+    ["GET", "https://g.test/api/repos/dave-4/third/issues"],
+  ]);
+  for (const rules of [
+    ["sibling-pair-variance"],
+    ["sibling-variance", "sibling-pair-variance"],
+  ] as const)
+    expect(
+      manifest([...rules], routes).tools.map((tool) => tool.path_template),
+    ).toEqual(["/api/repos/{repo_namespace}/{repo_name}/issues"]);
+});
+
+it("keeps each pair parameter's role when sibling-variance later templates the segment before the pair", () => {
+  const projected = manifest(
+    ["sibling-variance", "sibling-pair-variance"],
+    syntheticCapture([
+      ["GET", "https://g.test/api/root/group1s/alice-1/common/issues"],
+      ["GET", "https://g.test/api/root/group1s/bob-2/ledger/issues"],
+      ["GET", "https://g.test/api/root/group1s/carol-3/books/issues"],
+      ["GET", "https://g.test/api/root/group2s/dave-4/x1/issues"],
+      ["GET", "https://g.test/api/root/group2s/erin-5/x2/issues"],
+      ["GET", "https://g.test/api/root/group2s/finn-6/x3/issues"],
+    ]),
+  );
+  expect(projected.tools).toHaveLength(1);
+  expect(
+    projected.tools[0]?.params.map((param) => [param.name, param.rule]),
+  ).toEqual([
+    ["root_id", "sibling-variance"],
+    ["namespace", "sibling-pair-variance"],
+    ["name", "sibling-pair-variance"],
+  ]);
+});
+
 it("never folds a literal sibling into a format-rule parameter", () => {
   const projected = manifest(
     ALL_RULES,

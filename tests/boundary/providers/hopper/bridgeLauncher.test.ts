@@ -327,6 +327,7 @@ it.skipIf(process.platform !== "linux")(
   "gives the demo helper a live owner stream through Node's actual stdio transport",
   async () => {
     const directory = await createTestTempDirectory("rea-hopper-owner-stdio-");
+    const selectPrivateDisplay = vi.fn(readyDirectDisplay);
     const launcher = new HopperApplicationLauncher(
       {
         ...options(process.execPath),
@@ -344,7 +345,7 @@ it.skipIf(process.platform !== "linux")(
             signingFingerprint: "1".repeat(40),
             source: "signed_package_cache",
           }),
-        selectPrivateDisplay: readyDirectDisplay,
+        selectPrivateDisplay,
       },
     );
     const launched = await launcher.launch({
@@ -354,6 +355,7 @@ it.skipIf(process.platform !== "linux")(
       runId: randomUUID(),
     });
     if (!launched.ok) throw launched.error;
+    expect(selectPrivateDisplay).toHaveBeenCalledOnce();
     const supervisor = new ProviderProcessSupervisor(launched.value);
     try {
       expect(await supervisor.waitForOutputClose(5_000)).toBe(true);
@@ -378,10 +380,11 @@ it.skipIf(process.platform !== "linux")(
       "unsupported_hopper_build",
       "Fixture launcher is outside verified releases",
     );
+    const selectPrivateDisplay = vi.fn(readyDirectDisplay);
     const launcher = new HopperApplicationLauncher(
       { ...options("/unused/Hopper"), targetPath },
       {
-        selectPrivateDisplay: readyDirectDisplay,
+        selectPrivateDisplay,
         verifyLinuxLauncher: async () => err(rejected),
       },
     );
@@ -405,5 +408,6 @@ it.skipIf(process.platform !== "linux")(
     });
     expect(projected.details).not.toHaveProperty("exit_code");
     expect(projected.details).not.toHaveProperty("launcher");
+    expect(selectPrivateDisplay).not.toHaveBeenCalled();
   },
 );

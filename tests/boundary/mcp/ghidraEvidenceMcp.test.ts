@@ -182,10 +182,7 @@ it("retains terminal-call qualifications across function views and snapshot repl
         reply.structuredContent,
       );
       expect(evidence.normalized_result, name).toEqual(value);
-      expect(evidence.raw_result, name).toEqual({
-        value,
-        limitations: [limitation],
-      });
+      expect(evidence.raw_result, name).toBeNull();
       expect(evidence.limitations, name).toContain(limitation);
       expect(evidence.analysis_profile?.parameters).toMatchObject({
         function_boundary_observations:
@@ -240,7 +237,7 @@ it("retains handler-region limitations on incoming and outgoing reference Eviden
         reply.structuredContent,
       );
       expect(evidence.normalized_result).toMatchObject({ direction });
-      expect(evidence.raw_result).toMatchObject({ limitations: [limitation] });
+      expect(evidence.raw_result).toBeNull();
       expect(evidence.limitations).toContain(limitation);
       const replay = await harness.session.execute(
         "procedure_references",

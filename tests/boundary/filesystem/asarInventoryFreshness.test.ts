@@ -279,8 +279,8 @@ describe("ASAR captured-byte identity", () => {
       const replacementMember = await right.next();
       if (originalMember.done || replacementMember.done)
         throw new Error("Expected second members");
-      expect(originalMember.value.declaredSha256).not.toBe(
-        replacementMember.value.declaredSha256,
+      expect(originalMember.value.declaredIntegrity?.digest).not.toBe(
+        replacementMember.value.declaredIntegrity?.digest,
       );
       expect(
         (await buffer(await first.open(originalMember.value))).toString(),

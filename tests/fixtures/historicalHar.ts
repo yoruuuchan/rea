@@ -309,3 +309,14 @@ export const environmentManifestHar = () => ({
     ),
   },
 });
+
+/** The Grafana-shaped HAR with one second between requests, so its timeline orders reads before the writes that follow them. */
+export const environmentStateHar = () => {
+  const har = environmentManifestHar();
+  const start = Date.parse("2026-10-17T18:00:00.000Z");
+  har.log.entries = har.log.entries.map((entry, index) => ({
+    ...entry,
+    startedDateTime: new Date(start + index * 1000).toISOString(),
+  }));
+  return har;
+};

@@ -1,3 +1,9 @@
+import {
+  artifactIntegrityClaimSchema,
+  artifactSha256PairSchema,
+  artifactMd5PairSchema,
+} from "./artifactIntegrity.js";
+import { artifactFormatMetadataSchema } from "./artifactFormatMetadata.js";
 import { z } from "zod";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
@@ -54,6 +60,7 @@ const artifactFormatSchema = z.enum([
   "zip",
   "pkg",
   "asar",
+  "godot-pck",
   "javascript-bundle",
   "source-map",
   "mach-o-universal",
@@ -82,6 +89,7 @@ const artifactFormatSchema = z.enum([
 /** Formats established from bytes or a virtual directory tree, independent of path roles. */
 const artifactContentFormatSchema = artifactFormatSchema.extract([
   "zip",
+  "godot-pck",
   "mach-o-universal",
   "mach-o",
   "elf",
@@ -149,23 +157,29 @@ export const artifactOccurrenceSchema = z.object({
   encrypted: z.boolean(),
   hash_status: z.enum(["verified", "mismatched", "not-hashed", "unavailable"]),
   source_location: artifactByteRangeSchema.nullable(),
+  declared_integrity: artifactIntegrityClaimSchema.exactOptional(),
+  format_metadata: artifactFormatMetadataSchema.exactOptional(),
   limitations: z.array(z.string()),
 });
 
 /** Observed bytes that contradict a container's declared integrity identity. */
-export const integrityContradictionSchema = z.object({
+const integrityContradictionBaseSchema = z.object({
   contradiction_id: contradictionIdSchema,
   occurrence_id: occurrenceIdSchema,
   parent_artifact_id: artifactIdSchema,
   logical_path: boundedRelativePathSchema,
-  declared_sha256: sha256Schema,
-  observed_sha256: sha256Schema,
+
   entry_kind: z.enum(["file", "slice"]),
   unpacked: z.boolean(),
   trust: z.literal("observed-untrusted"),
   provenance: z.literal("container-integrity-metadata-versus-observed-bytes"),
   limitations: z.array(z.string()).min(1),
 });
+
+export const integrityContradictionSchema = z.union([
+  integrityContradictionBaseSchema.extend(artifactSha256PairSchema.shape),
+  integrityContradictionBaseSchema.extend(artifactMd5PairSchema.shape),
+]);
 
 /**
  * Parent-child derivation relation between two content-addressed artifacts.

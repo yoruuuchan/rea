@@ -1,3 +1,8 @@
+import type {
+  ArtifactIntegrityClaim,
+  ArtifactIntegrityDetails,
+} from "../domain/artifactIntegrity.js";
+import type { ArtifactFormatMetadata } from "../domain/artifactFormatMetadata.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { AnalysisCleanupLease } from "./AnalysisCleanupLease.js";
 import type { Readable } from "node:stream";
@@ -34,7 +39,8 @@ export interface ArtifactEntry {
   readonly executable: boolean;
   readonly encrypted: boolean;
   readonly byteOffset: number | null;
-  readonly declaredSha256: string | null;
+  readonly declaredIntegrity: ArtifactIntegrityClaim | null;
+  readonly formatMetadata?: ArtifactFormatMetadata;
   readonly unpacked: boolean;
   readonly limitations: readonly string[];
   readonly adapterKey: string;
@@ -73,6 +79,11 @@ export const sameArtifactSourceIdentity = (
 export const copyArtifactEntry = (entry: ArtifactEntry): ArtifactEntry => ({
   ...entry,
   limitations: [...entry.limitations],
+  declaredIntegrity:
+    entry.declaredIntegrity === null ? null : { ...entry.declaredIntegrity },
+  ...(entry.formatMetadata === undefined
+    ? {}
+    : { formatMetadata: { ...entry.formatMetadata } }),
   ...(entry.sourceIdentity === undefined
     ? {}
     : { sourceIdentity: { ...entry.sourceIdentity } }),
@@ -90,7 +101,8 @@ export const sameArtifactEntry = (
   entry.executable === produced.executable &&
   entry.encrypted === produced.encrypted &&
   entry.byteOffset === produced.byteOffset &&
-  entry.declaredSha256 === produced.declaredSha256 &&
+  sameDeclaredIntegrity(entry.declaredIntegrity, produced.declaredIntegrity) &&
+  sameFormatMetadata(entry.formatMetadata, produced.formatMetadata) &&
   entry.unpacked === produced.unpacked &&
   entry.adapterKey === produced.adapterKey &&
   entry.limitations.length === produced.limitations.length &&
@@ -103,6 +115,32 @@ export const sameArtifactEntry = (
   entry.sourceIdentity?.mode === produced.sourceIdentity?.mode &&
   entry.sourceIdentity?.mtimeNs === produced.sourceIdentity?.mtimeNs &&
   entry.sourceIdentity?.ctimeNs === produced.sourceIdentity?.ctimeNs;
+
+const sameDeclaredIntegrity = (
+  left: ArtifactEntry["declaredIntegrity"],
+  right: ArtifactEntry["declaredIntegrity"],
+): boolean =>
+  left === right ||
+  (left !== null &&
+    left !== undefined &&
+    right !== null &&
+    right !== undefined &&
+    left.algorithm === right.algorithm &&
+    left.digest === right.digest);
+
+/** Format metadata contracts contain only primitive source fields. */
+const sameFormatMetadata = (
+  left: ArtifactFormatMetadata | undefined,
+  right: ArtifactFormatMetadata | undefined,
+): boolean =>
+  left === right ||
+  (left !== undefined &&
+    right !== undefined &&
+    Object.keys(left).length === Object.keys(right).length &&
+    Object.entries(left).every(
+      ([key, value]) =>
+        Object.hasOwn(right, key) && Reflect.get(right, key) === value,
+    ));
 
 /** One entry or subtree deliberately excluded from a traversal. */
 export interface ArtifactTraversalOmission {
@@ -119,17 +157,29 @@ export interface ArtifactReaderTraversal {
 /** Per-iterator observation sink; adapters report intentional omissions without shared state. */
 export interface ArtifactTraversalOptions {
   readonly onOmission?: (omission: ArtifactTraversalOmission) => void;
+  readonly onCoverage?: (coverage: ArtifactReaderTraversal) => void;
 }
 
 /** Read-only adapter over one directory, archive, or virtual container. */
 export interface ArtifactReader {
-  readonly format: "directory" | ZipPackageFormat | "asar" | "file";
+  readonly format:
+    | "directory"
+    | ZipPackageFormat
+    | "asar"
+    | "godot-pck"
+    | "file";
   entries(
     signal?: AbortSignal,
     options?: ArtifactTraversalOptions,
   ): AsyncIterable<ArtifactEntry>;
   open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable>;
   provenance(): readonly ArtifactCommand[];
+  formatMetadata?(): ArtifactFormatMetadata | undefined;
+  /** Bind materialization to the exact inventoried carrier before creating outputs. */
+  prepareContainer?(
+    expectedSha256: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -153,12 +203,7 @@ export class ArtifactReaderFailure extends Error {
       | "unavailable",
     message: string,
     options?: ArtifactReaderFailureOptions,
-    readonly details?: Readonly<{
-      logicalPath: string;
-      declaredSha256: string | null;
-      calculatedSha256: string | null;
-      unpacked: boolean;
-    }>,
+    readonly details?: ArtifactIntegrityDetails,
   ) {
     super(message, options);
     this.name = "ArtifactReaderFailure";

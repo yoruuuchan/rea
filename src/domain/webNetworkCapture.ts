@@ -2,6 +2,7 @@ import { z } from "zod";
 import { jsonValueSchema } from "./jsonValue.js";
 import { localPathStringSchema } from "./localPath.js";
 import { qlogCaptureFactsSchema } from "./qlogCapture.js";
+import { canBorrowParsedJsonSnapshot } from "./immutableJson.js";
 
 /** Complete historical evidence budgets; exceeding a budget returns no partial capture. */
 export const WEB_NETWORK_CAPTURE_LIMITS = {
@@ -216,3 +217,25 @@ export type WebNetworkCapture = z.output<typeof webNetworkCaptureSchema>;
 export type WebNetworkCaptureRecord = z.output<
   typeof webNetworkCaptureRecordSchema
 >;
+
+const validatedImmutableCaptures = new WeakSet<object>();
+
+/** Reuse successful validation of the exact owned snapshot, without a retained copy. */
+export const safeParseOwnedWebNetworkCapture = (
+  input: unknown,
+): z.ZodSafeParseResult<WebNetworkCapture> => {
+  if (
+    typeof input === "object" &&
+    input !== null &&
+    validatedImmutableCaptures.has(input)
+  )
+    return { success: true, data: input as WebNetworkCapture };
+  const parsed = webNetworkCaptureSchema.safeParse(input);
+  if (parsed.success && canBorrowParsedJsonSnapshot(input, parsed.data)) {
+    // Borrow only when full validation preserves values, schema normalization
+    // and alias topology. Merely frozen or mutable objects never gain a proof.
+    validatedImmutableCaptures.add(input);
+    return { success: true, data: input };
+  }
+  return parsed;
+};

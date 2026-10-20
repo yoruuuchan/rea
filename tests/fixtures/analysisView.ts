@@ -1,4 +1,9 @@
-import { apiSurfaceHar, environmentManifestHar } from "./historicalHar.js";
+import type { JsonValue } from "../../src/domain/jsonValue.js";
+import {
+  apiSurfaceHar,
+  environmentManifestHar,
+  environmentStateHar,
+} from "./historicalHar.js";
 import { webNetworkCaptureSchema } from "../../src/domain/webNetworkCapture.js";
 import { BINARY_LAYOUT_TEST_PROVIDER } from "./binaryDiagnostics/layout.js";
 import { binaryLayoutFixture } from "./binaryDiagnostics/layout.js";
@@ -290,9 +295,10 @@ export const analysisViewObjectDenseCapture = (headerCount = 100_000) => {
 };
 
 /** Capture parent decoded from the Grafana-shaped HAR with producer ordinals intact. */
-export const environmentManifestCaptureFixture = () => {
+export const environmentManifestCaptureFixture = (
+  entries: readonly JsonValue[] = environmentManifestHar().log.entries,
+) => {
   const capture = analysisViewCaptureFixture();
-  const entries = environmentManifestHar().log.entries;
   capture.artifact.path = "/fixtures/environment-manifest.har";
   capture.total_records = entries.length;
   capture.records = entries.map((reported, ordinal) => ({
@@ -303,3 +309,7 @@ export const environmentManifestCaptureFixture = () => {
   }));
   return capture;
 };
+
+/** The same capture with distinct start times, as the environment-state view orders it. */
+export const environmentStateCaptureFixture = () =>
+  environmentManifestCaptureFixture(environmentStateHar().log.entries);

@@ -47,14 +47,24 @@ export const analysisErrorProjectionSchema = z.discriminatedUnion("code", [
     .object({
       code: z.literal("artifact_integrity_mismatch"),
       ...common,
-      details: z
-        .object({
+      details: z.union([
+        z.strictObject({
           logical_path: z.string(),
           declared_sha256: z.string().nullable(),
           calculated_sha256: z.string().nullable(),
           unpacked: z.boolean(),
-        })
-        .strict(),
+        }),
+        z.strictObject({
+          logical_path: z.string(),
+          algorithm: z.literal("md5"),
+          declared_md5: z.string().regex(/^[a-f0-9]{32}$/u),
+          calculated_md5: z
+            .string()
+            .regex(/^[a-f0-9]{32}$/u)
+            .nullable(),
+          unpacked: z.boolean(),
+        }),
+      ]),
     })
     .strict(),
   generic("artifact_operation_failed"),

@@ -389,24 +389,54 @@
           "additionalProperties": false
         },
         "details": {
-          "type": "object",
-          "properties": {
-            "logical_path": { "type": "string" },
-            "declared_sha256": {
-              "anyOf": [{ "type": "string" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "logical_path": { "type": "string" },
+                "declared_sha256": {
+                  "anyOf": [{ "type": "string" }, { "type": "null" }]
+                },
+                "calculated_sha256": {
+                  "anyOf": [{ "type": "string" }, { "type": "null" }]
+                },
+                "unpacked": { "type": "boolean" }
+              },
+              "required": [
+                "logical_path",
+                "declared_sha256",
+                "calculated_sha256",
+                "unpacked"
+              ],
+              "additionalProperties": false
             },
-            "calculated_sha256": {
-              "anyOf": [{ "type": "string" }, { "type": "null" }]
-            },
-            "unpacked": { "type": "boolean" }
-          },
-          "required": [
-            "logical_path",
-            "declared_sha256",
-            "calculated_sha256",
-            "unpacked"
-          ],
-          "additionalProperties": false
+            {
+              "type": "object",
+              "properties": {
+                "logical_path": { "type": "string" },
+                "algorithm": { "type": "string", "const": "md5" },
+                "declared_md5": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "calculated_md5": {
+                  "anyOf": [
+                    { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+                    { "type": "null" }
+                  ]
+                },
+                "unpacked": { "type": "boolean" }
+              },
+              "required": [
+                "logical_path",
+                "algorithm",
+                "declared_md5",
+                "calculated_md5",
+                "unpacked"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [

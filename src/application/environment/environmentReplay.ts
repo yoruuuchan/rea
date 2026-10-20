@@ -2,13 +2,12 @@ import { isJsonLike } from "../../domain/analysisView/EnvironmentManifestAccumul
 import { mediaTypeEssence } from "../../domain/analysisView/webNetworkRouteTemplates.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
-import { isExactJsonNumber } from "../../domain/exactJsonNumber.js";
-import { jsonValueSchema, type JsonValue } from "../../domain/jsonValue.js";
+import { parseExactJson } from "../../domain/exactJsonNumber.js";
+import type { JsonValue } from "../../domain/jsonValue.js";
 import {
   iterateUrlQueryParameters,
   recordedPathSegments,
 } from "../../domain/recordedTransportUrl.js";
-import { safeParseJson } from "../../domain/safeJson.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { environmentToolArguments } from "./environmentTools.js";
 import {
@@ -190,22 +189,8 @@ const replayBody = (
     exchange.contentType !== null &&
     isJsonLike(mediaTypeEssence(exchange.contentType))
   ) {
-    const parsed = safeParseJson(text, (_key, value, context) => {
-      // The native parser supplies each primitive's original spelling. Share
-      // HAR's exact-number policy rather than accepting an already-rounded ID.
-      if (
-        typeof value === "number" &&
-        !isExactJsonNumber(value, context?.source)
-      )
-        throw new RangeError(
-          "JSON numeric conversion would lose recorded data",
-        );
-      return value;
-    });
-    const value = parsed.ok
-      ? jsonValueSchema.safeParse(parsed.value)
-      : undefined;
-    if (value?.success === true) return { body: value.data, truncated: false };
+    const value = parseExactJson(text);
+    if (value !== undefined) return { body: value, truncated: false };
   }
   return { body: text, truncated: false };
 };

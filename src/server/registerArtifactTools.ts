@@ -1,3 +1,7 @@
+import {
+  canBorrowParsedJsonSnapshot,
+  immutableJsonSnapshotMember,
+} from "../domain/immutableJson.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
 import {
@@ -42,11 +46,18 @@ export const registerArtifactTools = (
         : decodeWithoutDelivery(operation, parameters);
     },
     parametersForEvidence: decodeWithoutDelivery,
-    sourceEvidence: (operation, result) =>
-      operation === "inspect_artifact"
-        ? artifactInspectionResultSchema
-            .parse(result)
-            .substeps.map(({ evidence }) => evidence)
-        : [],
+    sourceEvidence: (operation, result) => {
+      if (operation !== "inspect_artifact") return [];
+      const parsed = artifactInspectionResultSchema.parse(result);
+      const inspection = canBorrowParsedJsonSnapshot(result, parsed)
+        ? result
+        : parsed;
+      const substeps = immutableJsonSnapshotMember(inspection, "substeps");
+      return inspection.substeps.map((step, index) => {
+        const ownedStep = immutableJsonSnapshotMember(substeps, String(index));
+        immutableJsonSnapshotMember(ownedStep, "evidence");
+        return step.evidence;
+      });
+    },
   });
 };
