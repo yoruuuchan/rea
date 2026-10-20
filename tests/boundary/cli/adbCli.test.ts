@@ -135,7 +135,7 @@ it.each(["string:key", ":", "string"])(
     expect(error).toMatchObject({
       code: "invalid_request",
       category: "invalid_input",
-      retryable: true,
+      retryable: false,
       remediation: { action: expect.any(String) },
     });
     expect(error.remediation.action).not.toBe("");

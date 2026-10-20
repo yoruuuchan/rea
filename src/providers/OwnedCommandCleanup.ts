@@ -1,6 +1,6 @@
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
@@ -9,7 +9,7 @@ import { OwnedCommandFailure } from "../process/OwnedCommand.js";
 /** Transfer exact helper and command cleanup capabilities to the caller's scope. */
 export const retainOwnedCommandCleanup = (
   cause: unknown,
-  resourceOwner: FileCloseResourceOwner,
+  resourceOwner: RetainedResourceScope,
   providerId: string,
   operation: string,
 ): readonly AnalysisError[] => {

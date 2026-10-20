@@ -13,6 +13,7 @@ import { parseJebMcpEndpoint } from "./jeb/JebMcpEndpoint.js";
 import { selectLinuxPrivateDisplayStrategy } from "./hopper/LinuxPrivateDisplayProbe.js";
 import { ok } from "./domain/result.js";
 import { AnalysisCancelledError } from "./domain/analysisErrorCore.js";
+import type { RetainedResourceScope } from "./application/AnalysisProvider.js";
 import {
   inspectLinuxHopperPythonRuntime,
   linuxHopperPythonUnavailable,
@@ -23,6 +24,30 @@ export const createSystemDoctorHost = (
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
   signal?: AbortSignal,
 ): DoctorHost => {
+  const registrationReads = new WeakMap<
+    RetainedResourceScope,
+    Map<string, ReturnType<typeof readIdaConfiguration>>
+  >();
+  const readRegistration = (
+    path: string,
+    resourceScope: RetainedResourceScope,
+    inspectionSignal: AbortSignal,
+  ) => {
+    let byPath = registrationReads.get(resourceScope);
+    if (byPath === undefined) {
+      byPath = new Map();
+      registrationReads.set(resourceScope, byPath);
+    }
+    let registration = byPath.get(path);
+    if (registration === undefined) {
+      registration = readIdaConfiguration(path, {
+        resourceScope,
+        signal: inspectionSignal,
+      });
+      byPath.set(path, registration);
+    }
+    return registration;
+  };
   const selectedJebEndpoint = environment.REA_JEB_MCP_URL;
   const selectedJebRegistrationEnvironment: Readonly<Record<string, string>> =
     selectedJebEndpoint !== undefined &&
@@ -34,35 +59,48 @@ export const createSystemDoctorHost = (
     environment,
     ...(signal === undefined ? {} : { signal }),
     providerRegistrationEnvironment: () => selectedJebRegistrationEnvironment,
-    resolveProviderRequestBudget: (
+    resolveProviderRequestBudget: async (
       analysisProvider,
       registrationEnvironment,
+      resourceScope,
+      inspectionSignal,
     ) => {
       if (analysisProvider !== "ida" && analysisProvider !== "auto")
         return ok(undefined);
       const path = registrationEnvironment.REA_IDA_MCP_CONFIG;
       if (path === undefined) return ok(undefined);
-      const registration = readIdaConfiguration(path);
+      const registration = await readRegistration(
+        path,
+        resourceScope,
+        inspectionSignal,
+      );
       if (registration.ok) return ok(registration.value.timeoutMs);
       // An invalid IDA registration cannot be selected automatically. Keep it
       // out of recommendations for another available provider, but surface the
       // parser-owned error when IDA itself was explicitly selected.
       return analysisProvider === "ida" ? registration : ok(undefined);
     },
-    providerInspections: async (fileCloseResources, inspectionSignal) => [
+    providerInspections: async (resourceScope, inspectionSignal) => [
       await inspectSystemGhidraProvider(
         environment,
-        fileCloseResources,
+        resourceScope,
         inspectionSignal,
       ),
-      inspectIdaRegistration(environment.REA_IDA_MCP_CONFIG),
-      await inspectJadxProvider(
-        environment,
-        fileCloseResources,
+      await inspectIdaRegistration(
+        environment.REA_IDA_MCP_CONFIG,
+        resourceScope,
         inspectionSignal,
+        environment.REA_IDA_MCP_CONFIG === undefined
+          ? undefined
+          : readRegistration(
+              environment.REA_IDA_MCP_CONFIG,
+              resourceScope,
+              inspectionSignal,
+            ),
       ),
+      await inspectJadxProvider(environment, resourceScope, inspectionSignal),
       await inspectKunaProvider(environment, process.platform, {
-        fileCloseResources,
+        resourceScope,
         signal: inspectionSignal,
       }),
     ],

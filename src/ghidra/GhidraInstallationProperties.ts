@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import {
   ArtifactFileCancelled,
   ArtifactFileCleanupFailure,
@@ -15,7 +15,7 @@ import { ghidraFileFailure } from "./GhidraFileArtifacts.js";
 /** Metadata admission budget, not a Java Properties format limit. */
 export const MAX_GHIDRA_INSTALLATION_PROPERTIES_BYTES = 1024 * 1024;
 export interface GhidraInstallationFileOptions {
-  readonly resourceOwner: FileCloseResourceOwner;
+  readonly resourceOwner: RetainedResourceScope;
   readonly signal?: AbortSignal;
 }
 

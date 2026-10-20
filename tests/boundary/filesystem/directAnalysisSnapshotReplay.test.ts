@@ -30,6 +30,7 @@ import {
   workflowAnalysisProfile,
 } from "../../../src/application/InvestigationProviders.js";
 import {
+  analysisQueryId,
   createAnalysisSnapshotWorkflowEntry,
   type AnalysisSnapshot,
 } from "../../../src/domain/analysisSnapshot.js";
@@ -39,6 +40,7 @@ import {
   createTestProviderRouter,
 } from "../../fixtures/binarySession.js";
 import { BinarySession } from "../../../src/application/binary/BinarySession.js";
+import { isProfilelessNativeDispatchSnapshot } from "../../../src/application/binary/ProfilelessNativeWorkflowSnapshot.js";
 import { OwnedStagedOutput } from "../../../src/filesystem/OwnedStagedOutput.js";
 import { ProviderAdapterError } from "../../../src/domain/providerAdapterError.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -46,6 +48,7 @@ import {
   CAPABILITIES as GHIDRA_CAPABILITIES,
   GHIDRA_PROVIDER_IDENTITY,
 } from "../../../src/ghidra/GhidraProviderCapabilities.js";
+import { APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE } from "../../../src/native/NativeMacOSProviderMetadata.js";
 
 const IDENTITY = {
   id: "snapshot-fixture",
@@ -1038,4 +1041,260 @@ describe("workflow snapshot profile and cancellation binding", () => {
     expect(fixture.calls.toSorted()).toEqual(operations.toSorted());
     expect(fixture.starts).toHaveLength(1);
   });
+});
+
+const expectProfilelessWorkflowSnapshotRejections = async (
+  path: string,
+  provider: AnalysisProvider,
+  snapshot: AnalysisSnapshot,
+): Promise<void> => {
+  const session = createTestBinarySession(provider);
+  const opened = await session.open(path);
+  if (!opened.ok) throw opened.error;
+  const readerIdentity = APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE.provider;
+  const wrongReader = structuredClone(snapshot);
+  const otherReaderProfile = createAnalysisProfile(
+    { ...readerIdentity, version: "apple-metadata-reader-older" },
+    {
+      operation: "inspect_native_dispatch_metadata",
+      reader: "apple-dispatch-metadata",
+      revision: 0,
+    },
+  );
+  wrongReader.binding = {
+    provider: otherReaderProfile.provider,
+    analysis_profile: otherReaderProfile,
+  };
+  expect(
+    isProfilelessNativeDispatchSnapshot(
+      wrongReader,
+      opened.value,
+      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+    ),
+  ).toBe(false);
+  const rejectedReader = session.importAnalysisSnapshot(wrongReader);
+  expect(rejectedReader.ok).toBe(false);
+  if (!rejectedReader.ok)
+    expect(rejectedReader.error.message).toContain("profile_mismatch");
+
+  const wrongOperation = structuredClone(snapshot);
+  wrongOperation.workflow_entries[0]!.operation = "inspect_native_api";
+  wrongOperation.workflow_entries[0]!.query_id = analysisQueryId(
+    wrongOperation.target,
+    wrongOperation.binding,
+    "inspect_native_api",
+    wrongOperation.workflow_entries[0]!.parameters,
+  );
+  expect(
+    isProfilelessNativeDispatchSnapshot(
+      wrongOperation,
+      opened.value,
+      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+    ),
+  ).toBe(false);
+  const rejectedOperation = session.importAnalysisSnapshot(wrongOperation);
+  expect(rejectedOperation.ok).toBe(false);
+  if (!rejectedOperation.ok)
+    expect(rejectedOperation.error.message).toContain("profile_mismatch");
+
+  const mixedOperation = "inspect_native_api";
+  const mixedProfile = workflowAnalysisProfile(
+    APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+    mixedOperation,
+  );
+  const mixedSnapshot = {
+    ...snapshot,
+    workflow_entries: [
+      ...snapshot.workflow_entries,
+      createAnalysisSnapshotWorkflowEntry({
+        target: snapshot.target,
+        binding: snapshot.binding,
+        operation: mixedOperation,
+        parameters: {},
+        execution: {
+          result: null,
+          rawResult: null,
+          provider: mixedProfile.provider,
+          analysisProfile: mixedProfile,
+          limitations: [],
+          locations: [],
+          subject: null,
+        },
+      }),
+    ],
+  };
+  const rejectedMixed = session.importAnalysisSnapshot(mixedSnapshot);
+  expect(
+    isProfilelessNativeDispatchSnapshot(
+      mixedSnapshot as AnalysisSnapshot,
+      opened.value,
+      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+    ),
+  ).toBe(false);
+  expect(rejectedMixed.ok).toBe(false);
+  if (!rejectedMixed.ok)
+    expect(rejectedMixed.error.message).toContain("profile_mismatch");
+
+  const deepProfile = createAnalysisProfile(
+    { id: "ghidra", name: "Ghidra", version: "fixture-version" },
+    { fixture: "deep-provider-only" },
+  );
+  const deepWorkflowProfile = workflowAnalysisProfile(
+    deepProfile,
+    "inspect_native_dispatch_metadata",
+  );
+  const originalWorkflow = snapshot.workflow_entries[0]!;
+  const deepSnapshot = {
+    ...snapshot,
+    binding: {
+      provider: deepProfile.provider,
+      analysis_profile: deepProfile,
+    },
+    workflow_entries: [
+      createAnalysisSnapshotWorkflowEntry({
+        target: snapshot.target,
+        binding: {
+          provider: deepProfile.provider,
+          analysis_profile: deepProfile,
+        },
+        operation: "inspect_native_dispatch_metadata",
+        parameters: originalWorkflow.parameters,
+        execution: {
+          result: originalWorkflow.execution.result,
+          rawResult: originalWorkflow.execution.raw_result,
+          provider: deepWorkflowProfile.provider,
+          analysisProfile: deepWorkflowProfile,
+          limitations: originalWorkflow.execution.limitations,
+          ...(originalWorkflow.execution.relationship_coverage === null
+            ? {}
+            : {
+                relationshipCoverage:
+                  originalWorkflow.execution.relationship_coverage,
+              }),
+          locations: originalWorkflow.execution.locations,
+          subject:
+            originalWorkflow.execution.subject === null
+              ? null
+              : {
+                  path: originalWorkflow.execution.subject.path,
+                  sha256: originalWorkflow.execution.subject.sha256,
+                  format: originalWorkflow.execution.subject.format,
+                  ...(originalWorkflow.execution.subject.architecture === null
+                    ? {}
+                    : {
+                        architecture:
+                          originalWorkflow.execution.subject.architecture,
+                      }),
+                },
+        },
+      }),
+    ],
+  } as AnalysisSnapshot;
+  const rejectedDeepOnly = session.importAnalysisSnapshot(deepSnapshot);
+  expect(rejectedDeepOnly.ok).toBe(false);
+  if (!rejectedDeepOnly.ok)
+    expect(rejectedDeepOnly.error.message).toContain("profile_mismatch");
+};
+
+it("retains a native dispatch workflow snapshot without a deep provider profile", async () => {
+  const fixture = await createSnapshotReplayFixture(
+    "rea-native-dispatch-workflow-",
+  );
+  const identity: ProviderIdentity = {
+    id: "native-macos",
+    name: "macOS native inspection utilities",
+    version: null,
+  };
+  const capabilities: CapabilityDescriptor[] = [
+    {
+      provider: identity,
+      operation: "inspect_native_dispatch_metadata",
+      analysisProfile: APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+      available: true,
+      reason: null,
+      cachePolicy: "snapshot",
+      effects: {
+        mutatesArtifact: false,
+        launchesProcess: false,
+        mayShowUi: false,
+        mayAccessNetwork: false,
+        mayWriteFilesystem: false,
+        changesPermissions: false,
+        requiresRoot: false,
+      },
+      limitations: [],
+    },
+  ];
+  const readerIdentity = APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE.provider;
+  let dispatchCalls = 0;
+  const provider: AnalysisProvider = {
+    identity: () => identity,
+    capabilities: () => capabilities,
+    createClient: () => ({
+      execute: async (operation) =>
+        operation === "health"
+          ? ok(createAnalysisExecution(null, identity))
+          : operation === "inspect_native_dispatch_metadata"
+            ? ok(
+                (dispatchCalls++,
+                createAnalysisExecution(
+                  {
+                    target_sha256: null,
+                    provider: {
+                      id: identity.id,
+                      name: readerIdentity.name,
+                      version: readerIdentity.version,
+                    },
+                    analysis_profile_digest:
+                      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE.digest,
+                    result: { db_save_result: null },
+                  },
+                  readerIdentity,
+                  {
+                    analysisProfile: APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+                  },
+                )),
+              )
+            : err(new ProviderAdapterError(identity.id, operation)),
+      close: async () => ok(null),
+    }),
+  };
+  const dependencies = fixture.dependencies(provider);
+
+  const result = await runDirectAnalysis(
+    dependencies,
+    fixture.path,
+    "inspect_native_dispatch_metadata",
+    { max_records: 100 },
+    { snapshotPath: fixture.snapshotPath },
+  );
+
+  expect(result).toMatchObject({
+    operation: "inspect_native_dispatch_metadata",
+  });
+  const saved = await readAnalysisSnapshot(fixture.snapshotPath);
+  if (!saved.ok) throw saved.error;
+  expect(saved.value.binding.analysis_profile).toEqual(
+    APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+  );
+  expect(saved.value.entries).toEqual([]);
+  expect(saved.value.workflow_entries).toEqual([
+    expect.objectContaining({ operation: "inspect_native_dispatch_metadata" }),
+  ]);
+
+  const replay = await runDirectAnalysis(
+    dependencies,
+    fixture.path,
+    "inspect_native_dispatch_metadata",
+    { max_records: 100 },
+    { snapshotPath: fixture.snapshotPath },
+  );
+  expect(replay).toEqual(result);
+  expect(dispatchCalls).toBe(1);
+
+  await expectProfilelessWorkflowSnapshotRejections(
+    fixture.path,
+    provider,
+    saved.value,
+  );
 });

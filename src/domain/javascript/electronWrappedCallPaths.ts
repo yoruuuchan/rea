@@ -50,6 +50,9 @@ const ipcEndpointKey = (value: ElectronIpcFinding): string =>
 interface IpcEndpointFacts {
   // A directly observed transmission stays one fact however it is reached.
   observedTransmission: boolean;
+  // A bridge path to a directly observed renderer listener is provenance for
+  // that source registration, not another registration at the same callsite.
+  observedRendererListener: boolean;
   readonly invocations: Set<string>;
 }
 
@@ -63,12 +66,20 @@ const indexIpcFinding = (
   const key = ipcEndpointKey(value);
   let facts = index.get(key);
   if (facts === undefined) {
-    facts = { observedTransmission: false, invocations: new Set() };
+    facts = {
+      observedTransmission: false,
+      observedRendererListener: false,
+      invocations: new Set(),
+    };
     index.set(key, facts);
   }
   facts.observedTransmission ||=
     value.resolution_basis === undefined &&
     (value.mode === "send" || value.mode === "invoke");
+  facts.observedRendererListener ||=
+    value.resolution_basis === undefined &&
+    value.side === "renderer" &&
+    value.mode === "listen";
   facts.invocations.add(ipcInvocationKey(value.invocation_location));
 };
 
@@ -397,6 +408,8 @@ export const collectElectronWrappedCallPaths = (
     const duplicate =
       recorded !== undefined &&
       (recorded.observedTransmission ||
+        (context.entryKind === "bridge-member" &&
+          recorded.observedRendererListener) ||
         recorded.invocations.has(ipcInvocationKey(invocationLocation)));
     const findingGuarded =
       context.conditions.length > 0 || hasConditions(first) || guardedDispatch;
@@ -451,6 +464,12 @@ export const collectElectronWrappedCallPaths = (
       emit(channelContext, node, endpoint, channel);
       return;
     }
+    if (
+      descriptor.side === "renderer" &&
+      descriptor.mode === "listen" &&
+      context.entryKind === "bridge-member"
+    )
+      emit(channelContext, node, endpoint, channel);
     if (descriptor.side === "main" && fn)
       functionBody(
         fn,

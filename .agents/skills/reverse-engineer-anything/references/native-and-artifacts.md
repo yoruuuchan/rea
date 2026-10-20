@@ -38,6 +38,16 @@ unparsed module-text line. A missing record is an unknown, not proof of a
 non-Go binary; observed metadata does not authenticate its claims. Function,
 source and type recovery remain a separate native-analysis question.
 
+## Model files
+
+Use `inspect_model_artifact` (`inspect-model-artifact PATH`) for local GGUF v2/v3
+and safetensors declarations without a model runtime. Header-only mode does not
+read weights or establish full-file identity. `hash: "full"` explicitly streams
+all bytes. Retained `model-artifact` views page `metadata`, `tensors` and derived
+`types`, with exact batch filters and selected fields. Arrays retain typed counts
+and eight-element previews; omitted values, unknown types and runtime behavior
+stay explicit. See [model files](https://github.com/morluto/rea/blob/main/docs/model-artifacts.md).
+
 ## IL2CPP metadata
 
 Use `inspect_il2cpp_metadata` for an explicit local Unity `global-metadata.dat`

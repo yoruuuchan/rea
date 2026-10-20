@@ -387,10 +387,10 @@ const standardErrorMessage = (tag: AnalysisErrorTag): string | undefined => {
 };
 
 const timeoutUserMessage = (error: AnalysisTimeoutError): string =>
-  `REA's ${error.operation} operation reached its ${String(error.timeoutMs)}ms server/provider deadline. If the MCP client timed out before this response, increase its tool deadline above ${String(error.timeoutMs)}ms; otherwise retry with a smaller request after checking session/provider state. Do not repeat an unchanged call while work or cleanup may still be active.`;
+  `REA's ${error.operation} operation reached its ${String(error.timeoutMs)}ms server/provider deadline. This is not a client-side timeout; extending only the MCP client's deadline does not change this budget.`;
 
 const timeoutRemediation = (error: AnalysisTimeoutError): string =>
-  `Inspect session/provider state for ${error.operation} before retrying. If the MCP client ended the call before REA returned this error, raise its tool deadline above ${String(error.timeoutMs)}ms; otherwise retry with a smaller request. Do not repeat an unchanged call while work or cleanup may still be active.`;
+  `Inspect any partial Evidence, provider diagnostics and reported session/provider cleanup state for ${error.operation}. Reduce the request if supported, or resolve the reported provider condition before retrying. Do not repeat the unchanged call or retry while work or cleanup may still be active.`;
 
 const UNREADABLE_OUTPUT_TAGS: ReadonlySet<AnalysisErrorTag> = new Set([
   "AnalysisProtocolError",

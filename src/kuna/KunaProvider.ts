@@ -19,6 +19,7 @@ import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   kunaFileCleanupError,
+  kunaRetainedResourceCleanupError,
   type KunaProcessLauncher,
 } from "./KunaCommand.js";
 import {
@@ -26,7 +27,7 @@ import {
   type KunaConfiguration,
 } from "./KunaConfiguration.js";
 import {
-  createKunaFileCloseScope,
+  createKunaResourceScope,
   inspectKunaInstallation,
   kunaInstallationCancellation,
 } from "./KunaInstallation.js";
@@ -55,6 +56,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #platform: NodeJS.Platform;
   readonly #launcher: KunaProcessLauncher | undefined;
+  readonly #probeTimeoutMs: number | undefined;
   readonly #singleFunctionRuns: number | undefined;
   #cache: KunaProjectCache | undefined;
   #runSlots: KunaRunSlots | undefined;
@@ -64,6 +66,8 @@ export class KunaProvider implements AnalysisProviderCandidate {
     options: {
       readonly platform?: NodeJS.Platform;
       readonly launcher?: KunaProcessLauncher;
+      /** Test seam for bounded installation-probe lifecycle cases. */
+      readonly probeTimeoutMs?: number;
       /** Test seam for foreground native runs; production derives it from the host. */
       readonly singleFunctionRuns?: number;
     } = {},
@@ -71,6 +75,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
     this.#platform = options.platform ?? process.platform;
     this.#environment = snapshotEnvironment(environment, this.#platform);
     this.#launcher = options.launcher;
+    this.#probeTimeoutMs = options.probeTimeoutMs;
     this.#singleFunctionRuns = options.singleFunctionRuns;
   }
 
@@ -175,40 +180,73 @@ export class KunaProvider implements AnalysisProviderCandidate {
         }),
       );
     let installation: Awaited<ReturnType<typeof inspectKunaInstallation>>;
-    const fileCloseResources = options?.fileCloseResources;
-    if (fileCloseResources === undefined)
+    const resourceScope = options?.resourceScope;
+    if (resourceScope === undefined)
       return err(
         kunaUnavailable(
           "kuna:profile",
-          "Kuna profile inspection requires a durable file resource owner",
+          "Kuna profile inspection requires a durable resource scope",
         ),
       );
-    const fileCloseScope = createKunaFileCloseScope(fileCloseResources);
+    const kunaResources = createKunaResourceScope(resourceScope);
     try {
       installation = await inspectKunaInstallation(this.#environment, {
         platform: this.#platform,
         ...(options?.signal === undefined ? {} : { signal: options.signal }),
-        fileCloseResources: fileCloseScope.owner,
+        resourceScope: kunaResources.owner,
+        ...(this.#launcher === undefined
+          ? {}
+          : { processLauncher: this.#launcher }),
+        ...(this.#probeTimeoutMs === undefined
+          ? {}
+          : { probeTimeoutMs: this.#probeTimeoutMs }),
       });
     } catch (cause: unknown) {
+      const retainedCleanup = kunaRetainedResourceCleanupError(
+        cause,
+        "kuna:profile",
+      );
+      if (retainedCleanup !== undefined) return err(retainedCleanup);
       const cancellation = kunaInstallationCancellation(cause);
       if (
         !(cause instanceof RegularFileCleanupFailure) &&
         cancellation !== undefined
-      )
-        return err(
-          new AnalysisCancelledError("kuna:profile", {
-            cause: cancellation.reason,
-            diagnostics: cancellation.diagnostics,
-          }),
-        );
+      ) {
+        const error = new AnalysisCancelledError("kuna:profile", {
+          cause: cancellation.reason,
+          diagnostics: cancellation.diagnostics,
+          ...(!kunaResources.hasPending
+            ? {}
+            : {
+                cleanup: {
+                  reason: "Kuna version-probe process cleanup is unconfirmed.",
+                  resources: kunaResources.cleanupResources ?? [],
+                },
+              }),
+        });
+        kunaResources.bindRetainedFailure(error);
+        return err(error);
+      }
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
       const error = kunaFileCleanupError(cause, "kuna:profile");
-      fileCloseScope.bindFailure(cause, error);
+      kunaResources.bindFailure(cause, error);
       return err(error);
     }
-    if (!installation.ok)
-      return err(kunaUnavailable("open_binary", installation.error.reason));
+    if (!installation.ok) {
+      const error = kunaUnavailable("open_binary", installation.error.reason, {
+        diagnostics: installation.error.diagnostics,
+        ...(!kunaResources.hasPending
+          ? {}
+          : {
+              cleanup: {
+                reason: "Kuna version-probe process cleanup is unconfirmed.",
+                resources: kunaResources.cleanupResources ?? [],
+              },
+            }),
+      });
+      kunaResources.bindRetainedFailure(error);
+      return err(error);
+    }
     const { value } = installation;
     return ok({
       profile: createAnalysisProfile(

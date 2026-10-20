@@ -1181,8 +1181,8 @@ it("preserves admitted Unicode and escaped AssemblyRef names in complete Evidenc
   );
 });
 
-it.each([27, 28, 31, 106])(
-  "suggests metadata-only inspection for supported raw version %s",
+it.each([27, 28, 31, 106, 0xffffffff])(
+  "preserves raw metadata version %s and suggests inspection only when supported",
   async (version) => {
     const root = await createTestTempDirectory("rea-desktop-metadata-probe-");
     const bytes = Buffer.alloc(8);
@@ -1206,6 +1206,29 @@ it.each([27, 28, 31, 106])(
             }),
           ]
         : [],
+    );
+  },
+);
+
+it.each([4, 5, 6, 7])(
+  "retains IL2CPP magic with an unknown version for a %i-byte prefix",
+  async (length) => {
+    const root = await createTestTempDirectory("rea-desktop-metadata-prefix-");
+    const bytes = Buffer.alloc(length);
+    bytes.writeUInt32LE(0xfab11baf);
+    await put(root, "global-metadata.dat", bytes);
+    const { report } = await inspect(root);
+    const metadata = report.files.find((file) =>
+      file.path.endsWith("global-metadata.dat"),
+    );
+
+    expect(metadata?.facts).toContainEqual({
+      kind: "il2cpp-metadata-header",
+      offset: 0,
+      value: { magic: "0xfab11baf", raw_version: null },
+    });
+    expect(report.next_probes).not.toContainEqual(
+      expect.objectContaining({ operation: "inspect_il2cpp_metadata" }),
     );
   },
 );

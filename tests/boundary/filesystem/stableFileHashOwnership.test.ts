@@ -8,7 +8,10 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import * as regularFile from "../../../src/filesystem/RegularFile.js";
 import { RegularFileAdmissionFailure } from "../../../src/filesystem/RegularFile.js";
-import { hashStableFile } from "../../../src/filesystem/StableFileHash.js";
+import {
+  hashStableFile,
+  observeStableFile,
+} from "../../../src/filesystem/StableFileHash.js";
 import { LinuxHopperPublisher } from "../../../src/application/LinuxHopperPublisher.js";
 import {
   RegularFileCancelled,
@@ -16,6 +19,53 @@ import {
 } from "../../../src/filesystem/OwnedRegularFile.js";
 import { PrivateRuntimeRoot } from "../../../src/process/PrivateRuntimeRoot.js";
 import type { VerifiedLinuxHopperPackage } from "../../../src/application/LinuxHopperPublisher.js";
+
+it("captures a two-byte prefix across short reads and buffer reuse", async () => {
+  const root = await createTestTempDirectory("rea-stable-observation-prefix-");
+  const path = join(root, "script");
+  const bytes = Buffer.from("#!rest-of-file");
+  await writeFile(path, bytes);
+  const retained: OwnedFileHandle[] = [];
+  const originalOpen = regularFile.openRegularFile;
+  const open = vi
+    .spyOn(regularFile, "openRegularFile")
+    .mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args);
+      return {
+        get fd() {
+          return handle.fd;
+        },
+        stat: (...statArgs: Parameters<typeof handle.stat>) =>
+          handle.stat(...statArgs),
+        read: (
+          buffer: Buffer,
+          offset: number,
+          length: number,
+          position: number,
+        ) =>
+          handle.read(
+            buffer,
+            offset,
+            position === 0 ? Math.min(length, 1) : length,
+            position,
+          ),
+        close: () => handle.close(),
+      } as unknown as Awaited<ReturnType<typeof originalOpen>>;
+    });
+  try {
+    const observation = await observeStableFile(path, {
+      retainFailedClose: (owner) => retained.push(owner),
+    });
+    expect(observation).toMatchObject({
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.length,
+      prefix: Buffer.from("#!"),
+    });
+  } finally {
+    open.mockRestore();
+    for (const owner of retained) if (owner.handle.fd >= 0) await owner.close();
+  }
+});
 
 it("adopts and retries the descriptor when hashing succeeded but close failed", async () => {
   const root = await createTestTempDirectory("rea-stable-hash-close-");

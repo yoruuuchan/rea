@@ -11,3 +11,11 @@ afterEach(async () => {
 export const trackBrowser = (browser: FakeCdpBrowser): void => {
   browsers.push(browser);
 };
+
+export const waitFor = async (ready: () => boolean, description: string) => {
+  const deadline = Date.now() + 5_000;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(description);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};

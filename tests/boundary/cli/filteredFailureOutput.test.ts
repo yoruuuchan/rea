@@ -96,7 +96,7 @@ it.each(["json", "toon", "yaml", "md"] as const)(
           expect(document).toMatchObject({
             code: "invalid_request",
             category: "invalid_input",
-            retryable: true,
+            retryable: false,
             remediation: {
               action: expect.stringContaining("tools/list"),
             },
@@ -141,7 +141,7 @@ it.each(["json", "toon", "yaml", "md"] as const)(
           error: {
             code: "invalid_request",
             category: "invalid_input",
-            retryable: true,
+            retryable: false,
             remediation: {
               action: expect.stringContaining("tools/list"),
             },

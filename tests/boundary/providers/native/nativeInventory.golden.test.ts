@@ -46,14 +46,29 @@ const signatureTarget = async (
 
 it("distinguishes a codesign execution failure from an observed unsigned artifact", async () => {
   for (const kind of ["missing", "unsigned"] as const) {
+    const fixtureOutput = await fixture(`dyld-inventory/codesign-${kind}.txt`);
     const client = new NativeMacOSProvider(
       {},
-      new FixtureRunner(
-        {
-          codesign: await fixture(`dyld-inventory/codesign-${kind}.txt`),
+      {
+        async run(tool, arguments_) {
+          const output =
+            kind === "unsigned"
+              ? `${arguments_.at(-1)}: code object is not signed at all\n`
+              : fixtureOutput;
+          const capture = await new FixtureRunner({ codesign: output }, 1).run(
+            tool,
+            arguments_,
+          );
+          if (!capture.ok || kind !== "unsigned") return capture;
+          return ok({
+            ...capture.value,
+            stdout: "",
+            stderr: output,
+            stdoutBytes: 0,
+            stderrBytes: Buffer.byteLength(output),
+          });
         },
-        1,
-      ),
+      },
       "darwin",
     ).createClient(await signatureTarget());
     const execution = await client.execute("inspect_signature", {});
@@ -397,13 +412,21 @@ const signatureRunner = (outputs: {
     const architectureIndex = arguments_.indexOf("-a");
     const architecture =
       architectureIndex < 0 ? null : arguments_[architectureIndex + 1];
-    const response = arguments_.includes("-r-")
+    const selectedResponse = arguments_.includes("-r-")
       ? { output: outputs.unsigned, exitCode: 1 }
       : arguments_.includes("--entitlements")
         ? { output: outputs.entitlements, exitCode: 0 }
         : architecture === "x86_64"
           ? { output: outputs.unsigned, exitCode: 1 }
           : { output: outputs.signed, exitCode: 0 };
+    const response =
+      selectedResponse.exitCode !== 0 &&
+      selectedResponse.output.includes("code object is not signed at all")
+        ? {
+            ...selectedResponse,
+            output: `${arguments_.at(-1)}: code object is not signed at all\n`,
+          }
+        : selectedResponse;
     const capture: NativeCommandCapture = {
       tool,
       executable: `/usr/bin/${tool}`,
@@ -412,7 +435,7 @@ const signatureRunner = (outputs: {
       versionReason: "fixture",
       arguments: [...arguments_],
       // Entitlements XML is printed to stdout; diagnostics to stderr.
-      ...(arguments_.includes("--entitlements")
+      ...(response.exitCode === 0 && arguments_.includes("--entitlements")
         ? {
             stdout: response.output,
             stderr: "",

@@ -23,7 +23,7 @@ import type { AnalysisProviderSelector } from "../contracts/providerSelection.js
 export type ProviderRequestBudgetResolver = (
   analysisProvider: AnalysisProviderSelector,
   environment: Readonly<Record<string, string>>,
-) => Result<number | undefined, ConfigurationError>;
+) => Promise<Result<number | undefined, ConfigurationError>>;
 
 export interface ClientRegistrationEnvironmentDetails {
   readonly values: Readonly<Record<string, string>>;
@@ -47,7 +47,6 @@ export const clientRegistrationEnvironment = (
     parsed,
     overrides,
     validation,
-    undefined,
     platform,
   );
   return details.ok ? ok(details.value.values) : details;
@@ -58,7 +57,6 @@ export const clientRegistrationEnvironmentDetails = (
   parsed: ClientConfigurationDocument | undefined,
   overrides: Readonly<Record<string, string>> = {},
   validation: "fragment" | "effective" = "effective",
-  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
   platform: NodeJS.Platform = process.platform,
 ): Result<ClientRegistrationEnvironmentDetails, ConfigurationError> => {
   if (parsed?.dialect === "dsh") {
@@ -68,12 +66,7 @@ export const clientRegistrationEnvironmentDetails = (
       platform,
     );
     if (!environment.ok) return environment;
-    return validatedDetails(
-      environment.value,
-      validation,
-      resolveProviderRequestBudget,
-      platform,
-    );
+    return validatedDetails(environment.value, validation, platform);
   }
   const key =
     parsed?.dialect === "opencode" || parsed?.dialect === "opencode_v2"
@@ -107,18 +100,32 @@ export const clientRegistrationEnvironmentDetails = (
     overrides,
     platform,
   );
-  return validatedDetails(
-    environment,
+  return validatedDetails(environment, validation, platform);
+};
+
+/** Resolve the async provider-specific budget through its retained reader owner. */
+export const clientRegistrationEnvironmentDetailsWithBudget = async (
+  parsed: ClientConfigurationDocument | undefined,
+  overrides: Readonly<Record<string, string>>,
+  validation: "fragment" | "effective",
+  resolveProviderRequestBudget: ProviderRequestBudgetResolver | undefined,
+  platform: NodeJS.Platform = process.platform,
+): Promise<
+  Result<ClientRegistrationEnvironmentDetails, ConfigurationError>
+> => {
+  const details = clientRegistrationEnvironmentDetails(
+    parsed,
+    overrides,
     validation,
-    resolveProviderRequestBudget,
     platform,
   );
+  if (!details.ok || resolveProviderRequestBudget === undefined) return details;
+  return validatedBudget(details.value, resolveProviderRequestBudget, platform);
 };
 
 const validatedDetails = (
   environment: Readonly<Record<string, string>>,
   validation: "fragment" | "effective",
-  resolveProviderRequestBudget?: ProviderRequestBudgetResolver,
   platform: NodeJS.Platform = process.platform,
 ): Result<ClientRegistrationEnvironmentDetails, ConfigurationError> => {
   const runtimeEnvironment = snapshotEnvironment(environment, platform);
@@ -127,12 +134,6 @@ const validatedDetails = (
       ? parseEnvironmentValues(runtimeEnvironment)
       : parseEnvironment(runtimeEnvironment);
   if (!validated.ok) return validated;
-  const providerRequestBudget =
-    resolveProviderRequestBudget?.(
-      validated.value.REA_ANALYSIS_PROVIDER,
-      runtimeEnvironment,
-    ) ?? ok(undefined);
-  if (!providerRequestBudget.ok) return providerRequestBudget;
   return ok({
     values: Object.fromEntries(
       Object.entries(environment).sort(([left], [right]) =>
@@ -146,9 +147,29 @@ const validatedDetails = (
       ...(validated.value.REA_JEB_MCP_TIMEOUT_MS === undefined
         ? {}
         : { jebMcpTimeoutMs: validated.value.REA_JEB_MCP_TIMEOUT_MS }),
-      ...(providerRequestBudget.value === undefined
+    },
+  });
+};
+
+const validatedBudget = async (
+  details: ClientRegistrationEnvironmentDetails,
+  resolveProviderRequestBudget: ProviderRequestBudgetResolver,
+  platform: NodeJS.Platform,
+): Promise<
+  Result<ClientRegistrationEnvironmentDetails, ConfigurationError>
+> => {
+  const providerBudget = await resolveProviderRequestBudget(
+    details.timeoutInputs.analysisProvider,
+    snapshotEnvironment(details.values, platform),
+  );
+  if (!providerBudget.ok) return providerBudget;
+  return ok({
+    ...details,
+    timeoutInputs: {
+      ...details.timeoutInputs,
+      ...(providerBudget.value === undefined
         ? {}
-        : { providerRequestTimeoutMs: providerRequestBudget.value }),
+        : { providerRequestTimeoutMs: providerBudget.value }),
     },
   });
 };

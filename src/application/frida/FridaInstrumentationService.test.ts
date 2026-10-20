@@ -12,6 +12,8 @@ import {
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
 } from "../../domain/analysisErrorCore.js";
+import type { Evidence } from "../../domain/evidence.js";
+import { ok } from "../../domain/result.js";
 
 const createSession = () => ({
   sessionId: "00000000-0000-4000-8000-000000000001",
@@ -63,6 +65,109 @@ const createProvider = (
   },
   async closeAll() {},
   ...overrides,
+});
+
+it("keeps default Frida status identity and messages and refreshes every summary", () => {
+  let reads = 0;
+  const provider = createProvider({
+    status() {
+      reads++;
+      return {
+        ...createSession(),
+        state: reads === 1 ? "paused" : "detached",
+        targetResumeObserved: false,
+        scripts: [],
+        messages: [{ observed: reads }],
+        messagesTruncated: reads > 1,
+      };
+    },
+  });
+  const service = new FridaInstrumentationService(provider);
+  const records = new Map<string, Evidence>();
+  const retention = {
+    evidenceById: (id: string) => records.get(id),
+    recordEvidence(evidence: Evidence) {
+      records.set(evidence.evidence_id, evidence);
+      return ok("added" as const);
+    },
+  };
+  const input = { session_id: createSession().sessionId };
+  const complete = service.inspectStatus(input);
+  if (!complete.ok) throw complete.error;
+  expect(complete.value.normalized_result).toMatchObject({
+    state: "paused",
+    messages: [{ observed: 1 }],
+    messages_truncated: false,
+  });
+  const summary = service.inspectStatus(
+    { ...input, detail: "summary" },
+    retention,
+  );
+  if (!summary.ok) throw summary.error;
+  expect(summary.value.normalized_result).toMatchObject({
+    parent_operation: "frida_session_status",
+    artifact: null,
+    source_provider: complete.value.provider,
+    source_parameters: input,
+    summary: {
+      state: "detached",
+      messages_retained: 1,
+      messages_truncated: true,
+    },
+  });
+  expect(JSON.stringify(summary.value)).not.toContain('"messages":');
+  expect(reads).toBe(2);
+  const parent = [...records.values()][0];
+  expect(parent?.normalized_result).toMatchObject({
+    messages: [{ observed: 2 }],
+  });
+  expect(parent?.authority).toBe("external-service");
+  expect(parent?.environment).toBeNull();
+  expect(parent?.raw_result).toBeNull();
+});
+
+it.each([
+  undefined,
+  { recordEvidence: undefined, evidenceById: () => undefined },
+  { recordEvidence: () => ok("added" as const), evidenceById: undefined },
+])(
+  "rejects missing Frida summary retention before reading live state: %j",
+  (retention) => {
+    let reads = 0;
+    const service = new FridaInstrumentationService(
+      createProvider({
+        status() {
+          reads++;
+          return undefined;
+        },
+      }),
+    );
+    const result = service.inspectStatus(
+      { session_id: createSession().sessionId, detail: "summary" },
+      retention,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error._tag).toBe("AnalysisCapabilityUnavailableError");
+    expect(reads).toBe(0);
+  },
+);
+
+it("rejects malformed Frida status selections and preserves unknown-session errors", () => {
+  const service = new FridaInstrumentationService(createProvider());
+  for (const input of [
+    { session_id: "invalid" },
+    { session_id: createSession().sessionId, detail: "messages" },
+  ]) {
+    const result = service.inspectStatus(input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error._tag).toBe("AnalysisInputError");
+  }
+  const unknown = service.inspectStatus({
+    session_id: createSession().sessionId,
+  });
+  expect(unknown.ok).toBe(false);
+  if (!unknown.ok) expect(unknown.error._tag).toBe("AnalysisInputError");
 });
 
 it.each(["startSession", "instrument"] as const)(

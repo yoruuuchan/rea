@@ -14,15 +14,7 @@ import {
   startFakeCdpBrowser,
   type FakeCdpBrowser,
 } from "../../fixtures/fakeCdpBrowser.js";
-import { trackBrowser } from "./cdpBrowserProvider.support.js";
-
-const waitFor = async (ready: () => boolean, description: string) => {
-  const deadline = Date.now() + 5_000;
-  while (!ready()) {
-    if (Date.now() > deadline) throw new Error(description);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-};
+import { trackBrowser, waitFor } from "./cdpBrowserProvider.support.js";
 
 describe("CdpBrowserProvider: cancellation during cleanup", () => {
   it.each([
@@ -378,7 +370,11 @@ describe("CdpBrowserProvider: session termination and scope changes", () => {
     expect(result.value.timeline.at(-1)).toMatchObject({
       type: "target_terminated",
       detail: "target_terminated",
+      timestamp: null,
     });
+    expect(result.value.limitations).toContain(
+      "Timeline rows without a comparable producer timestamp have a null timestamp. Buffered events with unknown timing are retained as context only; they do not establish activity inside the selected observation window.",
+    );
   });
 
   it("ends a direct page session when its transport disconnects", async () => {

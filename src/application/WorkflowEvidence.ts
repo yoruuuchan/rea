@@ -133,12 +133,18 @@ const batchProcedureLocations = (result: JsonValue): EvidenceLocation[] => {
 export const workflowSnapshotRecord = (
   evidence: Evidence,
   operation: AnalysisOperation,
+  bindingProfile: AnalysisProfileCommitment | undefined,
   cachePolicy?: "live",
 ): WorkflowSnapshotRecordInput | undefined => {
-  if (evidence.analysis_profile === null || cachePolicy === "live")
+  if (
+    evidence.analysis_profile === null ||
+    bindingProfile === undefined ||
+    cachePolicy === "live"
+  )
     return undefined;
   return {
     operation,
+    bindingProfile,
     parameters: evidence.parameters,
     execution: {
       result: evidence.normalized_result,

@@ -384,6 +384,66 @@ it("keeps a directly observed renderer operation singular when tracing its expos
     expect.objectContaining({ entry: "desktop.ping", channel: "ping" }),
   );
 });
+it("counts one exposed renderer listener callsite once and retains its bridge path", () => {
+  const result = analyzeJavaScriptStaticSource(`
+    const {contextBridge,ipcRenderer}=require("electron");
+    contextBridge.exposeInMainWorld("desktop", {
+      onPong: callback => ipcRenderer.on("pong", callback),
+    });
+  `);
+  expect(
+    result.electron.ipc.filter(
+      ({ side, mode, channel }) =>
+        side === "renderer" && mode === "listen" && channel === "pong",
+    ),
+  ).toHaveLength(1);
+  expect(result.electron.call_paths).toContainEqual(
+    expect.objectContaining({
+      entry: "desktop.onPong",
+      channel: "pong",
+      terminal: "electron.ipcRenderer.on",
+    }),
+  );
+});
+it("keeps separate bridge callers while counting their shared listener callsite once", () => {
+  const result = analyzeJavaScriptStaticSource(`
+    const {contextBridge,ipcRenderer}=require("electron");
+    const subscribe = callback => ipcRenderer.once("pong", callback);
+    contextBridge.exposeInMainWorld("desktop", {
+      onPong: subscribe,
+      onPongAgain: subscribe,
+    });
+  `);
+  const listeners = result.electron.ipc.filter(
+    ({ side, mode, channel }) =>
+      side === "renderer" && mode === "listen" && channel === "pong",
+  );
+  expect(listeners).toHaveLength(1);
+  expect(listeners[0]?.operation).toBe("once");
+  expect(
+    result.electron.call_paths
+      ?.filter(({ channel }) => channel === "pong")
+      .map(({ entry }) => entry),
+  ).toEqual(["desktop.onPong", "desktop.onPongAgain"]);
+});
+it("keeps distinct exposed renderer listener callsites distinct", () => {
+  const result = analyzeJavaScriptStaticSource(`
+    const {contextBridge,ipcRenderer}=require("electron");
+    contextBridge.exposeInMainWorld("desktop", {
+      onPong: callback => ipcRenderer.on("pong", callback),
+      onPongAgain: callback => ipcRenderer.on("pong", callback),
+    });
+  `);
+  expect(
+    result.electron.ipc.filter(
+      ({ side, mode, channel }) =>
+        side === "renderer" && mode === "listen" && channel === "pong",
+    ),
+  ).toHaveLength(2);
+  expect(
+    result.electron.call_paths?.filter(({ channel }) => channel === "pong"),
+  ).toHaveLength(2);
+});
 it("does not identify overwritten Electron namespaces or shadowed require", () => {
   for (const source of [
     `const e=require("electron");e.ipcMain={on(){}};e.ipcMain.on("bad",event=>event.sender.copy());`,

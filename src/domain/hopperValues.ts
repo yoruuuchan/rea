@@ -13,6 +13,7 @@ import { AnalysisOutputError } from "./analysisErrorCore.js";
 export interface AddressedName {
   readonly address: string;
   readonly name: string;
+  readonly objc_class_label?: "hopper_legacy_class_object";
 }
 
 export interface SegmentSummary {

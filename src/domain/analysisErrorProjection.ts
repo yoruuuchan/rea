@@ -592,7 +592,6 @@ const lifecycleErrorDetails = (
 
 const RETRYABLE_CODES: ReadonlySet<AnalysisErrorProjection["code"]> = new Set([
   "artifact_changed",
-  "invalid_request",
   "provider_timeout",
   "cancelled",
   "revision_conflict",

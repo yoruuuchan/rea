@@ -7,6 +7,11 @@ import { promisify } from "node:util";
 import { parseStaticTaskContext } from "./static-task-context.mjs";
 
 const execute = promisify(execFile);
+/** Job display name owns the artifact that contains that gate's diagnostics. */
+export const STATIC_EVIDENCE_ARTIFACTS = {
+  "Static checks": "static-check-reports",
+  "Deep static checks": "static-deep-check-reports",
+};
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 const MAX_MEMBER_BYTES = 4 * 1024 * 1024;
 const MAX_DIAGNOSTICS = 10_000;
@@ -43,7 +48,8 @@ export function classifyFailure({
       "run_event_or_repository_identity_unverified",
     ],
     () => [
-      job?.name !== mainJob?.name || job?.name !== "Static checks",
+      job?.name !== mainJob?.name ||
+        !Object.hasOwn(STATIC_EVIDENCE_ARTIFACTS, job?.name ?? ""),
       "failed_job_not_the_same_static_gate",
     ],
     () => [
@@ -134,7 +140,12 @@ export function safeSha(value) {
     ? value.toLowerCase()
     : null;
 }
-export function selectStaticCheckArtifact(page, run, runAttempt) {
+export function selectStaticCheckArtifact(
+  page,
+  run,
+  runAttempt,
+  name = STATIC_EVIDENCE_ARTIFACTS["Static checks"],
+) {
   if (runAttempt !== 1) return null;
   if (
     !Array.isArray(page?.artifacts) ||
@@ -143,9 +154,7 @@ export function selectStaticCheckArtifact(page, run, runAttempt) {
     page.artifacts.length >= 100
   )
     return null;
-  const matches = page.artifacts.filter(
-    (artifact) => artifact.name === "static-check-reports",
-  );
+  const matches = page.artifacts.filter((artifact) => artifact.name === name);
   if (matches.length !== 1) return null;
   const [artifact] = matches;
   if (

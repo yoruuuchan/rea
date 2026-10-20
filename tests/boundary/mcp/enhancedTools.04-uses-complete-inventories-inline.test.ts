@@ -99,6 +99,57 @@ it("discovers declarations without counting duplicates or compiler bookkeeping",
   });
 });
 
+it("discovers stripped Hopper class labels through MCP with literal filtering", async () => {
+  const names = [
+    "__objc_class_HuntRoot_class",
+    "__objc_class_HuntSub_class",
+    "__objc_class_HuntWorker_class",
+    "__objc_class_HuntModel_class",
+    "__objc_class_HuntLegacy_class",
+    "prefix__objc_class_HuntForeign_class",
+    "__objc_class__class",
+    "__objc_class_HuntMissingSuffix",
+  ];
+  const client = await connect({
+    execute: (name) => {
+      expect(name).toBe("list_names");
+      return Promise.resolve(
+        ok(
+          names.map((value, index) => ({
+            address: `0x${index + 1}`,
+            value,
+            ...(index < 5
+              ? { objc_class_label: "hopper_legacy_class_object" }
+              : {}),
+          })),
+        ),
+      );
+    },
+  });
+
+  const all = jsonResult(
+    await client.callTool({ name: "get_objc_classes", arguments: {} }),
+  );
+  expect(all).toMatchObject({
+    count: 5,
+    classes: names.slice(0, 5).map((name, index) => ({
+      address: `0x${index + 1}`,
+      name,
+    })),
+  });
+
+  const filtered = jsonResult(
+    await client.callTool({
+      name: "get_objc_classes",
+      arguments: { pattern: "__objc_class_HuntRoot_class" },
+    }),
+  );
+  expect(filtered).toMatchObject({
+    count: 1,
+    classes: [{ address: "0x1", name: "__objc_class_HuntRoot_class" }],
+  });
+});
+
 const completeOverviewPort: AnalysisOperationPort = {
   execute: (name) => {
     switch (name) {

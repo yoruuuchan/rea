@@ -17,7 +17,10 @@ import {
   il2cppMetadataSummaryViewResultSchema,
 } from "../../src/domain/analysisView/analysisView.js";
 import { createEvidence, parseEvidence } from "../../src/domain/evidence.js";
-import { createEvidenceBundle } from "../../src/domain/evidenceBundle.js";
+import {
+  createEvidenceBundle,
+  parseEvidenceBundle,
+} from "../../src/domain/evidenceBundle.js";
 import { jsonObjectSchema } from "../../src/domain/jsonValue.js";
 import { il2cppMetadataSchema } from "../../src/domain/il2cpp/il2cppMetadata.js";
 import {
@@ -215,6 +218,81 @@ cliTest(
       expect(result.json).toMatchObject(expected);
       const response = await call("inspect_il2cpp_metadata", { path });
       expect(parseMcpToolError(response).error).toMatchObject(expected);
+    }
+    await client.ping();
+  },
+  30000,
+);
+
+cliTest(
+  "reports a recognized IL2CPP magic with an incomplete version as corrupt truncation through CLI and MCP",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-il2cpp-prefix-fail-");
+    const { client, call } = await connectLocalToolsMcp();
+
+    for (const length of [4, 5, 6, 7]) {
+      const path = join(root, `magic-${length}.dat`);
+      const bytes = Buffer.alloc(length);
+      bytes.writeUInt32LE(0xfab11baf, 0);
+      await writeFile(path, bytes);
+
+      const expected = {
+        code: "invalid_request",
+        details: {
+          operation: "inspect_il2cpp_metadata",
+          issues: [
+            {
+              path: ["path"],
+              reason: "invalid_format",
+              message: expect.stringContaining(
+                "truncated-header: the file has",
+              ),
+            },
+          ],
+          partial_observation: {
+            normalized_result: {
+              artifact: {
+                path,
+                bytes: length,
+                sha256: createHash("sha256").update(bytes).digest("hex"),
+              },
+              inventory_status: "not-returned-as-complete",
+            },
+          },
+        },
+      };
+      const result = await cli.run({
+        arguments: ["inspect-il2cpp-metadata", path, "--json"],
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.json).toMatchObject(expected);
+
+      const response = await call("inspect_il2cpp_metadata", { path });
+      const projected = parseMcpToolError(response).error;
+      expect(projected).toMatchObject({
+        ...expected,
+        details: {
+          ...expected.details,
+          partial_observation: {
+            kind: "retained-evidence",
+            evidence_id: expect.any(String),
+          },
+        },
+      });
+      const reference = projected.details?.partial_observation as {
+        evidence_id: string;
+      };
+      const bundle = parseEvidenceBundle(
+        toolContract("get_evidence_bundle").outputSchema.parse(
+          (await call("get_evidence_bundle", { detail: "complete" }))
+            .structuredContent,
+        ).result,
+      );
+      expect(
+        bundle.records.find(
+          ({ evidence_id }) => evidence_id === reference.evidence_id,
+        ),
+      ).toMatchObject(expected.details.partial_observation);
     }
     await client.ping();
   },

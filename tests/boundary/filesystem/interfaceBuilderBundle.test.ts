@@ -746,6 +746,155 @@ cliTest(
 );
 
 cliTest(
+  "compiled CLI reports unsupported keyed archive bindings in connection coverage",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-ib-binding-coverage-");
+    const bundle = join(root, "Example.app");
+    const contents = join(bundle, "Contents");
+    const resources = join(contents, "Resources");
+    await mkdir(resources, { recursive: true });
+    await mkdir(join(contents, "MacOS"), { recursive: true });
+    await writeFile(
+      join(contents, "MacOS", "App"),
+      thinMach(0xfeedfacf, 0x0100000c),
+    );
+    await writeFile(
+      join(contents, "Info.plist"),
+      "<plist><dict><key>CFBundleExecutable</key><string>App</string></dict></plist>",
+    );
+    await writeFile(
+      join(resources, "MainMenu.nib"),
+      buildBinary({
+        $archiver: "NSKeyedArchiver",
+        $version: 100000,
+        $objects: [
+          "$null",
+          { $class: { UID: 6 } },
+          { $class: { UID: 6 } },
+          {
+            $class: { UID: 7 },
+            NSSource: { UID: 1 },
+            NSDestination: { UID: 2 },
+            NSLabel: "outlet",
+          },
+          {
+            $class: { UID: 8 },
+            NSSource: { UID: 1 },
+            NSDestination: { UID: 2 },
+            NSLabel: "performAction:",
+          },
+          {
+            $class: { UID: 9 },
+            NSSource: { UID: 1 },
+            NSDestination: { UID: 2 },
+            NSLabel: "value",
+          },
+          { $classname: "NSView", $classes: ["NSView", "NSObject"] },
+          {
+            $classname: "NSNibOutletConnector",
+            $classes: ["NSNibOutletConnector", "NSNibConnector", "NSObject"],
+          },
+          {
+            $classname: "NSNibControlConnector",
+            $classes: ["NSNibControlConnector", "NSNibConnector", "NSObject"],
+          },
+          {
+            $classname: "NSNibBindingConnector",
+            $classes: ["NSNibBindingConnector", "NSNibConnector", "NSObject"],
+          },
+        ],
+        $top: { root: { UID: 1 } },
+      }),
+    );
+
+    const output = await cli.run({
+      arguments: ["decode-interface-builder", bundle, "--json"],
+      environment: { REA_LOG_LEVEL: "silent", REA_ANALYSIS_PROVIDER: "auto" },
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const result = interfaceBuilderAnalysisSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    expect(result.documents[0]?.connection_count).toBe(3);
+    expect(result.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Contents/Resources/MainMenu.nib",
+        status: "partial",
+        reason: "unsupported_connection_type",
+        examined: 3,
+        omitted: 0,
+      }),
+    );
+    expect(result.graph.edges).toContainEqual(
+      expect.objectContaining({
+        relation: "contains",
+        reason: "unsupported_connection_type",
+      }),
+    );
+  },
+);
+
+it("projects an NIBArchive binding as an unsupported partial connection", async () => {
+  const root = await createTestTempDirectory("rea-ib-nibarchive-binding-");
+  const bundle = join(root, "Example.app");
+  const resources = join(bundle, "Contents", "Resources");
+  await mkdir(resources, { recursive: true });
+  await writeFile(
+    join(resources, "Main.nib"),
+    encodeNibArchiveFixture({
+      classes: [
+        "NSView",
+        "NSNibBindingConnector",
+        "NSString",
+        "TelemetryConnectorState",
+      ],
+      objects: [
+        { classIndex: 0, values: {} },
+        { classIndex: 0, values: {} },
+        {
+          classIndex: 1,
+          values: {
+            NSSource: { ref: 0 },
+            NSDestination: { ref: 1 },
+            NSLabel: { ref: 3 },
+          },
+        },
+        { classIndex: 2, values: { "NS.bytes": "value" } },
+        {
+          classIndex: 3,
+          values: { NSSource: { ref: 0 }, NSDestination: { ref: 1 } },
+        },
+      ],
+    }),
+  );
+
+  const result = await analyzeInterfaceBuilderBundle({
+    bundlePath: bundle,
+    targetSha256: "e".repeat(64),
+  });
+
+  expect(result.documents[0]?.connection_count).toBe(1);
+  expect(result.graph.nodes).toContainEqual(
+    expect.objectContaining({ name: "TelemetryConnectorState" }),
+  );
+  expect(result.graph.coverage).toContainEqual(
+    expect.objectContaining({
+      facet: "connections:Contents/Resources/Main.nib",
+      status: "partial",
+      reason: "unsupported_connection_type",
+      examined: 1,
+      omitted: 0,
+    }),
+  );
+  expect(result.graph.edges).toContainEqual(
+    expect.objectContaining({
+      relation: "contains",
+      reason: "unsupported_connection_type",
+    }),
+  );
+});
+
+cliTest(
   "compiled CLI preserves a good archive and reports repeated key and data omissions",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-ib-cli-amplification-");

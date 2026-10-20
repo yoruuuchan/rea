@@ -22,6 +22,11 @@ import {
   gdbOneShotCommandMayInvalidateDetachProof,
 } from "../gdb/GdbSessionManager.js";
 import { RizinDebugSessionManager } from "../rizin/RizinDebugSessionManager.js";
+import {
+  analysisEvidenceDeliveryOptions,
+  cliEvidenceDeliveryInputError,
+  publishCliAnalysisEvidence,
+} from "./analysisEvidenceDelivery.js";
 
 const executeWithCleanup = async (
   service: ReverseEngineeringService,
@@ -117,6 +122,7 @@ export const registerReverseEngineeringCommands = (
         .describe("GNU objdump inspection operation to run."),
     }),
     options: z.object({
+      ...analysisEvidenceDeliveryOptions,
       symbol: z
         .string()
         .optional()
@@ -133,6 +139,15 @@ export const registerReverseEngineeringCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectWithObjdump, async () => {
+          const delivery = {
+            providerId: "gnu.objdump",
+            operation: "inspect_with_objdump",
+            signal,
+            detail: options.detail,
+            evidenceOutput: options.evidence_output,
+          };
+          const inputError = cliEvidenceDeliveryInputError(delivery);
+          if (inputError !== undefined) return projectAnalysisError(inputError);
           const result = await executeWithCleanup(service, () =>
             service.inspectWithObjdump(
               {
@@ -145,19 +160,32 @@ export const registerReverseEngineeringCommands = (
               { signal },
             ),
           );
-          return result.ok ? result.value : projectAnalysisError(result.error);
+          return result.ok
+            ? publishCliAnalysisEvidence(result.value, delivery)
+            : projectAnalysisError(result.error);
         }),
       ),
   });
   cli.command(CLI_COMMANDS.listObjdumpArchitectures, {
     description: "List BFD targets advertised by the installed GNU objdump",
     args: z.object({}),
-    run: () =>
+    options: z.object(analysisEvidenceDeliveryOptions),
+    run: ({ options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(
           logger,
           CLI_COMMANDS.listObjdumpArchitectures,
           async () => {
+            const delivery = {
+              providerId: "gnu.objdump",
+              operation: "inspect_with_objdump",
+              signal,
+              detail: options.detail,
+              evidenceOutput: options.evidence_output,
+            };
+            const inputError = cliEvidenceDeliveryInputError(delivery);
+            if (inputError !== undefined)
+              return projectAnalysisError(inputError);
             const result = await executeWithCleanup(service, () =>
               service.inspectWithObjdump(
                 { operation: "architectures" },
@@ -165,7 +193,7 @@ export const registerReverseEngineeringCommands = (
               ),
             );
             return result.ok
-              ? result.value
+              ? publishCliAnalysisEvidence(result.value, delivery)
               : projectAnalysisError(result.error);
           },
         ),
@@ -206,10 +234,20 @@ export const registerReverseEngineeringCommands = (
         .describe(
           "Caller-selected durable TTY for output from a live GDB inferior.",
         ),
+      ...analysisEvidenceDeliveryOptions,
     }),
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.debugWithGdb, async () => {
+          const delivery = {
+            providerId: "gdb",
+            operation: "gdb_console",
+            signal,
+            detail: options.detail,
+            evidenceOutput: options.evidence_output,
+          };
+          const inputError = cliEvidenceDeliveryInputError(delivery);
+          if (inputError !== undefined) return projectAnalysisError(inputError);
           if (gdbOneShotCommandMayInvalidateDetachProof(args.command))
             return projectAnalysisError(
               new AnalysisInputError("gdb_console", undefined, [
@@ -223,34 +261,52 @@ export const registerReverseEngineeringCommands = (
             );
           const manager = createGdbManager(environment);
           let sessionId: string | undefined;
-          try {
-            const started = await manager.start(signal, {
-              inferiorTty: options.inferiorTty,
-            });
-            if (!started.ok) return projectAnalysisError(started.error);
-            sessionId = started.value.session_id;
-            const executed = await manager.execute(
-              sessionId,
-              args.command,
-              signal,
-            );
-            return executed.ok
-              ? executed.value.evidence
-              : projectAnalysisError(executed.error);
-          } finally {
-            let cleanupFailed = false;
-            if (sessionId !== undefined) {
-              try {
-                const closed = await manager.close(sessionId);
-                cleanupFailed = !closed.ok;
-                if (!closed.ok)
+          const completed = await (async () => {
+            try {
+              const started = await manager.start(signal, {
+                inferiorTty: options.inferiorTty,
+              });
+              if (!started.ok) return projectAnalysisError(started.error);
+              sessionId = started.value.session_id;
+              const executed = await manager.execute(
+                sessionId,
+                args.command,
+                signal,
+              );
+              return executed.ok
+                ? executed.value.evidence
+                : projectAnalysisError(executed.error);
+            } finally {
+              let cleanupFailed = false;
+              if (sessionId !== undefined) {
+                try {
+                  const closed = await manager.close(sessionId);
+                  cleanupFailed = !closed.ok;
+                  if (!closed.ok)
+                    logger.error(
+                      {
+                        command: CLI_COMMANDS.debugWithGdb,
+                        cleanup: projectAnalysisError(closed.error),
+                      },
+                      "GDB cleanup failed after collecting command output",
+                    );
+                } catch (cause) {
+                  cleanupFailed = true;
                   logger.error(
                     {
                       command: CLI_COMMANDS.debugWithGdb,
-                      cleanup: projectAnalysisError(closed.error),
+                      cleanup:
+                        cause instanceof Error
+                          ? cause.message
+                          : "Unknown cleanup failure",
                     },
                     "GDB cleanup failed after collecting command output",
                   );
+                }
+              }
+              try {
+                await manager.closeAll();
+                cleanupFailed = false;
               } catch (cause) {
                 cleanupFailed = true;
                 logger.error(
@@ -261,28 +317,13 @@ export const registerReverseEngineeringCommands = (
                         ? cause.message
                         : "Unknown cleanup failure",
                   },
-                  "GDB cleanup failed after collecting command output",
+                  "GDB fallback cleanup failed",
                 );
               }
+              if (cleanupFailed) process.exitCode = 1;
             }
-            try {
-              await manager.closeAll();
-              cleanupFailed = false;
-            } catch (cause) {
-              cleanupFailed = true;
-              logger.error(
-                {
-                  command: CLI_COMMANDS.debugWithGdb,
-                  cleanup:
-                    cause instanceof Error
-                      ? cause.message
-                      : "Unknown cleanup failure",
-                },
-                "GDB fallback cleanup failed",
-              );
-            }
-            if (cleanupFailed) process.exitCode = 1;
-          }
+          })();
+          return publishCliAnalysisEvidence(completed, delivery);
         }),
       ),
   });

@@ -42,8 +42,18 @@ const matchesAny = (file, patterns) =>
   patterns.some((pattern) => matchesGlob(file, pattern));
 const selected = Object.fromEntries(flags.map((flag) => [flag, false]));
 const reasons = [];
+// Shared process, contract, CLI, and CI-script edits are not a specific provider.
+// Fast qualification keeps the portable suite and the Linux x64 runtime
+// baseline. Full qualification still selects every lane.
+const SHARED_BOUNDARY =
+  /^(src\/process\/|src\/filesystem\/|src\/contracts\/tool|src\/server\/createServer|src\/cli\.ts|scripts\/ci\/)/;
 const full = (reason) => {
-  for (const flag of flags) selected[flag] = true;
+  if (tier === "full") {
+    for (const flag of flags) selected[flag] = true;
+  } else {
+    selected.code = true;
+    selected.runtime = true;
+  }
   reasons.push(reason);
 };
 const git = (...args) =>
@@ -196,6 +206,28 @@ if (tier === "reused") {
         selected.code = true;
         continue;
       }
+      // Timing and report helpers stay on the portable suite. They are not a
+      // runtime or provider change.
+      if (PORTABLE_CI_REPORTERS.has(file)) {
+        selected.code = true;
+        continue;
+      }
+      // A shared boundary is not evidence that every provider or host changed.
+      // One matching owner is path evidence. Several owners means the same
+      // registration file is listed by many lanes; fast qualification does not
+      // fan those out or start the multi-host package matrix.
+      if (tier !== "full" && SHARED_BOUNDARY.test(file)) {
+        selected.code = true;
+        selected.runtime = true;
+        const owners = Object.entries(SCOPES)
+          .filter(([, patterns]) =>
+            patterns.some((pattern) => matchesGlob(file, pattern)),
+          )
+          .map(([owner]) => owner);
+        if (owners.length === 1) selected[owners[0]] = true;
+        reasons.push(`Shared boundary on fast tier: ${file}`);
+        continue;
+      }
       const owners = Object.entries(SCOPES)
         .filter(([, patterns]) =>
           patterns.some((pattern) => matchesGlob(file, pattern)),
@@ -226,7 +258,6 @@ if (tier === "reused") {
       }
       if (matchesAny(file, READINESS_SOURCES)) selected.readiness = true;
       if (file.startsWith("tests/")) continue;
-      if (PORTABLE_CI_REPORTERS.has(file)) continue;
       if (
         /^(src\/process\/|src\/filesystem\/|src\/contracts\/tool|src\/server\/createServer|src\/cli\.ts|scripts\/ci\/)/.test(
           file,

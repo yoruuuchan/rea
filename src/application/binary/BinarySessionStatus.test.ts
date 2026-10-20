@@ -16,6 +16,11 @@ import type {
   SessionProviderRouter,
 } from "./SessionProviderRouter.js";
 import { binarySessionStatus } from "./BinarySessionStatus.js";
+import {
+  APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE,
+  NATIVE_MACOS_PROVIDER_IDENTITY,
+  nativeMacOSCapabilities,
+} from "../../native/NativeMacOSProviderMetadata.js";
 
 const projectedStatusSchema = sessionProvider.pick({
   capabilities: true,
@@ -326,6 +331,21 @@ const expectedExpandedCandidateCapabilities = [
 ];
 
 describe("binary session provider capability projection", () => {
+  it("keeps the private dispatch reader profile out of public capability status", async () => {
+    const capabilities = nativeMacOSCapabilities("darwin");
+    const projected = await project(capabilities, [
+      candidate(NATIVE_MACOS_PROVIDER_IDENTITY, capabilities),
+    ]);
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toContain(
+      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE.provider.version,
+    );
+    expect(serialized).not.toContain(
+      APPLE_DISPATCH_METADATA_ANALYSIS_PROFILE.digest,
+    );
+    expect(projectedStatusSchema.parse(projected)).toEqual(projected);
+  });
+
   it("preserves provider scope and route overlays while factoring exact prefixes", async () => {
     const selectedBefore = structuredClone(selectedCapabilities);
     const otherBefore = structuredClone(otherCapabilities);

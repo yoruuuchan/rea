@@ -38,7 +38,13 @@ export const classifySwiftSymbol = (
   let category: SwiftTypeCategory | null = null;
   for (;;) {
     const end = identifierEnd(mangling, offset);
-    if (end === undefined) break;
+    if (end === undefined) {
+      // A zero-prefixed identifier uses word substitutions or Punycode. We
+      // cannot tell whether it continues a nested type or names a member, so
+      // retaining the outer category would be a guess.
+      if (mangling.charAt(offset) === "0") category = null;
+      break;
+    }
     const kind = mangling.charAt(end);
     const nominal = NOMINAL_CATEGORIES.get(kind);
     if (nominal === undefined) {

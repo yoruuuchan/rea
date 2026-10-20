@@ -87,6 +87,30 @@ const comparison = (): Parameters<typeof classifyFailure>[0] => ({
   blobs: { "src/example.ts": true },
 });
 
+it("attributes a deep duplication failure when both gates record the same jscpd task", () => {
+  const duplicate = { kind: "jscpd" as const, paths: ["src/a.ts", "src/b.ts"] };
+  const deepContext = (sourceSha: string) => ({
+    ...context(sourceSha),
+    taskHashes: { jscpd: "c".repeat(16) },
+  });
+  expect(
+    classifyFailure({
+      ...comparison(),
+      job: job({ name: "Deep static checks" }),
+      mainJob: job({ name: "Deep static checks" }),
+      diagnostics: [duplicate],
+      mainDiagnostics: [duplicate],
+      context: deepContext(sha("a")),
+      mainContext: deepContext(sha("c")),
+      blobs: { "src/a.ts": true, "src/b.ts": true },
+    }),
+  ).toEqual({
+    classification: "matching-main-diagnostics",
+    reason:
+      "supported_diagnostics_match_failed_task_and_source_on_verified_main_ancestor",
+  });
+});
+
 it("attributes only an identical structured lint failure with matching task, context, ancestry, and source blob", () => {
   const result = classifyFailure(comparison());
   expect(result).toEqual({
@@ -115,6 +139,10 @@ it.each([
   ["ancestry", { ancestry: { status: "diverged", mergeBaseSha: sha("e") } }],
   ["canceled job", { job: job({ conclusion: "cancelled" }) }],
   ["not a static job", { job: job({ name: "Test shard (1)" }) }],
+  [
+    "deep gate compared with the fast gate",
+    { job: job({ name: "Deep static checks" }) },
+  ],
 ] as const)("does not attribute on mismatched %s", (_label, overrides) => {
   const result = classifyFailure({ ...comparison(), ...overrides });
   expect(result.classification).toBe("unknown");
@@ -411,6 +439,76 @@ it("uses static artifacts only when listing is complete, unique, and tied to thi
       2,
     ),
   ).toBeNull();
+  const deep = { ...artifact, id: 13, name: "static-deep-check-reports" };
+  expect(
+    selectStaticCheckArtifact(
+      { total_count: 2, artifacts: [artifact, deep] },
+      runRecord,
+      1,
+      "static-deep-check-reports",
+    ),
+  ).toBe(deep);
+  expect(
+    selectStaticCheckArtifact(
+      { total_count: 2, artifacts: [artifact, deep] },
+      runRecord,
+      1,
+    ),
+  ).toBe(artifact);
+  expect(
+    selectStaticCheckArtifact(
+      { total_count: 2, artifacts: [deep, deep] },
+      runRecord,
+      1,
+      "static-deep-check-reports",
+    ),
+  ).toBeNull();
+});
+
+it("loads each static gate from its own artifact", async () => {
+  const downloads: string[] = [];
+  const api = createGitHubApi({
+    token: "fixture-token",
+    fetchImpl: async (url) => {
+      downloads.push(String(url));
+      throw new Error("stop-before-download");
+    },
+    apiRequest: async () => ({
+      total_count: 2,
+      artifacts: [
+        {
+          id: 1,
+          name: "static-check-reports",
+          expired: false,
+          workflow_run: { id: 10, head_sha: sha("a") },
+        },
+        {
+          id: 2,
+          name: "static-deep-check-reports",
+          expired: false,
+          workflow_run: { id: 10, head_sha: sha("a") },
+        },
+      ],
+    }),
+  });
+  const runRecord = { id: 10, run_attempt: 1, head_sha: sha("a") };
+  await expect(
+    api.getStaticEvidence("owner/rea", runRecord, {
+      name: "Deep static checks",
+    }),
+  ).rejects.toThrow("stop-before-download");
+  await expect(
+    api.getStaticEvidence("owner/rea", runRecord, { name: "Static checks" }),
+  ).rejects.toThrow("stop-before-download");
+  expect(
+    await api.getStaticEvidence("owner/rea", runRecord, {
+      name: "Test shard (1)",
+    }),
+  ).toBeNull();
+  expect(downloads).toEqual([
+    "https://api.github.com/repos/owner/rea/actions/artifacts/2/zip",
+    "https://api.github.com/repos/owner/rea/actions/artifacts/1/zip",
+  ]);
 });
 
 it("rejects artifact redirects that could send the bearer token to a non-HTTPS host", async () => {

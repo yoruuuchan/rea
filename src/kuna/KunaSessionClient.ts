@@ -7,7 +7,7 @@ import {
   type AnalysisExecution,
   type AnalysisOperation,
   type ExecutionOptions,
-  type FileCloseResourceOwner,
+  type RetainedResourceScope,
 } from "../application/AnalysisProvider.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
@@ -38,11 +38,12 @@ import { SharedStartupAttempt } from "../process/SharedStartupAttempt.js";
 import {
   KUNA_INVENTORY_OUTPUT_BYTES,
   kunaFileCleanupError,
+  kunaRetainedResourceCleanupError,
   type KunaProcessLauncher,
 } from "./KunaCommand.js";
 import { kunaFunctionDeadline } from "./KunaConfiguration.js";
 import {
-  createKunaFileCloseScope,
+  createKunaResourceScope,
   inspectKunaInstallation,
   kunaInstallationCancellation,
   type KunaInstallation,
@@ -236,7 +237,8 @@ export class KunaSessionClient implements AnalysisClient {
   readonly #cache: KunaProjectCache;
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #runSlots: KunaRunSlots;
-  readonly #fileCloseResources = new ArtifactResourceScope();
+  readonly #launcher: KunaProcessLauncher | undefined;
+  readonly #resourceScope = new ArtifactResourceScope();
   /** Single-function runs in flight, by entry address. */
   readonly #singleFunctionRuns = new Map<string, SingleFunctionRun>();
   /** Completed single-function texts by address, least recently used first. */
@@ -289,6 +291,7 @@ export class KunaSessionClient implements AnalysisClient {
     this.#cache = dependencies.cache;
     this.#runSlots = dependencies.runSlots;
     this.#environment = dependencies.environment;
+    this.#launcher = dependencies.launcher;
     this.#commands = new KunaTargetCommands(target, {
       signal: this.#session.signal,
       ...(dependencies.launcher === undefined
@@ -450,7 +453,7 @@ export class KunaSessionClient implements AnalysisClient {
     const commands = await this.#commands.close();
     if (!commands.ok) failures.push(commands.error);
     try {
-      await this.#fileCloseResources.close();
+      await this.#resourceScope.close();
     } catch (cause: unknown) {
       const observation = ArtifactReaderFailure.cleanupObservation(
         cause,
@@ -1376,24 +1379,40 @@ export class KunaSessionClient implements AnalysisClient {
   async #inspectInstallation(
     signal: AbortSignal,
   ): Promise<Result<KunaInstallation, AnalysisError>> {
-    const parentFileCloseResources: FileCloseResourceOwner = {
+    const parentResourceScope: RetainedResourceScope = {
       retain: (owner, resource) =>
-        this.#fileCloseResources.retain({
+        this.#resourceScope.retain({
           kind: "lease",
           resource,
           lease: AnalysisCleanupLease.forCloseOwner(owner, resource),
         }),
       run: <T>(operation: () => Promise<T>) =>
-        this.#fileCloseResources.run(operation),
+        this.#resourceScope.run(operation),
     };
-    const fileCloseScope = createKunaFileCloseScope(parentFileCloseResources);
+    const kunaResources = createKunaResourceScope(parentResourceScope);
     try {
       const inspected = await inspectKunaInstallation(this.#environment, {
-        fileCloseResources: fileCloseScope.owner,
+        resourceScope: kunaResources.owner,
         signal,
+        ...(this.#launcher === undefined
+          ? {}
+          : { processLauncher: this.#launcher }),
       });
-      if (!inspected.ok)
-        return err(kunaUnavailable("health", inspected.error.reason));
+      if (!inspected.ok) {
+        const error = kunaUnavailable("health", inspected.error.reason, {
+          diagnostics: inspected.error.diagnostics,
+          ...(!kunaResources.hasPending
+            ? {}
+            : {
+                cleanup: {
+                  reason: "Kuna version-probe process cleanup is unconfirmed.",
+                  resources: kunaResources.cleanupResources ?? [],
+                },
+              }),
+        });
+        kunaResources.bindRetainedFailure(error);
+        return err(error);
+      }
       const committed = this.#profile?.parameters["kuna_sha256"];
       if (committed !== undefined && committed !== inspected.value.sha256)
         return err(
@@ -1408,21 +1427,32 @@ export class KunaSessionClient implements AnalysisClient {
         );
       return ok(inspected.value);
     } catch (cause: unknown) {
+      const retainedCleanup = kunaRetainedResourceCleanupError(cause, "health");
+      if (retainedCleanup !== undefined) return err(retainedCleanup);
       const cancellation = kunaInstallationCancellation(cause);
       if (
         !(cause instanceof RegularFileCleanupFailure) &&
         cancellation !== undefined
-      )
-        return err(
-          new AnalysisCancelledError("health", {
-            cause: cancellation.reason,
-            diagnostics: cancellation.diagnostics,
-          }),
-        );
+      ) {
+        const error = new AnalysisCancelledError("health", {
+          cause: cancellation.reason,
+          diagnostics: cancellation.diagnostics,
+          ...(!kunaResources.hasPending
+            ? {}
+            : {
+                cleanup: {
+                  reason: "Kuna version-probe process cleanup is unconfirmed.",
+                  resources: kunaResources.cleanupResources ?? [],
+                },
+              }),
+        });
+        kunaResources.bindRetainedFailure(error);
+        return err(error);
+      }
       if (!(cause instanceof RegularFileCleanupFailure))
         return err(failure("health", cause));
       const error = kunaFileCleanupError(cause, "health");
-      fileCloseScope.bindFailure(cause, error);
+      kunaResources.bindFailure(cause, error);
       return err(error);
     }
   }

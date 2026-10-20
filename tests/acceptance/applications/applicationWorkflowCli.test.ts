@@ -1680,7 +1680,7 @@ describe("application workflow CLI validation", () => {
     ]);
     expect(malformed).toMatchObject({
       code: "invalid_request",
-      retryable: true,
+      retryable: false,
       details: {
         issues: [{ path: [], reason: "invalid_format", expected: "JSON" }],
       },

@@ -61,6 +61,10 @@ const workflow = async () =>
         build: z.object({ steps: stepsSchema }),
         docs: z.object({ steps: stepsSchema }),
         static: z.object({ steps: stepsSchema }),
+        "static-deep": z.object({
+          if: z.string(),
+          steps: stepsSchema,
+        }),
       }),
     })
     .parse(
@@ -327,10 +331,26 @@ it("runs the existing onboarding and Python producer guards from their selected 
   expect(scripts["docs:check"]).toContain(
     "tests/conformance/readmeConsistency.test.ts",
   );
-  const producer = jobs.static.steps.find(
-    (step) => step.run === "npm run test:python",
+  expect(
+    jobs.static.steps.some((step) => step.run === "npm run test:python"),
+  ).toBe(false);
+  expect(
+    jobs.static.steps.some((step) => step.run === "npm run check:ci:fast"),
+  ).toBe(true);
+  const deep = jobs["static-deep"];
+  expect(deep?.if).toBe(
+    "needs.changes.outputs.tier == 'full' && needs.changes.outputs.code == 'true'",
   );
-  expect(producer?.if).toBe("needs.changes.outputs.code == 'true'");
+  expect(deep?.steps.some((step) => step.run === "npm run check:ci:deep")).toBe(
+    true,
+  );
+  expect(scripts["check:ci:deep"]).toContain("npm run test:python");
+  expect(scripts["check:ci:fast"]).toBe(
+    "node scripts/run-exclusive.mjs artifacts npm run check:ci:fast:tasks",
+  );
+  expect(scripts["check:ci:fast:tasks"]).toBe(
+    "turbo run typecheck lint:built format:check",
+  );
   expect(scripts["test:python"]).toContain(
     "bridge/native/test_rea_lldb_tracer.py",
   );

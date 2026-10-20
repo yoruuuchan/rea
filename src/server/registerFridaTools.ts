@@ -2,6 +2,7 @@ import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { Logger } from "pino";
 
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
+import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
 import { FridaInstrumentationService } from "../application/frida/FridaInstrumentationService.js";
 import type { FridaInstrumentationPort } from "../application/frida/FridaInstrumentationPort.js";
 import type { FridaRemoteConnection } from "../application/frida/FridaInstrumentationPort.js";
@@ -14,7 +15,6 @@ import { jsonValueSchema } from "../domain/jsonValue.js";
 import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import type { ToolResultDelivery } from "./toolResult.js";
-import { unknownFridaSession } from "../application/frida/fridaInputErrors.js";
 
 /** Register Frida device discovery and persistent instrumentation operations. */
 export const registerFridaTools = (
@@ -23,6 +23,7 @@ export const registerFridaTools = (
   logger: Logger,
   delivery: ToolResultDelivery,
   recordEvidence?: EvidenceWriter["recordEvidence"],
+  evidenceById?: EvidenceLookup,
 ): void => {
   const service = new FridaInstrumentationService(provider);
   const listDevices = toolContract("list_frida_devices");
@@ -193,19 +194,15 @@ export const registerFridaTools = (
     status.name,
     toolRegistrationOptions(status),
     async (input) => {
-      const evidence = service.statusEvidence(input.session_id);
-      if (evidence === undefined)
-        return delivery.toCallToolResult(
-          {
-            ok: false as const,
-            error: unknownFridaSession(status.name, input.session_id),
-          },
-          status,
-        );
+      const result = service.inspectStatus(input, {
+        recordEvidence,
+        evidenceById,
+      });
+      if (!result.ok) return delivery.toCallToolResult(result, status);
       return delivery.toEvidenceToolResult(
-        evidence,
+        result.value,
         status,
-        recordEvidence?.(evidence),
+        recordEvidence?.(result.value),
       );
     },
   );

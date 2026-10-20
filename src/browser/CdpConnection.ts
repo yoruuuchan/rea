@@ -15,7 +15,12 @@ const MAX_WEBSOCKET_PAYLOAD_BYTES = 0x7fff_ffff;
 export interface CdpEvent {
   readonly method: string;
   readonly params: unknown;
-  readonly sessionId?: string;
+  readonly sessionId?: string | undefined;
+}
+
+export interface CdpTransportEvent extends CdpEvent {
+  /** Original WebSocket message payload size, before JSON parsing. */
+  readonly wireBytes: number;
 }
 
 interface PendingCommand {
@@ -29,7 +34,7 @@ interface PendingCommand {
 /** Correlated JSON-RPC transport for one CDP target operation. */
 export class CdpConnection {
   readonly #pending = new Map<number, PendingCommand>();
-  readonly #listeners = new Set<(event: CdpEvent) => void>();
+  readonly #listeners = new Set<(event: CdpTransportEvent) => void>();
   readonly #disconnectListeners = new Set<
     (error: BrowserObservationError) => void
   >();
@@ -114,7 +119,7 @@ export class CdpConnection {
   }
 
   /** Subscribe to validated CDP event envelopes. */
-  onEvent(listener: (event: CdpEvent) => void): () => void {
+  onEvent(listener: (event: CdpTransportEvent) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
@@ -316,9 +321,11 @@ export class CdpConnection {
       this.#failPending("protocol_error");
       return;
     }
-    const event: CdpEvent = {
+    const wireBytes = rawByteLength(data);
+    const event: CdpTransportEvent = {
       method: message.method,
       params: "params" in message ? message.params : {},
+      wireBytes,
       ...(typeof message.sessionId === "string"
         ? { sessionId: message.sessionId }
         : {}),
@@ -436,6 +443,11 @@ const rawText = (data: RawData): string =>
     : Buffer.isBuffer(data)
       ? data.toString("utf8")
       : Buffer.from(data).toString("utf8");
+
+const rawByteLength = (data: RawData): number =>
+  Array.isArray(data)
+    ? data.reduce((bytes, chunk) => bytes + chunk.byteLength, 0)
+    : data.byteLength;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

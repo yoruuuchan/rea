@@ -30,7 +30,13 @@ const timelineEventSchema = z.object({
     "lifecycle",
     "target_terminated",
   ]),
-  timestamp: z.number().min(0),
+  timestamp: z
+    .number()
+    .min(0)
+    .nullable()
+    .describe(
+      "CDP monotonic seconds when supplied; null when the event has no valid comparable producer timestamp.",
+    ),
   frame_id: z.string().nullable(),
   loader_id: z.string().nullable(),
   request_id: z.string().nullable(),

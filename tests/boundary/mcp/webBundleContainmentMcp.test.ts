@@ -81,7 +81,7 @@ it("retains timeout Evidence and recovers on the same MCP server", async () => {
     code: "provider_timeout",
     message: expect.stringContaining("server/provider deadline"),
     remediation: {
-      action: expect.stringContaining("MCP client"),
+      action: expect.stringContaining("provider diagnostics"),
     },
     recovery: {
       kind: "inspect_timeout_state",

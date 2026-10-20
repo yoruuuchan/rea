@@ -38,6 +38,13 @@ type InterfaceBuilderConnection = z.infer<typeof connection>;
 export const isUIKitRuntimeConnectionClass = (className: string): boolean =>
   /^UIRuntime\w*Connection$/u.test(className);
 
+/** AppKit NIB connector classes and UIKit runtime connection records. */
+export const isInterfaceBuilderConnectionClass = (className: string): boolean =>
+  isUIKitRuntimeConnectionClass(className) ||
+  /^NSNib(?:Connector|BindingConnector|ControlConnector|OutletConnector)$/u.test(
+    className,
+  );
+
 /** The connection class selects the source archive field namespace. */
 export const interfaceBuilderConnectionFieldNames = (className: string) =>
   isUIKitRuntimeConnectionClass(className)
@@ -167,13 +174,51 @@ const HIERARCHY_KEY =
  * names the referenced object; the hierarchy walk visits each object once.
  */
 const keyedArchiveTable = (objectTable: readonly unknown[]) => {
-  const classNameOf = (value: unknown): string | null => {
-    const classReference = record(value).$class;
-    const uid = archiveUid(classReference);
-    return firstString(
-      record(uid === undefined ? classReference : objectTable[uid]).$classname,
-    );
+  type ClassFacts = {
+    readonly name: string | null;
+    readonly rawSuperclasses: unknown[];
+    readonly superclasses: readonly string[];
   };
+  const classFactsByUid = new Map<number, ClassFacts>();
+  const parseClassFacts = (value: unknown): ClassFacts | null => {
+    const descriptor = record(value);
+    const rawSuperclasses = Array.isArray(descriptor.$classes)
+      ? descriptor.$classes
+      : [];
+    if (
+      !Object.hasOwn(descriptor, "$classname") &&
+      rawSuperclasses.length === 0
+    )
+      return null;
+    return {
+      name: firstString(descriptor.$classname),
+      rawSuperclasses,
+      superclasses: rawSuperclasses.filter(
+        (name): name is string => typeof name === "string",
+      ),
+    };
+  };
+  const classFactsForUid = (uid: number): ClassFacts | null => {
+    const cached = classFactsByUid.get(uid);
+    if (cached !== undefined) return cached;
+    if (!Number.isInteger(uid) || uid < 0 || uid >= objectTable.length)
+      return null;
+    const facts = parseClassFacts(objectTable[uid]);
+    if (facts !== null) classFactsByUid.set(uid, facts);
+    return facts;
+  };
+  const classFactsOfReference = (reference: unknown): ClassFacts | null => {
+    const uid = archiveUid(reference);
+    return uid === undefined
+      ? parseClassFacts(reference)
+      : classFactsForUid(uid);
+  };
+  const classFactsOfObject = (value: unknown) =>
+    classFactsOfReference(record(value).$class);
+  const classNameOf = (value: unknown): string | null =>
+    classFactsOfObject(value)?.name ?? null;
+  const hasClassSuperclass = (value: unknown, superclass: string): boolean =>
+    classFactsOfObject(value)?.superclasses.includes(superclass) ?? false;
   /** The string an archived string object holds, if it is one. */
   const archivedString = (target: unknown): string | undefined => {
     if (typeof target === "string") return target;
@@ -294,20 +339,23 @@ const keyedArchiveTable = (objectTable: readonly unknown[]) => {
     return { items: root, omittedReferences };
   };
   const archivedArrayClass = (classReference: unknown): boolean => {
-    const uid = archiveUid(classReference);
-    const descriptor = record(
-      uid === undefined ? classReference : objectTable[uid],
-    );
-    const classNames = Array.isArray(descriptor.$classes)
-      ? descriptor.$classes.filter(
-          (name): name is string => typeof name === "string",
-        )
-      : [];
+    const superclasses =
+      classFactsOfReference(classReference)?.superclasses ?? [];
     return (
-      classNames.includes("NSArray") || classNames.includes("NSMutableArray")
+      superclasses.includes("NSArray") ||
+      superclasses.includes("NSMutableArray")
     );
   };
-  return { resolve, hierarchy };
+  const classTable = () =>
+    Object.fromEntries(
+      objectTable.flatMap((_, uid) => {
+        const facts = classFactsForUid(uid);
+        return facts === null || facts.name === null
+          ? []
+          : [[facts.name, { superclasses: facts.rawSuperclasses }]];
+      }),
+    );
+  return { resolve, hierarchy, hasClassSuperclass, classTable };
 };
 
 /** Project class and connection objects from an NSKeyedArchiver object table. */
@@ -317,7 +365,12 @@ const parseKeyedArchive = (
   if (root.$archiver !== "NSKeyedArchiver" || !Array.isArray(root.$objects))
     return null;
   const objectTable: readonly unknown[] = root.$objects;
-  const { resolve, hierarchy: toHierarchy } = keyedArchiveTable(objectTable);
+  const {
+    resolve,
+    hierarchy: toHierarchy,
+    hasClassSuperclass,
+    classTable,
+  } = keyedArchiveTable(objectTable);
   const objects: InterfaceBuilderObject[] = [];
   const connections: InterfaceBuilderConnection[] = [];
   let objectCount = 0;
@@ -363,9 +416,8 @@ const parseKeyedArchive = (
       );
     if (
       className !== null &&
-      /(?:Outlet|Connection|Segue|ActionConnection|ControlConnector)/iu.test(
-        className,
-      )
+      (isInterfaceBuilderConnectionClass(className) ||
+        hasClassSuperclass(raw, "NSNibConnector"))
     ) {
       const controlAction = /ControlConnector/iu.test(className);
       const uiKit = isUIKitRuntimeConnectionClass(className);
@@ -417,22 +469,7 @@ const parseKeyedArchive = (
   }
   const top = record(root.$top);
   const hierarchy = toHierarchy(top.root ?? top.UITopLevelObjectsKey);
-  const classes = Object.fromEntries(
-    objectTable.flatMap((raw) => {
-      const item = record(raw);
-      const name = firstString(item.$classname);
-      return name === null
-        ? []
-        : [
-            [
-              name,
-              {
-                superclasses: Array.isArray(item.$classes) ? item.$classes : [],
-              },
-            ],
-          ];
-    }),
-  );
+  const classes = classTable();
   return {
     objects,
     connections,

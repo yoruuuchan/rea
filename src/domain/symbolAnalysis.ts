@@ -26,8 +26,9 @@ export const discoverObjcClasses = (
   const classes = uniqueByName(
     names
       .filter(
-        ({ name }) =>
+        ({ name, objc_class_label }) =>
           name.includes(OBJC_CLASS_MARKER) ||
+          objc_class_label === "hopper_legacy_class_object" ||
           (name.startsWith(LEGACY_OBJC_CLASS_PREFIX) &&
             name.length > LEGACY_OBJC_CLASS_PREFIX.length &&
             !/^l_OBJC_CLASS_NAME_(?:\.\d+)?$/u.test(name)),

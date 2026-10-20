@@ -4,7 +4,6 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   captureProcessScenarioFile,
   compareProcessEvidenceFiles,
-  projectProcessCliError,
 } from "../../../src/application/process/ProcessCli.js";
 import { JSON_BYTE_ORDER_MARK_MESSAGE } from "../../../src/application/Utf8JsonInput.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
@@ -12,23 +11,58 @@ import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidencePro
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { analysisCliErrorEnvelopeSchema } from "../../../src/contracts/errorSchemas.js";
+import { EvidenceFileError } from "../../../src/domain/evidenceErrors.js";
+import { err } from "../../../src/domain/result.js";
+import * as jsonFiles from "../../../src/application/JsonFiles.js";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { holdFirstFileRead } from "../../support/holdFirstFileRead.js";
 
 describe("process CLI error projection", () => {
-  it("preserves local diagnostics for unexpected process failures", () => {
-    const projected = projectProcessCliError(
-      new Error("SECRET internal failure /private/path"),
-    );
-    expect(projected).toEqual({
-      error: "Process command failed",
-      category: "execution_failure",
-      message:
-        "Process command could not complete: SECRET internal failure /private/path",
-    });
-    expect(JSON.stringify(projected)).not.toContain("stack");
-  });
+  it.each([
+    {
+      operation: "capture_process_scenario",
+      execute: (path: string) => captureProcessScenarioFile(path),
+    },
+    {
+      operation: "compare_process_captures",
+      execute: (path: string) => compareProcessEvidenceFiles(path, path),
+    },
+  ] as const)(
+    "projects an unexpected $operation failure canonically",
+    async ({ operation, execute }) => {
+      const failure = new Error("SECRET internal failure /private/path");
+      const read = vi
+        .spyOn(jsonFiles, "readJsonFile")
+        .mockImplementation(async () => {
+          throw failure;
+        });
+
+      try {
+        const projected = await execute("/selected/input.json");
+        expect(
+          analysisCliErrorEnvelopeSchema.safeParse(projected).success,
+        ).toBe(true);
+        expect(projected).toMatchObject({
+          error: "Process command failed",
+          code: "execution_failure",
+          category: "execution_failure",
+          retryable: false,
+          message:
+            "Process command could not complete: SECRET internal failure /private/path",
+          details: {
+            operation,
+            provider_id: PROCESS_PROVIDER.id,
+            diagnostics: { phase: "process_cli" },
+          },
+        });
+        expect(JSON.stringify(projected)).not.toContain("stack");
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
 });
 
 describe("process CLI file cancellation", () => {
@@ -139,6 +173,33 @@ describe("process CLI file cancellation", () => {
 });
 
 describe("process CLI input diagnostics", () => {
+  it("keeps physical file I/O failures in the execution-error projection", async () => {
+    const path = "/selected/scenario.json";
+    const ioFailure = new EvidenceFileError("read", "io", {
+      cause: Object.assign(new Error("disk I/O failed"), { code: "EIO" }),
+      path,
+    });
+    const read = vi
+      .spyOn(jsonFiles, "readJsonFile")
+      .mockResolvedValue(err(ioFailure));
+
+    try {
+      const result = await captureProcessScenarioFile(path);
+      expect(result).toMatchObject({
+        error: "Process command failed",
+        code: "execution_failure",
+        category: "execution_failure",
+        retryable: false,
+        details: { operation: "read", reason: "io", path },
+      });
+      expect(analysisCliErrorEnvelopeSchema.safeParse(result).success).toBe(
+        true,
+      );
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("projects missing, malformed JSON, and invalid scenario files", async () => {
     const root = await createTestTempDirectory("rea-process-cli-diagnostics-");
     const malformed = join(root, "malformed.json");
@@ -155,38 +216,94 @@ describe("process CLI input diagnostics", () => {
       ]),
     );
 
-    expect(
-      await captureProcessScenarioFile(join(root, "missing.json")),
-    ).toEqual({
+    const missing = await captureProcessScenarioFile(
+      join(root, "missing.json"),
+    );
+    expect(missing).toMatchObject({
       error: "Process command failed",
+      code: "invalid_request",
       category: "invalid_input",
-      message: expect.stringContaining(
-        `Process input file could not be read: ${join(root, "missing.json")} (ENOENT`,
-      ),
+      message: expect.stringContaining("Process input file could not be read:"),
+      retryable: false,
+      remediation: {
+        action: expect.stringContaining("Correct the listed fields"),
+      },
+      details: {
+        issues: [
+          {
+            path: ["input_file"],
+            reason: "invalid_value",
+            message: expect.stringContaining(
+              `Process input file could not be read: ${join(root, "missing.json")} (ENOENT`,
+            ),
+          },
+        ],
+      },
     });
-    expect(await captureProcessScenarioFile(malformed)).toEqual({
+    expect(analysisCliErrorEnvelopeSchema.safeParse(missing).success).toBe(
+      true,
+    );
+
+    const invalidJson = await captureProcessScenarioFile(malformed);
+    expect(invalidJson).toMatchObject({
       error: "Process command failed",
+      code: "invalid_request",
       category: "invalid_input",
       message: expect.stringContaining(
         `Process input file is not valid UTF-8 JSON: ${malformed}`,
       ),
+      retryable: false,
+      remediation: {
+        action: expect.stringContaining("Correct the listed fields"),
+      },
+      details: {
+        issues: [{ path: ["input_file"], reason: "invalid_value" }],
+      },
     });
-    expect(await captureProcessScenarioFile(invalidUtf8)).toEqual({
-      error: "Process command failed",
+    expect(analysisCliErrorEnvelopeSchema.safeParse(invalidJson).success).toBe(
+      true,
+    );
+
+    const invalidUtf8Json = await captureProcessScenarioFile(invalidUtf8);
+    expect(invalidUtf8Json).toMatchObject({
+      code: "invalid_request",
       category: "invalid_input",
+      retryable: false,
       message: expect.stringContaining(
         `Process input file is not valid UTF-8 JSON: ${invalidUtf8}`,
       ),
+      details: { issues: [{ path: ["input_file"], reason: "invalid_value" }] },
     });
-    expect(await captureProcessScenarioFile(invalid)).toEqual({
+    expect(
+      analysisCliErrorEnvelopeSchema.safeParse(invalidUtf8Json).success,
+    ).toBe(true);
+
+    const compareMissing = await compareProcessEvidenceFiles(
+      join(root, "missing-left.json"),
+      join(root, "missing-right.json"),
+    );
+    expect(compareMissing).toMatchObject({
+      error: "Process command failed",
+      code: "invalid_request",
+      category: "invalid_input",
+      retryable: false,
+      details: {
+        operation: "compare_process_captures",
+        issues: [{ path: ["input_file"], reason: "invalid_value" }],
+      },
+    });
+    expect(
+      analysisCliErrorEnvelopeSchema.safeParse(compareMissing).success,
+    ).toBe(true);
+
+    expect(await captureProcessScenarioFile(invalid)).toMatchObject({
       error: "Process command failed",
       code: "invalid_request",
       category: "invalid_input",
       message: "Analysis input is invalid. Check the arguments and try again.",
-      retryable: true,
+      retryable: false,
       remediation: {
-        action:
-          "Read the declared input schema or CLI usage for capture_process_scenario; if using MCP and the catalog may be stale, call tools/list. Correct the listed fields, then retry. Do not repeat the unchanged call.",
+        action: expect.stringContaining("Correct the listed fields"),
       },
       recovery: {
         kind: "inspect_input_contract",
@@ -200,7 +317,9 @@ describe("process CLI input diagnostics", () => {
       }),
     });
   });
+});
 
+describe("process CLI file cleanup", () => {
   it.each([false, true])(
     "preserves the open-file owner when close fails (cancelled: %s)",
     async (cancelDuringClose) => {
@@ -238,17 +357,21 @@ describe("process CLI input diagnostics", () => {
       }
     },
   );
+});
 
+describe("process CLI UTF-8 input diagnostics", () => {
   it("names a leading byte-order mark instead of quoting it as a token", async () => {
     const path = join(
       await createTestTempDirectory("rea-process-cli-diagnostics-"),
       "scenario.json",
     );
     await writeFile(path, '\uFEFF{"executable":"/bin/echo"}');
-    expect(await captureProcessScenarioFile(path)).toEqual({
+    expect(await captureProcessScenarioFile(path)).toMatchObject({
       error: "Process command failed",
+      code: "invalid_request",
       category: "invalid_input",
       message: `Process input file is not valid UTF-8 JSON: ${path} (${JSON_BYTE_ORDER_MARK_MESSAGE}). Repair the file, then try again.`,
+      details: { issues: [{ path: ["input_file"], reason: "invalid_value" }] },
     });
   });
 });

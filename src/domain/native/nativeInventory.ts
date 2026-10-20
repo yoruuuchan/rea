@@ -14,6 +14,7 @@ export const addressedValueSchema = z.object({
       source: z.enum(["default", "analysis", "ai", "imported", "user_defined"]),
     })
     .exactOptional(),
+  objc_class_label: z.literal("hopper_legacy_class_object").exactOptional(),
   procedure: z
     .object({
       external: z.boolean(),

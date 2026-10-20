@@ -222,12 +222,19 @@ it("preserves a provider lane when a portable CI reporter changes with provider 
   });
 });
 
-it("keeps unknown CI scripts on complete qualification", async () => {
+it("keeps unknown CI scripts on the fast Linux baseline", async () => {
   const { directory, base } = await fixture();
   const head = await change(directory, ["scripts/ci/new-qualification.mjs"]);
   const plan = await classify(directory, base, head);
   const { CI_FLAGS } = await loadScopes();
-  for (const flag of CI_FLAGS) expect(plan[flag]).toBe(true);
+  expect(plan).toMatchObject({ tier: "fast", code: true, runtime: true });
+  for (const flag of CI_FLAGS)
+    if (flag !== "code" && flag !== "runtime") expect(plan[flag]).toBe(false);
+  expect(plan.matrix).toEqual({
+    include: [{ os: "ubuntu-latest", platform: "linux", architecture: "x64" }],
+  });
+  const full = await classify(directory, base, head, "pull_request", true);
+  for (const flag of CI_FLAGS) expect(full[flag]).toBe(true);
 });
 
 it("emits an observational owner proposal without changing ordinary or full portable execution", async () => {
@@ -399,7 +406,7 @@ it("includes changes from earlier cancelled pushes since the last successful bas
 });
 
 it.each(["", "not-a-commit"])(
-  "fails closed to all lanes for a missing or invalid push baseline (%s)",
+  "fails closed to the fast Linux baseline for a missing or invalid push baseline (%s)",
   async (base) => {
     const { directory } = await fixture();
     const head = await change(directory, ["README.md"]);
@@ -407,13 +414,20 @@ it.each(["", "not-a-commit"])(
     expect(plan).toMatchObject({
       tier: "fast",
       code: true,
-      package: true,
-      evm: true,
-      browser: true,
+      runtime: true,
+      package: false,
+      evm: false,
+      browser: false,
       reasons: expect.arrayContaining([expect.stringContaining("baseline")]),
     });
     const { CI_FLAGS } = await loadScopes();
-    for (const flag of CI_FLAGS) expect(plan[flag]).toBe(true);
+    for (const flag of CI_FLAGS)
+      if (flag !== "code" && flag !== "runtime") expect(plan[flag]).toBe(false);
+    expect(plan.matrix).toEqual({
+      include: [
+        { os: "ubuntu-latest", platform: "linux", architecture: "x64" },
+      ],
+    });
   },
 );
 
@@ -518,9 +532,10 @@ it("fails closed when the successful push baseline is not an ancestor", async ()
   expect(await classify(directory, unrelated, head, "push")).toMatchObject({
     tier: "fast",
     code: true,
-    package: true,
-    evm: true,
-    browser: true,
+    runtime: true,
+    package: false,
+    evm: false,
+    browser: false,
   });
   expect(head).not.toBe(base);
 });
@@ -631,17 +646,39 @@ it.each([
   ],
   [
     "src/process/ProviderProcess.ts",
-    { code: true, package: true, evm: true, browser: true },
+    {
+      code: true,
+      runtime: true,
+      package: false,
+      evm: false,
+      browser: false,
+      sqlite: false,
+    },
   ],
   [
     "package-lock.json",
-    { code: true, package: true, evm: true, browser: true },
+    {
+      code: true,
+      runtime: true,
+      package: false,
+      evm: false,
+      browser: false,
+    },
   ],
   [
     ".github/workflows/real-evm-interface.yml",
     { code: false, evm: true, browser: false, package: false },
   ],
-  ["unknown-input", { code: true, package: true, evm: true, browser: true }],
+  [
+    "unknown-input",
+    {
+      code: true,
+      runtime: true,
+      package: false,
+      evm: false,
+      browser: false,
+    },
+  ],
   [
     "src/application/Example.ts",
     {
@@ -830,11 +867,35 @@ it.each([
     "tests/boundary/mcp/serverLifecycleMcp.test.ts",
     { code: true, sqlite: true },
   ],
-  ["src/process/OwnedCommand.ts", { code: true, sqlite: true, runtime: true }],
-  ["src/server/createServer.ts", { code: true, sqlite: true, runtime: true }],
+  [
+    "src/process/OwnedCommand.ts",
+    {
+      code: true,
+      sqlite: false,
+      runtime: true,
+      package: false,
+      browser: false,
+    },
+  ],
+  [
+    "src/server/createServer.ts",
+    {
+      code: true,
+      sqlite: false,
+      runtime: true,
+      package: false,
+      browser: false,
+    },
+  ],
   [
     "src/contracts/toolContracts.ts",
-    { code: true, sqlite: true, runtime: true },
+    {
+      code: true,
+      sqlite: false,
+      runtime: true,
+      package: false,
+      browser: false,
+    },
   ],
   [
     "src/domain/analysisErrorProjection.ts",
@@ -927,8 +988,10 @@ it("scopes package script edits while retaining broad dependency checks", async 
   );
   expect(await classify(directory, head, dependency)).toMatchObject({
     code: true,
-    browser: true,
-    package: true,
+    runtime: true,
+    browser: false,
+    package: false,
+    evm: false,
   });
 });
 
@@ -1089,11 +1152,24 @@ it.each([
   ],
   [
     ".nvmrc",
-    { code: true, package: true, browser: true, evm: true, sqlite: true },
+    {
+      code: true,
+      runtime: true,
+      package: false,
+      browser: false,
+      evm: false,
+      sqlite: false,
+    },
   ],
   [
     "tsconfig.build.json",
-    { code: true, package: true, browser: true, evm: true },
+    {
+      code: true,
+      runtime: true,
+      package: false,
+      browser: false,
+      evm: false,
+    },
   ],
   ["docs/.vitepress/config.ts", { code: true, docs: true, package: false }],
   [
@@ -1117,7 +1193,10 @@ it.each([
     "src/contracts/evm/tools.ts",
     { code: true, docs: true, evm: true, package: false },
   ],
-  ["scripts/unknown-website-helper.mjs", { code: true, package: true }],
+  [
+    "scripts/unknown-website-helper.mjs",
+    { code: true, runtime: true, package: false, browser: false },
+  ],
   [
     ".github/workflows/release.yml",
     { workflows: true, code: true, package: false, website: false },
@@ -1229,9 +1308,11 @@ it("retains a broad fallback when a provider script adds shared shell work", asy
   };
   const head = await change(directory, ["package.json"], JSON.stringify(after));
   expect(await classify(directory, base, head)).toMatchObject({
-    evm: true,
-    browser: true,
-    package: true,
+    code: true,
+    runtime: true,
+    evm: false,
+    browser: false,
+    package: false,
   });
 });
 

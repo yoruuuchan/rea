@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { commandEvidenceDetailSchema } from "./commandObservation.js";
 
 export const OBJDUMP_ARTIFACT_OPERATIONS = [
   "file_headers",
@@ -35,11 +36,17 @@ const objdumpDisassemblyInputSchema = objdumpArtifactInputSchema.extend({
     .optional(),
 });
 
-/** Caller-selected artifact facet or pathless provider capability query. */
+const objdumpArchitecturesInputSchema = z.strictObject({
+  operation: z.literal("architectures"),
+});
+
+/** Caller-selected native selection and independent Evidence delivery. */
 export const objdumpInputSchema = z.discriminatedUnion("operation", [
-  objdumpArtifactInputSchema,
-  objdumpDisassemblyInputSchema,
-  z.strictObject({ operation: z.literal("architectures") }),
+  objdumpArtifactInputSchema.extend({ detail: commandEvidenceDetailSchema }),
+  objdumpDisassemblyInputSchema.extend({ detail: commandEvidenceDetailSchema }),
+  objdumpArchitecturesInputSchema.extend({
+    detail: commandEvidenceDetailSchema,
+  }),
 ]);
 
 /** Caller-selected Rizin command against one local artifact. */
@@ -56,5 +63,8 @@ export const rizinInputSchema = z
   })
   .strict();
 
-export type ObjdumpInput = z.input<typeof objdumpInputSchema>;
+export type ObjdumpSelection =
+  | z.input<typeof objdumpArtifactInputSchema>
+  | z.input<typeof objdumpDisassemblyInputSchema>
+  | z.input<typeof objdumpArchitecturesInputSchema>;
 export type RizinInput = z.input<typeof rizinInputSchema>;

@@ -10,7 +10,7 @@ import { STARTUP_OWNER_CLOSED } from "../process/SharedStartupAttempt.js";
 import { constants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import type { FileCloseResourceOwner } from "./AnalysisProvider.js";
+import type { RetainedResourceScope } from "./AnalysisProvider.js";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { join } from "node:path";
 
@@ -480,13 +480,18 @@ export interface SystemDoctorHostOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly execFileOutput?: typeof execFileOutput;
   readonly providerInspections?: (
-    fileCloseResources: FileCloseResourceOwner,
+    resourceScope: RetainedResourceScope,
     signal: AbortSignal,
   ) => Promise<readonly DoctorProviderInspection[]>;
   readonly providerRegistrationEnvironment?: () => Readonly<
     Record<string, string>
   >;
-  readonly resolveProviderRequestBudget?: ProviderRequestBudgetResolver;
+  readonly resolveProviderRequestBudget?: (
+    provider: Parameters<ProviderRequestBudgetResolver>[0],
+    environment: Parameters<ProviderRequestBudgetResolver>[1],
+    resources: RetainedResourceScope,
+    signal: AbortSignal,
+  ) => ReturnType<ProviderRequestBudgetResolver>;
   readonly linuxDemoRuntimeCheck?: () => Promise<DoctorCheck>;
 }
 
@@ -506,7 +511,7 @@ export const systemDoctorHost = (
   const hostExecFileOutput = options.execFileOutput ?? execFileOutput;
   const homeDirectory = homeDirectoryFromEnvironment(environment, platform);
   const commandEnvironment = { env: environment };
-  const fileCloseResources: FileCloseResourceOwner = {
+  const resourceScope: RetainedResourceScope = {
     retain: (owner, resource) =>
       resources.retain({
         kind: "lease",
@@ -515,6 +520,19 @@ export const systemDoctorHost = (
       }),
     run: (operation) => resources.run(operation),
   };
+  const resolveProviderRequestBudget =
+    options.resolveProviderRequestBudget === undefined
+      ? undefined
+      : (
+          provider: Parameters<ProviderRequestBudgetResolver>[0],
+          environment: Parameters<ProviderRequestBudgetResolver>[1],
+        ) =>
+          options.resolveProviderRequestBudget!(
+            provider,
+            environment,
+            resourceScope,
+            inspectionSignal,
+          );
   return {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     platform,
@@ -620,10 +638,7 @@ export const systemDoctorHost = (
       : {
           providerInspections: () =>
             resources.run(() =>
-              options.providerInspections!(
-                fileCloseResources,
-                inspectionSignal,
-              ),
+              options.providerInspections!(resourceScope, inspectionSignal),
             ),
         }),
     ...(options.providerRegistrationEnvironment === undefined
@@ -632,9 +647,9 @@ export const systemDoctorHost = (
           providerRegistrationEnvironment:
             options.providerRegistrationEnvironment,
         }),
-    ...(options.resolveProviderRequestBudget === undefined
+    ...(resolveProviderRequestBudget === undefined
       ? {}
-      : { resolveProviderRequestBudget: options.resolveProviderRequestBudget }),
+      : { resolveProviderRequestBudget }),
     async ilspyCmdVersion(path) {
       try {
         await access(path, constants.X_OK);
@@ -699,11 +714,10 @@ export const systemDoctorHost = (
         platform,
         environment,
         resources,
-        ...(options.resolveProviderRequestBudget === undefined
+        ...(resolveProviderRequestBudget === undefined
           ? {}
           : {
-              resolveProviderRequestBudget:
-                options.resolveProviderRequestBudget,
+              resolveProviderRequestBudget,
             }),
       }),
   };

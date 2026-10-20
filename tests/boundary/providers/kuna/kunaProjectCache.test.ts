@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { expect, it as test, vi } from "vitest";
 
-import { inspectKunaInstallationOwned as inspectKunaInstallation } from "./kunaFileCloseOwner.js";
+import { inspectKunaInstallationOwned as inspectKunaInstallation } from "./kunaResourceScope.js";
 import { cleanupOwnedProcessGroup } from "../../../../src/process/ProcessOwnership.js";
 import { spawnOwnedProviderProcess } from "../../../../src/process/ProviderProcess.js";
 import type { KunaInstallation } from "../../../../src/kuna/KunaInstallation.js";

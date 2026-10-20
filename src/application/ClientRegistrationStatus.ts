@@ -37,7 +37,7 @@ import {
 import type { SetupClient } from "./SupportedClients.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { dshDocument } from "./DshCordisPatch.js";
-import { clientRegistrationEnvironmentDetails } from "./ClientRegistrationEnvironment.js";
+import { clientRegistrationEnvironmentDetailsWithBudget } from "./ClientRegistrationEnvironment.js";
 import type { ProviderRequestBudgetResolver } from "./ClientRegistrationEnvironment.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
@@ -262,7 +262,7 @@ export const readClientRegistrationInspections = async (
       const registration = parseRegistration(raw, effectiveClient);
       const registrationEnvironment =
         client.name === "kimi" || client.name === "codex"
-          ? clientRegistrationEnvironmentDetails(
+          ? await clientRegistrationEnvironmentDetailsWithBudget(
               parsed,
               {},
               "effective",

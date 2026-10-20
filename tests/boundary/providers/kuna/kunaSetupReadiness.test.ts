@@ -6,7 +6,7 @@ import {
   options,
 } from "../../../../src/application/Setup.fixture.js";
 import { runSetup } from "../../../../src/application/Setup.js";
-import { inspectKunaProviderOwned } from "./kunaFileCloseOwner.js";
+import { inspectKunaProviderOwned } from "./kunaResourceScope.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { writeFakeKuna } from "./fakeKuna.js";
 

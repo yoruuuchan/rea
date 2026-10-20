@@ -95,9 +95,10 @@ optional bounded `recovery` next step. `recovery.kind=inspect_input_contract`
 names the rejected operation: re-read that operation's advertised input schema
 (call `tools/list` if the catalog may be stale), correct the listed fields, and
 do not repeat the unchanged call. `recovery.kind=inspect_timeout_state` names
-the operation and the REA server/provider deadline; inspect session/provider
-state before retrying, and raise the MCP client's tool deadline only when the
-client ended the call before REA returned this response. These hints never
+the operation and the REA server/provider deadline; inspect partial Evidence
+and reported cleanup state, then follow producer-specific remediation or reduce
+supported work. Generic errors do not assume adjustable timeout controls. Raising
+only the MCP client's deadline cannot extend this budget. These hints never
 include the complete catalog or caller arguments.
 Failures omit `structuredContent`, since each advertised `outputSchema`
 describes successful results. Successful replies retain their schema-validated
@@ -238,6 +239,23 @@ reserves 1024 bytes for the envelope. Raising it restores complete inline
 delivery for responses that fit that buffer and Node's single-string limit.
 It does not change the client's buffer, analysis coverage, or retained content.
 Ordinary responses keep their existing complete result contract.
+
+### Error recovery and deadline ownership
+
+Initialization instructions and the static JavaScript tool description teach
+recovery before a host can discard a tool response. Invalid input calls should be corrected from the connected schema
+(refresh `tools/list` only if stale), not retried unchanged. REA's returned
+`provider_timeout` describes its server/provider deadline; provider-authored
+remediation names the applicable controls and preserves partial Evidence and
+cleanup uncertainty.
+
+A host timeout without a REA result is different: execution and cleanup remain
+unknown. Increasing an advertised `analysis_timeout_ms` cannot fix a shorter
+client deadline. Configure the client's tool timeout with execution, cleanup
+and delivery headroom, or report that change is needed when not authorized.
+Session status does not establish that all target-free work stopped. Detailed
+host settings and bounded retry guidance live in the shipped skill's
+[recovery reference](https://github.com/morluto/rea/blob/main/.agents/skills/reverse-engineer-anything/references/connection-and-recovery.md#distinguish-client-and-server-deadlines).
 
 ### Untrusted target content
 

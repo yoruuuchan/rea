@@ -352,6 +352,41 @@ it("retains the exact empty source observation without claiming a decoded invent
   });
 });
 
+it("retains the exact source when recognized magic has no complete version", async () => {
+  const root = await createTestTempDirectory("rea-il2cpp-short-prefix-");
+  const path = join(root, "global-metadata.dat");
+  const bytes = Buffer.alloc(7);
+  bytes.writeUInt32LE(0xfab11baf, 0);
+  await writeFile(path, bytes);
+  const result = await inspectMetadata(path);
+
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected truncated metadata prefix");
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisInputError",
+    issues: [
+      {
+        path: ["path"],
+        reason: "invalid_format",
+        message: expect.stringMatching(
+          /truncated-header:.*metadata version is unknown/u,
+        ),
+      },
+    ],
+  });
+  expect(result.error.partialObservation).toMatchObject({
+    operation: "observe_il2cpp_metadata_source",
+    normalized_result: {
+      artifact: {
+        path,
+        bytes: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+      inventory_status: "not-returned-as-complete",
+    },
+  });
+});
+
 it("keeps the metadata source observation when the selected binary does not link", async () => {
   const root = await createTestTempDirectory("rea-il2cpp-binary-failure-");
   const path = join(root, "global-metadata.dat");

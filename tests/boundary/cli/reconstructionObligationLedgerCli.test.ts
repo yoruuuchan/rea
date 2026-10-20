@@ -69,7 +69,7 @@ describe("reconstruction obligation ledger CLI parity", () => {
     expect(JSON.parse(stdout)).toMatchObject({
       code: "invalid_request",
       category: "invalid_input",
-      retryable: true,
+      retryable: false,
       details: {
         operation: "build_reconstruction_obligation_ledger",
         issues: [

@@ -1,4 +1,5 @@
 import type { AnalysisProfileCommitment } from "../../domain/analysisProfile.js";
+import { analysisProfilesEqual } from "../../domain/analysisProfile.js";
 import type { AnalysisSnapshot } from "../../domain/analysisSnapshot.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { Evidence } from "../../domain/evidence.js";
@@ -33,6 +34,11 @@ import { InvestigationRecords } from "../investigation/InvestigationRecords.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { writeAnalysisSnapshot as writeSnapshotFile } from "./AnalysisSnapshotFiles.js";
+import { workflowAnalysisProfile } from "../InvestigationProviders.js";
+import {
+  hasOnlyProfilelessNativeDispatchEntries,
+  isProfilelessNativeDispatchSnapshot,
+} from "./ProfilelessNativeWorkflowSnapshot.js";
 
 const SNAPSHOT_MUTATION_RECOVERY =
   "Export session observations through export_evidence_bundle if needed. Close the active target without saving a snapshot, then reopen it before importing or saving a snapshot.";
@@ -40,11 +46,14 @@ const SNAPSHOT_MUTATION_RECOVERY =
 export interface ActiveAnalysisBinding {
   readonly target: BinaryTarget;
   readonly profile: AnalysisProfileCommitment | null;
+  /** Current route profile for the single profileless native dispatch workflow. */
+  readonly profilelessWorkflowProfile?: AnalysisProfileCommitment;
 }
 
 /** Validated composed-workflow payload bound to the active target and profile. */
 export interface WorkflowSnapshotRecordInput {
   readonly operation: AnalysisOperation;
+  readonly bindingProfile: AnalysisProfileCommitment;
   readonly parameters: Readonly<Record<string, JsonValue>>;
   readonly execution: Parameters<
     AnalysisSnapshotCache["recordWorkflow"]
@@ -160,11 +169,28 @@ export abstract class BinarySessionRecords {
         ),
       );
     const target = active?.target;
-    const profile = active?.profile ?? undefined;
+    const profile =
+      active?.profile ?? active?.profilelessWorkflowProfile ?? undefined;
     if (target !== undefined && profile === undefined)
       return err(
         new EvidenceIntegrityError(
           "Analysis snapshots require a concrete provider analysis profile",
+        ),
+      );
+    if (
+      active?.profile === null &&
+      (target === undefined ||
+        profile === undefined ||
+        !this.#snapshot.matches(target, profile) ||
+        this.#snapshot.entries().length !== 0 ||
+        !hasOnlyProfilelessNativeDispatchEntries(
+          this.#snapshot.workflowEntries(),
+          profile,
+        ))
+    )
+      return err(
+        new EvidenceIntegrityError(
+          "Profileless native snapshots may contain only current dispatch workflow observations",
         ),
       );
     return this.#snapshot.export(
@@ -192,17 +218,24 @@ export abstract class BinarySessionRecords {
           },
         ),
       );
-    if (active?.profile === null)
+    const profile = active?.profile ?? active?.profilelessWorkflowProfile;
+    if (
+      active?.profile === null &&
+      (profile === undefined ||
+        !isProfilelessNativeDispatchSnapshot(snapshot, active.target, profile))
+    )
       return err(
         new AnalysisSnapshotMismatchError(
-          "Analysis snapshot profile_mismatch: the active target has no concrete analysis profile",
+          "Analysis snapshot profile_mismatch: the snapshot is not bound to the active native dispatch reader",
         ),
       );
     const imported = this.#snapshot.import(
       snapshot,
       active === undefined
         ? undefined
-        : { target: active.target, profile: active.profile },
+        : profile === undefined
+          ? undefined
+          : { target: active.target, profile },
       (bundle) => {
         const imported = this.#records.mergeEvidenceBundle(bundle);
         return imported.ok ? ok(imported.value.recordsAdded) : imported;
@@ -252,17 +285,33 @@ export abstract class BinarySessionRecords {
     input: WorkflowSnapshotRecordInput,
   ): Result<null, EvidenceIntegrityError> {
     const active = this.activeAnalysisBinding();
-    if (active === undefined || active.profile === null)
+    if (active === undefined)
       return err(
         new EvidenceIntegrityError(
           "Workflow snapshot entries require an active concrete provider profile",
         ),
       );
     if (this.#snapshotInvalidated) return ok(null);
+    const profile = active.profile ?? active.profilelessWorkflowProfile;
+    if (
+      profile === undefined ||
+      !analysisProfilesEqual(profile, input.bindingProfile) ||
+      !analysisProfilesEqual(
+        input.execution.analysisProfile,
+        workflowAnalysisProfile(profile, input.operation),
+      ) ||
+      (active.profile === null &&
+        input.operation !== "inspect_native_dispatch_metadata")
+    )
+      return err(
+        new EvidenceIntegrityError(
+          "Workflow snapshot entry does not match the active reader profile",
+        ),
+      );
     try {
       this.#snapshot.recordWorkflow({
         target: active.target,
-        profile: active.profile,
+        profile,
         ...input,
       });
       this.#emitSnapshotChanged();

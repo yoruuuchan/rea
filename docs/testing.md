@@ -69,8 +69,14 @@ Source projects also contain large capacity regressions; `test:fast` promises
 no compiled-runtime prerequisite, not a fixed time budget.
 
 `npm run lint` prints errors and a warning summary; `npm run jscpd` prints
-duplication statistics. Complete reports remain in `.cache/static-checks/` and
-CI uploads them as `static-check-reports`, including after a failed static gate.
+duplication statistics. Complete reports remain in `.cache/static-checks/`.
+The fast gate uploads them as `static-check-reports`. Full qualification
+uploads duplication diagnostics from the deep job as
+`static-deep-check-reports`, including after that gate fails.
+Task-graph recording runs `check:ci:fast:tasks` and `check:ci:deep:tasks`
+without the artifacts lock, so it can record hashes while `check:pr` or
+`check:test` already holds that lock. The CI jobs still run the locked
+`check:ci:fast` and `check:ci:deep` commands.
 Use `npm run lint:details` or `npm run jscpd:details` for all console diagnostics.
 Both duplicate commands scan production and test code with the same 3% limit;
 the summary commands preserve checker failures and restore reports from cached
@@ -481,14 +487,16 @@ real-system lanes remain separate jobs so one kind of evidence cannot stand in
 for another. Workflow syntax and expression validation runs inside the required
 static-check job when workflow changes select it, avoiding a separate runner.
 Native, provider, fixture, SQLite compatibility, and website lanes wait for
-static checks to succeed before allocating their runners. This avoids spending
-those runner slots on revisions that already fail static validation. Portable
-test shards and documentation checks remain independent of static results, so
-they can still provide diagnostic feedback. The required gate rejects skipped
-selected lanes when static checks fail; passing revisions retain all selected
-coverage. This ordering reduces peak demand on invalid revisions but can add
-static-check waiting to otherwise passing runs; it is not a measured reduction
-in end-to-end latency.
+the fast static checks (typecheck, built lint, and format) to succeed before
+allocating their runners. Knip, duplication, architecture guards, test
+discovery, and the Python producer run in the separate full-tier deep static
+job and do not gate provider admission. Portable test shards and documentation
+checks remain independent of static results, so they can still provide
+diagnostic feedback. The required gate rejects skipped selected lanes when
+static checks fail; on the full tier it also requires the deep static job.
+Passing revisions retain all selected coverage. This ordering reduces peak
+demand on invalid revisions but can add static-check waiting to otherwise
+passing runs; it is not a measured reduction in end-to-end latency.
 
 Core jobs have execution limits of five minutes for classification, ten minutes
 for static checks, builds, docs, and report merging, and thirty minutes per
@@ -1167,13 +1175,16 @@ scripts also select it. Unrelated code edits retain the complete portable suite
 on the pinned Node version without starting four additional compatibility jobs.
 Full qualification retains every SQLite version.
 Shared process/contract/CLI boundaries, dependencies, other packaging inputs,
-unknown paths, and changes to the planner select the full baseline.
+unknown paths, and changes to the planner select the fast Linux x64 baseline:
+portable code checks and the installed-package runtime lane, without provider
+lanes or the multi-host package matrix. A shared file with exactly one owner
+still selects that owner. Full qualification still selects every lane.
 CI timing collection, timing history, and test-report helper edits retain static
 checks and the complete portable suite without selecting unrelated host/provider
 lanes. Classification, qualification, gate, release receipt, and unknown CI
-scripts keep the broad fallback.
+scripts keep that fast baseline.
 Package script-only edits select their owning verifier when its entrypoint is
-identifiable; unknown or shared script changes select everything. Android
+identifiable; unknown or shared script changes select the fast baseline. Android
 build-script edits retain the Linux suite and workflow validation; real Android
 verification stays manual. Renames account for both paths.
 
@@ -1197,7 +1208,8 @@ or provider effects outside its owners.
 Ordinary main pushes use the same owner scopes as PRs. Their diff starts at a
 successful ancestor push run of this CI workflow, rather than the preceding
 push: changes from failed or cancelled intermediate runs remain in scope.
-Missing, untrusted, or non-ancestor history selects every lane. The lookup is
+Missing, untrusted, or non-ancestor history selects the fast Linux x64
+baseline: portable checks and the Linux runtime lane. The lookup is
 bounded to the last 100 successful push runs; lookup failures broaden selection.
 Every code change still selects all six portable shards, without coverage
 instrumentation in this fast tier. Ordinary PR matrices cancel remaining
@@ -1227,8 +1239,11 @@ immediately starts the separate `Full PR qualification` workflow against the
 label event's merge revision; subsequent PR revisions also select the full tier
 in normal CI while that label remains. Unrelated labels do not start validation
 jobs or replace the main CI checks. Manual dispatch also requests full validation.
-Fast-tier broad fallbacks retain all owner lanes and the three-host
-package matrix; Intel macOS and coverage remain full-tier obligations. Each
+Fast-tier broad fallbacks keep the portable suite and the Linux x64 runtime
+baseline. They do not start every owner lane or the three-host package
+matrix. Intel macOS and coverage remain full-tier obligations. Real provider
+lanes stay path-gated, and a shared registration file listed by many lanes
+does not start those lanes on a fast PR. Each
 classification job records its selection and broad-fallback reasons in the run
 summary. Representative Git-diff cases live in
 `tests/boundary/filesystem/ciChangeScope.test.ts`.
@@ -1308,9 +1323,14 @@ report in each shard's snapshot. The bounded lookup verifies the artifact's
 producer; newer schedules that reuse qualification without producing timings do
 not hide the last full run's artifact.
 CI assigns discovered files by historical duration, with a deterministic
-fallback weight for new files, rather than dividing only by file count. Every
+fallback weight for new files, rather than dividing only by file count.
+`process-boundary` files are weighted at their full duration because that
+project runs files serially. Other projects are weighted at half their file
+duration, matching the two-worker cap, so a serial file does not look as cheap
+as a file that overlaps with another. Every
 discovered file still belongs to exactly one shard; worker limits and project
-ordering remain unchanged. The merge job rejects successful reports with missing,
+ordering remain unchanged. Fast qualification keeps five built shards without
+coverage. The merge job rejects successful reports with missing,
 unexpected, or duplicate portable files. Coverage instrumentation and aggregate
 thresholds remain enforced in full qualification.
 Missing or unusable history falls back to Vitest's default assignment. Only
@@ -1318,8 +1338,24 @@ timing data is reused; live provider results are never cached. Turbo outputs are
 restored by task hash, with trusted default-branch runs as cache writers and PRs
 as restore-only consumers. The static job also restores its Turbo snapshot;
 each task revalidates its own input hash before reusing outputs or diagnostics.
-The Node pin and npm install settings are global hash inputs. Knip includes its ignore rules and VitePress
+The Node pin and npm install settings are global hash inputs. Knip runs only
+in full qualification, with `--cache` and a GitHub cache of
+`node_modules/.cache/knip`. The saved key includes the commit SHA. Restore uses
+the configuration prefix, so the next trusted full run can publish a refreshed
+snapshot. That cache is an AST cache keyed by file mtime and size, so a
+fresh checkout often misses it; Turbo still hashes the Knip task inputs. Knip
+includes its ignore rules and VitePress
 entry, so changes to those inputs cannot reuse an older successful check.
+Jobs that run Turbo export `TURBO_TEAM`. A called workflow sees the caller
+event, so `workflow_call` is not an event name inside CI. `TURBO_TOKEN` is set
+when release qualification passes `remote_cache_write`, or when the ref is the
+default branch and the event is push, schedule, or workflow_dispatch, and only
+when that secret is available to the run. Release qualification passes
+`TURBO_TOKEN` and `remote_cache_write` into the called workflow. Labeled
+pull-request qualification does not. Pull requests receive an empty token and
+`TURBO_CACHE=local:rw`. Remote reads require `TURBO_TOKEN`, and this repository
+does not pass a separate read-only credential into pull requests. An empty
+token leaves the local Turbo cache in place.
 
 The shared npm-cache action caches downloads, not `node_modules`, and every
 consumer still runs `npm ci`. Keys cover the runner OS, actual Node architecture,

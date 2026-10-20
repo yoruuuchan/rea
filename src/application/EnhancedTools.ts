@@ -37,6 +37,7 @@ import { inspectNativeDispatch } from "./native/NativeDispatchMetadataInspection
 import { traceNativeValues } from "./native/NativeValueTrace.js";
 import { traceNativeUiAction } from "./native/NativeUiActionTrace.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
+import { addressedValueSchema } from "../domain/native/nativeInventory.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 import {
@@ -676,11 +677,15 @@ export class EnhancedTools {
   ) {
     const result = await this.#call(tool, {}, signal);
     if (!result.ok) return result;
-    const parsed = z
-      .array(z.object({ address: z.string(), value: z.string() }))
-      .safeParse(result.value);
+    const parsed = z.array(addressedValueSchema).safeParse(result.value);
     return parsed.success
-      ? ok(parsed.data.map(({ address, value: name }) => ({ address, name })))
+      ? ok(
+          parsed.data.map(({ address, value: name, objc_class_label }) => ({
+            address,
+            name,
+            ...(objc_class_label === undefined ? {} : { objc_class_label }),
+          })),
+        )
       : err(
           new AnalysisOutputError(
             tool,

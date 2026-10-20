@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { commandObservationSchema } from "../domain/commandObservation.js";
+import { objdumpSummaryViewResultSchema } from "../domain/analysisView/analysisView.js";
 
 import {
   objdumpInputSchema,
@@ -6,21 +7,8 @@ import {
 } from "../domain/reverseEngineering.js";
 import type { ToolContract } from "./toolContractTypes.js";
 import { evidenceResultOf } from "./toolOutputSchemaPrimitives.js";
+import { analysisDetailOutputSchemaOf } from "./analysisDetail.js";
 import { toolContractMetadata } from "./toolEffects.js";
-
-const commandObservationSchema = z.strictObject({
-  stdout: z.string(),
-  stderr: z.string(),
-  exit_code: z.union([z.string(), z.number(), z.null()]),
-  signal: z.string().nullable(),
-  output_truncated: z.boolean(),
-  completion_status: z.enum(["complete", "unknown"]),
-  artifact_sha256_after: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/u)
-    .nullable(),
-  artifact_changed: z.boolean().nullable(),
-});
 
 /** Caller-selected GNU objdump and Rizin observations. */
 export const REVERSE_ENGINEERING_TOOL_CONTRACTS = [
@@ -29,9 +17,12 @@ export const REVERSE_ENGINEERING_TOOL_CONTRACTS = [
     ...toolContractMetadata("inspect_with_objdump"),
     kind: "native-provider",
     description:
-      "Run caller-selected GNU objdump inspection against a local artifact, or request operation=architectures without a path to list BFD targets advertised by the installed binary. For operation=disassemble, optional symbol selects native symbol-scoped disassembly before output collection; omission preserves all code sections. Matching and symbol boundaries follow GNU objdump. Preserves decoded stdout and stderr inline with SHA-256 Evidence for artifact inspections, up to a shared 16 MiB combined limit; invalid UTF-8 bytes are represented by replacement characters and flagged in Evidence limitations. output_truncated reports output beyond that limit and completion_status is unknown if buffer enforcement terminated the process. The raw output is authoritative and REA does not claim a stable normalized format. DWARF does not follow local debug links by default. Set follow_debug_links to true to follow them; identities of external debug files are not bound to Evidence. REA clears DEBUGINFOD_URLS for objdump so DWARF processing does not make debuginfod network requests. Architecture output is subjectless and does not establish support for any artifact.",
+      "Run caller-selected GNU objdump inspection against a local artifact, or request operation=architectures without a path to list BFD targets advertised by the installed binary. For operation=disassemble, optional symbol selects native symbol-scoped disassembly before output collection; omission preserves all code sections. Matching and symbol boundaries follow GNU objdump. Preserves decoded stdout and stderr inline with SHA-256 Evidence for artifact inspections, up to a shared 16 MiB combined limit; invalid UTF-8 bytes are represented by replacement characters and flagged in Evidence limitations. output_truncated reports output beyond that limit and completion_status is unknown if buffer enforcement terminated the process. The raw output is authoritative and REA does not claim a stable normalized format. DWARF does not follow local debug links by default. Set follow_debug_links to true to follow them; identities of external debug files are not bound to Evidence. REA clears DEBUGINFOD_URLS for objdump so DWARF processing does not make debuginfod network requests. Default detail complete returns original Evidence. Explicit detail summary retains the complete parent and returns its command observation once, without the raw mirror; parent_evidence_id supports later inspect_analysis_view summary queries and complete Evidence export. Architecture output is subjectless and does not establish support for any artifact.",
     inputSchema: objdumpInputSchema,
-    outputSchema: evidenceResultOf(commandObservationSchema),
+    outputSchema: analysisDetailOutputSchemaOf(
+      commandObservationSchema,
+      objdumpSummaryViewResultSchema,
+    ),
     examples: [
       {
         title: "Disassemble code sections",

@@ -1,5 +1,6 @@
 import type { JsonValue } from "../../domain/jsonValue.js";
 import { hasNibArchiveSignature } from "../../domain/apple/appleArchiveFormat.js";
+import { isInterfaceBuilderConnectionClass } from "../../domain/apple/interfaceBuilderKeyedArchive.js";
 import { TextDecoder } from "node:util";
 import {
   InterfaceBuilderDecodeBudget,
@@ -147,9 +148,7 @@ export const decodeNibArchive = (
   });
   let connectionObjectCount = 0;
   for (const object of objects)
-    if (
-      /(?:Outlet|Connection|Segue|ActionConnection)/iu.test(object.class_name)
-    )
+    if (isInterfaceBuilderConnectionClass(object.class_name))
       connectionObjectCount += 1;
 
   return {

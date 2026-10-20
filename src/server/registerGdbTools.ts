@@ -3,9 +3,14 @@ import type { Logger } from "pino";
 
 import type { GdbSessionManager } from "../gdb/GdbSessionManager.js";
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
+import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
+import {
+  requireAnalysisViewRetention,
+  summarizeRetainedAnalysis,
+} from "../application/analysisView/AnalysisViewService.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { evidenceSchema } from "../domain/evidence.js";
-import { err } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import {
   runOwnedCleanupWithExternalMutationAdmission,
@@ -29,6 +34,7 @@ export const registerGdbTools = (
   delivery: ToolResultDelivery,
   recordEvidence?: EvidenceWriter["recordEvidence"],
   session?: ExternalMutationAdmission,
+  evidenceById?: EvidenceLookup,
 ): void => {
   const start = toolContract("start_gdb_session");
   const consoleContract = toolContract("gdb_console");
@@ -70,6 +76,14 @@ export const registerGdbTools = (
     consoleContract.name,
     toolRegistrationOptions(consoleContract),
     async (input, context: ServerContext) => {
+      const retention = { recordEvidence, evidenceById };
+      if (input.detail === "summary") {
+        const ready = requireAnalysisViewRetention(
+          consoleContract.name,
+          retention,
+        );
+        if (!ready.ok) return delivery.toCallToolResult(ready, consoleContract);
+      }
       const execute = () =>
         logToolExecution(logger, consoleContract.name, () =>
           manager.execute(
@@ -78,7 +92,7 @@ export const registerGdbTools = (
             context.mcpReq.signal,
           ),
         );
-      const result = await runWithExternalMutationAdmission(
+      const executed = await runWithExternalMutationAdmission(
         session,
         consoleContract.name,
         context.mcpReq.signal,
@@ -86,6 +100,11 @@ export const registerGdbTools = (
         (value) => value.evidence,
         () => manager.retryCleanupFailures(),
       );
+      const result = !executed.ok
+        ? executed
+        : input.detail === "summary"
+          ? summarizeRetainedAnalysis(executed.value.evidence, retention)
+          : ok(executed.value.evidence);
       if (!result.ok) {
         const partial = result.error.partialObservation;
         const parsed = evidenceSchema.safeParse(partial);
@@ -101,9 +120,9 @@ export const registerGdbTools = (
         }
         return delivery.toCallToolResult(result, consoleContract);
       }
-      const recorded = recordEvidence?.(result.value.evidence);
+      const recorded = recordEvidence?.(result.value);
       return delivery.toEvidenceToolResult(
-        result.value.evidence,
+        result.value,
         consoleContract,
         recorded,
       );

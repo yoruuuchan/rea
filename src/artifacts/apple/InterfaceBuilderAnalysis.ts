@@ -4,6 +4,7 @@ import { parseBinary } from "plist";
 import { appleResourceKeyFields } from "../../domain/apple/appleAssetCatalog.js";
 import {
   interfaceBuilderConnectionFieldNames,
+  isInterfaceBuilderConnectionClass,
   isUIKitRuntimeConnectionClass,
 } from "../../domain/apple/interfaceBuilderKeyedArchive.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
@@ -576,7 +577,7 @@ const projectNibArchive = (
     // AppKit connectors use NS-prefixed keys; UIKit's runtime outlet and
     // event connections use UI-prefixed keys with the same roles.
     const uiKit = isUIKitRuntimeConnectionClass(className);
-    if (!uiKit && !className.includes("Connector")) continue;
+    if (!isInterfaceBuilderConnectionClass(className)) continue;
     const values = object.values;
     const connectionFields = interfaceBuilderConnectionFieldNames(className);
     const source = reference(values[connectionFields.source]);

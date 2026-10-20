@@ -140,7 +140,12 @@ const selectableRoute = (
       ? providers[0]
       : providers.length === 0
         ? undefined
-        : new CompositeProvider(providers);
+        : new CompositeProvider(
+            providers,
+            binding?.createClient === undefined
+              ? new Map()
+              : new Map([[binding.identity.id, binding.createClient]]),
+          );
   const identity = provider?.identity() ?? emptyProviderIdentity();
   // The binding attributes deep-provider capabilities to the resolved version.
   const capabilities = capabilityMap([

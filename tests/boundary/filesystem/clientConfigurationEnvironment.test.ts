@@ -16,9 +16,47 @@ import {
 } from "../../../src/application/SetupClientConfiguration.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
-import { clientRegistrationEnvironmentDetails } from "../../../src/application/ClientRegistrationEnvironment.js";
+import {
+  clientRegistrationEnvironmentDetails,
+  clientRegistrationEnvironmentDetailsWithBudget,
+} from "../../../src/application/ClientRegistrationEnvironment.js";
 import { snapshotEnvironment } from "../../../src/process/snapshotEnvironment.js";
 import { npxRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
+import { ok } from "../../../src/domain/result.js";
+
+it("awaits the owner-parsed provider request budget without changing caller strings", async () => {
+  const parsed = parseClientConfiguration(
+    JSON.stringify({
+      mcpServers: {
+        rea: {
+          command: "rea",
+          args: ["mcp"],
+          env: {
+            REA_ANALYSIS_PROVIDER: "ida",
+            REA_IDA_MCP_CONFIG: "/tmp/rea-registration.json/",
+          },
+        },
+      },
+    }),
+    "json",
+  );
+  const details = await clientRegistrationEnvironmentDetailsWithBudget(
+    parsed,
+    {},
+    "effective",
+    async (provider) => {
+      expect(provider).toBe("ida");
+      return ok(17);
+    },
+  );
+  expect(details).toMatchObject({
+    ok: true,
+    value: {
+      values: { REA_IDA_MCP_CONFIG: "/tmp/rea-registration.json/" },
+      timeoutInputs: { providerRequestTimeoutMs: 17 },
+    },
+  });
+});
 
 it.each(["win32", "linux"] as const)(
   "uses the selected %s identity when inspecting lowercase registration settings",

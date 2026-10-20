@@ -59,6 +59,7 @@ it.each([false, true])(
       workflowSnapshotRecord(
         evidence,
         "inspect_native_api",
+        ANALYSIS_SNAPSHOT_PROFILE,
         composed.value.cachePolicy,
       ) === undefined,
     ).toBe(transient);

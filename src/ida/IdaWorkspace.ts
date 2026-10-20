@@ -20,6 +20,10 @@ export const sameIdaHostPath = (left: string, right: string): boolean =>
     ? normalize(left).toLowerCase() === normalize(right).toLowerCase()
     : normalize(left) === normalize(right);
 
+/** Resolve the exact existing parent used by both readiness and allocation. */
+export const resolveIdaWorkspaceParent = (root = tmpdir()): Promise<string> =>
+  realpath(normalize(root));
+
 /** Private input copy isolates upstream database and sidecar writes from the original. */
 export class IdaWorkspace {
   readonly sessionId = `rea-${randomUUID()}`;
@@ -48,7 +52,7 @@ export class IdaWorkspace {
     // Upstream reports canonical paths (macOS /var -> /private/var), so the
     // private input path must already be canonical for identity checks.
     const runtime = await PrivateRuntimeRoot.create({
-      parent: await realpath(normalize(root)),
+      parent: await resolveIdaWorkspaceParent(root),
       prefix: "rea-ida-",
     });
     const inputPath = join(runtime.path, basename(target.path));

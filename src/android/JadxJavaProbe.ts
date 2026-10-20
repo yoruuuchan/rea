@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import {
   AnalysisError,
   type AnalysisCapturedOutput,
@@ -27,7 +27,7 @@ const JAVA_MODULE_LISTING_TIMEOUT_MS = 10_000;
 const JAVA_MODULE_LISTING_MAX_OUTPUT_BYTES = 1024 * 1024;
 
 export interface JadxJavaProbeOptions {
-  readonly resourceOwner: FileCloseResourceOwner;
+  readonly resourceOwner: RetainedResourceScope;
   readonly signal?: AbortSignal | undefined;
   readonly operation?: string;
   /** The Android operation owns this deadline; the probe also has its own bound. */

@@ -87,7 +87,7 @@ export const projectDesktopApplication = (
     candidate(
       "unity-il2cpp",
       [...metadata, ...il2cpp],
-      "IL2CPP metadata headers and conventionally named native libraries coexist; their build correspondence is unverified.",
+      "IL2CPP metadata magic and conventionally named native libraries coexist; metadata validity and build correspondence are unverified.",
       "inferred",
     );
     for (const file of il2cpp)

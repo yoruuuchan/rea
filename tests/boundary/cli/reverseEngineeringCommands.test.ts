@@ -150,7 +150,7 @@ it("lists objdump architectures without inventing an artifact path", async () =>
   if (command === undefined)
     throw new Error("architecture command was not registered");
 
-  const result = await command.run({});
+  const result = await command.run({ options: { detail: "complete" } });
 
   expect(result).toEqual(evidence);
   expect(inspectWithObjdump).toHaveBeenCalledWith(

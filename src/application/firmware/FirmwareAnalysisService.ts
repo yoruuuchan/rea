@@ -12,6 +12,7 @@ import {
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
 import { jsonObjectSchema } from "../../domain/jsonValue.js";
+import { projectInputIssues } from "../../domain/inputIssueProjection.js";
 import { err, type Result } from "../../domain/result.js";
 import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
@@ -35,7 +36,13 @@ export class FirmwareAnalysisService {
       );
     const parsed = firmwareRequestSchema.safeParse({ operation, input });
     if (!parsed.success)
-      return err(new AnalysisInputError(operation, { cause: parsed.error }));
+      return err(
+        new AnalysisInputError(
+          operation,
+          { cause: parsed.error },
+          projectInputIssues(parsed.error.issues, { operation, input }),
+        ),
+      );
     const executed = await this.provider.execute(parsed.data, options);
     if (!executed.ok) return executed;
     const execution = executed.value;

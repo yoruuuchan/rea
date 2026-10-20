@@ -37,6 +37,7 @@ import {
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 
 const CONTENT = "registered executable bytes";
+const runFile = promisify(execFile);
 const fixture = async () => {
   const directory = await createTestTempDirectory("rea-signature-binding-");
   const path = join(directory, "program");
@@ -228,10 +229,23 @@ it.each([
   async (stage, failure) => {
     const { path, target } = await fixture();
     const replay = new NativeFixtureRunner();
-    const unsigned = new NativeFixtureRunner(
-      { codesign: "code object is not signed at all\n" },
-      1,
-    );
+    const unsigned: NativeCommandRunner = {
+      async run(tool, args, options) {
+        const diagnostic = `${args.at(-1)}: code object is not signed at all\n`;
+        const capture = await new NativeFixtureRunner(
+          { codesign: diagnostic },
+          1,
+        ).run(tool, args);
+        if (!capture.ok) return capture;
+        return ok({
+          ...capture.value,
+          stdout: "",
+          stderr: diagnostic,
+          stdoutBytes: 0,
+          stderrBytes: Buffer.byteLength(diagnostic),
+        });
+      },
+    };
     let failed = false;
     const runner: NativeCommandRunner = {
       async run(tool, args) {
@@ -259,7 +273,7 @@ it.each([
           return err(new NativeCommandFailure(tool, "nonzero-exit", 1));
         }
         if (stage === "slice" && args.includes("-r-"))
-          return unsigned.run(tool, args);
+          return unsigned.run(tool, args, {});
         return replay.run(tool, args);
       },
     };
@@ -361,6 +375,110 @@ it("preserves cancellation after a capture instead of classifying it as invalid 
   });
 });
 
+it("does not classify an unrelated path-echo diagnostic as an unsigned observation", async () => {
+  const directory = await createTestTempDirectory(
+    "rea-signature-path-diagnostic-",
+  );
+  const path = join(directory, "source\ncode object is not signed\noperand");
+  await writeFile(path, CONTENT);
+  const target = await nativeMachoTargetForFile(path);
+  let snapshotPath: string | undefined;
+  const runner: NativeCommandRunner = {
+    async run(tool, args) {
+      snapshotPath = args.at(-1);
+      if (snapshotPath === undefined)
+        throw new Error("Expected the bound snapshot as the codesign operand");
+      expect(await readFile(snapshotPath)).toEqual(Buffer.from(CONTENT));
+      return new NativeFixtureRunner(
+        { codesign: `${snapshotPath}: No such file or directory\n` },
+        1,
+      ).run(tool, args);
+    },
+  };
+
+  const result = await new NativeMacOSProvider({}, runner, "darwin")
+    .createClient(target)
+    .execute("inspect_signature", {});
+
+  expect(result).toMatchObject({
+    ok: false,
+    error: { _tag: "ProviderAdapterError" },
+  });
+  expect(await readFile(path, "utf8")).toBe(CONTENT);
+  if (snapshotPath === undefined) throw new Error("Expected codesign capture");
+  await expect(lstat(dirname(snapshotPath))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it.skipIf(process.platform !== "darwin")(
+  "rejects a path-injected unsigned diagnostic when real codesign sees a removed private snapshot",
+  async () => {
+    const directory = await createTestTempDirectory(
+      "rea-signature-snapshot-path-",
+    );
+    const path = join(directory, "source\ncode object is not signed\noperand");
+    await copyFile("/usr/bin/true", path);
+    const target = await nativeMachoTargetForFile(path);
+    const originalBytes = await readFile(path);
+    const real = new XcrunCommandRunner({});
+    let snapshotPath: string | undefined;
+    const runner: NativeCommandRunner = {
+      async run(tool, args, options) {
+        snapshotPath = args.at(-1);
+        if (snapshotPath === undefined)
+          throw new Error(
+            "Expected the bound snapshot as the codesign operand",
+          );
+        expect(snapshotPath).not.toBe(path);
+        expect(snapshotPath).toContain("\ncode object is not signed\n");
+        await rm(snapshotPath);
+        return real.run(tool, args, options);
+      },
+    };
+
+    const result = await new NativeMacOSProvider({}, runner, "darwin")
+      .createClient(target)
+      .execute("inspect_signature", {});
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisArtifactChangedError" },
+    });
+    expect(await readFile(path)).toEqual(originalBytes);
+    if (snapshotPath === undefined)
+      throw new Error("Expected codesign capture");
+    await expect(lstat(dirname(snapshotPath))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "accepts the exact unsigned diagnostic for a caller path containing that phrase",
+  async () => {
+    const directory = await createTestTempDirectory(
+      "rea-signature-real-unsigned-",
+    );
+    const path = join(directory, "source\ncode object is not signed\noperand");
+    await copyFile("/usr/bin/true", path);
+    await runFile("/usr/bin/codesign", ["--remove-signature", path]);
+    const target = await nativeMachoTargetForFile(path);
+    const result = await new NativeMacOSProvider(
+      {},
+      new XcrunCommandRunner({}),
+      "darwin",
+    )
+      .createClient(target)
+      .execute("inspect_signature", {});
+    if (!result.ok) throw result.error;
+    const parsed = inspectSignatureSchema.parse(result.value.result);
+    expect(parsed).toMatchObject({ signed: false });
+    expect(parsed.provenance).toHaveLength(3);
+    expect(parsed.provenance.every(({ exit }) => exit.code === 1)).toBe(true);
+  },
+);
+
 it.each(["success", "failure", "cancellation", "throw"] as const)(
   "releases the verified snapshot after %s",
   async (outcome) => {
@@ -408,6 +526,28 @@ it("copies and hashes the same bytes across multiple snapshot chunks", async () 
     },
   );
 });
+
+it.skipIf(process.platform === "win32")(
+  "rejects a changed snapshot identity while the registered source remains unchanged",
+  async () => {
+    const { path, target } = await fixture();
+    const result = await withSignatureTarget(
+      target,
+      new ArtifactResourceScope(),
+      async (binding) => {
+        await chmod(binding.snapshotPath, 0o600);
+        await writeFile(binding.snapshotPath, "replacement snapshot bytes");
+        const verified = await verifySignatureTarget(target, binding);
+        return verified.ok ? ok(signatureInspectionFixture()) : verified;
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisArtifactChangedError" },
+    });
+    expect(await readFile(path, "utf8")).toBe(CONTENT);
+  },
+);
 
 it("cleans the private snapshot when inspection throws", async () => {
   const { target } = await fixture();

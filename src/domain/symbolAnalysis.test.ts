@@ -52,6 +52,56 @@ describe("modern Swift category evidence", () => {
     ).toMatchObject({ total: 0, unclassified: [] });
   });
 
+  it("preserves unsupported zero-prefixed nested Unicode contexts as unresolved", () => {
+    const names = [
+      "_$s6Nested8EnvelopeV007IhuqBAbO8describeSSyF",
+      "_$s6Nested8EnvelopeV007jvrtDBlCAEycfC",
+      "_$s6Nested8EnvelopeV007jvrtDBlCMa",
+    ];
+    const procedures = names.map((name, index) => ({
+      address: `0x${String(index + 1)}`,
+      name,
+    }));
+    const unresolved = names.map((name) => ({
+      name,
+      mangled_names: [name],
+      reason: "category_not_decoded",
+    }));
+    expect(categorizeSwiftTypes(procedures)).toMatchObject({
+      total: 3,
+      categories: {
+        other: {
+          items: names.map((name) => ({ name, mangled_names: [name] })),
+        },
+      },
+      unclassified: unresolved,
+    });
+
+    for (const category of ["classes", "enums"] as const)
+      expect(categorizeSwiftTypes(procedures, { category })).toMatchObject({
+        total: 0,
+        categories: { [category]: { count: 0 }, other: { count: 0 } },
+        unclassified: unresolved,
+      });
+  });
+
+  it("keeps outer and ASCII nested nominal categories decoded", () => {
+    const names = [
+      ["_$s6Nested8EnvelopeVMa", "structs"],
+      ["_$s6Nested8EnvelopeV5InnerCMa", "classes"],
+      ["_$s6Nested8EnvelopeV5InnerC6methodyyF", "classes"],
+    ] as const;
+    for (const [name, category] of names) {
+      expect(
+        categorizeSwiftTypes([{ address: "0x1", name }], { category }),
+      ).toMatchObject({
+        total: 1,
+        categories: { [category]: { count: 1 } },
+        unclassified: [],
+      });
+    }
+  });
+
   it("deduplicates display names after selecting a category", () => {
     expect(
       categorizeSwiftTypes(

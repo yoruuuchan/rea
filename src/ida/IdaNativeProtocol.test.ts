@@ -19,6 +19,15 @@ import { parseConfig } from "../config/parseConfig.js";
 import { IdaProvider } from "./IdaProvider.js";
 import { idaCapabilities } from "./IdaProviderCapabilities.js";
 import { IdaSessionClient } from "./IdaSessionClient.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
+import { ProviderInspectionScope } from "../providers/ProviderInspectionScope.js";
+import type { AnalysisProfileResolution } from "../application/AnalysisProvider.js";
+import type { AnalysisProfileCommitment } from "../domain/analysisProfile.js";
+
+const resourceScope: RetainedResourceScope = {
+  retain: () => undefined,
+  run: (operation) => operation(),
+};
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -107,6 +116,160 @@ const fixture = async () => {
 };
 
 describe("native IDA attached protocol", () => {
+  it("keeps the exact registration fact selected at readiness if the path changes before profile resolution", async () => {
+    const { root, target, producer } = await fixture();
+    const path = join(root, "mutable-registration.json");
+    await writeFile(
+      path,
+      JSON.stringify({ command: "first-server", mode: "attached" }),
+    );
+    const config = parseConfig({ REA_IDA_MCP_CONFIG: path });
+    if (!config.ok) throw config.error;
+    const factoryRegistrations: string[] = [];
+    const provider = new IdaProvider(config.value, {}, (registration) => {
+      factoryRegistrations.push(
+        "command" in registration ? registration.command : registration.url,
+      );
+      return producer;
+    });
+    const controller = new AbortController();
+    const scope = new ProviderInspectionScope();
+    const options = { signal: controller.signal, scope, resourceScope };
+    const readiness = await provider.inspectReadinessSnapshot(options);
+    expect(readiness.availability).toMatchObject({
+      status: "available",
+      diagnostics: { mode: "attached" },
+    });
+    await writeFile(
+      path,
+      JSON.stringify({ command: "replacement-server", mode: "headless" }),
+    );
+    const profile = await provider.resolveAnalysisProfile(target, options);
+    if (!profile.ok) throw profile.error;
+    expect(profile.value.profile.parameters).toMatchObject({
+      mode: "attached",
+    });
+    const createBoundClient = profile.value.createClient;
+    if (createBoundClient === undefined)
+      throw new Error("IDA profile did not retain its client factory");
+    const client = createBoundClient(target, profile.value.profile);
+    const restoredClient = createBoundClient(target, profile.value.profile);
+    expect(factoryRegistrations).toEqual(["first-server", "first-server"]);
+    await client.close();
+    await restoredClient.close();
+    scope.close();
+  });
+
+  it("does not reuse a registration across independent scopes sharing one signal", async () => {
+    const { root, target } = await fixture();
+    const path = join(root, "independent-registration.json");
+    await writeFile(path, JSON.stringify({ command: "first-server" }));
+    const config = parseConfig({ REA_IDA_MCP_CONFIG: path });
+    if (!config.ok) throw config.error;
+    const provider = new IdaProvider(config.value, {});
+    const controller = new AbortController();
+    const firstScope = new ProviderInspectionScope();
+    const first = await provider.inspectReadinessSnapshot({
+      signal: controller.signal,
+      scope: firstScope,
+      resourceScope,
+    });
+    expect(first.availability.status).toBe("available");
+    const firstProfile = await provider.resolveAnalysisProfile(target, {
+      signal: controller.signal,
+      scope: firstScope,
+      resourceScope,
+    });
+    if (!firstProfile.ok) throw firstProfile.error;
+    await writeFile(path, JSON.stringify({ command: "second-server" }));
+    const secondScope = new ProviderInspectionScope();
+    const second = await provider.inspectReadinessSnapshot({
+      signal: controller.signal,
+      scope: secondScope,
+      resourceScope,
+    });
+    expect(second.availability.status).toBe("available");
+    const profile = await provider.resolveAnalysisProfile(target, {
+      signal: controller.signal,
+      scope: secondScope,
+      resourceScope,
+    });
+    if (!profile.ok) throw profile.error;
+    expect(profile.value.profile.parameters.mode).toBe("attached");
+    expect(profile.value.profile.digest).not.toBe(
+      firstProfile.value.profile?.digest,
+    );
+    firstScope.close();
+    secondScope.close();
+  });
+});
+
+describe("IDA selected registration factories", () => {
+  it("retains every concurrently resolved registration factory without eviction", async () => {
+    const { root, target } = await fixture();
+    const path = join(root, "many-registrations.json");
+    const config = parseConfig({ REA_IDA_MCP_CONFIG: path });
+    if (!config.ok) throw config.error;
+    const observed: string[] = [];
+    const producer = new RecordingIdaMcp(target);
+    const provider = new IdaProvider(config.value, {}, (registration) => {
+      observed.push(
+        "command" in registration ? registration.command : registration.url,
+      );
+      return producer;
+    });
+    const bindings: {
+      readonly createClient: NonNullable<
+        AnalysisProfileResolution["createClient"]
+      >;
+      readonly profile: AnalysisProfileCommitment;
+    }[] = [];
+    const signal = new AbortController().signal;
+    for (let index = 0; index < 40; index += 1) {
+      await writeFile(path, JSON.stringify({ command: `server-${index}` }));
+      const scope = new ProviderInspectionScope();
+      const resolution = await provider.resolveAnalysisProfile(target, {
+        signal,
+        scope,
+        resourceScope,
+      });
+      if (!resolution.ok) throw resolution.error;
+      if (
+        resolution.value.profile === null ||
+        resolution.value.createClient === undefined
+      )
+        throw new Error(
+          "IDA profile resolution omitted its bound client factory",
+        );
+      bindings.push({
+        createClient: resolution.value.createClient,
+        profile: resolution.value.profile,
+      });
+      scope.close();
+    }
+    const clients = bindings.map(({ createClient, profile }) =>
+      createClient(target, profile),
+    );
+    expect(observed).toEqual(
+      Array.from({ length: 40 }, (_, index) => `server-${index}`),
+    );
+    const mismatchedTargetClient = bindings[0]!.createClient(
+      { ...target, path: `${target.path}.different` },
+      bindings[0]!.profile,
+    );
+    const mismatchedProfileClient = bindings[0]!.createClient(
+      target,
+      bindings[1]!.profile,
+    );
+    expect((await mismatchedTargetClient.execute("health", {})).ok).toBe(false);
+    expect((await mismatchedProfileClient.execute("health", {})).ok).toBe(
+      false,
+    );
+    await mismatchedTargetClient.close();
+    await mismatchedProfileClient.close();
+    for (const client of clients) await client.close();
+  });
+
   it("requires explicit opt-in and rejects native headless registrations", async () => {
     const { root } = await fixture();
     const path = join(root, "native.json");
@@ -114,7 +277,7 @@ describe("native IDA attached protocol", () => {
       path,
       JSON.stringify({ url: "http://127.0.0.1:13337/mcp", protocol: "native" }),
     );
-    expect(readIdaConfiguration(path)).toMatchObject({
+    expect(await readIdaConfiguration(path, { resourceScope })).toMatchObject({
       ok: true,
       value: { mode: "attached", protocol: "native" },
     });
@@ -126,9 +289,11 @@ describe("native IDA attached protocol", () => {
         mode: "headless",
       }),
     );
-    expect(readIdaConfiguration(path).ok).toBe(false);
+    expect((await readIdaConfiguration(path, { resourceScope })).ok).toBe(
+      false,
+    );
     await writeFile(path, JSON.stringify({ command: "python" }));
-    const old = readIdaConfiguration(path);
+    const old = await readIdaConfiguration(path, { resourceScope });
     expect(old.ok && old.value.protocol).toBeUndefined();
   });
 
@@ -144,7 +309,7 @@ describe("native IDA attached protocol", () => {
     const provider = new IdaProvider(config.value, {}, () => {
       throw new Error("Unexpected discovery startup");
     });
-    expect(provider.inspectAvailability().status).toBe("available");
+    expect((await provider.inspectAvailability()).status).toBe("available");
     const profile = await provider.resolveAnalysisProfile(target);
     if (!profile.ok) throw profile.error;
     expect(profile.value.profile.provider.name).toBe("IDA MCP adapter");
@@ -154,21 +319,17 @@ describe("native IDA attached protocol", () => {
       cache_policy: "live",
       engine_version: null,
     });
+    const readiness = await provider.inspectReadinessSnapshot();
     expect(
-      provider
-        .capabilities()
-        .find(({ operation }) => operation === "procedure_pseudo_code")?.effects
-        .mayShowUi,
-    ).toBe(true);
-    expect(
-      provider
-        .capabilities()
-        .find(({ operation }) => operation === "procedure_assembly")?.effects
-        .mayShowUi,
+      readiness.capabilities.find(
+        ({ operation }) => operation === "procedure_assembly",
+      )?.effects.mayShowUi,
     ).toBe(false);
     expect(producer.connects).toBe(0);
   });
+});
 
+describe("native IDA complete result decoding", () => {
   it("uses complete native JSON text instead of a shortened structured preview", () => {
     const complete = [
       {

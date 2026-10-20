@@ -62,6 +62,33 @@ export async function readTestDurations(
 
 type TimedItem<T> = { item: T; key: string; duration: number | undefined };
 
+// process-boundary runs its files one at a time. Other projects overlap up to
+// the runner worker cap, so equal file-duration sums are not equal wall time.
+const PARALLEL_TEST_WORKERS = 2;
+
+export function estimatedShardCost(
+  project: string,
+  durationMs: number,
+): number {
+  if (project === "process-boundary") return durationMs;
+  return durationMs / PARALLEL_TEST_WORKERS;
+}
+
+/** Weight raw durations, filling gaps from the raw median before worker sharing. */
+export function weightFileDurations(
+  entries: readonly { project: string; duration: number | undefined }[],
+): (number | undefined)[] {
+  const known = entries
+    .flatMap(({ duration }) => (duration === undefined ? [] : [duration]))
+    .sort((left, right) => left - right);
+  if (!known.length) return entries.map(() => undefined);
+  const lower = known[Math.floor((known.length - 1) / 2)]!;
+  const median = lower + (known[Math.floor(known.length / 2)]! - lower) / 2;
+  return entries.map(({ project, duration }) =>
+    estimatedShardCost(project, duration ?? median),
+  );
+}
+
 /** Distribute the longest files first, retaining every discovered specification. */
 export function allocateByDuration<T>(
   items: readonly TimedItem<T>[],
@@ -105,16 +132,23 @@ export class CiTestSequencer extends BaseSequencer {
     const durations = await readTestDurations(historyPath, root);
     if (!durations) return super.shard(files);
 
-    const weighted = files.map((item) => {
+    const timed = files.map((item) => {
       const path = relative(root, resolve(root, item.moduleId))
         .split(sep)
         .join("/");
       return {
         item,
         key: path + "\0" + item.project.name + "\0" + item.pool,
+        project: item.project.name,
         duration: durations.get(path),
       };
     });
+    const costs = weightFileDurations(timed);
+    const weighted = timed.map((entry, index) => ({
+      item: entry.item,
+      key: entry.key,
+      duration: costs[index],
+    }));
     const shards = allocateByDuration(weighted, shard.count);
     return shards ? shards[shard.index - 1]! : super.shard(files);
   }

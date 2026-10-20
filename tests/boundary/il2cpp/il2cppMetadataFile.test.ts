@@ -7,6 +7,7 @@ import {
   il2cppIndexWidth,
   il2cppMetadataRecordBytes,
   readIl2cppMetadata,
+  readIl2cppMetadataForLinking,
   readIl2cppMetadataSteps,
 } from "../../../src/il2cpp/Il2cppMetadataFile.js";
 import {
@@ -24,9 +25,14 @@ import {
   type Il2cppMetadataFixture,
 } from "../../fixtures/il2cpp/metadata.js";
 
-const failure = (bytes: Buffer) => {
+const failure = (
+  bytes: Buffer,
+  reader:
+    | typeof readIl2cppMetadata
+    | typeof readIl2cppMetadataForLinking = readIl2cppMetadata,
+) => {
   try {
-    readIl2cppMetadata(bytes);
+    reader(bytes);
   } catch (cause: unknown) {
     if (cause instanceof Il2cppMetadataFormatFailure) return cause;
     throw cause;
@@ -161,12 +167,47 @@ describe("rejected IL2CPP global-metadata", () => {
       "unrecognized-magic",
       "unsupported",
     );
-    rejects(Buffer.alloc(4), "unrecognized-magic", "unsupported");
+    for (const length of [4, 5, 6, 7])
+      rejects(Buffer.alloc(length), "unrecognized-magic", "unsupported");
     rejects(
       mutated((_, bytes) => bytes.writeInt32LE(30, 4)),
       "unsupported-version",
       "unsupported",
     );
+  });
+
+  it("retains the decoder's signed interpretation of a complete high-bit version", () => {
+    const bytes = Buffer.alloc(8);
+    bytes.writeUInt32LE(0xfab11baf, 0);
+    bytes.writeUInt32LE(0xffffffff, 4);
+    const rejected = failure(bytes);
+    expect(rejected.reason).toBe("unsupported-version");
+    expect(rejected.kind).toBe("unsupported");
+    expect(rejected.message).toContain("metadata version -1 is not supported");
+  });
+
+  it.each([4, 5, 6, 7])(
+    "retains recognized magic and reports a %i-byte version prefix as truncated",
+    (length) => {
+      const bytes = Buffer.alloc(length);
+      bytes.writeUInt32LE(0xfab11baf, 0);
+      const rejected = failure(bytes);
+      expect(rejected.reason).toBe("truncated-header");
+      expect(rejected.kind).toBe("corrupt");
+      expect(rejected.message).toContain(
+        "fewer than the 8-byte magic/version prefix",
+      );
+      expect(rejected.message).toContain("metadata version is unknown");
+    },
+  );
+
+  it("uses the same truncated-prefix classification before native linking", () => {
+    const bytes = Buffer.alloc(7);
+    bytes.writeUInt32LE(0xfab11baf, 0);
+    const rejected = failure(bytes, readIl2cppMetadataForLinking);
+    expect(rejected.reason).toBe("truncated-header");
+    expect(rejected.kind).toBe("corrupt");
+    expect(rejected.message).toContain("metadata version is unknown");
   });
 
   it("rejects a truncated header and an unexpected header size", () => {

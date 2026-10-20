@@ -17,6 +17,10 @@ import {
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { err, type Result } from "../../domain/result.js";
 import type { SessionProviderRoute } from "./SessionProviderRouter.js";
+import {
+  isProfilelessNativeDispatchSnapshot,
+  profilelessNativeDispatchProfile,
+} from "./ProfilelessNativeWorkflowSnapshot.js";
 import { SessionProviderRouter } from "./SessionProviderRouter.js";
 
 /** Read a staged snapshot once the open holds its place in the session order. */
@@ -126,6 +130,7 @@ export const validateResolvedSessionTarget = (
     snapshot: options.snapshot,
     target,
     profile: route.profile,
+    profilelessWorkflowProfile: profilelessNativeDispatchProfile(route),
     current,
     stagedSnapshotMatches,
   });
@@ -147,6 +152,7 @@ interface ValidateSnapshotInput {
   readonly snapshot: AnalysisSnapshot | undefined;
   readonly target: BinaryTarget;
   readonly profile: AnalysisProfileCommitment | null;
+  readonly profilelessWorkflowProfile: AnalysisProfileCommitment | undefined;
   readonly current: CurrentOpenBinding | undefined;
   readonly stagedSnapshotMatches: (
     target: BinaryTarget,
@@ -158,17 +164,31 @@ const validateSnapshot = ({
   snapshot,
   target,
   profile,
+  profilelessWorkflowProfile,
   current,
   stagedSnapshotMatches,
 }: ValidateSnapshotInput): EvidenceIntegrityError | undefined => {
   if (
     snapshot !== undefined &&
-    (profile === null || !snapshotMatchesBinding(snapshot, target, profile))
+    (profile === null
+      ? profilelessWorkflowProfile === undefined ||
+        !isProfilelessNativeDispatchSnapshot(
+          snapshot,
+          target,
+          profilelessWorkflowProfile,
+        )
+      : !snapshotMatchesBinding(snapshot, target, profile))
   )
     return new AnalysisSnapshotMismatchError(
       "Analysis snapshot profile_mismatch: target, provider, or analysis profile does not match the requested binary",
     );
-  if (current === undefined && !stagedSnapshotMatches(target, profile))
+  if (
+    current === undefined &&
+    !stagedSnapshotMatches(
+      target,
+      profile ?? profilelessWorkflowProfile ?? null,
+    )
+  )
     return new AnalysisSnapshotMismatchError(
       "Analysis snapshot profile_mismatch: staged target, provider, or analysis profile does not match",
     );

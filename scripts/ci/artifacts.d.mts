@@ -49,6 +49,7 @@ export function selectStaticCheckArtifact(
   page: unknown,
   run: { id?: string | number; head_sha?: string },
   runAttempt: number,
+  name?: string,
 ): unknown | null;
 
 export function readStaticCheckArtifact(options: {

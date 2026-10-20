@@ -35,6 +35,39 @@ const cases = [
   },
 ];
 
+cliTest(
+  "names the server deadline control in CLI timeout recovery",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-js-cli-timeout-recovery-");
+    await writeFile(join(root, "main.js"), "export const observed = 7;\n");
+    const response = await cli.run({
+      arguments: [
+        "analyze-javascript-application",
+        root,
+        "--max-heap-mb",
+        "128",
+        "--analysis-timeout-ms",
+        "1",
+        "--format",
+        "json",
+      ],
+      environment: { NODE_OPTIONS: "--max-old-space-size=512" },
+    });
+    expect(response.exitCode).not.toBe(0);
+    expect(response.json).toMatchObject({
+      error: "JavaScript application analysis failed",
+      code: "provider_timeout",
+      message: expect.stringContaining("analysis_timeout_ms"),
+      remediation: {
+        action: expect.stringContaining(
+          "rea analyze-javascript-application <input_path> --analysis-timeout-ms",
+        ),
+      },
+      recovery: { kind: "inspect_timeout_state", timeout_ms: 1 },
+    });
+  },
+);
+
 cliTest.for(cases)(
   "preserves $name in CLI Evidence without adding ambient defaults",
   async ({ args, controls }, { cli }) => {

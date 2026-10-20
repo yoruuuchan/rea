@@ -1,6 +1,6 @@
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
 import { throwIfJadxInterrupted } from "./JadxInterruption.js";
 import { chmod, copyFile } from "node:fs/promises";
@@ -250,7 +250,7 @@ export class JadxProvider implements AndroidAnalysisPort {
   readonly #inspections = new Set<
     Promise<Awaited<ReturnType<typeof inspectJadxAvailability>>>
   >();
-  readonly #prerequisiteOwner: FileCloseResourceOwner = {
+  readonly #prerequisiteOwner: RetainedResourceScope = {
     retain: (owner, resource) =>
       this.#prerequisites.retain({
         kind: "lease",

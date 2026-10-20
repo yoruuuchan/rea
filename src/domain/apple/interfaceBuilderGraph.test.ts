@@ -707,7 +707,170 @@ describe("AppKit keyed archive connectors", () => {
       }),
     ]);
   });
+});
 
+describe("unsupported keyed archive connections", () => {
+  it("keeps unsupported binding connectors in connection coverage", () => {
+    const raw = {
+      $archiver: "NSKeyedArchiver",
+      $objects: [
+        "$null",
+        { $class: { UID: 6 } },
+        { $class: { UID: 6 } },
+        {
+          $class: { UID: 7 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 2 },
+          NSLabel: "outlet",
+        },
+        {
+          $class: { UID: 8 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 2 },
+          NSLabel: "performAction:",
+        },
+        {
+          $class: { UID: 9 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 2 },
+          NSLabel: "value",
+        },
+        { $classname: "NSView", $classes: ["NSView", "NSObject"] },
+        {
+          $classname: "NSNibOutletConnector",
+          $classes: ["NSNibOutletConnector", "NSNibConnector", "NSObject"],
+        },
+        {
+          $classname: "NSNibControlConnector",
+          $classes: ["NSNibControlConnector", "NSNibConnector", "NSObject"],
+        },
+        {
+          $classname: "NSNibBindingConnector",
+          $classes: ["NSNibBindingConnector", "NSNibConnector", "NSObject"],
+        },
+      ],
+      $top: {},
+    };
+
+    const parsed = parseInterfaceBuilderRecords(raw);
+    expect(parsed.connections.map(({ kind }) => kind)).toEqual([
+      "outlet",
+      "action",
+      "other",
+    ]);
+
+    const analysis = buildInterfaceBuilderAnalysis({
+      targetSha256: hash,
+      toolVersion: "test",
+      documents: [
+        {
+          relativePath: "MainMenu.nib",
+          archiveSha256: hash,
+          documentKind: "nib",
+          raw,
+        },
+      ],
+      limits: interfaceBuilderLimitsSchema.parse({}),
+    });
+    expect(analysis.documents[0]?.connection_count).toBe(3);
+    expect(analysis.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:MainMenu.nib",
+        status: "partial",
+        reason: "unsupported_connection_type",
+        examined: 3,
+        omitted: 0,
+      }),
+    );
+    expect(analysis.graph.edges).toContainEqual(
+      expect.objectContaining({
+        relation: "contains",
+        reason: "unsupported_connection_type",
+        evidence: [
+          expect.objectContaining({ description: "connection type other" }),
+        ],
+      }),
+    );
+  });
+});
+
+describe("keyed archive class identity", () => {
+  it("does not classify a custom class containing Connector as a connection", () => {
+    const parsed = parseInterfaceBuilderRecords({
+      $archiver: "NSKeyedArchiver",
+      $objects: [
+        "$null",
+        {
+          $class: { UID: 2 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 1 },
+        },
+        {
+          $classname: "TelemetryConnectorState",
+          $classes: ["TelemetryConnectorState", "NSObject"],
+        },
+      ],
+      $top: {},
+    });
+
+    expect(parsed.objects).toContainEqual(
+      expect.objectContaining({
+        class_name: "TelemetryConnectorState",
+        id: "1",
+      }),
+    );
+    expect(parsed.connections).toEqual([]);
+    expect(parsed.unresolvedConnections).toBe(0);
+
+    const inheritedConnector = parseInterfaceBuilderRecords({
+      $archiver: "NSKeyedArchiver",
+      $objects: [
+        "$null",
+        {
+          $class: { UID: 3 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 1 },
+        },
+        { $classname: "NSNibConnector", $classes: ["NSNibConnector"] },
+        {
+          $classname: "CustomBindingConnector",
+          $classes: ["CustomBindingConnector", "NSNibConnector", "NSObject"],
+        },
+      ],
+      $top: {},
+    });
+    expect(inheritedConnector.connections).toMatchObject([
+      { kind: "other", source_id: "1", destination_id: "1" },
+    ]);
+  });
+
+  it("preserves a malformed class UID without inferring a connector", () => {
+    const parsed = parseInterfaceBuilderRecords({
+      $archiver: "NSKeyedArchiver",
+      $objects: [
+        "$null",
+        {
+          $class: { UID: 99 },
+          NSSource: { UID: 1 },
+          NSDestination: { UID: 1 },
+        },
+      ],
+      $top: {},
+    });
+
+    expect(parsed.objects).toContainEqual(
+      expect.objectContaining({
+        class_name: null,
+        id: "1",
+        attributes: expect.objectContaining({ $class: { UID: 99 } }),
+      }),
+    );
+    expect(parsed.connections).toEqual([]);
+    expect(parsed.unresolvedConnections).toBe(0);
+  });
+});
+
+describe("AppKit control connectors", () => {
   it("projects an AppKit action from the control through the selector to its target", () => {
     const analysis = buildInterfaceBuilderAnalysis({
       targetSha256: hash,

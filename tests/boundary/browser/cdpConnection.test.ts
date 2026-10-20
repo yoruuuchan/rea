@@ -4,7 +4,10 @@ import { createServer as createNetServer, type Socket } from "node:net";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CdpConnection } from "../../../src/browser/CdpConnection.js";
+import {
+  CdpConnection,
+  type CdpTransportEvent,
+} from "../../../src/browser/CdpConnection.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
@@ -121,6 +124,42 @@ describe("CDP connection response correlation", () => {
       });
       browser.emitRawMessage(JSON.stringify({ id: 999 }));
       await expect(connection.send("Runtime.enable")).resolves.toEqual({});
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("carries the original event payload byte count before parsing", async () => {
+    const browser = await startFakeCdpBrowser();
+    browsers.push(browser);
+    const connection = await CdpConnection.connect(
+      browser.browserWebSocketUrl,
+      "inspect_web_page",
+    );
+    try {
+      const eventMessage = String.raw` { "method" : "Fixture.event", "params" : {"text":"escaped quote: \" slash: \\ unicode: \u96ea"}, "sessionId" : "session-1", "extra" : "counted from source bytes" } `;
+      let deliveredEvents = 0;
+      const eventPromise = new Promise<CdpTransportEvent>((resolve) => {
+        connection.onEvent((event) => {
+          deliveredEvents += 1;
+          if (event.method === "Fixture.event") resolve(event);
+        });
+      });
+      browser.emitRawMessage(eventMessage);
+      const event = await eventPromise;
+
+      expect(event.wireBytes).toBe(Buffer.byteLength(eventMessage, "utf8"));
+      expect(event.params).toEqual({
+        text: 'escaped quote: " slash: \\ unicode: 雪',
+      });
+      expect(deliveredEvents).toBe(1);
+
+      const protocolFailure = new Promise((resolve) =>
+        connection.onProtocolFailure(resolve),
+      );
+      browser.emitRawMessage("{not-json");
+      await protocolFailure;
+      expect(deliveredEvents).toBe(1);
     } finally {
       await connection.close();
     }

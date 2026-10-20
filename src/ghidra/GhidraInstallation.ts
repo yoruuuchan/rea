@@ -1,6 +1,6 @@
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import {
   probeGhidraJava,
   type GhidraJavaObservation,
@@ -160,7 +160,7 @@ const assessNativeDecompiler = (
 /** Caller-owned paths and host coordinates used for one installation probe. */
 export interface GhidraInstallationOptions {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
-  readonly resourceOwner: FileCloseResourceOwner;
+  readonly resourceOwner: RetainedResourceScope;
   readonly signal?: AbortSignal;
   readonly installDir?: string;
   readonly javaHome?: string;

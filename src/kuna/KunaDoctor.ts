@@ -7,10 +7,12 @@ import type {
   DoctorProviderInspection,
 } from "../application/Doctor.js";
 import { readKunaConfiguration } from "./KunaConfiguration.js";
-import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
+import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { kunaRetainedResourceCleanupError } from "./KunaCommand.js";
 import {
+  createKunaResourceScope,
   inspectKunaInstallation,
   kunaInstallationCancellation,
   kunaInstallationFailureDiagnostics,
@@ -39,25 +41,60 @@ export const inspectKunaProvider = async (
   environment: Readonly<NodeJS.ProcessEnv>,
   platform: NodeJS.Platform = process.platform,
   options: {
-    readonly fileCloseResources: FileCloseResourceOwner;
+    readonly resourceScope: RetainedResourceScope;
     readonly signal?: AbortSignal;
   },
 ): Promise<DoctorProviderInspection> => {
+  const kunaResources = createKunaResourceScope(options.resourceScope);
   let installation: Awaited<ReturnType<typeof inspectKunaInstallation>>;
   try {
     installation = await inspectKunaInstallation(environment, {
       platform,
-      fileCloseResources: options.fileCloseResources,
+      resourceScope: kunaResources.owner,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (cause: unknown) {
+    const retainedCleanup = kunaRetainedResourceCleanupError(cause, "doctor");
+    if (retainedCleanup !== undefined)
+      return {
+        id: KUNA_PROVIDER_ID,
+        configured: environment.REA_KUNA_COMMAND !== undefined,
+        available: false,
+        providerVersion: null,
+        registrationEnvironment: {},
+        checks: [
+          {
+            name: "installation",
+            ok: false,
+            code: "cleanup_incomplete",
+            detail: retainedCleanup.message,
+            remediation: null,
+            classification: "config_drift",
+            details: {
+              cleanup_incomplete: true,
+              cleanup_resources: [...retainedCleanup.cleanupResources],
+            },
+          },
+        ],
+      };
     if (!(cause instanceof RegularFileCleanupFailure)) {
       const cancellation = kunaInstallationCancellation(cause);
-      if (cancellation !== undefined)
-        throw new AnalysisCancelledError("doctor", {
+      if (cancellation !== undefined) {
+        const error = new AnalysisCancelledError("doctor", {
           cause: cancellation.reason,
           diagnostics: cancellation.diagnostics,
+          ...(!kunaResources.hasPending
+            ? {}
+            : {
+                cleanup: {
+                  reason: "Kuna version-probe process cleanup is unconfirmed.",
+                  resources: kunaResources.cleanupResources ?? [],
+                },
+              }),
         });
+        kunaResources.bindRetainedFailure(error);
+        throw error;
+      }
       throw cause;
     }
     return {
@@ -85,15 +122,34 @@ export const inspectKunaProvider = async (
   const configured =
     environment.REA_KUNA_COMMAND !== undefined &&
     environment.REA_KUNA_COMMAND.length > 0;
-  if (!installation.ok)
+  const base = {
+    id: KUNA_PROVIDER_ID,
+    configured,
+    available: false,
+    providerVersion: null,
+    registrationEnvironment: {},
+  } as const;
+  if (!installation.ok) {
+    const check = installationFailure(installation.error, configured);
+    const cleanupResources = kunaResources.cleanupResources;
+    if (!kunaResources.hasPending) return { ...base, checks: [check] };
     return {
-      id: KUNA_PROVIDER_ID,
-      configured,
-      available: false,
-      providerVersion: null,
-      registrationEnvironment: {},
-      checks: [installationFailure(installation.error, configured)],
+      ...base,
+      checks: [
+        {
+          ...check,
+          code: "cleanup_incomplete",
+          details: {
+            ...installation.error.diagnostics,
+            cleanup_incomplete: true,
+            ...(cleanupResources === undefined
+              ? {}
+              : { cleanup_resources: [...cleanupResources] }),
+          },
+        },
+      ],
     };
+  }
   const { value } = installation;
   return {
     id: KUNA_PROVIDER_ID,

@@ -316,7 +316,7 @@ async function assertRejectedEvidenceReferences(
       error: {
         code: "invalid_request",
         category: "invalid_input",
-        retryable: true,
+        retryable: false,
       },
     });
   }

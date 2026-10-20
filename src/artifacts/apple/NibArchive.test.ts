@@ -77,6 +77,23 @@ describe("NIBArchive decoder", () => {
     expect(decoded.coder_version).toBe(10);
   });
 
+  it("counts AppKit outlet, action, and binding connector objects", () => {
+    const archive = encodeArchive({
+      classes: [
+        "NSNibOutletConnector",
+        "NSNibControlConnector",
+        "NSNibBindingConnector",
+      ],
+      objects: [
+        { classIndex: 0, values: {} },
+        { classIndex: 1, values: {} },
+        { classIndex: 2, values: {} },
+      ],
+    });
+
+    expect(decodeNibArchive(archive).connection_object_count).toBe(3);
+  });
+
   it("rejects malformed references and unsupported format versions", () => {
     const valid = encodeArchive({
       classes: ["NSObject"],

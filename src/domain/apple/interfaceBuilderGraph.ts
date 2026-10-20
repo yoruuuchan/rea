@@ -453,6 +453,9 @@ export const buildInterfaceBuilderAnalysis = (input: {
     // no connection record, so its coverage is partial with its own reason
     // rather than absent or truncated.
     const connectionsUnresolved = parsed.unresolvedConnections > 0;
+    const unsupportedConnections = parsed.connections.some(
+      ({ kind }) => kind === "other",
+    );
     omittedObjects +=
       parsed.omittedObjects +
       Math.max(0, parsed.objects.length - documentObjectCount);
@@ -500,7 +503,8 @@ export const buildInterfaceBuilderAnalysis = (input: {
         status:
           connectionsTruncated ||
           documentOmittedConnections > 0 ||
-          connectionsUnresolved
+          connectionsUnresolved ||
+          unsupportedConnections
             ? "partial"
             : "complete",
         reason:
@@ -508,7 +512,9 @@ export const buildInterfaceBuilderAnalysis = (input: {
             ? "connection_limit_reached"
             : connectionsUnresolved
               ? "connection_unresolved"
-              : null,
+              : unsupportedConnections
+                ? "unsupported_connection_type"
+                : null,
         examined: Math.min(
           parsed.connections.length,
           input.limits.max_connections,

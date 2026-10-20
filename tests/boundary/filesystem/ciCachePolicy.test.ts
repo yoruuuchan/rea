@@ -219,8 +219,45 @@ it("shares static task snapshots only after validation using the npm cache owner
     key: "${{ steps.static-cache.outputs.cache-primary-key }}",
   });
   expect(steps.indexOf(save!)).toBeGreaterThan(
-    steps.findIndex((step) => step.run === "npm run test:python"),
+    steps.findIndex((step) => step.run === "npm run check:ci:fast"),
   );
+  const deep = ci?.workflow.jobs?.["static-deep"]?.steps ?? [];
+  const deepSave = deep.find(
+    (step) => step.name === "Save validated deep static task cache",
+  );
+  const knipRestore = deep.find((step) => step.id === "knip-cache");
+  const knipSave = deep.find(
+    (step) => step.name === "Save Knip analysis cache",
+  );
+  expect(deepSave?.uses).toBe(
+    "actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830",
+  );
+  expect(deepSave?.if).toContain("success()");
+  expect(deepSave?.if).toContain("steps.npm-cache.outputs.can-save == 'true'");
+  expect(deepSave?.if).toContain(
+    "steps.static-cache.outputs.cache-hit != 'true'",
+  );
+  expect(deep.indexOf(deepSave!)).toBeGreaterThan(
+    deep.findIndex((step) => step.run === "npm run check:ci:deep"),
+  );
+  const knipWith = z
+    .object({
+      path: z.string(),
+      key: z.string(),
+      "restore-keys": z.string(),
+    })
+    .parse(knipRestore?.with);
+  expect(knipWith.path).toBe("node_modules/.cache/knip");
+  expect(knipWith.key).toContain("${{ github.sha }}");
+  expect(knipWith["restore-keys"]).not.toContain("github.sha");
+  expect(knipWith["restore-keys"].startsWith("knip-meta-v1-")).toBe(true);
+  expect(knipSave?.if).toContain(
+    "steps.knip-cache.outputs.cache-hit != 'true'",
+  );
+  expect(knipSave?.with).toEqual({
+    path: "node_modules/.cache/knip",
+    key: "${{ steps.knip-cache.outputs.cache-primary-key }}",
+  });
 });
 
 it("passes the npm cache owner's selected path to package installation", async () => {
@@ -239,6 +276,73 @@ it("passes the npm cache owner's selected path to package installation", async (
     z.record(z.string(), z.unknown()).parse(steps[consumerIndex]?.env)
       .npm_config_cache,
   ).toBe("${{ steps.npm-cache.outputs.path }}");
+});
+
+it("exports turbo remote-cache credentials wherever a workflow runs turbo", async () => {
+  const directory = join(repository, ".github/workflows");
+  const files = (await readdir(directory)).filter((file) =>
+    /\.ya?ml$/u.test(file),
+  );
+  const turboCommand =
+    /\bturbo\b|build:cached|check:ci|docs:check|docs:generate|docs:prepare|test:prepare/u;
+  const workflowSchema = z.object({
+    env: z.record(z.string(), z.unknown()).optional(),
+    jobs: z.record(
+      z.string(),
+      z
+        .object({
+          env: z.record(z.string(), z.unknown()).optional(),
+          steps: z.array(z.object({ run: z.string().optional() })).optional(),
+        })
+        .passthrough(),
+    ),
+  });
+  for (const file of files) {
+    const workflow = workflowSchema.parse(
+      parse(await readFile(join(directory, file), "utf8")),
+    );
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      const runsTurbo = job.steps?.some(
+        (step) => step.run !== undefined && turboCommand.test(step.run),
+      );
+      if (!runsTurbo) continue;
+      const env = { ...workflow.env, ...job.env };
+      const token = z.string().parse(env.TURBO_TOKEN);
+      const cache = z.string().parse(env.TURBO_CACHE);
+      expect(token, `${file}:${name}`).toContain("secrets.TURBO_TOKEN");
+      expect(token, `${file}:${name}`).toContain("|| ''");
+      expect(token, `${file}:${name}`).not.toBe("${{ secrets.TURBO_TOKEN }}");
+      const grantsReleaseWrite = token.includes(
+        "inputs.remote_cache_write == true",
+      );
+      const grantsCalledEvent = token.includes(
+        "github.event_name == 'workflow_call'",
+      );
+      expect(grantsReleaseWrite || grantsCalledEvent, `${file}:${name}`).toBe(
+        true,
+      );
+      if (grantsReleaseWrite)
+        expect(token, `${file}:${name}`).not.toContain(
+          "github.event_name == 'workflow_call'",
+        );
+      for (const event of ["push", "schedule", "workflow_dispatch"])
+        expect(token, `${file}:${name}`).toContain(
+          `github.event_name == '${event}'`,
+        );
+      expect(token, `${file}:${name}`).not.toContain(
+        "github.event_name == 'pull_request'",
+      );
+      if (grantsReleaseWrite) {
+        expect(cache, `${file}:${name}`).toContain(
+          "inputs.remote_cache_write == true",
+        );
+        expect(cache, `${file}:${name}`).toContain("|| 'local:rw'");
+        expect(cache, `${file}:${name}`).not.toContain("local:rw,remote:r'");
+      } else expect(cache, `${file}:${name}`).toContain("local:rw,remote:r'");
+      expect(cache, `${file}:${name}`).toContain("local:rw,remote:rw");
+      expect(env.TURBO_TEAM, `${file}:${name}`).toBe("${{ vars.TURBO_TEAM }}");
+    }
+  }
 });
 
 it("bounds the rolling static snapshot with Turbo age and size eviction", async () => {

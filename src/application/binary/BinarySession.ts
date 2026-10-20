@@ -48,6 +48,7 @@ import {
 } from "./BinarySessionExecution.js";
 import { closeAnalysisClient } from "../../providers/AnalysisClientCleanup.js";
 import { analysisErrorWithCleanupFailure } from "../../domain/analysisErrorCleanup.js";
+import { profilelessNativeDispatchProfile } from "./ProfilelessNativeWorkflowSnapshot.js";
 const OFFICIAL_OPERATIONS: ReadonlySet<string> = new Set(
   OFFICIAL_TOOL_CONTRACTS.map(({ name }) => name),
 );
@@ -64,6 +65,7 @@ interface SessionRun {
 interface SessionBinding extends SessionRun {
   readonly target: BinaryTarget;
   readonly profile: AnalysisProfileCommitment | null;
+  readonly profilelessWorkflowProfile?: AnalysisProfileCommitment;
   nativeSourceAdmitted: boolean;
 }
 
@@ -173,7 +175,12 @@ export class BinarySession
     operation?: AnalysisOperation,
   ): AnalysisProfileCommitment | undefined {
     const profile = this.#active?.profile;
-    if (profile === null || profile === undefined) return undefined;
+    if (profile === null || profile === undefined) {
+      if (operation !== "inspect_native_dispatch_metadata") return undefined;
+      return this.#active?.profilelessWorkflowProfile === undefined
+        ? undefined
+        : structuredClone(this.#active.profilelessWorkflowProfile);
+    }
     if (
       operation !== undefined &&
       this.providerIdentity(operation).id !== profile.provider.id
@@ -337,7 +344,9 @@ export class BinarySession
       return err(
         await this.#restoreAfterFailedOpen(
           previous,
-          new AnalysisCancelledError("open_binary"),
+          new AnalysisCancelledError("open_binary", {
+            cause: options.signal?.reason,
+          }),
         ),
       );
     const runId = randomUUID();
@@ -358,9 +367,14 @@ export class BinarySession
         ),
       );
     }
+    const profilelessWorkflowProfile =
+      profile === null ? profilelessNativeDispatchProfile(route) : undefined;
     this.#active = {
       target,
       profile,
+      ...(profilelessWorkflowProfile === undefined
+        ? {}
+        : { profilelessWorkflowProfile }),
       ...run,
       nativeSourceAdmitted: false,
     };

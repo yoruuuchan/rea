@@ -19,6 +19,10 @@ import { createEvidence } from "../../../src/domain/evidence.js";
 import { ProcessCaptureError } from "../../../src/process/capture/ProcessCaptureError.js";
 import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
 import { INVESTIGATION_EXAMPLES } from "../../../src/contracts/investigationExamples.js";
+import {
+  analysisCliErrorEnvelopeSchema,
+  analysisErrorProjectionSchema,
+} from "../../../src/contracts/errorSchemas.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_INTEGRATION_TIMEOUT_MS = 60_000;
@@ -75,6 +79,71 @@ describe("documented process CLI workflow", () => {
 });
 
 describe("process CLI errors", () => {
+  cliTest(
+    "returns canonical JSON errors for missing and malformed process files",
+    async ({ cli }) => {
+      const root = await createTestTempDirectory("rea-process-cli-errors-");
+      const malformed = join(root, "malformed.json");
+      await writeFile(malformed, "not-json");
+      const cases = [
+        ["capture-process", join(root, "missing.json"), "--json"],
+        ["capture-process", malformed, "--json"],
+        [
+          "compare-process-captures",
+          join(root, "missing-left.json"),
+          join(root, "missing-right.json"),
+          "--json",
+        ],
+      ] as const;
+
+      for (const arguments_ of cases) {
+        const result = await cli.run({
+          arguments: arguments_,
+          cwd: root,
+        });
+        expect(result.exitCode).toBe(1);
+        expect(
+          analysisCliErrorEnvelopeSchema.safeParse(result.json).success,
+        ).toBe(true);
+        expect(result.json).toMatchObject({
+          code: "invalid_request",
+          category: "invalid_input",
+          retryable: false,
+          details: {
+            operation: expect.stringMatching(
+              /^(capture_process_scenario|compare_process_captures)$/u,
+            ),
+            issues: [
+              expect.objectContaining({
+                path: ["input_file"],
+                reason: "invalid_value",
+              }),
+            ],
+          },
+        });
+      }
+
+      const full = await cli.run({
+        arguments: [
+          "capture-process",
+          join(root, "missing.json"),
+          "--json",
+          "--full-output",
+        ],
+        cwd: root,
+      });
+      expect(full.exitCode).toBe(1);
+      expect(full.json).toMatchObject({ ok: false });
+      if (typeof full.json !== "object" || full.json === null)
+        throw new Error("Expected a full-output CLI error document");
+      const fullError = Reflect.get(full.json, "error");
+      expect(analysisErrorProjectionSchema.safeParse(fullError).success).toBe(
+        true,
+      );
+    },
+    CLI_INTEGRATION_TIMEOUT_MS,
+  );
+
   it(
     "exits unsuccessfully without writing failure-shaped evidence",
     async () => {
@@ -165,6 +234,7 @@ describe("process CLI evidence validation", () => {
           temporary_root: { state: "cleaned", reason: null },
         },
       }),
+      "compare_process_captures",
     );
     expect(projected).toMatchObject({
       code: "cleanup_incomplete",
@@ -227,11 +297,21 @@ describe("process CLI evidence validation", () => {
       error: "Process command failed",
       category: "invalid_input",
     });
-    expect(await compareProcessEvidenceFiles(unrelated, unrelated)).toEqual({
+    const failure = await compareProcessEvidenceFiles(unrelated, unrelated);
+    expect(analysisCliErrorEnvelopeSchema.safeParse(failure).success).toBe(
+      true,
+    );
+    expect(failure).toMatchObject({
       error: "Process command failed",
+      code: "invalid_request",
+      retryable: false,
       category: "invalid_input",
       message:
         "Capture evidence is not from the current process-capture workflow. Create new capture evidence, then try again.",
+      details: {
+        operation: "compare_process_captures",
+        issues: [{ path: ["left"], reason: "invalid_value" }],
+      },
     });
   });
 
