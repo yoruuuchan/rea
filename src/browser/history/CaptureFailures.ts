@@ -1,5 +1,7 @@
 import type { ExecutionOptions } from "../../application/AnalysisProvider.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
+import { analysisErrorWithCleanupFailure } from "../../domain/analysisErrorCleanup.js";
+import { bindArtifactFileCleanup } from "../../artifacts/ArtifactFileOperation.js";
 import { artifactFileCancellationCause } from "../../artifacts/ArtifactFileOperation.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
@@ -33,10 +35,18 @@ export const CAPTURE_PROCESS_MEMORY_LIMIT_REASON =
 export const historicalCaptureFailure = (
   input: InspectWebNetworkCaptureInput,
   cause: unknown,
-  phase: "capture-read" | "decoder",
+  phase: "capture-read" | "descriptor-read" | "decoder",
   options?: ExecutionOptions,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
+  const descriptorRead = phase === "descriptor-read";
+  const sourcePath = descriptorRead
+    ? (input.protobuf?.schema?.descriptor_set_path ?? input.capture_path)
+    : input.capture_path;
+  const inputPath = descriptorRead
+    ? ["protobuf", "schema", "descriptor_set_path"]
+    : ["capture_path"];
+  const sourceLabel = descriptorRead ? "descriptor set" : "capture";
   if (cause instanceof OwnedCommandFailure) {
     if (cause.cleanupFailure !== null)
       return new ProviderCleanupError(
@@ -99,18 +109,18 @@ export const historicalCaptureFailure = (
       );
   }
   if (
-    phase === "capture-read" &&
+    phase !== "decoder" &&
     cause instanceof ArtifactReaderFailure &&
     cause.reason === "integrity"
   )
     return new AnalysisArtifactChangedError(
       OPERATION,
-      input.capture_path,
+      sourcePath,
       cause.message,
       { cause },
     );
   if (
-    phase === "capture-read" &&
+    phase !== "decoder" &&
     cause instanceof ArtifactReaderFailure &&
     cause.reason === "cancelled"
   )
@@ -118,7 +128,7 @@ export const historicalCaptureFailure = (
       cause: artifactFileCancellationCause(cause),
     });
   if (
-    phase === "capture-read" &&
+    phase !== "decoder" &&
     cause instanceof ArtifactReaderFailure &&
     (cause.reason === "limit" ||
       cause.reason === "format" ||
@@ -126,44 +136,44 @@ export const historicalCaptureFailure = (
   )
     return new AnalysisInputError(OPERATION, { cause }, [
       {
-        path: ["capture_path"],
+        path: inputPath,
         reason: cause.reason === "limit" ? "out_of_range" : "invalid_format",
         message:
           cause.reason === "limit"
-            ? `${cause.message}. Select a capture within the ${WEB_NETWORK_CAPTURE_LIMITS.inputBytes}-byte input budget.`
+            ? `${cause.message}. Select a ${sourceLabel} within the ${WEB_NETWORK_CAPTURE_LIMITS.inputBytes}-byte input budget.`
             : cause.message,
         ...(cause.reason === "limit"
           ? {
               expected: {
-                maximum_capture_bytes: WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
+                [descriptorRead
+                  ? "maximum_descriptor_set_bytes"
+                  : "maximum_capture_bytes"]:
+                  WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
               },
             }
           : {}),
       },
     ]);
   if (
-    phase === "capture-read" &&
+    phase !== "decoder" &&
     cause instanceof Error &&
     "code" in cause &&
     (cause.code === "EACCES" || cause.code === "EPERM")
   )
-    return new AnalysisAccessDeniedError(
-      OPERATION,
-      input.capture_path,
-      cause.code,
-      { cause },
-    );
+    return new AnalysisAccessDeniedError(OPERATION, sourcePath, cause.code, {
+      cause,
+    });
   if (
-    phase === "capture-read" &&
+    phase !== "decoder" &&
     cause instanceof Error &&
     "code" in cause &&
     ["ENOENT", "ENOTDIR"].includes(String(cause.code))
   )
     return new AnalysisInputError(OPERATION, { cause }, [
       {
-        path: ["capture_path"],
+        path: inputPath,
         reason: "invalid_value",
-        message: `Selected capture could not be read (${String(cause.code)}): ${input.capture_path}.`,
+        message: `Selected ${sourceLabel} could not be read (${String(cause.code)}): ${sourcePath}.`,
       },
     ]);
   if (
@@ -182,6 +192,9 @@ export const historicalCaptureFailure = (
     diagnostics: {
       phase,
       capture_path: input.capture_path,
+      ...(descriptorRead
+        ? { source_path: sourcePath, input_path: inputPath }
+        : {}),
       reason: cause instanceof Error ? cause.message : String(cause),
       ...(cause instanceof ArtifactReaderFailure
         ? { failure_kind: cause.reason }
@@ -248,3 +261,36 @@ export const captureMemoryFailure = (
         : {}),
     },
   );
+
+/** Preserve the exact file owner when capture or descriptor acquisition needs cleanup. */
+export const withCaptureReaderCleanup = (
+  primary: AnalysisError,
+  cause: unknown,
+): AnalysisError => {
+  if (!(cause instanceof ArtifactReaderFailure) || cause.cleanup === undefined)
+    return primary;
+  if (cause.reason === "unavailable") {
+    const cleanup = new ProviderCleanupError(
+      "web-network-capture",
+      cause.cleanup.resources,
+      { reason: cause.cleanup.reason },
+      { operation: OPERATION, cause },
+    );
+    bindArtifactFileCleanup(cause, cleanup);
+    return cleanup;
+  }
+  const cleanup = new ProviderCleanupError(
+    "web-network-capture",
+    cause.cleanup.resources,
+    { reason: cause.cleanup.reason },
+    { operation: OPERATION, cause },
+  );
+  bindArtifactFileCleanup(cause, cleanup);
+  const composed = analysisErrorWithCleanupFailure(
+    primary,
+    cleanup,
+    OPERATION,
+  ).bindCleanupDependencies([primary, cleanup]);
+  bindArtifactFileCleanup(cause, composed);
+  return composed;
+};

@@ -281,7 +281,7 @@ cliTest(
           surface,
           cli,
           root,
-          connection?.call,
+          { mcpCall: connection?.call },
         );
         expect(application.input_path).toBe(root);
         expect(artifacts.has(application.root_artifact_sha256)).toBe(false);
@@ -521,7 +521,7 @@ for (const surface of ["CLI", "stdio MCP"] as const) {
           surface,
           cli,
           root,
-          connection?.call,
+          { mcpCall: connection?.call },
         );
         expect(application.input_path).toBe(root);
         return application;

@@ -199,6 +199,8 @@ const nodePaths = (node: ApplicationNode): string[] => {
       isRawApplicationFileObservation(observation);
     if (typeof observation.properties.path === "string")
       paths.push(observation.properties.path);
+    const applicationPath = ownedApplicationPath(observation);
+    if (applicationPath !== undefined) paths.push(applicationPath);
     if (rawApplicationFile) continue;
     if (typeof observation.properties.resolved_path === "string")
       paths.push(observation.properties.resolved_path);
@@ -231,20 +233,44 @@ const hasOwnedArtifactPath = (node: ApplicationNode): boolean =>
   ) ||
   node.observations.some(
     (observation) =>
-      !isRawApplicationFileObservation(observation) &&
-      typeof observation.properties.resolved_path === "string",
+      ownedApplicationPath(observation) !== undefined ||
+      (!isRawApplicationFileObservation(observation) &&
+        typeof observation.properties.resolved_path === "string"),
   );
 
-// loadFile receives a raw literal here: the syntax producer does not retain
-// computed __dirname expressions. Electron resolves this relative to the app
-// root, so its source-relative inference is not an owned runtime target.
+// Ownership of the application base survives missing target bytes. A confined
+// candidate is a path identity, not proof that a static file exists.
+const ownedApplicationPath = (
+  observation: ApplicationNode["observations"][number],
+): string | undefined => {
+  const properties = observation.properties;
+  if (properties.runtime_path_base !== "application-root") return undefined;
+  if (
+    properties.resolution_status === "resolved" &&
+    typeof properties.resolved_path === "string"
+  )
+    return properties.resolved_path;
+  if (
+    properties.runtime_path_base_proven === true &&
+    (properties.resolution_status === "not-found" ||
+      properties.resolution_status === "unavailable") &&
+    typeof properties.candidate_path === "string"
+  )
+    return properties.candidate_path;
+  return undefined;
+};
+
+// Native declaration matching is needed only without an owned logical path.
 const isRawApplicationFileObservation = (
   observation: ApplicationNode["observations"][number],
 ): boolean =>
-  observation.properties.resolution_context === "filesystem-expression" &&
-  typeof observation.properties.mechanism === "string" &&
-  observation.properties.mechanism.startsWith("call:") &&
-  observation.properties.mechanism.endsWith("loadFile");
+  observation.properties.runtime_path_base === "application-root"
+    ? ownedApplicationPath(observation) === undefined
+    : // Compatibility for captures reconstructed before the producer retained its base.
+      observation.properties.resolution_context === "filesystem-expression" &&
+      typeof observation.properties.mechanism === "string" &&
+      observation.properties.mechanism.startsWith("call:") &&
+      observation.properties.mechanism.endsWith("loadFile");
 
 const usesApplicationFileDeclaration = (node: ApplicationNode): boolean =>
   node.kind === "electron-renderer" &&

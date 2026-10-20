@@ -1,5 +1,10 @@
 # Analysis efficiency measurements
 
+The [native inventory view checkpoint](native-inventory-views.md) compares
+complete delivery with summaries and selected rows on real `true` and jq
+inventories, including oversized-response recovery, portable old Evidence,
+CLI/MCP parity, tokenizer estimates and independent-engine variation.
+
 The [retained-capture validation checkpoint](retained-capture-validation.md)
 reconciles the earlier audit queue and measures immutable historical-capture
 validation reuse on public compact and large qlogs, including first-view costs,

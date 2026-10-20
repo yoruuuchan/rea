@@ -122,29 +122,96 @@ XML node tree; optional `_w.txt` and `_g.txt` files retain opaque WebSocket and
 gRPC message bytes. Missing members remain null, distinct from empty bodies.
 See Telerik's [SAZ format reference](https://www.telerik.com/fiddler/fiddler-everywhere/documentation/knowledge-base/fiddler-archives).
 
-The existing ZIP reader verifies read members; expanded archive contents are
-limited to 32 MiB in addition to the input/output budgets below. Exceeding this
-expanded-byte budget returns `invalid_request` / `invalid_input` through both
-CLI and MCP, with an `out_of_range` issue at
-`capture_path` and `maximum_expanded_capture_bytes`. Selecting records does not
-bypass the complete-archive admission check or return partial Evidence. Encrypted
-archives and unrecognized raw session members are unsupported. SAZ requires an
-enforced decoder memory bound: Node's fixed heap, or the Windows Job Object
-commit limit. Bun on hosts without that Job Object limit returns capability
-unavailable before starting the SAZ decoder. Non-session
-members are inventoried without decoding their content. Original files remain
-unchanged. Linux verification includes independently checked public recorded
-Mattermost captures from [FOREST](https://github.com/dfrc-korea/FOREST/tree/405c9154658a128ea203a6c10040cec55111ed03/api-results/dataset)
-and the Fiddler author's [encoding corpus](https://github.com/ericlaw1979/Clearinet/blob/b6faf78cde1e72042980364f180ceb34b77d1434/Test/data/Encodings.saz),
-plus synthetic malformed/limit fixtures. Their exporting product versions are
-not authenticated. An interactive export from a current Fiddler Everywhere
-installation and its live MCP server remain unverified. Support here is the
-bounded documented raw HTTP/XML SAZ layout, not every product/version profile.
+## Protobuf and gRPC bodies
 
-For visual inspection, use Everywhere's **Import Snapshot**, then **Inspectors**
-and **Overview**. HAR remains an alternative: select sessions, choose
-**Export > HTTPArchive**, and confirm `log.version` is `"1.2"`. Preserve the
-original SAZ when exporting. See the [import/export instructions](https://www.telerik.com/fiddler/fiddler-everywhere/documentation/collaboration/exporting-and-importing).
+Selecting `record_ordinals` (CLI `--record`) also decodes retained bodies with
+recognized protobuf or gRPC content types. Whole-capture inspection does not
+perform this extra work. The original binary sidecar, SHA-256 and producer
+ordinal remain the source; decoding adds flat body, frame and field facts.
+
+Native gRPC admits only data-frame flags 0/1; gRPC-web additionally admits its
+terminal trailer frame. `grpc-web-text` supports independently padded base64
+chunks. Its offsets refer to **base64-decoded body bytes**; other offsets refer
+to retained body bytes. Every field has a body-scoped `field_id` derived from
+its byte offset, a `frame_index`, and a `parent_field_id` for schema-driven
+nested messages or groups. Repeated field numbers remain separate occurrences.
+
+Without a schema, varints and fixed-width values retain exact unsigned decimal
+representations. Length-delimited UTF-8, nested-message and packed readings
+are candidates; REA does not choose one or invent field names or signedness.
+Nested candidate ranges remain accessible without recursively expanding them.
+Malformed messages retain the parsed prefix and an exact error offset.
+Compressed frames and encoded HTTP bodies remain unknown; they are not
+silently treated as empty messages.
+
+For schema interpretation, supply a local compiled `FileDescriptorSet` and its
+fully qualified message type. All imports must be included. REA never fetches
+schemas or executes the selected application. Descriptor identity and parser
+version remain in the body facts. Scalars, repeated numeric packing and nested
+messages are interpreted alongside the unchanged wire facts; disagreements
+remain explicit. Map semantics, extensions and required-field validation are
+unsupported. A supplied schema does not establish the sender's actual schema.
+An invalid nested interpretation records `schema_status: "invalid-message"`
+and `schema_error` locally; later outer fields remain available. Valid string
+contents, including a leading U+FEFF, are preserved.
+
+```bash
+# Compile your own schema with your existing protoc, including local imports:
+protoc --include_imports --descriptor_set_out=/evidence/api.pb api.proto
+rea inspect-web-network-capture /evidence/session.har har --record 3 \
+  --protobuf-schema /evidence/api.pb --protobuf-message example.Response \
+  --detail summary --evidence_output /evidence/session-evidence.json --json
+```
+
+MCP accepts the same choices as `protobuf: {schema: {descriptor_set_path:
+"/evidence/api.pb", message_type: "example.Response"}}`, with explicit
+`record_ordinals`. Optional `body_pointers` batch-select exact binary pointers;
+`framing` can explicitly select `raw`, `grpc`, `grpc-web` or `grpc-web-text`
+when MIME metadata is unavailable. CLI exposes `--protobuf-body-pointer` and
+`--protobuf-framing`. Filters never invent bytes excluded by source redaction. Decoding an extra
+base64 layer also checks explicit exclusions; newly recognized trailer
+credentials exclude the entire affected binary sidecar and its reported
+encoding, preserving a redaction coordinate instead of a credential digest.
+Credential inspection covers every selected body before descriptor reads or
+field expansion. Later capacity or schema failures can therefore retain the
+sanitized source even with explicit sensitivity options. If that source pass
+is interrupted, unchecked bodies are not published as partial Evidence.
+Framing overrides apply only to format-owned body coordinates and preserve
+exclusions for the transport declared in MIME metadata.
+Unknown or explicitly excluded HTTP coding metadata is not treated as absent:
+SAZ/native bodies remain opaque until identity coding is established. Raw
+header values and retained body bytes remain available in source Evidence.
+Skipping wire analysis still runs the independent credential check. If HTTP
+coding metadata is unavailable and that check cannot complete, the operation
+returns unavailable without publishing unchecked capture bodies as Evidence.
+
+Use `detail: "summary"`, then `inspect_analysis_view` with its retained parent:
+
+```json
+{"kind":"protobuf","collection":"bodies","offset":0,"limit":16}
+{"kind":"protobuf","collection":"frames","record_ordinals":[3],"offset":0,"limit":16}
+{"kind":"protobuf","collection":"fields","record_ordinals":[3],"field_numbers":[1,4],"fields":["number","schema_name","schema_value"],"offset":0,"limit":32}
+```
+
+Filters intersect; an empty filter selects nothing. Field pages also accept
+`field_ids`, `frame_indices` and `schema_names`. Default field pages omit `text`,
+`schema_value` and enum alias inventories; select these columns when needed. Identity, source offset
+basis and body status survive column selection. Complete Evidence retains
+all decoded values, and ordinary capture previews expose counts. Page exhaustion
+covers retained facts only; a partial source does not establish absence.
+
+Authenticated immutable parents reuse validation and the most recent field
+filter per capture. These caches live only with retained Evidence, hold references
+to existing facts and never reopen either file. Cached selector text is bounded
+by retained field cardinality; larger selections use an uncached scan. Mutable
+input is revalidated.
+The existing 96 MiB report budget includes the original decoder reply plus
+conservative charges for new facts, strings and descriptor expansion. The explicit
+`protobuf_coverage` reports selected and inspected record counts, preserving
+partial decoding through composed views. Capacity failure retains the source
+observation as partial Evidence; cancellation yields
+between bounded work batches. Real elapsed time and process-family memory
+still depend on the selected capture and schema.
 
 ## Fiddler Everywhere MCP and public skills
 

@@ -1,3 +1,4 @@
+import { analysisDetailSchema } from "./analysisDetail.js";
 import { z } from "zod";
 import { nativeFunctionAnnotationsInputSchema } from "../domain/native/nativeFunctionAnnotations.js";
 
@@ -109,13 +110,17 @@ export const OFFICIAL_TOOL_CONTRACTS = [
   ),
   official(
     "list_names",
-    "List every analyzed memory and external symbol as address/value pairs. Provider metadata distinguishes Ghidra primary, dynamic, external, type, and source facts when available.",
-    z.object({ document, address: optionalAddress }),
+    "List every analyzed memory and external symbol as address/value pairs. Provider metadata distinguishes Ghidra primary, dynamic, external, type, and source facts when available. Select detail summary for counts and retained native-inventory pages; complete remains the default.",
+    z.object({
+      document,
+      address: optionalAddress,
+      detail: analysisDetailSchema,
+    }),
   ),
   official(
     "list_procedures",
-    "List every analyzed procedure as address/value pairs after provider analysis. Ghidra metadata distinguishes thunks and external functions; use returned addresses in later function operations.",
-    z.object({ document }),
+    "List every analyzed procedure as address/value pairs after provider analysis. Ghidra metadata distinguishes thunks and external functions; use returned addresses in later function operations. Select detail summary for counts and retained native-inventory pages; complete remains the default.",
+    z.object({ document, detail: analysisDetailSchema }),
   ),
   official(
     "list_segments",
@@ -124,8 +129,12 @@ export const OFFICIAL_TOOL_CONTRACTS = [
   ),
   official(
     "list_strings",
-    "List every provider-reported string object or candidate, or filter to one address, as address/value pairs with encoding, terminator status, and byte length when available. Hopper reads complete typed objects and retains its original display text as provider_value; long literals may span adjacent unterminated objects. Kuna scans mapped printable sequences of at least five characters, including unterminated fragments; references are not computed.",
-    z.object({ document, address: optionalAddress }),
+    "List every provider-reported string object or candidate, or filter to one address, as address/value pairs with encoding, terminator status, and byte length when available. Hopper reads complete typed objects and retains its original display text as provider_value; long literals may span adjacent unterminated objects. Kuna scans mapped printable sequences of at least five characters, including unterminated fragments; references are not computed. Select detail summary for counts and retained native-inventory pages; complete remains the default.",
+    z.object({
+      document,
+      address: optionalAddress,
+      detail: analysisDetailSchema,
+    }),
   ),
   official(
     "next_address",
@@ -191,13 +200,13 @@ export const OFFICIAL_TOOL_CONTRACTS = [
   ),
   official(
     "search_procedures",
-    "Search every analyzed procedure name using literal matching by default or regex when requested. Results are deterministic and complete. Hopper regex mode uses ECMAScript Unicode syntax in a cancellable worker; a matching deadline leaves its API usable.",
-    z.object(analysisSearchInput),
+    "Search every analyzed procedure name using literal matching by default or regex when requested. Results are deterministic and complete. Hopper regex mode uses ECMAScript Unicode syntax in a cancellable worker; a matching deadline leaves its API usable. Select detail summary for counts and retained native-inventory pages; complete remains the default.",
+    z.object({ ...analysisSearchInput, detail: analysisDetailSchema }),
   ),
   official(
     "search_strings",
-    "Search every provider-reported string object or candidate using literal matching by default or regex when requested. Results are deterministic and complete over that provider inventory, not every text sequence in artifact bytes. Kuna scans mapped sequences of at least five characters, including unterminated fragments, without computing references. Ghidra may omit packed or undefined literals, including Rust strings; an empty result does not prove text is absent. If an address is known, read_bytes and xrefs inspect its bytes and references. Hopper retains typed byte decoding, native display, and explicit decoding unknowns. Adjacent long-literal fragments match independently. Hopper regex mode uses ECMAScript Unicode syntax in a cancellable worker; a matching deadline leaves its API usable.",
-    z.object(analysisSearchInput),
+    "Search every provider-reported string object or candidate using literal matching by default or regex when requested. Results are deterministic and complete over that provider inventory, not every text sequence in artifact bytes. Kuna scans mapped sequences of at least five characters, including unterminated fragments, without computing references. Ghidra may omit packed or undefined literals, including Rust strings; an empty result does not prove text is absent. If an address is known, read_bytes and xrefs inspect its bytes and references. Hopper retains typed byte decoding, native display, and explicit decoding unknowns. Adjacent long-literal fragments match independently. Hopper regex mode uses ECMAScript Unicode syntax in a cancellable worker; a matching deadline leaves its API usable. Select detail summary for counts and retained native-inventory pages; complete remains the default.",
+    z.object({ ...analysisSearchInput, detail: analysisDetailSchema }),
   ),
   official(
     "set_address_name",

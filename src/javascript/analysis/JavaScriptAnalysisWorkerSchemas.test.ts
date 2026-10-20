@@ -8,6 +8,41 @@ import {
 } from "./JavaScriptAnalysisWorkerSchemas.js";
 import { analyzeJavaScriptSemantics } from "../../domain/javascript/javascriptSemanticAnalysis.js";
 import { getterExpansionSource } from "../../../tests/fixtures/javascriptGetterExpansion.js";
+import { aliasSelectionBudgetSource } from "../../../tests/fixtures/javascriptAliasSelectionBudget.js";
+
+it("transfers bounded alias selection coverage across the worker boundary", () => {
+  const source = aliasSelectionBudgetSource();
+  const facts = analyzeJavaScriptStaticSource(source);
+  const ir = analyzeJavaScriptSemantics(source);
+  const header = { coverage: ir.coverage, limitations: ir.limitations };
+  expect(ir.coverage).toMatchObject({
+    status: "partial",
+    resourceLimits: ["alias-selections"],
+  });
+  expect(
+    javaScriptWorkerModuleHeaderSchema.parse(
+      JSON.parse(JSON.stringify(header)) as unknown,
+    ),
+  ).toEqual(header);
+  expect(
+    javaScriptWorkerStaticAnalysisSchema.parse(
+      JSON.parse(JSON.stringify(facts)) as unknown,
+    ),
+  ).toEqual(facts);
+});
+
+it("retains application path change identity and provenance across the worker boundary", () => {
+  const facts = analyzeJavaScriptStaticSource(`
+    const { app } = require("electron");
+    app.setAppPath("./other");
+  `);
+  expect(facts.electron.app_path_changes).toHaveLength(1);
+  expect(
+    javaScriptWorkerStaticAnalysisSchema.parse(
+      JSON.parse(JSON.stringify(facts)) as unknown,
+    ),
+  ).toEqual(facts);
+});
 
 it("transfers getter expansion limits and unknown bindings across the worker boundary", () => {
   const ir = analyzeJavaScriptSemantics(getterExpansionSource());

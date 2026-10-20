@@ -11,7 +11,7 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect, vi } from "vitest";
+import { expect, onTestFinished, vi } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { itWithCaptureCapability } from "./processCaptureCapability.js";
 
@@ -181,6 +181,16 @@ itWithCaptureCapability(
     const controller = new AbortController();
     let fallback: ReturnType<typeof setTimeout> | undefined;
     let reachedRunning = false;
+    let fallbackFired = false;
+    const clearFallback = () => {
+      clearTimeout(fallback);
+      fallback = undefined;
+    };
+    onTestFinished(() => {
+      controller.abort();
+      clearFallback();
+      now.mockRestore();
+    });
     try {
       const result = await captureProcessScenario(
         parseProcessScenario({
@@ -200,20 +210,30 @@ itWithCaptureCapability(
             if (update.phase === "running" && !reachedRunning) {
               reachedRunning = true;
               wallNow -= 60_000;
-              fallback = setTimeout(() => controller.abort(), 1_500);
+              // The deadline starts after native ownership preparation and
+              // executable inspection. Bound only the same running interval.
+              fallback = setTimeout(() => {
+                fallbackFired = true;
+                controller.abort();
+              }, 1_500);
             } else if (
               update.phase === "settling" ||
               update.phase === "cleanup"
             )
-              clearTimeout(fallback);
+              clearFallback();
           },
         },
       );
       expect(reachedRunning).toBe(true);
+      expect(
+        fallbackFired,
+        "the monotonic deadline precedes the caller safety abort",
+      ).toBe(false);
       const { capture } = captureObservations(result);
       expect(capture.exit.reason).toBe("timeout");
     } finally {
-      clearTimeout(fallback);
+      controller.abort();
+      clearFallback();
       now.mockRestore();
     }
   },

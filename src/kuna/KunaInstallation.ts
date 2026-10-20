@@ -1,9 +1,12 @@
-import { assertRegularFileActive } from "../filesystem/RegularFile.js";
+import {
+  assertRegularFileActive,
+  RegularFileOperationCancelled,
+} from "../filesystem/RegularFile.js";
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { JsonValue } from "../domain/jsonValue.js";
+import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
@@ -14,12 +17,14 @@ import {
 import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import {
   RegularFileCleanupFailure,
+  RegularFileCancelled,
   regularFileCancellation,
   withOwnedRegularFile,
 } from "../filesystem/OwnedRegularFile.js";
 import {
   execFileOutput,
   execFileOutputFailure,
+  ExecFileOutputCancelledError,
 } from "../process/ExecFileOutput.js";
 import {
   readKunaConfiguration,
@@ -74,6 +79,39 @@ export interface KunaInstallationOptions {
   readonly probeTimeoutMs?: number;
   readonly fileCloseResources: FileCloseResourceOwner;
 }
+
+/** Cancellation facts normalized by the installation inspection that observed them. */
+interface KunaInstallationCancellation {
+  readonly reason: unknown;
+  readonly diagnostics?: Readonly<Record<string, JsonValue>>;
+}
+
+// Annotations follow the exact failure's lifetime. Descriptor ownership stays
+// with the supplied resource scope, independently of this weak metadata.
+const installationFailureDiagnostics = new WeakMap<
+  Error,
+  Readonly<Record<string, JsonValue>>
+>();
+
+export const kunaInstallationFailureDiagnostics = (
+  cause: unknown,
+): Readonly<Record<string, JsonValue>> | undefined =>
+  cause instanceof Error
+    ? installationFailureDiagnostics.get(cause)
+    : undefined;
+
+/** Consumers project the owner's facts without reinterpreting generic file outcomes. */
+export const kunaInstallationCancellation = (
+  cause: unknown,
+): KunaInstallationCancellation | undefined => {
+  const cancellation = regularFileCancellation(cause);
+  if (cancellation === undefined) return undefined;
+  const diagnostics = kunaInstallationFailureDiagnostics(cause);
+  return {
+    reason: cancellation.reason,
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  };
+};
 
 /** One installation inspection's file owners and their originating errors. */
 export interface KunaFileCloseScope {
@@ -150,6 +188,7 @@ export const inspectKunaInstallation = async (
         : { setting: configuration.error.setting }),
     });
   const { command } = configuration.value;
+  assertRegularFileActive(options.signal);
 
   let executable: string;
   try {
@@ -162,13 +201,14 @@ export const inspectKunaInstallation = async (
         { command },
       );
   } catch (cause: unknown) {
-    assertRegularFileActive(options.signal);
     return failure(
       "executable_missing",
       `Cannot execute REA_KUNA_COMMAND ${command}: ${message(cause)}. ${KUNA_COMMAND_REMEDIATION}`,
       { command },
     );
   }
+
+  assertRegularFileActive(options.signal);
 
   const deadline = options.probeTimeoutMs ?? VERSION_PROBE_TIMEOUT_MS;
   let stdout: string;
@@ -182,7 +222,8 @@ export const inspectKunaInstallation = async (
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     }));
   } catch (cause: unknown) {
-    assertRegularFileActive(options.signal);
+    if (cause instanceof ExecFileOutputCancelledError)
+      throw new RegularFileOperationCancelled(cause.cause);
     const output = execFileOutputFailure(cause);
     return failure(
       "version_unresolved",
@@ -208,6 +249,11 @@ export const inspectKunaInstallation = async (
 
   let fingerprint: { readonly sha256: string; readonly bytes: number };
   let script: boolean;
+  const observed: {
+    phase: "fingerprint" | "shebang";
+    completed_hash?: { readonly sha256: string; readonly bytes: number };
+    script?: boolean;
+  } = { phase: "fingerprint" };
   try {
     ({ fingerprint, script } = await options.fileCloseResources.run(
       async () => {
@@ -216,20 +262,57 @@ export const inspectKunaInstallation = async (
           retainFailedClose: (owner) =>
             options.fileCloseResources.retain(owner, executable),
         });
+        observed.completed_hash = fingerprint;
+        assertRegularFileActive(options.signal);
+        observed.phase = "shebang";
         const script = await startsWithShebang(
           executable,
           options.fileCloseResources,
+          options.signal,
         );
+        observed.script = script;
         assertRegularFileActive(options.signal);
         return { fingerprint, script };
       },
     ));
   } catch (cause: unknown) {
+    const cancellation = regularFileCancellation(cause);
     if (
-      cause instanceof RegularFileCleanupFailure ||
-      regularFileCancellation(cause) !== undefined
-    )
+      cause instanceof Error &&
+      (cause instanceof RegularFileCleanupFailure || cancellation !== undefined)
+    ) {
+      const outcome =
+        cause instanceof RegularFileCancelled ||
+        cause instanceof RegularFileCleanupFailure
+          ? cause.outcome
+          : undefined;
+      const completed =
+        outcome?.kind === "completed" ? outcome.value : undefined;
+      const completedHash =
+        observed.completed_hash ??
+        (observed.phase === "fingerprint" && outcome?.kind === "completed"
+          ? jsonValueSchema.parse(completed)
+          : undefined);
+      const completedScript =
+        observed.script ??
+        (observed.phase === "shebang" && typeof completed === "boolean"
+          ? completed
+          : undefined);
+      installationFailureDiagnostics.set(cause, {
+        kuna_installation: {
+          status: "partial",
+          command,
+          executable,
+          version,
+          verified: version === KUNA_VERIFIED_VERSION,
+          ...(completedHash === undefined
+            ? {}
+            : { completed_hash: completedHash }),
+          ...(completedScript === undefined ? {} : { script: completedScript }),
+        },
+      });
       throw cause;
+    }
     return failure(
       "executable_missing",
       `Cannot fingerprint ${executable}: ${message(stableFileHashCause(cause))}`,
@@ -250,11 +333,13 @@ export const inspectKunaInstallation = async (
 const startsWithShebang = (
   path: string,
   fileCloseResources: FileCloseResourceOwner,
+  signal?: AbortSignal,
 ): Promise<boolean> =>
   withOwnedRegularFile(
     path,
     {
       symlinks: "follow",
+      ...(signal === undefined ? {} : { signal }),
       retainFailedClose: (owner) => fileCloseResources.retain(owner, path),
     },
     async (handle) => {

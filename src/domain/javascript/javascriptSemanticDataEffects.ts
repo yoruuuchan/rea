@@ -21,7 +21,10 @@ import {
   type JavaScriptSemanticAnalysisState,
   type JavaScriptSemanticBindingState,
 } from "./javascriptSemanticState.js";
-import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
+import {
+  semanticBindingAtRead,
+  semanticEffectTiming,
+} from "./javascriptSemanticMutationInitializers.js";
 import {
   builtinDataEffectMethod as builtinMethod,
   dataEffectArgumentBindingId as argumentBindingId,
@@ -254,11 +257,35 @@ const soleWriteReachesRead = (
   binding: JavaScriptSemanticBindingState | undefined,
   read: t.Node,
   context: TraversalContext,
-): boolean =>
-  binding?.initializers.length === 1 &&
-  (semanticStableInitializer(binding, context.state) !== undefined ||
-    semanticBindingAtRead(binding, read, context.state.parentsByNode)
-      .hasDefiniteInitializer);
+  request: t.Node | undefined,
+): boolean => {
+  if (binding === undefined || request === undefined) return false;
+  const snapshot = semanticBindingAtRead(
+    binding,
+    read,
+    context.state.parentsByNode,
+  );
+  const initializers = snapshot.binding.initializers.filter(
+    ({ node }) => semanticEffectTiming(read, node, context.state) !== "after",
+  );
+  const [initializer] = initializers;
+  if (initializers.length !== 1 || initializer === undefined) return false;
+  // The result itself must be this request. Containing a request in a branch
+  // or child allocation does not prove the entire initializer is its response.
+  let source = unwrapJavaScriptExpression(initializer.node).node;
+  while (t.isAwaitExpression(source))
+    source = unwrapJavaScriptExpression(source.argument).node;
+  return (
+    source === request &&
+    !snapshot.binding.referenceInitializers.some(
+      ({ assignment, node }) =>
+        assignment &&
+        semanticEffectTiming(read, node, context.state) !== "after",
+    ) &&
+    (semanticStableInitializer(binding, context.state) !== undefined ||
+      snapshot.hasDefiniteInitializer)
+  );
+};
 
 const collectResponseConsumers = (
   program: t.Program,
@@ -308,7 +335,12 @@ const collectResponseConsumers = (
       )
         ? linked[0]
         : undefined;
-    const soleWrite = soleWriteReachesRead(binding, member.object, context);
+    const soleWrite = soleWriteReachesRead(
+      binding,
+      member.object,
+      context,
+      uniqueRequest?.node,
+    );
     output.push({
       requestId: `response:${String(node.start ?? -1)}:${String(node.end ?? -1)}`,
       kind: "response-consumer",

@@ -123,3 +123,35 @@ it("bounds returned-reference expansion across a React-shaped switch mesh", () =
   expect(small.reads).toBeGreaterThan(0);
   expect(large.reads).toBeLessThan(4 * small.reads);
 });
+
+it.each([
+  ["{make:()=>module}", "{...box}", "box.make"],
+  ["[()=>module]", "[...box]", "box[0]"],
+])(
+  "converges repeated copy boundaries without dropping callable results: %s",
+  (initial, replacement, target) => {
+    const state = indexed(
+      `let box=${initial};while(flag)box=${replacement};${target}();`,
+    );
+    let callee: t.Node | undefined;
+    t.traverseFast(state.program, (node) => {
+      if (t.isCallExpression(node)) callee = node.callee;
+    });
+    if (callee === undefined) throw new Error("Missing copied call");
+    const lookups = state.scopes.map((scope) =>
+      vi.spyOn(scope.bindings, "get"),
+    );
+    try {
+      const result = createSemanticReturnedReferences(state)(callee);
+      expect(result.references).toContainEqual({
+        node: expect.objectContaining({ type: "Identifier", name: "module" }),
+        projection: [],
+      });
+      expect(
+        lookups.reduce((count, lookup) => count + lookup.mock.calls.length, 0),
+      ).toBeLessThan(100);
+    } finally {
+      for (const lookup of lookups) lookup.mockRestore();
+    }
+  },
+);

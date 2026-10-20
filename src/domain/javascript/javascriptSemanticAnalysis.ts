@@ -58,7 +58,11 @@ import {
   completeSemanticSteps,
   traverseJavaScriptAstSteps,
 } from "./javascriptSemanticTraversal.js";
-import { semanticRequireOrigin } from "./javascriptSemanticRequireOrigin.js";
+import {
+  semanticRequireOrigin,
+  observePossibleCommonJsDelegateWrite,
+  invalidateSemanticRequireDelegateWrites,
+} from "./javascriptSemanticRequireOrigin.js";
 import { semanticBundledRequireOrigin } from "./javascriptBundledRequireOrigin.js";
 import { collectSemanticMemberMutationsSteps } from "./javascriptSemanticMemberMutations.js";
 import { semanticEffectTiming } from "./javascriptSemanticMutationInitializers.js";
@@ -104,9 +108,11 @@ import {
   type JavaScriptSemanticPropertyPath,
 } from "./javascriptSemanticPropertyPaths.js";
 import { indexCommonJsExportReceiversSteps } from "./javascriptCommonJsExportReceivers.js";
+import { createSemanticElectronAppPathChangeQuery } from "./javascriptElectronAppPathChanges.js";
 import type { JavaScriptModuleResolutionMode } from "./javascriptModuleResolutionMode.js";
 
 interface BindPatternInput {
+  readonly iterationSources?: JavaScriptSemanticBindingState["initializers"][number]["iterationSources"];
   readonly pattern: t.Node;
   readonly initializer: t.Node | null;
   readonly scope: JavaScriptSemanticScopeState;
@@ -116,6 +122,7 @@ interface BindPatternInput {
   readonly kind?: JavaScriptSemanticDefinition["kind"];
   readonly projection?: readonly (string | number | null)[];
   readonly referenceOnly?: boolean;
+  readonly assignmentReference?: true;
   readonly copyKind?: "object-rest" | "array-rest";
   readonly copyProjectionOffset?: number;
   readonly copyExcludedKeys?: readonly string[];
@@ -123,14 +130,21 @@ interface BindPatternInput {
   readonly fallbackSources?: readonly {
     readonly node: t.Node;
     readonly projection: readonly (string | number | null)[];
+    readonly iterationSources?: NonNullable<
+      JavaScriptSemanticBindingState["initializers"][number]["iterationSources"]
+    >;
   }[];
   readonly requiredSources?: readonly {
     readonly node: t.Node;
     readonly projection: readonly (string | number | null)[];
+    readonly iterationSources?: NonNullable<
+      JavaScriptSemanticBindingState["initializers"][number]["iterationSources"]
+    >;
   }[];
 }
 
 interface AddBindingInput {
+  readonly iterationSources?: JavaScriptSemanticBindingState["initializers"][number]["iterationSources"];
   readonly state: JavaScriptSemanticAnalysisState;
   readonly scope: JavaScriptSemanticScopeState;
   readonly name: string;
@@ -177,6 +191,7 @@ function* indexSemanticAmbientWritesSteps(
     state.program,
     state,
     createSemanticOpaqueGlobalObserver(state),
+    (node) => observePossibleCommonJsDelegateWrite(node, state),
   );
   if (state.opaqueEffects.globalSites.length > 0)
     clearSemanticValueCaches(state);
@@ -196,6 +211,7 @@ function* indexSemanticMemberMutationFactsSteps(
       referenceEffectsMayHaveChanged(state, site, reference, path),
   );
   indexedMemberMutationStates.add(state);
+  invalidateSemanticRequireDelegateWrites(state);
 }
 
 /** One owner projects source-site effects for complete reports or early exit. */
@@ -420,6 +436,9 @@ export function* analyzeParsedJavaScriptSemanticsSteps(
       [...state.returnedReferenceWidenings].map(range),
     ),
     limitations: [
+      ...(state.valueResourceLimits.has("alias-selections")
+        ? [semanticResourceLimitReason("alias-selections")]
+        : []),
       ...(state.returnedReferenceWidenings.size > 0
         ? [RETURNED_REFERENCE_WIDENING_LIMITATION]
         : []),
@@ -801,6 +820,10 @@ export interface JavaScriptElectronIdentity {
   readonly bindings: ReadonlyMap<number, readonly string[]>;
   readonly intactExport: (path: readonly (string | null)[]) => boolean;
   readonly exportPath: (root: t.Node) => readonly string[] | undefined;
+  readonly invocationPath: (
+    node: t.CallExpression | t.OptionalCallExpression,
+  ) => readonly string[] | undefined;
+  readonly mayChangeAppPath: (node: t.Node) => boolean;
 }
 
 export function* indexJavaScriptElectronIdentitySteps(
@@ -881,7 +904,35 @@ export function* indexJavaScriptElectronIdentitySteps(
         facts.set(root.start ?? -1, exported);
     },
   });
-  return { bindings: facts, intactExport, exportPath: rootExport };
+  const invocationPath = (
+    node: t.CallExpression | t.OptionalCallExpression,
+  ): readonly string[] | undefined => {
+    const invocation = interop.intrinsicInvocation(node, (callee) => {
+      const { root, members } = electronMemberPath(callee);
+      const exported = rootExport(root);
+      if (
+        exported !== undefined &&
+        members.every((member): member is string => member !== null) &&
+        intactExport(["electron", ...exported, ...members])
+      )
+        return ["electron", ...exported, ...members];
+      return interop.intrinsicPath(callee);
+    });
+    return invocation?.path[0] === "electron"
+      ? invocation.path.slice(1)
+      : undefined;
+  };
+  return {
+    bindings: facts,
+    intactExport,
+    exportPath: rootExport,
+    invocationPath,
+    mayChangeAppPath: createSemanticElectronAppPathChangeQuery(
+      state,
+      rootExport,
+      interop,
+    ),
+  };
 }
 
 // Read import and require origins directly; general value evaluation is
@@ -951,6 +1002,7 @@ const createState = (
     bindings: new Map(),
   };
   return {
+    arrayIterationUnknown: false,
     program,
     opaqueEffects: {
       mayReferenceGlobalEval: false,
@@ -983,6 +1035,7 @@ const createState = (
     ambientBindingWrites: new Map(),
     ambientWrites: new SemanticPropertyPathCoverage(),
     ambientEscapes: new SemanticPropertyPathCoverage(),
+    ambientEscapeEffects: [],
     ambientWriteEffects: [],
   };
 };
@@ -1433,6 +1486,9 @@ const bindAssignment = (
 ): void => {
   if (t.isAssignmentExpression(node)) {
     const left = unwrapJavaScriptExpression(node.left).node;
+    const selectedPattern =
+      node.operator === "=" &&
+      (t.isObjectPattern(left) || t.isArrayPattern(left));
     if (t.isIdentifier(left))
       addAssignment(
         left,
@@ -1446,17 +1502,28 @@ const bindAssignment = (
         conditionallySkipped,
         node,
       );
-    else
+    else {
       for (const identifier of semanticWriteTargets(node.left))
         if (t.isIdentifier(identifier))
           addAssignment(
             identifier,
-            node,
+            selectedPattern ? null : node,
             scope,
             state,
             conditionallySkipped,
             node,
           );
+      if (selectedPattern)
+        bindPattern({
+          pattern: left,
+          initializer: node.right,
+          scope,
+          state,
+          mutable: true,
+          referenceOnly: true,
+          assignmentReference: true,
+        });
+    }
   } else if (t.isUpdateExpression(node)) {
     const argument = unwrapJavaScriptExpression(node.argument).node;
     if (t.isIdentifier(argument))
@@ -1677,12 +1744,14 @@ const bindPattern = (input: BindPatternInput): void => {
     kind = "variable",
     projection = [],
     referenceOnly = false,
+    assignmentReference,
     copyKind,
     copyProjectionOffset,
     copyExcludedKeys,
     copyStartIndex,
     fallbackSources,
     requiredSources,
+    iterationSources,
   } = input;
   if (t.isTSParameterProperty(pattern)) {
     bindPattern({ ...input, pattern: pattern.parameter });
@@ -1699,6 +1768,7 @@ const bindPattern = (input: BindPatternInput): void => {
         binding.referenceInitializers.push({
           node: initializer,
           projection,
+          ...(assignmentReference === undefined ? {} : { assignment: true }),
           ...(copyKind === undefined ? {} : { copyKind }),
           ...(copyProjectionOffset === undefined
             ? {}
@@ -1707,6 +1777,7 @@ const bindPattern = (input: BindPatternInput): void => {
           ...(copyStartIndex === undefined ? {} : { copyStartIndex }),
           ...(fallbackSources === undefined ? {} : { fallbackSources }),
           ...(requiredSources === undefined ? {} : { requiredSources }),
+          ...(iterationSources === undefined ? {} : { iterationSources }),
         });
       return;
     }
@@ -1720,6 +1791,7 @@ const bindPattern = (input: BindPatternInput): void => {
       definitionNode: pattern,
       initializer,
       projection,
+      ...(iterationSources === undefined ? {} : { iterationSources }),
     });
     return;
   }
@@ -1733,7 +1805,15 @@ const bindPattern = (input: BindPatternInput): void => {
           : (initializer ?? pattern.right),
       requiredSources: [
         ...(requiredSources ?? []),
-        ...(initializer === null ? [] : [{ node: initializer, projection }]),
+        ...(initializer === null
+          ? []
+          : [
+              {
+                node: initializer,
+                projection,
+                ...(iterationSources === undefined ? {} : { iterationSources }),
+              },
+            ]),
       ],
     });
     bindPattern({
@@ -1745,9 +1825,18 @@ const bindPattern = (input: BindPatternInput): void => {
       initializer: pattern.right,
       projection: [],
       referenceOnly: true,
+      ...(assignmentReference === undefined ? {} : { assignmentReference }),
       fallbackSources: [
         ...(fallbackSources ?? []),
-        ...(initializer === null ? [] : [{ node: initializer, projection }]),
+        ...(initializer === null
+          ? []
+          : [
+              {
+                node: initializer,
+                projection,
+                ...(iterationSources === undefined ? {} : { iterationSources }),
+              },
+            ]),
       ],
       ...(requiredSources === undefined ? {} : { requiredSources }),
     });
@@ -1790,17 +1879,28 @@ const bindPattern = (input: BindPatternInput): void => {
         });
       }
     }
-  else if (t.isArrayPattern(pattern))
+  else if (t.isArrayPattern(pattern)) {
+    const arrayInput = {
+      ...input,
+      ...(initializer === null
+        ? {}
+        : {
+            iterationSources: [
+              ...(iterationSources ?? []),
+              { node: initializer, projection },
+            ],
+          }),
+    };
     pattern.elements.forEach((element, index) => {
       if (element !== null) {
         bindPattern({
-          ...input,
+          ...arrayInput,
           pattern: element,
           projection: [...projection, index],
         });
         if (t.isRestElement(element))
           bindPattern({
-            ...input,
+            ...arrayInput,
             pattern: element.argument,
             projection: [...projection, null],
             referenceOnly: true,
@@ -1810,6 +1910,7 @@ const bindPattern = (input: BindPatternInput): void => {
           });
       }
     });
+  }
 };
 
 const addBinding = (input: AddBindingInput): void => {
@@ -1825,6 +1926,7 @@ const addBinding = (input: AddBindingInput): void => {
     directOrigin,
     runtimeImport,
     projection = [],
+    iterationSources,
   } = input;
   let binding = scope.bindings.get(name);
   if (binding === undefined) {
@@ -1838,7 +1940,11 @@ const addBinding = (input: AddBindingInput): void => {
     binding.declarationKinds.add(declarationKind);
   binding.definitions.push({ kind, location: range(definitionNode) });
   if (initializer !== null)
-    binding.initializers.push({ node: initializer, projection });
+    binding.initializers.push({
+      node: initializer,
+      projection,
+      ...(iterationSources === undefined ? {} : { iterationSources }),
+    });
   if (directOrigin !== undefined)
     binding.directOrigins.push(
       directOrigin.resolutionMode === undefined &&
@@ -1875,12 +1981,14 @@ const createBinding = (
 
 const addAssignment = (
   identifier: t.Identifier,
-  initializer: t.Node,
+  initializer: t.Node | null,
   scope: JavaScriptSemanticScopeState,
   state: JavaScriptSemanticAnalysisState,
   conditionallySkipped: boolean,
   writeSite?: t.Node,
 ): void => {
+  const mutation = writeSite ?? initializer;
+  if (mutation === null) return;
   const lookup = semanticBindingLookupFromScope(scope, identifier.name, state);
   if (lookup.kind === "captured") return;
   const binding = "binding" in lookup ? lookup.binding : undefined;
@@ -1890,16 +1998,17 @@ const addAssignment = (
     // Unbound identifiers can denote host wrapper bindings (such as require),
     // which are separate from properties written through the global object.
     const writes = state.ambientBindingWrites.get(identifier.name) ?? [];
-    writes.push(writeSite ?? initializer);
+    writes.push(mutation);
     state.ambientBindingWrites.set(identifier.name, writes);
     return;
   }
   const writes = state.bindingWrites.get(binding.bindingId) ?? [];
-  writes.push(writeSite ?? initializer);
+  writes.push(mutation);
   state.bindingWrites.set(binding.bindingId, writes);
   binding.mutable = true;
   binding.definitions.push({ kind: "assignment", location: range(identifier) });
-  binding.initializers.push({ node: initializer, projection: [] });
+  if (initializer !== null)
+    binding.initializers.push({ node: initializer, projection: [] });
   if (conditionallySkipped)
-    state.conditionallySkippedExpressions.add(initializer);
+    state.conditionallySkippedExpressions.add(initializer ?? mutation);
 };

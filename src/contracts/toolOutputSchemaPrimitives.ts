@@ -1,11 +1,9 @@
+import { procedureInfoSchema } from "../domain/native/procedureInfo.js";
 import { z } from "zod";
 
 import {
-  procedureClassificationSchema,
   procedureIdentitySchema,
-  localVariableSchema,
   functionDossierSchema,
-  functionBodySchema,
 } from "../domain/hopperValues.js";
 import { analysisProfileSchema } from "../domain/analysisProfile.js";
 import {
@@ -579,34 +577,6 @@ const availableMemoryPermissions = z.object({
   source: z.literal("ghidra-memory-block"),
 });
 
-export const addressedValue = z.object({
-  address: z.string(),
-  value: z.string(),
-  symbol: z
-    .object({
-      primary: z.boolean(),
-      dynamic: z.boolean(),
-      external: z.boolean(),
-      type: z.string(),
-      source: z.enum(["default", "analysis", "ai", "imported", "user_defined"]),
-    })
-    .optional(),
-  procedure: z
-    .object({
-      external: z.boolean(),
-      thunk: z.boolean(),
-      thunk_target: z.string().nullable(),
-    })
-    .optional(),
-  string: z
-    .object({
-      encoding: z.string(),
-      termination: z.enum(["missing", "present_or_not_required"]),
-      byte_length: z.number().int().min(0),
-    })
-    .optional(),
-});
-
 const memoryRegionOutput = z.object({
   name: z.string(),
   start: z.string(),
@@ -626,18 +596,7 @@ export const segmentOutput = evidenceResultOf(
   z.array(memoryRegionOutput.extend({ sections: z.array(memoryRegionOutput) })),
 );
 
-export const procedureInfoOutput = evidenceResultOf(
-  z.object({
-    name: z.string(),
-    entrypoint: z.string(),
-    basicblock_count: z.number().int().min(0),
-    length: z.number().min(0),
-    signature: nullableText,
-    locals: z.array(localVariableSchema),
-    classification: procedureClassificationSchema.nullable(),
-    body: functionBodySchema,
-  }),
-);
+export const procedureInfoOutput = evidenceResultOf(procedureInfoSchema);
 
 export const symbolDiscoveryOutput = (property: "classes" | "protocols") =>
   evidenceResultOf(

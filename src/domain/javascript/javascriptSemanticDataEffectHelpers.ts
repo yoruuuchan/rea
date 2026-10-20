@@ -161,22 +161,31 @@ export const builtinDataEffectMethod = (
   state: JavaScriptSemanticAnalysisState,
   specifiers: readonly string[],
 ): string | null => {
+  const path = builtinDataEffectCallablePath(callee, state, specifiers);
+  return path?.length === 1 ? (path[0] ?? null) : null;
+};
+
+/** Recover the complete callable export path using the shared mutation proof. */
+export const builtinDataEffectCallablePath = (
+  callee: t.Node,
+  state: JavaScriptSemanticAnalysisState,
+  specifiers: readonly string[],
+): readonly string[] | null => {
   const expression = unwrapJavaScriptExpression(callee).node;
   if (expression !== callee)
-    return builtinDataEffectMethod(expression, state, specifiers);
+    return builtinDataEffectCallablePath(expression, state, specifiers);
   if (t.isSequenceExpression(expression)) {
     const final = expression.expressions.at(-1);
     return final === undefined
       ? null
-      : builtinDataEffectMethod(final, state, specifiers);
+      : builtinDataEffectCallablePath(final, state, specifiers);
   }
   const required = semanticRequireOrigin(callee, state);
   if (required !== undefined) {
     const origin = builtinNamespaceOrigin(required.origin);
-    return origin.importedPath.length === 1 &&
-      specifiers.some(
-        (specifier) => specifier.replace(/^node:/u, "") === origin.specifier,
-      ) &&
+    return specifiers.some(
+      (specifier) => specifier.replace(/^node:/u, "") === origin.specifier,
+    ) &&
       !requiredModuleChanged(
         required.origin.specifier,
         required.origin.importedPath,
@@ -184,7 +193,7 @@ export const builtinDataEffectMethod = (
         state,
         true,
       )
-      ? (origin.importedPath[0] ?? null)
+      ? origin.importedPath
       : null;
   }
   if (t.isIdentifier(callee)) {
@@ -197,7 +206,7 @@ export const builtinDataEffectMethod = (
       [],
       true,
     );
-    return path?.length === 1 ? (path[0] ?? null) : null;
+    return path;
   }
   if (!t.isMemberExpression(callee) && !t.isOptionalMemberExpression(callee))
     return null;
@@ -227,27 +236,26 @@ export const builtinDataEffectMethod = (
             callee,
             [...receiver.path, method],
             true,
-          )?.length === 0
-            ? method
+          ) !== null
+            ? [...origin.importedPath, method]
             : null;
       }
     }
     const source = semanticExpressionModuleOrigin(callee.object, state);
     if (method === null || source === undefined) return null;
     const origin = builtinNamespaceOrigin(source);
-    return origin.importedPath.length === 0 &&
-      specifiers.some(
-        (specifier) => specifier.replace(/^node:/u, "") === origin.specifier,
-      ) &&
+    return specifiers.some(
+      (specifier) => specifier.replace(/^node:/u, "") === origin.specifier,
+    ) &&
       !requiredModuleChanged(
         origin.specifier,
-        [...origin.importedPath, method],
+        [...source.importedPath, method],
         callee,
         state,
         true,
         callee.object,
       )
-      ? method
+      ? [...origin.importedPath, method]
       : null;
   }
   const binding = resolveSemanticBindingState(
@@ -265,7 +273,7 @@ export const builtinDataEffectMethod = (
     [method],
     true,
   );
-  if (resolvedPath?.length === 0) return method;
+  if (resolvedPath !== null) return [...resolvedPath, method];
   const initializer = binding?.initializers[0];
   if (
     initializer === undefined ||
@@ -298,7 +306,7 @@ export const builtinDataEffectMethod = (
       true,
       initializer.node,
     )
-    ? method
+    ? [method]
     : null;
 };
 
@@ -588,6 +596,9 @@ const affectsBuiltinPath = (
 
 const BUILTIN_RECEIVER_METHODS: Readonly<Record<string, ReadonlySet<string>>> =
   {
+    path: new Set(["resolve", "join", "dirname"]),
+    "path/posix": new Set(["resolve", "join", "dirname"]),
+    url: new Set(["fileURLToPath"]),
     fs: new Set([
       "readFile",
       "readFileSync",
@@ -762,7 +773,7 @@ const computeOriginalBuiltinReceiver = (
 ): boolean => {
   if (!t.isCallExpression(node) && !t.isOptionalCallExpression(node))
     return false;
-  const callee = node.callee;
+  const callee = unwrapJavaScriptExpression(node.callee).node;
   if (!t.isMemberExpression(callee) && !t.isOptionalMemberExpression(callee))
     return false;
   const receiver = t.isIdentifier(callee.object)
@@ -780,14 +791,21 @@ const computeOriginalBuiltinReceiver = (
         semanticGlobalProcessOrigin(callee.object, state));
   if (sourceOrigin === undefined) return false;
   const origin = builtinNamespaceOrigin(sourceOrigin);
-  if (origin.importedPath.length !== 0) return false;
+  const posixReceiver =
+    origin.specifier === "path" &&
+    origin.importedPath.length === 1 &&
+    origin.importedPath[0] === "posix";
+  if (origin.importedPath.length !== 0 && !posixReceiver) return false;
   const method = semanticStaticPropertyKey(callee.property, callee.computed);
   const identity = semanticRequireExportsIdentity(origin.specifier, [
+    ...origin.importedPath,
     method ?? "",
   ]);
   if (
     method === null ||
-    !BUILTIN_RECEIVER_METHODS[origin.specifier]?.has(method) ||
+    !BUILTIN_RECEIVER_METHODS[
+      posixReceiver ? "path/posix" : origin.specifier
+    ]?.has(method) ||
     receiver?.memberWrites.some(
       ({ path, node: write }) =>
         affectsBuiltinPath(path, [method]) &&

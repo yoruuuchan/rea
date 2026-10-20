@@ -2,6 +2,7 @@ import { primitiveByteExpansionSource } from "../../../tests/fixtures/javascript
 import { graphForJavaScript as graphFor } from "../../../tests/fixtures/javascriptSemanticGraph.js";
 import * as t from "@babel/types";
 import { expect, it } from "vitest";
+import { aliasSelectionBudgetSource } from "../../../tests/fixtures/javascriptAliasSelectionBudget.js";
 
 import {
   SEMANTIC_GRAPH_FILE_NODE_CEILING,
@@ -25,6 +26,36 @@ import { semanticCoverageResourceLimits } from "../../domain/javascript/javascri
 import { getterExpansionSource } from "../../../tests/fixtures/javascriptGetterExpansion.js";
 
 const SHA256 = "a".repeat(64);
+
+it("projects bounded alias selection as a resource-limit unknown", () => {
+  const source = aliasSelectionBudgetSource();
+  const ir = analyzeJavaScriptSemantics(source);
+  const graph = graphFor(source, ir);
+  expect(ir.coverage).toMatchObject({
+    status: "partial",
+    resourceLimits: ["alias-selections"],
+  });
+  const unknown = graph.unknowns.find(
+    ({ reason, detail }) =>
+      reason === "resource-limit" && /Alias selection expansion/u.test(detail),
+  );
+  expect(unknown).toBeDefined();
+  expect(
+    graph.evidence_contexts.find(
+      ({ context_id }) => context_id === unknown?.evidence.context_id,
+    ),
+  ).toMatchObject({
+    coverage: {
+      limits: expect.arrayContaining([
+        {
+          name: "javascript_semantic_alias_selections",
+          value: 512,
+          unit: "items",
+        },
+      ]),
+    },
+  });
+});
 
 it.each([
   ["plain export", "const answer = 42; export { answer };", 0],

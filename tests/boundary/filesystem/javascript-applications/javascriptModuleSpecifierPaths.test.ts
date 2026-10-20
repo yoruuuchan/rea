@@ -398,15 +398,32 @@ describe("package exports URL path rejections", () => {
         ...crossContainer,
         container_sha256: "c".repeat(64),
       });
-      expect(
+      const resolveTarget = () =>
         resolveArtifactPathByContext({
           declaredPath: "fixture",
           sourcePath: "app/main.js",
           context: "module-specifier",
           moduleKind,
           files,
-        }),
-      ).toMatchObject({ resolved_path: null, resolution_status: "not-found" });
+        });
+      expect(resolveTarget()).toMatchObject({
+        resolved_path: null,
+        resolution_status: "unavailable",
+        candidate_path: target,
+        limitations: [
+          expect.stringContaining("crosses an artifact container boundary"),
+        ],
+      });
+      files.delete(target);
+      expect(resolveTarget()).toMatchObject({
+        resolved_path: null,
+        resolution_status: "not-found",
+      });
+      files.set(target, crossContainer);
+      expect(resolveTarget()).toMatchObject({
+        resolved_path: target,
+        resolution_status: "resolved",
+      });
     },
   );
 });

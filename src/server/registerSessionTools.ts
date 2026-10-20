@@ -1,3 +1,4 @@
+import { registerNativeFunctionMatchingTool } from "./registerNativeFunctionMatchingTool.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { workflowUnknownInput } from "../application/investigation/WorkflowUnknown.js";
@@ -375,6 +376,7 @@ export const registerSessionTools = (
   registerProcessComparisonTool(server, session, compareContract);
   registerArtifactComparisonTool(server, session, compareArtifactsContract);
   registerFunctionComparisonTool(server, session, compareFunctionsContract);
+  registerNativeFunctionMatchingTool(server, session, logger);
   registerBundleComparisonTool(
     server,
     session,

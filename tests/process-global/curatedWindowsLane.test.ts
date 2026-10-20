@@ -83,6 +83,16 @@ describe("curated Windows test lane", () => {
     );
   });
 
+  it("keeps Windows environment identity and layered setup regressions in the lane", async () => {
+    expect(await explicitPaths("windows")).toEqual(
+      expect.arrayContaining([
+        "tests/boundary/filesystem/clientConfigurationEnvironment.test.ts",
+        "tests/boundary/filesystem/clientConfigurationLayeredEnvironment.test.ts",
+        "tests/acceptance/setup/registrationRuntimeEnvironmentCli.test.ts",
+      ]),
+    );
+  });
+
   it("keeps packed bridge verification under the retained native runtime lease in the lane", async () => {
     expect(await explicitPaths("windows")).toContain(
       "tests/boundary/process/packedBridgeVerification.test.ts",

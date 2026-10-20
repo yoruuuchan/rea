@@ -14,6 +14,11 @@ import {
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
 import { npxRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import {
+  effectiveClientConfiguration,
+  readClientConfigurationFiles,
+} from "../../../src/application/ClientConfigurationFiles.js";
+import { clientRegistrationEnvironmentDetails } from "../../../src/application/ClientRegistrationEnvironment.js";
 
 const command = npxRegistrationCommand(process.platform);
 const language = "x86:LE:32:default";
@@ -61,6 +66,47 @@ const layered = async (lower: unknown, upper: unknown) => {
   };
   return { client, paths, sources, status, unchanged };
 };
+
+it.skipIf(process.platform !== "win32").each([
+  { REA_ANALYSIS_PROVIDER: "ghidra", rea_analysis_provider: "hopper" },
+  { rea_analysis_provider: "hopper", REA_ANALYSIS_PROVIDER: "ghidra" },
+])(
+  "keeps explicit overrides above inherited Windows aliases: %j",
+  async (lower) => {
+    const fixture = await layered(lower, {});
+    expect(
+      await configureClientConfiguration(
+        fixture.client,
+        { REA_ANALYSIS_PROVIDER: "ghidra" },
+        command,
+      ),
+    ).toMatchObject({ status: "configured" });
+    const sources = await readClientConfigurationFiles(fixture.client);
+    expect(sources.ok).toBe(true);
+    if (!sources.ok) throw new Error(sources.error.detail);
+    const environment = clientRegistrationEnvironmentDetails(
+      effectiveClientConfiguration(sources.value),
+    );
+    expect(environment.ok).toBe(true);
+    if (!environment.ok) throw environment.error;
+    expect(environment.value.timeoutInputs.analysisProvider).toBe("ghidra");
+    expect(environment.value.values).toHaveProperty(
+      "REA_ANALYSIS_PROVIDER",
+      "ghidra",
+    );
+    expect(environment.value.values).not.toHaveProperty(
+      "rea_analysis_provider",
+    );
+    expect(await readFile(fixture.paths[0]!, "utf8")).toBe(fixture.sources[0]);
+    expect(
+      await configureClientConfiguration(
+        fixture.client,
+        { REA_ANALYSIS_PROVIDER: "ghidra" },
+        command,
+      ),
+    ).toEqual({ status: "unchanged" });
+  },
+);
 
 it("validates language/compiler settings in the effective OpenCode environment", async () => {
   const fixture = await layered(

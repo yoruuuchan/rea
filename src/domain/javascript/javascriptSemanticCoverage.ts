@@ -4,6 +4,7 @@ import type { ApplicationCoverage } from "./javascriptApplicationEvidenceSchemas
 import {
   SEMANTIC_EXPRESSION_DEPTH_LIMIT,
   SEMANTIC_GETTER_EXPANSION_LIMIT,
+  SEMANTIC_ALIAS_SELECTION_LIMIT,
   SEMANTIC_PRIMITIVE_CANDIDATE_LIMIT,
   SEMANTIC_PRIMITIVE_JSON_BYTES_LIMIT,
 } from "./javascriptSemanticResourceLimits.js";
@@ -89,6 +90,10 @@ const semanticResourceBounds: Record<
   },
   "getter-expansion": {
     value: SEMANTIC_GETTER_EXPANSION_LIMIT,
+    unit: "items",
+  },
+  "alias-selections": {
+    value: SEMANTIC_ALIAS_SELECTION_LIMIT,
     unit: "items",
   },
 };

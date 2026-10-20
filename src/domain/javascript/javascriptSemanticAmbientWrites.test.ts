@@ -25,6 +25,32 @@ it("keeps wrapper module aliases distinct from global-object module properties",
 });
 
 it.each([
+  ["const copy={...module};consume(copy);", false],
+  ["const copy={...{child:module}};consume(copy);", true],
+  [
+    "const original={child:module};const copy={...original};consume(copy);",
+    true,
+  ],
+])(
+  "exposes copied children without escaping the source container: %s",
+  (body, moduleEscaped) => {
+    const parsed = parseJavaScriptSource(`function copy(){${body}}`);
+    if (parsed === null) throw new Error("Expected copied escape fixture");
+    const state = completeSemanticSteps(
+      indexJavaScriptBindingsSteps(parsed.program),
+    );
+    expect(
+      state.ambientEscapeEffects.some(
+        ({ path }) =>
+          path.length === 2 &&
+          path[0] === "commonjs-module" &&
+          path[1] === null,
+      ),
+    ).toBe(moduleEscaped);
+  },
+);
+
+it.each([
   {
     name: "reconverging projections with different alias-cycle histories",
     setup: `var x; const a = { foo: x, bar: globalThis }; x = a.bar;

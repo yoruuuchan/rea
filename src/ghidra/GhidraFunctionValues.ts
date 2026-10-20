@@ -1,3 +1,4 @@
+import { procedureInfoSchema } from "../domain/native/procedureInfo.js";
 import { z } from "zod";
 import {
   nativeFunctionAnnotationsInputSchema,
@@ -181,13 +182,11 @@ const procedureReferences = z
     ),
   })
   .strict();
-const procedureInfo = z
-  .object({
+const procedureInfo = procedureInfoSchema
+  .safeExtend({
     name: z.string().min(1),
     entrypoint: ghidraCanonicalAddressSchema,
-    basicblock_count: z.number().int().min(0),
     length: z.number().int().min(0),
-    signature: z.string().nullable(),
     locals: z.array(localVariable),
     classification,
     body: ghidraFunctionBody,

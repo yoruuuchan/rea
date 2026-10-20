@@ -12,6 +12,8 @@ import {
   HTML_INLINE_SCRIPT_LOCATION_COVERAGE_LIMIT,
   omittedHtmlInlineScriptLocations,
   selfReferenceOmissions,
+  dependencyManifest,
+  applicationContainerIdentity,
   type JavaScriptArtifactGraphContext,
 } from "./JavaScriptArtifactGraphContext.js";
 import {
@@ -93,6 +95,57 @@ function* buildJavaScriptArtifactGraphInputSteps(
 ): Generator<void, unknown> {
   const accumulator = new JavaScriptArtifactGraphAccumulator();
   const root = createJavaScriptArtifactRootNode(accumulator, snapshot);
+  const parsedPackages = new Set(
+    analysis.packages
+      .filter((metadata) => metadata.status === "included")
+      .map(({ path }) => path),
+  );
+  const applicationOwnershipUnknownContainers = new Set<string>();
+  const applicationModuleGapSources = new Map<string, Set<string>>();
+  const applicationModuleReferencesRetained = new Set<string>();
+  const recordModuleGap = (file: {
+    path: string;
+    container_sha256: string;
+  }) => {
+    const container = applicationContainerIdentity(fileSet, file);
+    const sources =
+      applicationModuleGapSources.get(container) ?? new Set<string>();
+    sources.add(file.path);
+    applicationModuleGapSources.set(container, sources);
+  };
+  for (const files of [fileSet.files, fileSet.unavailable_relevant_files]) {
+    for (const file of files) {
+      if (
+        file.kind === "package-json" &&
+        !dependencyManifest(file.path) &&
+        !parsedPackages.has(file.path)
+      )
+        applicationOwnershipUnknownContainers.add(
+          applicationContainerIdentity(fileSet, file),
+        );
+      if (
+        file.kind === "javascript" &&
+        (!("text" in file) || !file.text.included)
+      )
+        recordModuleGap(file);
+    }
+  }
+  // Omitted module relationships can hide another launch owner. Do not expand
+  // retained facts beyond the projection guard merely to recover ownership.
+  for (const analyzed of analysis.files) {
+    if (
+      analyzed.application_projection_failure !== undefined ||
+      analyzed.analysis_failure !== undefined ||
+      analyzed.javascript?.parse_status === "failed" ||
+      (analyzed.javascript?.parse_error_count ?? 0) > 0
+    )
+      recordModuleGap(analyzed.file);
+    else if (analyzed.javascript !== null)
+      applicationModuleReferencesRetained.add(analyzed.file.path);
+  }
+  const unavailableFilesByPath = new Map(
+    fileSet.unavailable_relevant_files.map((file) => [file.path, file]),
+  );
   const context: JavaScriptArtifactGraphContext = {
     accumulator,
     snapshot,
@@ -105,13 +158,23 @@ function* buildJavaScriptArtifactGraphInputSteps(
     ),
     root,
     filesByPath: new Map(fileSet.files.map((file) => [file.path, file])),
-    unanalyzedFiles: fileSet.unanalyzed_files,
+    unanalyzedFiles: {
+      get: (path) =>
+        unavailableFilesByPath.get(path) ?? fileSet.unanalyzed_files?.get(path),
+      hasDirectory: (path, container) =>
+        fileSet.unanalyzed_files?.hasDirectory(path, container) ?? false,
+    },
     fileNodes: new Map(),
     assetNodes: new Map(),
     sourceModuleNodes: new Map(),
     chunkNodes: new Map(),
     moduleNodes: new Map(),
     containerNodes: new Map([[snapshot.manifest.root_sha256, root]]),
+    applicationRootsBySource: new Map(),
+    applicationOwnershipUnknownContainers,
+    applicationModuleGapSources,
+    applicationModuleReferencesRetained,
+    applicationPossibleRootsByContainer: new Map(),
   };
   addJavaScriptArtifactContainers(context);
   yield;

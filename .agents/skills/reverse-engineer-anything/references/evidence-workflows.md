@@ -24,6 +24,17 @@ retain its complete source and receive that view immediately. Without that
 advertised choice, keep the existing complete call. CLI inspection returns
 portable complete Evidence; save it before projecting a selected inline view.
 
+For native procedure/name/string inventories, select `detail: "summary"` when
+the connected tool advertises it and the task needs counts or selected rows.
+Use its parent Evidence ID with
+`view: {kind: "native-inventory", offset: 0, limit: 32, fields: ["value"]}`.
+Search tools retain the existing pattern/mode/case/document selection. Omit
+`fields` for complete records; `record.address` and `source_index` remain on
+selected rows. Selecting `value` keeps its string/decoding qualifications.
+Parent Evidence ID plus source index preserves same-address
+alternatives. Follow `coverage.next_offset` only as far as the question needs;
+exhausting retained rows does not establish complete program discovery.
+
 Use `record_unknown` to track unresolved questions in the user's investigation
 and name the authority or environment still required. Supply supporting and
 contradicting evidence IDs. It updates the session registry directly.

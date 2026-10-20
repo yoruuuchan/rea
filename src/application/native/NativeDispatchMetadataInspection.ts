@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { addressedValue } from "../../contracts/toolOutputSchemaPrimitives.js";
+import { addressedValueSchema } from "../../domain/native/nativeInventory.js";
 import {
   nativeDispatchMetadataResultSchema,
   inspectNativeDispatchMetadata,
@@ -44,8 +44,8 @@ export const inspectNativeDispatch = async (
   const names = z
     .array(
       z.union([
-        addressedValue.strict(),
-        addressedValue
+        addressedValueSchema.strict(),
+        addressedValueSchema
           .omit({ value: true })
           .extend({ name: z.string() })
           .strict(),

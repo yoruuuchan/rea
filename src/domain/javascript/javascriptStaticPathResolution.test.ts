@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { analyzeJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
 import { parserPluginsForPath } from "./javascriptSourceParser.js";
 import {
+  calleeName,
   staticPath,
   staticPathResolutionContext,
 } from "./javascriptStaticAnalysisHelpers.js";
@@ -27,6 +28,22 @@ const anchoredExpressions = [
   ['path[`resolve`](__dirname, "preload.js")', "preload.js"],
   ['path.posix.resolve("ignored", __dirname, "preload.js")', "preload.js"],
   ['path.resolve("/ignored", __dirname, "preload.js")', "preload.js"],
+  ['path.resolve(runtimeBase, "/app/preload.js")', "/app/preload.js"],
+  ['path.resolve(runtimeBase, __dirname, "preload.js")', "preload.js"],
+  ['path.resolve(...parts, "/app/preload.js")', "/app/preload.js"],
+  ['path.resolve(42, "/app/preload.js")', "/app/preload.js"],
+  [
+    'path.resolve(new URL("./", import.meta.url), __dirname, "preload.js")',
+    "preload.js",
+  ],
+  [
+    'path.resolve(new URL("./", import.meta.url), dirname(fileURLToPath(import.meta.url)), "preload.js")',
+    "preload.js",
+  ],
+  [
+    'path.posix.resolve(new URL("./", import.meta.url), "/app", "preload.js")',
+    "/app/preload.js",
+  ],
   [
     'path.posix.resolve("ignored", dirname(fileURLToPath(import.meta.url)), "preload.js")',
     "preload.js",
@@ -58,13 +75,9 @@ const unknownExpressions = [
   "path.posix.resolve()",
   'path.resolve("sub", "../preload.js")',
   'path.resolve("", "")',
-  'path.resolve(runtimeBase, "/app/preload.js")',
   'path.resolve("/app", runtimeFile)',
-  'path.resolve(runtimeBase, __dirname, "preload.js")',
   "path.resolve(__dirname, runtimeFile)",
-  'path.resolve(...parts, "/app/preload.js")',
   'path.resolve("/app", ...parts)',
-  'path.resolve(42, "/app/preload.js")',
   'path.resolve("/app", null)',
   "path.resolve(`/app/${runtimeFile}`)",
   'path.win32.resolve("/app", "/shared/preload.js")',
@@ -73,6 +86,12 @@ const unknownExpressions = [
   'resolve("/app", "preload.js")',
   '__dirname + "preload.js"',
   'path.dirname(__filename) + "preload.js"',
+  'new URL("./pre%2Fload.js", import.meta.url)',
+  'path.join(new URL("./", import.meta.url), "preload.js")',
+  'path.resolve(new URL("./", import.meta.url), "preload.js")',
+  'path.join(__dirname, new URL("./pre%2Fload.js", import.meta.url))',
+  'path.resolve(__dirname, new URL("./", import.meta.url), "preload.js")',
+  'path.resolve("/app", new URL("./", import.meta.url), "preload.js")',
 ];
 
 const pathValueExpressions = [
@@ -324,6 +343,36 @@ it.each([
   );
 });
 
+it("decodes a source-relative file URL once before composing a filesystem path", () => {
+  assertPathProjection(
+    'fileURLToPath(new URL("./pre%252Fload.js", import.meta.url))',
+    "./pre%2Fload.js",
+    "filesystem-expression",
+  );
+  assertPathProjection(
+    'path.join(dirname(fileURLToPath(import.meta.url)), "pre%2Fload.js")',
+    "pre%2Fload.js",
+    "filesystem-expression",
+  );
+});
+
+it("retains Worker URL references through their separate URL-aware producer", () => {
+  const specifier = "./worker%252Fentry.js?version=1#worker";
+  const analysis = analyzeJavaScriptStaticSource(`
+    import { Worker } from "node:worker_threads";
+    new Worker(new URL(${JSON.stringify(specifier)}, import.meta.url));
+  `);
+
+  expect(analysis.parse_status).toBe("complete");
+  expect(analysis.parse_error_count).toBe(0);
+  expect(
+    analysis.references
+      .filter(({ kind }) => kind === "worker")
+      .map(({ specifier, expression }) => ({ specifier, expression })),
+  ).toEqual([{ specifier, expression: null }]);
+  expect(analysis.role_paths).toEqual([]);
+});
+
 it.each([
   'fileURLToPath("file:///app/%2Fpreload.js")',
   'fileURLToPath("file:///app/%5Cpreload.js")',
@@ -344,7 +393,8 @@ const parsePathExpression = (expression: string) =>
 
 const analyzePathConsumers = (expression: string) => {
   const property = `preload: ${expression}`;
-  const genericPrefix = "const options = { ";
+  const genericPrefix =
+    'import path, {dirname} from "node:path"; import {fileURLToPath} from "node:url"; const options = { ';
   const windowPrefix = "new BrowserWindow({ webPreferences: { ";
   const windowExpression = `${windowPrefix}${property} } })`;
   const utilityExpression = `utilityProcess.fork(${expression})`;
@@ -366,8 +416,24 @@ const assertPathProjection = (
   context: JavaScriptStaticPathContext,
 ) => {
   const node = parsePathExpression(expression);
-  expect(staticPath(node)).toBe(path);
-  expect(staticPathResolutionContext(node)).toBe(context);
+  // This syntax matrix supplies identity explicitly; full-source cases prove it.
+  const nodePathResolve = (
+    callee: import("@babel/types").Node,
+    fact?: "source-directory",
+  ) => {
+    if (fact === "source-directory") {
+      const name = calleeName(
+        callee.type === "CallExpression" ? callee.callee : callee,
+      );
+      return (
+        name === "__dirname" || name === "dirname" || name.endsWith(".dirname")
+      );
+    }
+    const name = calleeName(callee);
+    return name.endsWith(".resolve") && !name.includes("win32");
+  };
+  expect(staticPath(node, nodePathResolve)).toBe(path);
+  expect(staticPathResolutionContext(node, nodePathResolve)).toBe(context);
   const {
     analysis,
     property,

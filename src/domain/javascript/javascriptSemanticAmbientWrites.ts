@@ -22,6 +22,11 @@ import {
   type SemanticIterationSource,
 } from "./javascriptSemanticIterationSources.js";
 import { createSemanticReturnedReferences } from "./javascriptSemanticReturnedReferences.js";
+import {
+  semanticCopiedReferencePath,
+  semanticReferenceIterationUnknown,
+  semanticReferenceSourcesInactive,
+} from "./javascriptSemanticReferenceSources.js";
 
 const GLOBAL_OBJECT_NAMES = ["globalThis", "global", "window", "self"];
 
@@ -236,30 +241,44 @@ export const createAmbientPathResolver = (
         }
         const binding = resolveSemanticBindingState(state, root, root.name);
         if (binding === undefined) continue;
-        const stable = semanticStableInitializer(binding, state);
+        const stable = possibleWrites
+          ? undefined
+          : semanticStableInitializer(binding, state);
         const readAt = current.readsAtSelf ? root : capture;
-        const initializers = possibleWrites
-          ? readAt === undefined
-            ? binding.initializers
+        const selected =
+          !possibleWrites || readAt === undefined
+            ? binding
             : semanticBindingAtRead(binding, readAt, state.parentsByNode)
-                .binding.initializers
+                .binding;
+        const initializers = possibleWrites
+          ? [...selected.initializers, ...selected.referenceInitializers]
           : stable === undefined
             ? []
             : [stable];
-        for (const initializer of initializers)
+        for (const initializer of initializers) {
+          if (semanticReferenceSourcesInactive(initializer, state)) continue;
+          // Pattern assignments share the source selection owner with member
+          // effects: copying a container preserves its children, not itself.
+          const path = semanticCopiedReferencePath(
+            initializer,
+            suffix ?? [null],
+            escapedContents ? "escape" : "identity",
+          );
+          if (path === null) continue;
           pending.push({
             node: initializer.node,
             readsAtSelf: true,
             suffix:
-              suffix === undefined
+              suffix === undefined ||
+              semanticReferenceIterationUnknown(initializer, state)
                 ? undefined
-                : [
-                    ...initializer.projection.map((key) =>
-                      key === null ? null : String(key),
-                    ),
-                    ...suffix,
-                  ],
+                : path.map((key) =>
+                    key === null || typeof key === "object"
+                      ? null
+                      : String(key),
+                  ),
           });
+        }
         continue;
       }
       if (
@@ -332,7 +351,8 @@ export const createAmbientPathResolver = (
         if (t.isObjectExpression(root)) {
           for (const property of root.properties)
             if (t.isSpreadElement(property))
-              continueWith(property.argument, []);
+              // A fresh copy exposes selected children, not its source container.
+              continueWith(property.argument, [null]);
             else if (
               t.isObjectProperty(property) &&
               t.isExpression(property.value)
@@ -433,6 +453,7 @@ export function* indexJavaScriptAmbientWritesSteps(
   program: t.Program,
   state: JavaScriptSemanticAnalysisState,
   observeOpaqueInvocation?: (node: t.Node) => void,
+  observeWriteSite?: (node: t.Node) => void,
 ): Generator<void> {
   const ambientReads = createAmbientPathResolver(state, false);
   const browserReceiverMethods = new Set<string>();
@@ -482,6 +503,7 @@ export function* indexJavaScriptAmbientWritesSteps(
     program,
     (root, kind, writeSite) => {
       if (kind === "opaque-call") return [];
+      observeWriteSite?.(writeSite);
       // Reassigning a local alias changes the binding, not the referenced object.
       if (kind === "binding")
         return t.isIdentifier(root) &&
@@ -626,8 +648,11 @@ export function* indexJavaScriptAmbientWritesSteps(
   for (const { node, target, browserReceiver, projection } of escapes)
     for (const path of ambientWrites(target, node, true, projection))
       // Only proven browser APIs keep their global receiver from user code.
-      if (!(browserReceiver && path.length === 1 && path[0] === "global"))
-        state.ambientEscapes.retain([...path, null]);
+      if (!(browserReceiver && path.length === 1 && path[0] === "global")) {
+        const escaped = [...path, null];
+        state.ambientEscapes.retain(escaped);
+        state.ambientEscapeEffects.push({ path: escaped, node });
+      }
   // A function may call a browser method replaced later in source order.
   if (
     [...browserReceiverMethods].some((method) =>

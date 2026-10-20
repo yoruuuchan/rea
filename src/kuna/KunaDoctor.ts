@@ -9,8 +9,11 @@ import type {
 import { readKunaConfiguration } from "./KunaConfiguration.js";
 import type { FileCloseResourceOwner } from "../application/AnalysisProvider.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import {
   inspectKunaInstallation,
+  kunaInstallationCancellation,
+  kunaInstallationFailureDiagnostics,
   type KunaReadinessFailure,
 } from "./KunaInstallation.js";
 import {
@@ -37,6 +40,7 @@ export const inspectKunaProvider = async (
   platform: NodeJS.Platform = process.platform,
   options: {
     readonly fileCloseResources: FileCloseResourceOwner;
+    readonly signal?: AbortSignal;
   },
 ): Promise<DoctorProviderInspection> => {
   let installation: Awaited<ReturnType<typeof inspectKunaInstallation>>;
@@ -44,9 +48,18 @@ export const inspectKunaProvider = async (
     installation = await inspectKunaInstallation(environment, {
       platform,
       fileCloseResources: options.fileCloseResources,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (cause: unknown) {
-    if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
+    if (!(cause instanceof RegularFileCleanupFailure)) {
+      const cancellation = kunaInstallationCancellation(cause);
+      if (cancellation !== undefined)
+        throw new AnalysisCancelledError("doctor", {
+          cause: cancellation.reason,
+          diagnostics: cancellation.diagnostics,
+        });
+      throw cause;
+    }
     return {
       id: KUNA_PROVIDER_ID,
       configured: environment.REA_KUNA_COMMAND !== undefined,
@@ -61,7 +74,10 @@ export const inspectKunaProvider = async (
           detail: `Kuna installation inspection could not confirm file cleanup: ${cause instanceof Error ? cause.message : String(cause)}`,
           remediation: null,
           classification: "config_drift",
-          details: { cleanup_incomplete: true },
+          details: {
+            cleanup_incomplete: true,
+            ...kunaInstallationFailureDiagnostics(cause),
+          },
         },
       ],
     };

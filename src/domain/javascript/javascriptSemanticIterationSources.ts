@@ -4,20 +4,24 @@ import {
   semanticObjectPatternKeys,
   runtimeFunctionParameters,
   semanticStaticPropertyKey,
+  unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import {
   semanticArrayIndex,
   type JavaScriptSemanticPropertyPath,
 } from "./javascriptSemanticPropertyPaths.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
+import { semanticCopiedReferencePath } from "./javascriptSemanticReferenceSources.js";
 
 interface IterationSourceValue {
   readonly node: t.Node;
   readonly projection: JavaScriptSemanticPropertyPath;
+  readonly iterationSources?: readonly IterationSourceValue[];
 }
 
 /** An iterator receiver or property reference store, with default guards. */
 export interface SemanticIterationSource extends IterationSourceValue {
+  readonly iterationSources?: readonly IterationSourceValue[];
   readonly kind: "iteration" | "reference-store";
   readonly mutation: t.Node;
   readonly target?: t.MemberExpression;
@@ -30,7 +34,44 @@ interface PatternSource extends IterationSourceValue {
   readonly restStartIndex?: number;
 }
 
+/** Select an assigned slot while retaining fresh rest-copy identity and offsets. */
+export const semanticStoredSourceSelection = (
+  source: SemanticIterationSource,
+  selected: JavaScriptSemanticPropertyPath,
+): {
+  readonly projection: JavaScriptSemanticPropertyPath;
+  readonly capturedSelectionDepth?: number;
+  readonly ownEnumerable?: true;
+} | null => {
+  const copy = source.projection.at(-1);
+  if (copy === null || typeof copy !== "object")
+    return { projection: [...source.projection, ...selected] };
+  const projection = semanticCopiedReferencePath(
+    {
+      projection: source.projection,
+      copyProjectionOffset: source.projection.length - 1,
+      copyKind: copy.startIndex === undefined ? "object-rest" : "array-rest",
+      copyExcludedKeys: copy.excludedKeys,
+      ...(copy.startIndex === undefined
+        ? {}
+        : { copyStartIndex: copy.startIndex }),
+    },
+    selected,
+    "identity",
+  );
+  return projection === null
+    ? null
+    : {
+        projection,
+        capturedSelectionDepth: source.projection.length,
+        ...(copy.startIndex === undefined
+          ? { ownEnumerable: true as const }
+          : {}),
+      };
+};
+
 interface SourceGuards {
+  readonly iterationSources?: readonly IterationSourceValue[];
   readonly fallbackSources?: readonly IterationSourceValue[];
   readonly requiredSources?: readonly IterationSourceValue[];
 }
@@ -79,6 +120,7 @@ const visit = (
   source: PatternSource | undefined,
   guards: SourceGuards = {},
 ): void => {
+  pattern = unwrapJavaScriptExpression(pattern).node;
   const { sources, mutation } = context;
   if (t.isMemberExpression(pattern)) {
     // Property stores have no lexical alias binding. Preserve the selected
@@ -111,7 +153,16 @@ const visit = (
       ...guards,
       requiredSources: [
         ...(guards.requiredSources ?? []),
-        ...(source === undefined ? [] : [source]),
+        ...(source === undefined
+          ? []
+          : [
+              {
+                ...source,
+                ...(guards.iterationSources === undefined
+                  ? {}
+                  : { iterationSources: guards.iterationSources }),
+              },
+            ]),
       ],
     });
     visit(
@@ -122,7 +173,16 @@ const visit = (
         ...guards,
         fallbackSources: [
           ...(guards.fallbackSources ?? []),
-          ...(source === undefined ? [] : [source]),
+          ...(source === undefined
+            ? []
+            : [
+                {
+                  ...source,
+                  ...(guards.iterationSources === undefined
+                    ? {}
+                    : { iterationSources: guards.iterationSources }),
+                },
+              ]),
         ],
       },
     );
@@ -168,6 +228,13 @@ const visit = (
   if (t.isArrayPattern(pattern)) {
     if (source !== undefined && source.restStartIndex === undefined)
       add(sources, source, mutation, guards);
+    const selectedGuards = {
+      ...guards,
+      iterationSources: [
+        ...(guards.iterationSources ?? []),
+        ...(source === undefined ? [] : [source]),
+      ],
+    };
     pattern.elements.forEach((element, index) => {
       if (element === null) return;
       if (t.isRestElement(element))
@@ -181,9 +248,9 @@ const visit = (
                 projection: source.projection,
                 restStartIndex: (source.restStartIndex ?? 0) + index,
               },
-          guards,
+          selectedGuards,
         );
-      else visit(context, element, project(source, index), guards);
+      else visit(context, element, project(source, index), selectedGuards);
     });
     return;
   }

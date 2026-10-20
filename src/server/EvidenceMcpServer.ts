@@ -451,7 +451,15 @@ class ErrorEvidenceTransport implements Transport {
     );
     return {
       ...message,
-      result: this.delivery.toErrorToolResult(failure, targetContent),
+      result: {
+        ...this.delivery.toErrorToolResult(failure, targetContent),
+        // The SDK stamps `resultType` on modern-era results before this
+        // transport sees them; the replacement must keep the stamp or a
+        // 2026-07-28 client discards REA's structured error entirely.
+        ...(typeof message.result.resultType === "string"
+          ? { resultType: message.result.resultType }
+          : {}),
+      },
     };
   }
 }

@@ -8,6 +8,7 @@ import {
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import {
+  semanticArrayIndex,
   semanticPropertyPathKeyMatches,
   type JavaScriptSemanticPropertyPath as PropertyPath,
 } from "./javascriptSemanticPropertyPaths.js";
@@ -21,6 +22,12 @@ import { expandSemanticGetterResult } from "./javascriptSemanticGetterResults.js
 export interface JavaScriptSemanticObjectReference {
   readonly node: t.Node;
   readonly path: PropertyPath;
+  /** This selection crossed the object's prototype, rather than an own slot. */
+  readonly inherited?: true;
+  /** A shallow copy selects this prefix now while retaining its child identity. */
+  readonly capturedSelectionAt?: t.Node;
+  readonly ownEnumerable?: true;
+  readonly iterableFallbackPath?: PropertyPath;
   readonly escapes?: true;
   /** A retry omitted suffixes, so escaping constructed children must cover them. */
   readonly widenedGetterResult?: true;
@@ -638,6 +645,8 @@ class ObjectReferenceWalk {
     this.#references.push({
       node: property.argument,
       path: [this.#spreadKey(), ...this.#remaining],
+      capturedSelectionAt: property.argument,
+      ownEnumerable: true,
     });
     if (
       selected !== null &&
@@ -672,6 +681,7 @@ class ObjectReferenceWalk {
       this.#references.push({
         node: property.value,
         path: [selected, ...this.#remaining],
+        inherited: true,
       });
     return true;
   }
@@ -776,4 +786,58 @@ const objectExpressionDefinesKey = (
     }
   }
   return false;
+};
+
+export const semanticArrayPropertyReferences = (
+  node: t.ArrayExpression,
+  path: PropertyPath,
+): readonly JavaScriptSemanticObjectReference[] => {
+  const [key, ...remaining] = path;
+  const selected = key ?? null;
+  const selectedIndex =
+    typeof selected === "object" ? null : semanticArrayIndex(selected);
+  if (typeof selected !== "object" && selectedIndex === null) return [];
+  const references: JavaScriptSemanticObjectReference[] = [];
+  let minimumIndex = 0;
+  let uncertainIndex = false;
+  for (const element of node.elements) {
+    if (t.isSpreadElement(element)) {
+      if (selectedIndex === null || selectedIndex >= minimumIndex) {
+        let sourceKey: PropertyPath[number] = null;
+        if (!uncertainIndex) {
+          if (selectedIndex !== null) sourceKey = selectedIndex - minimumIndex;
+          else if (selected !== null && typeof selected === "object")
+            sourceKey = {
+              excludedKeys: selected.excludedKeys.flatMap((name) => {
+                const index = semanticArrayIndex(name);
+                return index === null || index < minimumIndex
+                  ? []
+                  : [String(index - minimumIndex)];
+              }),
+              startIndex: Math.max(
+                0,
+                (selected.startIndex ?? 0) - minimumIndex,
+              ),
+            };
+        }
+        references.push({
+          node: element.argument,
+          path: [sourceKey, ...remaining],
+          capturedSelectionAt: element.argument,
+          iterableFallbackPath: [],
+        });
+      }
+      uncertainIndex = true;
+      continue;
+    }
+    if (
+      element !== null &&
+      (uncertainIndex
+        ? selectedIndex === null || selectedIndex >= minimumIndex
+        : semanticPropertyPathKeyMatches(selected, String(minimumIndex)))
+    )
+      references.push({ node: element, path: remaining });
+    minimumIndex++;
+  }
+  return references;
 };

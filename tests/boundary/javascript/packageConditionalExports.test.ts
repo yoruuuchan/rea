@@ -66,6 +66,7 @@ const compareWithNode = async (
     readonly specifier?: string;
     readonly main?: string;
     readonly metadataText?: string;
+    readonly metadataAbsent?: boolean;
     readonly sourceWithinPackage?: string;
     readonly packageFiles?: Readonly<Record<string, string>>;
   } = {},
@@ -91,11 +92,11 @@ const compareWithNode = async (
       exports: exportsMap,
       main: options.main,
     });
-  await writeFile(join(packageDirectory, "package.json"), metadata);
-  const contents = new Map<string, string>([
-    [sourcePath, ""],
-    [`node_modules/${packageName}/package.json`, metadata],
-  ]);
+  const contents = new Map<string, string>([[sourcePath, ""]]);
+  if (!options.metadataAbsent) {
+    await writeFile(join(packageDirectory, "package.json"), metadata);
+    contents.set(`node_modules/${packageName}/package.json`, metadata);
+  }
   if (options.siblingFile === true) {
     const filename = `${packageName}.js`;
     const source = `module.exports = ${JSON.stringify(filename)};`;
@@ -320,13 +321,23 @@ describe("package exports before sibling files", () => {
     },
   );
 
-  it("does not let another container's exports override a local sibling file", async () => {
-    const { files } = await compareWithNode(
-      "./default.cjs",
-      "require",
-      TARGETS,
-      { siblingFile: true },
-    );
+  it("keeps an unmapped package container unknown despite a local sibling file", async () => {
+    const {
+      node,
+      node_error,
+      outcome: mapped,
+      files,
+    } = await compareWithNode("./default.cjs", "require", TARGETS, {
+      siblingFile: true,
+    });
+    expect(node).toBe("default.cjs");
+    expect(node_error).toBeNull();
+    expect(mapped).toMatchObject({
+      resolved_path: "node_modules/example/default.cjs",
+      resolution_status: "resolved",
+    });
+    // The Node control has one runtime directory. A different inventoried
+    // container without its loader mapping cannot prove the metadata absent.
     const outcome = resolveArtifactPathByContext({
       declaredPath: "example",
       sourcePath: "main.js",
@@ -342,10 +353,37 @@ describe("package exports before sibling files", () => {
       ),
     });
     expect(outcome).toMatchObject({
-      resolved_path: "node_modules/example.js",
-      resolution_status: "resolved",
+      resolved_path: null,
+      resolution_status: "unavailable",
+      limitations: [
+        expect.stringContaining(
+          "without an established runtime loader mapping",
+        ),
+      ],
     });
   });
+
+  it.each([undefined, "main.js"])(
+    "uses the real sibling when metadata is absent with package-local source %s",
+    async (sourceWithinPackage) => {
+      const { node, node_error, outcome } = await compareWithNode(
+        "./default.cjs",
+        "require",
+        TARGETS,
+        {
+          siblingFile: true,
+          metadataAbsent: true,
+          ...(sourceWithinPackage === undefined ? {} : { sourceWithinPackage }),
+        },
+      );
+      expect(node).toBe("example.js");
+      expect(node_error).toBeNull();
+      expect(outcome).toMatchObject({
+        resolved_path: "node_modules/example.js",
+        resolution_status: "resolved",
+      });
+    },
+  );
 });
 describe("scalar package exports metadata", () => {
   it.each([false, true, 0, 42])(
@@ -564,13 +602,22 @@ describe("package self-reference scope boundaries", () => {
     });
   });
 
-  it("does not apply self exports from another container", async () => {
-    const { files } = await compareWithNode(
-      "./specific.cjs",
-      "require",
-      TARGETS,
-      { sourceWithinPackage: "main.js", siblingFile: true },
-    );
+  it("keeps unmapped self metadata unknown rather than selecting a sibling", async () => {
+    const {
+      node,
+      node_error,
+      outcome: mapped,
+      files,
+    } = await compareWithNode("./specific.cjs", "require", TARGETS, {
+      sourceWithinPackage: "main.js",
+      siblingFile: true,
+    });
+    expect(node).toBe("specific.cjs");
+    expect(node_error).toBeNull();
+    expect(mapped).toMatchObject({
+      resolved_path: "node_modules/example/specific.cjs",
+      resolution_status: "resolved",
+    });
     const outcome = resolveArtifactPathByContext({
       declaredPath: "example",
       sourcePath: "node_modules/example/main.js",
@@ -586,8 +633,13 @@ describe("package self-reference scope boundaries", () => {
       ),
     });
     expect(outcome).toMatchObject({
-      resolved_path: "node_modules/example.js",
-      resolution_status: "resolved",
+      resolved_path: null,
+      resolution_status: "unavailable",
+      limitations: [
+        expect.stringContaining(
+          "without an established runtime loader mapping",
+        ),
+      ],
     });
   });
 });

@@ -63,6 +63,7 @@ export const createSystemDoctorHost = (
       ),
       await inspectKunaProvider(environment, process.platform, {
         fileCloseResources,
+        signal: inspectionSignal,
       }),
     ],
     linuxDemoRuntimeCheck: () =>

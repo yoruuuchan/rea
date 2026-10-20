@@ -2931,6 +2931,12 @@ describe("Ghidra deadline guidance", () => {
     expect(projected.remediation.action).toContain(
       "REA_GHIDRA_DISABLED_ANALYZERS",
     );
+    expect(projected.remediation.action).toContain("restart REA");
+    expect(projected.remediation.action).toContain("reconnect the MCP client");
+    expect(projected.remediation.action).toContain("export useful Evidence");
+    expect(projected.remediation.action).toContain(
+      "Reopening alone keeps the current server settings",
+    );
     expect(projected.remediation.action).not.toContain("rea doctor");
   });
 

@@ -1,3 +1,4 @@
+import { isNativeInventoryOperation } from "../domain/native/nativeInventory.js";
 import { INSPECT_ANALYSIS_VIEW_OPERATION } from "../domain/analysisView/analysisViewErrors.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
@@ -26,13 +27,19 @@ export const createToolResultDelivery = (
   new ToolResultDelivery(maximumResponseBytes ?? STDIO_DEFAULT_MAX_BUFFER_SIZE);
 
 /** Offer a named, schema-validated source page only for retained native analysis. */
-const nativeEvidenceContinuation = (
+const retainedEvidenceContinuation = (
   evidence: Evidence,
 ): Readonly<Record<string, JsonValue>> => {
-  if (evidence.operation !== "analyze_function") return {};
+  const view =
+    evidence.operation === "analyze_function"
+      ? { kind: "native", facet: "pseudocode", offset: 0 }
+      : isNativeInventoryOperation(evidence.operation)
+        ? { kind: "native-inventory", offset: 0, limit: 64 }
+        : undefined;
+  if (view === undefined) return {};
   const input = inspectAnalysisViewInputSchema.safeParse({
     source: { kind: "retained-evidence", evidence_id: evidence.evidence_id },
-    view: { kind: "native", facet: "pseudocode", offset: 0 },
+    view,
   });
   if (!input.success) return {};
   return {
@@ -81,7 +88,7 @@ export class ToolResultDelivery {
                   kind: "retained-evidence",
                   evidence_id: evidence.evidence_id,
                 },
-                ...nativeEvidenceContinuation(evidence),
+                ...retainedEvidenceContinuation(evidence),
               }),
         });
   }
@@ -171,7 +178,7 @@ export class ToolResultDelivery {
     const retainedEvidence = recovery.evidence_reference !== undefined;
     const recoveryAdvice =
       recovery.continuation !== undefined
-        ? "Call inspect_analysis_view with the supplied continuation arguments to read retained pseudocode. Follow coverage.next_offset for subsequent pages; reduce the page limit if needed, or export the complete retained Evidence."
+        ? "Call inspect_analysis_view with the supplied continuation arguments to read retained analysis. Follow coverage.next_offset for subsequent pages; reduce the page limit if needed, or export the complete retained Evidence."
         : retainedEvidence
           ? "Export retained evidence to consume the complete analysis, or use complete CLI JSON output."
           : encoded.constraint === "string-length"

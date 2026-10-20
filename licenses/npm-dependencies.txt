@@ -2,7 +2,7 @@ REA npm dependency inventory
 Prepared from the root package-lock.json; refresh this inventory when locked dependencies change.
 License identifiers are upstream lockfile declarations, not a legal assessment.
 Runtime includes transitive and optional platform packages; development includes build, test and website tooling.
-Locked package entries: 750; runtime: 178.
+Locked package entries: 751; runtime: 179.
 Full runtime copyright/license/NOTICE texts: npm-runtime-notices.txt.
 
 @algolia/abtesting@1.25.0 | development | MIT
@@ -335,6 +335,11 @@ obug@3.0.0 | development | MIT
   Package: https://www.npmjs.com/package/@bcoe/v8-coverage/v/1.0.2
   Archive: https://registry.npmjs.org/@bcoe/v8-coverage/-/v8-coverage-1.0.2.tgz
   Integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==
+@bufbuild/protobuf@2.16.0 | runtime | (Apache-2.0 AND BSD-3-Clause)
+  Lockfile path: node_modules/@bufbuild/protobuf
+  Package: https://www.npmjs.com/package/@bufbuild/protobuf/v/2.16.0
+  Archive: https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-2.16.0.tgz
+  Integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==
 @cfworker/json-schema@4.1.1 | runtime | MIT
   Lockfile path: node_modules/@cfworker/json-schema
   Package: https://www.npmjs.com/package/@cfworker/json-schema/v/4.1.1

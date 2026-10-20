@@ -1,3 +1,4 @@
+import { resolvePairedEvidenceRequest } from "../application/EvidenceInputResolver.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
@@ -38,11 +39,18 @@ export const registerFunctionComparisonTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
+          const resolved = resolvePairedEvidenceRequest(
+            input,
+            (id) =>
+              session.evidenceForAnalysis?.(id) ?? session.evidenceById(id),
+          );
+          if (!resolved.ok)
+            return server.delivery.toCallToolResult(resolved, contract);
           let leftEvidence: Evidence;
           let rightEvidence: Evidence;
           try {
-            leftEvidence = parseEvidence(input.left);
-            rightEvidence = parseEvidence(input.right);
+            leftEvidence = parseEvidence(resolved.value.left);
+            rightEvidence = parseEvidence(resolved.value.right);
           } catch (cause: unknown) {
             return server.delivery.toCallToolResult(
               err(

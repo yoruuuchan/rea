@@ -12,6 +12,7 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { machoImage } from "../../../src/artifacts/apple/MachoImage.fixture.js";
 import {
   CATALOG_IDENTITY,
+  createCatalogDigestProfiles,
   createCatalogDigests,
 } from "../../../src/catalogIdentity.js";
 import { CLI_COMMAND_NAMES } from "../../../src/cliCommandNames.js";
@@ -141,17 +142,7 @@ describe("server and catalog identity", () => {
   });
 
   it("binds output schema profile and canonical output contracts into identity", () => {
-    const full = createCatalogDigests();
-    const off = createCatalogDigests(
-      TOOL_CONTRACTS,
-      PROMPT_CONTRACTS,
-      undefined,
-      "off",
-    );
-    expect(off.tools_sha256).not.toBe(full.tools_sha256);
-    expect(off.combined_sha256).not.toBe(full.combined_sha256);
-    expect(off.prompts_sha256).toBe(full.prompts_sha256);
-
+    const profiles = createCatalogDigestProfiles();
     const changedOutput = TOOL_CONTRACTS.map((contract, index) =>
       index === 0
         ? {
@@ -160,17 +151,24 @@ describe("server and catalog identity", () => {
           }
         : contract,
     );
-    const changedFull = createCatalogDigests(changedOutput);
-    const changedOff = createCatalogDigests(
-      changedOutput,
-      PROMPT_CONTRACTS,
-      undefined,
-      "off",
-    );
-    expect(changedFull.tools_sha256).not.toBe(full.tools_sha256);
-    expect(changedOff.tools_sha256).not.toBe(off.tools_sha256);
-    expect(changedFull.combined_sha256).not.toBe(full.combined_sha256);
-    expect(changedOff.combined_sha256).not.toBe(off.combined_sha256);
+    const changed = createCatalogDigestProfiles(changedOutput);
+    for (const input of ["full", "compact"] as const) {
+      const { full, off } = profiles[input];
+      expect(off.tools_sha256).not.toBe(full.tools_sha256);
+      expect(off.combined_sha256).not.toBe(full.combined_sha256);
+      expect(off.prompts_sha256).toBe(full.prompts_sha256);
+      for (const output of ["full", "off"] as const) {
+        expect(changed[input][output].tools_sha256).not.toBe(
+          profiles[input][output].tools_sha256,
+        );
+        expect(changed[input][output].combined_sha256).not.toBe(
+          profiles[input][output].combined_sha256,
+        );
+        expect(changed[input][output].prompts_sha256).toBe(
+          profiles[input][output].prompts_sha256,
+        );
+      }
+    }
   });
 
   it("changes catalog identity when advertised input examples change", () => {

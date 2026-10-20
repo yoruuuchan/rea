@@ -1,3 +1,4 @@
+import { registerNativeFunctionMatchingCommands } from "./cli/nativeFunctionMatchingCommands.js";
 import { registerCaptureCommands } from "./cli/captureCommands.js";
 import { registerSignalCommands } from "./cli/signalCommands.js";
 import { registerWasmCommands } from "./cli/wasmCommands.js";
@@ -134,6 +135,7 @@ export const createCli = (
   registerFirmwareCommands(cli, logger, environment);
   registerBinaryDiagnosticsCommands(cli, logger, environment);
   registerAnalysisViewCommands(cli, logger);
+  registerNativeFunctionMatchingCommands(cli, logger);
   registerFridaCommands(cli, logger, fridaInstrumentation);
   registerEvidenceCommands(cli, logger);
   registerEnvironmentCommands(cli, logger, environment);

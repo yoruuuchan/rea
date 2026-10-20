@@ -15,10 +15,7 @@ import {
 } from "../domain/analysisProfile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok } from "../domain/result.js";
-import {
-  RegularFileCleanupFailure,
-  regularFileCancellation,
-} from "../filesystem/OwnedRegularFile.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   kunaFileCleanupError,
@@ -31,6 +28,7 @@ import {
 import {
   createKunaFileCloseScope,
   inspectKunaInstallation,
+  kunaInstallationCancellation,
 } from "./KunaInstallation.js";
 import { KunaProjectCache } from "./KunaProjectCache.js";
 import {
@@ -193,7 +191,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
         fileCloseResources: fileCloseScope.owner,
       });
     } catch (cause: unknown) {
-      const cancellation = regularFileCancellation(cause);
+      const cancellation = kunaInstallationCancellation(cause);
       if (
         !(cause instanceof RegularFileCleanupFailure) &&
         cancellation !== undefined
@@ -201,6 +199,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
         return err(
           new AnalysisCancelledError("kuna:profile", {
             cause: cancellation.reason,
+            diagnostics: cancellation.diagnostics,
           }),
         );
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;

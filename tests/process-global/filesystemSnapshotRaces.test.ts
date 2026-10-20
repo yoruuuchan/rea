@@ -34,9 +34,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         return original.readlink(...args);
       }
       if (path === race.target && race.mode === "readlink_eio")
-        throw Object.assign(new Error("injected unexpected readlink failure"), {
-          code: "EIO",
-        });
+        throw race.reason;
       if (path === race.target && race.mode === "readlink_eacces")
         throw Object.assign(new Error("injected denied readlink"), {
           code: "EACCES",
@@ -407,11 +405,17 @@ it.skipIf(process.platform === "win32")(
       });
       race.mode = "readlink_eio";
       race.target = link;
+      const reason = Object.assign(
+        new Error("injected unexpected readlink failure"),
+        { code: "EIO" },
+      );
+      race.reason = reason;
       const cause = await snapshotRoots(scenario).catch(
         (failure: unknown) => failure,
       );
       expect(cause).toBeInstanceOf(ProcessCaptureSnapshotFailure);
       const failure = cause as ProcessCaptureSnapshotFailure;
+      expect(failure.cause).toBe(reason);
       expect(failure.cause).toMatchObject({ code: "EIO" });
       expect(failure.userCategory).toBeUndefined();
       expect(failure.snapshot).toMatchObject({

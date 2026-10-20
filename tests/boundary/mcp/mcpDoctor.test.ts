@@ -1,7 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +24,40 @@ import { MCP_STARTUP_POLICY } from "../../../src/mcpStartupPolicy.js";
 afterEach(() => vi.useRealTimers());
 
 describe("production MCP doctor", () => {
+  it("reuses immutable compiled profile digests and preserves custom-budget identity", async () => {
+    // Exercise the generated module with Node, outside Vitest's source loader.
+    await promisify(execFile)(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+        import assert from "node:assert/strict";
+        import { createCatalogIdentity, createCatalogDigests } from "./dist/catalogIdentity.js";
+        import { RECORDED_CATALOG_DIGEST_PROFILES as profiles } from "./dist/recordedCatalogDigests.js";
+        import { COMPACT_INPUT_SCHEMA_BUDGET_BYTES as budgetBytes } from "./dist/config/mcpInputSchemaProfile.js";
+        assert.ok(Object.isFrozen(profiles));
+        for (const input of ["full", "compact"]) {
+          assert.ok(Object.isFrozen(profiles[input]));
+          for (const output of ["full", "off"]) {
+            const identity = createCatalogIdentity(input === "compact" ? { budgetBytes } : undefined, output);
+            assert.equal(identity.digests, profiles[input][output]);
+            assert.ok(Object.isFrozen(identity.digests));
+          }
+        }
+        const selection = { budgetBytes: 1 };
+        const custom = createCatalogIdentity(selection, "off");
+        selection.budgetBytes = budgetBytes;
+        const expected = createCatalogDigests(undefined, undefined, { budgetBytes: 1 }, "off");
+        assert.deepEqual(custom.digests, expected);
+        assert.notEqual(custom.digests.tools_sha256, profiles.compact.off.tools_sha256);
+        assert.equal(custom.digests, custom.digests);
+      `,
+      ],
+      { timeout: 30_000 },
+    );
+  }, 35_000);
+
   it("preserves the full-output envelope for startup failures", async () => {
     const result = await runProductionMcpDoctorCli(
       ["--json", "--full-output"],

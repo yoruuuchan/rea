@@ -12,6 +12,8 @@ import type { SetupClient } from "./SupportedClients.js";
 import { clientRegistrationEnvironment } from "./ClientRegistrationEnvironment.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { ConfigurationError } from "../domain/configurationErrors.js";
+import { mergeEnvironmentOverrides } from "../process/snapshotEnvironment.js";
+import { PRODUCT_IDENTITY } from "../identity.js";
 
 /** A parsed layer retains its path so rereading the write target replaces only that layer. */
 export interface ClientConfigurationSource extends ClientConfigurationDocument {
@@ -88,6 +90,7 @@ export const readConfigurationFile = async (
 export const readClientConfigurationFiles = async (
   client: SetupClient,
   resources?: ArtifactResourceScope,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<
   Result<readonly ClientConfigurationSource[], ClientConfigurationFileError>
 > => {
@@ -104,6 +107,7 @@ export const readClientConfigurationFiles = async (
         document.value,
         {},
         "fragment",
+        platform,
       );
       if (!environment.ok)
         return err(invalidEnvironment(path, environment.error));
@@ -111,7 +115,10 @@ export const readClientConfigurationFiles = async (
     }
   }
   const environment = clientRegistrationEnvironment(
-    effectiveClientConfiguration(documents),
+    effectiveClientConfiguration(documents, undefined, platform),
+    {},
+    "effective",
+    platform,
   );
   if (!environment.ok)
     return err(invalidEnvironment(client.configPath, environment.error));
@@ -142,6 +149,7 @@ export const effectiveClientConfiguration = (
     readonly client: Pick<SetupClient, "configPath" | "configPaths">;
     readonly document: ClientConfigurationDocument | undefined;
   },
+  platform: NodeJS.Platform = process.platform,
 ): ClientConfigurationDocument | undefined => {
   const documents =
     target === undefined
@@ -164,11 +172,28 @@ export const effectiveClientConfiguration = (
       ...Object.keys(document.legacyServers),
       ...Object.keys(document.servers),
     ]);
-    for (const name of names)
-      servers[name] = mergeConfigurationValue(
-        servers[name],
-        effectiveClientServer(document, name),
-      );
+    for (const name of names) {
+      const previous = servers[name];
+      const next = effectiveClientServer(document, name);
+      const merged = mergeConfigurationValue(previous, next);
+      const key =
+        document.dialect === "opencode" || document.dialect === "opencode_v2"
+          ? "environment"
+          : "env";
+      if (
+        name === PRODUCT_IDENTITY.mcpServerKey &&
+        isObject(merged) &&
+        isObject(merged[key])
+      ) {
+        const before =
+          isObject(previous) && isObject(previous[key]) ? previous[key] : {};
+        const after = isObject(next) && isObject(next[key]) ? next[key] : {};
+        servers[name] = {
+          ...merged,
+          [key]: mergeEnvironmentOverrides(before, after, platform),
+        };
+      } else servers[name] = merged;
+    }
   }
   return { ...last, servers, legacyServers: {} };
 };
@@ -177,6 +202,7 @@ export const effectiveClientConfiguration = (
 export const readEffectiveClientRegistrationConfiguration = async (
   client: SetupClient,
   resources?: ArtifactResourceScope,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<
   Result<
     {
@@ -186,9 +212,17 @@ export const readEffectiveClientRegistrationConfiguration = async (
     ClientConfigurationFileError
   >
 > => {
-  const nativeSources = await readClientConfigurationFiles(client, resources);
+  const nativeSources = await readClientConfigurationFiles(
+    client,
+    resources,
+    platform,
+  );
   if (!nativeSources.ok) return nativeSources;
-  const nativeDocument = effectiveClientConfiguration(nativeSources.value);
+  const nativeDocument = effectiveClientConfiguration(
+    nativeSources.value,
+    undefined,
+    platform,
+  );
   const fallbackPath =
     client.format === "zcode" ? client.zcodeFallbackPath : undefined;
   if (
@@ -207,9 +241,14 @@ export const readEffectiveClientRegistrationConfiguration = async (
   const fallbackSources = await readClientConfigurationFiles(
     fallbackClient,
     resources,
+    platform,
   );
   if (!fallbackSources.ok) return fallbackSources;
-  const fallbackDocument = effectiveClientConfiguration(fallbackSources.value);
+  const fallbackDocument = effectiveClientConfiguration(
+    fallbackSources.value,
+    undefined,
+    platform,
+  );
   return ok(
     fallbackDocument === undefined
       ? { document: nativeDocument, configPath: client.configPath }

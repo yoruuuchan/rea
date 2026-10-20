@@ -80,6 +80,30 @@ export class WebNetworkCaptureService {
           },
         ]),
       );
+    if (input.protobuf !== undefined && input.record_ordinals === undefined)
+      return failure(
+        new AnalysisInputError(OPERATION, undefined, [
+          {
+            path: ["record_ordinals"],
+            reason: "invalid_format",
+            message:
+              "Protobuf options require explicit producer record ordinals.",
+          },
+        ]),
+      );
+    if (
+      input.protobuf?.schema !== undefined &&
+      !isAbsolute(input.protobuf.schema.descriptor_set_path)
+    )
+      return failure(
+        new AnalysisInputError(OPERATION, undefined, [
+          {
+            path: ["protobuf", "schema", "descriptor_set_path"],
+            reason: "invalid_format",
+            message: "Expected an absolute descriptor-set path on this host.",
+          },
+        ]),
+      );
     const loaded = await this.port.inspect(input, options);
     if (!loaded.ok) {
       const partial = webNetworkCaptureSchema.safeParse(
@@ -201,6 +225,30 @@ export class WebNetworkCaptureService {
         ? {}
         : { format: input.format }),
       record_ordinals: selected,
+      ...(input.protobuf === undefined
+        ? {}
+        : {
+            protobuf: {
+              framing: input.protobuf.framing,
+              ...(input.protobuf.body_pointers === undefined
+                ? {}
+                : {
+                    body_pointers: input.protobuf.body_pointers.map(redactText),
+                  }),
+              ...(input.protobuf.schema === undefined
+                ? {}
+                : {
+                    schema: {
+                      descriptor_set_path: redactText(
+                        input.protobuf.schema.descriptor_set_path,
+                      ),
+                      message_type: redactText(
+                        input.protobuf.schema.message_type,
+                      ),
+                    },
+                  }),
+            },
+          }),
       sensitive_value_count: input.sensitive_values.length,
     });
     return ok(

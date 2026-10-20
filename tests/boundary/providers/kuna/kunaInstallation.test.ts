@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
-import { chmod, readFile, realpath, symlink } from "node:fs/promises";
+import {
+  chmod,
+  readFile,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, it as test } from "vitest";
 
+import { kunaInstallationCancellation } from "../../../../src/kuna/KunaInstallation.js";
 import { readKunaConfiguration } from "../../../../src/kuna/KunaConfiguration.js";
 import { inspectKunaInstallationOwned as inspectKunaInstallation } from "./kunaFileCloseOwner.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
@@ -219,3 +226,106 @@ it("stops a version probe that ignores SIGTERM instead of waiting on it", async 
   const pid = (await fakeKunaCalls(kuna))[0]?.pid ?? 0;
   expect(() => process.kill(pid, 0)).toThrow();
 }, 20_000);
+
+it("keeps a version deadline ahead of cancellation during its joined stop", async () => {
+  const root = await createTestTempDirectory("rea-kuna-deadline-first-");
+  const command = join(root, "probe.cjs");
+  const stopped = join(root, "stopped");
+  const release = join(root, "release");
+  await (
+    await import("node:fs/promises")
+  ).writeFile(
+    command,
+    `#!${process.execPath}
+const fs = require("node:fs");
+process.on("SIGTERM", () => fs.writeFileSync(${JSON.stringify(stopped)}, "timeout stop"));
+const gate = setInterval(() => {
+  if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(gate); process.exit(0); }
+}, 5);
+setTimeout(() => process.exit(9), 10000).unref();
+`,
+    { mode: 0o700 },
+  );
+  const controller = new AbortController();
+  const pending = inspectKunaInstallation(
+    {
+      REA_KUNA_COMMAND: command,
+      REA_KUNA_CACHE_DIR: join(root, "cache"),
+    },
+    { signal: controller.signal, probeTimeoutMs: 1000 },
+  );
+  const outcome = pending.then(
+    (value) => ({ kind: "result" as const, value }),
+    (cause: unknown) => ({ kind: "thrown" as const, cause }),
+  );
+  try {
+    await expect
+      .poll(
+        () =>
+          readFile(stopped).then(
+            () => true,
+            () => false,
+          ),
+        { timeout: 5000 },
+      )
+      .toBe(true);
+    controller.abort({ request: "late doctor cancellation" });
+    await writeFile(release, "release");
+    expect(await outcome).toMatchObject({
+      kind: "result",
+      value: {
+        ok: false,
+        error: {
+          code: "version_unresolved",
+          diagnostics: { deadline_ms: 1000, killed: true },
+        },
+      },
+    });
+  } finally {
+    await writeFile(release, "release");
+    await outcome;
+  }
+});
+
+it("retains an admitted lookup failure when cancellation arrives during settlement", async () => {
+  const root = await createTestTempDirectory("rea-kuna-lookup-failure-");
+  const command = join(root, "missing-kuna");
+  const controller = new AbortController();
+  const pending = inspectKunaInstallation(
+    {
+      REA_KUNA_COMMAND: command,
+      REA_KUNA_CACHE_DIR: join(root, "cache"),
+    },
+    { signal: controller.signal },
+  );
+  controller.abort({ request: "cancel in-flight lookup" });
+  const outcome = await pending.then(
+    (value) => ({ kind: "result" as const, value }),
+    (cause: unknown) => ({ kind: "thrown" as const, cause }),
+  );
+  expect(outcome).toMatchObject({
+    kind: "result",
+    value: {
+      ok: false,
+      error: { code: "executable_missing", diagnostics: { command } },
+    },
+  });
+});
+
+it("preserves an already-cancelled caller before admitting a lookup", async () => {
+  const root = await createTestTempDirectory("rea-kuna-preabort-lookup-");
+  const controller = new AbortController();
+  const reason = { request: "cancel before lookup" };
+  controller.abort(reason);
+  const cause: unknown = await inspectKunaInstallation(
+    {
+      REA_KUNA_COMMAND: join(root, "missing-kuna"),
+      REA_KUNA_CACHE_DIR: join(root, "cache"),
+    },
+    { signal: controller.signal },
+  ).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(kunaInstallationCancellation(cause)?.reason).toBe(reason);
+});

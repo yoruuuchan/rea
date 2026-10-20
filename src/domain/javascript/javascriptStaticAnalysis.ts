@@ -12,6 +12,9 @@ import {
 } from "./javascriptSemanticTraversal.js";
 
 import { inspectElectronStaticNode } from "./electronStaticAnalysis.js";
+import { hasPossibleCommonJsDelegateWrite } from "./javascriptSemanticRequireOrigin.js";
+import { semanticResourceLimitReason } from "./javascriptSemanticResourceLimits.js";
+import { createStaticNodePathResolveQuery } from "./javascriptStaticPathIntrinsics.js";
 import { finishElectronBrowserWindowsSteps } from "./electronStaticAnalysisBrowser.js";
 import {
   detectVendors,
@@ -24,6 +27,7 @@ import {
   addReference,
   addSourceMapDirectives,
   finishPartialNetworkEndpoints,
+  finishModuleRequireCalls,
   finishSqliteStorageCalls,
   inspectCall,
   inspectRouteProperty,
@@ -89,20 +93,29 @@ export function* analyzeParsedJavaScriptStaticSourceSteps(
   const index = yield* indexJavaScriptBindingsWithReceiversSteps(file.program);
   const { bindings, receivers } = index;
   yield* index.indexAmbientWritesSteps();
+  if (hasPossibleCommonJsDelegateWrite(bindings))
+    yield* index.indexMemberMutationFactsSteps();
   const electronIdentity = yield* indexJavaScriptElectronIdentitySteps(
     file.program,
     bindings,
   );
   const findings: JavaScriptFindingContext = {
+    nodePathResolve: createStaticNodePathResolveQuery(index),
     source,
     accumulator,
     vitePreloadDependencyTable: indexVitePreloadDependencyTable(file.program),
     openReceiverFacts: receivers.openReceivers,
     electronBindings: electronIdentity.bindings,
+    electronInvocationPath: electronIdentity.invocationPath,
+    electronAppPathChangePossible: electronIdentity.mayChangeAppPath,
     rpcScan: createJavaScriptRpcScan(source, receivers.rpcClientRoots, index),
   };
   yield* traverseStaticSourceSteps(file, findings, bindings);
   yield* finishElectronBrowserWindowsSteps(findings, index);
+  if (accumulator.pendingModuleRequireCalls.length > 0) {
+    yield* index.indexMemberMutationFactsSteps();
+    finishModuleRequireCalls(findings, bindings);
+  }
   if (
     accumulator.pendingNetworkCalls.length > 0 ||
     accumulator.pendingSqliteCalls.length > 0
@@ -145,6 +158,9 @@ const finalizeStaticAnalysis = (
 ): JavaScriptStaticAnalysis => {
   const parserErrors = file.errors.length;
   const limitations = [
+    ...(bindings.valueResourceLimits.has("alias-selections")
+      ? [semanticResourceLimitReason("alias-selections")]
+      : []),
     ...(bindings.returnedReferenceWidenings.size > 0
       ? [RETURNED_REFERENCE_WIDENING_LIMITATION]
       : []),
@@ -183,7 +199,9 @@ const finalizeStaticAnalysis = (
   ];
   return {
     parse_status:
-      parserErrors > 0 || accumulator.unknownFindings > 0
+      parserErrors > 0 ||
+      accumulator.unknownFindings > 0 ||
+      bindings.valueResourceLimits.has("alias-selections")
         ? "partial"
         : "complete",
     parse_error_count: parserErrors,
@@ -211,6 +229,14 @@ const finalizeStaticAnalysis = (
     source_map_urls: accumulator.sourceMaps,
     vendors: detectVendors(source),
     electron: {
+      ...(accumulator.appPathChanges.length > 0
+        ? {
+            app_path_changes: finalizeLocatedFindings(
+              accumulator.appPathChanges,
+              accumulator.moduleRangeIndex,
+            ),
+          }
+        : {}),
       ...(accumulator.electronCallPaths?.length
         ? { call_paths: accumulator.electronCallPaths }
         : {}),

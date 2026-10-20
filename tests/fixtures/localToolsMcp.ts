@@ -36,6 +36,7 @@ const compileValidator = (schema: unknown): ValidateFunction<unknown> => {
 /** Start the built production server without configuring deep binary providers. */
 export async function connectLocalToolsMcp(
   environment: Readonly<Record<string, string>> = {},
+  registerCleanup: (cleanup: () => Promise<void>) => void = onTestFinished,
 ) {
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -52,7 +53,7 @@ export async function connectLocalToolsMcp(
     stderr: "pipe",
   });
   const client = new Client({ name: "local-tools-e2e", version: "1" });
-  onTestFinished(async () => {
+  registerCleanup(async () => {
     await client.close();
     await transport.close();
   });

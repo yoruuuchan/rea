@@ -171,22 +171,31 @@ export const staticArrayValues = (
 };
 
 /** Classify whether inert path syntax is a module specifier or file expression. */
+export type JavaScriptStaticPathIntrinsicQuery = (
+  node: t.Node,
+  fact?: "source-directory",
+) => boolean;
+
 export const staticPathResolutionContext = (
   node: t.Node,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
 ): JavaScriptStaticPathContext =>
-  isFilesystemPathExpression(node)
+  isFilesystemPathExpression(node, nodePathResolve)
     ? "filesystem-expression"
     : "module-specifier";
 
-/** Resolve a path composed only from inert literal syntax. */
-export const staticPath = (node: t.Node): string | undefined => {
+/** Resolve a path string composed only from inert literal syntax. */
+export const staticPath = (
+  node: t.Node,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
+): string | undefined => {
   node = unwrapJavaScriptExpression(node).node;
   const value = stringValue(node);
   if (value !== undefined) return value;
   if (t.isBinaryExpression(node, { operator: "+" }))
-    return staticConcatenation(node);
+    return staticConcatenation(node, nodePathResolve);
   if (t.isCallExpression(node) || t.isNewExpression(node))
-    return staticCallPath(node);
+    return staticCallPath(node, nodePathResolve);
   return undefined;
 };
 
@@ -195,18 +204,21 @@ export const staticPath = (node: t.Node): string | undefined => {
  * `__dirname + "/preload.js"` names a file inside it, while text without a
  * leading separator extends the directory's own name and stays unknown.
  */
-const staticConcatenation = (node: t.BinaryExpression): string | undefined => {
+const staticConcatenation = (
+  node: t.BinaryExpression,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
+): string | undefined => {
   const operands: t.Node[] = [];
   let current: t.Node = node;
   while (t.isBinaryExpression(current, { operator: "+" })) {
     operands.push(current.right);
     current = unwrapJavaScriptExpression(current.left).node;
   }
-  const anchored = isDirectoryPath(current);
+  const anchored = isDirectoryPath(current, nodePathResolve);
   if (!anchored) operands.push(current);
   let text = "";
   for (const operand of operands.reverse()) {
-    const value = staticPath(operand);
+    const value = staticPath(operand, nodePathResolve);
     if (value === undefined) return undefined;
     text += value;
   }
@@ -216,29 +228,27 @@ const staticConcatenation = (node: t.BinaryExpression): string | undefined => {
 
 const staticCallPath = (
   node: t.CallExpression | t.NewExpression,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
 ): string | undefined => {
+  if (t.isCallExpression(node) && nodePathResolve?.(node.callee))
+    return staticResolvedPath(node, nodePathResolve);
   const name = calleeName(node.callee);
-  if (name === "URL" || name.endsWith(".URL"))
-    return isFileIdentity(argumentNode(node.arguments[1]))
-      ? stringValue(node.arguments[0])
-      : undefined;
   if (name === "fileURLToPath" || name.endsWith(".fileURLToPath")) {
-    return staticFileUrlPath(node);
+    return staticFileUrlPath(node, nodePathResolve);
   }
-  if (name.endsWith(".resolve"))
-    return name === "win32.resolve" || name.endsWith(".win32.resolve")
-      ? undefined
-      : staticResolvedPath(node);
+  if (name.endsWith(".resolve")) return undefined;
   if (!name.endsWith(".join") && name !== "join") return undefined;
   const parts: string[] = [];
   for (const argument of node.arguments) {
-    if (isDirectoryIdentity(argumentNode(argument))) {
+    if (isDirectoryPath(argumentNode(argument), nodePathResolve)) {
       // join never resets at an absolute segment, so `/preload.js` after the
       // source directory stays inside it.
       parts.push(".");
       continue;
     }
-    const value = t.isNode(argument) ? staticPath(argument) : undefined;
+    const value = t.isNode(argument)
+      ? staticPath(argument, nodePathResolve)
+      : undefined;
     if (value === undefined) return undefined;
     parts.push(value);
   }
@@ -247,13 +257,14 @@ const staticCallPath = (
 
 const staticFileUrlPath = (
   node: t.CallExpression | t.NewExpression,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
 ): string | undefined => {
   if (node.arguments.length !== 1) return undefined;
   const rawArgument = argumentNode(node.arguments[0]);
   if (rawArgument === undefined) return undefined;
   const argument = unwrapJavaScriptExpression(rawArgument).node;
   if (isSourceFileUrl(argument)) return sourceRelativeFileUrlPath(argument);
-  const value = staticPath(argument);
+  const value = staticPath(argument, nodePathResolve);
   const rawPath = value?.split(/[?#]/u, 1)[0] ?? "";
   if (
     value === undefined ||
@@ -324,82 +335,86 @@ const isSourceFileUrl = (
 
 const staticResolvedPath = (
   node: t.CallExpression | t.NewExpression,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
 ): string | undefined => {
-  const parts: (string | null)[] = [];
-  for (const argument of node.arguments) {
-    if (isDirectoryIdentity(argumentNode(argument))) {
-      parts.push(null);
-      continue;
+  const parts: string[] = [];
+  let anchored = false;
+  // Node walks right-to-left and never inspects arguments before its anchor.
+  for (let index = node.arguments.length - 1; index >= 0; index -= 1) {
+    const argument = node.arguments[index];
+    if (isDirectoryPath(argumentNode(argument), nodePathResolve)) {
+      anchored = true;
+      break;
     }
-    const value = t.isNode(argument) ? staticPath(argument) : undefined;
-    // Validate every argument, including those before the last anchor.
+    const value = t.isNode(argument)
+      ? staticPath(argument, nodePathResolve)
+      : undefined;
     if (value === undefined) return undefined;
     parts.push(value);
+    if (posix.isAbsolute(value)) {
+      anchored = true;
+      break;
+    }
   }
-  const anchor = parts.findLastIndex(
-    (part) => part === null || posix.isAbsolute(part),
-  );
   // Relative-only calls depend on the target process cwd, which is unknown.
-  if (anchor === -1) return undefined;
-  // A null anchor is the source directory; preserve its relative projection.
-  const path = posix.join(
-    ...parts.slice(anchor).filter((part) => part !== null),
-  );
+  if (!anchored) return undefined;
+  const path = posix.join(...parts.reverse());
   return path === "/" ? path : path.replace(/\/$/u, "");
 };
 
-const isFilesystemPathExpression = (node: t.Node): boolean => {
+const isFilesystemPathExpression = (
+  node: t.Node,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
+): boolean => {
   node = unwrapJavaScriptExpression(node).node;
   const value = stringValue(node);
   if (value !== undefined) return value.startsWith("/");
-  if (isFileIdentity(node) || isDirectoryIdentity(node)) return true;
+  if (isFileIdentity(node) || isDirectoryPath(node, nodePathResolve))
+    return true;
   if (t.isBinaryExpression(node, { operator: "+" }))
     return (
-      isFilesystemPathExpression(node.left) ||
-      isFilesystemPathExpression(node.right)
+      isFilesystemPathExpression(node.left, nodePathResolve) ||
+      isFilesystemPathExpression(node.right, nodePathResolve)
     );
   if (t.isCallExpression(node) || t.isNewExpression(node)) {
     const name = calleeName(node.callee);
-    if (name.endsWith(".resolve") && staticCallPath(node) !== undefined)
+    if (
+      nodePathResolve?.(node.callee) &&
+      staticCallPath(node, nodePathResolve) !== undefined
+    )
       return true;
-    if (name === "URL" || name.endsWith(".URL"))
-      return isFileIdentity(argumentNode(node.arguments[1]));
+    // A URL object is not a path string until fileURLToPath converts it.
+    if (name === "URL" || name.endsWith(".URL")) return false;
     if (name === "fileURLToPath" || name.endsWith(".fileURLToPath"))
       return (
-        staticFileUrlPath(node) !== undefined ||
+        staticFileUrlPath(node, nodePathResolve) !== undefined ||
         node.arguments.some((argument) => {
           const value = argumentNode(argument);
-          return value !== undefined && isFilesystemPathExpression(value);
+          return (
+            value !== undefined &&
+            isFilesystemPathExpression(value, nodePathResolve)
+          );
         })
       );
     return node.arguments.some((argument) => {
       const value = argumentNode(argument);
-      return value !== undefined && isFilesystemPathExpression(value);
+      return (
+        value !== undefined &&
+        isFilesystemPathExpression(value, nodePathResolve)
+      );
     });
   }
   return false;
 };
 
-const isDirectoryIdentity = (node: t.Node | undefined): boolean => {
-  if (node !== undefined) node = unwrapJavaScriptExpression(node).node;
-  if (isDirectoryPath(node)) return true;
-  if (!t.isCallExpression(node) && !t.isNewExpression(node)) return false;
-  const name = calleeName(node.callee);
-  return (
-    (name === "URL" || name.endsWith(".URL")) &&
-    isFileIdentity(argumentNode(node.arguments[1]))
-  );
-};
-
 /** `__dirname` or the dirname of the source file, as a string. */
-const isDirectoryPath = (node: t.Node | undefined): boolean => {
+const isDirectoryPath = (
+  node: t.Node | undefined,
+  nodePathResolve?: JavaScriptStaticPathIntrinsicQuery,
+): boolean => {
   if (node !== undefined) node = unwrapJavaScriptExpression(node).node;
-  if (t.isIdentifier(node, { name: "__dirname" })) return true;
-  if (!t.isCallExpression(node)) return false;
-  const name = calleeName(node.callee);
   return (
-    (name === "dirname" || name.endsWith(".dirname")) &&
-    isFileIdentity(argumentNode(node.arguments[0]))
+    node !== undefined && nodePathResolve?.(node, "source-directory") === true
   );
 };
 

@@ -6,6 +6,9 @@ import type { JavaScriptStaticAnalysis } from "../../domain/javascript/javascrip
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
 import {
   addStaticInferenceEdge,
+  applicationRootPath,
+  applicationContainerIdentity,
+  addApplicationRootCandidate,
   artifactLocalIdentity,
   chunkLookupKey,
   createElectronRoleNode,
@@ -26,7 +29,10 @@ import {
   resolveArtifactPathByContext,
   type ArtifactPathResolution,
 } from "./JavaScriptArtifactPathResolution.js";
-import { moduleResolutionModeForJavaScriptReference } from "../../domain/javascript/javascriptModuleResolutionMode.js";
+import {
+  moduleResolutionModeForJavaScriptReference,
+  isJsonModuleTarget,
+} from "../../domain/javascript/javascriptModuleResolutionMode.js";
 
 type StaticReference = JavaScriptStaticAnalysis["references"][number];
 type StaticEndpoint = JavaScriptStaticAnalysis["endpoints"][number];
@@ -42,11 +48,11 @@ interface FindingInput<Value> {
 }
 
 interface ResolvedReference {
+  readonly targetImportsUnexamined?: true;
   readonly path: string | null;
   readonly file: JavaScriptArtifactFile | null;
   readonly node: ApplicationNode | null;
   readonly limitations: readonly string[];
-  readonly resolutionStatus?: string;
   readonly resolution?: ArtifactPathResolution;
 }
 
@@ -54,7 +60,10 @@ interface ResolvedReference {
 export function* addJavaScriptStaticFindingsSteps(
   context: JavaScriptArtifactGraphContext,
 ): Generator<void, readonly string[]> {
-  const omissions = { selfReferences: 0 };
+  const omissions = {
+    selfReferences: 0,
+    imports: new Map<string, Set<string>>(),
+  };
   for (const analyzed of context.analysis.files) {
     yield;
     const { file, javascript } = analyzed;
@@ -67,10 +76,41 @@ export function* addJavaScriptStaticFindingsSteps(
       addEndpoint(context, { file, asset, value, coverage });
     for (const value of javascript.storage)
       addStorage(context, { file, asset, value, coverage });
-    for (const value of javascript.role_paths)
-      addDiscoveredRole(context, { file, asset, value, coverage });
     for (const value of javascript.source_map_urls)
       addSourceMapEdge(context, { file, asset, value, coverage });
+  }
+  yield* propagateApplicationOwners(context, omissions.imports);
+  const possible = new Set<string>();
+  for (const roots of context.applicationPossibleRootsByContainer.values())
+    for (const root of roots) addApplicationRootCandidate(possible, root);
+  for (const gaps of context.applicationModuleGapSources.values()) {
+    for (const gap of gaps) {
+      yield;
+      for (const root of context.applicationRootsBySource.get(gap) ?? [])
+        addApplicationRootCandidate(possible, root);
+    }
+  }
+  // An unknown loader may cross an inventoried archive boundary in either
+  // direction. Retain possible owners in every container it could reach.
+  for (const file of context.fileSet.files) {
+    yield;
+    context.applicationPossibleRootsByContainer.set(
+      applicationContainerIdentity(context.fileSet, file),
+      possible,
+    );
+  }
+  const changedRoots = changedApplicationRoots(context);
+  for (const { file, javascript } of context.analysis.files) {
+    yield;
+    const asset = context.assetNodes.get(file.path);
+    if (javascript === null || asset === undefined) continue;
+    const coverage = javascriptAnalysisCoverage(javascript);
+    for (const value of javascript.role_paths)
+      addDiscoveredRole(
+        context,
+        { file, asset, value, coverage },
+        changedRoots,
+      );
   }
   return selfReferenceOmissions(
     omissions.selfReferences,
@@ -79,10 +119,78 @@ export function* addJavaScriptStaticFindingsSteps(
   );
 }
 
+/** A setter changes process-wide runtime state, not package ownership. */
+const changedApplicationRoots = (
+  context: JavaScriptArtifactGraphContext,
+): ReadonlySet<string> | null => {
+  const roots = new Set<string>();
+  // An unchecked load can execute a setter even when the imported source has
+  // no retained AST. Package ownership alone does not prove its runtime path
+  // unchanged. Only launch owners that can reach the gap are affected; an
+  // unrelated unselected source is not evidence of a running setter.
+  for (const sources of context.applicationModuleGapSources.values()) {
+    for (const source of sources) {
+      const owners = context.applicationRootsBySource.get(source);
+      if (owners === undefined) continue;
+      if (owners.size >= 2) return null;
+      for (const root of owners) roots.add(root);
+    }
+  }
+  for (const { file, javascript } of context.analysis.files) {
+    if (!javascript?.electron.app_path_changes?.length) continue;
+    const owners = context.applicationRootsBySource.get(file.path);
+    // A setter whose launching application is unknown cannot establish an
+    // unchanged root for any package-based fallback.
+    if (owners === undefined) return null;
+    // Owner sets stop at two distinct roots once uniqueness is disproven.
+    // They cannot enumerate every application affected by a shared setter.
+    if (owners.size >= 2) return null;
+    for (const root of owners) roots.add(root);
+    const possibleOwners = context.applicationPossibleRootsByContainer.get(
+      applicationContainerIdentity(context.fileSet, file),
+    );
+    // An unchecked loader can execute this setter in another application's
+    // process even when only one entrypoint has a proven import of this source.
+    // Possible-owner sets have the same two-root saturation as proven owners.
+    if (possibleOwners !== undefined) {
+      if (possibleOwners.size >= 2) return null;
+      for (const root of possibleOwners) roots.add(root);
+    }
+  }
+  return roots;
+};
+
+/** Carry every entrypoint owner through already-resolved imports before roles.
+ * Sets and change-driven traversal retain competition and terminate on cycles.
+ */
+function* propagateApplicationOwners(
+  context: JavaScriptArtifactGraphContext,
+  imports: ReadonlyMap<string, ReadonlySet<string>>,
+): Generator<void> {
+  const pending = [...context.applicationRootsBySource.keys()];
+  while (pending.length > 0) {
+    yield;
+    const source = pending.pop();
+    if (source === undefined) break;
+    const roots = context.applicationRootsBySource.get(source);
+    if (roots === undefined) continue;
+    for (const target of imports.get(source) ?? []) {
+      yield;
+      const candidates =
+        context.applicationRootsBySource.get(target) ?? new Set<string>();
+      const previousSize = candidates.size;
+      for (const root of roots) addApplicationRootCandidate(candidates, root);
+      if (candidates.size === previousSize) continue;
+      context.applicationRootsBySource.set(target, candidates);
+      pending.push(target);
+    }
+  }
+}
+
 const addReference = (
   context: JavaScriptArtifactGraphContext,
   input: FindingInput<StaticReference>,
-  omissions: { selfReferences: number },
+  omissions: { selfReferences: number; imports: Map<string, Set<string>> },
 ): void => {
   const source =
     sourceNodeFor(
@@ -95,6 +203,32 @@ const addReference = (
     input.value.specifier === null
       ? null
       : resolveReference(context, input.file.path, input.value, input.coverage);
+  if (
+    (input.value.kind === "static-import" ||
+      input.value.kind === "dynamic-import" ||
+      input.value.kind === "require") &&
+    (input.value.specifier === null ||
+      resolved === null ||
+      resolved.targetImportsUnexamined === true)
+  ) {
+    const container = applicationContainerIdentity(context.fileSet, input.file);
+    const gaps =
+      context.applicationModuleGapSources.get(container) ?? new Set<string>();
+    gaps.add(input.file.path);
+    context.applicationModuleGapSources.set(container, gaps);
+  }
+  if (
+    resolved !== null &&
+    resolved.path !== null &&
+    resolved.file !== null &&
+    (input.value.kind === "static-import" ||
+      input.value.kind === "dynamic-import" ||
+      input.value.kind === "require")
+  ) {
+    const targets = omissions.imports.get(input.file.path) ?? new Set<string>();
+    targets.add(resolved.path);
+    omissions.imports.set(input.file.path, targets);
+  }
   if (input.value.kind === "worker" || input.value.kind === "service-worker") {
     const worker = context.accumulator.addNode({
       kind: input.value.kind === "worker" ? "worker" : "service-worker",
@@ -110,7 +244,7 @@ const addReference = (
             declared_specifier: input.value.specifier,
             expression: input.value.expression,
             resolved_path: resolved?.path ?? null,
-            resolution_status: resolved?.resolutionStatus ?? null,
+            resolution_status: resolved?.resolution?.resolution_status ?? null,
             ...artifactPathResolutionProperties(resolved?.resolution),
           },
           evidence: staticInferenceEvidence({
@@ -133,7 +267,7 @@ const addReference = (
       relation: "loads",
       properties: {
         kind: input.value.kind,
-        resolution_status: resolved?.resolutionStatus ?? null,
+        resolution_status: resolved?.resolution?.resolution_status ?? null,
         ...artifactPathResolutionProperties(resolved?.resolution),
       },
       limitations: resolved?.limitations ?? [],
@@ -182,7 +316,7 @@ const addReference = (
             )
           : null,
       resolved_path: resolved?.path ?? null,
-      resolution_status: resolved?.resolutionStatus ?? null,
+      resolution_status: resolved?.resolution?.resolution_status ?? null,
       ...artifactPathResolutionProperties(resolved?.resolution),
     },
     ...(resolved === null ? {} : { limitations: resolved.limitations }),
@@ -344,7 +478,9 @@ const addStorage = (
 const addDiscoveredRole = (
   context: JavaScriptArtifactGraphContext,
   input: FindingInput<StaticRolePath>,
+  changedRoots: ReadonlySet<string> | null,
 ): void => {
+  const root = applicationRootPath(context, input.file);
   const resolution = resolveArtifactPathByContext({
     declaredPath: input.value.path,
     sourcePath: input.file.path,
@@ -352,14 +488,25 @@ const addDiscoveredRole = (
     files: context.filesByPath,
     directoryPaths: context.directoryPaths,
     unanalyzedFiles: context.unanalyzedFiles,
-    ...(input.value.role === "preload" ||
-    (input.value.role === "renderer" &&
-      input.value.resolution_context === "filesystem-expression")
+    ...(input.value.role === "preload"
       ? { runtimePathKind: "exact-file" as const }
       : input.value.role === "renderer" &&
-          input.value.resolution_context === "module-specifier"
-        ? { runtimePathKind: "url-resource" as const }
-        : {}),
+          input.value.resolution_context === "filesystem-expression"
+        ? {
+            // Raw loadFile literals belong to the application, not its caller.
+            runtimePathKind: "application-file" as const,
+            applicationRootPath:
+              changedRoots === null || (root !== null && changedRoots.has(root))
+                ? null
+                : root,
+            applicationRootIsProven: context.applicationRootsBySource.has(
+              input.file.path,
+            ),
+          }
+        : input.value.role === "renderer" &&
+            input.value.resolution_context === "module-specifier"
+          ? { runtimePathKind: "url-resource" as const }
+          : {}),
   });
   const role = createElectronRoleNode(context, {
     kind:
@@ -533,6 +680,23 @@ const resolveReference = (
           : {}),
       });
   const path = resolution.resolved_path;
+  const targetPath = path ?? resolution.candidate_path;
+  const targetKind =
+    targetPath === undefined
+      ? undefined
+      : (
+          context.filesByPath.get(targetPath) ??
+          context.unanalyzedFiles?.get(targetPath)
+        )?.kind;
+  // Resolving bytes does not prove that the loader's module imports were read.
+  // Only an exact JSON loader target can be inert without JavaScript analysis.
+  const targetIsJson =
+    targetPath !== undefined && isJsonModuleTarget(targetPath, targetKind);
+  const targetImportsUnexamined =
+    !targetIsJson &&
+    (resolution.resolution_status === "unavailable" ||
+      (path !== null &&
+        !context.applicationModuleReferencesRetained.has(path)));
   if (path === null) {
     const source = context.filesByPath.get(sourcePath);
     return source === undefined
@@ -550,7 +714,9 @@ const resolveReference = (
                 resolution,
               ),
           limitations: resolution.limitations,
-          resolutionStatus: resolution.resolution_status,
+          ...(targetImportsUnexamined
+            ? { targetImportsUnexamined: true as const }
+            : {}),
           resolution,
         };
   }
@@ -563,7 +729,9 @@ const resolveReference = (
         file,
         node,
         limitations: resolution.limitations,
-        resolutionStatus: resolution.resolution_status,
+        ...(targetImportsUnexamined
+          ? { targetImportsUnexamined: true as const }
+          : {}),
         resolution,
       };
 };

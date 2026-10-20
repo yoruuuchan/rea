@@ -1,4 +1,5 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
@@ -15,6 +16,242 @@ import {
 } from "../../../src/application/SetupClientConfiguration.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
+import { clientRegistrationEnvironmentDetails } from "../../../src/application/ClientRegistrationEnvironment.js";
+import { snapshotEnvironment } from "../../../src/process/snapshotEnvironment.js";
+import { npxRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
+
+it.each(["win32", "linux"] as const)(
+  "uses the selected %s identity when inspecting lowercase registration settings",
+  async (platform) => {
+    const home = await createTestTempDirectory("rea-selected-platform-env-");
+    const path = join(home, ".cursor/mcp.json");
+    await mkdir(join(home, ".cursor"));
+    await writeFile(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          rea: clientRegistrationEntry(
+            "json",
+            npxRegistrationCommand(platform),
+            { rea_analysis_provider: "invalid provider" },
+          ),
+        },
+      }),
+    );
+    const statuses = await readClientRegistrationStatuses(home, "rea", {
+      platform,
+      environment: {},
+    });
+    expect(statuses.find(({ client }) => client === "cursor")).toMatchObject({
+      state: platform === "win32" ? "invalid" : "aligned",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "win32").each([
+  {
+    key: "rea_analysis_provider",
+    override: "REA_ANALYSIS_PROVIDER",
+    value: "ghidra",
+    duplicate: false,
+  },
+  { key: "true", override: "TRUE", value: "chosen", duplicate: false },
+  { key: '"true"', override: "true", value: "chosen", duplicate: true },
+  {
+    key: "rea_analysis_provider",
+    override: "REA_ANALYSIS_PROVIDER",
+    value: "ghidra",
+    duplicate: true,
+  },
+])(
+  "preserves DSH scalar-key identity and comments when replacing $key",
+  async ({ key, override, value, duplicate }) => {
+    const root = await createTestTempDirectory("rea-dsh-alias-comments-");
+    const configPath = join(root, "cordis.patch.yml");
+    const source = `- insert:\n    - id: rea-mcp\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n        serverName: rea\n        transport: stdio\n        command: old-rea\n        args: [mcp]\n        env:\n          # retain preceding rationale\n          ${key}: "hopper" # retain inline rationale\n${duplicate ? `          ${override}: "ghidra" # retain winning rationale\n` : ""}          CUSTOM: !!js caller.custom\n`;
+    await writeFile(configPath, source);
+    const client = { name: "dsh", format: "dsh", configPath } as const;
+    const result = await configureClientConfiguration(
+      client,
+      { [override]: value },
+      ["rea", "mcp"],
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({
+      status: "configured",
+    });
+    const text = await readFile(configPath, "utf8");
+    expect(text).toContain("# retain preceding rationale");
+    expect(text).toContain("# retain inline rationale");
+    if (duplicate) expect(text).toContain("# retain winning rationale");
+    expect(text).toContain("!!js caller.custom");
+    const env = clientRegistrationEnvironmentDetails(
+      parseClientConfiguration(text, "dsh"),
+    );
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw env.error;
+    expect(env.value.values).toHaveProperty(override, value);
+    expect(
+      Object.keys(env.value.values).filter(
+        (name) => name.toUpperCase() === override.toUpperCase(),
+      ),
+    ).toEqual([override]);
+    expect(await readFile(`${configPath}.rea.backup`, "utf8")).toBe(source);
+    expect(
+      await configureClientConfiguration(client, { [override]: value }, [
+        "rea",
+        "mcp",
+      ]),
+    ).toEqual({ status: "unchanged" });
+  },
+);
+
+it.skipIf(process.platform !== "win32")(
+  "preserves a lowercase explicit Kimi schema profile instead of inserting a conflicting default",
+  async () => {
+    const home = await createTestTempDirectory("rea-kimi-case-");
+    await mkdir(join(home, ".kimi-code"));
+    const configPath = join(home, ".kimi-code/mcp.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: "old-rea",
+            args: ["mcp"],
+            env: { rea_mcp_input_schema_profile: "full" },
+          },
+        },
+      }),
+    );
+    const client = { name: "kimi", format: "kimi", configPath } as const;
+    expect(
+      await configureClientConfiguration(
+        client,
+        {},
+        npxRegistrationCommand(process.platform),
+      ),
+    ).toMatchObject({ status: "configured" });
+    const parsed = parseClientConfiguration(
+      await readFile(configPath, "utf8"),
+      "kimi",
+    );
+    expect(effectiveClientServer(parsed, "rea")).toHaveProperty("env", {
+      rea_mcp_input_schema_profile: "full",
+    });
+    const statuses = await readClientRegistrationStatuses(home, "rea", {
+      environment: {},
+    });
+    expect(statuses.find(({ client }) => client === "kimi")).toMatchObject({
+      state: "aligned",
+    });
+  },
+);
+
+it
+  .skipIf(process.platform !== "win32")
+  .each(["hopper", "!!js caller.provider"])(
+  "replaces a Windows DSH environment alias without evaluating %s",
+  async (stored) => {
+    const root = await createTestTempDirectory("rea-dsh-case-");
+    const configPath = join(root, "cordis.patch.yml");
+    const source = `- insert:\n    - id: rea-mcp\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n        serverName: rea\n        transport: stdio\n        command: old-rea\n        args: [mcp]\n        env:\n          rea_analysis_provider: ${stored}\n          CUSTOM: !!js caller.custom\n`;
+    await writeFile(configPath, source);
+    const client = { name: "dsh", format: "dsh", configPath } as const;
+    const overrides = { REA_ANALYSIS_PROVIDER: "ghidra" };
+    const configured = await configureClientConfiguration(client, overrides, [
+      "rea",
+      "mcp",
+    ]);
+    expect(configured, JSON.stringify(configured)).toMatchObject({
+      status: "configured",
+    });
+    const text = await readFile(configPath, "utf8");
+    expect(text).not.toContain("rea_analysis_provider:");
+    expect(text).toContain("REA_ANALYSIS_PROVIDER: ghidra");
+    expect(text).toContain("!!js caller.custom");
+    const details = clientRegistrationEnvironmentDetails(
+      parseClientConfiguration(text, "dsh"),
+    );
+    expect(details.ok).toBe(true);
+    if (!details.ok) throw details.error;
+    expect(details.value.timeoutInputs.analysisProvider).toBe("ghidra");
+    expect(
+      await configureClientConfiguration(client, overrides, ["rea", "mcp"]),
+    ).toEqual({ status: "unchanged" });
+  },
+);
+
+it.skipIf(process.platform !== "win32").each([
+  {
+    existing: { rea_analysis_provider: "hopper" },
+    overrides: { REA_ANALYSIS_PROVIDER: "ghidra" },
+    expected: "ghidra",
+  },
+  {
+    existing: { REA_ANALYSIS_PROVIDER: "ghidra" },
+    overrides: { rea_analysis_provider: "hopper" },
+    expected: "hopper",
+  },
+])(
+  "keeps Windows override precedence consistent with the launched environment: $expected",
+  ({ existing, overrides, expected }) => {
+    const parsed = parseClientConfiguration(
+      JSON.stringify({
+        mcpServers: { rea: { command: "rea", args: ["mcp"], env: existing } },
+      }),
+      "json",
+    );
+    const result = clientRegistrationEnvironmentDetails(parsed, overrides);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw result.error;
+    expect(result.value.timeoutInputs.analysisProvider).toBe(expected);
+    expect(snapshotEnvironment(result.value.values).REA_ANALYSIS_PROVIDER).toBe(
+      expected,
+    );
+    expect(Object.keys(result.value.values)).toHaveLength(1);
+    const child = spawnSync(
+      process.execPath,
+      ["-e", "process.stdout.write(process.env.REA_ANALYSIS_PROVIDER ?? '')"],
+      {
+        env: result.value.values,
+        encoding: "utf8",
+        timeout: 5_000,
+      },
+    );
+    expect(child.status, child.stderr).toBe(0);
+    expect(child.stdout).toBe(expected);
+  },
+);
+
+it.skipIf(process.platform !== "win32")(
+  "rejects invalid lowercase known settings before writing a Windows registration",
+  async () => {
+    const root = await createTestTempDirectory(
+      "rea-invalid-lowercase-environment-",
+    );
+    const configPath = join(root, "config.json");
+    const original = JSON.stringify({
+      mcpServers: {
+        rea: {
+          command: "rea",
+          args: ["mcp"],
+          env: { rea_analysis_provider: "invalid provider" },
+        },
+      },
+    });
+    await writeFile(configPath, original);
+    const result = await configureClientConfiguration(
+      { name: "cursor", format: "json", configPath },
+      {},
+      ["rea", "mcp"],
+    );
+    expect(result).toMatchObject({ status: "failed" });
+    expect(await readFile(configPath, "utf8")).toBe(original);
+    await expect(access(`${configPath}.rea.backup`)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
 
 it.each([
   ["cursor", "json", "mcpServers", "env"],

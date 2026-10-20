@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import {
+  isJSONRPCResultResponse,
+  type JSONRPCResultResponse,
+} from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
 import { InvestigationRecords } from "../application/investigation/InvestigationRecords.js";
@@ -43,104 +48,137 @@ describe("MCP request bookkeeping", () => {
 });
 
 describe("SDK validation error delivery", () => {
-  it("bounds oversized errors, retains their source, and preserves fitting and valid calls", async () => {
-    const delivery = new ToolResultDelivery(4096);
-    const records = new InvestigationRecords();
-    const server = new EvidenceMcpServer(
-      { name: "sdk-validation-budget-test", version: "1" },
-      { capabilities: {} },
-      (evidence) => records.recordEvidence(evidence),
-      delivery,
-    );
-    server.registerTool(
-      "procedure_pseudo_code",
-      { inputSchema: z.strictObject({ required: z.string() }) },
-      async () => ({ content: [{ type: "text", text: "valid call" }] }),
-    );
-    const client = new Client({
-      name: "sdk-validation-budget-client",
-      version: "1",
-    });
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    const oversizedKey = `unexpected_${"x".repeat(6000)}`;
-    try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-
-      const oversized = await client.callTool({
-        name: "procedure_pseudo_code",
-        arguments: { required: "present", [oversizedKey]: true },
-      });
-      expect(oversized.isError).toBe(true);
-      expect(oversized.structuredContent).toBeUndefined();
-      expect(oversized._meta).toEqual({
-        provenance: { untrusted_content: true, source: "analysis_target" },
-      });
-      expect(Buffer.byteLength(JSON.stringify(oversized))).toBeLessThan(4096);
-      const oversizedError = z
-        .object({
-          error: z.object({
-            code: z.string(),
-            details: z.object({
-              reported_limits: z.record(z.string(), z.unknown()),
-            }),
-          }),
-        })
-        .parse(JSON.parse(firstText(oversized) ?? "null"));
-      expect(oversizedError.error.code).toBe("resource_constraint");
-      const reportedLimits = oversizedError.error.details.reported_limits;
-      expect(reportedLimits).toMatchObject({
-        evidence_reference: {
-          kind: "retained-evidence",
-          evidence_id: expect.any(String),
-        },
-        diagnostic_truncated: true,
-      });
-      expect(reportedLimits).not.toHaveProperty("retention");
-      const bundle = records.exportEvidenceBundle();
-      expect(bundle.records).toHaveLength(1);
-      expect(bundle.records[0]?.operation).toBe("mcp_tool_error");
-      expect(bundle.records[0]?.raw_result).toMatchObject({
-        isError: true,
-        content: [
-          { type: "text", text: expect.stringContaining(oversizedKey) },
-        ],
-      });
-      const evidenceReference = z
-        .object({ evidence_id: z.string() })
-        .parse(reportedLimits.evidence_reference);
-      expect(bundle.records[0]?.evidence_id).toBe(
-        evidenceReference.evidence_id,
+  it.each(["2025-11-25", "2026-07-28"])(
+    "bounds and retains errors through the public stdio entry on %s",
+    async (revision) => {
+      const delivery = new ToolResultDelivery(4096);
+      const records = new InvestigationRecords();
+      const server = new EvidenceMcpServer(
+        { name: "sdk-validation-budget-test", version: "1" },
+        { capabilities: {} },
+        (evidence) => records.recordEvidence(evidence),
+        delivery,
       );
+      server.registerTool(
+        "procedure_pseudo_code",
+        { inputSchema: z.strictObject({ required: z.string() }) },
+        async () => ({ content: [{ type: "text", text: "valid call" }] }),
+      );
+      const client = new Client(
+        {
+          name: "sdk-validation-budget-client",
+          version: "1",
+        },
+        revision === "2026-07-28"
+          ? { versionNegotiation: { mode: { pin: revision } } }
+          : { supportedProtocolVersions: [revision] },
+      );
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      const oversizedKey = `unexpected_${"x".repeat(6000)}`;
+      const serving = serveStdio(() => server, { transport: serverTransport });
+      const replies: JSONRPCResultResponse[] = [];
+      try {
+        await client.connect(clientTransport);
+        expect(client.getNegotiatedProtocolVersion()).toBe(revision);
+        const receive = clientTransport.onmessage;
+        clientTransport.onmessage = (message) => {
+          if (isJSONRPCResultResponse(message)) replies.push(message);
+          receive?.(message);
+        };
 
-      const fitting = await client.callTool({
-        name: "procedure_pseudo_code",
-        arguments: { unexpected: true },
-      });
-      expect(fitting.isError).toBe(true);
-      expect(firstText(fitting)).toContain("Input validation error");
+        // The normal reply and SDK validation error already negotiate and decode
+        // correctly before oversized recovery replaces an SDK-encoded envelope.
+        const valid = await client.callTool({
+          name: "procedure_pseudo_code",
+          arguments: { required: "present" },
+        });
+        expect(valid.content).toContainEqual({
+          type: "text",
+          text: "valid call",
+        });
+        const fitting = await client.callTool({
+          name: "procedure_pseudo_code",
+          arguments: { unexpected: true },
+        });
+        expect(fitting.isError).toBe(true);
+        expect(firstText(fitting)).toContain("Input validation error");
 
-      const quotedKey = '"\\'.repeat(350);
-      const quoted = await client.callTool({
-        name: "procedure_pseudo_code",
-        arguments: { required: "present", [quotedKey]: true },
-      });
-      expect(quoted.isError).toBe(true);
-      expect(firstText(quoted)).toContain("Input validation error");
-      expect(Buffer.byteLength(JSON.stringify(quoted))).toBeLessThan(4096);
-      expect(records.exportEvidenceBundle().records).toHaveLength(1);
+        const oversized = await client.callTool({
+          name: "procedure_pseudo_code",
+          arguments: { required: "present", [oversizedKey]: true },
+        });
+        expect(oversized.isError).toBe(true);
+        expect(oversized.structuredContent).toBeUndefined();
+        expect(oversized._meta).toEqual({
+          provenance: { untrusted_content: true, source: "analysis_target" },
+        });
+        expect(Buffer.byteLength(JSON.stringify(oversized))).toBeLessThan(4096);
+        const oversizedError = z
+          .object({
+            error: z.object({
+              code: z.string(),
+              details: z.object({
+                reported_limits: z.record(z.string(), z.unknown()),
+              }),
+            }),
+          })
+          .parse(JSON.parse(firstText(oversized) ?? "null"));
+        expect(oversizedError.error.code).toBe("resource_constraint");
+        const reportedLimits = oversizedError.error.details.reported_limits;
+        expect(reportedLimits).toMatchObject({
+          evidence_reference: {
+            kind: "retained-evidence",
+            evidence_id: expect.any(String),
+          },
+          diagnostic_truncated: true,
+        });
+        expect(reportedLimits).not.toHaveProperty("retention");
+        const bundle = records.exportEvidenceBundle();
+        expect(bundle.records).toHaveLength(1);
+        expect(bundle.records[0]?.operation).toBe("mcp_tool_error");
+        expect(bundle.records[0]?.raw_result).toMatchObject({
+          isError: true,
+          content: [
+            { type: "text", text: expect.stringContaining(oversizedKey) },
+          ],
+        });
+        const evidenceReference = z
+          .object({ evidence_id: z.string() })
+          .parse(reportedLimits.evidence_reference);
+        expect(bundle.records[0]?.evidence_id).toBe(
+          evidenceReference.evidence_id,
+        );
 
-      const valid = await client.callTool({
-        name: "procedure_pseudo_code",
-        arguments: { required: "present" },
-      });
-      expect(valid.content).toContainEqual({
-        type: "text",
-        text: "valid call",
-      });
-    } finally {
-      await Promise.all([client.close(), server.close()]);
-    }
-  });
+        const quotedKey = '"\\'.repeat(350);
+        const quoted = await client.callTool({
+          name: "procedure_pseudo_code",
+          arguments: { required: "present", [quotedKey]: true },
+        });
+        expect(quoted.isError).toBe(true);
+        expect(firstText(quoted)).toContain("Input validation error");
+        expect(Buffer.byteLength(JSON.stringify(quoted))).toBeLessThan(4096);
+        expect(records.exportEvidenceBundle().records).toHaveLength(1);
+
+        const recovered = await client.callTool({
+          name: "procedure_pseudo_code",
+          arguments: { required: "present" },
+        });
+        expect(recovered.content).toContainEqual({
+          type: "text",
+          text: "valid call",
+        });
+        for (const reply of replies) {
+          expect(reply.result.resultType).toBe(
+            revision === "2026-07-28" ? "complete" : undefined,
+          );
+          expect(
+            Buffer.byteLength(JSON.stringify(reply)) + 1,
+          ).toBeLessThanOrEqual(4096);
+        }
+      } finally {
+        await Promise.all([client.close(), serving.close()]);
+      }
+    },
+  );
 });

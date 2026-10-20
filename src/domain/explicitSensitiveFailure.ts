@@ -41,6 +41,10 @@ export const redactExplicitFailure = (
 ): AnalysisError => {
   if (values.length === 0) return error;
   const redacted = redactFailure(error, values);
+  // Observation owners already apply format-aware exclusions. Keep their facts
+  // and identity across every diagnostic replacement, including input/capacity.
+  if (redacted !== error && error.partialObservation !== undefined)
+    redacted.retainPartialObservation(error.partialObservation);
   return redacted === error
     ? error
     : mirrorCleanup(error, redacted, (value) =>
@@ -118,12 +122,10 @@ const redactFailure = (
     return new AnalysisCancelledError(error.operation, {
       ...context,
       cause: error.cause,
-      partialObservation: error.partialObservation,
     });
   if (error instanceof AnalysisTimeoutError)
     return new AnalysisTimeoutError(error.operation, error.timeoutMs, {
       ...context,
-      partialObservation: error.partialObservation,
     });
   if (error instanceof AnalysisAccessDeniedError)
     return new AnalysisAccessDeniedError(
@@ -199,17 +201,11 @@ const redactFailure = (
       {
         ...context,
         operation: error.operation,
-        ...(error.partialObservation === undefined
-          ? {}
-          : { partialObservation: error.partialObservation }),
       },
     );
   if (error instanceof ProviderAdapterError)
     return new ProviderAdapterError(error.providerId, error.operation, {
       ...context,
-      ...(error.partialObservation === undefined
-        ? {}
-        : { partialObservation: error.partialObservation }),
       ...(error.userMessage === undefined
         ? {}
         : { userMessage: text(error.userMessage) }),

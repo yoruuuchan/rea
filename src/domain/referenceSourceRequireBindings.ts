@@ -39,11 +39,13 @@ export const unshadowedReferenceSourceRequireCalls = (
       if (!t.isCallExpression(node)) return;
       const identifier = requireCalleeIdentifier(node.callee);
       if (identifier === undefined) return;
-      const fact = semanticRequireLoaderAt(
-        node,
-        index.bindings,
-        factoryBindings,
-      );
+      let fact = semanticRequireLoaderAt(node, index.bindings, factoryBindings);
+      if (fact === "create-require") {
+        // Definitions identify a possible factory. Its mutable member reads
+        // need the shared write index before they can prove an association.
+        completeSemanticSteps(index.indexMemberMutationFactsSteps());
+        fact = semanticRequireLoaderAt(node, index.bindings, factoryBindings);
+      }
       if (
         fact === "create-require" ||
         (fact === "commonjs-loader" && wrapperMode !== "absent")

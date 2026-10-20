@@ -155,6 +155,9 @@ const bridgeShape = {
 const utilityShape = { ...findingContext, service_name: z.string().nullable() };
 const electron = z
   .strictObject({
+    app_path_changes: z
+      .array(z.strictObject(findingContext).transform(withRuntime))
+      .optional(),
     call_paths: z
       .array(
         z.strictObject({
@@ -285,8 +288,9 @@ const electron = z
       }),
     ),
   })
-  .transform(({ call_paths, ...rest }) => ({
+  .transform(({ call_paths, app_path_changes, ...rest }) => ({
     ...rest,
+    ...(app_path_changes === undefined ? {} : { app_path_changes }),
     ...(call_paths === undefined ? {} : { call_paths }),
   }));
 const referenceShape = {
@@ -422,6 +426,7 @@ const resourceLimit = z.enum([
   "primitive-bytes",
   "expression-depth",
   "getter-expansion",
+  "alias-selections",
 ]);
 const primitive = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const property: z.ZodType<JavaScriptSemanticProperty> = z.lazy(() =>

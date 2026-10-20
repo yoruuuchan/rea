@@ -44,6 +44,7 @@ import { kunaFunctionDeadline } from "./KunaConfiguration.js";
 import {
   createKunaFileCloseScope,
   inspectKunaInstallation,
+  kunaInstallationCancellation,
   type KunaInstallation,
 } from "./KunaInstallation.js";
 import {
@@ -76,10 +77,7 @@ import {
   type KunaProjectFileSpan,
 } from "./KunaProjectReader.js";
 import { kunaUnavailable } from "./KunaUnavailable.js";
-import {
-  RegularFileCleanupFailure,
-  regularFileCancellation,
-} from "../filesystem/OwnedRegularFile.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { kunaQueryFailureForCaller } from "./KunaQueryErrors.js";
@@ -1410,7 +1408,7 @@ export class KunaSessionClient implements AnalysisClient {
         );
       return ok(inspected.value);
     } catch (cause: unknown) {
-      const cancellation = regularFileCancellation(cause);
+      const cancellation = kunaInstallationCancellation(cause);
       if (
         !(cause instanceof RegularFileCleanupFailure) &&
         cancellation !== undefined
@@ -1418,6 +1416,7 @@ export class KunaSessionClient implements AnalysisClient {
         return err(
           new AnalysisCancelledError("health", {
             cause: cancellation.reason,
+            diagnostics: cancellation.diagnostics,
           }),
         );
       if (!(cause instanceof RegularFileCleanupFailure))

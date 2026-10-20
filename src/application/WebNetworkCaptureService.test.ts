@@ -543,3 +543,29 @@ it("reports malformed retained facts while keeping their cleanup owner retryable
   expect(result.error.cleanupIncomplete).toBe(false);
   expect(projectAnalysisError(result.error).code).toBe("unreadable_output");
 });
+
+it("rejects relative descriptor paths before starting a capture decoder", async () => {
+  const service = new WebNetworkCaptureService({
+    inspect: () => {
+      throw new Error("Invalid input must fail before provider admission");
+    },
+  });
+  const result = await service.inspect({
+    capture_path: "/capture.har",
+    format: "har",
+    record_ordinals: [0],
+    protobuf: {
+      schema: {
+        descriptor_set_path: "relative.pb",
+        message_type: "capture.Message",
+      },
+    },
+  });
+  if (result.ok) throw new Error("Expected typed invalid input");
+  expect(projectAnalysisError(result.error)).toMatchObject({
+    code: "invalid_request",
+    details: {
+      issues: [{ path: ["protobuf", "schema", "descriptor_set_path"] }],
+    },
+  });
+});

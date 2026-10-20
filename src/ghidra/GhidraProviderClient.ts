@@ -1096,8 +1096,8 @@ const projectObservedJvmMemoryFailure = (
 
 /** Name the settings that change Ghidra's import-and-analysis startup deadline. */
 const ghidraStartupTimeoutGuidance = (timeoutMs: number) => ({
-  userMessage: `Ghidra did not finish importing and analyzing the target within its ${String(timeoutMs)} ms startup deadline (REA_GHIDRA_STARTUP_TIMEOUT_MS).`,
-  remediationAction: `Large binaries can need longer: set REA_GHIDRA_STARTUP_TIMEOUT_MS above ${String(timeoutMs)} in the environment that starts REA, or skip expensive analyzers with REA_GHIDRA_DISABLED_ANALYZERS, then open the target again. An MCP client's own tool-call timeout is separate and may also need raising.`,
+  userMessage: `Ghidra did not finish importing and analyzing the target within its configured ${String(timeoutMs)} ms startup deadline (REA_GHIDRA_STARTUP_TIMEOUT_MS).`,
+  remediationAction: `Large binaries can need longer: set REA_GHIDRA_STARTUP_TIMEOUT_MS above ${String(timeoutMs)} in REA's launch environment; REA_GHIDRA_DISABLED_ANALYZERS can skip selected expensive analyzers with reduced coverage. Before restarting, export useful Evidence and close the binary; resolve any cleanup failure. Then restart REA, reconnect the MCP client if used, and reopen the target. Reopening alone keeps the current server settings and repeats import from scratch. The MCP client's tool-call deadline must also allow startup and the query.`,
 });
 
 /** A provider already observed as running can be restarted by reopening. */

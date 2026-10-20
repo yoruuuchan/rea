@@ -7,7 +7,11 @@ import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { cliIntegerArgument } from "./options.js";
 import { withCommandCancellation } from "./commandCancellation.js";
-import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
+import {
+  analysisEvidenceDeliveryOptions,
+  deliverCliAnalysisEvidence,
+} from "./analysisEvidenceDelivery.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
 /** Expose offline historical capture inspection with the same selection contract as MCP. */
 export const registerWebNetworkCaptureCommands = (
@@ -26,6 +30,23 @@ export const registerWebNetworkCaptureCommands = (
         .describe("Producer capture format"),
     }),
     options: z.object({
+      ...analysisEvidenceDeliveryOptions,
+      protobufFraming: z
+        .enum(["auto", "raw", "grpc", "grpc-web", "grpc-web-text"])
+        .optional()
+        .describe("Override framing for selected retained binary bodies"),
+      protobufBodyPointer: z
+        .array(z.string())
+        .optional()
+        .describe("Exact body pointers; repeat to select several"),
+      protobufSchema: z
+        .string()
+        .optional()
+        .describe("Absolute local compiled FileDescriptorSet path"),
+      protobufMessage: z
+        .string()
+        .optional()
+        .describe("Fully qualified message type in the descriptor set"),
       record: z
         .array(cliIntegerArgument(0))
         .optional()
@@ -43,13 +64,42 @@ export const registerWebNetworkCaptureCommands = (
           logger,
           CLI_COMMANDS.inspectWebNetworkCapture,
           async () => {
-            return finishAnalysisCommand(
-              () =>
+            return deliverCliAnalysisEvidence({
+              run: () =>
                 service.inspect(
                   {
-                    capture_path: args.capturePath,
+                    capture_path: absoluteCallerPath(args.capturePath),
                     format: args.format,
                     sensitive_values: options.sensitiveValue,
+                    ...([
+                      options.protobufFraming,
+                      options.protobufBodyPointer,
+                      options.protobufSchema,
+                      options.protobufMessage,
+                    ].every((value) => value === undefined)
+                      ? {}
+                      : {
+                          protobuf: {
+                            framing: options.protobufFraming ?? "auto",
+                            ...(options.protobufBodyPointer === undefined
+                              ? {}
+                              : { body_pointers: options.protobufBodyPointer }),
+                            ...(options.protobufSchema === undefined &&
+                            options.protobufMessage === undefined
+                              ? {}
+                              : {
+                                  schema: {
+                                    descriptor_set_path:
+                                      options.protobufSchema === undefined
+                                        ? undefined
+                                        : absoluteCallerPath(
+                                            options.protobufSchema,
+                                          ),
+                                    message_type: options.protobufMessage,
+                                  },
+                                }),
+                          },
+                        }),
                     ...(options.record === undefined
                       ? {}
                       : { record_ordinals: options.record }),
@@ -57,11 +107,12 @@ export const registerWebNetworkCaptureCommands = (
                   { signal },
                 ),
               service,
-              "web-network-capture",
-              "inspect_web_network_capture",
+              providerId: "web-network-capture",
+              operation: "inspect_web_network_capture",
               signal,
-              "Web network capture resources",
-            );
+              detail: options.detail,
+              evidenceOutput: options.evidence_output,
+            });
           },
         ),
       ),

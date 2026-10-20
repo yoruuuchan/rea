@@ -1,3 +1,4 @@
+import { matchNativeFunctionsInputSchema } from "./native/functionMatchingContracts.js";
 import { z } from "zod";
 
 import { isAbsolute } from "node:path";
@@ -108,8 +109,13 @@ export const SESSION_TOOL_CONTRACTS = [
     artifactComparisonInputSchema,
   ),
   session(
+    "match_native_functions",
+    "Match two retained list_procedures inventories by unique exact reported symbols, then unique identical observed function bytes. Optional same-context list_names/procedure_info/read_bytes/analyze_function Evidence supplies symbol origin, exact bodies, bytes and dossier links as supplied static facts. Optional compatible CFG/call/string fingerprints from supplied dossiers propose unresolved groups only. Duplicate candidates remain unresolved groups; only_left/right mean unpaired within supplied observations, never proof of addition/removal. Default summary retains complete Evidence for filtered, selected-column, paged function-matches views. Complete detail returns every group. Existing dossier pairs provide direct retained-reference compare_functions inputs.",
+    matchNativeFunctionsInputSchema,
+  ),
+  session(
     "compare_functions",
-    "Compare two explicit sets of analyze_function Evidence across identity, exact provider text, calls, references, strings, and address-normalized CFG topology. Missing or provider-incompatible facets remain truncated or unknown; every conclusion cites both Evidence sets.",
+    "Compare two explicit analyze_function Evidence records or exact retained session references across identity, exact provider text, calls, references, strings, and address-normalized CFG topology. Missing or provider-incompatible facets remain truncated or unknown; every conclusion cites both Evidence sets.",
     functionComparisonInputSchema,
   ),
   session(

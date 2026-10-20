@@ -32,6 +32,7 @@ import {
 } from "./ClientRegistrationEnvironment.js";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
+import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { npxRegistrationCommand } from "./ClientRegistrationIdentity.js";
 import {
   MCP_STARTUP_POLICY,
@@ -761,7 +762,8 @@ const clientConfigurationDesired = (
   if (!environment.ok) throw environment.error;
   const registrationEnvironment =
     client.name === "kimi" &&
-    environment.value.REA_MCP_INPUT_SCHEMA_PROFILE === undefined
+    snapshotEnvironment(environment.value).REA_MCP_INPUT_SCHEMA_PROFILE ===
+      undefined
       ? {
           ...environment.value,
           REA_MCP_INPUT_SCHEMA_PROFILE: "compact",

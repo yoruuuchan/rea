@@ -50,8 +50,9 @@ import {
 import { semanticTopLevelEffectFollowsCapture } from "./javascriptSemanticMutationInitializers.js";
 import {
   semanticFactoryLoaderMemberAt,
-  semanticFactoryRequireLoaderAt,
-  semanticRequireLoaderAt,
+  semanticRequireCallAt,
+  semanticModuleRequireCallAt,
+  semanticModuleRequireReceiver,
 } from "./javascriptSemanticRequireOrigin.js";
 
 type JavaScriptCallLike =
@@ -69,7 +70,13 @@ export const inspectCall = (
   const { accumulator } = context;
   const name = calleeName(node.callee);
   const first = stringValue(node.arguments[0]);
-  const requireCall = requireCallSpecifier(node, bindings, context);
+  const deferredModuleRequire =
+    semanticModuleRequireReceiver(node) !== undefined ||
+    semanticModuleRequireCallAt(node, bindings, false);
+  if (deferredModuleRequire) accumulator.pendingModuleRequireCalls.push(node);
+  const requireCall = deferredModuleRequire
+    ? null
+    : requireCallSpecifier(node, bindings, context);
   if (requireCall !== null)
     addReference(context, {
       node,
@@ -249,43 +256,37 @@ const requireCallSpecifier = (
   bindings: JavaScriptSemanticAnalysisState,
   context: FindingContext,
 ): { readonly specifier: string | undefined } | null => {
-  const bareRequire = t.isIdentifier(node.callee, { name: "require" });
-  if (bareRequire) {
-    const loader = semanticRequireLoaderAt(
-      node,
-      bindings,
-      context.accumulator.factoryRequireBindingIds,
-    );
-    if (loader === "local") return null;
-    if (loader === "unknown") context.accumulator.unknownFindings += 1;
-    return {
-      specifier:
-        loader === "unknown" ? undefined : argumentValue(node.arguments[0]),
-    };
-  }
-  const factoryLoader = semanticFactoryRequireLoaderAt(
+  const call = semanticRequireCallAt(
     node,
     bindings,
     context.accumulator.factoryRequireBindingIds,
   );
-  if (factoryLoader === "factory-loader")
-    return {
-      specifier: argumentValue(
-        node.arguments[
-          t.isMemberExpression(unwrapJavaScriptExpression(node.callee).node) ||
-          t.isOptionalMemberExpression(
-            unwrapJavaScriptExpression(node.callee).node,
-          )
-            ? 1
-            : 0
-        ],
-      ),
-    };
-  if (factoryLoader === "unknown") {
+  if (call === undefined || call.loader === "local") return null;
+  if (call.loader === "unknown" || !call.sourceRelative) {
     context.accumulator.unknownFindings += 1;
     return { specifier: undefined };
   }
-  return null;
+  return { specifier: argumentValue(call.arguments?.[0]) };
+};
+
+/** Examine member-loader receivers only after shared alias mutation facts settle. */
+export const finishModuleRequireCalls = (
+  context: FindingContext,
+  bindings: JavaScriptSemanticAnalysisState,
+): void => {
+  for (const node of context.accumulator.pendingModuleRequireCalls) {
+    const call = requireCallSpecifier(node, bindings, context);
+    if (call !== null)
+      addReference(context, {
+        node,
+        kind: "require",
+        specifier: call.specifier,
+      });
+  }
+  context.accumulator.pendingModuleRequireCalls.length = 0;
+  context.accumulator.references.sort(
+    (left, right) => left.offset - right.offset,
+  );
 };
 
 const chunkLoadSpecifier = (
@@ -760,7 +761,7 @@ export const inspectRoleProperty = (
 ): void => {
   if (semanticStaticPropertyName(node.key, node.computed) !== "preload") return;
   if (context.accumulator.mediaElementPreloads.has(node)) return;
-  const path = staticPath(node.value);
+  const path = staticPath(node.value, context.nodePathResolve);
   if (path === undefined) return;
   addLocatedFinding(context, {
     collection: context.accumulator.roles,
@@ -769,7 +770,10 @@ export const inspectRoleProperty = (
     value: {
       role: "preload",
       path,
-      resolution_context: staticPathResolutionContext(node.value),
+      resolution_context: staticPathResolutionContext(
+        node.value,
+        context.nodePathResolve,
+      ),
       mechanism: "property:preload",
       module_key: null,
       location: range(node),

@@ -101,7 +101,12 @@ it.each(["hash", "snapshot"] as const)(
             }),
             controller.signal,
           );
-    const failure = await result.catch((cause: unknown) => cause);
+    const failure: unknown = await result.catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({
+      _tag: "ProcessCaptureError",
+      reason: "cancelled",
+      userCategory: "cancelled",
+    });
     if (operation === "hash") {
       expect(failure).toBeInstanceOf(ProcessCaptureReadFailure);
       const read = failure as ProcessCaptureReadFailure;

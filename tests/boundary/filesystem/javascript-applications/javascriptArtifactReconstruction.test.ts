@@ -50,6 +50,404 @@ import {
 } from "../../../../src/domain/javascript/javascriptSemanticGraph.js";
 import { parseJavaScriptSemanticGraph } from "../../../../src/domain/javascript/javascriptSemanticGraphSerialization.js";
 import { writeJavaScriptArtifactFixture } from "../../../fixtures/javascriptArtifactApplication.js";
+import { writeFixtureFiles } from "../../../support/javascriptApplicationFixture.js";
+
+it("does not let a known-absent optional import erase another application's page", async () => {
+  const root = await createTestTempDirectory("rea-absent-optional-owner-");
+  await writeFixtureFiles(root, {
+    "a/package.json": JSON.stringify({ main: "main.cjs" }),
+    "b/package.json": JSON.stringify({ main: "main.cjs" }),
+    "a/main.cjs":
+      'const {BrowserWindow} = require("electron"); const w = new BrowserWindow(); w.loadFile("index.html");',
+    "b/main.cjs": 'try { require("./optional.cjs"); } catch {}',
+    "a/index.html": "valid page",
+    "index.html": "root decoy",
+  });
+  const result = await reconstructJavaScriptArtifact({
+    input_path: root,
+    format: "directory",
+  });
+  const role = result.graph.nodes.find(
+    ({ kind }) => kind === "electron-renderer",
+  );
+  expect(role?.observations).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          resolved_path: "a/index.html",
+          resolution_status: "resolved",
+        }),
+      }),
+    ]),
+  );
+  expect(
+    result.graph.edges.filter(
+      ({ source_node_id, relation }) =>
+        source_node_id === role?.node_id && relation === "maps_to",
+    ),
+  ).toHaveLength(1);
+});
+
+it.each([
+  "unselected",
+  "unavailable",
+  "dynamic",
+  "unavailable-json",
+  "unavailable-package-json",
+  "unavailable-uppercase-json",
+  "unavailable-main",
+  "unavailable-default-main",
+  "unavailable-json-main",
+  "resolved-html",
+  "resolved-uppercase-json",
+  "resolved-json",
+  "resolved-package-json",
+  "resolved-html-main",
+  "unavailable-package-metadata",
+  "unavailable-directory-main",
+] as const)(
+  "distinguishes hidden imports from inert data through %s",
+  async (omission) => {
+    const root = await createTestTempDirectory("rea-competing-gap-");
+    const targetPaths: Partial<Record<typeof omission, string>> = {
+      "unavailable-default-main": "b/index.js",
+      "unavailable-json-main": "b/config.json",
+      "unavailable-main": "b/main.cjs",
+      "unavailable-json": "b/config.json",
+      "unavailable-package-json": "b/node_modules/pkg/package.json",
+      "unavailable-uppercase-json": "shared/bridge.JSON",
+      "resolved-html": "shared/bridge.html",
+      "resolved-uppercase-json": "shared/bridge.JSON",
+      "resolved-json": "b/config.json",
+      "resolved-package-json": "b/node_modules/pkg/package.json",
+      "resolved-html-main": "b/main.html",
+      "unavailable-package-metadata": "b/node_modules/pkg/package.json",
+      "unavailable-directory-main": "b/node_modules/pkg/package.json",
+    };
+    const targetPath = targetPaths[omission] ?? "shared/bridge.cjs";
+    const inertJson = [
+      "unavailable-json",
+      "unavailable-package-json",
+      "unavailable-json-main",
+      "resolved-json",
+      "resolved-package-json",
+    ].includes(omission);
+    await writeFixtureFiles(root, {
+      "a/package.json": JSON.stringify({ main: "main.cjs" }),
+      "b/package.json": JSON.stringify(
+        omission === "unavailable-default-main"
+          ? {}
+          : {
+              main:
+                omission === "unavailable-directory-main"
+                  ? "node_modules/pkg"
+                  : omission === "resolved-html-main"
+                    ? "main.html"
+                    : omission === "unavailable-json-main"
+                      ? "config.json"
+                      : "main.cjs",
+            },
+      ),
+      "b/index.js": 'require("../shared/window.cjs");',
+      "b/main.html": 'require("../shared/window.cjs");',
+      "a/main.cjs": 'require("../shared/window.cjs");',
+      "b/main.cjs":
+        omission === "unavailable-package-metadata"
+          ? 'require("pkg");'
+          : omission === "unavailable-main"
+            ? 'require("../shared/window.cjs");'
+            : omission === "dynamic"
+              ? "require(process.env.CHILD);"
+              : `require(${JSON.stringify(targetPath.startsWith("b/") ? `./${targetPath.slice(2)}` : `../${targetPath}`)});`,
+      "b/config.json": "{}",
+      "b/node_modules/pkg/package.json": "{}",
+      "b/node_modules/pkg/index.js": 'require("../../../shared/window.cjs");',
+      "shared/bridge.JSON": 'require("./window.cjs");',
+      "shared/bridge.html": 'require("./window.cjs");',
+      "shared/bridge.cjs": 'require("./window.cjs");',
+      "shared/window.cjs":
+        'const {BrowserWindow} = require("electron"); const w = new BrowserWindow(); w.loadFile("index.html");',
+      "a/index.html": "wrong unique owner",
+      "b/index.html": "competing owner",
+      "index.html": "root decoy",
+    });
+    const snapshot = await scanCanonicalArtifactInventory(root, {});
+    const reader = createJavaScriptArtifactReader(root, "directory");
+    try {
+      const files = await readJavaScriptArtifactFiles(
+        reader,
+        snapshot,
+        undefined,
+        omission === "unselected"
+          ? [
+              "a/package.json",
+              "b/package.json",
+              "a/main.cjs",
+              "b/main.cjs",
+              "shared/window.cjs",
+            ]
+          : undefined,
+      );
+      const bridge = files.files.find(({ path }) => path === targetPath);
+      if (bridge === undefined) throw new Error("Missing bridge");
+      const partial = !omission.startsWith("unavailable")
+        ? files
+        : {
+            ...files,
+            files: files.files.filter(({ path }) => path !== bridge.path),
+            unavailable_relevant_files: [
+              ...files.unavailable_relevant_files,
+              {
+                path: bridge.path,
+                container_sha256: bridge.container_sha256,
+                sha256: null,
+                bytes: null,
+                inventory_artifact_id: bridge.inventory_artifact_id,
+                kind: bridge.kind,
+                hash_status: "unavailable" as const,
+              },
+            ],
+          };
+      const graph = buildJavaScriptArtifactGraph(
+        snapshot,
+        partial,
+        analyzeJavaScriptArtifactFiles(partial),
+      );
+      const roles = graph.nodes.filter(
+        ({ kind }) => kind === "electron-renderer",
+      );
+      expect(roles).toHaveLength(1);
+      expect(roles[0]?.observations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              resolved_path: inertJson ? "a/index.html" : null,
+              resolution_status: inertJson ? "resolved" : "unavailable",
+            }),
+          }),
+        ]),
+      );
+      expect(
+        graph.edges.filter(
+          ({ source_node_id, relation }) =>
+            source_node_id === roles[0]?.node_id && relation === "maps_to",
+        ),
+      ).toHaveLength(inertJson ? 1 : 0);
+    } finally {
+      await reader.close();
+    }
+  },
+);
+
+it.each(["unselected", "unavailable"] as const)(
+  "keeps imported loadFile ownership unknown across an %s module",
+  async (omission) => {
+    const root = await createTestTempDirectory("rea-missing-module-owner-");
+    await writeFixtureFiles(root, {
+      "app/package.json": JSON.stringify({ main: "../shared/main.cjs" }),
+      "shared/main.cjs": 'require("./window.cjs");',
+      "shared/window.cjs":
+        'const { BrowserWindow } = require("electron"); const win = new BrowserWindow(); win.loadFile("index.html");',
+      "index.html": "artifact-root decoy",
+      "app/index.html": "unproven application page",
+    });
+    const snapshot = await scanCanonicalArtifactInventory(root, {});
+    const reader = createJavaScriptArtifactReader(root, "directory");
+    try {
+      const files = await readJavaScriptArtifactFiles(
+        reader,
+        snapshot,
+        undefined,
+        omission === "unselected"
+          ? ["app/package.json", "shared/window.cjs"]
+          : undefined,
+      );
+      const entry = files.files.find(({ path }) => path === "shared/main.cjs");
+      if (entry === undefined) throw new Error("Missing inventoried entry");
+      // The unavailable variant injects the reader boundary, not an actual I/O failure.
+      const partial =
+        omission === "unselected"
+          ? files
+          : {
+              ...files,
+              files: files.files.filter(({ path }) => path !== entry.path),
+              unavailable_relevant_files: [
+                ...files.unavailable_relevant_files,
+                {
+                  path: entry.path,
+                  container_sha256: entry.container_sha256,
+                  sha256: null,
+                  bytes: null,
+                  inventory_artifact_id: entry.inventory_artifact_id,
+                  kind: entry.kind,
+                  hash_status: "unavailable" as const,
+                },
+              ],
+            };
+      const graph = buildJavaScriptArtifactGraph(
+        snapshot,
+        partial,
+        analyzeJavaScriptArtifactFiles(partial),
+      );
+      const roles = graph.nodes.filter(
+        ({ kind }) => kind === "electron-renderer",
+      );
+      expect(roles).toHaveLength(1);
+      const role = roles[0];
+      if (role === undefined) throw new Error("Missing renderer");
+      expect(role.observations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              resolved_path: null,
+              resolution_status: "unavailable",
+            }),
+          }),
+        ]),
+      );
+      expect(
+        graph.edges.filter(
+          ({ source_node_id, relation }) =>
+            source_node_id === role.node_id && relation === "maps_to",
+        ),
+      ).toEqual([]);
+    } finally {
+      await reader.close();
+    }
+  },
+);
+
+it("keeps imported loadFile ownership unknown across an application projection omission", async () => {
+  const root = await createTestTempDirectory("rea-omitted-app-owner-");
+  await writeFixtureFiles(root, {
+    "app/package.json": JSON.stringify({ main: "../shared/main.cjs" }),
+    "shared/main.cjs": 'require("./window.cjs");',
+    "shared/window.cjs":
+      'const { BrowserWindow } = require("electron"); const win = new BrowserWindow(); win.loadFile("index.html");',
+    "index.html": "artifact-root decoy",
+    "app/index.html": "unproven application page",
+  });
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    const analysis = analyzeJavaScriptArtifactFiles(files);
+    const entry = analysis.files.find(
+      ({ file }) => file.path === "shared/main.cjs",
+    );
+    expect(
+      entry?.javascript?.references.some(
+        ({ specifier }) => specifier === "./window.cjs",
+      ),
+    ).toBe(true);
+    // Exercise the production omission boundary without bypassing its memory guard.
+    const graph = buildJavaScriptArtifactGraph(snapshot, files, {
+      ...analysis,
+      files: analysis.files.map((file) =>
+        file.file.path === "shared/main.cjs"
+          ? {
+              ...file,
+              application_projection_failure: {
+                reason: "fixture projection omitted",
+                error: null,
+                limits: null,
+              },
+            }
+          : file,
+      ),
+    });
+    const roles = graph.nodes.filter(
+      ({ kind }) => kind === "electron-renderer",
+    );
+    expect(roles).toHaveLength(1);
+    const role = roles[0];
+    if (role === undefined) throw new Error("Missing renderer");
+    expect(role.observations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            resolved_path: null,
+            resolution_status: "unavailable",
+          }),
+        }),
+      ]),
+    );
+    expect(
+      graph.edges.filter(
+        ({ source_node_id, relation }) =>
+          source_node_id === role.node_id && relation === "maps_to",
+      ),
+    ).toEqual([]);
+  } finally {
+    await reader.close();
+  }
+});
+
+it("keeps a loadFile owner unknown when a sibling manifest is unavailable in the inventory projection", async () => {
+  const root = await createTestTempDirectory("rea-unavailable-app-owner-");
+  await writeFixtureFiles(root, {
+    "app/package.json": JSON.stringify({ main: "../shared/main.cjs" }),
+    "shared/main.cjs":
+      'const { BrowserWindow } = require("electron"); const win = new BrowserWindow(); win.loadFile("index.html");',
+    "index.html": "artifact-root decoy",
+    "app/index.html": "unproven app page",
+  });
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    const manifest = files.files.find(
+      ({ path }) => path === "app/package.json",
+    );
+    if (manifest === undefined) throw new Error("Missing inventoried manifest");
+    // Inject the reader boundary's unavailable projection, not a fabricated graph.
+    const partial = {
+      ...files,
+      files: files.files.filter(({ path }) => path !== manifest.path),
+      unavailable_relevant_files: [
+        ...files.unavailable_relevant_files,
+        {
+          path: manifest.path,
+          container_sha256: manifest.container_sha256,
+          sha256: null,
+          bytes: null,
+          inventory_artifact_id: manifest.inventory_artifact_id,
+          kind: manifest.kind,
+          hash_status: "unavailable" as const,
+        },
+      ],
+    };
+    const graph = buildJavaScriptArtifactGraph(
+      snapshot,
+      partial,
+      analyzeJavaScriptArtifactFiles(partial),
+    );
+    const roles = graph.nodes.filter(
+      ({ kind }) => kind === "electron-renderer",
+    );
+    expect(roles).toHaveLength(1);
+    const role = roles[0];
+    if (role === undefined) throw new Error("Missing renderer");
+    expect(role.observations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            resolved_path: null,
+            resolution_status: "unavailable",
+          }),
+        }),
+      ]),
+    );
+    expect(
+      graph.edges.filter(
+        ({ source_node_id, relation }) =>
+          source_node_id === role.node_id && relation === "maps_to",
+      ),
+    ).toEqual([]);
+  } finally {
+    await reader.close();
+  }
+});
 
 it("keeps excluded non-JavaScript files out of both semantic construction paths", async () => {
   const root = await createTestTempDirectory("rea-js-semantic-applicability-");

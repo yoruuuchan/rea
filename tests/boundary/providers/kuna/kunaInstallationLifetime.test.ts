@@ -1,4 +1,3 @@
-import { regularFileCancellation } from "../../../../src/filesystem/OwnedRegularFile.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const gates = vi.hoisted(() => {
@@ -63,7 +62,10 @@ vi.mock("../../../../src/filesystem/RegularFile.js", async (importOriginal) => {
 
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
 import type { FileCloseResourceOwner } from "../../../../src/application/AnalysisProvider.js";
-import { inspectKunaInstallation } from "../../../../src/kuna/KunaInstallation.js";
+import {
+  inspectKunaInstallation,
+  kunaInstallationCancellation,
+} from "../../../../src/kuna/KunaInstallation.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { writeFakeKuna } from "./fakeKuna.js";
 import { session } from "./kunaSessionFixture.js";
@@ -138,7 +140,7 @@ it
       const failure: unknown = await inspection.catch(
         (cause: unknown) => cause,
       );
-      const cancellation = regularFileCancellation(failure);
+      const cancellation = kunaInstallationCancellation(failure);
       expect(cancellation).toBeDefined();
       expect(cancellation?.reason).toBe(controller.signal.reason);
       await expect(cleanup).resolves.toBeUndefined();

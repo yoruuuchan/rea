@@ -25,7 +25,6 @@ import {
 import { range } from "./javascriptStaticAnalysisHelpers.js";
 import {
   propertyName,
-  semanticFinalObjectProperty,
   semanticStaticPropertyKey,
   semanticWrappedWriteSite,
   semanticWriteSiteReadsFirst,
@@ -40,11 +39,11 @@ import {
   semanticImportEqualsSpecifier,
 } from "./javascriptModuleDeclaration.js";
 import {
-  commonJsDefinedExport,
-  commonJsExportName,
+  commonJsRuntimeExportValues,
   type CommonJsExportReceiverEffect,
   type CommonJsExportSite,
 } from "./javascriptCommonJsExportReceivers.js";
+import type { JavaScriptSemanticPropertyPath } from "./javascriptSemanticPropertyPaths.js";
 
 interface CollectCallableInput {
   readonly node: t.Node;
@@ -124,7 +123,7 @@ export const collectSemanticModuleLink = (
   else if (t.isAssignmentExpression(node))
     collectCommonJsExport(node, state, commonJsReceivers.get(node));
   else if (t.isCallExpression(node)) {
-    collectDefinedCommonJsExport(node, state, commonJsReceivers.get(node));
+    collectCommonJsExport(node, state, commonJsReceivers.get(node));
     collectUnboundRequireLink(node, state);
   }
 };
@@ -472,34 +471,21 @@ const requirePatternBindings = (
 };
 
 const collectCommonJsExport = (
-  node: t.AssignmentExpression,
+  node: CommonJsExportSite,
   state: JavaScriptSemanticAnalysisState,
   receiverEffect: CommonJsExportReceiverEffect | undefined,
 ): void => {
-  const exportedName = commonJsExportName(node.left, state);
-  if (exportedName === undefined) return;
   if (receiverEffect === "detached") return;
   // Compound and logical writes also depend on the previous value, so remain
   // unknown.
-  const value =
-    node.operator === "=" && receiverEffect !== "uncertain" ? node.right : null;
-  addCommonJsExport(node, state, exportedName, value);
-};
-
-const collectDefinedCommonJsExport = (
-  node: t.CallExpression,
-  state: JavaScriptSemanticAnalysisState,
-  receiverEffect: CommonJsExportReceiverEffect | undefined,
-): void => {
-  const defined = commonJsDefinedExport(node, state);
-  if (defined === undefined || receiverEffect === "detached") return;
-  // A data descriptor exports its value; an accessor's result stays unknown.
-  const descriptor = unwrapJavaScriptExpression(defined.descriptor).node;
-  const value =
-    receiverEffect !== "uncertain" && t.isObjectExpression(descriptor)
-      ? (semanticFinalObjectProperty(descriptor, "value") ?? null)
-      : null;
-  addCommonJsExport(node, state, defined.exportedName, value);
+  for (const exported of commonJsRuntimeExportValues(node, state))
+    addCommonJsExport(
+      node,
+      state,
+      exported.exportedName,
+      receiverEffect === "uncertain" ? null : exported.value,
+      exported.projection,
+    );
 };
 
 const addCommonJsExport = (
@@ -507,6 +493,7 @@ const addCommonJsExport = (
   state: JavaScriptSemanticAnalysisState,
   exportedName: string,
   exported: t.Node | null,
+  projection?: JavaScriptSemanticPropertyPath,
 ): void => {
   // Simple assignment chains yield their rightmost assigned value.
   let value = exported;
@@ -514,21 +501,41 @@ const addCommonJsExport = (
     value = value.right;
   const required =
     value === null ? undefined : semanticRequireOrigin(value, state);
-  const origin = required?.origin;
+  // Copies retain their module provenance, but do not export the source object
+  // itself. A wildcard with exclusions cannot express one module link.
+  const origin = projection?.some(
+    (key) =>
+      typeof key === "object" && key !== null && key.excludedKeys.length > 0,
+  )
+    ? undefined
+    : required?.origin;
+  const selectedName = projection?.at(-1);
   addModuleLink(
     state,
     {
       kind: "commonjs-export",
       specifier: origin?.specifier ?? null,
-      importedName: origin?.importedPath.at(-1) ?? null,
-      localName: value !== null && t.isIdentifier(value) ? value.name : null,
+      importedName:
+        origin === undefined
+          ? null
+          : typeof selectedName === "string" || typeof selectedName === "number"
+            ? String(selectedName)
+            : (origin.importedPath.at(-1) ?? null),
+      localName:
+        projection === undefined && value !== null && t.isIdentifier(value)
+          ? value.name
+          : null,
       exportedName,
-      callableId: value === null ? null : semanticCallableIdForNode(value),
+      callableId:
+        projection !== undefined || value === null
+          ? null
+          : semanticCallableIdForNode(value),
       location: range(node),
     },
     node,
   );
-  if (required !== undefined) state.linkedRequireCalls.add(required.call);
+  if (origin !== undefined && required !== undefined)
+    state.linkedRequireCalls.add(required.call);
 };
 
 const addModuleLink = (

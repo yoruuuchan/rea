@@ -157,7 +157,7 @@ describe("JavaScript runtime observation CLI parity", () => {
       { exit: () => {}, stdout: (chunk) => (stdout += chunk) },
     );
 
-    expect(closeAttempts).toBe(1);
+    expect(closeAttempts, stdout).toBe(1);
     expect(JSON.parse(stdout)).toMatchObject({
       code: "cleanup_incomplete",
       details: {

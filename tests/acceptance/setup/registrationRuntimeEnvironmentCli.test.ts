@@ -19,6 +19,70 @@ const missingHopperAndGhidraEnvironment = (home: string) => ({
   JAVA_HOME: join(home, "missing-java"),
 });
 
+cliTest.skipIf(process.platform !== "win32")(
+  "rejects lowercase Windows provider settings in doctor and setup without writing",
+  async ({ cli }) => {
+    const home = await createTestTempDirectory("rea-registration-case-");
+    const config = join(home, ".cursor/mcp.json");
+    await mkdir(dirname(config), { recursive: true });
+    const original = JSON.stringify({
+      mcpServers: {
+        rea: clientRegistrationEntry(
+          "json",
+          [process.execPath, resolve("scripts/rea.mjs"), "mcp"],
+          { rea_analysis_provider: "invalid provider" },
+        ),
+      },
+    });
+    await writeFile(config, original);
+    const environment = {
+      HOME: home,
+      USERPROFILE: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      ...missingHopperAndGhidraEnvironment(home),
+    };
+    const doctor = await cli.run({
+      arguments: ["doctor", "--client", "cursor", "--skill=false", "--json"],
+      cwd: home,
+      environment,
+    });
+    expect(doctor.exitCode).toBe(1);
+    expect(doctor.json).toMatchObject({
+      scope_checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: "registration:cursor",
+          ok: false,
+          classification: "config_drift",
+          remediation: expect.stringContaining("REA_ANALYSIS_PROVIDER"),
+        }),
+      ]),
+    });
+    const setup = await cli.run({
+      arguments: [
+        "setup",
+        "--client",
+        "cursor",
+        "--skill=false",
+        "--yes",
+        "--json",
+      ],
+      cwd: home,
+      environment,
+    });
+    expect(setup.exitCode).toBe(1);
+    expect(setup.json).toMatchObject({
+      status: "needs_human",
+      plannedActions: [],
+      appliedActions: [],
+      remediation: expect.stringContaining("REA_ANALYSIS_PROVIDER"),
+    });
+    expect(await readFile(config, "utf8")).toBe(original);
+    await expect(access(`${config}.rea.backup`)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
+
 const scenarios = [
   {
     client: "cursor",
@@ -318,7 +382,13 @@ cliTest(
         mcp: {
           rea: clientRegistrationEntry(
             "opencode",
-            [resolve("scripts/rea.mjs"), "mcp"],
+            // Windows launches JavaScript through Node; otherwise setup repairs
+            // the command before this test can exercise layered environment data.
+            [
+              ...(process.platform === "win32" ? [process.execPath] : []),
+              resolve("scripts/rea.mjs"),
+              "mcp",
+            ],
             env,
           ),
         },

@@ -31,6 +31,7 @@ import type {
 } from "../process/ProviderProcess.js";
 import {
   kunaChildEnvironment,
+  kunaInstallationFailureDiagnostics,
   type KunaInstallation,
 } from "./KunaInstallation.js";
 import type { KunaDeadline } from "./KunaConfiguration.js";
@@ -99,21 +100,23 @@ export const kunaFileCleanupError = (
   failure: RegularFileCleanupFailure,
   operation: string,
 ): AnalysisError => {
-  const cleanup = new ProviderCleanupError(
-    KUNA_PROVIDER_ID,
-    [failure.path],
-    { reason: message(failure.cleanupCause) },
-    { cause: failure, operation },
-  );
+  const diagnostics = kunaInstallationFailureDiagnostics(failure);
   const cancellation = regularFileCancellation(failure);
   if (cancellation !== undefined)
     return new AnalysisCancelledError(operation, {
       cause: cancellation.reason,
+      diagnostics,
       cleanup: {
         reason: message(failure.cleanupCause),
         resources: [failure.path],
       },
     });
+  const cleanup = new ProviderCleanupError(
+    KUNA_PROVIDER_ID,
+    [failure.path],
+    { reason: message(failure.cleanupCause), ...diagnostics },
+    { cause: failure, operation },
+  );
   if (failure.outcome.kind === "completed") return cleanup;
   const primaryCause = failure.outcome.cause;
   const primary =
@@ -121,6 +124,7 @@ export const kunaFileCleanupError = (
       ? primaryCause
       : new ProviderAdapterError(KUNA_PROVIDER_ID, operation, {
           cause: primaryCause,
+          diagnostics,
           userMessage: `Kuna ${operation} failed: ${message(primaryCause)}`,
         });
   return analysisErrorWithCleanupFailure(primary, cleanup, operation);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { overallStatus } from "./functionComparisonResults.js";
-import { evidenceSchema } from "./evidence.js";
+import { evidenceInputSchema } from "./evidenceReference.js";
 import { digestSchema } from "./../domain/digests.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
@@ -19,8 +19,8 @@ const evidenceIdSchema = prefixedDigestSchema("ev");
 
 /** Inputs for explicit function-to-function comparison. */
 export const functionComparisonInputSchema = z.strictObject({
-  left: evidenceSchema,
-  right: evidenceSchema,
+  left: evidenceInputSchema,
+  right: evidenceInputSchema,
 });
 
 const textDeltaSchema = z.object({

@@ -39,6 +39,8 @@ interface CliEvidenceDelivery {
   readonly signal: AbortSignal;
   readonly detail: "complete" | "summary";
   readonly evidenceOutput: string | undefined;
+  /** Derived workflows publish their selected source closure with the result. */
+  readonly sourceEvidence?: readonly Evidence[];
 }
 
 export const cliEvidenceDeliveryInputError = (
@@ -115,7 +117,14 @@ export const publishCliAnalysisEvidence = async (
   const delivered = await finishAnalysisCommand(
     async () => {
       const written = await writeEvidenceBundle(
-        createEvidenceBundle([complete]),
+        createEvidenceBundle([
+          ...new Map(
+            [...(input.sourceEvidence ?? []), complete].map((record) => [
+              record.evidence_id,
+              record,
+            ]),
+          ).values(),
+        ]),
         absoluteCallerPath(evidenceOutput),
         false,
         resources,

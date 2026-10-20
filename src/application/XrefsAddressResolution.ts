@@ -1,4 +1,4 @@
-import { addressedValue } from "../contracts/toolOutputSchemaPrimitives.js";
+import { addressedValueSchema } from "../domain/native/nativeInventory.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCapabilityUnavailableError,
@@ -54,7 +54,7 @@ export const resolveXrefsAddress = async (
 
   const addresses = new Set<string>();
   for (const [index, item] of inventory.value.result.entries()) {
-    const parsed = addressedValue.safeParse(item);
+    const parsed = addressedValueSchema.safeParse(item);
     if (!parsed.success || parsed.data.address.length === 0)
       return err(
         new AnalysisOutputError(

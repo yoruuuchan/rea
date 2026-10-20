@@ -120,6 +120,12 @@ export const registerEvidenceTools = (
                   : { analysisProfile: execution.value.analysisProfile }),
                 rawResult: execution.value.rawResult,
                 limitations: execution.value.limitations,
+                ...(execution.value.relationshipCoverage === undefined
+                  ? {}
+                  : {
+                      relationshipCoverage:
+                        execution.value.relationshipCoverage,
+                    }),
                 locations: execution.value.locations,
                 evidenceLinks: sourceEvidence.map(({ evidence_id: id }) => id),
               },

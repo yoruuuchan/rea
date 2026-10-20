@@ -7,6 +7,10 @@ import { ConfigurationError } from "../domain/configurationErrors.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { ClientConfigurationDocument } from "./ClientConfigurationDocument.js";
 import { CordisExpression, DshCordisYaml } from "./DshCordisYaml.js";
+import {
+  mergeEnvironmentOverrides,
+  snapshotEnvironment,
+} from "../process/snapshotEnvironment.js";
 
 export const DSH_ENTRY_ID = "rea-mcp";
 export const DSH_CLIENT_PACKAGE = "@deepseek-ai/dsh-mcp-client";
@@ -185,6 +189,7 @@ export class DshCordisDocument {
   environment(
     overrides: Readonly<Record<string, string>> = {},
     validation: "fragment" | "effective" = "effective",
+    platform: NodeJS.Platform = process.platform,
   ): Result<Readonly<Record<string, string>>, ConfigurationError> {
     const config = this.#field("config");
     if (config instanceof CordisExpression)
@@ -220,9 +225,11 @@ export class DshCordisDocument {
       );
     const literals: Record<string, string> = {};
     const unresolvedSettings = new Set<string>();
-    for (const [key, value] of Object.entries(raw ?? {})) {
+    for (const [key, value] of Object.entries(
+      mergeEnvironmentOverrides<unknown>(raw ?? {}, overrides, platform),
+    )) {
       if (value instanceof CordisExpression) {
-        if (overrides[key] === undefined) unresolvedSettings.add(key);
+        unresolvedSettings.add(key);
         continue;
       }
       if (typeof value !== "string")
@@ -239,11 +246,20 @@ export class DshCordisDocument {
         );
       literals[key] = value;
     }
-    const environment = { ...literals, ...overrides };
+    const environment = literals;
+    const runtimeEnvironment = snapshotEnvironment(environment, platform);
+    const unresolved = new Set(
+      Object.keys(
+        snapshotEnvironment(
+          Object.fromEntries([...unresolvedSettings].map((key) => [key, ""])),
+          platform,
+        ),
+      ),
+    );
     const validated =
       validation === "fragment"
-        ? parseEnvironmentValues(environment, unresolvedSettings)
-        : parseEnvironment(environment, unresolvedSettings);
+        ? parseEnvironmentValues(runtimeEnvironment, unresolved)
+        : parseEnvironment(runtimeEnvironment, unresolved);
     return validated.ok ? ok(environment) : validated;
   }
 
@@ -255,10 +271,10 @@ export class DshCordisDocument {
       return err(this.#editabilityError);
     const environment = this.environment(overrides);
     if (!environment.ok) return environment;
-    const env = {
-      ...(isRecord(this.config?.env) ? this.config.env : {}),
-      ...overrides,
-    };
+    const env = mergeEnvironmentOverrides<unknown>(
+      isRecord(this.config?.env) ? this.config.env : {},
+      overrides,
+    );
     const desired = { ...this.config, ...dshClientRegistrationEntry(command) };
     delete desired.env;
     if (Object.keys(env).length > 0) desired.env = env;
@@ -373,6 +389,21 @@ export class DshCordisDocument {
           : this.#yaml.detach(env, invalidated);
       if (!isMap(nextEnv))
         throw new ConfigurationError("Cordis environment is not a mapping");
+      for (const pair of [...nextEnv.items]) {
+        const key = this.#yaml.key(pair.key);
+        if (Object.hasOwn(desiredEnv, key)) {
+          this.#yaml.renameKey(nextEnv, pair, key);
+          continue;
+        }
+        const alias =
+          process.platform === "win32"
+            ? Object.keys(desiredEnv).find(
+                (name) => name.toUpperCase() === key.toUpperCase(),
+              )
+            : undefined;
+        if (alias === undefined) nextEnv.delete(pair.key);
+        else this.#yaml.renameKey(nextEnv, pair, alias);
+      }
       for (const [key, value] of Object.entries(desiredEnv)) {
         this.#yaml.setValue(nextEnv, key, value);
       }

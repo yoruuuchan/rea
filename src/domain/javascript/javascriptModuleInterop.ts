@@ -29,6 +29,7 @@ import {
   runtimeFunctionParameters,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
+import { semanticKnownArrayIterationAt } from "./javascriptSemanticReferenceSources.js";
 
 // Match the complete Rolldown runtime operations, including its live getters.
 // Names and formatting are irrelevant; lexical roles, operators and keys are not.
@@ -82,6 +83,8 @@ export const createSemanticModuleInterop = (
     readonly intrinsicPath: (node: t.Node) => readonly string[] | undefined;
   },
 ) => {
+  const nativeArrayIteration = (array: t.ArrayExpression) =>
+    semanticKnownArrayIterationAt(array, state);
   const helpers = new Map<string, InteropHelper | null>();
   const origins = new Map<string, InteropOrigin>();
   const calls = new WeakMap<t.Node, InteropOrigin>();
@@ -272,7 +275,10 @@ export const createSemanticModuleInterop = (
       const { root, members } = electronMemberPath(current.callee);
       let bindTarget = root;
       let bindingArguments: JavaScriptIntrinsicInvocation["arguments"] =
-        expandJavaScriptInvocationArguments(current.arguments);
+        expandJavaScriptInvocationArguments(
+          current.arguments,
+          nativeArrayIteration,
+        );
       let captured = capturedIntrinsic(current.callee);
       let terminal = captured?.path.at(-1) === "bind";
       let path: readonly string[] | undefined = captured?.path.slice(0, -1);
@@ -287,6 +293,7 @@ export const createSemanticModuleInterop = (
           intrinsicPath,
           boundIntrinsic,
           intrinsicReadChanged,
+          nativeArrayIteration,
         );
         if (
           invocation?.kind !== "known" ||
@@ -618,12 +625,16 @@ export const createSemanticModuleInterop = (
     origin,
     callOrigin,
     intrinsicPath,
-    intrinsicInvocation: (node: t.CallExpression | t.OptionalCallExpression) =>
+    intrinsicInvocation: (
+      node: t.CallExpression | t.OptionalCallExpression,
+      callablePath = intrinsicPath,
+    ) =>
       resolveJavaScriptIntrinsicInvocation(
         node,
-        intrinsicPath,
+        callablePath,
         boundIntrinsic,
         intrinsicReadChanged,
+        nativeArrayIteration,
       ),
     boundIntrinsic,
     staticString,

@@ -1,9 +1,14 @@
 import type { JavaScriptOpaqueScopeEffects } from "./javascriptSemanticOpaqueEffects.js";
+import type { SemanticIterationSource } from "./javascriptSemanticIterationSources.js";
 import * as t from "@babel/types";
 import {
   semanticStaticPropertyKey,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
+import {
+  semanticBindingAtRead,
+  semanticEffectTiming,
+} from "./javascriptSemanticMutationInitializers.js";
 
 import type {
   JavaScriptSemanticPropertyPath,
@@ -29,10 +34,16 @@ export interface JavaScriptSemanticInitializer {
   readonly node: t.Node;
   readonly projection: readonly (string | number | null)[];
   readonly entryBody?: t.BlockStatement;
+  readonly iterationSources?: readonly {
+    readonly node: t.Node;
+    readonly projection: JavaScriptSemanticPropertyPath;
+  }[];
 }
 
 /** Additional references from destructuring copies and possible defaults. */
 interface JavaScriptSemanticReferenceInitializer extends JavaScriptSemanticInitializer {
+  /** This source is a value replacement, rather than a declaration fallback. */
+  readonly assignment?: true;
   readonly copyKind?: "object-rest" | "array-rest";
   readonly copyProjectionOffset?: number;
   readonly copyExcludedKeys?: readonly string[];
@@ -45,6 +56,12 @@ interface JavaScriptSemanticReferenceInitializer extends JavaScriptSemanticIniti
 export interface JavaScriptSemanticMemberEffect {
   readonly path: JavaScriptSemanticPropertyPath;
   readonly node: t.Node | undefined;
+  /** Selected RHS values retained by the shared pattern-store owner. */
+  readonly assignedSources?: readonly SemanticIterationSource[];
+  /** Binding values whose receiver identities were selected for this effect. */
+  readonly receiverInitializers?: readonly JavaScriptSemanticInitializer[];
+  /** Capture of this binding used while following an aliased effect receiver. */
+  readonly receiverAt?: t.Node;
 }
 
 export type JavaScriptSemanticEffectTiming = "before" | "after" | "unknown";
@@ -101,6 +118,7 @@ export interface JavaScriptSemanticScopeState {
 
 /** Shared state for semantic collection and evaluation. */
 export interface JavaScriptSemanticAnalysisState {
+  arrayIterationUnknown: boolean;
   readonly program: t.Program;
   readonly opaqueEffects: JavaScriptOpaqueScopeEffects;
   /** Effective loader for static imports in this source artifact. */
@@ -150,6 +168,8 @@ export interface JavaScriptSemanticAnalysisState {
   readonly ambientWrites: SemanticPropertyPathCoverage;
   /** Ambient object identities passed to calls whose effects are not evaluated. */
   readonly ambientEscapes: SemanticPropertyPathCoverage;
+  /** Capture sites keep later opaque effects from changing earlier copies. */
+  readonly ambientEscapeEffects: JavaScriptSemanticMemberEffect[];
   /** Source sites distinguish replacement before an ambient identity capture from later writes. */
   readonly ambientWriteEffects: JavaScriptSemanticMemberEffect[];
 }
@@ -537,7 +557,52 @@ export const isUnmodifiedCommonJsWrapperBinding = (
   state: JavaScriptSemanticAnalysisState,
 ): boolean => {
   const binding = commonJsWrapperBindingDeclaration(node, name, state);
-  return binding !== undefined && binding.initializers.length === 0;
+  return (
+    binding !== undefined &&
+    !semanticBindingHasPriorValueWrite(node, binding, state)
+  );
+};
+
+/** Retained value and pattern stores share one source-ordered write boundary. */
+export const semanticBindingHasPriorValueWrite = (
+  site: t.Node,
+  binding: JavaScriptSemanticBindingState,
+  state: JavaScriptSemanticAnalysisState,
+): boolean => {
+  if (binding.definitions.some(({ kind }) => kind === "function")) return true;
+  const writes = state.bindingWrites.get(binding.bindingId) ?? [];
+  const read = semanticBindingAtRead(binding, site, state.parentsByNode);
+  const retained =
+    read.status === "ordered"
+      ? new Set([
+          ...read.binding.initializers,
+          ...read.binding.referenceInitializers,
+        ])
+      : undefined;
+  const representedWrites = new Set<t.Node>();
+  const retainedWrites = new Set<t.Node>();
+  for (const source of [
+    ...binding.initializers,
+    ...binding.referenceInitializers,
+  ]) {
+    let owner: t.Node | undefined = source.node;
+    while (owner !== undefined && !writes.includes(owner))
+      owner = state.parentsByNode.get(owner);
+    if (owner !== undefined) {
+      representedWrites.add(owner);
+      if (retained === undefined || retained.has(source))
+        retainedWrites.add(owner);
+    } else if (
+      (retained === undefined || retained.has(source)) &&
+      semanticEffectTiming(site, source.node, state) !== "after"
+    )
+      return true;
+  }
+  return writes.some(
+    (write) =>
+      (!representedWrites.has(write) || retainedWrites.has(write)) &&
+      semanticEffectTiming(site, write, state) !== "after",
+  );
 };
 
 /** Program `var` redeclarations retain wrapper identity until a source write. */
@@ -550,7 +615,9 @@ export const commonJsWrapperBindingDeclaration = (
   // specifier resolution mode does not establish that distinction.
   if (
     state.program.sourceType !== "script" ||
-    !["module", "exports", "require"].includes(name) ||
+    !["module", "exports", "require", "__dirname", "__filename"].includes(
+      name,
+    ) ||
     !t.isIdentifier(node, { name })
   )
     return undefined;

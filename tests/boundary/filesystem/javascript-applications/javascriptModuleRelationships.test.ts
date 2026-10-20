@@ -38,6 +38,59 @@ const relationshipGraph = async (root: string) => {
   }
 };
 
+it.each(["browser", "module", "renderer", "main"] as const)(
+  "distinguishes %s package metadata from an imported module's application owner",
+  async (field) => {
+    const root = await createTestTempDirectory("rea-frontend-package-owner-");
+    await writeFixtureFiles(root, {
+      "package.json": JSON.stringify({ main: "main.cjs" }),
+      "main.cjs": 'require("./lib/window.cjs");',
+      "lib/package.json": JSON.stringify({ [field]: "window.cjs" }),
+      "lib/window.cjs":
+        'const {BrowserWindow} = require("electron"); const w = new BrowserWindow(); w.loadFile("index.html");',
+      "lib/orphan.cjs":
+        'const {BrowserWindow} = require("electron"); const w = new BrowserWindow(); w.loadFile("orphan.html");',
+      "index.html": "root application page",
+      "lib/index.html": "frontend package decoy",
+      "orphan.html": "root application fallback",
+      "lib/orphan.html": "frontend package fallback decoy",
+    });
+    const graph = await relationshipGraph(root);
+    const actualMain = field === "main";
+    for (const declaredPath of ["index.html", "orphan.html"]) {
+      const renderer = graph.nodes.find(
+        ({ kind, observations }) =>
+          kind === "electron-renderer" &&
+          observations.some(
+            ({ properties }) => properties.declared_path === declaredPath,
+          ),
+      );
+      expect(renderer?.observations[0]?.properties).toMatchObject({
+        resolved_path: actualMain ? null : declaredPath,
+        resolution_status: actualMain ? "unavailable" : "resolved",
+      });
+      expect(
+        graph.edges.filter(
+          ({ source_node_id, relation }) =>
+            source_node_id === renderer?.node_id && relation === "maps_to",
+        ),
+      ).toHaveLength(actualMain ? 0 : 1);
+    }
+    if (!actualMain)
+      expect(
+        graph.nodes.some(
+          ({ kind, observations }) =>
+            kind === "electron-renderer" &&
+            observations.some(
+              ({ properties }) =>
+                properties.mechanism === "package.json:renderer" &&
+                properties.resolved_path === "lib/window.cjs",
+            ),
+        ),
+      ).toBe(true);
+  },
+);
+
 it.each([
   ["getter-expansion", getterExpansionSource()],
   [

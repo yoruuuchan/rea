@@ -1,7 +1,10 @@
 import * as t from "@babel/types";
 import { expect, it, vi } from "vitest";
 
-import { indexJavaScriptBindingsSteps } from "./javascriptSemanticAnalysis.js";
+import {
+  analyzeJavaScriptSemantics,
+  indexJavaScriptBindingsSteps,
+} from "./javascriptSemanticAnalysis.js";
 import {
   resolveLocalCallables,
   type LocalCallableResolution,
@@ -36,6 +39,88 @@ const indexed = (source: string) => {
       }),
   };
 };
+
+it.each([
+  "if(flag)({make}={make:replacement});",
+  "if(flag)[make]=[replacement];",
+  "({make}={make:replacement});",
+  "[make]=[replacement];",
+])("does not prove the old callable after a projected write: %s", (write) => {
+  const analysis = analyzeJavaScriptSemantics(
+    `function original(){}function replacement(){}let make=original;make();${write}make();`,
+  );
+  const original = analysis.callables.find(({ name }) => name === "original");
+  expect(original).toBeDefined();
+  const [before, after] = analysis.callSites;
+  expect(before).toMatchObject({
+    resolution: "exact",
+    calleeCallableIds: [original?.callableId],
+  });
+  expect(after).toBeDefined();
+  expect(after?.resolution).not.toBe("exact");
+  expect(analysis.frontiers).toContainEqual(
+    expect.objectContaining({
+      kind: "dynamic-call",
+      location: after?.calleeLocation,
+    }),
+  );
+});
+
+it.each([
+  "if(flag)({make}={make:replacement});",
+  "if(flag)[make]=[replacement];",
+])(
+  "retains known callable candidates without claiming completeness: %s",
+  (write) => {
+    const context = indexed(
+      `function original(){}function replacement(){}let make=original;${write}make();`,
+    );
+    const last = context.state.program.body.at(-1);
+    if (!t.isExpressionStatement(last) || !t.isCallExpression(last.expression))
+      throw new Error("Missing projected call");
+    const original = context.state.callables.find(
+      ({ name }) => name === "original",
+    );
+    expect(original).toBeDefined();
+    expect(context.resolve(last.expression.callee)).toMatchObject({
+      complete: false,
+      callableIds: [original?.callableId],
+    });
+  },
+);
+
+it("retains selected callable keys without admitting an unrelated return", () => {
+  const context = indexed(`
+    const table = { x() { return {}; }, y() { return {}; }, z() { return module; } };
+    const make = flag ? table.x : table.y;
+    make();
+  `);
+  const last = context.state.program.body.at(-1);
+  if (!t.isExpressionStatement(last) || !t.isCallExpression(last.expression))
+    throw new Error("Missing selected call");
+  const returns = createSemanticReturnedReferences(context.state)(
+    last.expression.callee,
+  ).references;
+  expect(returns).toHaveLength(2);
+  expect(returns.every(({ node }) => t.isObjectExpression(node))).toBe(true);
+});
+
+it("retains correlations between selected callable path segments", () => {
+  const context = indexed(`
+    const table = { a: { b() { return {}; }, d() { return module; } },
+      c: { d() { return {}; }, b() { return module; } } };
+    const make = flag ? table.a.b : table.c.d;
+    make();
+  `);
+  const last = context.state.program.body.at(-1);
+  if (!t.isExpressionStatement(last) || !t.isCallExpression(last.expression))
+    throw new Error("Missing selected call");
+  const returns = createSemanticReturnedReferences(context.state)(
+    last.expression.callee,
+  ).references;
+  expect(returns).toHaveLength(2);
+  expect(returns.every(({ node }) => t.isObjectExpression(node))).toBe(true);
+});
 
 it("bounds shared partial callback alias expansion by AST size", () => {
   const measure = (depth: number) => {
