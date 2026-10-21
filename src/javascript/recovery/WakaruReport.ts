@@ -6,8 +6,12 @@ import {
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import type { JavaScriptRecoveryResult } from "../../domain/javascript/javascriptRecovery.js";
-import { readRecoveryFile, recoveryFailureMessage } from "./RecoveryFiles.js";
-import { RECOVERY_LIMITS } from "./WakaruRelease.js";
+import {
+  isRecoveryFileSizeError,
+  readRecoveryFile,
+  recoveryFailureMessage,
+} from "./RecoveryFiles.js";
+import { RECOVERY_LIMITS, wakaruFixedLimitRecovery } from "./WakaruRelease.js";
 import type { runWakaruCommand } from "./WakaruCommand.js";
 
 const warningSchema = z.looseObject({
@@ -75,9 +79,7 @@ export const parseWakaruReports = async (context: ReportContext) => {
     const report = reportSchema.parse(JSON.parse(execution.stdout));
     const provenance = provenanceSchema.parse(
       JSON.parse(
-        (
-          await readRecoveryFile(provenancePath, RECOVERY_LIMITS.reportBytes)
-        ).toString("utf8"),
+        (await readWakaruProvenanceReport(provenancePath)).toString("utf8"),
       ),
     );
     if (report.total !== report.modules.length || report.failed > report.total)
@@ -104,6 +106,7 @@ export const parseWakaruReports = async (context: ReportContext) => {
   } catch (cause: unknown) {
     throw new ProviderAdapterError("wakaru", OPERATION, {
       cause,
+      ...wakaruReportGuidance(cause),
       diagnostics: {
         reason: `Unusable Wakaru recovery report: ${recoveryFailureMessage(cause)}`,
         exit_code: execution.exit_code,
@@ -113,6 +116,41 @@ export const parseWakaruReports = async (context: ReportContext) => {
       },
     });
   }
+};
+
+const PROVENANCE_REPORT_ALLOWANCE = `Wakaru provenance report exceeds the ${String(RECOVERY_LIMITS.reportBytes)}-byte report allowance`;
+
+/** Report-size refusals name the fixed allowance; other read failures stay unchanged. */
+const readWakaruProvenanceReport = async (path: string): Promise<Buffer> => {
+  try {
+    return await readRecoveryFile(path, RECOVERY_LIMITS.reportBytes);
+  } catch (cause: unknown) {
+    if (!isRecoveryFileSizeError(cause, RECOVERY_LIMITS.reportBytes))
+      throw cause;
+    throw new AnalysisOutputError(OPERATION, PROVENANCE_REPORT_ALLOWANCE, {
+      cause,
+      ...wakaruFixedLimitRecovery(PROVENANCE_REPORT_ALLOWANCE),
+    });
+  }
+};
+
+/** Keep fixed-limit guidance when the report parser wraps the producing error. */
+const wakaruReportGuidance = (
+  cause: unknown,
+): { readonly userMessage?: string; readonly remediationAction?: string } => {
+  if (typeof cause !== "object" || cause === null) return {};
+  const userMessage =
+    "userMessage" in cause && typeof cause.userMessage === "string"
+      ? cause.userMessage
+      : undefined;
+  const remediationAction =
+    "remediationAction" in cause && typeof cause.remediationAction === "string"
+      ? cause.remediationAction
+      : undefined;
+  return {
+    ...(userMessage === undefined ? {} : { userMessage }),
+    ...(remediationAction === undefined ? {} : { remediationAction }),
+  };
 };
 
 const validateModuleSet = (

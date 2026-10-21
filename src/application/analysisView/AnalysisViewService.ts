@@ -97,7 +97,11 @@ export const inspectAnalysisViewValidatedWithFiles = async (
   };
   // A request cancelled during authentication reports cancellation, even when authentication failed.
   if (await cancelled())
-    return err(new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION));
+    return err(
+      new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
+        cause: options.signal?.reason,
+      }),
+    );
   if (!loaded.ok) return loaded;
   const id = loaded.value.evidence_id;
   const projected = inspectAnalysisViewValidated(
@@ -105,9 +109,13 @@ export const inspectAnalysisViewValidatedWithFiles = async (
     (evidenceId) => (evidenceId === id ? loaded.value : lookup?.(evidenceId)),
   );
   // A request cancelled during projection delivers and records nothing.
-  return (await cancelled())
-    ? err(new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION))
-    : projected;
+  if (await cancelled())
+    return err(
+      new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
+        cause: options.signal?.reason,
+      }),
+    );
+  return projected;
 };
 
 /** Authenticate borrowed inline Evidence after adapter envelope validation. */

@@ -123,6 +123,12 @@ const cases = [
     skill: ".agents/skills",
   },
   {
+    client: "copilot_cli",
+    env: { COPILOT_HOME: "" },
+    config: ".copilot/mcp-config.json",
+    skill: ".agents/skills",
+  },
+  {
     client: "omp",
     env: { PI_CODING_AGENT_DIR: "profile" },
     config: "profile/mcp.json",

@@ -539,8 +539,10 @@ cleanup. A later abort does not replace an earlier helper or output failure.
 Cleanup failures retain their runtime owner until a confirmed cleanup retry.
 
 Scenarios accept caller-selected action lists and accessibility node counts.
-Individual waits cannot exceed the operation's 180-second deadline, and the
-complete scenario result has a 64 MiB output budget. Screenshots are scaled to
+One wait step stays capped at 180000 ms. That cap has no runtime override.
+The operation deadline is `native_ui_deadline_ms` (omitted means 180000 ms)
+and does not raise the wait-step cap. The complete scenario result has a
+64 MiB output budget. Screenshots are scaled to
 at most 2,048 pixels and captured only for the selected window. REA compiles one
 owned helper per scenario, removes its temporary compiler cache and stops its
 helper on cancellation. It does not launch or own the selected application. UI

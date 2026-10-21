@@ -1,5 +1,6 @@
 import { setImmediate } from "node:timers/promises";
 import { AnalysisResourceConstraintError } from "../../domain/analysisErrorCore.js";
+import { fixedNativeAllowance } from "../../domain/native/nativeDeadlines.js";
 
 const NATIVE_MATCHING_REPRESENTATION_BYTES = 96 * 1024 * 1024;
 
@@ -18,8 +19,13 @@ export class NativeMatchingAdmission {
       throw new AnalysisResourceConstraintError(
         this.operation,
         "capacity",
-        "Native function matching exceeds representation capacity",
+        `Native function matching exceeds its ${String(NATIVE_MATCHING_REPRESENTATION_BYTES)}-byte (96 MiB) representation allowance. This release has no runtime override.`,
         { maximum_bytes: NATIVE_MATCHING_REPRESENTATION_BYTES },
+        fixedNativeAllowance(
+          "The native function-matching representation allowance",
+          "bytes",
+          `${String(NATIVE_MATCHING_REPRESENTATION_BYTES)} bytes`,
+        ),
       );
     this.signal?.throwIfAborted();
     if (++this.#work % 256 === 0)

@@ -120,7 +120,11 @@ export class GpuCodeObjectsProvider implements GpuCodeObjectsPort {
             maximum_object_bytes: GPU_OBJECT_BYTES,
             maximum_report_bytes: GPU_REPORT_BYTES,
           },
-          { cause, retryable: false },
+          {
+            cause,
+            retryable: false,
+            remediationAction: `${primary.message} This release has no runtime override for that GPU byte allowance. The object allowance is ${String(GPU_OBJECT_BYTES)} bytes and the report allowance is ${String(GPU_REPORT_BYTES)} bytes. Additional host memory does not raise them. Repeating the unchanged request fails the same way.`,
+          },
         );
       else if (primary instanceof BinaryFormatFailure) {
         error =
@@ -175,8 +179,12 @@ export class GpuCodeObjectsProvider implements GpuCodeObjectsPort {
           OPERATION,
           "memory",
           primary.message,
-          {},
-          { cause: primary },
+          { maximum_object_bytes: GPU_OBJECT_BYTES },
+          {
+            cause: primary,
+            retryable: false,
+            remediationAction: `${primary.message} The GPU object allowance is ${String(GPU_OBJECT_BYTES)} bytes. This release has no runtime override. Additional host memory does not raise it. Repeating the unchanged request fails the same way.`,
+          },
         );
       else if (primary instanceof Error && "code" in primary)
         error = new BinaryTargetError(input.path, primary.message, { cause });

@@ -104,6 +104,39 @@ describe("NativeAOT parser report admission", () => {
       /no unique System\.Object.*fully examined/iu,
     );
   });
+
+  it("explains a hydration work budget on the partial report", () => {
+    const bytes = nativeAotPeFixture();
+    // Extend DEHYDRATED_DATA with a zero-fill larger than the work left after
+    // the directory is found, so hydrate throws into the partial report.
+    const end = bytes.readBigUInt64LE(0x620);
+    bytes.writeBigUInt64LE(end + 3n, 0x620);
+    bytes.writeUInt8(0xf9, 0x704);
+    Buffer.from([0x3c, 0x42, 0x0f]).copy(bytes, 0x705);
+    const summary = parseNativeAotPe(
+      bytes,
+      nativeAotPeDigest(bytes),
+      REPORT_BUDGET,
+      undefined,
+      {
+        sourceBytes: bytes.length,
+        workUnits: 5000,
+        workingMemoryBytes: 1024 * 1024,
+      },
+    ).summary;
+    const visible = [summary.reason ?? "", ...summary.diagnostics].join("\n");
+    expect(summary.status).toBe("partial");
+    expect(visible).toContain("NativeAOT parser work budget is exhausted");
+    expect(visible).toContain(
+      "This release has no runtime override for that NativeAOT parser budget",
+    );
+    expect(visible).toContain(
+      "Repeating the unchanged request fails the same way",
+    );
+    expect(summary.diagnostics.join("\n")).toContain(
+      "Read-only hydration stopped:",
+    );
+  });
 });
 
 describe("NativeAOT detail and summary byte accounting", () => {

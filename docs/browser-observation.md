@@ -125,14 +125,11 @@ bundle, for example
 `"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"`. Fedora installs
 Chromium as `chromium-browser`.
 
-REA needs the browser's HTTP discovery endpoint on a loopback port. A browser
-driven over `--remote-debugging-pipe` or a private channel, for example by an
-automation SDK, exposes no such endpoint, so `list_browser_targets` has nothing
-to attach to. Connection failures report `endpoint_unreachable`; a reachable
-HTTP service that returns a non-200 or non-JSON discovery response reports
-`invalid_endpoint_response`.
-Reproduce that flow in a Chromium-family browser started with
-`--remote-debugging-port`.
+REA attaches through the browser's HTTP discovery endpoint on a loopback port,
+or, for some passive tools, through a
+[browser socket](#browsers-without-http-discovery). Connection failures report
+`endpoint_unreachable`; a reachable HTTP service that returns a non-200 or
+non-JSON discovery response reports `invalid_endpoint_response`.
 
 In a minimal Linux container, headed Chromium under Xvfb can keep running while
 its DevTools port never opens. Install the GLES, EGL, and Mesa DRI libraries
@@ -184,7 +181,9 @@ file for you.
   the origins you are investigating.
 
 A browser driven only through `--remote-debugging-pipe` or a vendor's private
-automation channel has neither endpoint, and REA cannot attach to it.
+automation channel has neither endpoint, and REA cannot attach to it. To
+inspect such a page, reproduce it in a Chromium-family browser started with
+`--remote-debugging-port`.
 
 ## Request boundary
 

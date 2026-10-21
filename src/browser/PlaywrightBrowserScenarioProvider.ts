@@ -14,7 +14,10 @@ import type {
   ProviderIdentity,
 } from "../application/AnalysisProvider.js";
 import type { BrowserScenario } from "../domain/browserScenario.js";
-import type { BrowserScenarioAction } from "../domain/browserScenarioValues.js";
+import {
+  BROWSER_SCENARIO_START_STEP_ID,
+  type BrowserScenarioAction,
+} from "../domain/browserScenarioValues.js";
 import {
   browserScenarioCaptureSchema,
   type BrowserScenarioCapture,
@@ -147,7 +150,7 @@ const initialStep = async (input: {
   );
   return createStep({
     stepIndex: 0,
-    stepId: "scenario_start",
+    stepId: BROWSER_SCENARIO_START_STEP_ID,
     action: "goto_start",
     status: "completed",
     elapsedMs,

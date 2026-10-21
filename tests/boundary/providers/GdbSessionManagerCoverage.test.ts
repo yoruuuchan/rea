@@ -2879,7 +2879,7 @@ process.stdin.on('data', (chunk) => {
     });
     expect(exited.error.partialObservation).toMatchObject({
       limitations: expect.arrayContaining([
-        expect.stringContaining("truncated prefix"),
+        expect.stringContaining("16777216 byte or 16384 record cap"),
       ]),
     });
   }

@@ -1829,3 +1829,54 @@ it("retains an owned preparation cleanup marker when the command deadline expire
     await client.close();
   }
 });
+
+it("reports the selected command deadline when preparation times out", async () => {
+  const marker = new ProviderCleanupError(
+    "process-ownership",
+    ["owned helper root"],
+    { reason: "controlled cleanup failure" },
+  );
+  const reason = new Error("command deadline");
+  const inspection = new DarwinProcessOwnershipInspectionError(
+    "cancelled preparation",
+    { cancellation: { reason }, cleanupFailure: marker },
+  );
+  const owned = new OwnedCommandFailure(
+    "timeout",
+    "command preparation timed out",
+    null,
+    null,
+    { cause: inspection, preparationFailure: inspection },
+  );
+  const failure = new NativeCommandFailure("swift-demangle", "timeout", null, {
+    cause: owned,
+  });
+  const runner: NativeCommandRunner = { run: async () => err(failure) };
+  const client = new NativeMacOSProvider({}, runner, "darwin").createClient(
+    machoTarget("/fixture"),
+  );
+  try {
+    const result = await client.execute("demangle_swift", {
+      symbols: ["fixture"],
+      native_command_timeout_ms: 1_500,
+    });
+    if (result.ok) throw new Error("Expected preparation timeout");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisTimeoutError",
+      cleanupIncomplete: true,
+    });
+    expect(result.error.cause).toBe(reason);
+    const projected = projectAnalysisError(result.error);
+    expect(projected.message).toContain("of 1500 ms");
+    expect(projected.message).toContain("native_command_timeout_ms");
+    expect(projected.remediation.action).toContain("above 1500");
+    expect(projected.remediation.action).not.toContain("above 60000");
+    expect(projected.remediation.action).toContain(
+      `${String(NATIVE_COMMAND_OUTPUT_BUDGET_BYTES)}-byte command output allowance`,
+    );
+    marker.resolveCleanup();
+    expect(result.error.cleanupIncomplete).toBe(false);
+  } finally {
+    await client.close();
+  }
+});

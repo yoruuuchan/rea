@@ -382,7 +382,7 @@ describe("updated executable maintenance planning", () => {
 });
 
 describe("update subprocess boundaries", () => {
-  cliTest("exposes update as the sole CLI command", async ({ cli }) => {
+  cliTest("exposes update in CLI help", async ({ cli }) => {
     const help = await cli.run({
       arguments: ["--help"],
       environment: process.env,
@@ -390,6 +390,9 @@ describe("update subprocess boundaries", () => {
     expect(help.exitCode, help.stderr).toBe(0);
     expect(help.stdout).toMatch(/^\s{2}update\s/mu);
     expect(help.stdout).not.toMatch(/^\s{2}upgrade\s/mu);
+  });
+
+  cliTest("rejects the removed upgrade CLI command", async ({ cli }) => {
     const removed = await cli.run({
       arguments: ["upgrade", "--json"],
       environment: process.env,

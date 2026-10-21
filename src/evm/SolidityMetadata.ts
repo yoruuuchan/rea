@@ -122,8 +122,21 @@ export const inspectSolidityMetadata = (
     });
     if (!(raw instanceof Map))
       throw new Error("Terminal CBOR candidate did not decode to a root map.");
-    for (const [key, value] of raw as Map<unknown, unknown>)
-      result.entries.push({ key: scalar(key), value: scalar(value) });
+    // cborg compares Map keys by identity, so repeated byte-string keys (each
+    // its own Uint8Array) pass its duplicate check; compare scalars by value.
+    const seen = new Set<string>();
+    for (const [key, value] of raw as Map<unknown, unknown>) {
+      const entry = { key: scalar(key), value: scalar(value) };
+      if (entry.key.kind !== "uninterpreted") {
+        const identity = JSON.stringify(entry.key);
+        if (seen.has(identity))
+          throw new Error(
+            `CBOR decode error: found repeat map key ${identity}`,
+          );
+        seen.add(identity);
+      }
+      result.entries.push(entry);
+    }
     result.status = result.entries.some(
       ({ key, value }) =>
         key.kind === "uninterpreted" || value.kind === "uninterpreted",

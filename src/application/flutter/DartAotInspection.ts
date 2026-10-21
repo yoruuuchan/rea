@@ -21,7 +21,11 @@ export const inspectDartAot = async (
 ): Promise<Result<Evidence, AnalysisError>> => {
   const operation = "inspect_dart_aot";
   if (options?.signal?.aborted === true)
-    return err(new AnalysisCancelledError(operation));
+    return err(
+      new AnalysisCancelledError(operation, {
+        cause: options.signal.reason,
+      }),
+    );
   const parsed = dartAotInspectionInputSchema.safeParse(rawInput);
   if (!parsed.success)
     return err(

@@ -199,7 +199,8 @@ const registerExtractionCommand = (
   runProviderAnalysis: DirectAnalysis["runProviderAnalysis"],
 ): void => {
   cli.command(CLI_COMMANDS.extractArtifact, {
-    description: "Extract all regular artifact contents safely",
+    description:
+      "Extract regular contents of supported artifacts; DMG extraction is unavailable",
     args: z.object({
       path: z.string().describe("Application or package path"),
     }),

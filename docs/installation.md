@@ -24,6 +24,10 @@ Restart the agents named in the completion message. Quit Claude Desktop fully
 before approving, because a running app can overwrite the registration; on
 Windows, see [where Claude Desktop reads its configuration](client-configuration.md#claude-desktop).
 
+During package resolution, npm may print a deprecation warning for `prebuild-install`
+from transitive native dependencies (such as Frida). This warning originates from
+the upstream dependency tree and does not affect REA or indicate setup failure.
+
 For the latest published release, use `npx rea-agents@latest setup`.
 [Package-runner and global-installation options](#package-runners-and-global-installation)
 cover explicit versions, Bun, runtime requirements, and the curl wrapper.

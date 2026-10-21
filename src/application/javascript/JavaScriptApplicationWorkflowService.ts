@@ -1,3 +1,4 @@
+import type { ResolvedSourceToBundleReference } from "./SourceToBundleReference.js";
 import { z } from "zod";
 
 import { AnalysisProtocolError } from "../../domain/analysisErrorCore.js";
@@ -184,7 +185,8 @@ export const compareApplicationVersionsEvidenceValidated = (
 
 /** Compare source and bundle inputs already parsed by a trusted adapter. */
 export const compareSourceToBundleEvidenceValidated = (
-  input: z.output<typeof compareSourceToBundleInputSchema>,
+  input: ResolvedSourceToBundleReference &
+    Pick<z.output<typeof compareSourceToBundleInputSchema>, "application">,
 ): Result<Evidence, AnalysisError> => {
   const operation = "compare_source_to_bundle";
   const applicationResult = parseApplicationGraphEvidence(input.application, [
@@ -209,6 +211,9 @@ export const compareSourceToBundleEvidenceValidated = (
         {
           reference_root_sha256: input.reference.root_sha256,
           application_evidence_id: application.evidence.evidence_id,
+          ...(input.reference_source === undefined
+            ? {}
+            : { reference_source: input.reference_source }),
         },
         result,
       ),

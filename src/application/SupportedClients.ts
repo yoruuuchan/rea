@@ -360,7 +360,7 @@ const piAgentDirectory = ({
 };
 
 const copilotDirectory = ({ home, env }: ClientPathContext): string =>
-  env.COPILOT_HOME ?? join(home, ".copilot");
+  env.COPILOT_HOME || join(home, ".copilot");
 
 const commandCodeDirectory = ({ home }: ClientPathContext): string =>
   join(home, ".commandcode");

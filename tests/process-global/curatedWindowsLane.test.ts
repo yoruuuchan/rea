@@ -99,6 +99,18 @@ describe("curated Windows test lane", () => {
     );
   });
 
+  it("keeps Windows-only path and snapshot admission cases in the lane", async () => {
+    // These files have cases that run only on Windows, so outside this lane
+    // CI never executes them.
+    expect(await explicitPaths("windows")).toEqual(
+      expect.arrayContaining([
+        "src/contracts/sessionPathInputs.test.ts",
+        "tests/boundary/filesystem/directAnalysisSnapshotReplay.test.ts",
+        "tests/boundary/mcp/rawBinaryMcp.test.ts",
+      ]),
+    );
+  });
+
   it("keeps Windows runner cancellation coverage in the lane", async () => {
     expect(await explicitPaths("windows")).toEqual(
       expect.arrayContaining([

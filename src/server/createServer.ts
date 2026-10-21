@@ -1012,6 +1012,7 @@ const registerObservationTools = ({
       options.optionalProviderLoadFailures?.javascriptRuntimeObservation,
   });
   registerApplicationTools(server, {
+    artifactResources,
     evidenceById,
     logger,
     recordEvidence,

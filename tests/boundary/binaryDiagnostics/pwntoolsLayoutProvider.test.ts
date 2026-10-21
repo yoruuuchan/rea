@@ -86,6 +86,15 @@ it.runIf(!unsupportedHost).each([
     expect(projected.remediation.action).toContain(
       resource === "cpu" ? "CPU" : "file-size",
     );
+    if (resource === "file-size") {
+      expect(projected.remediation.action).toContain("outputBytes");
+      expect(projected.remediation.action).toContain("67108864");
+      expect(projected.remediation.action).toContain("file_size_bytes");
+      expect(projected.remediation.action).not.toContain("address-space");
+      expect(projected.remediation.action).not.toContain("3221225472");
+      if (scenario === "reported")
+        expect(projected.remediation.action).toContain("1024");
+    }
     await expect(access(ownedPath)).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
@@ -313,7 +322,8 @@ it.runIf(!unsupportedHost).each([
     );
     const result = await provider.inspect({ path });
     if (result.ok) throw new Error("Expected resource failure");
-    expect(projectAnalysisError(result.error)).toMatchObject({
+    const projected = projectAnalysisError(result.error);
+    expect(projected).toMatchObject({
       code: "resource_constraint",
       category: "resource_constraint",
       details: {
@@ -325,6 +335,8 @@ it.runIf(!unsupportedHost).each([
         },
       },
     });
+    expect(projected.remediation.action).toContain("memory");
+    expect(projected.remediation.action).toContain("address-space");
     await expect(access(ownedPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readFile(path, "utf8")).toBe("source-owned-seam-bytes");
   },

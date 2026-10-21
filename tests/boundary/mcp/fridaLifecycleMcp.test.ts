@@ -476,7 +476,7 @@ it.each([
       response.structuredContent,
     );
     const result = evidence.normalized_result;
-    expect(result.messages_truncated).toBe(true);
+    expect(result.messages_truncated).toBe(false);
     const retained = jsonObjectSchema.parse(result.messages[0]);
     expect(retained.description_truncated).toBe(true);
     expect(
@@ -492,7 +492,7 @@ it.each([
         status.structuredContent,
       ),
     ).toMatchObject({
-      normalized_result: { messages: [retained], messages_truncated: true },
+      normalized_result: { messages: [retained], messages_truncated: false },
     });
   },
 );

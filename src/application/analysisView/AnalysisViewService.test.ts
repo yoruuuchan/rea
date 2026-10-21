@@ -1023,27 +1023,32 @@ describe("inspectAnalysisViewWithFiles", () => {
 
   it("returns typed cancellation for a cancelled file request", async () => {
     const controller = new AbortController();
-    controller.abort();
+    const reason = Object.freeze({ requested: "view-stop" });
+    controller.abort(reason);
     const parent = analysisViewCaptureEvidence(
       environmentManifestCaptureFixture(),
     );
-    expect(
-      await inspectAnalysisViewWithFiles(
-        {
-          source: {
-            kind: "evidence-file",
-            path: await writeEvidenceFile(parent),
-          },
-          view,
+    const result = await inspectAnalysisViewWithFiles(
+      {
+        source: {
+          kind: "evidence-file",
+          path: await writeEvidenceFile(parent),
         },
-        undefined,
-        { signal: controller.signal },
-      ),
-    ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+        view,
+      },
+      undefined,
+      { signal: controller.signal },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError" },
+    });
+    expect(result.ok ? undefined : result.error.cause).toBe(reason);
   });
 
   it("returns typed cancellation when a running file request is aborted", async () => {
     const controller = new AbortController();
+    const reason = Object.freeze({ requested: "running-view-stop" });
     const parent = analysisViewCaptureEvidence(
       environmentManifestCaptureFixture(),
     );
@@ -1054,11 +1059,13 @@ describe("inspectAnalysisViewWithFiles", () => {
       { signal: controller.signal },
     );
     // Queued before the request yields after its synchronous work, so it is seen even if the read already finished.
-    setImmediate(() => controller.abort());
-    expect(await running).toMatchObject({
+    setImmediate(() => controller.abort(reason));
+    const result = await running;
+    expect(result).toMatchObject({
       ok: false,
       error: { _tag: "AnalysisCancelledError" },
     });
+    expect(result.ok ? undefined : result.error.cause).toBe(reason);
   });
 
   it("leaves file sources to the file-aware entry point", () => {

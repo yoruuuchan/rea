@@ -1,5 +1,8 @@
 import type { Document, Node } from "@xmldom/xmldom";
-import { MAX_PLIST_DEPTH } from "./apple/plistValue.js";
+import {
+  MAX_PLIST_DEPTH,
+  plistNestingLimitMessage,
+} from "./apple/plistValue.js";
 import { err, ok, type Result } from "./result.js";
 import { parseXmlDocument, XML_LINE_ENDING } from "./xmlDocument.js";
 import {
@@ -176,9 +179,7 @@ const collectXmlPlistScalarSpans = (
       pending.push({ node: node.nextSibling, depth });
     if (node.nodeType !== node.ELEMENT_NODE) continue;
     if (node.nodeName !== "key" && depth > MAX_PLIST_DEPTH)
-      throw new RangeError(
-        `Plist exceeds ${String(MAX_PLIST_DEPTH)} nesting levels`,
-      );
+      throw new RangeError(plistNestingLimitMessage());
     if (PLIST_LEXICAL_SCALARS.has(node.nodeName))
       spans.set(node, readSpan(node));
     if (PLIST_CONTAINER_ELEMENTS.has(node.nodeName) && node.firstChild !== null)

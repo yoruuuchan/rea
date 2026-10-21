@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { AnalysisTimeoutError } from "../domain/analysisErrorCore.js";
+import { idaRegistrationTimeoutGuidance } from "./IdaConfiguration.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { IdaMcpConnection } from "./IdaMcpConnection.js";
 import { busyHealthSchema } from "./IdaProtocolValues.js";
@@ -63,7 +64,9 @@ export const readSettledHealth = async (
     const budgetMs = remaining();
     if (budgetMs <= 0)
       throw lastBusy === undefined
-        ? new AnalysisTimeoutError("server_health", timeoutMs)
+        ? new AnalysisTimeoutError("server_health", timeoutMs, {
+            ...idaRegistrationTimeoutGuidance(timeoutMs, "readiness"),
+          })
         : busyTimeout(lastBusy, timeoutMs);
     const requestTimeoutMs = Math.min(timeoutMs, Math.ceil(budgetMs));
     let raw: JsonValue;
@@ -83,6 +86,7 @@ export const readSettledHealth = async (
         throw new AnalysisTimeoutError(lastBusy.operation, timeoutMs, {
           cause: lastBusy.raw,
           capturedOutput: cause.capturedOutput,
+          ...idaRegistrationTimeoutGuidance(timeoutMs, "readiness"),
           diagnostics: {
             health_request_operation: cause.operation,
             health_request_timeout_ms: cause.timeoutMs,
@@ -116,4 +120,5 @@ const busyTimeout = (
 ): AnalysisTimeoutError =>
   new AnalysisTimeoutError(lastBusy.operation, timeoutMs, {
     cause: lastBusy.raw,
+    ...idaRegistrationTimeoutGuidance(timeoutMs, "readiness"),
   });

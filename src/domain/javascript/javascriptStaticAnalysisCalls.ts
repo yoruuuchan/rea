@@ -398,7 +398,14 @@ export const indexVitePreloadDependencyTable = (
   if (tables.length !== 1) return [];
   const table = tables[0];
   if (table === undefined) return [];
-  const dependencies = table.elements.map((element) =>
+  // A spread contributes an unknown number of entries, so every later slot
+  // has an unknown index; leave those out instead of shifting them.
+  const spread = table.elements.findIndex((element) =>
+    t.isSpreadElement(element),
+  );
+  const dependencies = (
+    spread === -1 ? table.elements : table.elements.slice(0, spread)
+  ).map((element) =>
     element === null || t.isSpreadElement(element)
       ? undefined
       : stringValue(element),

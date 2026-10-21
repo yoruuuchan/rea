@@ -5,6 +5,7 @@ import type { InspectSignature } from "../../src/domain/native/nativeInspection.
 import { ok } from "../../src/domain/result.js";
 import type {
   NativeCommandCapture,
+  NativeCommandOptions,
   NativeCommandRunner,
 } from "../../src/native/CommandRunner.js";
 
@@ -15,7 +16,11 @@ export class NativeFixtureRunner implements NativeCommandRunner {
     private readonly exitCode = 0,
   ) {}
 
-  async run(tool: string, arguments_: readonly string[]) {
+  async run(
+    tool: string,
+    arguments_: readonly string[],
+    _options?: NativeCommandOptions,
+  ) {
     const output =
       this.overrides[`${tool}:${arguments_[0] ?? ""}`] ??
       this.overrides[tool] ??

@@ -17,6 +17,9 @@ app.isReady = () => true;
 app.relaunch = () => undefined;
 app.setAsDefaultProtocolClient = () => true;
 app.setLoginItemSettings = () => undefined;
+app.moveToApplicationsFolder = () => {
+  throw new Error("moveToApplicationsFolder must not run");
+};
 const ipcMain = new EventEmitter();
 ipcMain.handlers = new Map();
 ipcMain.handle = (channel, listener) => ipcMain.handlers.set(channel, listener);
@@ -111,6 +114,11 @@ window.webContents.setWindowOpenHandler(() => ({ action: "allow" }));
 const popupDecision = window.webContents.windowOpenHandler({ url: "https://popup.invalid" });
 electron.shell.openExternal("https://example.invalid").catch(() => undefined);
 electron.app.relaunch();
+const moveResult = electron.app.moveToApplicationsFolder({
+  conflictHandler: () => {
+    throw new Error("conflictHandler must not run");
+  },
+});
 electron.contextBridge.exposeInMainWorld("api", { value: true });
 window.webContents.loadURL("https://example.invalid").catch(() => undefined);
 for (let index = 0; index < 6000; index++) electron.app.relaunch();
@@ -124,7 +132,7 @@ const firstIpc = firstSnapshot.events.find((event) => event.kind === "main-handl
 if (firstIpc) { firstIpc.channel = "mutated"; firstIpc.argument_shapes.push("mutated"); }
 firstSnapshot.events.length = 0;
 const snapshot = globalThis.__reaElectronActiveSnapshot();
-process.stdout.write(JSON.stringify({ snapshot, default_popup_decision: defaultPopupDecision, popup_decision: popupDecision }) + "\\n");
+process.stdout.write(JSON.stringify({ snapshot, default_popup_decision: defaultPopupDecision, popup_decision: popupDecision, move_result: moveResult }) + "\\n");
 })();
 `;
 
@@ -149,6 +157,7 @@ it("retains active hook evidence within its event-retention budget", async () =>
   ) as {
     readonly default_popup_decision: { readonly action: string };
     readonly popup_decision: { readonly action: string };
+    readonly move_result: boolean;
     readonly snapshot: {
       readonly hook_error: boolean;
       readonly events: readonly Record<string, unknown>[];
@@ -192,13 +201,25 @@ it("retains active hook evidence within its event-retention budget", async () =>
       expect.objectContaining({ kind: "window-lifecycle", event: "created" }),
       expect.objectContaining({ kind: "preload", event: "configured" }),
       expect.objectContaining({ kind: "shell-attempt", phase: "blocked" }),
-      expect.objectContaining({ kind: "updater", phase: "blocked" }),
+      expect.objectContaining({
+        kind: "app-lifecycle",
+        event: "moveToApplicationsFolder",
+        phase: "blocked",
+        argument_shapes: ["object"],
+        error: true,
+      }),
+      expect.objectContaining({
+        kind: "updater",
+        event: "relaunch",
+        phase: "blocked",
+      }),
       expect.objectContaining({ kind: "native-addon" }),
       expect.objectContaining({ kind: "popup-attempt", phase: "blocked" }),
     ]),
   );
   expect(result.default_popup_decision).toEqual({ action: "deny" });
   expect(result.popup_decision).toEqual({ action: "deny" });
+  expect(result.move_result).toBe(false);
   expect(
     snapshot.events.filter(
       (event) => event.kind === "download" && event.phase === "blocked",

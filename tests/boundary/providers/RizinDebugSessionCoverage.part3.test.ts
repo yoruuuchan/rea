@@ -31,7 +31,7 @@ it.skipIf(process.platform === "win32")(
       });
       expect(result.value.evidence.limitations).toEqual([
         "The current debugger target identity is not established by the Rizin session identifier.",
-        "The command timed out before its completion marker; retained output is partial and completion is unknown.",
+        "The command timed out before its completion marker at 10 ms (deadlineExpired). This release has no runtime override. Retained output is partial and completion is unknown.",
         "The owned debugger session was stopped because output correlation could no longer be guaranteed.",
         "The command is unrestricted and may access local files, the shell, network, or mutate the target.",
         "Interrupted output may include an incomplete completion-marker prefix; it is retained because it cannot be distinguished from command diagnostics.",

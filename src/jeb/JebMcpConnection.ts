@@ -163,12 +163,17 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
     const acquisition = new SharedStartupAttempt<
       Result<readonly string[], unknown>
     >(async (startupSignal) => {
-      const deadline = new JebMcpDeadline(discoveryTimeoutMs, startupSignal);
+      const deadline = new JebMcpDeadline(
+        discoveryTimeoutMs,
+        startupSignal,
+        "discovery",
+      );
       try {
         await owner.client.connect(owner.transport, {
           signal: deadline.signal,
+          timeout: deadline.remainingMs(),
         });
-        const tools = await readToolNames(owner.client, deadline.signal);
+        const tools = await readToolNames(owner.client, deadline);
         deadline.signal.throwIfAborted();
         owner.tools = tools;
         return ok(tools);
@@ -220,9 +225,13 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
         signal === undefined
           ? owner.signal.signal
           : AbortSignal.any([signal, owner.signal.signal]);
-      const deadline = new JebMcpDeadline(discoveryTimeoutMs, discoverySignal);
+      const deadline = new JebMcpDeadline(
+        discoveryTimeoutMs,
+        discoverySignal,
+        "discovery",
+      );
       try {
-        const refreshed = await readToolNames(owner.client, deadline.signal);
+        const refreshed = await readToolNames(owner.client, deadline);
         owner.tools = refreshed;
         return refreshed;
       } catch (cause: unknown) {
@@ -281,27 +290,28 @@ export const createStreamableHttpJebMcpConnection: JebMcpConnectionFactory = (
 
 const readToolNames = async (
   client: Client,
-  signal: AbortSignal,
+  deadline: JebMcpDeadline,
 ): Promise<readonly string[]> => {
   const names = new Set<string>();
   let cursor: string | undefined;
   do {
-    signal.throwIfAborted();
+    deadline.signal.throwIfAborted();
     // listTools without a cursor aggregates and caches every page in SDK v2.
     // This owner needs single pages to bound retained names and the whole walk.
+    // Each page gets the discovery budget still remaining, not the SDK default.
     const page = await client.request(
       {
         method: "tools/list",
         ...(cursor === undefined ? {} : { params: { cursor } }),
       },
-      { signal },
+      { signal: deadline.signal, timeout: deadline.remainingMs() },
     );
     for (const tool of page.tools)
       if (RELEVANT_ENGINE_TOOLS.has(tool.name)) names.add(tool.name);
     const next = page.nextCursor;
     if (next !== undefined && next === cursor)
       throw new AnalysisProtocolError("JEB MCP repeated a tool catalog cursor");
-    signal.throwIfAborted();
+    deadline.signal.throwIfAborted();
     if (names.size === RELEVANT_ENGINE_TOOLS.size) return [...names];
     cursor = next;
   } while (cursor !== undefined);

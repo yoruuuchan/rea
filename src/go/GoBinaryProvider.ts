@@ -96,8 +96,7 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
         { maximum_input_bytes: INPUT_BYTES },
         {
           cause,
-          remediationAction:
-            "Select a suitable stable artifact within the reported input byte allowance. Do not truncate required bytes; retrying the unchanged oversized input will fail again.",
+          remediationAction: `Select a suitable stable artifact within the reported ${String(INPUT_BYTES)}-byte input byte allowance. This release has no runtime override. Do not truncate required bytes; retrying the unchanged oversized input will fail again.`,
         },
       );
     if (cause.reason === "path")

@@ -404,10 +404,14 @@ it("rejects traversal from a production reader seam and malformed ASAR container
 it("preserves cancellation and explicit format diagnostics", async () => {
   const root = await fixtureDirectory();
   const controller = new AbortController();
-  controller.abort();
-  await expect(
-    reconstructJavaScriptArtifact({ input_path: root }, controller.signal),
-  ).rejects.toMatchObject({ reason: "cancelled" });
+  const reason = Object.freeze({ requested: "reconstruction-stop" });
+  controller.abort(reason);
+  const cancelled: unknown = await reconstructJavaScriptArtifact(
+    { input_path: root },
+    controller.signal,
+  ).catch((caught: unknown) => caught);
+  expect(cancelled).toMatchObject({ reason: "cancelled" });
+  expect((cancelled as { cause?: unknown }).cause).toBe(reason);
   await expect(
     reconstructJavaScriptArtifact({ input_path: root, format: "asar" }),
   ).rejects.toMatchObject({

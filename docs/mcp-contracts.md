@@ -352,6 +352,35 @@ application and semantic coverage. The result carries a digest of the selected
 facts. Actual serialized size determines MCP transport admission: reduce the
 page size or export retained Evidence if the view is too large.
 
+`compare_source_to_bundle` accepts the committed historical graph inline or as
+`reference: {"kind":"file","path":"/absolute/reference.json"}`. The shared
+reader checks resource bounds and the graph's root commitment on every read. File-backed
+comparison Evidence records `parameters.reference_source`: the exact
+`requested_path` and the reader's absolute selected `path`, preserving POSIX
+`..`/symlink semantics. Normalized comparison facts and mapping identities agree
+with inline input; Evidence IDs distinguish caller-selected file origins.
+Omitting `view` preserves the complete comparison. For a compact initial reply,
+select `view: {"kind":"summary"}` or a `source-to-bundle` page; the session retains
+the complete comparison before delivery. Later calls use `inspect_analysis_view`
+with the returned `parent_evidence_id`.
+
+A `source-to-bundle` view selects `collection: "mappings"` or `"candidates"` with
+exact `source_paths`, `mapping_ids`, `statuses`, `fields`, `offset` and `limit`.
+Omitted filters select all; empty arrays select none. The default mapping fields
+include status, confidence, source digest/language and candidate/mapped counts.
+Candidate defaults include kind, score and confidence; request `signals` for exact
+supporting values. Mapping identity and `source_index` always remain; candidates
+also retain `current_node_id`, `candidate_index` and whether they were actually
+mapped. Indices refer to the complete comparison's item array and that item's
+candidate array. All classifications are computed before selection. The original
+`source_coverage` remains separate from page `coverage`; exhausting a page never
+turns unknown correspondence into absence or proves behavioral equivalence.
+
+The CLI accepts the same reference-file alternative (relative paths resolve from
+the working directory). Save its complete `--json` Evidence, then use
+`inspect-analysis-view` with an `evidence-file` source and the same view. Neither
+adapter executes the target or repeats analysis for retained queries.
+
 Completed `inspect_artifact` and atomic `inventory_artifact` Evidence also
 support summary and inventory views. A summary reports the manifest's expected
 counts separately from available record counts, observed entry kinds, inventory
@@ -821,7 +850,8 @@ operation headroom: 450 seconds with the default Ghidra allowance, or 2820
 seconds with `REA_GHIDRA_STARTUP_TIMEOUT_MS=2700000`. Positive caller-selected
 deadlines remain unchanged. Doctor reports an informational recommendation
 when a configured deadline is shorter than the known provider allowance. An
-explicit JEB upstream request budget also contributes to that allowance.
+explicit JEB upstream deadline (`REA_JEB_MCP_TIMEOUT_MS`, shared by catalog
+discovery and each tools/call) also contributes to that allowance.
 
 For an already connected client using the pinned SDK, request options are the
 **second** argument of `callTool`:

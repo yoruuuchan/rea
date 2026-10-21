@@ -1,3 +1,8 @@
+import { z } from "zod";
+import {
+  sourceToBundleSummaryViewResultSchema,
+  sourceToBundlePageViewResultSchema,
+} from "../domain/analysisView/analysisView.js";
 import { applicationVersionComparisonResultSchema } from "../domain/javascript/javascriptApplicationVersionComparisonSchemas.js";
 import { applicationFeatureTraceResultSchema } from "../domain/javascript/javascriptFeatureTraceSchemas.js";
 import { javaScriptSemanticTraceResultSchema } from "../domain/javascript/javascriptSemanticTraceSchemas.js";
@@ -52,7 +57,11 @@ const comparisonOutputSchema = evidenceResultOf(
   applicationVersionComparisonResultSchema,
 );
 const sourceToBundleOutputSchema = evidenceResultOf(
-  sourceToBundleComparisonResultSchema,
+  z.union([
+    sourceToBundleComparisonResultSchema,
+    sourceToBundleSummaryViewResultSchema,
+    sourceToBundlePageViewResultSchema,
+  ]),
 );
 const exportShapeComparisonOutputSchema = evidenceResultOf(
   javaScriptExportShapeComparisonResultSchema,
@@ -144,7 +153,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "compare_source_to_bundle",
     ...toolContractMetadata("compare_source_to_bundle"),
     description:
-      "Compare a cryptographically committed HistoricalSourceGraph with authenticated JavaScript Application Graph Evidence supplied inline or by exact same-session retained reference. Uses explicit exact-digest, source-map path, current-path, suffix, and basename signals with stable weights. Classifies unchanged, modified, removed, split, merged, duplicated, and unknown; incomplete coverage and ambiguous weak signals never become absence or forced matches.",
+      "Compare a cryptographically committed HistoricalSourceGraph supplied inline or as reference {kind:file,path:absolute-local-JSON-path} with authenticated JavaScript Application Graph Evidence supplied inline or by exact same-session retained reference. Omitted view preserves the full report. Optional view {kind:summary} or {kind:source-to-bundle,collection:mappings|candidates,source_paths?,mapping_ids?,statuses?,fields?,offset?,limit?} retains the full parent and returns selected facts. Query it again using inspect_analysis_view. Empty filters select none; identity fields always remain. Candidate signals are opt-in; classifications use the full comparison. Page coverage never upgrades source coverage. Uses explicit exact-digest, source-map path, current-path, suffix, and basename signals with stable weights. Classifies unchanged, modified, removed, split, merged, duplicated, and unknown; incomplete coverage and ambiguous weak signals never become absence or forced matches.",
     kind: "application",
     inputSchema: compareSourceToBundleRequestSchema,
     outputSchema: sourceToBundleOutputSchema,

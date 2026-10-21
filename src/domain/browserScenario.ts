@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   browserScenarioActionSchema,
+  BROWSER_SCENARIO_START_STEP_ID,
   browserScenarioBrowserSchema,
   browserScenarioCaptureSchema,
   browserScenarioEnvironmentSchema,
@@ -111,6 +112,15 @@ const validateBrowserScenario = (
     "Action step IDs",
     context,
   );
+  const reservedIndex = scenario.actions.findIndex(
+    ({ step_id: id }) => id === BROWSER_SCENARIO_START_STEP_ID,
+  );
+  if (reservedIndex !== -1)
+    addIssue(
+      context,
+      ["actions", reservedIndex, "step_id"],
+      "Action step IDs must not reuse the reserved initial step identity",
+    );
   assertUnique(
     scenario.secrets.map(({ secret_id: id }) => id),
     ["secrets"],

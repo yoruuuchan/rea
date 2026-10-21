@@ -5,20 +5,82 @@ import {
   artifactFileCancellationCause,
   bindArtifactFileCleanup,
 } from "../artifacts/ArtifactFileOperation.js";
-import { AnalysisError } from "../domain/analysisErrorBase.js";
+import {
+  AnalysisError,
+  type AnalysisCapturedOutput,
+  type AnalysisErrorOptions,
+} from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisTimeoutError,
   AnalysisOutputError,
+  AnalysisResourceConstraintError,
+  AnalysisTimeoutError,
 } from "../domain/analysisErrorCore.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { FirmwareDeadline } from "./FirmwareDeadline.js";
 import { firmwareDeadlineElapsed } from "./FirmwareDeadline.js";
-import type { AnalysisErrorOptions } from "../domain/analysisErrorBase.js";
 import { z } from "zod";
 import { MAX_FIRMWARE_TIMEOUT_MS } from "../domain/firmware/firmwareAnalysis.js";
+import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
+
+/** Fixed firmware allowance. analysis_timeout_ms does not raise it. */
+export const firmwareLimitRecovery = (allowance: string): string =>
+  `${allowance}. This release has no runtime override. analysis_timeout_ms (--analysis-timeout-ms in the CLI) does not raise it. Repeating the unchanged request fails the same way.`;
+
+/** Classify a prlimit signal that is not the analysis wall clock. */
+export const firmwareSignalLimitError = (
+  operation: string,
+  signal: NodeJS.Signals | null | undefined,
+  fileSizeBytes: number,
+  fileSizeAdjustable: boolean,
+  capturedOutput?: AnalysisCapturedOutput,
+): AnalysisResourceConstraintError | undefined => {
+  const recovery = (
+    remediationAction: string,
+  ): AnalysisResourceConstraintError =>
+    new AnalysisResourceConstraintError(
+      operation,
+      signal === "SIGXCPU" ? "cpu" : "file-size",
+      signal === "SIGXCPU"
+        ? `Firmware analysis reached its ${String(FIRMWARE_LIMITS.cpuSeconds)}-second CPU allowance (cpuSeconds).`
+        : `Firmware analysis reached its ${String(fileSizeBytes)}-byte file-size allowance.`,
+      signal === "SIGXCPU"
+        ? { cpu_seconds: FIRMWARE_LIMITS.cpuSeconds }
+        : { file_size_bytes: fileSizeBytes },
+      {
+        retryable: false,
+        remediationAction,
+        ...(capturedOutput === undefined ? {} : { capturedOutput }),
+      },
+    );
+  if (signal === "SIGXCPU")
+    return recovery(
+      firmwareLimitRecovery(
+        `cpuSeconds is ${String(FIRMWARE_LIMITS.cpuSeconds)}`,
+      ),
+    );
+  if (signal !== "SIGXFSZ") return undefined;
+  return recovery(
+    fileSizeAdjustable
+      ? `The file-size cap for this extraction is max_output_bytes at ${String(fileSizeBytes)} bytes. analysis_timeout_ms does not raise it. Increase max_output_bytes when it is below its schema maximum and the larger staging budget is still required. Repeating the unchanged request fails the same way.`
+      : firmwareLimitRecovery(
+          `The firmware file-size allowance is ${String(fileSizeBytes)} bytes`,
+        ),
+  );
+};
+
+/** Address-space and CPU ceilings that a wall-clock change cannot raise. */
+export const firmwareProcessLimitRecovery = (
+  fileSizeBytes: number,
+  fileSizeAdjustable: boolean,
+): string =>
+  `cpuSeconds is ${String(FIRMWARE_LIMITS.cpuSeconds)}. The address-space allowance is ${String(FIRMWARE_LIMITS.addressSpaceBytes)} bytes. This release has no runtime override for those per-process allowances, and analysis_timeout_ms does not raise them. ${
+    fileSizeAdjustable
+      ? `The file-size cap for this call is max_output_bytes at ${String(fileSizeBytes)} bytes. analysis_timeout_ms does not raise it.`
+      : `The file-size allowance is ${String(fileSizeBytes)} bytes. This release has no runtime override for that allowance, and analysis_timeout_ms does not raise it.`
+  }`;
 
 type FirmwarePublicationProgress = {
   readonly output_directory: string;

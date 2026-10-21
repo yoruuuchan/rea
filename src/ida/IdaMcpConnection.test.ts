@@ -246,7 +246,12 @@ it("preserves the SDK request timeout as a typed IDA timeout", async () => {
     expect(failure).toMatchObject({
       operation: "decompile",
       timeoutMs: requestTimeoutMs,
+      userMessage: expect.stringContaining("40 ms"),
+      remediationAction: expect.stringContaining("REA_IDA_MCP_CONFIG"),
     });
+    expect(
+      failure instanceof AnalysisTimeoutError ? failure.userMessage : "",
+    ).toContain("1000 ms");
     if (!(failure instanceof AnalysisTimeoutError))
       throw new Error("Expected a typed IDA request timeout");
     expect(failure.cause).toBeInstanceOf(Error);
@@ -311,6 +316,8 @@ it("bounds a stalled health poll by the remaining readiness deadline", async () 
     expect(failure).toMatchObject({
       operation: "server_health: headless worker still busy in config_json_get",
       timeoutMs,
+      userMessage: expect.stringContaining("800 ms"),
+      remediationAction: expect.stringContaining("timeoutMs"),
       cause: busy,
       diagnostics: {
         health_request_operation: "server_health",

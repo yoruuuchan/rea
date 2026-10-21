@@ -38,7 +38,10 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { evmInterfaceEvidence } from "../application/evm/EvmInterfaceEvidence.js";
-import type { InspectEvmInterfaceInput } from "../domain/evm/evmInterface.js";
+import {
+  DEFAULT_EVM_TIMEOUT_MS,
+  type InspectEvmInterfaceInput,
+} from "../domain/evm/evmInterface.js";
 import { evmInterfaceSchema } from "../domain/evm/evmInterface.js";
 import { solidityMetadataSchema } from "../domain/evm/solidityMetadata.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
@@ -58,6 +61,7 @@ import {
 } from "./EvmoleInterfaceAdapter.js";
 import {
   EVMOLE_PROVIDER_IDENTITY,
+  EVM_CPU_SECONDS,
   EVM_INTERFACE_LIMITS,
   EVM_FILE_SIZE_FAILURE_EXIT,
 } from "./EvmoleRelease.js";
@@ -337,7 +341,16 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
       try {
         return await this.#resources.run(() => this.#inspect(input, options));
       } catch (cause: unknown) {
-        const failure = evmInterfaceFailure(cause, "artifact-read", input.path);
+        const failure = evmInterfaceFailure(
+          cause,
+          "artifact-read",
+          input.path,
+          undefined,
+          this.environment.REA_EVM_PRLIMIT_COMMAND ??
+            EVM_PRLIMIT_COMMAND_DEFAULT,
+          undefined,
+          input.timeout_ms ?? DEFAULT_EVM_TIMEOUT_MS,
+        );
         if (cause instanceof ArtifactReaderFailure)
           bindArtifactFileCleanup(cause, failure);
         return err(failure);
@@ -399,6 +412,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
       rootLease ??= AnalysisCleanupLease.forCloseOwner(owner, owner.path);
       return rootLease;
     };
+    const timeoutMs = input.timeout_ms ?? DEFAULT_EVM_TIMEOUT_MS;
     let retainedOutput: AnalysisCapturedOutput | undefined;
     let phase: "configuration" | "artifact-read" | "worker" = "configuration";
     let workerLimits: EvmWorkerLimits | undefined;
@@ -518,7 +532,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
           hostEnvironment: environment,
         },
         {
-          timeoutMs: EVM_INTERFACE_LIMITS.timeoutMs,
+          timeoutMs,
           diagnosticBytes: EVM_INTERFACE_LIMITS.diagnosticBytes,
         },
         {
@@ -594,6 +608,8 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         if (reply.reason === "output-limit")
           throw new AnalysisOutputError(OPERATION, reply.message, {
             capturedOutput,
+            userMessage: `${reply.message} The reply allowance is ${String(EVM_INTERFACE_LIMITS.outputBytes)} bytes. This release has no runtime override.`,
+            remediationAction: `The EVMole reply allowance is ${String(EVM_INTERFACE_LIMITS.outputBytes)} bytes. This release has no runtime override. timeout_ms does not raise it. Repeating the unchanged request fails the same way.`,
           });
         throw new ProviderAdapterError(EVMOLE_PROVIDER_IDENTITY.id, OPERATION, {
           diagnostics: {
@@ -631,7 +647,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         "Bytecode kind, hardfork and deployed-contract authenticity are unknown. This inspection performs no target runtime execution, chain/RPC lookup or network request.",
         "Original carrier and decoded bytecode SHA-256 are distinct identities; SHA-256 is not the Ethereum Keccak code hash.",
         "Terminal CBOR metadata is an independently decoded candidate, not proof of Solidity origin, source identity or deployment. Nested or unsupported values retain explicit unavailable interpretation and original byte ranges.",
-        "The owned worker has a 256 MiB JavaScript heap, 3 GiB virtual address-space limit and 30-second deadline. Virtual address space is distinct from resident memory; limits fail without partial success.",
+        `The owned worker has a 256 MiB JavaScript heap, an address-space ceiling of ${String(EVM_INTERFACE_LIMITS.addressSpaceBytes)} bytes, and a CPU ceiling of ${String(EVM_CPU_SECONDS)} seconds. The command deadline is timeout_ms at ${String(timeoutMs)} ms (default ${String(DEFAULT_EVM_TIMEOUT_MS)}). Those byte, address-space, and CPU ceilings have no runtime override, and timeout_ms does not raise them. Virtual address space is distinct from resident memory; limits fail without partial success.`,
       ];
       const validated = evmInterfaceSchema.safeParse({
         artifact: {
@@ -729,6 +745,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
               workerLimits,
               limiter,
               fileFailure,
+              timeoutMs,
             )
           : options?.signal?.aborted &&
               (cause === options.signal.reason ||
@@ -750,6 +767,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
                 workerLimits,
                 limiter,
                 fileFailure,
+                timeoutMs,
               );
       const artifactFailure =
         markerCleanupFailure ??

@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { sqliteDatabaseFailure } from "../../../src/sqlite/SqliteDatabaseFailures.js";
+import { SQLITE_DATABASE_LIMITS } from "../../../src/sqlite/SqliteDatabaseLimits.js";
 
 it.each([null, "owned stop unconfirmed"])(
   "preserves a selected worker deadline with cleanup=%s",
@@ -85,4 +86,21 @@ it("does not recommend a timer above the supported maximum", () => {
   expect(failure.details).toMatchObject({ timeout_ms: 2_147_483_647 });
   expect(failure.remediation.action).toContain("no higher worker deadline");
   expect(failure.remediation.action).not.toContain("Increase");
+});
+
+it("says diagnostic capture has no runtime override", () => {
+  const projected = projectAnalysisError(
+    sqliteDatabaseFailure(
+      new OwnedCommandFailure("output-limit", "diagnostics exceeded"),
+      "/selected.db",
+      "worker",
+    ),
+  );
+  expect(projected.remediation.action).toContain(
+    String(SQLITE_DATABASE_LIMITS.diagnosticBytes),
+  );
+  expect(projected.remediation.action).toContain("no runtime override");
+  expect(projected.remediation.action).toContain(
+    "worker_timeout_ms does not raise it",
+  );
 });

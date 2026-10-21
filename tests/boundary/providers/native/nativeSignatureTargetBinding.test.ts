@@ -73,6 +73,10 @@ describe("native signature target identity", () => {
     expect(result.value.result).toMatchObject({
       signed: true,
       identifier: "com.example.fixture",
+      designated_requirement: "identifier com.example.fixture",
+      limitations: [
+        "Inspected a digest-verified Mach-O byte snapshot; filesystem-bound signing context and trust validation are not examined.",
+      ],
     });
   });
 

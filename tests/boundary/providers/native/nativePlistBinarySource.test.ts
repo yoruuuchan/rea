@@ -72,7 +72,7 @@ it("reports a binary source-size refusal as a typed resource limit", async () =>
     retryable: false,
     remediation: {
       action: expect.stringContaining(
-        "within the fixed 64 MiB native plist input allowance",
+        "native plist input allowance (no runtime override)",
       ),
     },
   });
@@ -91,14 +91,16 @@ it.each([
     value: { data: Buffer.alloc(22 * 1024 * 1024, 0x78) },
     reason: "binary plist object table exceeds the native plist decode budget",
     limits: { maximum_decoded_bytes: 64 * 1024 * 1024 },
-    allowance: "The 64 MiB native binary plist decode allowance",
+    allowance:
+      "The 64 MiB (67108864-byte) native binary plist decode allowance (no runtime override)",
   },
   {
     budget: "nesting",
     value: nested(MAX_BINARY_PLIST_NESTING_DEPTH + 1),
     reason: "binary plist nesting exceeds the native plist decode budget",
     limits: { maximum_nesting_depth: MAX_BINARY_PLIST_NESTING_DEPTH },
-    allowance: "The 128-level native binary plist nesting allowance",
+    allowance:
+      "The 128-level native binary plist nesting allowance (no runtime override)",
   },
 ])(
   "names the fixed binary plist $budget allowance instead of host memory",

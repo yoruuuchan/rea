@@ -142,6 +142,7 @@ export class AnalysisSnapshotCache {
     for (const entry of snapshot.workflow_entries) {
       if (!this.#workflowEntries.has(entry.query_id) && !this.#hasCapacity())
         continue;
+      if (!this.#workflowEntries.has(entry.query_id)) imported += 1;
       this.#workflowEntries.set(entry.query_id, entry);
     }
     return imported;

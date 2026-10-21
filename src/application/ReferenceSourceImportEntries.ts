@@ -343,6 +343,7 @@ const appendFile = (
     limitations: [...(parsed?.limitations ?? [])],
   });
   if (parsed === undefined) return;
+  output.limitations.push(...parsed.limitations);
   for (const relationship of parsed.relationships) {
     const { resolutionStrategy, ...graphRelationship } = relationship;
     if (graphRelationship.resolution !== "internal") {

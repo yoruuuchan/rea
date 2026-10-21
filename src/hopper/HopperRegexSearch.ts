@@ -136,6 +136,10 @@ export class HopperRegexSearch {
         }),
     });
     if (!matched.ok) return matched;
+    if (options.signal?.aborted)
+      return err(
+        new AnalysisCancelledError(operation, { cause: options.signal.reason }),
+      );
     const selected = new Set(matched.value);
     return ok(parsed.data.filter((_, index) => selected.has(index)));
   }

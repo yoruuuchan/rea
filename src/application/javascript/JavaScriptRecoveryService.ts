@@ -13,8 +13,9 @@ import {
 } from "../../domain/javascript/javascriptRecovery.js";
 import { jsonObjectSchema, jsonValueSchema } from "../../domain/jsonValue.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
-import { err, ok, type Result } from "../../domain/result.js";
+import { err, type Result } from "../../domain/result.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 import type { JavaScriptRecoveryPort } from "./JavaScriptRecoveryPort.js";
 
 const OPERATION = "recover_javascript_sources";
@@ -107,8 +108,10 @@ export class JavaScriptRecoveryService {
           "Recovery source or engine identity disagrees with its Evidence binding",
         ),
       );
-    return ok(
-      createEvidence(execution.value.subject, execution.value.provider, {
+    const evidence = createEvidence(
+      execution.value.subject,
+      execution.value.provider,
+      {
         operation: OPERATION,
         parameters: jsonObjectSchema.parse(parsed.data),
         result: jsonValueSchema.parse(result.data),
@@ -117,7 +120,8 @@ export class JavaScriptRecoveryService {
         limitations: execution.value.limitations,
         confidence: "derived",
         authority: "shipped-artifact",
-      }),
+      },
     );
+    return completeProviderEvidence(evidence, options?.signal);
   }
 }

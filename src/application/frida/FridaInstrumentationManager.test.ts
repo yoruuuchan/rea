@@ -15,8 +15,10 @@ import { FridaScriptLoadCancelledError } from "./FridaInstrumentationPort.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
+  AnalysisTimeoutError,
 } from "../../domain/analysisErrorCore.js";
 import { FridaInstrumentationManager } from "../../frida/FridaInstrumentationManager.js";
+import { fridaCaptureLimitations } from "../../frida/fridaCaptureLimits.js";
 
 const signal = <Handler extends (...args: never[]) => void>() => {
   let connected: Handler | undefined;
@@ -215,6 +217,78 @@ const startLocalAttachedSession = async (
 
 // eslint-disable-next-line max-lines-per-function -- related manager lifecycle cases share the same focused fake provider.
 describe("FridaInstrumentationManager", () => {
+  it("reports a fixed device-lookup deadline when Frida's lookup times out", async () => {
+    const bindings = new FakeDeviceManager();
+    bindings.getDeviceById = async () => {
+      throw new Error("Device not found");
+    };
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const listed = await manager.listProcesses({ deviceId: "local" });
+    expect(listed.ok).toBe(false);
+    if (listed.ok) return;
+    expect(listed.error).toBeInstanceOf(AnalysisTimeoutError);
+    expect(listed.error).toMatchObject({
+      operation: "list_frida_processes",
+      timeoutMs: 1_000,
+    });
+    if (!(listed.error instanceof AnalysisTimeoutError)) return;
+    expect(listed.error.userMessage).toContain("1000 ms");
+    expect(listed.error.userMessage).toContain("no runtime override");
+    expect(listed.error.remediationAction).toContain("no runtime override");
+  });
+
+  it("preserves a Frida device-manager failure instead of claiming the lookup deadline expired", async () => {
+    const bindings = new FakeDeviceManager();
+    bindings.getDeviceById = async () => {
+      throw new Error("Device manager is closed");
+    };
+    const manager = new FridaInstrumentationManager({
+      deviceManager: bindings,
+    });
+    const listed = await manager.listProcesses({ deviceId: "local" });
+    expect(listed.ok).toBe(false);
+    if (listed.ok) return;
+    expect(listed.error).toBeInstanceOf(AnalysisCapabilityUnavailableError);
+    expect(listed.error).not.toBeInstanceOf(AnalysisTimeoutError);
+    expect(listed.error).toMatchObject({
+      providerId: "frida",
+      operation: "list_frida_processes",
+      reason: "Device manager is closed",
+    });
+    expect(listed.error.message).toContain("Device manager is closed");
+    expect(listed.error.message).not.toContain("deadlineExpired");
+  });
+
+  it("names a capture cap only after that observation dropped data", () => {
+    expect(fridaCaptureLimitations({ messages_truncated: false })).toEqual([]);
+    expect(
+      fridaCaptureLimitations({ messages_truncated: true }).join("\n"),
+    ).toContain("16777216");
+    const field = fridaCaptureLimitations({
+      messages: [{ type_truncated: true }],
+    }).join("\n");
+    expect(field).toContain("4096");
+    expect(field).not.toContain("16777216");
+    const text = fridaCaptureLimitations({
+      messages: [
+        {
+          description_truncated: true,
+          payload: { messages_truncated: true, type_truncated: true },
+        },
+      ],
+    }).join("\n");
+    expect(text).toContain("32768");
+    expect(text).not.toContain("16777216");
+    expect(text).not.toContain("4096");
+    expect(
+      fridaCaptureLimitations({
+        messages: [{ payload: { messages_truncated: true } }],
+      }),
+    ).toEqual([]);
+  });
+
   it("attaches by PID when Frida omits the target from process lookup", async () => {
     const bindings = new FakeDeviceManager();
     bindings.device.getProcessByPid = async () => {
@@ -1242,7 +1316,7 @@ it("bounds oversized Frida message metadata before retaining it", async () => {
   });
   expect(loaded.ok).toBe(true);
   if (loaded.ok) {
-    expect(loaded.value.messagesTruncated).toBe(true);
+    expect(loaded.value.messagesTruncated).toBe(false);
     const message = loaded.value.messages[0];
     expect(message).toMatchObject({
       description_truncated: true,
@@ -1309,10 +1383,10 @@ it.each([
       expect(message[field]).toBe(retained);
       expect(message[`${field}_truncated`] ?? false).toBe(truncated);
     }
-    expect(loaded.value.messagesTruncated).toBe(truncated);
+    expect(loaded.value.messagesTruncated).toBe(false);
     expect(manager.status(started.value.sessionId)).toMatchObject({
       messages: [message],
-      messagesTruncated: truncated,
+      messagesTruncated: false,
     });
   },
 );
@@ -1460,7 +1534,10 @@ it.each([false, true])(
     expect(loaded.error.script.messages).toContainEqual(
       expect.objectContaining({ payload: "during cleanup" }),
     );
-    expect(loaded.error.script.messagesTruncated).toBe(true);
+    expect(loaded.error.script.messagesTruncated).toBe(false);
+    expect(loaded.error.script.messages).toContainEqual(
+      expect.objectContaining({ description_truncated: true }),
+    );
     expect(loaded.error.diagnostics).toEqual(
       rejectNative ? { native_failure: nativeFailure.message } : undefined,
     );

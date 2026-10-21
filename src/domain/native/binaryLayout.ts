@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { canBorrowParsedJsonSnapshot } from "../immutableJson.js";
 
+import { pwntoolsTimeoutField } from "./nativeDeadlines.js";
 import { localPathStringSchema } from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 
@@ -21,6 +22,7 @@ export const inspectBinaryLayoutInputSchema = z.strictObject({
   path: localPathStringSchema.describe(
     "Absolute filesystem path to the selected binary",
   ),
+  pwntools_timeout_ms: pwntoolsTimeoutField,
 });
 
 /** File and linked-image evidence; numeric ELF values never pass through unsafe JSON numbers. */

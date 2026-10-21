@@ -280,8 +280,7 @@ export const captureSqliteDatabaseSnapshot = async (
         observed_sqlite_snapshot_input_bytes: selectedSize.toString(),
       },
       {
-        remediationAction:
-          "Use the application's supported export workflow to create a consistent, smaller offline SQLite snapshot containing only the relevant data, then inspect that snapshot. REA will not truncate or modify the selected source.",
+        remediationAction: `Use the application's supported export workflow to create a consistent, smaller offline SQLite snapshot containing only the relevant data, then inspect that snapshot. REA will not truncate or modify the selected source. The combined input allowance is ${String(SQLITE_DATABASE_LIMITS.inputBytes)} bytes. This release has no runtime override. worker_timeout_ms does not raise it.`,
       },
     );
   if (journal !== null)

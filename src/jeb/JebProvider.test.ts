@@ -56,7 +56,10 @@ describe("JebProvider live availability", () => {
         return scriptedConnection({});
       },
     );
-    expect(configured).toEqual({ requestTimeoutMs: 900_000 });
+    expect(configured).toEqual({
+      requestTimeoutMs: 900_000,
+      discoveryTimeoutMs: 900_000,
+    });
     await provider.close();
   });
 

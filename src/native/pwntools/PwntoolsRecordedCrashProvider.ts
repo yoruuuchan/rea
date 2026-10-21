@@ -56,6 +56,7 @@ export class PwntoolsRecordedCrashProvider
           diagnostics,
           options,
           runCommand,
+          timeoutMs,
         }) => {
           const validate = (debuggerContext: RecordedCrash["debugger"]) =>
             recordedCrashSchema.safeParse({
@@ -140,6 +141,7 @@ export class PwntoolsRecordedCrashProvider
               diagnostics,
               options,
               runCommand,
+              timeoutMs,
             });
             const enriched = validate(context);
             if (!enriched.success)

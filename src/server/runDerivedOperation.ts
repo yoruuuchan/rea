@@ -31,7 +31,11 @@ export const runDerivedOperation = async <Value>(
   });
   await setImmediate();
   if (context.mcpReq.signal.aborted)
-    return err(new AnalysisCancelledError(operation));
+    return err(
+      new AnalysisCancelledError(operation, {
+        cause: context.mcpReq.signal.reason,
+      }),
+    );
   let value: Value;
   try {
     value = compute();
@@ -62,7 +66,11 @@ export const runDerivedOperation = async <Value>(
   });
   await setImmediate();
   if (context.mcpReq.signal.aborted)
-    return err(new AnalysisCancelledError(operation));
+    return err(
+      new AnalysisCancelledError(operation, {
+        cause: context.mcpReq.signal.reason,
+      }),
+    );
   await progress.report({
     phase: "complete",
     completed: 2,
@@ -71,6 +79,10 @@ export const runDerivedOperation = async <Value>(
     terminal: true,
   });
   if (context.mcpReq.signal.aborted)
-    return err(new AnalysisCancelledError(operation));
+    return err(
+      new AnalysisCancelledError(operation, {
+        cause: context.mcpReq.signal.reason,
+      }),
+    );
   return ok(value);
 };

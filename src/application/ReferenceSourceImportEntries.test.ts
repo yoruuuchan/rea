@@ -64,6 +64,42 @@ it("keeps a failed regular file as file kind", () => {
   });
 });
 
+it("keeps source entries when a module has an empty specifier", () => {
+  const files = [
+    ["main.mjs", 'import "";\n'],
+    ["other.txt", "retained\n"],
+  ] as const;
+  const read: ReferenceSourceRead = {
+    root: "/selected/source",
+    entries: files.map(([path, content]) => ({
+      status: "read",
+      kind: "file",
+      path,
+      bytes: Buffer.from(content),
+      size: Buffer.byteLength(content),
+    })),
+    bytesRead: files.reduce(
+      (sum, [, content]) => sum + Buffer.byteLength(content),
+      0,
+    ),
+    limitations: [],
+  };
+
+  const parsed = parseReferenceSourceEntries(
+    read,
+    new Set(files.map(([path]) => path)),
+  );
+
+  expect(parsed.entries.map(({ path }) => path)).toEqual([
+    "main.mjs",
+    "other.txt",
+  ]);
+  expect(parsed.relationships).toEqual([]);
+  expect(parsed.limitations).toEqual([
+    "Empty module specifier in main.mjs was not recorded as a relationship.",
+  ]);
+});
+
 it("retains Kotlin source identity and language across the inventory projection", () => {
   const files = [
     [

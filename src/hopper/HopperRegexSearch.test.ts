@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { HopperRegexSearch } from "./HopperRegexSearch.js";
 import { err, ok } from "../domain/result.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
@@ -8,6 +8,24 @@ import {
   HopperProcessError,
 } from "../domain/hopperErrors.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+
+const regexMatch = vi.hoisted(() => ({
+  afterSettle: undefined as (() => void) | undefined,
+}));
+vi.mock("../process/RegexMatcher.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../process/RegexMatcher.js")>();
+  return {
+    ...actual,
+    matchRegexValues: async (
+      request: Parameters<typeof actual.matchRegexValues>[0],
+    ) => {
+      const result = await actual.matchRegexValues(request);
+      regexMatch.afterSettle?.();
+      return result;
+    },
+  };
+});
 
 it.each(
   (["search_strings", "search_procedures"] as const).flatMap((operation) =>
@@ -193,6 +211,29 @@ it("preserves an inventory failure when cancellation arrives after the physical 
       },
     });
   } finally {
+    await search.close();
+  }
+});
+
+it("returns cancellation when the caller aborts after the regex worker settles", async () => {
+  const controller = new AbortController();
+  const reason = { request: "stop search" };
+  regexMatch.afterSettle = () => controller.abort(reason);
+  const search = new HopperRegexSearch({
+    callTool: async () =>
+      ok([{ address: "0x1000", value: "fixture" }] as never),
+  });
+  try {
+    const result = await search.execute(
+      "search_strings",
+      { pattern: "fixture", mode: "regex", case_sensitive: false },
+      { signal: controller.signal },
+    );
+    if (result.ok) throw new Error("Expected cancellation");
+    expect(result.error._tag).toBe("AnalysisCancelledError");
+    expect(result.error.cause).toBe(reason);
+  } finally {
+    regexMatch.afterSettle = undefined;
     await search.close();
   }
 });

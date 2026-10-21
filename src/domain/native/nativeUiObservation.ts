@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import {
+  NATIVE_UI_WAIT_STEP_MAX_MS,
+  nativeUiDeadlineField,
+} from "./nativeDeadlines.js";
+
 import { decodeCanonicalBase64 } from "../webScreenshot.js";
 import { readPngHeaderDimensions } from "../pngHeader.js";
 
@@ -19,6 +24,7 @@ const scope = {
     .describe(
       "Maximum accessibility nodes per capture; increase for large windows.",
     ),
+  native_ui_deadline_ms: nativeUiDeadlineField,
 };
 /** Opt-in passive observation binds one already-running process and window. */
 export const nativeUiObservationInputSchema = z.strictObject(scope);
@@ -48,9 +54,9 @@ export const nativeUiScenarioInputSchema = z.strictObject({
             .number()
             .int()
             .min(0)
-            .max(180_000)
+            .max(NATIVE_UI_WAIT_STEP_MAX_MS)
             .describe(
-              "Wait duration in milliseconds, within the 180-second operation deadline.",
+              "Wait duration in milliseconds. One wait step stays capped at 180000 ms. This release has no runtime override for that step cap. The operation deadline is native_ui_deadline_ms (omitted means 180000).",
             ),
         }),
       ]),

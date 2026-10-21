@@ -182,7 +182,10 @@ export class KunaProjectReader {
       ),
     );
     const index = await waitForAbortable(this.#assembly, signal);
-    if (index === ABORTED) return err(new AnalysisCancelledError(operation));
+    if (index === ABORTED)
+      return err(
+        new AnalysisCancelledError(operation, { cause: signal?.reason }),
+      );
     return index.ok
       ? index
       : err(

@@ -9,7 +9,10 @@ import {
   decodeKeyedArchiveBytes,
   inspectBundleKeyedArchive,
 } from "./KeyedArchiveReader.js";
-import { unknownDateLimitation } from "../../domain/apple/plistValue.js";
+import {
+  plistNestingLimitMessage,
+  unknownDateLimitation,
+} from "../../domain/apple/plistValue.js";
 import { deeplyNestedXmlPlist } from "../../../tests/fixtures/keyedArchiveXmlNesting.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { scanBinaryPlistScalars } from "./PlistScalars.js";
@@ -791,7 +794,7 @@ describe("XML plist nesting preflight", () => {
           Buffer.from(deeplyNestedXmlPlist(depth)),
           selection,
         ),
-      ).toThrow(new RangeError("Plist exceeds 128 nesting levels"));
+      ).toThrow(new RangeError(plistNestingLimitMessage()));
     },
   );
 
@@ -808,6 +811,6 @@ describe("XML plist nesting preflight", () => {
   it("rejects one nesting level past the limit before decoding", () => {
     expect(() =>
       decodeKeyedArchiveBytes(deeplyNestedArchive(127), selection),
-    ).toThrow(new RangeError("Plist exceeds 128 nesting levels"));
+    ).toThrow(new RangeError(plistNestingLimitMessage()));
   });
 });

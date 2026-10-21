@@ -83,4 +83,19 @@ describe("Vite preload dependency recovery", () => {
         .map(({ specifier }) => specifier),
     ).toEqual(["./original.js"]);
   });
+
+  it("keeps table slots from a spread onward unknown", () => {
+    const analysis = analyzeJavaScriptStaticSource(`
+      const __vite__mapDeps = (indexes, map = __vite__mapDeps, dependencies =
+        (map.f || (map.f = ["./first.js", ...["./middle-a.js", "./middle-b.js"], "./last.js"]))) =>
+        indexes.map((index) => dependencies[index]);
+      __vite__mapDeps([0, 2]);
+    `);
+
+    expect(
+      analysis.references
+        .filter(({ kind }) => kind === "dynamic-import")
+        .map(({ specifier }) => specifier),
+    ).toEqual(["./first.js", null]);
+  });
 });

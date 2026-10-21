@@ -197,7 +197,24 @@ cliTest(
       expect.arrayContaining([
         { name: "semantic_graph_node_ceiling", value: 50 },
         { name: "semantic_graph_file_node_ceiling", value: 30 },
+        { name: "max_semantic_nodes", value: 50 },
+        { name: "max_semantic_nodes_per_file", value: 30 },
       ]),
     );
+    const limitation = z
+      .object({
+        normalized_result: z.object({
+          semantic_graph: z.object({
+            limitations: z.array(z.string()),
+          }),
+        }),
+      })
+      .parse(output.json);
+    expect(
+      limitation.normalized_result.semantic_graph.limitations.join("\n"),
+    ).toContain("max_semantic_nodes");
+    expect(
+      limitation.normalized_result.semantic_graph.limitations.join("\n"),
+    ).toContain("1 to 1000000");
   },
 );

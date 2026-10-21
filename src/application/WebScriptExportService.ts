@@ -4,6 +4,10 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import {
+  AnalysisCleanupLeaseGroup,
+  type AnalysisCleanupLease,
+} from "../artifacts/AnalysisCleanupLease.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { publishWebScripts } from "../browser/assets/PublishWebScripts.js";
 import { selectScriptCapture } from "../browser/assets/ScriptCaptureAdapters.js";
@@ -38,6 +42,7 @@ import {
   NonRegularFileReadError,
   RegularFileChangedError,
 } from "../filesystem/RegularFile.js";
+import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
 
 const OPERATION = "export_web_scripts";
 
@@ -47,6 +52,7 @@ interface CaptureRead {
     readonly reason: string;
     readonly incomplete: boolean;
     readonly cause: unknown;
+    readonly lease?: AnalysisCleanupLease;
   };
 }
 
@@ -101,6 +107,13 @@ export const exportWebScriptsValidated = async (
       resources,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    if (options.signal?.aborted === true)
+      return err(
+        new AnalysisCancelledError(OPERATION, {
+          cause: options.signal.reason,
+          partialObservation: { kind: "web-script-export", result },
+        }),
+      );
     return ok(
       createEvidence(
         { path: input.capture_path, sha256, format: "file" },
@@ -170,6 +183,8 @@ const mapExportFailure = (
   signal: AbortSignal | undefined,
 ): AnalysisError => {
   if (cause instanceof WebScriptExportError) return cause;
+  if (cause instanceof AnalysisCancelledError && cause !== signal?.reason)
+    return cause;
   if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined)
     return analysisErrorWithCleanupFailure(
       new WebScriptExportError(
@@ -187,7 +202,12 @@ const mapExportFailure = (
       OPERATION,
     );
   if (signal?.aborted === true)
-    return new AnalysisCancelledError(OPERATION, { cause });
+    return new AnalysisCancelledError(OPERATION, {
+      cause:
+        cause instanceof ArtifactReaderFailure && cause.cause === signal.reason
+          ? signal.reason
+          : cause,
+    });
   if (cause instanceof ArtifactReaderFailure)
     return new WebScriptExportError(
       cause.reason,
@@ -244,9 +264,27 @@ const readCapture = async (
         reason: retry.cleanup?.reason ?? errorMessage(cause.cleanupCause),
         incomplete: retry.cleanup !== undefined,
         cause: cause.cleanupCause,
+        ...(retry.cleanupLease === undefined
+          ? {}
+          : { lease: retry.cleanupLease }),
       };
-      if (retry.outcome.kind === "completed")
+      if (retry.outcome.kind === "completed") {
+        const cancellation =
+          signal?.aborted === true
+            ? { reason: signal.reason }
+            : regularFileCancellation(cause);
+        if (cancellation !== undefined) {
+          const primary = new AnalysisCancelledError(OPERATION, {
+            cause: cancellation.reason,
+          });
+          return err(
+            retry.cleanup === undefined
+              ? primary
+              : incompleteCaptureCleanup(primary, path, cleanup),
+          );
+        }
         return ok({ bytes: retry.outcome.value as Buffer, cleanup });
+      }
       const primary = captureReadFailure(
         path,
         retry.outcome.cause,
@@ -323,8 +361,8 @@ const incompleteCaptureCleanup = (
   primary: AnalysisError,
   path: string,
   cleanup: NonNullable<CaptureRead["cleanup"]>,
-): AnalysisError =>
-  analysisErrorWithCleanupFailure(
+): AnalysisError => {
+  const error = analysisErrorWithCleanupFailure(
     primary,
     new ProviderCleanupError(
       PROVIDER.id,
@@ -334,6 +372,10 @@ const incompleteCaptureCleanup = (
     ),
     OPERATION,
   );
+  if (cleanup.lease !== undefined)
+    new AnalysisCleanupLeaseGroup(error, [cleanup.lease]);
+  return error;
+};
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);

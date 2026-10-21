@@ -218,7 +218,8 @@ const decodeIndirectObjcClass = (
   if (pointer.kind === "raw" || pointer.kind === "rebase")
     return typeReferenceResult({
       kind,
-      target: pointer.target === 0n ? null : pointer.target,
+      target:
+        pointer.kind === "raw" && pointer.target === 0n ? null : pointer.target,
       reason: "Indirect Objective-C class metadata requires runtime lookup",
     });
   return typeReferenceResult({

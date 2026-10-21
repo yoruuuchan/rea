@@ -7,7 +7,10 @@ import { expect, it } from "vitest";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
+  AnalysisResourceConstraintError,
 } from "../../../src/domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+import { javaScriptRuntime } from "../../../src/domain/runtimeVersion.js";
 import { JavaScriptAnalysisWorker } from "../../../src/javascript/analysis/JavaScriptAnalysisWorker.js";
 import {
   javaScriptWorkerMessageSchema,
@@ -777,11 +780,28 @@ it("retains the owned worker's V8 heap exhaustion classification", async () => {
   try {
     const result = await worker.analyze(file, { nodes: 100, unknowns: 100 });
     expect(result.ok).toBe(false);
-    if (!result.ok)
-      expect(result.error.error).toMatchObject({
-        _tag: "AnalysisResourceConstraintError",
-        resource: "memory",
-      });
+    if (!result.ok) {
+      expect(result.error.error).toBeInstanceOf(
+        AnalysisResourceConstraintError,
+      );
+      const projected = projectAnalysisError(result.error.error);
+      if (javaScriptRuntime(process.versions).id === "node") {
+        expect(projected.message).toContain(
+          "128 MiB V8 old-space heap (max_heap_mb)",
+        );
+        expect(projected.remediation.action).toContain("--max-heap-mb");
+      } else {
+        expect(projected.message).toContain(
+          "Bun ignores the V8 old-space flag",
+        );
+        expect(projected.message).not.toContain(
+          "128 MiB V8 old-space heap (max_heap_mb)",
+        );
+        expect(projected.remediation.action).not.toContain(
+          "Increase max_heap_mb",
+        );
+      }
+    }
   } finally {
     await worker.close();
   }

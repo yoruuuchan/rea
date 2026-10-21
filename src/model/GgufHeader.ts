@@ -10,6 +10,7 @@ import type {
 import { ModelHeaderReader } from "./ModelHeaderReader.js";
 import {
   MODEL_ARRAY_PREVIEW,
+  MODEL_METADATA_NESTING,
   ModelFormatFailure,
   ModelReportBudget,
   rejectModel,
@@ -64,6 +65,7 @@ export class GgufHeader {
       throw new ModelFormatFailure(
         "capacity",
         "Header length/count exceeds exact host offset precision",
+        "exact-offset",
       );
     return Number(value);
   }
@@ -114,10 +116,11 @@ export class GgufHeader {
   }> {
     if (NAMES[type] === undefined)
       rejectModel(`Unknown GGUF metadata type ${String(type)}`);
-    if (depth > 32)
+    if (depth > MODEL_METADATA_NESTING)
       throw new ModelFormatFailure(
         "capacity",
-        "GGUF metadata nesting exceeds 32 array frames",
+        `GGUF metadata nesting exceeds ${String(MODEL_METADATA_NESTING)} array frames`,
+        "metadata-nesting",
       );
     if (type === 8)
       return {

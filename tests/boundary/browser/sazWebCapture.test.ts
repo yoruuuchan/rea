@@ -627,6 +627,46 @@ it("keeps CRLF separators inside a body after LF-only HTTP headers", async () =>
   expect(await readFile(path)).toEqual(bytes);
 });
 
+it("reports zero-byte SAZ HTTP members as null instead of rejecting the archive", async () => {
+  const bytes = await archive([
+    ["raw/1_c.txt", Buffer.from("GET https://example.test/ HTTP/1.1\r\n\r\n")],
+    ["raw/1_s.txt", Buffer.alloc(0)],
+    ["raw/2_c.txt", Buffer.alloc(0)],
+    ["raw/2_s.txt", Buffer.from("HTTP/1.1 204 No Content\r\n\r\n")],
+    ["raw/2_w.txt", Buffer.alloc(0)],
+  ]);
+  const path = await fixture(bytes);
+  const capture = webNetworkCaptureSchema.parse(
+    (await cli(path)).normalized_result,
+  );
+  expect(capture.total_records).toBe(2);
+  expect(capture.records[0]?.reported).toMatchObject({
+    request: { method: "GET" },
+    response: null,
+  });
+  expect(capture.records[1]?.reported).toMatchObject({
+    request: null,
+    response: { status: "204" },
+    websocket: { member: "raw/2_w.txt" },
+  });
+  expect(capture.records[0]?.location).toEqual({
+    kind: "archive-members",
+    members: ["raw/1_c.txt", "raw/1_s.txt"],
+  });
+  expect(capture.records[0]?.limitations).toEqual([
+    "The stored response member is empty (zero bytes); the response is reported as null.",
+  ]);
+  expect(capture.records[1]?.limitations).toEqual([
+    "The stored request member is empty (zero bytes); the request is reported as null.",
+  ]);
+  const selected = webNetworkCaptureSchema.parse(
+    (await cli(path, ["--record", "0"])).normalized_result,
+  );
+  expect(selected.records).toMatchObject([
+    { ordinal: 0, reported: { response: null } },
+  ]);
+});
+
 it("validates SAZ XML declarations against archive member bytes at the CLI boundary", async () => {
   const withMetadata = (metadata: Buffer): [string, Buffer][] =>
     members().map(([name, bytes]) =>

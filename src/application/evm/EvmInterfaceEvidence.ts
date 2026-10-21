@@ -9,7 +9,13 @@ export const evmInterfaceEvidence = (
 ) =>
   createEvidence(execution.subject, execution.provider, {
     operation: "inspect_evm_interface",
-    parameters: input,
+    parameters: {
+      path: input.path,
+      encoding: input.encoding,
+      ...(input.timeout_ms === undefined
+        ? {}
+        : { timeout_ms: input.timeout_ms }),
+    },
     result: execution.result,
     ...(execution.rawResult === null ? {} : { rawResult: execution.rawResult }),
     confidence: "inferred",

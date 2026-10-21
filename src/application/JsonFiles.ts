@@ -47,7 +47,7 @@ export interface TextWriteCancellation {
 type TextWriteResult<Failure = EvidenceFileError | AnalysisCancelledError> =
   Result<{ readonly path: string; readonly bytes: number }, Failure>;
 
-/** Read JSON data from a regular file at the caller-supplied path. */
+/** Read JSON data without changing the caller's existing data-only contract. */
 export const readJsonFile = async (
   path: string,
   signal?: AbortSignal,
@@ -57,11 +57,33 @@ export const readJsonFile = async (
     unknown,
     EvidenceFileError | AnalysisResourceConstraintError | AnalysisCancelledError
   >
+> => {
+  const read = await readJsonFileWithSource(path, signal, resources);
+  return read.ok ? ok(read.value.data) : read;
+};
+
+/** Read data and the absolute selected path at the same owning regular-file boundary. */
+export const readJsonFileWithSource = (
+  path: string,
+  signal?: AbortSignal,
+  resources?: ArtifactResourceScope,
+): Promise<
+  Result<
+    { readonly data: unknown; readonly path: string },
+    EvidenceFileError | AnalysisResourceConstraintError | AnalysisCancelledError
+  >
 > =>
   readJsonFileInput(
     path,
-    (selected) =>
-      readJsonInputFile(selected, "read_evidence_file", signal, resources),
+    async (selected) => {
+      const read = await readJsonInputFile(
+        selected,
+        "read_evidence_file",
+        signal,
+        resources,
+      );
+      return read.ok ? ok({ data: read.value, path: selected }) : read;
+    },
     signal,
   );
 

@@ -473,6 +473,82 @@ const expectOptionalContextFailure = (
     });
 };
 
+it.runIf(host)(
+  "reports a non-default debugger deadline when pwndbg times out",
+  async () => {
+    const { path, value, bytes, root } = await fixture();
+    const venv = join(root, "venv");
+    const plugin = join(root, "gdbinit.py");
+    await mkdir(venv);
+    await writeFile(plugin, "");
+    let stage = 0;
+    const provider = new PwntoolsRecordedCrashProvider(
+      {
+        REA_PWNTOOLS_PYTHON: process.execPath,
+        REA_PWNDBG_GDB: process.execPath,
+        REA_PWNDBG_GDBINIT: plugin,
+        REA_PWNDBG_VENV_PATH: venv,
+      },
+      async (spawn) => {
+        stage += 1;
+        const request = requestSchema.parse(
+          JSON.parse(await readFile(spawn.arguments.at(-1) ?? "", "utf8")),
+        );
+        if (stage === 1) {
+          const {
+            artifact: _artifact,
+            diagnostics: _diagnostics,
+            debugger: _debugger,
+            decoder_diagnostics: _decoderDiagnostics,
+            ...raw
+          } = value;
+          await writeFile(
+            request.reply_path,
+            JSON.stringify({
+              ok: true,
+              profile: PWNTOOLS_PROVIDER_IDENTITY.version,
+              value: raw,
+            }),
+          );
+          return spawnOwnedProviderProcess({
+            ...spawn,
+            command: process.execPath,
+            arguments: ["-e", "process.stdout.write('basic stage diagnostic')"],
+          });
+        }
+        await new Promise<void>((resolve) => {
+          if (spawn.signal?.aborted === true) {
+            resolve();
+            return;
+          }
+          spawn.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
+        return spawnOwnedProviderProcess({
+          ...spawn,
+          command: process.execPath,
+          arguments: ["-e", "process.exit(0)"],
+        });
+      },
+    );
+    onTestFinished(() => provider.close());
+    const result = await provider.inspect({
+      path,
+      include_debugger_context: true,
+      pwntools_timeout_ms: 1_500,
+    });
+    expect(await readFile(path)).toEqual(bytes);
+    if (result.ok) throw new Error("expected debugger timeout");
+    const projected = projectAnalysisError(result.error);
+    expect(projected.code).toBe("provider_timeout");
+    expect(projected.message).toContain("of 1500 ms");
+    expect(projected.remediation.action).toContain("above 1500");
+    expect(projected.remediation.action).not.toContain("above 30000");
+  },
+  10_000,
+);
+
 const fixture = async (
   createReport: (path: string) => RecordedCrash = recordedCrashFixture,
 ) => {

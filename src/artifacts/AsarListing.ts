@@ -52,6 +52,7 @@ export const readAsarListing = async (
         throw new ArtifactReaderFailure(
           "cancelled",
           "ASAR operation cancelled",
+          { cause: signal.reason },
         );
     }
     const frame = pending.at(-1);

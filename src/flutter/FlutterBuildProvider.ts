@@ -594,7 +594,11 @@ export class FlutterBuildProvider {
     options?: ExecutionOptions,
   ): Promise<Result<AnalysisExecution, AnalysisError>> {
     if (options?.signal?.aborted === true)
-      return err(new AnalysisCancelledError(request.operation));
+      return err(
+        new AnalysisCancelledError(request.operation, {
+          cause: options.signal.reason,
+        }),
+      );
     const { path } = request.input;
     const signal = options?.signal;
     let snapshot: OwnedSnapshot | undefined;

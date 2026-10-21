@@ -151,8 +151,12 @@ export class EnhancedTools {
           ? this.executeValidated({ name, input: parsed.data }, signal)
           : invalidEnhancedInput(name, parsed.error);
       }
-      case "get_objc_protocols":
-        return this.executeValidated({ name, input: {} }, signal);
+      case "get_objc_protocols": {
+        const parsed = enhancedInputSchemas.get_objc_protocols.safeParse(input);
+        return parsed.success
+          ? this.executeValidated({ name, input: parsed.data }, signal)
+          : invalidEnhancedInput(name, parsed.error);
+      }
       case "batch_decompile": {
         const parsed = enhancedInputSchemas.batch_decompile.safeParse(input);
         return parsed.success

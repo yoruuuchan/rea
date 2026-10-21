@@ -1,5 +1,7 @@
+import { EventEmitter } from "node:events";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { expect, it as test, vi } from "vitest";
 
@@ -11,7 +13,10 @@ import {
   resolveFirmwareCommand,
   runFirmwareCommand,
 } from "./FirmwareCommand.js";
-import { spawnOwnedProviderProcess } from "../process/ProviderProcess.js";
+import {
+  spawnOwnedProviderProcess,
+  type ProviderProcessHandle,
+} from "../process/ProviderProcess.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { ExecFileOutputCancelledError } from "../process/ExecFileOutput.js";
 
@@ -190,6 +195,80 @@ it("rejects a directory configured as the resource limiter executable", async ()
   ).rejects.toMatchObject({
     _tag: "AnalysisCapabilityUnavailableError",
     reason: expect.stringContaining(limiter),
+  });
+});
+
+it("keeps captured tool output when firmware stops on SIGXCPU", async () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const emitter = new EventEmitter();
+  const child: ProviderProcessHandle = {
+    on: emitter.on.bind(emitter),
+    once: emitter.once.bind(emitter),
+    off: emitter.off.bind(emitter),
+    pid: 4242,
+    stdout,
+    stderr,
+    exitCode: null,
+    signalCode: "SIGXCPU",
+    kill: () => false,
+  };
+  let ended = 0;
+  const close = () => {
+    ended += 1;
+    if (ended === 2) emitter.emit("close", null, "SIGXCPU");
+  };
+  stdout.once("end", close);
+  stderr.once("end", close);
+  setTimeout(() => {
+    stdout.end("partial scan\n");
+    stderr.end("cpu limit\n");
+  }, 15);
+  const analysis = new AbortController();
+  const failure: unknown = await runFirmwareCommand({
+    engine: "binwalk",
+    operation: "inspect_firmware_regions",
+    command: "/opt/binwalk",
+    limiter: "/usr/bin/prlimit",
+    args: ["--quiet"],
+    cwd: await createTestTempDirectory("rea-firmware-signal-"),
+    environment: process.env,
+    signal: analysis.signal,
+    deadline: {
+      phase: "analysis",
+      signal: analysis.signal,
+      timeoutMs: 30_000,
+      expiresAtMs: performance.now() + 30_000,
+    },
+    launcher: () =>
+      Promise.resolve({
+        process: child,
+        ownership: {
+          runId: "rea-firmware-signal",
+          leaderPid: 4242,
+          processGroupId: 4242,
+        },
+        cleanup: () => Promise.resolve({ cleaned: true, signaled: false }),
+      }),
+    retainCleanup: vi.fn(),
+  }).catch((cause: unknown) => cause);
+  expect(failure).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    resource: "cpu",
+    capturedOutput: {
+      stdout: "partial scan\n",
+      stderr: "cpu limit\n",
+      signal: "SIGXCPU",
+      exit_code: null,
+      truncated: false,
+    },
+  });
+  if (!(failure instanceof AnalysisError))
+    throw new Error("Expected a firmware resource constraint");
+  expect(projectAnalysisError(failure).details?.captured_output).toMatchObject({
+    stdout: "partial scan\n",
+    stderr: "cpu limit\n",
+    signal: "SIGXCPU",
   });
 });
 

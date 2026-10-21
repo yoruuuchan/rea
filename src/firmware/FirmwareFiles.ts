@@ -13,6 +13,7 @@ import type { FirmwareRequest } from "../domain/firmware/firmwareAnalysis.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
 import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
+import { firmwareLimitRecovery } from "./FirmwareFailures.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import type { SafeOutputTree } from "../artifacts/SafeOutputTree.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
@@ -282,14 +283,16 @@ const firmwareAdmissionFailure = (
   );
 };
 
-const firmwareInputFailure = (operation: string, cause?: unknown) =>
-  new AnalysisInputError(operation, { cause }, [
+const firmwareInputFailure = (operation: string, cause?: unknown) => {
+  const message = `Firmware must be a nonempty regular file no larger than ${String(FIRMWARE_LIMITS.inputBytes)} bytes. Select a stable copy within this allowance. ${firmwareLimitRecovery(`The firmware input allowance is ${String(FIRMWARE_LIMITS.inputBytes)} bytes`)}`;
+  return new AnalysisInputError(operation, { cause, userMessage: message }, [
     {
       path: ["path"],
       reason: "out_of_range",
-      message: `Firmware must be a nonempty regular file no larger than ${FIRMWARE_LIMITS.inputBytes} bytes. Select a stable copy within this allowance.`,
+      message,
     },
   ]);
+};
 
 /** Inventory private output without following links, enforcing aggregate staging budgets. */
 export const inventoryFirmwareOutput = async (

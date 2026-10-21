@@ -101,13 +101,17 @@ it("cancels before provider work and delivers observed Evidence on success", asy
     },
   });
   const controller = new AbortController();
-  controller.abort();
-  expect(
-    await service.inspect(
-      { path: value.artifact.path },
-      { signal: controller.signal },
-    ),
-  ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  const reason = Object.freeze({ requested: "wasm-stop" });
+  controller.abort(reason);
+  const cancelled = await service.inspect(
+    { path: value.artifact.path },
+    { signal: controller.signal },
+  );
+  expect(cancelled).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisCancelledError" },
+  });
+  expect(cancelled.ok ? undefined : cancelled.error.cause).toBe(reason);
   expect(calls).toBe(0);
   expect(await service.inspect({ path: value.artifact.path })).toMatchObject({
     ok: true,

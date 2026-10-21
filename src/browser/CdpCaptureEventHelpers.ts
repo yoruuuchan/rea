@@ -243,6 +243,12 @@ export const consolePrimitive = (
         : undefined;
     case "undefined":
       return { type, text: "undefined" };
+    case "object":
+      // The protocol delivers `null` as an object with a `null` subtype. Its
+      // sentinel is already in the event, unlike an unexpanded remote object.
+      return cdpStringValue(value.subtype) === "null"
+        ? { type, text: "null" }
+        : undefined;
     default:
       return undefined;
   }

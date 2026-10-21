@@ -2,6 +2,11 @@ import { expect, it } from "vitest";
 import { evmInterfaceFailure } from "./EvmoleFailures.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import {
+  DEFAULT_EVM_TIMEOUT_MS,
+  MAX_EVM_TIMEOUT_MS,
+} from "../domain/evm/evmInterface.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
 
 const snapshot: ProviderProcessSnapshot = {
@@ -42,6 +47,64 @@ it.each([
     expect(result.cleanupIncomplete).toBe(false);
   },
 );
+
+it("names timeout_ms, the omitted default, and the caps it does not raise", () => {
+  const source = new OwnedCommandFailure(
+    "timeout",
+    "Command deadline elapsed.",
+    snapshot,
+    null,
+  );
+  const projected = projectAnalysisError(
+    evmInterfaceFailure(
+      source,
+      "worker",
+      "/selected.hex",
+      undefined,
+      undefined,
+      undefined,
+      45_000,
+    ),
+  );
+  expect(projected).toMatchObject({
+    code: "provider_timeout",
+    details: { timeout_ms: 45_000 },
+  });
+  expect(projected.message).toContain("timeout_ms");
+  expect(projected.message).toContain(String(DEFAULT_EVM_TIMEOUT_MS));
+  expect(projected.remediation.action).toContain("--timeout-ms");
+  expect(projected.remediation.action).toContain(String(MAX_EVM_TIMEOUT_MS));
+  expect(projected.remediation.action).toContain("does not raise");
+  expect(projected.remediation.action).toContain("no server restart");
+});
+
+it("says a CPU signal has no runtime override and timeout_ms does not raise it", () => {
+  const source = new OwnedCommandFailure(
+    "process",
+    "signaled",
+    {
+      ...snapshot,
+      exitCode: null,
+      signal: "SIGXCPU",
+    },
+    null,
+  );
+  const projected = projectAnalysisError(
+    evmInterfaceFailure(source, "worker", "/selected.hex", {
+      addressSpaceBytes: 1024,
+      cpuSeconds: 30,
+      fileSizeBytes: 1024,
+    }),
+  );
+  expect(projected).toMatchObject({
+    code: "resource_constraint",
+    details: { resource: "cpu" },
+  });
+  expect(projected.remediation.action).toContain("no runtime override");
+  expect(projected.remediation.action).toContain(
+    "timeout_ms does not raise it",
+  );
+});
 
 it.each([
   { failure: "process" as const, cleanup: null, tag: "ProviderAdapterError" },

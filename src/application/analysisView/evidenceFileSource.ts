@@ -1,12 +1,9 @@
-import { getHeapStatistics } from "node:v8";
+import { requireAuthenticationHeadroom } from "../JsonAuthenticationHeadroom.js";
 import { z } from "zod";
 
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import {
-  AnalysisCancelledError,
-  AnalysisResourceConstraintError,
-} from "../../domain/analysisErrorCore.js";
+import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import { INSPECT_ANALYSIS_VIEW_OPERATION } from "../../domain/analysisView/analysisViewErrors.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { parseEvidence, type Evidence } from "../../domain/evidence.js";
@@ -22,54 +19,6 @@ export interface EvidenceFileReadOptions {
   readonly signal?: AbortSignal;
   readonly resources?: ArtifactResourceScope;
 }
-
-/** Authentication clones the parsed Evidence and hashes its canonical JSON. */
-const AUTHENTICATION_COPIES = 2;
-
-/** Conservative bytes a parsed JSON value occupies: UTF-16 text plus container and slot overhead. */
-export const estimateJsonValueBytes = (value: unknown): number => {
-  let bytes = 0;
-  const stack: unknown[] = [value];
-  while (stack.length > 0) {
-    const item = stack.pop();
-    if (typeof item === "string") bytes += 64 + item.length * 2;
-    else if (Array.isArray(item)) {
-      bytes += 128 + item.length * 16;
-      for (const entry of item) stack.push(entry);
-    } else if (typeof item === "object" && item !== null) {
-      bytes += 128;
-      for (const [key, entry] of Object.entries(item)) {
-        bytes += 64 + key.length * 2;
-        stack.push(entry);
-      }
-    } else bytes += 16;
-  }
-  return bytes;
-};
-
-/** Refuse before authentication when live heap headroom cannot hold its copies of the parsed value. */
-export const requireAuthenticationHeadroom = (
-  value: unknown,
-  path: string,
-  availableBytes: number = getHeapStatistics().total_available_size,
-): Result<void, AnalysisError> => {
-  const valueBytes = estimateJsonValueBytes(value);
-  const requiredBytes = valueBytes * AUTHENTICATION_COPIES;
-  if (requiredBytes <= availableBytes) return ok(undefined);
-  return err(
-    new AnalysisResourceConstraintError(
-      INSPECT_ANALYSIS_VIEW_OPERATION,
-      "memory",
-      "Insufficient heap headroom to authenticate the Evidence file",
-      {
-        input_path: path,
-        projected_value_bytes: valueBytes,
-        authentication_bytes: requiredBytes,
-        available_heap_bytes: availableBytes,
-      },
-    ),
-  );
-};
 
 /** Read and authenticate one Evidence file under the request's cancellation and resource scope. */
 export const readEvidenceFileSource = async (
@@ -99,7 +48,11 @@ export const readEvidenceFileSource = async (
         cause: signal.reason,
       }),
     );
-  const headroom = requireAuthenticationHeadroom(loaded.value, path);
+  const headroom = requireAuthenticationHeadroom(loaded.value, {
+    operation: INSPECT_ANALYSIS_VIEW_OPERATION,
+    path,
+    description: "Insufficient heap headroom to authenticate the Evidence file",
+  });
   if (!headroom.ok) return headroom;
   try {
     return ok(parseEvidence(loaded.value));

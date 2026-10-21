@@ -628,5 +628,6 @@ const abortIfNeeded = (signal?: AbortSignal): void => {
     throw new ArtifactReaderFailure(
       "cancelled",
       "JavaScript artifact reconstruction cancelled",
+      { cause: signal.reason },
     );
 };

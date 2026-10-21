@@ -33,6 +33,7 @@ import {
   DEFAULT_SQLITE_WORKER_TIMEOUT_MS,
   MAX_SQLITE_WORKER_TIMEOUT_MS,
 } from "../domain/sqlite/sqliteDatabase.js";
+import { SQLITE_DATABASE_LIMITS } from "./SqliteDatabaseLimits.js";
 
 /** Preserve diagnostics independently of worker exit and private-root cleanup. */
 export const capturedSqliteOutput = (
@@ -274,7 +275,11 @@ const ownedCommandFailure = (
     });
   if (timeout !== undefined) return timeout;
   if (cause.reason === "output-limit")
-    return new AnalysisOutputError(operation, cause.message, options);
+    return new AnalysisOutputError(operation, cause.message, {
+      ...options,
+      userMessage: `SQLite worker diagnostics exceeded the ${String(SQLITE_DATABASE_LIMITS.diagnosticBytes)}-byte capture allowance. This release has no runtime override.`,
+      remediationAction: `The SQLite diagnostic capture allowance is ${String(SQLITE_DATABASE_LIMITS.diagnosticBytes)} bytes. This release has no runtime override. worker_timeout_ms does not raise it. Repeating the unchanged request fails the same way.`,
+    });
   if (
     cause.snapshot?.stderr.text.includes("JavaScript heap out of memory") ===
     true

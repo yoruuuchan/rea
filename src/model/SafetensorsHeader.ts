@@ -109,6 +109,7 @@ class HeaderJson {
       throw new ModelFormatFailure(
         "capacity",
         "Safetensors integer exceeds exact host offset precision",
+        "exact-offset",
       );
     return number;
   }
@@ -163,6 +164,7 @@ export const readSafetensorsHeader = async (
     throw new ModelFormatFailure(
       "capacity",
       "Safetensors header length exceeds exact host offset precision",
+      "exact-offset",
     );
   const size = Number(length);
   reader.guarantee(size - 1);

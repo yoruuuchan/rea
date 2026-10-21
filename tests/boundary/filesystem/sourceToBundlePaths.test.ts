@@ -1,3 +1,5 @@
+import { resolveSourceToBundleReference } from "../../../src/application/javascript/SourceToBundleReference.js";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -810,3 +812,38 @@ it.each([
     ).toEqual({ kind: "suffix", path: expected });
   },
 );
+
+it("cancels historical graph file reads and rejects malformed JSON through the owning reader", async () => {
+  const root = await createTestTempDirectory("rea-reference-read-");
+  const path = join(root, "reference.json");
+  await writeFile(path, "{malformed");
+  const resources = new ArtifactResourceScope();
+  try {
+    const malformed = await resolveSourceToBundleReference(
+      { kind: "file", path },
+      undefined,
+      resources,
+    );
+    expect(malformed).toMatchObject({
+      ok: false,
+      error: { _tag: "EvidenceFileError", reason: "invalid-json" },
+    });
+    for (const abortBefore of [true, false]) {
+      const controller = new AbortController();
+      if (abortBefore) controller.abort("cancelled test read");
+      const pending = resolveSourceToBundleReference(
+        { kind: "file", path },
+        controller.signal,
+        resources,
+      );
+      if (!abortBefore) controller.abort("cancelled test read");
+      expect(await pending).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisCancelledError" },
+      });
+    }
+  } finally {
+    await resources.close();
+  }
+  expect(resources.hasPending).toBe(false);
+});

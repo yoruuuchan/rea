@@ -17,6 +17,12 @@ import {
 
 export const scenarioIdentifierSchema = z.string().regex(IDENTIFIER_PATTERN);
 
+/**
+ * Step identity the provider owns for the initial-state step. Callers cannot
+ * claim it, because two capture steps with one identity cannot be aligned.
+ */
+export const BROWSER_SCENARIO_START_STEP_ID = "scenario_start";
+
 const browserScenarioBaseUrlSchema = z
   .string()
   .min(1)

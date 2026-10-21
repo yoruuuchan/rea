@@ -127,6 +127,12 @@ const redactFailure = (
   if (error instanceof AnalysisTimeoutError)
     return new AnalysisTimeoutError(error.operation, error.timeoutMs, {
       ...context,
+      ...(error.userMessage === undefined
+        ? {}
+        : { userMessage: text(error.userMessage) }),
+      ...(error.remediationAction === undefined
+        ? {}
+        : { remediationAction: text(error.remediationAction) }),
     });
   if (error instanceof AnalysisAccessDeniedError)
     return new AnalysisAccessDeniedError(

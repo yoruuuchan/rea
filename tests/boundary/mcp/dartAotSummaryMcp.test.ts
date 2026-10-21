@@ -273,13 +273,27 @@ it("rejects unavailable retention, invalid delivery and cancellation before prod
       retention,
     ),
   ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
-  expect(
-    await inspectDartAot(
-      service,
-      { path: "/missing.apk", detail: "summary" },
-      retention,
-      { signal: AbortSignal.abort() },
-    ),
-  ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  const reason = Object.freeze({ requested: "dart-stop" });
+  const cancelled = await inspectDartAot(
+    service,
+    { path: "/missing.apk", detail: "summary" },
+    retention,
+    { signal: AbortSignal.abort(reason) },
+  );
+  expect(cancelled).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisCancelledError" },
+  });
+  expect(cancelled.ok ? undefined : cancelled.error.cause).toBe(reason);
+  const executed = await service.execute(
+    "inspect_dart_aot",
+    { path: "/missing.apk", abi: "x86_64" },
+    { signal: AbortSignal.abort(reason) },
+  );
+  expect(executed).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisCancelledError" },
+  });
+  expect(executed.ok ? undefined : executed.error.cause).toBe(reason);
   expect(execute).not.toHaveBeenCalled();
 });

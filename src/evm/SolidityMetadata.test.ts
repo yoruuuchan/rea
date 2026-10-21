@@ -107,12 +107,27 @@ it("keeps the compiler version beside a shortest-form empty text", () => {
   expect(result.entries).toHaveLength(2);
 });
 
+it("decodes distinct byte keys and distinct nested-container keys", () => {
+  expect(
+    inspectSolidityMetadata(bytecode("a2410101410202")).entries.map(
+      ({ key }) => key,
+    ),
+  ).toEqual([
+    { kind: "bytes", value: "01" },
+    { kind: "bytes", value: "02" },
+  ]);
+  expect(inspectSolidityMetadata(bytecode("a2810101810202"))).toMatchObject({
+    status: "partial",
+  });
+});
+
 it.each([
   ["invalid text", "a1617861ff"],
   ["truncated value", "a16178"],
   ["unsupported tag", "a16178c000"],
   ["floating point", "a16178fa3f800000"],
   ["duplicate key", "a2617801617802"],
+  ["duplicate byte key", "a2410101410102"],
   ["excessive nesting", "a16178" + "81".repeat(65) + "00"],
   ["impossible collection", "a161788a00"],
 ])("keeps exact ranges and unavailable interpretation for %s", (_name, hex) => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { BinaryArchitecture } from "../binaryTargetTypes.js";
+import { pwntoolsTimeoutField } from "./nativeDeadlines.js";
 import { localPathStringSchema } from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 import { recordedNoteCoverageIssues } from "./recordedCrashNoteCoverage.js";
@@ -149,6 +150,7 @@ export const inspectRecordedCrashInputSchema = z.strictObject({
     .describe(
       "Add core-only mapping candidates through caller-supplied GDB/pwndbg",
     ),
+  pwntools_timeout_ms: pwntoolsTimeoutField,
 });
 
 /** Debugger map candidates preserve reported flags; zero does not establish absent permissions. */

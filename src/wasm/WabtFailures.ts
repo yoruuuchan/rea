@@ -176,8 +176,7 @@ const classifyWabtFailure = (
         { max_output_bytes: WABT_LIMITS.outputBytes },
         {
           ...options,
-          remediationAction:
-            "The WABT output budget is fixed, so retrying with the same input will fail the same way.",
+          remediationAction: `The WABT output allowance is ${String(WABT_LIMITS.outputBytes)} bytes. This release has no runtime override. command_timeout_ms does not raise it. The WABT output budget is fixed, so retrying with the same input will fail the same way.`,
         },
       );
     if (phase === "configuration" && cause.reason === "process")
@@ -199,6 +198,23 @@ const classifyWabtFailure = (
       "inspect_wasm_artifact",
       reason,
       { cause, retryable: cause.retryable },
+    );
+  if (
+    phase === "configuration" &&
+    cause instanceof ArtifactReaderFailure &&
+    cause.reason === "limit" &&
+    cause.boundary === "file-size"
+  )
+    return new AnalysisCapabilityUnavailableError(
+      WABT_PROVIDER_IDENTITY.id,
+      "inspect_wasm_artifact",
+      cause.message,
+      {
+        cause,
+        ...cleanupOptions,
+        userMessage: `Configured WABT tools exceed the ${String(WABT_LIMITS.toolBytes)}-byte tool allowance. This release has no runtime override.`,
+        remediationAction: `The WABT tool allowance is ${String(WABT_LIMITS.toolBytes)} bytes. This release has no runtime override. command_timeout_ms and REA_WABT_BIN_DIRECTORY do not raise it. Select tools within the allowance. Do not repeat the unchanged call.`,
+      },
     );
   if (phase === "configuration")
     return new AnalysisCapabilityUnavailableError(
@@ -227,8 +243,7 @@ const classifyWabtFailure = (
         cause,
         ...cleanupOptions,
         retryable: false,
-        remediationAction:
-          "Select a suitable stable artifact within the reported input byte allowance. Do not truncate required bytes; retrying the unchanged oversized input will fail again.",
+        remediationAction: `Select a suitable stable artifact within the reported ${String(WABT_LIMITS.inputBytes)}-byte input byte allowance. This release has no runtime override. command_timeout_ms does not raise it. Do not truncate required bytes; retrying the unchanged oversized input will fail again.`,
       },
     );
   if (

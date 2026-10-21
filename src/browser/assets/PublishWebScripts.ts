@@ -8,6 +8,7 @@ import { DESTINATION_CASE_COLLISION_PREFIX } from "../../artifacts/ArtifactPaths
 import { SafeOutputTree } from "../../artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../../artifacts/SafeOutputTreeCreationFailure.js";
 import { PLAYWRIGHT_RESPONSE_BODY_PROVENANCE_LIMITATION } from "../../domain/browserNetworkEvidence.js";
+import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import {
   webScriptExportManifestSchema,
   webScriptExportResultSchema,
@@ -29,6 +30,8 @@ const LIMITATIONS = [
   "Source-map declarations are retained as metadata. No source maps or missing dependencies are fetched or reconstructed.",
   "Scenario response bytes preserve the output of Playwright's Response.body() API; any source-body provenance caveat from the capture is retained in this manifest. Debugger sources are the exposed text encoded as UTF-8. Redacted bytes are exported exactly as retained, and may no longer parse as JavaScript.",
 ];
+
+const OPERATION = "export_web_scripts";
 
 interface PublishWebScriptsOptions {
   readonly resources: ArtifactResourceScope;
@@ -128,19 +131,33 @@ export const publishWebScripts = async (
           const diagnostic = tree.published
             ? `Publication completed, but descriptor cleanup failed (${message(cleanupCause)}). The published output remains available.`
             : `Publication failed (${message(cause)}); rollback failed (${message(cleanupCause)}). Remove the residual output directory before retrying.`;
+          const partialObservation =
+            tree.published && result !== undefined
+              ? ({ kind: "web-script-export", result } as const)
+              : undefined;
+          if (options.signal?.aborted === true) {
+            const cancelled = new AnalysisCancelledError(OPERATION, {
+              cause: options.signal.reason,
+              cleanup: { reason: diagnostic, resources: [tree.outputRoot] },
+              ...(partialObservation === undefined
+                ? {}
+                : { partialObservation }),
+            });
+            cleanup.lease.bindCleanupError(cancelled);
+            throw cancelled;
+          }
           const error = new WebScriptExportError(
             cause instanceof ArtifactReaderFailure ? cause.reason : "io",
             tree.outputRoot,
             diagnostic,
             { residualPaths: [tree.outputRoot] },
           );
-          if (tree.published && result !== undefined)
-            error.retainPartialObservation({
-              kind: "web-script-export",
-              result,
-            });
+          if (partialObservation !== undefined)
+            error.retainPartialObservation(partialObservation);
+          cleanup.lease.bindCleanupError(error);
           throw error;
         }
+
         if (tree.published && result !== undefined) return result;
       }
       throw cause;

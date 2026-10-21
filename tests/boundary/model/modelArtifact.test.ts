@@ -4,6 +4,13 @@ import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { ModelArtifactProvider } from "../../../src/model/ModelArtifactProvider.js";
 import { ModelHeaderReader } from "../../../src/model/ModelHeaderReader.js";
+import {
+  MODEL_METADATA_NESTING,
+  MODEL_REPORT_BYTES,
+  ModelFormatFailure,
+  modelCapacityRemediation,
+  modelCapacityReportedLimits,
+} from "../../../src/model/ModelFormat.js";
 import { readSafetensorsHeader } from "../../../src/model/SafetensorsHeader.js";
 import { GgufHeader } from "../../../src/model/GgufHeader.js";
 import { createModelArtifactService } from "../../../src/composition/model.js";
@@ -309,7 +316,64 @@ it("retains the absolute header budget for GGUF without allocating that extent",
   await file.truncate(100_000_009);
   const reader = new ModelHeaderReader(file, 100_000_009);
   expect(() => reader.guarantee(100_000_000)).not.toThrow();
-  expect(() => reader.guarantee(100_000_001)).toThrow("100,000,000 bytes");
+  expect(() => reader.guarantee(100_000_001)).toThrow(ModelFormatFailure);
+  try {
+    reader.guarantee(100_000_001);
+  } catch (cause) {
+    expect(cause).toBeInstanceOf(ModelFormatFailure);
+    if (!(cause instanceof ModelFormatFailure))
+      throw new Error("Expected a model header capacity failure");
+    expect(cause.limit).toBe("header-bytes");
+    expect(cause.message).toContain("100,000,000 bytes");
+    expect(cause.message).not.toContain("Safetensors");
+  }
+});
+
+it("names exact offset and nesting limits instead of the retained report allowance", async () => {
+  const base = ggufFixture({ tensors: [] });
+  const oversized = ggufFixture({
+    metadata: [
+      {
+        key: "custom.length",
+        type: 8,
+        value: base.u64(BigInt(Number.MAX_SAFE_INTEGER) + 1n),
+      },
+    ],
+    tensors: [],
+  });
+  let nested = Buffer.from([1]);
+  for (let frame = 0; frame < 33; frame += 1)
+    nested = Buffer.concat([
+      base.u32(frame === 0 ? 7 : 9),
+      base.u64(1n),
+      nested,
+    ]);
+  const deep = ggufFixture({
+    metadata: [{ key: "custom.nested", type: 9, value: nested }],
+    tensors: [],
+  });
+  for (const [label, bytes, allowance] of [
+    ["offset", oversized.bytes, String(Number.MAX_SAFE_INTEGER)],
+    ["nesting", deep.bytes, "32 array frames"],
+  ] as const) {
+    const { path, provider } = await providerAt(bytes);
+    const result = await provider.inspect({ path, hash: "header" });
+    if (result.ok) throw new Error(`${label} capacity was accepted`);
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      retryable: false,
+      remediationAction: expect.stringContaining(allowance),
+    });
+    const remediation =
+      "remediationAction" in result.error ? result.error.remediationAction : "";
+    expect(remediation).not.toContain(String(MODEL_REPORT_BYTES));
+    expect(remediation).not.toContain("100,000,000");
+    expect(result.error).toMatchObject({
+      reportedLimits: expect.not.objectContaining({
+        maximum_report_bytes: MODEL_REPORT_BYTES,
+      }),
+    });
+  }
 });
 
 it("preserves safetensors scalar, empty and packed tensor declarations and raw string metadata", async () => {
@@ -504,6 +568,31 @@ it.each([
   },
 );
 
+it("chooses model recovery from the producing limit", () => {
+  const header = modelCapacityRemediation("header-bytes");
+  expect(header).toContain("100,000,000 bytes");
+  expect(header).not.toContain("Safetensors");
+  expect(header).not.toContain(String(MODEL_REPORT_BYTES));
+  const report = modelCapacityRemediation("report-bytes");
+  expect(report).toContain(`report allowance is ${String(MODEL_REPORT_BYTES)}`);
+  expect(report).not.toContain("representation");
+  const representation = modelCapacityRemediation("representation-bytes");
+  expect(representation).toContain("representation allowance");
+  expect(representation).not.toContain("report allowance");
+  const offset = modelCapacityRemediation("exact-offset");
+  expect(offset).toContain(String(Number.MAX_SAFE_INTEGER));
+  expect(offset).not.toContain(String(MODEL_REPORT_BYTES));
+  const nesting = modelCapacityRemediation("metadata-nesting");
+  expect(nesting).toContain(`${String(MODEL_METADATA_NESTING)} array frames`);
+  expect(nesting).not.toContain(String(MODEL_REPORT_BYTES));
+  expect(modelCapacityReportedLimits("report-bytes")).toEqual({
+    maximum_report_bytes: MODEL_REPORT_BYTES,
+  });
+  expect(modelCapacityReportedLimits("exact-offset")).toEqual({
+    maximum_exact_offset: Number.MAX_SAFE_INTEGER,
+  });
+});
+
 it("refuses an oversized declared header before reading or expanding it", async () => {
   const bytes = Buffer.alloc(9);
   bytes.writeBigUInt64LE(100_000_001n);
@@ -521,7 +610,15 @@ it("refuses an oversized declared header before reading or expanding it", async 
     _tag: "AnalysisResourceConstraintError",
     retryable: false,
     reportedLimits: { maximum_header_bytes: 100_000_000 },
+    remediationAction: expect.stringContaining("100,000,000"),
   });
+  expect(result.error.message).not.toContain("Safetensors");
+  expect(
+    "remediationAction" in result.error ? result.error.remediationAction : "",
+  ).not.toContain("Safetensors");
+  expect(
+    "reportedLimits" in result.error ? result.error.reportedLimits : {},
+  ).not.toHaveProperty("maximum_report_bytes");
 });
 
 const malformed = [

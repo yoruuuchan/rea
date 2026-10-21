@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
-import { describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/client";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   decodeJebToolResult,
@@ -30,9 +31,31 @@ const waitForRequestCount = async (
     throw new Error(`Expected ${expected} ${method} requests`);
 };
 
+const jebCatalogResult = (
+  paginateCatalog: boolean,
+  cursor: string | undefined,
+) => {
+  const pageTools =
+    paginateCatalog && cursor === undefined
+      ? jebTools.slice(0, 1)
+      : paginateCatalog
+        ? jebTools.slice(1)
+        : jebTools;
+  return {
+    tools: pageTools.map((name) => ({
+      name,
+      inputSchema: { type: "object" as const, properties: {} },
+    })),
+    ...(paginateCatalog && cursor === undefined
+      ? { nextCursor: "page-2" }
+      : {}),
+  };
+};
+
 const startJebHttpFixture = (
   responseDelayMs: number,
   catalogRefreshDelayMs = 0,
+  options: { readonly paginateCatalog?: boolean } = {},
 ) => {
   let callCount = 0;
   let catalogCount = 0;
@@ -78,18 +101,20 @@ const startJebHttpFixture = (
         response.on("close", () => {
           if (!response.writableEnded) responseClosed = true;
         });
+        const cursor =
+          typeof message.params?.cursor === "string"
+            ? message.params.cursor
+            : undefined;
         const sendCatalog = () => {
           if (responseClosed) return;
           response.writeHead(200, { "Content-Type": "application/json" }).end(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: {
-                tools: jebTools.map((name) => ({
-                  name,
-                  inputSchema: { type: "object", properties: {} },
-                })),
-              },
+              result: jebCatalogResult(
+                options.paginateCatalog === true,
+                cursor,
+              ),
             }),
           );
         };
@@ -365,6 +390,55 @@ it("keeps caller abort and connection close as cancellations during catalog refr
     await connection.close();
     await expect(closingRefresh).rejects.toBeInstanceOf(AnalysisCancelledError);
   } finally {
+    try {
+      await connection.close();
+    } finally {
+      await fixture.close();
+    }
+  }
+});
+
+it("passes a discovery budget above the SDK default to connect and every catalog page", async () => {
+  const discoveryTimeoutMs = 120_000;
+  const connect = vi.spyOn(Client.prototype, "connect");
+  const request = vi.spyOn(Client.prototype, "request");
+  const fixture = await startJebHttpFixture(0, 0, { paginateCatalog: true });
+  const connection = createStreamableHttpJebMcpConnection(fixture.endpoint, {
+    discoveryTimeoutMs,
+    requestTimeoutMs: discoveryTimeoutMs,
+  });
+  try {
+    await expect(connection.connect()).resolves.toEqual([...jebTools]);
+    const connectTimeout = connect.mock.calls[0]?.[1]?.timeout;
+    expect(connectTimeout).toBeGreaterThan(60_000);
+    expect(connectTimeout).toBeLessThanOrEqual(discoveryTimeoutMs);
+    const listTimeouts = request.mock.calls.flatMap((call) => {
+      const message = call[0];
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("method" in message) ||
+        message.method !== "tools/list"
+      )
+        return [];
+      const options = call[1];
+      return [
+        typeof options === "object" &&
+        options !== null &&
+        "timeout" in options &&
+        typeof options.timeout === "number"
+          ? options.timeout
+          : -1,
+      ];
+    });
+    expect(listTimeouts.length).toBeGreaterThanOrEqual(2);
+    for (const timeout of listTimeouts) {
+      expect(timeout).toBeGreaterThan(60_000);
+      expect(timeout).toBeLessThanOrEqual(discoveryTimeoutMs);
+    }
+  } finally {
+    connect.mockRestore();
+    request.mockRestore();
     try {
       await connection.close();
     } finally {

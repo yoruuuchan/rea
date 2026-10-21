@@ -1,4 +1,4 @@
-import { fixedAllowanceOptions } from "../../domain/fixedAllowanceRemediation.js";
+import { fixedNativeAllowance } from "../../domain/native/nativeDeadlines.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import {
@@ -96,10 +96,10 @@ export const inputBudgetRemediation = (
 ): string =>
   boundary === "file-size"
     ? input.max_file_bytes >= MAX_INSPECT_PE_FILE_BYTES
-      ? `The image exceeds the ${String(MAX_INSPECT_PE_FILE_BYTES)}-byte input ceiling this operation accepts; select a smaller artifact.`
+      ? `The image exceeds the ${String(MAX_INSPECT_PE_FILE_BYTES)}-byte input ceiling this operation accepts. This release has no runtime override. Select a smaller artifact.`
       : `Raise max_file_bytes above ${String(input.max_file_bytes)} bytes or select a smaller artifact; the limit is the caller-selected input read budget.`
     : input.max_entries >= MAX_INSPECT_PE_DIRECTORY_ENTRIES
-      ? `The image exceeds the ${String(MAX_INSPECT_PE_DIRECTORY_ENTRIES)}-entry resource-directory ceiling this operation accepts; select a smaller artifact.`
+      ? `The image exceeds the ${String(MAX_INSPECT_PE_DIRECTORY_ENTRIES)}-entry resource-directory ceiling this operation accepts. This release has no runtime override. Select a smaller artifact.`
       : `Raise max_entries above ${String(input.max_entries)} or select a smaller artifact; the limit is the caller-selected resource directory entry budget.`;
 
 const peResourcesFailurePrimary = (
@@ -142,9 +142,10 @@ const peResourcesFailurePrimary = (
           ...(cause.boundary === undefined
             ? {}
             : metadata
-              ? fixedAllowanceOptions(
+              ? fixedNativeAllowance(
                   "The PE resource metadata allowance",
                   "parser",
+                  `${String(PE_RESOURCE_METADATA_BYTES)} bytes (8 MiB)`,
                 )
               : {
                   retryable: false as const,

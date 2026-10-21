@@ -11,8 +11,11 @@ export const associateWasmGlue = (
 ) => {
   // Babel requires a hashbang at offset zero. Removing only its preceding BOM
   // leaves reference coordinates intact: all code starts on a later line.
+  // The selected filename selects the JavaScript grammar for .js glue; the
+  // unnamed-source fallback would misread valid JavaScript conditionals.
   const file = parseJavaScriptSource(
     source.startsWith("\uFEFF#!") ? source.slice(1) : source,
+    path,
   );
   const references: {
     value: string;

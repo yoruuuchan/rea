@@ -20,6 +20,14 @@ export const WAKARU_PROVIDER_IDENTITY = {
   version: WAKARU_RELEASE.version,
 } as const;
 
+/** Fixed Wakaru allowance. This release has no caller setting that raises it. */
+export const wakaruFixedLimitRecovery = (
+  allowance: string,
+): { readonly userMessage: string; readonly remediationAction: string } => ({
+  userMessage: `${allowance}. This release has no runtime override.`,
+  remediationAction: `${allowance}. This release has no runtime override. Raising max_heap_mb or analysis_timeout_ms does not raise it. Repeating the unchanged request fails the same way.`,
+});
+
 /** Per-operation resource bounds for the verified Linux adapter. */
 export const RECOVERY_LIMITS = {
   inputBytes: 64 * 1024 * 1024,

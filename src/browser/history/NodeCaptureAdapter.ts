@@ -25,7 +25,7 @@ export class NodeCaptureAdapter implements HistoricalCaptureFormatAdapter {
       format === "saz"
         ? [
             "SAZ ordinals follow first session-member occurrence in ZIP directory order, not chronology or numeric session ID.",
-            "HTTP fields use byte-preserving Latin-1 text; start-line separators and header delimiters are not projected. Bodies retain stored bytes without transfer/content decoding. Absent members are null, distinct from empty bodies.",
+            "HTTP fields use byte-preserving Latin-1 text; start-line separators and header delimiters are not projected. Bodies retain stored bytes without transfer/content decoding. Absent and zero-byte HTTP members are null, distinct from empty bodies.",
             "XML preserves node order and attribute/text values, not its original byte serialization. WebSocket and gRPC members retain opaque message-file bytes, not decoded protocol events.",
             "Non-session archive members are inventoried but their content is not decoded.",
           ]

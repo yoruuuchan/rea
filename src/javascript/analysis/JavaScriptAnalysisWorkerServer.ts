@@ -17,6 +17,7 @@ import {
 import { javaScriptWorkerStaticAnalysisSchema } from "./JavaScriptAnalysisWorkerSchemas.js";
 import {
   JAVASCRIPT_ANALYSIS_WORKER_DEFAULTS as DEFAULTS,
+  javaScriptCheckpointCeilingRemediation,
   javaScriptWorkerRequestSchema,
   javaScriptWorkerAdmissionSchema,
   javaScriptWorkerMessageSchema,
@@ -123,10 +124,15 @@ const analyzeJob = async (
             throw new AnalysisResourceConstraintError(
               "analyze_javascript_application",
               "transport",
-              "JavaScript static checkpoint exceeds its complete-fact byte budget",
+              `JavaScript static checkpoint exceeds its ${String(DEFAULTS.checkpointBytes)}-byte complete-fact ceiling. This release has no runtime override.`,
               {
                 checkpoint_bytes: bytes,
                 checkpoint_limit_bytes: DEFAULTS.checkpointBytes,
+              },
+              {
+                remediationAction: javaScriptCheckpointCeilingRemediation(
+                  DEFAULTS.checkpointBytes,
+                ),
               },
             );
           await writeFile(join(root, `${request.id}.static.json`), text, {

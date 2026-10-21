@@ -3216,10 +3216,12 @@ export class AdbProvider {
       await removeOwnedOutputDirectory(stagingDirectory, stagingIdentity);
     } catch (cause) {
       const primary = collectedResult.ok
-        ? new AnalysisOutputError(
-            operation,
-            "The archive was published, but its staging directory could not be removed",
-          )
+        ? signal?.aborted === true
+          ? new AnalysisCancelledError(operation, { cause: signal.reason })
+          : new AnalysisOutputError(
+              operation,
+              "The archive was published, but its staging directory could not be removed",
+            )
         : collectedResult.error;
       if (retainedObservation !== undefined)
         primary.retainPartialObservation(retainedObservation);

@@ -105,9 +105,29 @@ it.each([
     expect(projected.message).not.toContain("rea doctor");
     // Recorded arguments name a removed private workspace; recovery must not
     // present them as a replayable command.
-    expect(projected.remediation.action).toMatch(
-      /diagnostics\.report_state.*cannot be replayed as-is.*replacing every private path/,
-    );
+    expect(projected.remediation.action).toContain("diagnostics.report_state");
+    expect(projected.remediation.action).toContain("cannot be replayed as-is");
+    if (state === "oversized") {
+      expect(projected.remediation.action).toContain("no runtime override");
+      expect(projected.remediation.action).toContain(
+        "Repeating the unchanged request fails the same way",
+      );
+      expect(projected.remediation.action).not.toContain(
+        "Rerun the same REA request",
+      );
+      expect(projected.message).toContain("no runtime override");
+      expect(projected.message).not.toContain("Rerun the same REA request");
+    } else {
+      expect(projected.remediation.action).toContain(
+        "replacing every private path",
+      );
+      expect(projected.remediation.action).toContain(
+        "Rerun the same REA request",
+      );
+      expect(projected.remediation.action).not.toContain(
+        "Repeating the unchanged request fails the same way",
+      );
+    }
   },
 );
 

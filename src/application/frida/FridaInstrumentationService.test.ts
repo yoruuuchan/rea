@@ -99,6 +99,9 @@ it("keeps default Frida status identity and messages and refreshes every summary
     messages: [{ observed: 1 }],
     messages_truncated: false,
   });
+  expect(complete.value.limitations.join("\n")).not.toContain(
+    "no runtime override",
+  );
   const summary = service.inspectStatus(
     { ...input, detail: "summary" },
     retention,
@@ -121,9 +124,44 @@ it("keeps default Frida status identity and messages and refreshes every summary
   expect(parent?.normalized_result).toMatchObject({
     messages: [{ observed: 2 }],
   });
+  expect(parent?.limitations).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("16777216"),
+      expect.stringContaining("no runtime override"),
+    ]),
+  );
   expect(parent?.authority).toBe("external-service");
   expect(parent?.environment).toBeNull();
   expect(parent?.raw_result).toBeNull();
+});
+
+it("names the Frida field cap and ignores flags inside a caller payload", () => {
+  const service = new FridaInstrumentationService(
+    createProvider({
+      status() {
+        return {
+          ...createSession(),
+          targetResumeObserved: false,
+          scripts: [],
+          messages: [
+            {
+              description_truncated: true,
+              payload: { messages_truncated: true, type_truncated: true },
+            },
+          ],
+          messagesTruncated: false,
+        };
+      },
+    }),
+  );
+  const result = service.inspectStatus({
+    session_id: createSession().sessionId,
+  });
+  if (!result.ok) throw result.error;
+  const text = result.value.limitations.join("\n");
+  expect(text).toContain("32768");
+  expect(text).not.toContain("16777216");
+  expect(text).not.toContain("4096");
 });
 
 it.each([

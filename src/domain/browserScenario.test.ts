@@ -197,6 +197,28 @@ it("accepts caller-selected viewport sizes and click counts without ceilings", (
   expect(parsed.actions[0]).toMatchObject({ click_count: 4 });
 });
 
+it("refuses an action step id that the provider reserves for the initial state", () => {
+  const scenario = (secondStepId: string) => ({
+    browser: { mode: "launch", executable_path: "/opt/chromium" },
+    start_url: { url: "https://app.example.test/" },
+    actions: [
+      { step_id: "open", action: "wait_for_timeout", duration_ms: 10 },
+      { step_id: secondStepId, action: "wait_for_timeout", duration_ms: 10 },
+    ],
+  });
+
+  expect(() => browserScenarioSchema.parse(scenario("scenario_start"))).toThrow(
+    /reserved/u,
+  );
+  const rejected = browserScenarioSchema.safeParse(scenario("scenario_start"));
+  expect(rejected.success).toBe(false);
+  expect(rejected.error?.issues[0]?.path).toEqual(["actions", 1, "step_id"]);
+  // Only the exact identity is reserved; a similar caller id stays valid.
+  expect(
+    browserScenarioSchema.parse(scenario("scenario_start_2")).actions,
+  ).toHaveLength(2);
+});
+
 it.each([
   {
     field: "duration_ms",

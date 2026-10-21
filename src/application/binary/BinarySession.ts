@@ -589,6 +589,16 @@ export class BinarySession
         // Preserve Evidence and Unknown history for export and recovery.
         this.clearSnapshot();
         this.#clearRuntimeAvailability();
+        if (isAborted(options.signal))
+          return err(
+            analysisErrorWithCleanupFailure(
+              new AnalysisCancelledError("open_binary", {
+                cause: options.signal?.reason,
+              }),
+              closed.error,
+              "open_binary",
+            ).bindCleanupDependencies([closed.error]),
+          );
         return closed;
       }
     }

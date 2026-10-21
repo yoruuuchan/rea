@@ -82,6 +82,7 @@ const acknowledgementSchema = z.object({
 const MAX_DESCRIPTOR_BYTES = 64 * 1024;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const FRAME_PAGE_BYTES = 64 * 1024;
+const REQUEST_TIMEOUT_MS = 25_000;
 // Bound admitted descriptor input bytes and concurrent file/socket handles.
 const MAX_DESCRIPTOR_CANDIDATES = MAX_FRAME_BYTES / MAX_DESCRIPTOR_BYTES;
 const DISCOVERY_CONCURRENCY = 8;
@@ -106,8 +107,11 @@ const serializeRequest = (
     throw new AnalysisResourceConstraintError(
       "cutter_command",
       "transport",
-      "Cutter request exceeds its authenticated frame limit; no command was sent.",
+      `Cutter request exceeds its authenticated frame limit of ${String(MAX_FRAME_BYTES)} bytes (16 MiB); no command was sent. This release has no runtime override.`,
       { frame_bytes: frameBytes, max_frame_bytes: MAX_FRAME_BYTES },
+      {
+        remediationAction: `Shorten the Cutter command. This ${String(MAX_FRAME_BYTES)} byte frame limit has no runtime override.`,
+      },
     );
   return requestBytes as AuthenticatedRequestBytes;
 };
@@ -130,13 +134,13 @@ class CutterBridgeResponseFrames {
         MAX_FRAME_BYTES
       )
         throw new Error(
-          "Cutter bridge response exceeded its framed transport limit",
+          `Cutter bridge response exceeded its framed transport limit of ${String(MAX_FRAME_BYTES)} bytes (16 MiB). This release has no runtime override`,
         );
       this.#append(segment);
       if (delimiter < 0) return;
       if (++this.#contentBytes > MAX_FRAME_BYTES)
         throw new Error(
-          "Cutter bridge response exceeded its framed transport limit",
+          `Cutter bridge response exceeded its framed transport limit of ${String(MAX_FRAME_BYTES)} bytes (16 MiB). This release has no runtime override`,
         );
       if (this.#pageLength > 0)
         this.#parts.push(this.#page.subarray(0, this.#pageLength));
@@ -665,10 +669,13 @@ export class CutterBridgeClient {
       throw new AnalysisResourceConstraintError(
         "cutter_command",
         "transport",
-        "Cutter descriptor discovery exceeded its candidate budget; no command was sent.",
+        `Cutter descriptor discovery exceeded its candidate budget of ${String(MAX_DESCRIPTOR_CANDIDATES)} descriptors; no command was sent. This release has no runtime override.`,
         {
           max_descriptor_candidates: MAX_DESCRIPTOR_CANDIDATES,
           bridge_directory: this.#directory,
+        },
+        {
+          remediationAction: `Reduce the number of Cutter bridge descriptors in the bridge directory. This budget of ${String(MAX_DESCRIPTOR_CANDIDATES)} descriptors has no runtime override. Descriptor files above ${String(MAX_DESCRIPTOR_BYTES)} bytes are skipped, and at most ${String(DISCOVERY_CONCURRENCY)} descriptors are probed at once; those caps also have no runtime override.`,
         },
       );
     if (loaded.error !== undefined)
@@ -901,8 +908,10 @@ export class CutterBridgeClient {
           reject(new CutterBridgeRequestFailure(message, requestSent)),
         );
       const timer = setTimeout(() => {
-        rejectRequest("Cutter bridge request timed out");
-      }, 25_000);
+        rejectRequest(
+          `Cutter bridge request timed out after ${String(REQUEST_TIMEOUT_MS)} ms (deadlineExpired). This release has no runtime override`,
+        );
+      }, REQUEST_TIMEOUT_MS);
       const onAbort = (): void => {
         rejectRequest("Cutter bridge request was cancelled");
       };

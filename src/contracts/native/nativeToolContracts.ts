@@ -12,6 +12,7 @@ import { localPathStringSchema } from "../../domain/localPath.js";
 import { toolContractMetadata } from "../toolEffects.js";
 import { requireOutputSchema } from "../toolOutputSchemaPrimitives.js";
 import { analysisDetailSchema } from "../analysisDetail.js";
+import { nativeCommandTimeoutField } from "../../domain/native/nativeDeadlines.js";
 
 const examples: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   inspect_macho: {},
@@ -78,12 +79,12 @@ export const swiftSymbolsSchema = z.array(
 export const NATIVE_TOOL_CONTRACTS = [
   native(
     "observe_native_ui",
-    "Observe an already-running native app by PID and window ID, bound to the active Mach-O target. Captures a bounded accessibility tree and selected-window screenshot; OS permission denial fails without broad capture or target launch.",
+    "Observe an already-running native app by PID and window ID, bound to the active Mach-O target. Captures a bounded accessibility tree and selected-window screenshot; OS permission denial fails without broad capture or target launch. native_ui_deadline_ms is the observation deadline (omitted means 180000 ms, range 1..2147483647, next call). It does not raise the fixed 67108864-byte output allowance or the 180000 ms wait-step cap.",
     nativeUiObservationInputSchema,
   ),
   native(
     "capture_native_ui_scenario",
-    "Run selected-element press, increment/decrement scroll, AXValue text entry and bounded wait steps in one exact native app window. Returns ordered before/after captures and action/capture failures. Actions can change app data, network activity and persistent state; application state is left as-is and restoration is not attempted.",
+    "Run selected-element press, increment/decrement scroll, AXValue text entry and bounded wait steps in one exact native app window. Returns ordered before/after captures and action/capture failures. Actions can change app data, network activity and persistent state; application state is left as-is and restoration is not attempted. native_ui_deadline_ms is the scenario deadline (omitted means 180000 ms, range 1..2147483647, next call). It does not raise the fixed 67108864-byte output allowance or the 180000 ms wait-step cap.",
     nativeUiScenarioInputSchema,
   ),
   native(
@@ -93,7 +94,7 @@ export const NATIVE_TOOL_CONTRACTS = [
   ),
   native(
     "inspect_macho",
-    "Inspect Mach-O slices, load commands, imports, exports, dependencies, build metadata, segments, sections, permissions, and exact command provenance without launching Hopper. Large frameworks return megabytes of symbols; detail summary retains the complete Evidence and returns slice identity with per-collection counts, then page rows with inspect_analysis_view kind macho.",
+    "Inspect Mach-O slices, load commands, imports, exports, dependencies, build metadata, segments, sections, permissions, and exact command provenance without launching Hopper. Large frameworks return megabytes of symbols; detail summary retains the complete Evidence and returns slice identity with per-collection counts, then page rows with inspect_analysis_view kind macho. native_command_timeout_ms is each Xcode command's wall clock (omitted means 60000 ms, range 1..2147483647, next call) and is distinct from objdump/rizin command_timeout_ms. It does not raise the fixed 67108864-byte output allowance.",
     z.object({
       detail: analysisDetailSchema
         .unwrap()
@@ -101,30 +102,37 @@ export const NATIVE_TOOL_CONTRACTS = [
         .describe(
           "Omitted or complete returns the complete inspection Evidence. summary retains that complete Evidence in this session and returns its inspect_analysis_view summary; use normalized_result.parent_evidence_id for macho pages.",
         ),
+      native_command_timeout_ms: nativeCommandTimeoutField,
     }),
   ),
   native(
     "inspect_signature",
-    "Inspect the active Mach-O executable's code-signing identity, hashes, authorities, requirements, entitlements, hardened-runtime state, and exact command provenance.",
-    z.object({}),
+    "Inspect the active Mach-O executable's code-signing identity, hashes, authorities, requirements, entitlements, hardened-runtime state, and exact command provenance. native_command_timeout_ms is each codesign command's wall clock (omitted means 60000 ms). It does not raise the fixed 67108864-byte output allowance.",
+    z.object({
+      native_command_timeout_ms: nativeCommandTimeoutField,
+    }),
   ),
   native(
     "inspect_plist",
-    "Parse Info.plist from the active artifact by default, or pass any local plist path. Returns normalized JSON rather than plutil text.",
+    "Parse Info.plist from the active artifact by default, or pass any local plist path. Returns normalized JSON rather than plutil text. native_command_timeout_ms is each file or plutil command's wall clock (omitted means 60000 ms). The 67108864-byte plist input and decode allowances and the 128-level nesting allowance have no runtime override. The 4096-byte markup probe is a probe window, not a document cap, and has no runtime override.",
     z.object({
       path: localPathStringSchema.optional(),
+      native_command_timeout_ms: nativeCommandTimeoutField,
     }),
   ),
   native(
     "list_architectures",
-    "List thin or universal Mach-O slices with offsets, sizes, alignment, explicit coverage, and native-tool provenance.",
-    z.object({}),
+    "List thin or universal Mach-O slices with offsets, sizes, alignment, explicit coverage, and native-tool provenance. native_command_timeout_ms is the lipo wall clock (omitted means 60000 ms). It does not raise the fixed 67108864-byte output allowance.",
+    z.object({
+      native_command_timeout_ms: nativeCommandTimeoutField,
+    }),
   ),
   native(
     "demangle_swift",
-    "Demangle an ordered list of single-line Swift symbols without requiring Hopper. Each input returns demangled, unchanged, or invalid status.",
+    "Demangle an ordered list of single-line Swift symbols without requiring Hopper. Each input returns demangled, unchanged, or invalid status. native_command_timeout_ms is the swift-demangle wall clock (omitted means 60000 ms) and does not raise the fixed 67108864-byte output allowance.",
     z.object({
       symbols: swiftSymbolsSchema,
+      native_command_timeout_ms: nativeCommandTimeoutField,
     }),
   ),
 ] as const satisfies readonly ToolContract[];

@@ -98,6 +98,8 @@ export interface FakeOptions {
   readonly sessionRedirectResourceType?: "Document" | "Fetch" | "Script";
   readonly closeAfterMethod?: string;
   readonly sensitiveShapes?: boolean;
+  /** Deliver a console argument the protocol spells as `{ type: "object", subtype: "null" }`. */
+  readonly nullConsoleArgument?: boolean;
   readonly cachedResponseBody?: string;
   readonly invalidResponseBodyBase64?: boolean;
   readonly webMcpTools?: boolean;

@@ -47,6 +47,8 @@ export interface JebProviderOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /** Per-tools/call budget selected by REA_JEB_MCP_TIMEOUT_MS. */
   readonly requestTimeoutMs?: number;
+  /** Catalog discovery budget. Production uses the same REA_JEB_MCP_TIMEOUT_MS value. */
+  readonly discoveryTimeoutMs?: number;
   /** Injectable MCP boundary; defaults to the streamable HTTP client. */
   readonly connectionFactory?: JebMcpConnectionFactory;
 }
@@ -129,12 +131,18 @@ export class JebProvider implements JebAnalysisPort {
     this.#endpoint = endpoint.value;
     const createConnection =
       options.connectionFactory ?? createStreamableHttpJebMcpConnection;
+    const timeouts = {
+      ...(options.discoveryTimeoutMs === undefined
+        ? {}
+        : { discoveryTimeoutMs: options.discoveryTimeoutMs }),
+      ...(options.requestTimeoutMs === undefined
+        ? {}
+        : { requestTimeoutMs: options.requestTimeoutMs }),
+    };
     this.#connection =
-      options.requestTimeoutMs === undefined
+      Object.keys(timeouts).length === 0
         ? createConnection(this.#endpoint)
-        : createConnection(this.#endpoint, {
-            requestTimeoutMs: options.requestTimeoutMs,
-          });
+        : createConnection(this.#endpoint, timeouts);
   }
 
   async inspectAvailability(

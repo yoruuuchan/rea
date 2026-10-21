@@ -166,6 +166,26 @@ it("redacts cleanup primaries and mirrors the source error's live status", () =>
   });
 });
 
+it("keeps a named timeout control through explicit-value redaction", () => {
+  const error = new AnalysisTimeoutError(
+    "analyze_javascript_application",
+    300000,
+    {
+      userMessage:
+        "JavaScript source analysis reached its 300000ms per-source server/provider deadline (analysis_timeout_ms) for explicit-secret, not the MCP client deadline.",
+      remediationAction:
+        "Increase analysis_timeout_ms through MCP for explicit-secret, or use rea analyze-javascript-application <input_path> --analysis-timeout-ms <milliseconds> on the CLI.",
+    },
+  );
+  const redacted = redactExplicitFailure(error, ["explicit-secret"]);
+  const projected = projectAnalysisError(redacted);
+  expect(projected.message).toContain("analysis_timeout_ms");
+  expect(projected.message).toContain("300000");
+  expect(projected.remediation.action).toContain("analysis_timeout_ms");
+  expect(projected.remediation.action).toContain("--analysis-timeout-ms");
+  expect(JSON.stringify(projected)).not.toContain("explicit-secret");
+});
+
 it("keeps unsupported profile reasons distinct from malformed input", () => {
   const error = new AnalysisCapabilityUnavailableError(
     "mitmproxy",

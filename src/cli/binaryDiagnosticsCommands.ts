@@ -9,6 +9,8 @@ import { logCliCommand } from "../cliLogging.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
+import { inspectBinaryLayoutInputSchema } from "../domain/native/binaryLayout.js";
+import { inspectRecordedCrashInputSchema } from "../domain/native/recordedCrash.js";
 import { inspectPeResourcesInputSchema } from "../domain/native/peResources.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
@@ -60,11 +62,20 @@ export const registerBinaryDiagnosticsCommands = (
     args: z.object({
       path: z.string().describe("Local ELF binary or relocatable object"),
     }),
-    run: ({ args }) =>
+    options: z.object({
+      pwntoolsTimeoutMs:
+        inspectBinaryLayoutInputSchema.shape.pwntools_timeout_ms,
+    }),
+    run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectBinaryLayout, async () => {
           const result = await service.inspectAndClose(
-            { path: absoluteCallerPath(args.path) },
+            {
+              path: absoluteCallerPath(args.path),
+              ...(options.pwntoolsTimeoutMs === undefined
+                ? {}
+                : { pwntools_timeout_ms: options.pwntoolsTimeoutMs }),
+            },
             { signal },
           );
           return result.ok ? result.value : projectAnalysisError(result.error);
@@ -85,6 +96,8 @@ export const registerBinaryDiagnosticsCommands = (
         .boolean()
         .default(false)
         .describe("Add BYO core-only GDB/pwndbg mapping candidates"),
+      pwntoolsTimeoutMs:
+        inspectRecordedCrashInputSchema.shape.pwntools_timeout_ms,
     }),
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
@@ -93,6 +106,9 @@ export const registerBinaryDiagnosticsCommands = (
             {
               path: absoluteCallerPath(args.path),
               include_debugger_context: options.debuggerContext,
+              ...(options.pwntoolsTimeoutMs === undefined
+                ? {}
+                : { pwntools_timeout_ms: options.pwntoolsTimeoutMs }),
             },
             { signal },
           );

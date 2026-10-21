@@ -59,9 +59,22 @@ const LLDB_REQUIREMENT =
   "LLDB from Xcode or the Command Line Tools is not available";
 /** Captured target output kept per stream; the rest is counted, not stored. */
 const MAX_OUTPUT_BYTES = 1024 * 1024;
-/** LLDB startup, symbol loading and teardown beyond the observation window. */
+/**
+ * LLDB startup, symbol loading and teardown beyond the observation window.
+ * This grace has no runtime override; duration_ms is the caller-selected window.
+ */
 const DEADLINE_GRACE_MS = 60_000;
 const DIAGNOSTIC_BYTES = 16 * 1024;
+
+const lldbGraceRecovery = (
+  durationMs: number,
+): { readonly userMessage: string; readonly remediationAction: string } => {
+  const total = durationMs + DEADLINE_GRACE_MS;
+  return {
+    userMessage: `observe_native_calls reached its ${String(total)} ms server/provider deadline: duration_ms ${String(durationMs)} plus a fixed ${String(DEADLINE_GRACE_MS)} ms LLDB startup, symbol loading, and teardown grace. This is not the MCP client deadline.`,
+    remediationAction: `This release has no runtime override for the ${String(DEADLINE_GRACE_MS)} ms grace. Increase duration_ms on the next call when the observation window was too short; the grace stays added to that window. Captured output beyond ${String(MAX_OUTPUT_BYTES)} bytes per stream is counted and not kept, and that byte allowance has no runtime override. Failure diagnostics keep at most ${String(DIAGNOSTIC_BYTES)} bytes and that excerpt has no runtime override. Allow execution, cleanup, and delivery headroom in the outer MCP client deadline. Confirm the owned process was killed and cleanup finished before retrying.`,
+  };
+};
 
 const BRIDGE = fileURLToPath(
   new URL("../../bridge/native/rea_lldb_tracer.py", import.meta.url),
@@ -601,6 +614,7 @@ export class LldbCallTracer implements NativeCallTracer {
                 ? {}
                 : { cleanup: lifecycleCleanup }),
               partialObservation,
+              ...lldbGraceRecovery(input.duration_ms),
             },
           ),
       );
@@ -753,6 +767,7 @@ export class LldbCallTracer implements NativeCallTracer {
               trace,
               "timeout",
             ),
+            ...lldbGraceRecovery(input.duration_ms),
           },
         ),
       );

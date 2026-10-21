@@ -7,7 +7,10 @@ import {
 } from "./apple/plistNumbers.js";
 import { UnknownPlistScalar } from "./apple/unknownPlistScalar.js";
 
-import { MAX_PLIST_DEPTH } from "./apple/plistValue.js";
+import {
+  MAX_PLIST_DEPTH,
+  plistNestingLimitMessage,
+} from "./apple/plistValue.js";
 
 /** The dictionary key REA results cannot carry: validation strips it. */
 const PROTOTYPE_KEY = "__proto__";
@@ -132,9 +135,7 @@ const scanOpenStep = (text: string): number => {
   };
   const assertDepth = (): void => {
     if (containers.length > MAX_PLIST_DEPTH)
-      throw new RangeError(
-        `Plist exceeds ${String(MAX_PLIST_DEPTH)} nesting levels`,
-      );
+      throw new RangeError(plistNestingLimitMessage());
   };
   let cursor = 0;
   while (cursor < text.length) {

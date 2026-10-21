@@ -57,6 +57,7 @@ export const inspectPwndbgCore = async ({
   diagnostics,
   options,
   runCommand,
+  timeoutMs,
   probePath,
 }: {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
@@ -66,6 +67,8 @@ export const inspectPwndbgCore = async ({
   readonly diagnostics: AnalysisCapturedOutput;
   readonly options: ExecutionOptions | undefined;
   readonly runCommand: PwntoolsCommand;
+  /** Effective `pwntools_timeout_ms` for this debugger command. */
+  readonly timeoutMs: number;
   readonly probePath?: (
     path: string,
     kind: "file" | "directory",
@@ -142,6 +145,7 @@ export const inspectPwndbgCore = async ({
     operation: OPERATION,
     providerId: "pwndbg-core",
     precedingOutput: diagnostics,
+    timeoutMs,
   };
   const failure = (cause: unknown) =>
     pwntoolsDecoderFailure(

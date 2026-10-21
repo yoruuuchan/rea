@@ -6,6 +6,10 @@ import {
   type BinaryTarget,
 } from "../domain/binaryTargetTypes.js";
 import {
+  DEFAULT_NATIVE_UI_DEADLINE_MS,
+  NATIVE_UI_WAIT_STEP_MAX_MS,
+} from "../domain/native/nativeDeadlines.js";
+import {
   nativeUiObservationInputSchema,
   nativeUiScenarioInputSchema,
   nativeUiSnapshotSchema,
@@ -30,7 +34,10 @@ import {
   NATIVE_UI_OUTPUT_BUDGET_BYTES,
   NATIVE_UI_OUTPUT_WEIGHT,
 } from "./NativeUiOutputBudget.js";
-import { NativeUiInterruptionControl } from "./NativeUiInterruptionControl.js";
+import {
+  NATIVE_UI_DEADLINE_MS,
+  NativeUiInterruptionControl,
+} from "./NativeUiInterruptionControl.js";
 
 const helper = fileURLToPath(
   new URL("../../bridge/native/ReaNativeUI.swift", import.meta.url),
@@ -69,7 +76,11 @@ export const observeNativeUi = async (
     options.runtime ?? createNativeUiHelperRuntime(options.environment);
   const interruption =
     options.interruption ??
-    new NativeUiInterruptionControl(options.signal, runtime.signal);
+    new NativeUiInterruptionControl(
+      options.signal,
+      runtime.signal,
+      runtime.deadlineMs ?? NATIVE_UI_DEADLINE_MS,
+    );
   const ownsInterruption = options.interruption === undefined;
   let result: Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>;
   try {
@@ -202,12 +213,22 @@ const observeWithHelper = async (
           new AnalysisCapabilityUnavailableError(
             "native-macos",
             operation,
-            "Scenario captures exceeded the 64 MiB output budget",
+            `Scenario captures exceeded the fixed 64 MiB output budget (${String(NATIVE_UI_OUTPUT_BUDGET_BYTES)} bytes). This release has no runtime override. native_ui_deadline_ms does not raise it.`,
+            {
+              userMessage: `Scenario captures exceeded the fixed 64 MiB output budget (${String(NATIVE_UI_OUTPUT_BUDGET_BYTES)} bytes). This release has no runtime override.`,
+              remediationAction: `The scenario output allowance is ${String(NATIVE_UI_OUTPUT_BUDGET_BYTES)} bytes. This release has no runtime override. Waiting, additional host memory, and native_ui_deadline_ms do not raise it. Repeating the unchanged request fails the same way.`,
+            },
           ),
         );
       return ok(response.result);
     } catch (cause: unknown) {
       if (cause instanceof AnalysisError) return err(cause);
+      if (
+        cause instanceof Error &&
+        "code" in cause &&
+        cause.code === "ETIMEDOUT"
+      )
+        return err(interruption.deadlineFailure(operation));
       return err(
         cause instanceof ExecFileOutputCancelledError
           ? ((signal.aborted && cause.cause === signal.reason
@@ -270,7 +291,7 @@ const observeWithHelper = async (
       "Click uses AXPress; scroll uses AXIncrement/AXDecrement; key-entry sets the selected element's AXValue. Unsupported elements fail without global event fallback.",
       "Each completed action is followed immediately by capture; delayed UI changes require explicit wait steps. A failed after-capture can follow a completed action, so failure does not prove absence of application effects.",
       "Scenarios can change app data, cause app network activity and persist changes. The caller explicitly chooses leave-as-is; automatic restoration is unsupported.",
-      "Window matching uses exact PID and window ID for screenshots and unique accessibility geometry. Accessibility paths can change as the UI changes; stale or ambiguous paths fail. Screenshots are scaled to at most 2048 pixels; scenario output is budgeted at 64 MiB and execution has a 180-second deadline.",
+      `Window matching uses exact PID and window ID for screenshots and unique accessibility geometry. Accessibility paths can change as the UI changes; stale or ambiguous paths fail. Screenshots are scaled to at most 2048 pixels; scenario output is budgeted at 64 MiB. Execution uses the selected native_ui_deadline_ms of ${String(interruption.deadlineMs)} ms (omitted means ${String(DEFAULT_NATIVE_UI_DEADLINE_MS)}). One wait step stays capped at ${String(NATIVE_UI_WAIT_STEP_MAX_MS)} ms and that cap has no runtime override.`,
     ],
   });
   return terminalFailure === undefined

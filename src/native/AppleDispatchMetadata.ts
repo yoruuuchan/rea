@@ -24,7 +24,7 @@ import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
-import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
+import { fixedNativeAllowance } from "../domain/native/nativeDeadlines.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import {
@@ -273,11 +273,12 @@ export const inspectAppleDispatchMetadata = async (
     new AnalysisResourceConstraintError(
       "inspect_native_dispatch_metadata",
       "memory",
-      "Apple static metadata input exceeds its 64 MiB snapshot budget",
+      `Apple static metadata input exceeds its ${String(maximumBytes)}-byte (64 MiB) snapshot budget. This release has no runtime override.`,
       { input_bytes: maximumBytes },
-      fixedAllowanceOptions(
+      fixedNativeAllowance(
         "The Apple static metadata snapshot allowance",
         "parser",
+        `${String(maximumBytes)} bytes`,
       ),
     );
   const cancelled = () =>

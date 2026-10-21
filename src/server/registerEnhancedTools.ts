@@ -11,6 +11,7 @@ import type {
 
 import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
+import type { ProgressReporter } from "../application/ProgressReporter.js";
 import { EnhancedTools } from "../application/EnhancedTools.js";
 import type { ValidatedEnhancedCall } from "../application/EnhancedToolTypes.js";
 import {
@@ -233,6 +234,7 @@ const executeEnhancedTool = async (
         return executeFunctionTool(admittedAnalysis, registration, contract, {
           context,
           parameters,
+          progress,
         });
       const analysis: AnalysisOperationPort = {
         execute: (operation, operationParameters, executionOptions) =>
@@ -316,10 +318,12 @@ const executeFunctionTool = async (
   request: {
     readonly context: ServerContext;
     readonly parameters: Readonly<Record<string, JsonValue>>;
+    readonly progress: ProgressReporter;
   },
 ): Promise<CallToolResult> => {
-  const { context, parameters } = request;
-  const progress = mcpProgressReporter(context);
+  // Reuse the request reporter that already sent "started"; a second reporter
+  // would restart the notification sequence at 1.
+  const { context, parameters, progress } = request;
   const result = await logToolExecution(
     registration.logger,
     "analyze_function",

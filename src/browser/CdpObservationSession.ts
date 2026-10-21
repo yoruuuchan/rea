@@ -123,6 +123,7 @@ export const observeCdpSession = async (
     let endReason = await waitForWindow(
       context.input.observation_ms,
       capture,
+      context.connection,
       context.signal,
     );
     if (endReason === "window_elapsed")
@@ -593,18 +594,21 @@ const performanceTimestamp = (value: unknown): number => {
 const waitForWindow = async (
   durationMs: number,
   capture: TimelineCapture,
+  connection: CdpConnection,
   signal?: AbortSignal,
 ): Promise<EndReason> =>
   await new Promise<EndReason>((resolve, reject) => {
     const timerController = new AbortController();
     let settled = false;
     let removeEnd = (): void => {};
+    let removeProtocolFailure = (): void => {};
     const settle = (complete: () => void): void => {
       if (settled) return;
       settled = true;
       timerController.abort();
       signal?.removeEventListener("abort", onAbort);
       removeEnd();
+      removeProtocolFailure();
       complete();
     };
     const finish = (reason: EndReason): void => settle(() => resolve(reason));
@@ -619,6 +623,10 @@ const waitForWindow = async (
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted === true) onAbort();
     if (!settled) removeEnd = capture.onEnd(finish);
+    if (!settled)
+      removeProtocolFailure = connection.onProtocolFailure((error) =>
+        settle(() => reject(error)),
+      );
     if (settled) return;
     void delayWithCancellation(
       durationMs,

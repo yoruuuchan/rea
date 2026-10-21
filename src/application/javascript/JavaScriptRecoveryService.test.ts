@@ -176,3 +176,29 @@ describe("JavaScript recovery workflow", () => {
     });
   });
 });
+
+it("returns cancellation with the validated Evidence when the caller aborts after provider success", async () => {
+  const controller = new AbortController();
+  const reason = { request: "stop recovery" };
+  const service = new JavaScriptRecoveryService({
+    recover: async () => {
+      controller.abort(reason);
+      return ok(
+        createAnalysisExecution(recoveryResult(), providerIdentity, {
+          subject: {
+            path: artifact.path,
+            sha256: artifact.sha256,
+            format: "javascript" as const,
+          },
+        }),
+      );
+    },
+  });
+  const result = await service.recover(input, { signal: controller.signal });
+  if (result.ok) throw new Error("expected cancellation");
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toMatchObject({
+    operation: "recover_javascript_sources",
+  });
+});

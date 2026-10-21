@@ -16,6 +16,7 @@ import {
   type RegularFileOperationOutcome,
 } from "../filesystem/OwnedRegularFile.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
+import type { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js";
 
@@ -62,6 +63,7 @@ export const retryRegularFileCleanup = async <Value>(
   signal?: AbortSignal,
 ): Promise<{
   readonly outcome: RegularFileReadOutcome<Value>;
+  readonly cleanupLease?: AnalysisCleanupLease;
   readonly cleanup?: AnalysisCleanupObservation;
 }> => {
   const outcome: RegularFileReadOutcome<Value> =
@@ -79,6 +81,7 @@ export const retryRegularFileCleanup = async <Value>(
   if (released.kind === "released") return { outcome };
   return {
     outcome,
+    cleanupLease: released.lease,
     cleanup: {
       reason: `${failureMessage(failure.cleanupCause)}; retry: ${failureMessage(released.cause)}`,
       resources: [failure.path],

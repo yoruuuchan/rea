@@ -43,7 +43,8 @@ import {
   ModelFormatFailure,
   rejectModel,
   MODEL_REPORT_BYTES,
-  MODEL_HEADER_BYTES,
+  modelCapacityRemediation,
+  modelCapacityReportedLimits,
 } from "./ModelFormat.js";
 import { safetensorsBits } from "./ModelTensorTypes.js";
 import { jsonValueByteLength } from "../domain/jsonValueByteLength.js";
@@ -113,18 +114,19 @@ export class ModelArtifactProvider implements ModelArtifactPort {
       let error: AnalysisError;
       if (primary instanceof AnalysisError) error = primary;
       else if (primary instanceof ModelFormatFailure) {
+        const limit = primary.kind === "capacity" ? primary.limit : undefined;
         error =
-          primary.kind === "capacity"
+          limit !== undefined
             ? new AnalysisResourceConstraintError(
                 OPERATION,
                 "memory",
                 primary.message,
+                modelCapacityReportedLimits(limit),
                 {
-                  maximum_report_bytes: MODEL_REPORT_BYTES,
-                  maximum_header_bytes: MODEL_HEADER_BYTES,
-                  maximum_exact_offset: Number.MAX_SAFE_INTEGER,
+                  cause,
+                  retryable: false,
+                  remediationAction: modelCapacityRemediation(limit),
                 },
-                { cause, retryable: false },
               )
             : primary.kind === "unsupported"
               ? new AnalysisUnsupportedTargetError(
@@ -253,6 +255,7 @@ export class ModelArtifactProvider implements ModelArtifactPort {
       throw new ModelFormatFailure(
         "capacity",
         "Model file exceeds exact host offset precision",
+        "exact-offset",
       );
     const reader = new ModelHeaderReader(file, Number(initial.size), signal);
     const first = await reader.take(4);
@@ -458,7 +461,11 @@ export class ModelArtifactProvider implements ModelArtifactPort {
       ],
     };
     if (jsonValueByteLength(report, MODEL_REPORT_BYTES) > MODEL_REPORT_BYTES)
-      throw new ModelFormatFailure("capacity", "Model report exceeds 32 MiB");
+      throw new ModelFormatFailure(
+        "capacity",
+        "Model report exceeds 32 MiB",
+        "report-bytes",
+      );
     return modelArtifactSchema.parse(report);
   }
 }

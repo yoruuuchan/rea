@@ -167,7 +167,9 @@ explicit path or endpoint and do not need it.
   ambiguity. No implicit fetch or target execution; WAT is not original source.
   See the [WASM guide](https://github.com/morluto/rea/blob/main/docs/wasm-artifacts.md).
 - Explicit local EVM bytecode carrier: `inspect_evm_interface` with caller-selected
-  `raw` or `hex` encoding. Preserve carrier/decoded digests and treat selectors,
+  `raw` or `hex` encoding. The owned worker deadline is `timeout_ms` (default
+  30000 ms, range 1..2147483647, next call). It does not raise the fixed byte,
+  address-space, or CPU allowances. Preserve carrier/decoded digests and treat selectors,
   argument strings and mutability as inferred candidates; this performs no chain
   lookup or target execution. For the complete inferred interface without hex or
   duplicate stdout, discover support and select `detail: "summary"`; complete

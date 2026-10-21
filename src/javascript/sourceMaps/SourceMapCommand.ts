@@ -106,14 +106,16 @@ export const runSourceMapCommand = async (
         ? new AnalysisCancelledError(OPERATION, {
             cause: options.signal.reason,
           })
-        : new ProviderAdapterError(PROVIDER, OPERATION, {
-            cause,
-            diagnostics: {
-              map_path: path,
-              error_message: message(cause),
-              phase: "process_ownership_preparation",
-            },
-          }),
+        : cause instanceof AnalysisError
+          ? cause
+          : new ProviderAdapterError(PROVIDER, OPERATION, {
+              cause,
+              diagnostics: {
+                map_path: path,
+                error_message: message(cause),
+                phase: "process_ownership_preparation",
+              },
+            }),
     );
   }
   const deadline = new ProviderStartupDeadline(

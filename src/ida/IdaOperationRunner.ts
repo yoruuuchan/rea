@@ -535,7 +535,13 @@ export class IdaOperationRunner {
                 "Upstream callees capped results at 500; additional callees remain unknown.",
               ],
             }
-          : { status: "complete" };
+          : page.more === false
+            ? { status: "complete" }
+            : {
+                status: "unknown",
+                reason:
+                  "Upstream callees omitted an explicit truncation marker; additional callees remain unknown.",
+              };
       for (const item of page.callees) {
         if ("type" in item && item.type === "external")
           result.set(

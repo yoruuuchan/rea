@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { expect, it } from "vitest";
-import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCapabilityUnavailableError,
+  AnalysisTimeoutError,
+} from "../../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import {
   resolveWakaruCommand,
@@ -41,7 +44,34 @@ it("rejects an exhausted shared execution budget before launching the next comma
   ).rejects.toMatchObject({
     _tag: "AnalysisTimeoutError",
     operation: "recover_javascript_sources",
+    timeoutMs: RECOVERY_LIMITS.timeoutMs,
   });
+});
+
+it("says the Wakaru deadline has no runtime override", async () => {
+  const refusal: unknown = await runWakaruCommand({
+    command: "/selected/wakaru",
+    limiter: "/usr/bin/prlimit",
+    arguments: ["--version"],
+    cwd: "/tmp/unused",
+    environment: {},
+    deadline: performance.now() - 1,
+    launcher: async () => {
+      throw new Error("An expired budget must not launch");
+    },
+  }).catch((cause: unknown) => cause);
+  if (!(refusal instanceof AnalysisTimeoutError))
+    throw new Error("Expected the Wakaru deadline");
+  const projected = projectAnalysisError(refusal);
+  expect(projected.message).toContain(String(RECOVERY_LIMITS.timeoutMs));
+  expect(projected.message).toContain("Wakaru");
+  expect(projected.remediation.action).toContain("no runtime override");
+  expect(projected.remediation.action).toContain("analysis_timeout_ms");
+  expect(projected.remediation.action).toContain("max_heap_mb");
+  expect(projected.remediation.action).toContain(
+    "An unchanged retry may hit this deadline again",
+  );
+  expect(projected.remediation.action).not.toContain("fails the same way");
 });
 
 it("preserves caller cancellation before acquiring an expired execution budget", async () => {

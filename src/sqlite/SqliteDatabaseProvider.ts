@@ -107,8 +107,7 @@ export class SqliteDatabaseProvider implements SqliteDatabasePort {
             input_bytes_per_inspection: SQLITE_DATABASE_LIMITS.inputBytes,
           },
           {
-            remediationAction:
-              "Retry after an active SQLite inspection completes.",
+            remediationAction: `The concurrent SQLite inspection allowance is ${String(SQLITE_DATABASE_LIMITS.concurrentInspections)}. This release has no runtime override. Waiting for an active inspection to finish can free a slot. worker_timeout_ms does not raise it. Retry after an active SQLite inspection completes.`,
           },
         ),
       );

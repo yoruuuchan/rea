@@ -19,7 +19,10 @@ import {
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
 import { z } from "zod";
-import type { IdaConfiguration } from "./IdaConfiguration.js";
+import {
+  idaRegistrationTimeoutGuidance,
+  type IdaConfiguration,
+} from "./IdaConfiguration.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -397,6 +400,11 @@ export const createIdaMcpConnection = (
       throw new AnalysisTimeoutError(operation, requestTimeoutMs, {
         cause: failure,
         capturedOutput,
+        ...idaRegistrationTimeoutGuidance(
+          requestTimeoutMs,
+          "request",
+          config.timeoutMs,
+        ),
       });
     if (bufferLimit !== null)
       throw new AnalysisResourceConstraintError(

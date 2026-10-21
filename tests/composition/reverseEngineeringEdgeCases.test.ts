@@ -386,7 +386,7 @@ it("rejects work after reaching the concurrent provider-operation limit", async 
           active_operations: 8,
         });
       expect(rejected.error.message).toContain(
-        "Concurrent reverse-engineering operation capacity reached.",
+        "Concurrent reverse-engineering operation capacity reached (8 operations).",
       );
     }
     expect(providerCalls).toBe(0);

@@ -402,6 +402,110 @@ describe("Swift imported protocol references", () => {
 });
 
 describe("Swift conformance type-reference kinds", () => {
+  it.each([
+    {
+      label: "zero rebase",
+      target: 0n,
+      rebase: true,
+      address: "0x0",
+      fileOffset: 0,
+    },
+    {
+      label: "nonzero rebase",
+      target: 0x100n,
+      rebase: true,
+      address: "0x100",
+      fileOffset: 256,
+    },
+    {
+      label: "unmapped rebase",
+      target: 0x800n,
+      rebase: true,
+      address: "0x800",
+      fileOffset: null,
+    },
+    {
+      label: "raw zero",
+      target: 0n,
+      rebase: false,
+      address: null,
+      fileOffset: null,
+    },
+    {
+      label: "raw nonzero",
+      target: 0x100n,
+      rebase: false,
+      address: "0x100",
+      fileOffset: 256,
+    },
+  ])(
+    "preserves kind-3 target identity for $label",
+    ({ target, rebase, address, fileOffset }) => {
+      const bytes = Buffer.alloc(1024);
+      bytes.writeUInt32LE(0xfeedfacf, 0);
+      bytes.writeUInt32LE(0x0100000c, 4);
+      bytes.writeUInt32LE(6, 12); // MH_DYLIB; read statically, never executed.
+      bytes.writeUInt32LE(2, 16);
+      bytes.writeUInt32LE(200, 20);
+      bytes.writeUInt32LE(0x19, 32); // LC_SEGMENT_64, mapping address zero.
+      bytes.writeUInt32LE(152, 36);
+      bytes.write("__TEXT", 40);
+      bytes.writeBigUInt64LE(1024n, 64);
+      bytes.writeBigUInt64LE(1024n, 80);
+      bytes.writeUInt32LE(5, 88);
+      bytes.writeUInt32LE(5, 92);
+      bytes.writeUInt32LE(1, 96);
+      bytes.write("__swift5_proto", 104);
+      bytes.write("__TEXT", 120);
+      bytes.writeBigUInt64LE(0x200n, 136);
+      bytes.writeBigUInt64LE(4n, 144);
+      bytes.writeUInt32LE(0x200, 152);
+      bytes.writeUInt32LE(2, 156);
+      bytes.writeUInt32LE(0x80000022, 184); // LC_DYLD_INFO_ONLY.
+      bytes.writeUInt32LE(48, 188);
+      if (rebase) {
+        bytes.writeUInt32LE(0x380, 192);
+        bytes.writeUInt32LE(6, 196);
+        // Pointer rebase at segment 0 + 0x300, then end the stream.
+        Buffer.from([0x11, 0x20, 0x80, 0x06, 0x51, 0x00]).copy(bytes, 0x380);
+      }
+      bytes.writeInt32LE(0x20, 0x200); // Conformance descriptor at 0x220.
+      bytes.writeInt32LE(0x40, 0x220); // Protocol descriptor at 0x260.
+      bytes.writeInt32LE(0xdc, 0x224); // Indirect class cell at 0x300.
+      bytes.writeUInt32LE(3 << 3, 0x22c);
+      bytes.writeUInt32LE(3, 0x260); // Protocol context descriptor.
+      bytes.writeInt32LE(0x18, 0x268);
+      bytes.write("FixtureProtocol\0", 0x280);
+      bytes.writeBigUInt64LE(target, 0x300);
+
+      const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+      expect(result.swift_conformances).toMatchObject([
+        {
+          type_reference_kind: 3,
+          type_reference_target: { address, file_offset: fileOffset },
+          type_name: null,
+          type_binding: null,
+          protocol_name: "FixtureProtocol",
+          protocol_target: { address: "0x260", file_offset: 608 },
+          witness_table: { address: null, file_offset: null },
+          decode: {
+            status: "partial",
+            reason:
+              "Indirect Objective-C class metadata requires runtime lookup",
+          },
+        },
+      ]);
+      expect(result.swift_conformances).toHaveLength(1);
+      expect(result.swift_dispatch_slots).toEqual([]);
+      expect(result.relative_pointers).toContainEqual(
+        expect.objectContaining({
+          field: { address: "0x224", file_offset: 548 },
+          target: { address: "0x300", file_offset: 768 },
+        }),
+      );
+    },
+  );
+
   it("keeps a direct Objective-C class name and its local witness evidence", () => {
     const result = decodeAppleDispatchMetadata(
       swiftConformanceTypeReferenceImage(2),

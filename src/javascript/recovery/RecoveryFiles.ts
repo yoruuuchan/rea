@@ -16,7 +16,7 @@ import {
   openRegularFile,
   RegularFileAdmissionFailure,
 } from "../../filesystem/RegularFile.js";
-import { RECOVERY_LIMITS } from "./WakaruRelease.js";
+import { RECOVERY_LIMITS, wakaruFixedLimitRecovery } from "./WakaruRelease.js";
 
 const OPERATION = "recover_javascript_sources";
 
@@ -33,6 +33,14 @@ class RecoveryFileSizeError extends AnalysisOutputError {
     super(OPERATION, reason);
   }
 }
+
+/** A bounded read stopped because the regular file exceeded the caller's maximum. */
+export const isRecoveryFileSizeError = (
+  cause: unknown,
+  maximum?: number,
+): boolean =>
+  cause instanceof RecoveryFileSizeError &&
+  (maximum === undefined || cause.maximum === maximum);
 
 /** Read a stable regular file without retaining bytes during engine fingerprinting. */
 const scanRecoveryFile = async (
@@ -165,8 +173,7 @@ const snapshotRecoveryInput = async (
         {
           cause,
           retryable: false,
-          remediationAction:
-            "Select JavaScript inputs whose combined size is within maximum_input_bytes. Do not truncate required source; retrying the unchanged selection will fail again.",
+          remediationAction: `Select JavaScript inputs whose combined size is within the ${String(RECOVERY_LIMITS.inputBytes)}-byte total input allowance (maximum_input_bytes). This release has no runtime override. Raising max_heap_mb does not raise it. Do not truncate required source; retrying the unchanged selection will fail again.`,
         },
       );
     throw recoveryInputFailure(
@@ -291,6 +298,9 @@ export const inventoryRecoveryFiles = async (
           throw new AnalysisOutputError(
             OPERATION,
             "Recovery staging exceeds the 10000-entry resource limit",
+            wakaruFixedLimitRecovery(
+              `Recovery staging exceeds the ${String(RECOVERY_LIMITS.outputEntries)}-entry resource limit`,
+            ),
           );
         children.push(entry.name);
       }
@@ -314,6 +324,9 @@ export const inventoryRecoveryFiles = async (
           throw new AnalysisOutputError(
             OPERATION,
             "Recovery staging exceeds the 128 MiB resource limit",
+            wakaruFixedLimitRecovery(
+              `Recovery staging exceeds the ${String(RECOVERY_LIMITS.outputBytes)}-byte output allowance`,
+            ),
           );
         files.push({ relativePath, path, bytes: info.size });
       }
@@ -349,5 +362,8 @@ export const checkRecoveryDeadline = (
 ): void => {
   checkRecoveryCancellation(signal);
   if (performance.now() >= deadline)
-    throw new AnalysisTimeoutError(OPERATION, RECOVERY_LIMITS.timeoutMs);
+    throw new AnalysisTimeoutError(OPERATION, RECOVERY_LIMITS.timeoutMs, {
+      userMessage: `JavaScript source recovery reached its ${String(RECOVERY_LIMITS.timeoutMs)} ms Wakaru adapter deadline. This is REA's fixed per-operation deadline, not the MCP client deadline.`,
+      remediationAction: `This release has no runtime override for the ${String(RECOVERY_LIMITS.timeoutMs)} ms Wakaru recovery deadline. Raising analysis_timeout_ms or max_heap_mb does not raise it. A smaller complete input may finish inside this deadline. An unchanged retry may hit this deadline again. Allow execution, cleanup and delivery headroom in the outer MCP client deadline. Confirm outstanding work and cleanup before retrying.`,
+    });
 };

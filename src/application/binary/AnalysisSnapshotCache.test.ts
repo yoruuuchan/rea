@@ -118,6 +118,68 @@ it("exports independent nested query, workflow and Evidence payloads", () => {
   expect(serializeAnalysisSnapshot(fresh.value)).toBe(expected);
 });
 
+it("counts newly retained direct and workflow bindings when staging", () => {
+  const source = new AnalysisSnapshotCache();
+  const target = ANALYSIS_SNAPSHOT_TARGET;
+  const profile = ANALYSIS_SNAPSHOT_PROFILE;
+  const parameters = { address: "0x1000" };
+  const workflowProfile = workflowAnalysisProfile(profile, "trace_feature");
+  source.record({
+    target,
+    profile,
+    operation: "procedure_info",
+    parameters,
+    execution: createAnalysisExecution("direct", ANALYSIS_SNAPSHOT_PROVIDER, {
+      subject: target,
+      analysisProfile: profile,
+    }),
+  });
+  source.recordWorkflow({
+    target,
+    profile,
+    operation: "trace_feature",
+    parameters: { query: "feature" },
+    execution: {
+      ...createAnalysisExecution("workflow", REA_WORKFLOW_PROVIDER, {
+        subject: target,
+      }),
+      analysisProfile: workflowProfile,
+    },
+  });
+  const bundle = createEvidenceBundle([
+    createEvidence(target, ANALYSIS_SNAPSHOT_PROVIDER, {
+      operation: "procedure_info",
+      parameters,
+      result: "direct",
+      analysisProfile: profile,
+    }),
+    createEvidence(target, REA_WORKFLOW_PROVIDER, {
+      operation: "trace_feature",
+      confidence: "derived",
+      parameters: { query: "feature" },
+      result: "workflow",
+      analysisProfile: workflowProfile,
+    }),
+  ]);
+  const exported = source.export(target, profile, bundle);
+  if (!exported.ok) throw exported.error;
+  const snapshot = parseAnalysisSnapshot(
+    JSON.parse(serializeAnalysisSnapshot(exported.value)),
+  );
+  expect(snapshot.entries).toHaveLength(1);
+  expect(snapshot.workflow_entries).toHaveLength(1);
+
+  const workflowOnly = new AnalysisSnapshotCache();
+  expect(workflowOnly.stage({ ...snapshot, entries: [] })).toBe(1);
+  expect(workflowOnly.workflowEntries()).toHaveLength(1);
+
+  const staged = new AnalysisSnapshotCache();
+  expect(staged.stage(snapshot)).toBe(2);
+  expect(staged.entries()).toHaveLength(1);
+  expect(staged.workflowEntries()).toHaveLength(1);
+  expect(staged.stage(snapshot), "replacements are not new entries").toBe(0);
+});
+
 it("rebinds replayed target subjects while preserving child artifact subjects", () => {
   const cache = new AnalysisSnapshotCache();
   const target = ANALYSIS_SNAPSHOT_TARGET;
@@ -333,15 +395,18 @@ describe("analysis snapshot cache capacity", () => {
       limitations: execution.limitations,
       locations: execution.locations,
     });
-    cache.stage(
-      parseAnalysisSnapshot({
-        target: snapshotTarget(target),
-        binding: snapshotBinding(profile),
-        entries: [],
-        workflow_entries: [incoming],
-        evidence_bundle: createEvidenceBundle([evidence]),
-      }),
-    );
+    expect(
+      cache.stage(
+        parseAnalysisSnapshot({
+          target: snapshotTarget(target),
+          binding: snapshotBinding(profile),
+          entries: [],
+          workflow_entries: [incoming],
+          evidence_bundle: createEvidenceBundle([evidence]),
+        }),
+      ),
+      "a capacity-refused workflow binding is not counted",
+    ).toBe(0);
     expect(cache.workflowEntries()).toHaveLength(
       SNAPSHOT_CACHE_ENTRY_CEILING - 1,
     );

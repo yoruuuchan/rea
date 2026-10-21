@@ -63,7 +63,7 @@ const request = (
     throw new BinaryResourceFailure(
       "structure",
       STRUCTURE_BYTES,
-      "Native directory exceeds the 16 MiB structural decoding budget",
+      "Native directory exceeds the 16777216-byte (16 MiB) structural decoding budget. This release has no runtime override.",
     );
   return { offset: exact(offset), size: exact(size) };
 };

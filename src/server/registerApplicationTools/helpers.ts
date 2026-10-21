@@ -14,15 +14,25 @@ export const recordResult = (
     | "javascript-export-shape"
     | "source-to-bundle-comparison",
 ) => {
-  const recorded =
-    unknownKind === undefined
-      ? options.recordEvidence?.(evidence)
-      : options.recordEvidenceWithUnknown?.(
-          evidence,
-          unknownRegistration(evidence, unknownKind),
-        );
+  const recorded = recordApplicationResult(options, evidence, unknownKind);
   return options.delivery.toEvidenceToolResult(evidence, contract, recorded);
 };
+
+/** Record the complete parent before choosing a delivery projection. */
+export const recordApplicationResult = (
+  options: ApplicationToolRegistration,
+  evidence: Evidence,
+  unknownKind?:
+    | "application-version-comparison"
+    | "javascript-export-shape"
+    | "source-to-bundle-comparison",
+) =>
+  unknownKind === undefined
+    ? options.recordEvidence?.(evidence)
+    : options.recordEvidenceWithUnknown?.(
+        evidence,
+        unknownRegistration(evidence, unknownKind),
+      );
 
 const unknownRegistration = (
   evidence: Evidence,

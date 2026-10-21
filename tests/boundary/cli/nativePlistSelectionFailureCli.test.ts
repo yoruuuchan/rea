@@ -281,7 +281,7 @@ describe.skipIf(process.platform !== "darwin")(
           retryable: false,
           remediation: {
             action:
-              "The 64 MiB native binary plist decode allowance is a fixed allowance. Worker memory limits, inherited limits, and additional host memory do not raise it. Select another complete input within the allowance when that preserves the needed observation. Repeating the unchanged request fails the same way.",
+              "The 64 MiB (67108864-byte) native binary plist decode allowance (no runtime override) is a fixed allowance. Worker memory limits, inherited limits, and additional host memory do not raise it. Select another complete input within the allowance when that preserves the needed observation. Repeating the unchanged request fails the same way.",
           },
           details: {
             operation: "inspect_plist",
@@ -310,7 +310,7 @@ describe.skipIf(process.platform !== "darwin")(
           retryable: false,
           remediation: {
             action: expect.stringContaining(
-              "Select a suitable complete artifact within the fixed 64 MiB native plist input allowance.",
+              "Select a suitable complete artifact within the fixed 64 MiB (67108864-byte) native plist input allowance (no runtime override).",
             ),
           },
           details: {
