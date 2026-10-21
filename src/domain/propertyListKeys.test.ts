@@ -315,7 +315,7 @@ it("bounds nested plist wrappers before recursive decoding", () => {
   ).toEqual(["x"]);
 });
 
-it.each(["\n", "\r\n", "\r", "\u0085", "\u2028", "\u2029"])(
+it.each(["\n", "\r\n", "\r"])(
   "preserves unrelated source values around %j line endings",
   (newline) => {
     const text = plist(
@@ -390,3 +390,18 @@ describe("OpenStep plist nesting preflight", () => {
     });
   });
 });
+
+it.each(["\u0085", "\u2028", "\u2029"])(
+  "preserves key identity and omission around inter-element separator %j",
+  (separator) => {
+    const parsed = parseXmlPropertyList(
+      plist(
+        `<dict>${separator}<key>kept${separator}key</key><string>a${separator}b</string>${separator}<key>__proto__</key><string>omitted</string></dict>`,
+      ),
+    );
+    expect(parsed).toEqual({
+      value: { [`kept${separator}key`]: `a${separator}b` },
+      omittedPrototypeKeys: 1,
+    });
+  },
+);

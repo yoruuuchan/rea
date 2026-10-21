@@ -1,3 +1,4 @@
+import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
@@ -658,3 +659,151 @@ it("compares summary Evidence through retained complete inspection parents", asy
 });
 
 const toolEvidence = (value: unknown) => parseEvidence(value);
+
+it("discovers artifact target prerequisites and preserves typed MCP refusals", async () => {
+  const root = await createTestTempDirectory("rea-artifact-availability-mcp-");
+  const zip = new ZipWriter(new Uint8ArrayWriter());
+  await zip.add("a.txt", new TextReader("hello"));
+  await writeFile(join(root, "sample.zip"), await zip.close());
+  await writeFile(
+    join(root, "plain.plist"),
+    "<plist><dict><key>hello</key><string>world</string></dict></plist>",
+  );
+  await writeFile(
+    join(root, "keyed.plist"),
+    "<plist><dict><key>$archiver</key><string>NSKeyedArchiver</string><key>$objects</key><array><string>$null</string><string>hello</string></array><key>$top</key><dict><key>root</key><dict><key>CF$UID</key><integer>1</integer></dict></dict></dict></plist>",
+  );
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(0x01000007, 4);
+  header.writeUInt32LE(3, 8);
+  header.writeUInt32LE(2, 12);
+  await writeFile(join(root, "standalone"), header);
+  await writeFile(join(root, "Tool.app"), header);
+  const contents = join(root, "Fixture.app", "Contents");
+  await mkdir(join(contents, "MacOS"), { recursive: true });
+  await writeFile(join(contents, "MacOS", "Fixture"), header);
+  await writeFile(
+    join(contents, "Info.plist"),
+    "<plist><dict><key>CFBundleExecutable</key><string>Fixture</string></dict></plist>",
+  );
+  const session = createTestBinarySession(
+    new ArtifactProvider(process.env, "darwin"),
+  );
+  const server = createServer({ kind: "session", session });
+  const client = new Client({
+    name: "artifact-availability-test",
+    version: "1",
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const operations = [
+    "decode_interface_builder",
+    "inspect_asset_catalog",
+    "inspect_keyed_archive",
+    "trace_dylib_resolution",
+  ];
+  const availability = async () => {
+    const response = await client.callTool({
+      name: "binary_session",
+      arguments: {},
+    });
+    const result = toolContract("binary_session").outputSchema.parse(
+      response.structuredContent,
+    );
+    return result.result.tool_availability.groups;
+  };
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const before = await availability();
+    for (const name of operations)
+      expect(before.find((group) => group.names.includes(name))).toMatchObject({
+        available: false,
+        reason: "target_required",
+      });
+    for (const filename of [
+      "sample.zip",
+      "plain.plist",
+      "keyed.plist",
+      "standalone",
+      "Tool.app",
+      "Fixture.app",
+    ]) {
+      expect(
+        (
+          await client.callTool({
+            name: "open_binary",
+            arguments: { path: join(root, filename) },
+          })
+        ).isError,
+      ).not.toBe(true);
+      const groups = await availability();
+      for (const name of operations) {
+        const supported =
+          filename === "Fixture.app" ||
+          (filename.endsWith(".plist") && name === "inspect_keyed_archive") ||
+          (["standalone", "Tool.app"].includes(filename) &&
+            name === "trace_dylib_resolution");
+        const group = groups.find((entry) => entry.names.includes(name));
+        expect(group, `${filename} ${name}`).toMatchObject({
+          available: supported,
+          reason: supported ? "available" : "target_unsupported",
+        });
+        if (!supported) {
+          expect(group?.remediation).toMatch(/requires an active/);
+          const refused = await client.callTool({ name, arguments: {} });
+          expect(parseMcpToolError(refused)).toMatchObject({
+            error: { code: "unsupported_target" },
+          });
+        }
+      }
+      if (filename.endsWith(".plist")) {
+        const inspected = await client.callTool({
+          name: "inspect_keyed_archive",
+          arguments: {},
+        });
+        if (filename === "keyed.plist")
+          expect(inspected.isError).not.toBe(true);
+        else
+          expect(parseMcpToolError(inspected)).toMatchObject({
+            error: { code: "unsupported_target" },
+          });
+      }
+      await client.callTool({ name: "close_binary", arguments: {} });
+    }
+    await writeFile(
+      join(contents, "state.plist"),
+      await readFile(join(root, "keyed.plist")),
+    );
+    for (const format of ["raw-binary", "dos-com"] as const) {
+      const opened = await client.callTool({
+        name: "open_binary",
+        arguments: {
+          path: join(root, "Fixture.app"),
+          format,
+          ...(format === "raw-binary"
+            ? { architecture: "x86_64", entry_point: "0x0" }
+            : {}),
+        },
+      });
+      expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
+      const groups = await availability();
+      for (const name of operations.filter(
+        (name) => name !== "trace_dylib_resolution",
+      ))
+        expect(
+          groups.find((group) => group.names.includes(name)),
+          `${format} ${name}`,
+        ).toMatchObject({ available: true });
+      const inspected = await client.callTool({
+        name: "inspect_keyed_archive",
+        arguments: { path: "Contents/state.plist" },
+      });
+      expect(inspected.isError, JSON.stringify(inspected)).not.toBe(true);
+      await client.callTool({ name: "close_binary", arguments: {} });
+    }
+  } finally {
+    await Promise.allSettled([client.close(), server.close(), session.close()]);
+  }
+});

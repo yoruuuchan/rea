@@ -1,9 +1,9 @@
 import {
-  GoBinaryFormatFailure,
-  GoBinaryResourceFailure,
-  type GoImageSection,
-} from "../go/GoBinaryContainer.js";
-import { readGoBinaryContainer } from "../go/GoBinaryImage.js";
+  BinaryFormatFailure,
+  BinaryResourceFailure,
+  type ImageSection,
+} from "../native/metadata/BinaryContainer.js";
+import { readBinaryContainer } from "../native/metadata/readBinaryContainer.js";
 import type {
   RustAuditableMetadata,
   RustBinary,
@@ -48,13 +48,13 @@ export const readRustBinaryImage = (bytes: Buffer): RustBinaryImage => {
 
 const readContainer = (bytes: Buffer) => {
   try {
-    return readGoBinaryContainer(bytes);
+    return readBinaryContainer(bytes);
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure)
+    if (cause instanceof BinaryFormatFailure)
       throw new RustAuditableFormatFailure(cause.kind, cause.message, {
         cause,
       });
-    if (cause instanceof GoBinaryResourceFailure)
+    if (cause instanceof BinaryResourceFailure)
       throw new RustAuditableResourceFailure(
         {
           resource: "memory",
@@ -71,8 +71,8 @@ const readContainer = (bytes: Buffer) => {
 
 const dependencySection = (
   format: RustBinaryImage["format"],
-  sections: readonly GoImageSection[],
-): GoImageSection | null => {
+  sections: readonly ImageSection[],
+): ImageSection | null => {
   const expected = format === "macho" ? "__DATA,.dep-v0" : ".dep-v0";
   const matches = sections.filter((section) => section.name === expected);
   if (matches.length > 1)
@@ -98,7 +98,7 @@ const dependencySection = (
 const readDependency = (
   bytes: Buffer,
   format: RustBinaryImage["format"],
-  section: GoImageSection,
+  section: ImageSection,
 ): RustAuditableMetadata =>
   readAuditableSection(
     format === "macho" ? "__DATA,.dep-v0" : ".dep-v0",
@@ -108,7 +108,7 @@ const readDependency = (
 
 const rustcCommit = (
   bytes: Buffer,
-  sections: readonly GoImageSection[],
+  sections: readonly ImageSection[],
 ): RustBinaryImage["rustc_commit"] => {
   const hashes: { hash: string; file_offset: number }[] = [];
   const seen = new Set<string>();
@@ -120,7 +120,7 @@ const rustcCommit = (
 };
 
 const mergedReadOnlyRanges = (
-  sections: readonly GoImageSection[],
+  sections: readonly ImageSection[],
 ): { readonly offset: number; readonly end: number }[] => {
   const ranges = sections
     .filter((section) => section.read_only && section.size > 0)

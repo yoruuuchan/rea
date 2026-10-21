@@ -18,7 +18,7 @@
   "vitepress": {
     "entry": ["docs/.vitepress/config.ts"]
   },
-  "ignoreBinaries": ["mkfifo"],
+  "ignoreBinaries": ["^g\\+\\+$", "mkfifo"],
   "ignoreDependencies": [
     "@stryker-mutator/command-runner",
     "electron",

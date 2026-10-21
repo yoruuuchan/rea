@@ -1,11 +1,9 @@
-import {
-  DOMParser,
-  normalizeLineEndings,
-  onErrorStopParsing,
-  type Document,
-} from "@xmldom/xmldom";
+import { DOMParser, onErrorStopParsing, type Document } from "@xmldom/xmldom";
 import { SaxesParser } from "saxes";
 import { err, ok, type Result } from "./result.js";
+
+/** XML 1.0 literal line endings; Unicode separators remain source characters. */
+export const XML_LINE_ENDING = /\r\n?|\n/gu;
 
 export class XmlDocumentParseError extends Error {
   readonly _tag = "XmlDocumentParseError";
@@ -48,7 +46,7 @@ export const parseXmlDocument = (
         normalizeLineEndings:
           policy.lineEndings === "preserve"
             ? (text) => text
-            : normalizeLineEndings,
+            : (text) => text.replace(XML_LINE_ENDING, "\n"),
         onError: onErrorStopParsing,
       }).parseFromString(source, "application/xml"),
     );

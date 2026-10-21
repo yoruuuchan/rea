@@ -30,11 +30,11 @@ import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
+import { readGoBinaryImage } from "./GoBinaryImage.js";
 import {
-  readGoBinaryImage,
-  GoBinaryFormatFailure,
-  GoBinaryResourceFailure,
-} from "./GoBinaryImage.js";
+  BinaryFormatFailure,
+  BinaryResourceFailure,
+} from "../native/metadata/BinaryContainer.js";
 import { parseGoModuleBytes, parseGoModuleText } from "./GoModuleText.js";
 
 /** Bundled format reader identity; embedded compiler versions are separate observed facts. */
@@ -57,7 +57,7 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
     return new AnalysisCancelledError(OPERATION, {
       cause: artifactFileCancellationCause(cause),
     });
-  if (cause instanceof GoBinaryResourceFailure)
+  if (cause instanceof BinaryResourceFailure)
     return new AnalysisResourceConstraintError(
       OPERATION,
       cause.boundary === "search" ? "cpu" : "memory",
@@ -75,7 +75,7 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
         ),
       },
     );
-  if (cause instanceof GoBinaryFormatFailure)
+  if (cause instanceof BinaryFormatFailure)
     return cause.kind === "unsupported"
       ? new AnalysisUnsupportedTargetError(OPERATION, path, cause.message, {
           cause,

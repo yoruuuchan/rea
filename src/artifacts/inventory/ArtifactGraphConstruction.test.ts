@@ -10,7 +10,7 @@ import {
   createArtifactEdges,
   classifyArtifactContent,
   createOccurrence,
-  indexOccurrencesByPath,
+  indexDestinationOccurrencesByPath,
   resolveOccurrenceParents,
 } from "./ArtifactGraphConstruction.js";
 import { createArtifactClassificationProbe } from "../ArtifactClassificationProbe.js";
@@ -42,7 +42,7 @@ describe("occurrence parent ownership", () => {
 
     resolveOccurrenceParents(
       occurrences,
-      indexOccurrencesByPath(occurrences),
+      indexDestinationOccurrencesByPath(occurrences),
       new Set(),
     );
 
@@ -57,7 +57,7 @@ describe("occurrence parent ownership", () => {
 
     const resolution = resolveOccurrenceParents(
       occurrences,
-      indexOccurrencesByPath(occurrences),
+      indexDestinationOccurrencesByPath(occurrences),
       new Set(),
     );
 

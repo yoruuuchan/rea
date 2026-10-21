@@ -12,6 +12,11 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { writeElectronApiAliasApplication } from "../../fixtures/electronApiAliasApplication.js";
+import {
+  createCliCommandSession,
+  type CliCommandSession,
+} from "../../support/cli/cliCommandSession.js";
+import { definedCliEnvironment } from "../../support/cli/cliFixture.js";
 
 import {
   JAVASCRIPT_FEATURE_TRACE_EXAMPLE,
@@ -34,6 +39,7 @@ import { javaScriptSemanticTraceResultSchema } from "../../../src/domain/javascr
 import type { JavaScriptSemanticQueryInput } from "../../../src/domain/javascript/javascriptSemanticQuerySchemas.js";
 
 const execute = promisify(execFile);
+let cliSession: CliCommandSession | undefined;
 const requireFixture = createRequire(import.meta.url);
 // Analysis requests are stateless; retain one compiled server and its SDK
 // validators while every scenario still owns a separate application directory.
@@ -57,9 +63,13 @@ const connectedMcpClient = async (): Promise<Client> => {
 
 afterAll(async () => {
   try {
-    await mcpClient.close();
+    try {
+      await mcpClient.close();
+    } finally {
+      await mcpTransport.close();
+    }
   } finally {
-    await mcpTransport.close();
+    await cliSession?.close();
   }
 });
 const WEBPACK_FACTORY_BODY = `
@@ -1809,27 +1819,19 @@ const runCli = async (
   arguments_: readonly string[],
   environment: Readonly<Record<string, string>> = {},
 ): Promise<unknown> => {
-  try {
-    const { stdout } = await execute(
-      process.execPath,
-      ["scripts/rea.mjs", ...arguments_],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, ...environment },
-        maxBuffer: 16 * 1_024 * 1_024,
-      },
-    );
-    return JSON.parse(stdout);
-  } catch (cause: unknown) {
-    if (
-      typeof cause === "object" &&
-      cause !== null &&
-      "stdout" in cause &&
-      typeof cause.stdout === "string"
-    )
-      return JSON.parse(cause.stdout);
-    throw cause;
-  }
+  cliSession ??= createCliCommandSession();
+  const result = await cliSession.run({
+    arguments: arguments_,
+    cwd: process.cwd(),
+    environment: definedCliEnvironment({ ...process.env, ...environment }),
+  });
+  const stdout = result.stdout.trim();
+  if (stdout.length > 0) return JSON.parse(stdout) as unknown;
+  throw new Error(
+    result.stderr.trim().length > 0
+      ? result.stderr
+      : `Compiled CLI command failed with status ${String(result.exitCode)}`,
+  );
 };
 
 /**

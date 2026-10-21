@@ -5,11 +5,11 @@ import {
   fatImage,
   machoImage,
 } from "../../../src/artifacts/apple/MachoImage.fixture.js";
-import {
-  readGoBinaryImage,
-  GoBinaryResourceFailure,
-} from "../../../src/go/GoBinaryImage.js";
-import { readGoMachoImage } from "../../../src/go/GoMachoImage.js";
+import { readGoBinaryImage } from "../../../src/go/GoBinaryImage.js";
+import { goBuildInfoSearch } from "../../../src/go/GoBuildInfoSearch.js";
+import { BinaryResourceFailure } from "../../../src/native/metadata/BinaryContainer.js";
+import { readMachoImage } from "../../../src/native/metadata/MachoImage.js";
+import { readBinaryContainer } from "../../../src/native/metadata/readBinaryContainer.js";
 import {
   createGoBinaryFixture,
   createGoSplitElfFixture,
@@ -17,9 +17,43 @@ import {
   GO_MODULE_TEXT,
 } from "../../fixtures/go/image.js";
 
+it("preserves exact Mach-O protection masks for Go fallback selection", () => {
+  const { bytes } = createGoBinaryFixture({
+    format: "macho",
+    sectionless: true,
+  });
+  const firstSegment = 32;
+  const secondSegment = 104;
+  bytes.writeUInt32LE(2, 16);
+  bytes.writeUInt32LE(144, 20);
+  bytes.writeUInt32LE(11, firstSegment + 56);
+  bytes.writeUInt32LE(11, firstSegment + 60);
+  bytes.writeUInt32LE(0x19, secondSegment);
+  bytes.writeUInt32LE(72, secondSegment + 4);
+  bytes.write("__DATA2", secondSegment + 8, "ascii");
+  bytes.writeBigUInt64LE(0x20000n, secondSegment + 24);
+  bytes.writeBigUInt64LE(BigInt(bytes.length), secondSegment + 32);
+  bytes.writeBigUInt64LE(0n, secondSegment + 40);
+  bytes.writeBigUInt64LE(BigInt(bytes.length), secondSegment + 48);
+  bytes.writeUInt32LE(3, secondSegment + 56);
+  bytes.writeUInt32LE(3, secondSegment + 60);
+
+  const container = readBinaryContainer(bytes);
+  expect(
+    container.load_regions?.map((region) => region.protection_masks),
+  ).toEqual([
+    { current: 11, maximum: 11 },
+    { current: 3, maximum: 3 },
+  ]);
+  expect(goBuildInfoSearch(bytes, container)).toMatchObject([
+    { address: 0x20000n, offset: 0, size: bytes.length },
+  ]);
+  expect(readGoBinaryImage(bytes).build_info?.go_version).toBe("go1.26.0");
+});
+
 it("bounds cumulative header searches across overlapping ELF file spans", () => {
   const bytes = createGoOverlappingElfFixture();
-  expect(() => readGoBinaryImage(bytes)).toThrow(GoBinaryResourceFailure);
+  expect(() => readGoBinaryImage(bytes)).toThrow(BinaryResourceFailure);
   expect(() => readGoBinaryImage(bytes)).toThrow(/256 MiB.*search/);
 });
 
@@ -633,7 +667,7 @@ it("does not mark Mach-O section bytes outside their owning segment as read-only
   fixture.bytes.writeBigUInt64LE(0x10c00n, section + 32);
   fixture.bytes.writeBigUInt64LE(128n, section + 40);
   fixture.bytes.writeUInt32LE(3072, section + 48);
-  const image = readGoMachoImage(fixture.bytes);
+  const image = readMachoImage(fixture.bytes);
   expect(image.sections[0]).toMatchObject({
     file_backed: false,
     read_only: false,

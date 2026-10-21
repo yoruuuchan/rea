@@ -33,7 +33,7 @@ export interface ArtifactReaderFailureOptions extends ErrorOptions {
 /** Archive-neutral entry metadata. Reader adapters never choose output paths. */
 export interface ArtifactEntry {
   readonly path: string;
-  readonly kind: "file" | "directory" | "symlink" | "slice";
+  readonly kind: "file" | "directory" | "symlink" | "slice" | "metadata";
   readonly declaredSize: number | null;
   readonly compressedSize: number | null;
   readonly executable: boolean;
@@ -167,6 +167,7 @@ export interface ArtifactReader {
     | ZipPackageFormat
     | "asar"
     | "godot-pck"
+    | "pyinstaller"
     | "file";
   entries(
     signal?: AbortSignal,

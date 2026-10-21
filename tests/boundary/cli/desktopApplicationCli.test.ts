@@ -1,5 +1,5 @@
 import { readEvidenceBundle } from "../../../src/application/EvidenceBundleFiles.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { cliTest } from "../../support/cli/cliFixture.js";
@@ -107,5 +107,62 @@ cliTest(
       ],
     });
     expect(overwrite.exitCode).not.toBe(0);
+  },
+);
+
+cliTest(
+  "refuses a non-directory or missing root as a target selection",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-desktop-cli-root-");
+    const file = join(root, "regular-file");
+    await writeFile(file, "fixture\n");
+    const notDirectory = await cli.run({
+      arguments: ["inspect-desktop-application", file, "--json"],
+    });
+    expect(notDirectory.exitCode).toBe(1);
+    expect(notDirectory.json).toMatchObject({
+      code: "unsupported_target",
+      category: "unsupported_target",
+      details: { operation: "inspect_desktop_application", path: file },
+    });
+    const missingPath = join(root, "missing-directory");
+    const missing = await cli.run({
+      arguments: ["inspect-desktop-application", missingPath, "--json"],
+    });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.json).toMatchObject({
+      code: "target_unavailable",
+      category: "unavailable",
+      details: { path: missingPath, reason: expect.stringContaining("ENOENT") },
+    });
+  },
+);
+
+cliTest.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "reports a read-denied root as host access denial with read-access recovery",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-desktop-cli-denied-");
+    const locked = join(root, "locked-directory");
+    await mkdir(locked);
+    await chmod(locked, 0o000);
+    try {
+      const denied = await cli.run({
+        arguments: ["inspect-desktop-application", locked, "--json"],
+      });
+      expect(denied.exitCode).toBe(1);
+      expect(denied.json).toMatchObject({
+        code: "access_denied",
+        category: "unavailable",
+        remediation: { action: expect.stringContaining("read access") },
+        details: {
+          path: locked,
+          system_code: "EACCES",
+          boundary: "filesystem-read",
+          partial_observation: expect.any(Object),
+        },
+      });
+    } finally {
+      await chmod(locked, 0o700);
+    }
   },
 );

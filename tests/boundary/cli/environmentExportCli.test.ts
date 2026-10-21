@@ -2,6 +2,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   stat,
   symlink,
   writeFile,
@@ -283,5 +284,59 @@ cliTest.skipIf(process.platform === "win32")(
     await expect(
       readFile(join(root, "bundle/README.md")),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+const HOST_PATH_MAX: Partial<Record<NodeJS.Platform, number>> = {
+  darwin: 1024,
+  linux: 4096,
+};
+
+cliTest.skipIf(HOST_PATH_MAX[process.platform] === undefined)(
+  "reports a later nested-file pathname-limit failure as a host write failure and keeps the partial folder",
+  async ({ cli }) => {
+    const limit = HOST_PATH_MAX[process.platform] ?? 0;
+    const root = await realpath(
+      await createTestTempDirectory("rea-export-long-path-"),
+    );
+    const files = await writeEnvironmentServeFiles(root);
+    // Shorter bundle paths fit; the 41-byte nested verifier path reaches the host limit.
+    const length = limit - 40;
+    let parent = join(root, "long");
+    while (Buffer.byteLength(parent) + 1 + 200 < length - 1)
+      parent = join(parent, "d".repeat(200));
+    await mkdir(parent, { recursive: true });
+    const directory = join(
+      parent,
+      "l".repeat(length - Buffer.byteLength(parent) - 1),
+    );
+    expect(Buffer.byteLength(directory)).toBe(length);
+    const failed = join(directory, "artifacts/check_grafana-example/verify.py");
+    const result = await cli.run({
+      arguments: [
+        "environment-export",
+        files.manifestPath,
+        "--evidence",
+        files.capturePath,
+        directory,
+        "--json",
+      ],
+      timeoutMs: 30_000,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.json).toMatchObject({
+      code: "unreadable_output",
+      remediation: { action: expect.stringContaining(directory) },
+      details: {
+        operation: "environment-export",
+        diagnostics: { output_directory: directory },
+      },
+    });
+    expect(result.json).not.toHaveProperty("details.issues");
+    const reason = (result.json as { details: { reason: string } }).details
+      .reason;
+    expect(reason).toContain("ENAMETOOLONG");
+    expect(reason).toContain(failed);
+    expect(await readFile(join(directory, "README.md"))).not.toHaveLength(0);
   },
 );

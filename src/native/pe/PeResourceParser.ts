@@ -120,7 +120,6 @@ export const parsePeResources = async (
     ancestors: ReadonlySet<number>,
   ): Promise<void> => {
     if (ancestors.has(at)) peFailure("Cyclic PE resource directory.");
-    if (at % 4 !== 0) peFailure("Unaligned PE resource directory.");
     const header = relative(at, 16);
     const named = bytes.readUInt16LE(header + 12);
     const ids = bytes.readUInt16LE(header + 14);
@@ -177,7 +176,6 @@ export const parsePeResources = async (
             "Unsupported resource leaf outside the type/name/language profile.",
           );
         const data = relative(offset, 16);
-        if (offset % 4 !== 0) peFailure("Unaligned resource data entry.");
         const rva = bytes.readUInt32LE(data);
         const size = bytes.readUInt32LE(data + 4);
         const payloadOffset = layout.map(rva, size);

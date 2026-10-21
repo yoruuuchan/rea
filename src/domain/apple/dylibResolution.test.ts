@@ -398,6 +398,9 @@ describe("dyld resolution outcomes: checking candidate format and compatibility"
         ({ outcome }) => outcome,
       ),
     ).toEqual(["not-mach-o", "malformed", "architecture-missing"]);
+    expect(trace.findings[0]?.explanation).toContain(
+      "No usable candidate for @rpath/lib.dylib exists in the analyzed root; found Contents/MacOS/a/lib.dylib (not a Mach-O image), Contents/MacOS/b/lib.dylib (malformed), Contents/MacOS/c/lib.dylib (missing the process architecture)",
+    );
     expect(trace.coverage).toEqual({
       status: "partial",
       unparsed_images: ["Contents/MacOS/b/lib.dylib"],
@@ -439,26 +442,6 @@ describe("dyld resolution outcomes: checking candidate format and compatibility"
       status: "resolved",
       image: "Contents/MacOS/c/lib.dylib",
     });
-  });
-
-  it("preserves unknown platform compatibility before a later known candidate", async () => {
-    const trace = await traceDylibLoading(
-      memoryView({
-        [MAIN]: executable({
-          rpaths: ["@executable_path/a", "@executable_path/b"],
-          dependencies: [dependency("@rpath/lib.dylib")],
-        }),
-        "Contents/MacOS/a/lib.dylib": parsed(slice({ platform: null })),
-        "Contents/MacOS/b/lib.dylib": parsed(slice()),
-      }),
-      { roots: [MAIN] },
-    );
-    const edge = edgeFor(trace, MAIN, "@rpath/lib.dylib");
-    expect(edge.candidates.map(({ outcome }) => outcome)).toEqual([
-      "undetermined",
-      "resolved",
-    ]);
-    expect(edge.resolution.status).toBe("conditional");
   });
 
   it("applies dyld Catalyst and zippered platform compatibility", async () => {
@@ -503,6 +486,104 @@ describe("dyld resolution outcomes: checking candidate format and compatibility"
       status: "resolved",
       image: "Contents/MacOS/zippered/lib.dylib",
     });
+  });
+});
+
+describe("platform-less dylib compatibility", () => {
+  it("keeps an unknown candidate unresolved and traces the later known fallback", async () => {
+    const trace = await traceDylibLoading(
+      memoryView({
+        [MAIN]: executable({
+          platform: 6,
+          platforms: [6],
+          rpaths: ["@executable_path/a", "@executable_path/b"],
+          dependencies: [dependency("@rpath/lib.dylib")],
+        }),
+        "Contents/MacOS/a/lib.dylib": parsed(slice({ platform: null })),
+        "Contents/MacOS/b/lib.dylib": parsed(
+          slice({
+            platform: 6,
+            platforms: [6],
+            dependencies: [dependency("@loader_path/libChild.dylib")],
+          }),
+        ),
+        "Contents/MacOS/b/libChild.dylib": parsed(
+          slice({ platform: 6, platforms: [6] }),
+        ),
+      }),
+      { roots: [MAIN] },
+    );
+    const edge = edgeFor(trace, MAIN, "@rpath/lib.dylib");
+    expect(edge.candidates.map(({ outcome }) => outcome)).toEqual([
+      "undetermined",
+      "resolved",
+    ]);
+    expect(edge.resolution).toEqual({
+      status: "conditional",
+      image: "Contents/MacOS/b/lib.dylib",
+    });
+    expect(edge.candidates[0]).not.toHaveProperty("platform_basis");
+    expect(trace.edges.map(({ loader }) => loader)).toContain(
+      "Contents/MacOS/b/lib.dylib",
+    );
+    expect(trace.images.map(({ path }) => path)).toContain(
+      "Contents/MacOS/b/libChild.dylib",
+    );
+    expect(trace.coverage.status).toBe("partial");
+    expect(trace.limitations).toContainEqual(
+      expect.stringContaining("Contents/MacOS/a/lib.dylib"),
+    );
+  });
+
+  it("does not infer a platform-less image's platform when process platform is unknown", async () => {
+    const trace = await traceDylibLoading(
+      memoryView({
+        [MAIN]: executable({
+          platform: null,
+          platforms: [],
+          rpaths: ["@executable_path/a"],
+          dependencies: [dependency("@rpath/lib.dylib")],
+        }),
+        "Contents/MacOS/a/lib.dylib": parsed(slice({ platform: null })),
+      }),
+      { roots: [MAIN] },
+    );
+    const edge = edgeFor(trace, MAIN, "@rpath/lib.dylib");
+    expect(edge.candidates[0]).toMatchObject({
+      outcome: "undetermined",
+      resolved_path: "Contents/MacOS/a/lib.dylib",
+    });
+    expect(edge.candidates[0]).not.toHaveProperty("platform_basis");
+    expect(edge.resolution).toEqual({ status: "undetermined", image: null });
+    expect(trace.coverage.status).toBe("partial");
+  });
+
+  it("does not treat a selected dylib root as an executable process context", async () => {
+    const library = "Contents/Frameworks/libRoot.dylib";
+    const child = "Contents/Frameworks/libChild.dylib";
+    const trace = await traceDylibLoading(
+      memoryView({
+        [library]: parsed(
+          slice({
+            file_type: "dylib",
+            file_type_code: 6,
+            platform: 1,
+            platforms: [1],
+            dependencies: [dependency("@loader_path/libChild.dylib")],
+          }),
+        ),
+        [child]: parsed(slice({ platform: null })),
+      }),
+      { roots: [library] },
+    );
+    const edge = edgeFor(trace, library, "@loader_path/libChild.dylib");
+    expect(edge.candidates[0]).toMatchObject({
+      outcome: "undetermined",
+      resolved_path: child,
+    });
+    expect(edge.candidates[0]).not.toHaveProperty("platform_basis");
+    expect(edge.resolution).toEqual({ status: "undetermined", image: null });
+    expect(trace.coverage.status).toBe("partial");
   });
 });
 

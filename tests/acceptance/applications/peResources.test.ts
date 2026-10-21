@@ -92,6 +92,59 @@ const expectPeInputFailuresAcrossAdapters = async (input: {
 
 const contract = toolContract("inspect_pe_resources");
 
+const expectPeWordAlignedRecordsAcrossAdapters = async (input: {
+  readonly cli: TestCli;
+  readonly client: Client;
+  readonly root: string;
+  readonly definition: Awaited<
+    ReturnType<Client["listTools"]>
+  >["tools"][number];
+}): Promise<void> => {
+  const { cli, client, root, definition } = input;
+  for (const plus of [false, true]) {
+    for (const [index, identities] of [
+      { type: 10, name: 1, language: "AB" },
+      { type: "AB", name: 1, language: 1033 },
+    ].entries()) {
+      const fixture = peResourceFixture(
+        plus,
+        [{ ...identities, payload: Buffer.from("opaque resource") }],
+        65536,
+        2,
+      );
+      const path = join(root, `word-aligned-${plus}-${index}.exe`);
+      await writeFile(path, fixture.bytes);
+      const result = await cli.run({
+        arguments: ["inspect-pe-resources", path, "--json"],
+      });
+      expect(result.exitCode, result.stderr).toBe(0);
+      const evidence = contract.outputSchema.parse(result.json);
+      const report = peResourcesSchema.parse(evidence.normalized_result);
+      expect(report.coverage).toMatchObject({
+        status: "complete",
+        resources: 1,
+      });
+      expect(report.resources[0]?.data_entry_location).toEqual({
+        offset: fixture.dataOffsets[0],
+        bytes: 16,
+      });
+      expect(report.resources[0]?.payload.sha256).toBe(
+        createHash("sha256").update("opaque resource").digest("hex"),
+      );
+      const response = await client.callTool(
+        { name: definition.name, arguments: { path } },
+        { toolDefinition: definition },
+      );
+      expect(response.isError).not.toBe(true);
+      expect(
+        contract.outputSchema.parse(response.structuredContent)
+          .normalized_result,
+      ).toEqual(evidence.normalized_result);
+      expect(await readFile(path)).toEqual(fixture.bytes);
+    }
+  }
+};
+
 const expectPeMappingOwnershipAcrossAdapters = async (
   cli: TestCli,
   client: Client,
@@ -284,6 +337,11 @@ cliTest(
     try {
       await client.connect(transport);
       const inventory = await client.listTools();
+      const definition = inventory.tools.find(
+        ({ name }) => name === contract.name,
+      );
+      if (definition === undefined)
+        throw new Error("Missing PE resource tool contract");
       expect(inventory.tools).toContainEqual(
         expect.objectContaining({
           name: contract.name,
@@ -301,6 +359,12 @@ cliTest(
         "inspect_pe_resources",
       );
       await expectPeInventoriesAcrossAdapters(cli, client, root);
+      await expectPeWordAlignedRecordsAcrossAdapters({
+        cli,
+        client,
+        root,
+        definition,
+      });
       await expectPeMappingOwnershipAcrossAdapters(cli, client, root);
       await expectPePaddingFailureAcrossAdapters({
         cli,

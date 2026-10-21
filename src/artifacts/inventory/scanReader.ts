@@ -26,7 +26,7 @@ import {
   createArtifactNode,
   createOccurrence,
   noteUnreadContainerSuffix,
-  indexOccurrencesByPath,
+  indexDestinationOccurrencesByPath,
   resolveOccurrenceParents,
   type MutableOccurrence,
 } from "./ArtifactGraphConstruction.js";
@@ -107,7 +107,7 @@ export const scanReader = async (
   await visitArtifactEntries(context, reader, "");
   // Archive directories may appear after their children. Resolve containment
   // against the complete index before directory identities are materialized.
-  const byPath = indexOccurrencesByPath(occurrences);
+  const byPath = indexDestinationOccurrencesByPath(occurrences);
   const parentResolution = resolveOccurrenceParents(
     occurrences,
     byPath,
@@ -167,11 +167,13 @@ const visitArtifactEntries = async (
   const stack: Array<{
     readonly reader: ArtifactReader;
     readonly prefix: string;
+    readonly containerId: string | null;
     readonly iterator: AsyncIterator<ArtifactEntry>;
   }> = [
     {
       reader: currentReader,
       prefix,
+      containerId: null,
       iterator: inventoryEntries(context, currentReader, prefix),
     },
   ];
@@ -202,7 +204,7 @@ const visitArtifactEntries = async (
       const occurrence = createOccurrence(
         entry,
         logicalPath,
-        null,
+        entry.kind === "metadata" ? frame.containerId : null,
         duplicateOrdinal,
       );
       let digested:
@@ -254,6 +256,7 @@ const visitArtifactEntries = async (
         stack.push({
           reader: nested,
           prefix: logicalPath,
+          containerId: occurrence.occurrence_id,
           iterator: inventoryEntries(context, nested, logicalPath),
         });
       }

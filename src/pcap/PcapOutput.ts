@@ -269,13 +269,14 @@ export const parseTsharkJsonOutput = async (
       return protocolFailure(
         "frame inventory is missing, duplicated or out of order",
       );
-    if (
-      field("frame.protocols").length !== 1 ||
-      field("frame.protocols")[0] === ""
-    )
+    const protocolStack = field("frame.protocols");
+    if (protocolStack.length !== 1)
       return protocolFailure(
         "packet protocol inventory is missing or ambiguous",
       );
+    // TShark reports [""] for a frame with no dissected protocol, including
+    // zero-length packets. Keep the frame without inventing a protocol row.
+    const protocol = protocolStack[0]!;
     // Count one occurrence per packet even for loopback or nested IP layers.
     for (const address of new Set([
       ...field("ip.src"),
@@ -314,10 +315,9 @@ export const parseTsharkJsonOutput = async (
     }
     for (const value of field("tls.handshake.extensions_server_name"))
       if (value !== "") add(sni, value);
-    for (const value of new Set(field("frame.protocols"))) {
-      if (value === "") continue;
-      if (!protocols.has(value)) charge(value);
-      protocols.set(value, (protocols.get(value) ?? 0) + 1);
+    if (protocol !== "") {
+      if (!protocols.has(protocol)) charge(protocol);
+      protocols.set(protocol, (protocols.get(protocol) ?? 0) + 1);
     }
     for (const value of field("http.request.full_uri")) {
       if (value === "" || observedUris.has(value)) continue;

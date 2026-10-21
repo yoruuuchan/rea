@@ -91,9 +91,15 @@ explicit path or endpoint and do not need it.
 
 - ASAR or extracted JavaScript/Electron tree:
   `analyze_javascript_application`.
-- Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX or DMG):
-  `open_binary` with the supplied local path; use `inspect_artifact` when its
-  graph and findings help answer the question.
+- Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX, DMG, or a PyInstaller
+  executable): `open_binary` with the supplied local path; use `inspect_artifact`
+  when its graph and findings help answer the question. A PyInstaller CArchive
+  is the application layer; the bootloader is only the native prefix. Start with
+  `detail: "summary"` for large inventories, then use retained inventory views
+  for selected member fields/pages. A complete small inventory can cost less
+  than extra calls and schemas. Runtime options are metadata, not files.
+  Compact delivery still inventories and hashes members. See the
+  [Python packaged applications guide](https://github.com/morluto/rea/blob/main/docs/python-packaged-applications.md).
 - Apple app plist, Interface Builder, asset catalog, or keyed archive resources:
   `open_bundle_resources`, then the selected resource tool. This does not
   require `CFBundleExecutable` or a deep provider. Resource sessions have no

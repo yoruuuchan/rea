@@ -1,5 +1,6 @@
 import { AnalysisResourceConstraintError } from "../../../src/domain/analysisErrorCore.js";
 import { signalDecodersSchema } from "../../../src/domain/signals/signalDecoders.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import { it, expect, onTestFinished } from "vitest";
 import { writeFile, readdir, chmod, symlink } from "node:fs/promises";
@@ -28,6 +29,9 @@ const fixture = async (mode = "ok", failCleanup = false) => {
 if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'sigrok-cli 0.7.1' : 'sigrok-cli 0.7.2\\nlibsigrokdecode 0.5.3'); console.error('version warning'); }
 else if (${JSON.stringify(mode)} === 'bad-version') console.log('unexpected version fallback');
 else if (${JSON.stringify(mode)} === 'nonzero') { console.error('invalid decoder'); process.exitCode = 1; }
+else if (${JSON.stringify(mode)} === 'unknown-decoder') { console.error("srd: ModuleNotFoundError: Failed to load decoder nosuchdecoder: import by name failed: No module named 'nosuchdecoder'\\nFailed to load protocol decoder nosuchdecoder."); process.exitCode = 1; }
+else if (${JSON.stringify(mode)} === 'broken-decoder') { console.error("srd: ModuleNotFoundError: Failed to load decoder uart: import by name failed: No module named 'serial'\\nFailed to load protocol decoder uart."); process.exitCode = 1; }
+else if (${JSON.stringify(mode)} === 'unknown-annotation') { console.error("Annotation 'nosuchclass' not found for protocol decoder 'uart'."); process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'malformed-copy') { chmodSync('recording', 0o600); writeFileSync('recording', 'changed'); }
 else if (${JSON.stringify(mode)} === 'oversized-copy') { chmodSync('recording', 0o600); truncateSync('recording', 32 * 1024 * 1024 + 1); }
 else if (${JSON.stringify(mode)} === 'line-budget') process.stdout.write('ID: uart' + '\\n'.repeat(65536));
@@ -247,6 +251,68 @@ it.each([
         name.startsWith("decoder-"),
       ),
     ).toEqual([]);
+  },
+);
+
+it.each([
+  [
+    "unknown-decoder",
+    { decoders: "uart:rx=RX,nosuchdecoder" },
+    "decoders",
+    "Failed to load protocol decoder nosuchdecoder.",
+  ],
+  [
+    "unknown-annotation",
+    { decoders: "uart", annotations: "uart=rx-data:nosuchclass" },
+    "annotations",
+    "Annotation 'nosuchclass' not found for protocol decoder 'uart'.",
+  ],
+] as const)(
+  "reports sigrok's %s refusal as invalid caller input",
+  async (mode, selection, field, refusal) => {
+    const f = await fixture(mode);
+    const result = await f.service.decode({ path: f.path, ...selection });
+    if (result.ok) throw new Error("Expected selector refusal");
+    expect(result.error._tag).toBe("AnalysisInputError");
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("inspect_signal_decoders"),
+      details: {
+        issues: [
+          {
+            path: [field],
+            reason: "invalid_value",
+            message: expect.stringContaining(refusal),
+          },
+        ],
+        captured_output: {
+          exit_code: 1,
+          stderr: expect.stringContaining(refusal),
+        },
+      },
+    });
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(
+      (await readdir(f.directory)).filter((name) =>
+        name.startsWith("decoder-"),
+      ),
+    ).toEqual([]);
+  },
+);
+
+it.each([
+  // An installed decoder whose own dependency is missing is an installation fault.
+  ["broken-decoder", { decoders: "uart" }],
+  // Refusals naming selectors the caller did not supply stay unclassified.
+  ["unknown-decoder", { decoders: "uart" }],
+  ["unknown-annotation", { decoders: "uart", annotations: "uart=rx-data" }],
+] as const)(
+  "keeps %s outside caller selectors as a provider failure",
+  async (mode, selection) => {
+    const f = await fixture(mode);
+    const result = await f.service.decode({ path: f.path, ...selection });
+    if (result.ok) throw new Error("Expected decoder failure");
+    expect(result.error._tag).toBe("ProviderAdapterError");
   },
 );
 

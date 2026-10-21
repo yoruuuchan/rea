@@ -78,8 +78,9 @@ without the artifacts lock, so it can record hashes while `check:pr` or
 `check:test` already holds that lock. The CI jobs still run the locked
 `check:ci:fast` and `check:ci:deep` commands.
 Use `npm run lint:details` or `npm run jscpd:details` for all console diagnostics.
-Both duplicate commands scan production and test code with the same 3% limit;
-the summary commands preserve checker failures and restore reports from cached
+Both duplicate commands scan production and test code using the limit in
+[`.jscpd.json`](https://github.com/morluto/rea/blob/main/.jscpd.json).
+The summary commands preserve checker failures and restore reports from cached
 static tasks. Both lint caches include the website, documentation configuration,
 and experiment code scanned by the checker; a regression compares the actual
 lint inventory with Turbo's resolved inputs.
@@ -155,7 +156,27 @@ rejection without a reason. That cleanup stays owned until a later close or
 call releases it. Another server does not open while the cleanup remains, and
 a cleanup that already succeeded is not run again. Pass
 `mcpCall` when a case needs its own server, environment, or lifecycle. CLI
-cases still start a fresh process.
+cases for that helper share one compiled CLI process per child environment.
+The first case pays process startup; later cases reuse the loaded runtime.
+The process restarts when the environment changes, after 32 commands, or when
+the worker reports a resident set of at least 1 GiB. A fatal worker failure
+or a broken session frame retires that process and waits for it to exit before
+the next command starts.
+`cli.run` still starts a fresh process, including stdin and explicit deadlines.
+`runFileCli` uses the file session for commands that have neither. Go binary,
+IL2CPP metadata, and dylib-resolution commands use that session. File teardown
+stops the shared CLI process, including startup still in flight, and does not
+open another after close.
+`exportedFunctionBindingsCli.test.ts` keeps its own compiled CLI parity
+process for the file and still compares that process's JSON command results
+with the MCP session. A command that does not respond is rejected. That
+process stays owned until it exits, and another process does not start while
+it remains. A process that stays running after SIGKILL remains owned so a
+later close can retry. Closing the session reports a failure when the process
+does not exit after stdin closes, once the child has been stopped.
+`applicationWorkflowCli.test.ts` keeps one compiled CLI process for its JSON
+commands, including a non-zero status whose stdout is still a JSON document,
+and closes that process after the file.
 
 The Apple artifact verifier step shares a job-temporary bytecode cache among
 its fresh CLI/MCP children via `REA_ARTIFACT_NODE_COMPILE_CACHE`. The artifact
@@ -271,7 +292,23 @@ termination. Simulated Windows controls do not establish native Windows behavior
 Native process-ownership controls distinguish start identity, zombie lifecycle,
 current parent/group relation, and token-read evidence. Retain generation-bound
 candidates through smaller lineage observations, table omissions, reparenting,
-group changes, and failed cleanup retries. A readable token with unavailable
+group changes, and failed cleanup retries. Identityless exit-refresh controls
+cover a replacement row that is not linked to the prior descendant set: a
+matching token on its own group is signaled, a foreign or absent token is not,
+an unreadable live token stays unresolved, a replacement that appears only in
+the confirmation table is still token-checked, a group discovered during
+revalidation is signaled before cleanup succeeds, a member that changes groups
+during confirmation is signaled in its new group, a PID first seen with a
+foreign token is read again on the confirmation table, a PID whose token was
+already read is read again even when its parent and group return to the
+pre-exit values, a pre-existing PID is read again when its parent or group
+changes, an unchanged pre-existing row that was never token-read stays unread,
+an unbounded confirmation
+chain stays unresolved, lineage reads a row again when its launcher-tree
+membership changes, a cached lineage token is read again on the next refresh, an initial descendant whose token already matched is read again on a later refresh, the launcher is read again on that refresh and a missing, unowned, or relation-changed launcher PID stays unavailable, a descendant absent from the latest refresh is omitted,
+a group that reappears after it was processed is revalidated once, a further
+reappearance stays unresolved, lineage publishes one row per PID, and lineage does not publish a
+verified empty descendant list while that row remains unexamined. A readable token with unavailable
 identity stays unresolved. Native UID facts, rather than an earlier process-table
 row, determine whether a token denial concerns another user. Darwin tests compile
 the helper and exercise snapshot growth, absence, lifecycle, and UID observations;

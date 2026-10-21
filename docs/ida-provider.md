@@ -41,6 +41,15 @@ rea function /absolute/path/to/program main --json
 rea decompile /absolute/path/to/program main --json
 ```
 
+If the registration cannot be read or validated, provider diagnostics retain its
+selected `registration_path` and the configuration owner's setting/constraint
+facts in `configuration_details.settings`, plus `configuration_remediation`.
+`configured` means a path was selected, not that it is valid or an IDA connection
+was established; failed registrations remain unavailable. Correct
+`REA_IDA_MCP_CONFIG` in the next CLI invocation's environment or the MCP server's
+launch environment. Restart/reconnect that server after changing its environment;
+an export in another shell does not update a running server.
+
 Open the **original input binary** in REA, not an `.idb` or `.i64` database. Its SHA-256 must match IDA's recorded input hash. REA checks the attached identity and image base around each analysis request. A mismatch or target switch fails with recovery guidance. The original input must remain readable by REA; WSL can use its mounted alias while the GUI runs on Windows. Attached profiles, including native mode, refuse universal Mach-O inputs at admission: every slice shares the recorded whole-file hash, so REA cannot verify which slice the GUI loaded. Open a thin file extracted with `lipo -thin` in both IDA and REA, or use headless mode, which analyzes the selected slice.
 
 REA's close operation releases its MCP connection or proxy. It never saves or closes the existing GUI database. External edits remain visible because results are live and are not replayed from snapshots. These checks do not lock the GUI or prove that the database is unpatched.

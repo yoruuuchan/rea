@@ -1,69 +1,112 @@
 /** Distinguish corrupt recognized binaries from containers outside parser coverage. */
-export class GoBinaryFormatFailure extends Error {
+export class BinaryFormatFailure extends Error {
   constructor(
     readonly kind: "malformed" | "unsupported",
     message: string,
   ) {
     super(message);
-    this.name = "GoBinaryFormatFailure";
+    this.name = "BinaryFormatFailure";
   }
 }
 
 /** Resource boundary exceeded while decoding metadata or native container structure. */
-export class GoBinaryResourceFailure extends Error {
+export class BinaryResourceFailure extends Error {
   constructor(
     readonly boundary: "build-info" | "structure" | "search",
     readonly maximum_bytes: number,
     message: string,
   ) {
     super(message);
-    this.name = "GoBinaryResourceFailure";
+    this.name = "BinaryResourceFailure";
   }
 }
 
 /** One file-backed virtual range; addresses stay exact until mapped to file offsets. */
-export interface GoFileMapping {
+export interface FileMapping {
   readonly address: bigint;
   readonly offset: number;
   readonly size: number;
 }
 
 /** Declared zero-initialized virtual memory with no corresponding file bytes. */
-export interface GoZeroFillMapping {
+export interface ZeroFillMapping {
   readonly address: bigint;
   readonly size: bigint;
 }
 
-/** One named file section. Invalid declared ranges stay visible with `file_backed: false`. */
-export interface GoImageSection {
+/** Native loader region facts; language-specific fallback selection belongs to consumers. */
+export interface LoadRegion {
+  readonly mapping: FileMapping;
+  readonly memory_size: bigint;
+  readonly read: boolean;
+  readonly write: boolean;
+  readonly execute: boolean;
+  /** Raw Mach-O VM_PROT masks preserve bits not represented by booleans. */
+  readonly protection_masks?: {
+    readonly current: number;
+    readonly maximum: number;
+  };
+}
+
+/** Parsed section facts; consumer metadata validity is separate from native structure. */
+export type ImageSection = {
   readonly name: string;
   readonly offset: number;
   readonly size: number;
   readonly file_backed: boolean;
   readonly read_only: boolean;
   readonly compressed: boolean;
-}
+} & (
+  | {
+      readonly format: "elf";
+      readonly type: number;
+      readonly address: bigint;
+      readonly declared_range: {
+        readonly offset: bigint;
+        readonly size: bigint;
+      };
+    }
+  | {
+      readonly format: "pe";
+      readonly virtual_address: number;
+      readonly virtual_size: number;
+      readonly raw_size: number;
+      readonly characteristics: number;
+    }
+  | {
+      readonly format: "macho";
+      readonly section_name: string;
+      readonly type: number;
+      readonly address: bigint;
+      readonly declared_range: {
+        readonly offset: bigint;
+        readonly size: bigint;
+      };
+      readonly segment_mapping: FileMapping | null;
+      readonly segment_unmapped: boolean;
+    }
+);
 
-/** Native container facts and its ordered producer-defined build-info search ranges. */
-export interface GoBinaryContainer {
+/** Native container facts, without language metadata search policy. */
+export interface BinaryContainer {
   readonly format: "elf" | "pe" | "macho";
   readonly architecture: string;
   readonly bits: 32 | 64;
   readonly byte_order: "little" | "big";
-  /** Declared preferred base when the container supplies one (PE). */
+  /** Declared PE preferred base, when available. */
   readonly image_base?: bigint;
-  /** Mach-O load-command observation; omitted for other formats. */
+  /** Mach-O load-command observation, when available. */
   readonly macho_chained_fixups?: boolean;
-  readonly mappings: readonly GoFileMapping[];
-  /** File-backed ranges the native loader marks executable; omitted if unobserved. */
-  readonly executable_mappings?: readonly GoFileMapping[];
-  readonly zero_fills: readonly GoZeroFillMapping[];
-  readonly sections: readonly GoImageSection[];
-  readonly search: readonly GoFileMapping[];
+  readonly mappings: readonly FileMapping[];
+  readonly load_regions?: readonly LoadRegion[];
+  /** File-backed ranges the native loader marks executable. */
+  readonly executable_mappings?: readonly FileMapping[];
+  readonly zero_fills: readonly ZeroFillMapping[];
+  readonly sections: readonly ImageSection[];
 }
 
 /** Reader that checks every structural range before decoding numeric fields. */
-export class GoBinaryReader {
+export class BinaryReader {
   constructor(
     readonly bytes: Buffer,
     readonly little: boolean,
@@ -78,7 +121,7 @@ export class GoBinaryReader {
       offset > this.bytes.length ||
       size > this.bytes.length - offset
     )
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         `${label} range is truncated or outside the file`,
       );
@@ -101,12 +144,12 @@ export class GoBinaryReader {
     return this.little ? value.readBigUInt64LE() : value.readBigUInt64BE();
   }
 
-  fileRange(offset: bigint, size: bigint, label: string): GoFileMapping {
+  fileRange(offset: bigint, size: bigint, label: string): FileMapping {
     if (
       offset > BigInt(this.bytes.length) ||
       size > BigInt(this.bytes.length) - offset
     )
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         `${label} range is outside the file`,
       );
@@ -118,7 +161,7 @@ export class GoBinaryReader {
   table(offset: bigint, count: number, width: number, label: string): number {
     const size = BigInt(count) * BigInt(width);
     if (size > 16n * 1024n * 1024n)
-      throw new GoBinaryResourceFailure(
+      throw new BinaryResourceFailure(
         "structure",
         16 * 1024 * 1024,
         `${label} exceeds the 16 MiB structural decoding budget`,
@@ -155,10 +198,10 @@ export const declaredFileRange = (
 
 /** Map a virtual span without losing precision or selecting an ambiguous alias. */
 export const mappedFileOffset = (
-  mappings: readonly GoFileMapping[],
+  mappings: readonly FileMapping[],
   address: bigint,
   size: number,
-  zeroFills: readonly GoZeroFillMapping[] = [],
+  zeroFills: readonly ZeroFillMapping[] = [],
 ): number => {
   let found: number | undefined;
   for (const mapping of mappings) {
@@ -171,20 +214,20 @@ export const mappedFileOffset = (
       continue;
     const offset = mapping.offset + Number(delta);
     if (found !== undefined && found !== offset)
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         "Virtual address has ambiguous file mappings",
       );
     found = offset;
   }
   if (found === undefined)
-    throw new GoBinaryFormatFailure(
+    throw new BinaryFormatFailure(
       "malformed",
       "Virtual address or string range is not file mapped",
     );
   for (const zeroFill of zeroFills) {
     if (spansOverlap(address, BigInt(size), zeroFill.address, zeroFill.size))
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         "Virtual address has ambiguous file and zero-fill mappings",
       );
@@ -199,7 +242,7 @@ export const mappedFileOffset = (
       BigInt(found) + start - address !==
       BigInt(mapping.offset) + start - mapping.address
     )
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         "Virtual address has ambiguous file mappings",
       );
@@ -209,8 +252,8 @@ export const mappedFileOffset = (
 
 /** Recognize a wholly zero-filled span while refusing even partial file aliases. */
 export const isZeroFilledSpan = (
-  mappings: readonly GoFileMapping[],
-  zeroFills: readonly GoZeroFillMapping[],
+  mappings: readonly FileMapping[],
+  zeroFills: readonly ZeroFillMapping[],
   address: bigint,
   size: number,
 ): boolean => {
@@ -225,7 +268,7 @@ export const isZeroFilledSpan = (
     return false;
   for (const mapping of mappings) {
     if (spansOverlap(address, bytes, mapping.address, BigInt(mapping.size)))
-      throw new GoBinaryFormatFailure(
+      throw new BinaryFormatFailure(
         "malformed",
         "Virtual address has ambiguous file and zero-fill mappings",
       );
@@ -243,17 +286,3 @@ const spansOverlap = (
   otherSize > 0n &&
   address < otherAddress + otherSize &&
   otherAddress < address + size;
-
-/** Decode metadata text without replacing invalid bytes or stripping an initial BOM. */
-export const goUtf8 = (bytes: Buffer, label: string): string => {
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      bytes,
-    );
-  } catch (cause) {
-    throw new GoBinaryFormatFailure(
-      "malformed",
-      `${label} contains malformed UTF-8: ${String(cause)}`,
-    );
-  }
-};

@@ -678,17 +678,33 @@ cliTest.runIf(SQLITE_NATIVE_LIMITS_AVAILABLE)(
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-sqlite-errors-public-");
     const path = join(root, "invalid.db");
-    await writeFile(path, "not a SQLite database");
     const { call } = await connectLocalToolsMcp();
-    const corrupt = await cli.run({
-      arguments: ["inspect-sqlite-database", path, "--json"],
-      environment: { REA_LOG_LEVEL: "silent" },
-    });
-    expect(corrupt.exitCode).toBe(1);
-    expect(corrupt.json).toMatchObject({ code: "invalid_request" });
-    expect((await call("inspect_sqlite_database", { path })).isError).toBe(
-      true,
-    );
+    // Distinct malformed selections each name their own selected path.
+    for (const selected of [path, join(root, "other-invalid.db")]) {
+      await writeFile(selected, "not a SQLite database");
+      const expectedError = {
+        code: "invalid_request",
+        details: {
+          issues: [
+            {
+              path: ["path"],
+              reason: "invalid_format",
+              message: `Selected SQLite database is invalid (file is not a database): ${selected}`,
+            },
+          ],
+        },
+      };
+      const corrupt = await cli.run({
+        arguments: ["inspect-sqlite-database", selected, "--json"],
+        environment: { REA_LOG_LEVEL: "silent" },
+      });
+      expect(corrupt.exitCode).toBe(1);
+      expect(corrupt.json).toMatchObject(expectedError);
+      const response = await call("inspect_sqlite_database", {
+        path: selected,
+      });
+      expect(parseMcpToolError(response).error).toMatchObject(expectedError);
+    }
     const valid = join(root, "valid.db");
     const database = new DatabaseSync(valid);
     try {

@@ -2,11 +2,14 @@ import { expect, it } from "vitest";
 import { fat } from "../../../src/domain/binaryTarget.fixture.js";
 import {
   createRustImage,
+  createRustImageWithGoSection,
   createRustHashOverflowImage,
   RUSTC_HASH,
   rustDependencyPayload,
 } from "../../fixtures/rust/image.js";
 import { readRustBinaryImage } from "../../../src/rust/RustBinaryImage.js";
+import { readBinaryContainer } from "../../../src/native/metadata/readBinaryContainer.js";
+import { readGoBinaryImage } from "../../../src/go/GoBinaryImage.js";
 import { RustAuditableFormatFailure } from "../../../src/rust/RustAuditableReader.js";
 
 const packages = [
@@ -139,3 +142,48 @@ it("refuses read-only data with more distinct rustc paths than it retains", () =
     }),
   );
 });
+
+it.each([
+  ["elf", "compressed"],
+  ["elf", "unmapped"],
+  ["elf", "zero-fill"],
+  ["elf", "duplicate"],
+  ["elf", "out-of-file"],
+  ["elf", "zero-address"],
+  ["macho", "unmapped"],
+  ["macho", "zero-fill"],
+  ["macho", "duplicate"],
+  ["macho", "out-of-file"],
+] as const)(
+  "retains Rust evidence beside an unrelated %s %s Go section",
+  (format, fault) => {
+    const bytes = createRustImageWithGoSection(format, fault);
+    const control = Buffer.from(bytes);
+    const sectionOffset = format === "elf" ? 768 + 11 : 408;
+    const sectionName = Buffer.from(
+      (format === "elf" ? ".other\0" : "__other\0").padEnd(
+        format === "elf" ? 13 : 16,
+        "\0",
+      ),
+      "ascii",
+    );
+    if (format === "elf") {
+      const nameOffset = Number(bytes.readBigUInt64LE(320 + 32));
+      sectionName.copy(control, 768 + nameOffset);
+    } else {
+      sectionName.copy(control, sectionOffset);
+    }
+    expect(readBinaryContainer(bytes).load_regions).toEqual(
+      readBinaryContainer(control).load_regions,
+    );
+    expect(() => readGoBinaryImage(bytes)).toThrow(/build-info|mapped/i);
+    expect(readRustBinaryImage(bytes)).toMatchObject({
+      format,
+      auditable_metadata: { file_offset: 1024, packages },
+      rustc_commit: {
+        evidence_kind: "inferred",
+        hashes: [{ hash: RUSTC_HASH, file_offset: 2048 }],
+      },
+    });
+  },
+);

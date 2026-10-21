@@ -290,6 +290,13 @@ it("binds raw literals to their nodes across normalized line endings and UTF-16 
   ]);
 });
 
+it("preserves Unicode line separators in plist string values", () => {
+  const value = "a\u0085b\u2028c\u2029d";
+  expect(
+    parseXmlPropertyList(`<plist><string>${value}</string></plist>`).value,
+  ).toBe(value);
+});
+
 it.each(["\u0085", "\u2028", "\u2029"])(
   "does not normalize unsupported leading whitespace %j into an observed scalar",
   (prefix) => {

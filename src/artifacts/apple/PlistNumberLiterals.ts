@@ -3,6 +3,7 @@ import {
   type PlistNumberLiterals,
 } from "../../domain/apple/plistNumbers.js";
 import { hasBinaryPlistSignature } from "../../domain/apple/appleArchiveFormat.js";
+import { binaryPlistDateRepresentable } from "./BinaryPlistDate.js";
 
 export interface BinaryPlistNumberMetadata {
   readonly literals: PlistNumberLiterals;
@@ -139,12 +140,30 @@ export const scanBinaryPlistNumberLiterals = (
   return { literals: output.result(), wideIntegers };
 };
 
-/** Preserve 16-byte integers through plist@5's Number-only parser. */
+/**
+ * Preserve 16-byte integers and unrepresentable dates through plist@5.
+ * Both rewrites share one decoder-input copy. The caller's buffer stays
+ * unchanged, and it is returned when neither rewrite is needed.
+ * Date seconds are read from the original bytes before any rewrite.
+ */
 export const decodeBinaryPlistNumbers = (
   bytes: Buffer,
   metadata: BinaryPlistNumberMetadata,
+  datePayloadOffsets: readonly number[] = [],
 ): Buffer => {
-  if (metadata.wideIntegers.length === 0) return bytes;
+  const unrepresentableDates: number[] = [];
+  for (const offset of datePayloadOffsets) {
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset + 8 > bytes.length
+    )
+      throw new TypeError("binary plist date object is truncated");
+    if (!binaryPlistDateRepresentable(bytes.readDoubleBE(offset)))
+      unrepresentableDates.push(offset);
+  }
+  if (metadata.wideIntegers.length === 0 && unrepresentableDates.length === 0)
+    return bytes;
   const compatible = Buffer.from(bytes);
   for (const { offset, value } of metadata.wideIntegers) {
     // Convert only the decoder's input copy to a double. Exact integer metadata
@@ -152,5 +171,7 @@ export const decodeBinaryPlistNumbers = (
     compatible[offset] = 0x23;
     compatible.writeDoubleBE(Number(value), offset + 1);
   }
+  for (const offset of unrepresentableDates)
+    compatible.writeDoubleBE(Number.NaN, offset);
   return compatible;
 };

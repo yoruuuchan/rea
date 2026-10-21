@@ -16,7 +16,7 @@ import {
   GO_MODULE_TEXT,
 } from "../fixtures/go/image.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
-import { cliTest } from "../support/cli/cliFixture.js";
+import { cliTest, runFileCli } from "../support/cli/cliFixture.js";
 import { parseEvidence } from "../../src/domain/evidence.js";
 import { connectLocalToolsMcp } from "../fixtures/localToolsMcp.js";
 import { parseMcpToolError } from "../fixtures/mcpToolError.js";
@@ -28,12 +28,12 @@ cliTest(
     const path = join(root, "application.elf");
     const output = join(root, "source.json");
     await writeFile(path, createGoBinaryFixture().bytes);
-    const complete = await cli.run({
+    const complete = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(complete.exitCode, complete.stderr).toBe(0);
     const full = evidenceResultOf(goBinarySchema).parse(complete.json);
-    const summary = await cli.run({
+    const summary = await runFileCli(cli, {
       arguments: [
         "inspect-go-binary",
         path,
@@ -62,7 +62,7 @@ cliTest(
         .map((record) => parseEvidence(record))
         .find((record) => record.evidence_id === full.evidence_id),
     ).toEqual(full);
-    const refused = await cli.run({
+    const refused = await runFileCli(cli, {
       arguments: [
         "inspect-go-binary",
         join(root, "missing"),
@@ -86,7 +86,7 @@ cliTest(
     const root = await createTestTempDirectory("rea-go-overlap-");
     const path = join(root, "overlapping.elf");
     await writeFile(path, createGoOverlappingElfFixture());
-    const result = await cli.run({
+    const result = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(result.exitCode).toBe(1);
@@ -120,7 +120,7 @@ cliTest(
       const fixture = createGoSplitElfFixture({ sectionless });
       const path = join(root, sectionless ? "sectionless.elf" : "original.elf");
       await writeFile(path, fixture.bytes);
-      const result = await cli.run({
+      const result = await runFileCli(cli, {
         arguments: ["inspect-go-binary", path, "--json"],
       });
       expect(result.exitCode, result.stderr).toBe(0);
@@ -156,7 +156,7 @@ for (const bits of [32, 64] as const) {
         ] as const) {
           const path = join(root, `${label}.exe`);
           await writeFile(path, bytes);
-          const result = await cli.run({
+          const result = await runFileCli(cli, {
             arguments: ["inspect-go-binary", path, "--json"],
           });
           expect(result.exitCode, result.stderr).toBe(0);
@@ -208,7 +208,7 @@ cliTest(
         path,
         machoImageWithUnknownCommand(fixture.wide, fixture.size),
       );
-      const result = await cli.run({
+      const result = await runFileCli(cli, {
         arguments: ["inspect-go-binary", path, "--json"],
       });
       const response = await call("inspect_go_binary", { path });
@@ -248,7 +248,7 @@ for (const expectedErrno of ["ELOOP", "ENAMETOOLONG"] as const) {
         root,
         expectedErrno,
       );
-      const result = await cli.run({
+      const result = await runFileCli(cli, {
         arguments: ["inspect-go-binary", path, "--json"],
       });
       expect(result.exitCode).toBe(1);
@@ -279,7 +279,7 @@ cliTest(
     const path = join(root, "byte-strings.elf");
     const fixture = createGoBinaryByteStringFixture();
     await writeFile(path, fixture.bytes);
-    const result = await cli.run({
+    const result = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(result.exitCode, result.stderr).toBe(0);
@@ -297,7 +297,7 @@ for (const fixture of createGoBinaryDiagnosticFixtures()) {
       const root = await createTestTempDirectory("rea-go-cli-mz-");
       const path = join(root, `${fixture.name}.exe`);
       await writeFile(path, fixture.bytes);
-      const result = await cli.run({
+      const result = await runFileCli(cli, {
         arguments: ["inspect-go-binary", path, "--json"],
       });
       expect(result.exitCode).toBe(1);
@@ -318,7 +318,7 @@ cliTest(
     const root = await createTestTempDirectory("rea-go-cli-");
     const path = join(root, "text.bin");
     await writeFile(path, "This is not an executable container.");
-    const result = await cli.run({
+    const result = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(result.exitCode).toBe(1);
@@ -338,7 +338,7 @@ for (const format of ["elf", "pe", "macho"] as const) {
         const fixture = createGoBinaryFixture({ format, encoding });
         const path = join(root, "application.bin");
         await writeFile(path, fixture.bytes);
-        const result = await cli.run({
+        const result = await runFileCli(cli, {
           arguments: ["inspect-go-binary", "application.bin", "--json"],
           cwd: root,
         });
@@ -409,7 +409,7 @@ cliTest("preserves MIPS identity in Go CLI Evidence", async ({ cli }) => {
   fixture.bytes.writeUInt16LE(8, 18); // ELF EM_MIPS.
   const path = join(root, "application.elf");
   await writeFile(path, fixture.bytes);
-  const result = await cli.run({
+  const result = await runFileCli(cli, {
     arguments: ["inspect-go-binary", path, "--json"],
   });
   expect(result.exitCode, result.stderr).toBe(0);
@@ -428,7 +428,7 @@ cliTest(
     const root = await createTestTempDirectory("rea-go-cli-");
     const path = join(root, "metadata-free.elf");
     await writeFile(path, createGoBinaryFixture({ omitBuildInfo: true }).bytes);
-    const result = await cli.run({
+    const result = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(result.exitCode).toBe(0);
@@ -452,7 +452,7 @@ cliTest(
     const root = await createTestTempDirectory("rea-go-gopath-cli-");
     const path = join(root, "application.elf");
     await writeFile(path, createGoBinaryFixture({ moduleText }).bytes);
-    const result = await cli.run({
+    const result = await runFileCli(cli, {
       arguments: ["inspect-go-binary", path, "--json"],
     });
     expect(result.exitCode, result.stderr).toBe(0);

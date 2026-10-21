@@ -113,6 +113,20 @@ it.for<PlistSourceCase>([
     expected: "binary",
     xmlFallback: true,
   },
+  {
+    description: "Apple binary property list\n",
+    expected: "binary",
+    xmlFallback: true,
+    convertedXml:
+      "<plist><dict><key>nel</key><string>a\u0085b</string><key>ls</key><string>a\u2028b</string><key>ps</key><string>a\u2029b</string><key>lf</key><string>a\nb</string><key>payload</key><data>AA==</data></dict></plist>",
+    expectedValue: {
+      nel: "a\u0085b",
+      ls: "a\u2028b",
+      ps: "a\u2029b",
+      lf: "a\nb",
+      payload: { $plist_type: "data", base64: "AA==" },
+    },
+  },
 ])(
   "keeps source format $expected for $description (XML fallback: $xmlFallback)",
   async (

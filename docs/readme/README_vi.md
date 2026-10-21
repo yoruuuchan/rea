@@ -162,6 +162,7 @@ REA yêu cầu Node.js 22.x (>=22.19), 24.x (>=24.11) hoặc 26+, cùng với np
 | Tín hiệu logic đã ghi             | Chú thích bộ giải mã, phạm vi mẫu và chẩn đoán                                                                  | Linux: sigrok-cli 0.7.2 + prlimit; [hướng dẫn tín hiệu](../signal-recordings.md)                                                          |
 | Gói và tài nguyên                 | Danh sách tệp, giá trị băm, plist, cấu trúc bundle Apple và tài nguyên được trích xuất                          | [Hướng dẫn hiện vật phần mềm và JavaScript](../javascript-artifact-reconstruction.md), [ứng dụng Apple](../apple-application-analysis.md) |
 | Hành vi tiến trình                | Đầu ra terminal, tương tác, quan sát khi thoát và hệ thống tệp, cùng so sánh các lần chạy                       | Linux/macOS có PTY gốc; [ghi lại tiến trình](../process-capture.md)                                                                       |
+| PyInstaller                       | CArchive, PYZ, Python bytecode                                                                                  | Static inspection; [Python packaged applications](../python-packaged-applications.md)                                                     |
 
 Kiểm tra tĩnh JavaScript và .NET đọc các tệp được cung cấp mà không chạy ứng dụng. Ghi lại khi chạy sẽ khởi chạy hoặc tương tác với mục tiêu đã chọn bằng quyền người dùng của bạn; từng hướng dẫn mô tả tác động của nó.
 

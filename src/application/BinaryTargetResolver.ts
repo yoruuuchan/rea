@@ -90,11 +90,15 @@ export const parseBinaryTarget = async (
   const hostArchitecture = options.hostArchitecture ?? process.arch;
   const { targetKind, formatHint, signal, architecture, entryPoint } = options;
   const candidate = absoluteCallerPath(input, { cwd });
+  // Failures before canonicalization concern the selected path itself; later
+  // failures concern the canonical path opened with symbolic links rejected.
+  let stage: TargetFilesystemStage = "resolve";
   try {
     throwIfTargetResolutionCancelled(signal);
     await access(candidate, constants.R_OK);
     throwIfTargetResolutionCancelled(signal);
     const canonical = await realpath(candidate);
+    stage = "read";
     // Windows native admission must inspect the caller-selected reparse components.
     const sourcePath = process.platform === "win32" ? candidate : canonical;
     throwIfTargetResolutionCancelled(signal);
@@ -135,6 +139,7 @@ export const parseBinaryTarget = async (
         return ok({
           path,
           sourcePath,
+          ...bundle,
           sha256: await sha256Handle(handle, path, metadata, signal),
           kind: "executable",
           format: "raw-binary",
@@ -174,6 +179,7 @@ export const parseBinaryTarget = async (
         return ok({
           path,
           sourcePath,
+          ...bundle,
           sha256: await sha256Handle(handle, path, metadata, signal),
           kind: "executable",
           format: "dos-com",
@@ -245,24 +251,39 @@ export const parseBinaryTarget = async (
       );
     if (cause instanceof BinaryTargetError) return err(cause);
     if (!(cause instanceof Error)) throw cause;
-    const failure = classifyBinaryTargetFilesystemFailure(candidate, cause);
+    const failure = classifyTargetFilesystemFailure(candidate, cause, stage);
     if (failure === undefined) throw cause;
     return err(failure);
   }
 };
 
+/**
+ * `resolve` covers the caller-selected path before canonicalization; `read`
+ * covers a canonical path opened with symbolic links rejected.
+ */
+type TargetFilesystemStage = "resolve" | "read";
+
 /** Classify a filesystem failure while reading a previously selected target. */
 export const classifyBinaryTargetFilesystemFailure = (
   path: string,
   cause: unknown,
+): BinaryTargetError | undefined =>
+  classifyTargetFilesystemFailure(path, cause, "read");
+
+const classifyTargetFilesystemFailure = (
+  path: string,
+  cause: unknown,
+  stage: TargetFilesystemStage,
 ): BinaryTargetError | undefined => {
   if (!(cause instanceof Error)) return undefined;
   const code = filesystemErrorCode(cause);
   return code === undefined
     ? undefined
-    : new BinaryTargetError(path, targetFailureReason(code, cause.message), {
-        cause,
-      });
+    : new BinaryTargetError(
+        path,
+        targetFailureReason(code, cause.message, stage),
+        { cause },
+      );
 };
 
 const filesystemErrorCode = (cause: Error): string | undefined => {
@@ -270,7 +291,11 @@ const filesystemErrorCode = (cause: Error): string | undefined => {
   return typeof code === "string" ? code : undefined;
 };
 
-const targetFailureReason = (code: string, detail: string): string => {
+const targetFailureReason = (
+  code: string,
+  detail: string,
+  stage: TargetFilesystemStage,
+): string => {
   switch (code) {
     case "ENOENT":
     case "ENOTDIR":
@@ -283,7 +308,12 @@ const targetFailureReason = (code: string, detail: string): string => {
     case "ENOTFILE":
       return "target is not a regular file";
     case "ELOOP":
-      return `target changed while being opened: ${detail}`;
+      // A canonical path has no symbolic links left, so a link rejected while
+      // reading it appeared after resolution. Before that, ELOOP is a loop or
+      // an over-deep link chain in the selected path itself.
+      return stage === "resolve"
+        ? `target path could not be resolved: too many symbolic links or a symbolic link loop: ${detail}`
+        : `target changed while being opened: ${detail}`;
     default:
       return `target could not be read (${code}): ${detail}`;
   }

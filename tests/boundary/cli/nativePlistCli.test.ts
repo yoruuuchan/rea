@@ -228,6 +228,7 @@ describe.skipIf(process.platform !== "darwin")(
             "<key>CFBundleExecutable</key><string>App</string>",
             "<key>CFBundleIdentifier</key><string>com.example.types</string>",
             "<key>Blob</key><data>AAEC</data>",
+            "<key>Separators</key><string>a\u0085b\u2028c\u2029d</string>",
             "<key>Built</key><date>2020-01-01T00:00:00Z</date>",
             // Parse the unsigned extended year as a UTC field, without JS string-date inference.
             "<key>Far</key><date>11507-08-17T05:20:00Z</date>",
@@ -261,6 +262,7 @@ describe.skipIf(process.platform !== "darwin")(
             value: {
               CFBundleIdentifier: "com.example.types",
               Blob: { $plist_type: "data", base64: "AAEC" },
+              Separators: "a\u0085b\u2028c\u2029d",
               Built: {
                 $plist_type: "date",
                 iso8601: "2020-01-01T00:00:00.000Z",

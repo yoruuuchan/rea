@@ -115,6 +115,7 @@ export const preflightPropertyListDecode = (
           numberProjection,
         ),
         binaryPrototypeKeyObserved: false,
+        binaryDatePayloadOffsets: [],
       };
   if (expansion.estimatedBytes > maxBytes)
     throw new InterfaceBuilderDecodeBudgetExceeded(
@@ -225,6 +226,8 @@ export interface BinaryPlistExpansionOptions {
 export interface PlistDecodePreflight {
   readonly estimatedBytes: number;
   readonly binaryPrototypeKeyObserved: boolean;
+  /** Offsets of reachable `0x33` date payloads. Empty for XML. */
+  readonly binaryDatePayloadOffsets: readonly number[];
 }
 
 const PROTOTYPE_KEY = "__proto__";
@@ -232,7 +235,8 @@ const PROTOTYPE_KEY = "__proto__";
 /**
  * Count every expanded binary-plist reference before calling plist.parseBinary,
  * which recurses on each reference and copies shared containers. Malformed
- * structure throws TypeError; budget, depth, and cycle failures use `fail`.
+ * structure, including a reachable date marker other than `0x33`, throws
+ * TypeError; budget, depth, and cycle failures use `fail`.
  */
 export const estimateBinaryPlistExpansion = (
   bytes: Buffer,
@@ -277,11 +281,14 @@ export const estimateBinaryPlistExpansion = (
   // Metadata covers the full object table; projected values may repeat through references.
   const objectBytes = numberProjection ? 144 : 16;
   const expandedNodeBytes = numberProjection ? 224 : 96;
-  // Number projection may require a same-sized parser-compatible input copy
-  // for wide integers. Reserve for it before the caller allocates that copy.
+  // Number projection may require one same-sized parser-compatible input copy.
+  // That copy carries wide-integer rewrites and unrepresentable date payloads.
+  // Reserve for it before the caller allocates that copy.
   let estimate =
     bytes.length * (numberProjection ? 3 : 2) + objectCount * objectBytes;
   let binaryPrototypeKeyObserved = false;
+  const datePayloadOffsets: number[] = [];
+  const recordedDateObjects = new Set<number>();
   if (estimate > maxBytes)
     throw fail("expansion", `binary plist object table exceeds ${budget}`);
 
@@ -366,6 +373,28 @@ export const estimateBinaryPlistExpansion = (
         );
       continue;
     }
+    if (type === 3) {
+      // Binary plist dates are only marker 0x33 plus an 8-byte float inside
+      // the object region. Decoder bounds let other objects use trailing
+      // bytes; a date there would be parsed as a timestamp. The payload
+      // offset is retained so the decoder can judge that source instant
+      // without matching rounded timestamps across objects.
+      if (
+        offset >= offsetTable ||
+        !Number.isSafeInteger(cursor + 8) ||
+        cursor + 8 > offsetTable
+      )
+        throw new TypeError("binary plist date object is truncated");
+      if (marker !== 0x33)
+        throw new TypeError(
+          `binary plist date marker 0x${marker.toString(16)} is invalid`,
+        );
+      if (!recordedDateObjects.has(entry.object)) {
+        recordedDateObjects.add(entry.object);
+        datePayloadOffsets.push(cursor);
+      }
+      continue;
+    }
     if (type !== 10 && type !== 13) continue;
     const childCount = type === 13 ? size * 2 : size;
     const refsEnd = cursor + childCount * referenceSize;
@@ -402,5 +431,9 @@ export const estimateBinaryPlistExpansion = (
     }
     pendingObjectCount += childCount;
   }
-  return { estimatedBytes: estimate, binaryPrototypeKeyObserved };
+  return {
+    estimatedBytes: estimate,
+    binaryPrototypeKeyObserved,
+    binaryDatePayloadOffsets: datePayloadOffsets,
+  };
 };

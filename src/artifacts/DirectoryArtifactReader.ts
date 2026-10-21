@@ -60,6 +60,12 @@ export class DirectoryArtifactTraversalLimit extends ArtifactReaderFailure {
   }
 }
 
+/**
+ * The selected root could not be admitted or opened. The consumer that owns
+ * the caller's selection classifies it; `cause` retains the host failure.
+ */
+export class DirectoryArtifactRootFailure extends ArtifactReaderFailure {}
+
 /** Non-symlink-following directory reader. */
 export class DirectoryArtifactReader implements ArtifactReader {
   readonly format = "directory" as const;
@@ -133,7 +139,7 @@ export class DirectoryArtifactReader implements ArtifactReader {
           "Artifact root changed during traversal",
         );
       if (!metadata.isDirectory())
-        throw new ArtifactReaderFailure(
+        throw new DirectoryArtifactRootFailure(
           "path",
           "Artifact root must be a directory",
         );
@@ -143,7 +149,12 @@ export class DirectoryArtifactReader implements ArtifactReader {
       });
     })().catch((cause: unknown) => {
       if (cause instanceof ArtifactReaderFailure) throw cause;
-      throw directoryIoFailure("resolve artifact root", this.#rootPath, cause);
+      throw directoryIoFailure(
+        "resolve artifact root",
+        this.#rootPath,
+        cause,
+        DirectoryArtifactRootFailure,
+      );
     }));
   }
 
@@ -158,7 +169,14 @@ export class DirectoryArtifactReader implements ArtifactReader {
     const root = admittedRoot.canonicalPath;
     const handle = new OwnedDirectoryHandle(
       await opendir(directory).catch((cause: unknown) => {
-        throw directoryIoFailure("open directory", directory, cause);
+        throw directoryIoFailure(
+          "open directory",
+          directory,
+          cause,
+          directory === root
+            ? DirectoryArtifactRootFailure
+            : ArtifactReaderFailure,
+        );
       }),
     );
     this.#directories.add(handle);
@@ -484,6 +502,7 @@ const directoryIoFailure = (
   operation: string,
   path: string,
   cause: unknown,
+  Failure: typeof ArtifactReaderFailure = ArtifactReaderFailure,
 ): ArtifactReaderFailure => {
   if (cause instanceof ArtifactReaderFailure) return cause;
   const code =
@@ -494,7 +513,7 @@ const directoryIoFailure = (
       ? ` (${cause.code})`
       : "";
   const detail = failureMessage(cause);
-  return new ArtifactReaderFailure(
+  return new Failure(
     "io",
     `Could not ${operation} at ${path}${code}: ${detail}`,
     { cause },

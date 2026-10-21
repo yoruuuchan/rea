@@ -1,6 +1,7 @@
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
 import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import { hasDestinationPath } from "../ArtifactPaths.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import { isJavaScriptSourcePath } from "../../domain/javascript/javascriptArtifactFiles.js";
 import { digestCanonicalValue } from "../../domain/canonicalDigest.js";
@@ -56,12 +57,13 @@ export interface MutableOccurrence {
   limitations: string[];
 }
 
-/** Index every occurrence by canonical logical path without choosing an owner. */
-export const indexOccurrencesByPath = (
+/** Index destination paths without mixing in declaration query names or choosing an owner. */
+export const indexDestinationOccurrencesByPath = (
   occurrences: readonly MutableOccurrence[],
 ): ReadonlyMap<string, readonly MutableOccurrence[]> => {
   const byPath = new Map<string, MutableOccurrence[]>();
   for (const occurrence of occurrences) {
+    if (!hasDestinationPath(occurrence.entry_kind)) continue;
     const matches = byPath.get(occurrence.logical_path);
     if (matches === undefined)
       byPath.set(occurrence.logical_path, [occurrence]);
@@ -82,16 +84,18 @@ export const createOccurrence = (
   duplicateOrdinal = 0,
 ): MutableOccurrence => {
   const role =
-    entry.kind === "directory"
-      ? {
-          kind: path.toLowerCase().endsWith(".framework")
-            ? ("framework" as const)
-            : ("container" as const),
-          format: "directory" as const,
-        }
-      : containerSuffixFamily(path) === undefined
-        ? classifyArtifactPath(path)
-        : ({ kind: "unknown", format: "unknown" } as const);
+    entry.kind === "metadata"
+      ? { kind: "package-metadata" as const, format: "unknown" as const }
+      : entry.kind === "directory"
+        ? {
+            kind: path.toLowerCase().endsWith(".framework")
+              ? ("framework" as const)
+              : ("container" as const),
+            format: "directory" as const,
+          }
+        : containerSuffixFamily(path) === undefined
+          ? classifyArtifactPath(path)
+          : ({ kind: "unknown", format: "unknown" } as const);
   return {
     occurrence_id: `occ_${digestCanonicalValue(
       duplicateOrdinal === 0
@@ -263,7 +267,7 @@ export const rootOccurrenceFor = (
   artifact_kind:
     metadata.format === "directory" ||
     isZipPackageFormat(metadata.format) ||
-    ["asar", "godot-pck", "dmg", "pkg"].includes(metadata.format)
+    ["asar", "godot-pck", "dmg", "pkg", "pyinstaller"].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
   artifact_format: metadata.format,
@@ -316,7 +320,7 @@ export const createArtifactEdges = (
   producer?: ArtifactCommand,
 ): { readonly edges: ArtifactEdge[]; readonly limitations: string[] } => {
   const byId = new Map(occurrences.map((item) => [item.occurrence_id, item]));
-  const byPath = indexOccurrencesByPath(occurrences);
+  const byPath = indexDestinationOccurrencesByPath(occurrences);
   const edges: ArtifactEdge[] = [];
   const limitations: string[] = [];
   for (const occurrence of occurrences) {
@@ -364,11 +368,14 @@ export const createArtifactEdges = (
       relation:
         occurrence.entry_kind === "slice"
           ? ("slice-of" as const)
-          : isSourceMap
-            ? mappedSource === undefined
-              ? ("contains" as const)
-              : ("maps-source" as const)
-            : relationFor(occurrence.logical_path),
+          : occurrence.format_metadata?.kind === "pyinstaller-entry" &&
+              occurrence.format_metadata.bytecode_header === "derived"
+            ? ("derived-from" as const)
+            : isSourceMap
+              ? mappedSource === undefined
+                ? ("contains" as const)
+                : ("maps-source" as const)
+              : relationFor(occurrence.logical_path),
       occurrence_id: occurrence.occurrence_id,
     };
     edges.push({
@@ -428,6 +435,9 @@ export const resolveOccurrenceParents = (
   const limitations = new Set<string>();
   const unknownParentOccurrences = new Set<MutableOccurrence>();
   for (const occurrence of occurrences) {
+    // Query paths do not imply filesystem containment. The scanner records
+    // the declaring container for metadata instead.
+    if (occurrence.entry_kind === "metadata") continue;
     const path = occurrence.logical_path;
     let branch = root;
     let parent: MutableOccurrence | undefined;

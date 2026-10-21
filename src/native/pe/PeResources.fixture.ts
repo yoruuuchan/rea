@@ -38,6 +38,7 @@ export const peResourceFixture = (
     { type: 14, name: 42, language: 1033, payload: iconGroup() },
   ],
   sectionBytes = 65536,
+  recordAlignment: 2 | 4 = 4,
 ) => {
   const tree: Tree = { children: new Map() };
   for (const resource of resources) {
@@ -61,7 +62,7 @@ export const peResourceFixture = (
   }
   const section = Buffer.alloc(sectionBytes);
   let cursor = 0;
-  const allocate = (size: number, alignment = 4): number => {
+  const allocate = (size: number, alignment = recordAlignment): number => {
     cursor = Math.ceil(cursor / alignment) * alignment;
     const at = cursor;
     cursor += size;
@@ -110,7 +111,7 @@ export const peResourceFixture = (
   };
   emit(tree);
   for (const { dataAt, resource } of leaves) {
-    const payloadAt = allocate(resource.payload.length);
+    const payloadAt = allocate(resource.payload.length, 4);
     resource.payload.copy(section, payloadAt);
     section.writeUInt32LE(0x2000 + payloadAt, dataAt);
     section.writeUInt32LE(resource.payload.length, dataAt + 4);

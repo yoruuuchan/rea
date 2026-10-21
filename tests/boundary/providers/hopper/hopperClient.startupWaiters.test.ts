@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 
 import { expect, it, vi } from "vitest";
 
+import { HopperCancelledError } from "../../../../src/domain/hopperErrors.js";
 import { HopperClient } from "../../../../src/hopper/HopperClient.js";
 import { ok } from "../../../../src/domain/result.js";
 import { ProviderRunLineage } from "../../../../src/process/ProviderRunLineage.js";
@@ -16,11 +17,13 @@ it("preserves a warm provider when an already cancelled caller joins", async () 
   const client = trackHopperClient(new HopperClient({ launcher }));
   await expect(client.start()).resolves.toMatchObject({ ok: true });
   const controller = new AbortController();
-  controller.abort();
-  await expect(client.start(controller.signal)).resolves.toMatchObject({
-    ok: false,
-    error: { _tag: "HopperCancelledError" },
-  });
+  const reason = { source: "caller", opaque: 7 };
+  controller.abort(reason);
+  const joined = await client.start(controller.signal);
+  expect(joined.ok).toBe(false);
+  if (joined.ok) throw new Error("Expected cancellation");
+  expect(joined.error).toBeInstanceOf(HopperCancelledError);
+  expect(joined.error.cause).toBe(reason);
   expect(client.isReady()).toBe(true);
   expect(client.operationHealth()).toMatchObject({ state: "idle" });
   await expect(
@@ -137,13 +140,18 @@ it.each([0, 1])(
       void waits[cancelledIndex]?.then((result) => {
         cancelled = result;
       });
-      controllers[cancelledIndex]?.abort();
+      const reason = { source: "caller", opaque: cancelledIndex };
+      controllers[cancelledIndex]?.abort(reason);
       await vi.waitFor(() =>
         expect(cancelled).toMatchObject({
           ok: false,
           error: { _tag: "HopperCancelledError" },
         }),
       );
+      if (cancelled === undefined || cancelled.ok)
+        throw new Error("Expected cancellation");
+      expect(cancelled.error).toBeInstanceOf(HopperCancelledError);
+      expect(cancelled.error.cause).toBe(reason);
       expect(launcher.processes).toHaveLength(0);
       release?.();
       await expect(waits[1 - cancelledIndex]).resolves.toMatchObject({

@@ -5,6 +5,7 @@ import type { Stats } from "node:fs";
 import type { StableRegularFileDescriptor } from "../../filesystem/RegularFile.js";
 import type { OwnedFileHandle } from "../../filesystem/OwnedFileHandle.js";
 
+import { containsPyInstallerArchive } from "../pyinstaller/CArchiveLayout.js";
 import { classifyArtifactContent } from "./ArtifactGraphConstruction.js";
 import { abortIfNeeded } from "../ArtifactHash.js";
 import { createArtifactClassificationProbe } from "../ArtifactClassificationProbe.js";
@@ -114,7 +115,8 @@ export const classifyAndHashRootForInventory = async (
     const retainSource =
       isZipPackageFormat(format) ||
       format === "mach-o-universal" ||
-      format === "godot-pck";
+      format === "godot-pck" ||
+      format === "pyinstaller";
     outcome = {
       kind: "completed",
       value: {
@@ -178,7 +180,7 @@ const classifyRootFormat = async (
     evidence.fatSliceHeaders,
     signal,
   );
-  return classifyArtifactContent(
+  const format = classifyArtifactContent(
     path,
     {
       ...evidence,
@@ -186,6 +188,16 @@ const classifyRootFormat = async (
     },
     archiveBytes,
   ).format;
+  if (["elf", "pe", "mach-o", "mach-o-universal"].includes(format)) {
+    const packaged = await containsPyInstallerArchive(
+      handle,
+      archiveBytes,
+      signal,
+    );
+    abortIfNeeded(signal);
+    if (packaged) return "pyinstaller";
+  }
+  return format;
 };
 
 /** Read exact FAT header windows missed by the bounded prefix probe. */

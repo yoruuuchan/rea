@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
+import { HopperCancelledError } from "../../../../src/domain/hopperErrors.js";
 import { HopperApplicationLauncher } from "../../../../src/hopper/BridgeLauncher.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 
@@ -11,7 +12,8 @@ it.each(["failed", "cancelled"] as const)(
   async (outcome) => {
     const directory = await createTestTempDirectory("rea-bootstrap-cleanup-");
     const controller = new AbortController();
-    if (outcome === "cancelled") controller.abort();
+    const reason = { source: "caller", opaque: 7 };
+    if (outcome === "cancelled") controller.abort(reason);
     let releases = 0;
     const launcher = new HopperApplicationLauncher(
       {
@@ -45,11 +47,12 @@ it.each(["failed", "cancelled"] as const)(
       { signal: controller.signal },
     );
     expect(result.ok).toBe(false);
-    if (outcome === "cancelled")
-      expect(result).toMatchObject({
-        ok: false,
-        error: { _tag: "HopperCancelledError" },
-      });
+    if (outcome === "cancelled") {
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected cancellation");
+      expect(result.error).toBeInstanceOf(HopperCancelledError);
+      expect(result.error.cause).toBe(reason);
+    }
     await expect(lstat(join(directory, "bootstrap.py"))).rejects.toMatchObject({
       code: "ENOENT",
     });

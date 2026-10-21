@@ -73,3 +73,17 @@ it("applies XML line-ending normalization only when the consumer selects it", ()
   expect(parsed.value.documentElement?.getAttribute("attr")).toBe("a b");
   expect(parsed.value.documentElement?.textContent).toBe("\nx");
 });
+
+it("preserves Unicode separators under XML 1.0 normalization", () => {
+  const parsed = parseXmlDocument(
+    '<root attr="a\u0085b\u2028c\u2029d">a\r\u0085b\r\u2028c\r\n&#13;d\u2029</root>',
+    { doctype: "allow", lineEndings: "normalize" },
+  );
+  if (!parsed.ok) throw parsed.error;
+  expect(parsed.value.documentElement?.getAttribute("attr")).toBe(
+    "a\u0085b\u2028c\u2029d",
+  );
+  expect(parsed.value.documentElement?.textContent).toBe(
+    "a\n\u0085b\n\u2028c\n\rd\u2029",
+  );
+});

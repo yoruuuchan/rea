@@ -1,3 +1,4 @@
+import { artifactTargetRefusal } from "../domain/apple/artifactTargetApplicability.js";
 import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { translateArtifactFailure } from "./ArtifactOperationFailure.js";
@@ -24,10 +25,7 @@ import {
   artifactExtractionExecutionSchema,
   type ArtifactAnalysisOperation,
 } from "../contracts/artifactToolContracts.js";
-import {
-  isMachOFormat,
-  type BinaryTarget,
-} from "../domain/binaryTargetTypes.js";
+import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
@@ -215,23 +213,17 @@ class ArtifactClient implements AnalysisClient {
         ),
       );
     try {
+      const targetRefusal = artifactTargetRefusal(operation, this.target);
+      if (targetRefusal !== undefined)
+        throw this.unsupportedTarget(operation, targetRefusal.reason);
       if (operation === "inspect_artifact") {
         const inspected = await this.inspectArtifact(parameters, options);
         return inspected;
       }
       if (operation === "decode_interface_builder") {
-        if (
-          this.target.kind !== "executable" ||
-          this.target.sourcePath === undefined ||
-          !this.target.sourcePath.toLowerCase().endsWith(".app")
-        )
-          throw this.unsupportedTarget(
-            operation,
-            "decode_interface_builder requires an active .app bundle target",
-          );
         const limits = interfaceBuilderLimitsSchema.parse(parameters);
         const result = await analyzeInterfaceBuilderBundle({
-          bundlePath: this.target.sourcePath,
+          bundlePath: this.target.sourcePath ?? this.target.path,
           targetSha256: this.target.sha256,
           limits,
           ...(options?.signal === undefined ? {} : { signal: options.signal }),
@@ -266,15 +258,7 @@ class ArtifactClient implements AnalysisClient {
           ]);
         const bundlePath = standalone
           ? dirname(this.target.path)
-          : this.target.sourcePath;
-        if (
-          bundlePath === undefined ||
-          (!standalone && !bundlePath.toLowerCase().endsWith(".app"))
-        )
-          throw this.unsupportedTarget(
-            operation,
-            "inspect_keyed_archive requires an active plist or .app bundle",
-          );
+          : (this.target.sourcePath ?? this.target.path);
         const result = await inspectBundleKeyedArchive({
           bundlePath,
           targetSha256: this.target.sha256,
@@ -386,16 +370,7 @@ class ArtifactClient implements AnalysisClient {
     parameters: Readonly<Record<string, JsonValue>>,
     options?: ExecutionOptions,
   ) {
-    const bundlePath = this.target.sourcePath;
-    if (
-      this.target.kind !== "executable" ||
-      bundlePath === undefined ||
-      !bundlePath.toLowerCase().endsWith(".app")
-    )
-      throw this.unsupportedTarget(
-        "inspect_asset_catalog",
-        "inspect_asset_catalog requires an active .app bundle target",
-      );
+    const bundlePath = this.target.sourcePath ?? this.target.path;
     const result = await analyzeAppleAssetCatalogs({
       environment: this.environment,
       bundlePath,
@@ -418,11 +393,6 @@ class ArtifactClient implements AnalysisClient {
     parameters: Readonly<Record<string, JsonValue>>,
     options?: ExecutionOptions,
   ) {
-    if (this.target.kind !== "executable" || !isMachOFormat(this.target.format))
-      throw this.unsupportedTarget(
-        "trace_dylib_resolution",
-        "trace_dylib_resolution requires an active Mach-O or .app bundle target",
-      );
     // Only a target opened from an app bundle directory carries its Info.plist;
     // a regular file whose name ends in .app is a standalone image.
     const bundle =

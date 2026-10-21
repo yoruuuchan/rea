@@ -1,3 +1,4 @@
+import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -124,6 +125,7 @@ const project = async (
     string,
     { readonly reason: string }
   > = new Map(),
+  target?: BinaryTarget,
 ) => {
   const route: SessionProviderRoute = {
     identity: providerA,
@@ -142,7 +144,7 @@ const project = async (
   };
   return projectedStatusSchema.parse(
     await binarySessionStatus({
-      target: undefined,
+      target,
       route,
       router,
       runtimeUnavailability,
@@ -412,3 +414,33 @@ describe("binary session provider capability projection", () => {
     ]);
   });
 });
+
+it.each(["elf", "pe"] as const)(
+  "reports format rejection for %s dylib discovery",
+  async (format) => {
+    const target: BinaryTarget = {
+      kind: "executable",
+      format,
+      path: "/fixture",
+      sha256: "a".repeat(64),
+      architecture: "x86_64",
+      availableArchitectures: ["x86_64"],
+      ...(format === "pe"
+        ? { executableRole: "application" as const, managed: false }
+        : {}),
+    } as BinaryTarget;
+    const status = await project(
+      [descriptor(providerA, "trace_dylib_resolution", [])],
+      [],
+      new Map(),
+      target,
+    );
+    expect(expandCanonicalCapabilities(status.capabilities)).toMatchObject([
+      {
+        operation: "trace_dylib_resolution",
+        available: false,
+        availability_code: "target_format_unsupported",
+      },
+    ]);
+  },
+);

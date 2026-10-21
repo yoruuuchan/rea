@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { TextDecoder } from "node:util";
 import { setImmediate } from "node:timers/promises";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -73,6 +74,13 @@ export class GgufHeader {
       rejectModel("GGUF name exceeds its format byte limit");
     if (retain) this.#budget.charge(6 * length + 2);
     this.reader.guarantee(length);
+    // Omitted preview entries still need validation, but not decoded strings.
+    // Keep the streaming decoder for values spanning multiple read chunks.
+    if (!retain && length <= 65536) {
+      if (!isUtf8(await this.reader.take(length)))
+        rejectModel("GGUF string is not valid UTF-8");
+      return "";
+    }
     const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
     let result = "";
     try {
@@ -239,16 +247,21 @@ export class GgufHeader {
     tensors: ModelTensor[];
   }> {
     const versionBytes = await this.reader.take(4);
-    this.#little =
-      versionBytes.readUInt32LE() === 2 || versionBytes.readUInt32LE() === 3;
-    const version = this.#little
-      ? versionBytes.readUInt32LE()
-      : versionBytes.readUInt32BE();
-    if (version !== 2 && version !== 3)
+    const littleVersion = versionBytes.readUInt32LE();
+    const bigVersion = versionBytes.readUInt32BE();
+    let version: number;
+    if (littleVersion === 2 || littleVersion === 3) {
+      this.#little = true;
+      version = littleVersion;
+    } else if (bigVersion === 2 || bigVersion === 3) {
+      this.#little = false;
+      version = bigVersion;
+    } else {
       throw new ModelFormatFailure(
         "unsupported",
-        `GGUF version ${String(version)} is unsupported; supported versions are 2 and 3`,
+        `GGUF version bytes ${versionBytes.toString("hex")} are unsupported (little-endian ${String(littleVersion)}, big-endian ${String(bigVersion)}; byte order unknown); supported versions are 2 and 3`,
       );
+    }
     if (!this.#little && version !== 3)
       rejectModel("Big-endian GGUF requires version 3");
     const tensorCount = await this.#unsigned(8);

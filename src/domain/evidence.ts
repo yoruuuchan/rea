@@ -70,6 +70,7 @@ const subjectFormatSchema = z.enum([
   "mach-o-universal",
   "javascript-bundle",
   "entitlements",
+  "pyinstaller",
 ]);
 const subjectBaseSchema = z.strictObject({
   name: z.string().min(1),

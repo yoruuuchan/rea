@@ -2,6 +2,7 @@ import { desktopPathConventions } from "../domain/nativeConvention.js";
 import { isAbsolute } from "node:path";
 import {
   DirectoryArtifactReader,
+  DirectoryArtifactRootFailure,
   DirectoryArtifactTraversalLimit,
   type DirectoryArtifactEntry,
 } from "./DirectoryArtifactReader.js";
@@ -33,7 +34,15 @@ import { digestCanonicalValue } from "../domain/canonicalDigest.js";
 import { err, ok } from "../domain/result.js";
 import { createDesktopApplicationEvidence } from "../domain/desktopApplicationEvidence.js";
 import { ARTIFACT_GRAPH_PROVIDER } from "../application/InvestigationProviders.js";
-import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisResourceConstraintError,
+  AnalysisUnsupportedTargetError,
+} from "../domain/analysisErrorCore.js";
+import type {
+  AnalysisError,
+  AnalysisPartialObservation,
+} from "../domain/analysisErrorBase.js";
+import { BinaryTargetError } from "../domain/configurationErrors.js";
 
 const RETAINED_METADATA_BYTES = 32 * 1024 * 1024;
 
@@ -141,6 +150,8 @@ export class DesktopApplicationReader implements DesktopApplicationPort {
       throw this.#resources.cleanupFailure(outcome, [closed], partial);
     if (outcome.kind === "failed") {
       const cause = outcome.cause;
+      if (cause instanceof DirectoryArtifactRootFailure)
+        throw selectedRootFailure(input.path, cause, partial);
       if (!(cause instanceof ArtifactReaderFailure) || partial === undefined)
         throw cause;
       throw new ArtifactReaderFailure(
@@ -166,6 +177,33 @@ export class DesktopApplicationReader implements DesktopApplicationPort {
     return outcome.value;
   }
 }
+
+/**
+ * The root is the caller's selection: a non-directory is an unsupported
+ * target, and host failures keep the shared target-unavailable/access-denied
+ * classification instead of becoming artifact I/O faults.
+ */
+const selectedRootFailure = (
+  path: string,
+  failure: DirectoryArtifactRootFailure,
+  partialObservation: AnalysisPartialObservation | undefined,
+): AnalysisError =>
+  failure.reason === "path"
+    ? new AnalysisUnsupportedTargetError(
+        "inspect_desktop_application",
+        path,
+        failure.message,
+        {
+          cause: failure,
+          partialObservation,
+          remediationAction:
+            "Select the application's local installation directory, such as a macOS .app bundle or the directory containing its executable.",
+        },
+      )
+    : new BinaryTargetError(path, failure.message, {
+        cause: failure.cause,
+        partialObservation,
+      });
 
 const scanDirectory = async (
   reader: DirectoryArtifactReader,

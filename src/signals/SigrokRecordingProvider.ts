@@ -8,6 +8,10 @@ import {
   parseDecoderDiscovery,
 } from "./parseDecoderDiscovery.js";
 import {
+  parseSigrokSelectorRejection,
+  type SigrokSelectorRejection,
+} from "./sigrokSelectorRejection.js";
+import {
   BOUNDED_PRODUCER_LIMITS as LIMITS,
   prlimitArgumentVector,
   readLinuxResourceLimits,
@@ -166,7 +170,12 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
       root = await this.createRuntime();
       this.#resources.retain(root, undefined);
       const snapshotPath = join(root.path, "recording");
-      const execute = async (args: readonly string[]) => {
+      const execute = async (
+        args: readonly string[],
+        rejectedSelector?: (
+          stderr: string,
+        ) => SigrokSelectorRejection | undefined,
+      ) => {
         capturedOutput = undefined;
         const output = await runOwnedCommand(
           {
@@ -222,6 +231,16 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
           );
         phase = previousPhase;
         resourcePath = "path" in input ? input.path : command;
+        const rejection =
+          output.exitCode === 0
+            ? undefined
+            : rejectedSelector?.(output.stderr.text);
+        if (rejection !== undefined)
+          throw new AnalysisInputError(
+            operation,
+            { capturedOutput, userMessage: rejection.message },
+            [rejection],
+          );
         if (output.exitCode !== 0)
           throw new ProviderAdapterError(
             SIGROK_PROVIDER_IDENTITY.id,
@@ -311,7 +330,9 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
             ? []
             : [`--protocol-decoder-annotations=${input.annotations}`]),
         ];
-        const output = await execute(args);
+        const output = await execute(args, (stderr) =>
+          parseSigrokSelectorRejection(stderr, input),
+        );
         phase = "integrity";
         resourcePath = snapshotPath;
         if (

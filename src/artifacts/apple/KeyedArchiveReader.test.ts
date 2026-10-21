@@ -1,7 +1,17 @@
+import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import { build, buildBinary, type PlistValue } from "plist";
-import { decodeKeyedArchiveBytes } from "./KeyedArchiveReader.js";
+import { estimateBinaryPlistExpansion } from "./InterfaceBuilderDecodeBudget.js";
+import {
+  decodeKeyedArchiveBytes,
+  inspectBundleKeyedArchive,
+} from "./KeyedArchiveReader.js";
+import { unknownDateLimitation } from "../../domain/apple/plistValue.js";
 import { deeplyNestedXmlPlist } from "../../../tests/fixtures/keyedArchiveXmlNesting.js";
+import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 
 const archive = {
   $archiver: "NSKeyedArchiver",
@@ -372,6 +382,223 @@ describe("binary plist reference preflight", () => {
     expect(graph.limitations).toContain(
       "Dictionary entries keyed __proto__ were omitted because REA results cannot represent that key.",
     );
+  });
+});
+
+/**
+ * Python `plistlib` binary NSKeyedArchiver with `$objects = ["$null", date]`
+ * and `$top.root` as UID 1. The date is marker `0x33` and float64 `0.1`
+ * seconds after the 2001 epoch (`2001-01-01T00:00:00.100Z`).
+ */
+const pythonBinaryDateControl = Buffer.from(
+  "62706c6973743030d4010203040506090c5924617263686976657258246f626a656374735424746f70582476657273696f6e5f100f4e534b657965644172636869766572a2070855246e756c6c333fb999999999999ad10a0b54726f6f74800112000186a008111b24293244474d56595e600000000000000101000000000000000d00000000000000000000000000000065",
+  "hex",
+);
+const canonicalDateMarker = Buffer.alloc(9);
+canonicalDateMarker[0] = 0x33;
+canonicalDateMarker.writeDoubleBE(0.1, 1);
+
+/** Copy the control and mutate its single canonical date marker. */
+const mutateCanonicalDate = (
+  mutate: (markerOffset: number, bytes: Buffer) => void,
+): Buffer => {
+  const bytes = Buffer.from(pythonBinaryDateControl);
+  const offset = bytes.indexOf(canonicalDateMarker);
+  if (offset < 0 || bytes.indexOf(canonicalDateMarker, offset + 1) !== -1)
+    throw new Error("expected one canonical binary date in the control");
+  mutate(offset, bytes);
+  return bytes;
+};
+
+const dateScalar = (iso8601: string | null) => ({
+  id: 1,
+  kind: "scalar" as const,
+  status: "observed" as const,
+  value: { $plist_type: "date", iso8601 },
+});
+
+describe("binary keyed archive dates", () => {
+  const selection = { offset: 0, limit: 10 };
+
+  it("keeps the canonical millisecond control as an observed timestamp", async () => {
+    const bytes = Buffer.from(pythonBinaryDateControl);
+    const graph = decodeKeyedArchiveBytes(bytes, selection);
+    expect(graph.objects[1]).toMatchObject(
+      dateScalar("2001-01-01T00:00:00.100Z"),
+    );
+    expect(graph.limitations).not.toContain(unknownDateLimitation(1));
+    expect(bytes).toEqual(pythonBinaryDateControl);
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      "39f08db8341bd74220352dfd559485515cce1e6035e08f27a59ab8f856374a30",
+    );
+    const root = await createTestTempDirectory("rea-keyed-date-control-");
+    await writeFile(join(root, "archive.plist"), bytes);
+    const inspected = await inspectBundleKeyedArchive({
+      bundlePath: root,
+      targetSha256: createHash("sha256").update(bytes).digest("hex"),
+      parameters: { path: "archive.plist" },
+    });
+    expect(inspected.objects[1]).toMatchObject(
+      dateScalar("2001-01-01T00:00:00.100Z"),
+    );
+    expect(inspected.limitations).not.toContain(unknownDateLimitation(1));
+    expect(await readFile(join(root, "archive.plist"))).toEqual(bytes);
+  });
+
+  it.each(
+    [0x30, 0x31, 0x32, 0x34].map(
+      (marker) => [marker.toString(16), marker] as const,
+    ),
+  )(
+    "refuses reachable binary date marker 0x%s instead of projecting a timestamp",
+    async (_hex, marker) => {
+      const bytes = mutateCanonicalDate((offset, copy) => {
+        copy[offset] = marker;
+      });
+      const original = Buffer.from(bytes);
+      expect(() => decodeKeyedArchiveBytes(bytes, selection)).toThrow(
+        new TypeError(
+          `binary plist date marker 0x${marker.toString(16)} is invalid`,
+        ),
+      );
+      expect(bytes).toEqual(original);
+      if (marker === 0x30)
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+          "ac5696b866c312feb53c2e82edd8fea79dbeb572eb1b07e4291603faa41e8c0e",
+        );
+      const root = await createTestTempDirectory("rea-keyed-date-marker-");
+      const path = join(root, "archive.plist");
+      await writeFile(path, bytes);
+      await expect(
+        inspectBundleKeyedArchive({
+          bundlePath: root,
+          targetSha256: null,
+          parameters: { path: "archive.plist" },
+        }),
+      ).rejects.toMatchObject({
+        name: "ArtifactReaderFailure",
+        reason: "format",
+        message: `Cannot decode selected Foundation keyed archive: binary plist date marker 0x${marker.toString(16)} is invalid`,
+      });
+      expect(await readFile(path)).toEqual(bytes);
+    },
+  );
+
+  it("keeps a sub-millisecond instant unknown without changing the canonical sibling", async () => {
+    const submillisecond = mutateCanonicalDate((offset, copy) => {
+      copy.writeDoubleBE(0.1005, offset + 1);
+    });
+    const original = Buffer.from(submillisecond);
+    const graph = decodeKeyedArchiveBytes(submillisecond, selection);
+    expect(graph.objects[1]).toMatchObject(dateScalar(null));
+    expect(JSON.stringify(graph.objects[1]?.value)).not.toContain(
+      "2001-01-01T00:00:00.100Z",
+    );
+    expect(graph.limitations).toContain(unknownDateLimitation(1));
+    expect(graph.limitations.join("\n")).not.toContain(
+      "number metadata could not be completely observed",
+    );
+    expect(submillisecond).toEqual(original);
+    expect(createHash("sha256").update(submillisecond).digest("hex")).toBe(
+      "ab69ba6e8034c6f60b828ee323a5a3e81bae3e7657477e0ebfbfdb93d53ed2ce",
+    );
+    const root = await createTestTempDirectory("rea-keyed-date-subms-");
+    await writeFile(join(root, "archive.plist"), submillisecond);
+    const inspected = await inspectBundleKeyedArchive({
+      bundlePath: root,
+      targetSha256: createHash("sha256").update(submillisecond).digest("hex"),
+      parameters: { path: "archive.plist" },
+    });
+    expect(inspected.objects[1]).toMatchObject(dateScalar(null));
+    expect(inspected.limitations).toContain(unknownDateLimitation(1));
+    expect(await readFile(join(root, "archive.plist"))).toEqual(submillisecond);
+
+    const mixed = Buffer.from(
+      buildBinary({
+        $archiver: "NSKeyedArchiver",
+        $version: 100000,
+        $objects: [
+          "$null",
+          new Date("2001-01-01T00:00:00.100Z"),
+          new Date("2001-01-01T00:00:00.100Z"),
+          new Date("2001-01-01T00:00:00.100Z"),
+        ],
+        $top: { root: { UID: 1 } },
+      }),
+    );
+    const pattern = Buffer.from(canonicalDateMarker);
+    const offsets: number[] = [];
+    for (
+      let offset = mixed.indexOf(pattern);
+      offset !== -1;
+      offset = mixed.indexOf(pattern, offset + pattern.length)
+    )
+      offsets.push(offset);
+    expect(offsets).toHaveLength(3);
+    // 0.1004 and 0.1005 both round to the same millisecond as the control.
+    mixed.writeDoubleBE(0.1004, (offsets[1] ?? 0) + 1);
+    mixed.writeDoubleBE(0.1005, (offsets[2] ?? 0) + 1);
+    const mixedOriginal = Buffer.from(mixed);
+    const mixedGraph = decodeKeyedArchiveBytes(mixed, selection);
+    expect(mixedGraph.objects.slice(1).map(({ value }) => value)).toEqual([
+      { $plist_type: "date", iso8601: "2001-01-01T00:00:00.100Z" },
+      { $plist_type: "date", iso8601: null },
+      { $plist_type: "date", iso8601: null },
+    ]);
+    expect(mixedGraph.limitations).toContain(unknownDateLimitation(2));
+    expect(mixed).toEqual(mixedOriginal);
+  });
+});
+
+describe("binary plist date object region", () => {
+  it("refuses a binary date that extends past the object region", () => {
+    // Strict bounds end objects at the offset table. Four payload bytes
+    // remain before that table, short of the required eight.
+    const bytes = Buffer.alloc(8 + 5 + 1 + 32);
+    bytes.write("bplist00");
+    bytes[8] = 0x33;
+    const offsetTable = 13;
+    bytes[offsetTable] = 8;
+    const trailer = bytes.length - 32;
+    bytes[trailer + 6] = 1;
+    bytes[trailer + 7] = 1;
+    bytes.writeBigUInt64BE(1n, trailer + 8);
+    bytes.writeBigUInt64BE(0n, trailer + 16);
+    bytes.writeBigUInt64BE(BigInt(offsetTable), trailer + 24);
+    expect(() =>
+      estimateBinaryPlistExpansion(bytes, 1024 * 1024, { bounds: "strict" }),
+    ).toThrow(new TypeError("binary plist date object is truncated"));
+    // Decoder bounds extend other objects to the end of the file. The date
+    // payload still has to end at the offset table. The keyed-archive reader
+    // uses those bounds and must refuse the same payload.
+    expect(() =>
+      estimateBinaryPlistExpansion(bytes, 1024 * 1024, { bounds: "decoder" }),
+    ).toThrow(new TypeError("binary plist date object is truncated"));
+    expect(() =>
+      decodeKeyedArchiveBytes(bytes, { offset: 0, limit: 1 }),
+    ).toThrow(new TypeError("binary plist date object is truncated"));
+  });
+
+  it("refuses a decoder-bounds date whose marker sits past the offset table", () => {
+    // The one-byte offset table at byte 8 names an object at byte 9. That
+    // 0x33 marker and its eight payload bytes fit in the file, which decoder
+    // bounds would otherwise accept, but they are outside the object region.
+    const bytes = Buffer.alloc(64);
+    bytes.write("bplist00");
+    bytes[8] = 9;
+    bytes[9] = 0x33;
+    const trailer = bytes.length - 32;
+    bytes[trailer + 6] = 1;
+    bytes[trailer + 7] = 1;
+    bytes.writeBigUInt64BE(1n, trailer + 8);
+    bytes.writeBigUInt64BE(0n, trailer + 16);
+    bytes.writeBigUInt64BE(8n, trailer + 24);
+    expect(() =>
+      estimateBinaryPlistExpansion(bytes, 1024 * 1024, { bounds: "decoder" }),
+    ).toThrow(new TypeError("binary plist date object is truncated"));
+    expect(() =>
+      decodeKeyedArchiveBytes(bytes, { offset: 0, limit: 1 }),
+    ).toThrow(new TypeError("binary plist date object is truncated"));
   });
 });
 

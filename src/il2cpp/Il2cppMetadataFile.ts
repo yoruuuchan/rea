@@ -253,15 +253,25 @@ const FIXED_WIDTHS: Il2cppMetadataDecoded["index_widths"] = {
   type_width_source: "fixed-width-version",
 };
 
+const GENERIC_CONTAINER_RECORD_BYTES = 16;
+
 const resolveWidths = (
   section: (name: SectionName) => Il2cppMetadataSection,
 ): Il2cppMetadataDecoded["index_widths"] => {
+  const genericContainers = section("genericContainers");
+  const genericContainerBytes = recordBytes(genericContainers);
+  if (
+    genericContainerBytes !== null &&
+    genericContainerBytes !== GENERIC_CONTAINER_RECORD_BYTES
+  )
+    throw new Il2cppMetadataFormatFailure(
+      "record-size-mismatch",
+      `section genericContainers records are ${genericContainerBytes} bytes, but each record is ${GENERIC_CONTAINER_RECORD_BYTES}`,
+    );
   const type_definition = il2cppIndexWidth(
     headerCount(section("typeDefinitions")),
   );
-  const generic_container = il2cppIndexWidth(
-    headerCount(section("genericContainers")),
-  );
+  const generic_container = il2cppIndexWidth(headerCount(genericContainers));
   const parameter = il2cppIndexWidth(headerCount(section("parameters")));
   // TypeIndex counts native types, so its width is recovered from records.
   const interfaceOffset = recordBytes(section("interfaceOffsets"));

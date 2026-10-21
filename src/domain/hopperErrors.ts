@@ -61,15 +61,36 @@ export class HopperCancelledError extends HopperError {
   readonly _tag = "HopperCancelledError";
 
   constructor(
-    cause?: unknown,
-    options: Omit<AnalysisErrorOptions, "cause"> = {},
+    ...parameters:
+      | readonly []
+      | readonly [cause: unknown]
+      | readonly [cause: unknown, options: Omit<AnalysisErrorOptions, "cause">]
   ) {
-    super(
-      "Hopper operation was cancelled",
-      cause === undefined ? options : { ...options, cause },
-    );
+    const errorOptions: AnalysisErrorOptions = { ...parameters[1] };
+    // Argument presence matters: an explicit undefined is the caller's reason.
+    if (parameters.length > 0)
+      Object.defineProperty(errorOptions, "cause", {
+        configurable: true,
+        enumerable: true,
+        value: parameters[0],
+        writable: true,
+      });
+    super("Hopper operation was cancelled", errorOptions);
   }
 }
+
+/**
+ * Classify caller cancellation from a signal.
+ *
+ * An aborted signal keeps its exact reason, including undefined. A signal that
+ * has not aborted does not invent a reason.
+ */
+export const hopperCancelledBySignal = (
+  signal: AbortSignal | undefined,
+): HopperCancelledError =>
+  signal?.aborted === true
+    ? new HopperCancelledError(signal.reason)
+    : new HopperCancelledError();
 
 /** Hopper returned bytes or JSON that do not satisfy the NDJSON RPC contract. */
 export class HopperProtocolError extends HopperError {

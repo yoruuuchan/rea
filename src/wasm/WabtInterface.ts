@@ -7,7 +7,7 @@ import type {
   WasmInterfaceSignature,
   WasmInterfaceValueType,
 } from "../domain/wasm/wasmInterface.js";
-import { watString } from "./WabtString.js";
+import { watString, watStringEnd } from "./WabtString.js";
 
 /** Split direct WAT children only; function instruction bodies are never materialized. */
 const parts = (form: string): string[] => {
@@ -40,12 +40,12 @@ const parts = (form: string): string[] => {
     }
     const start = i;
     if (form[i] === '"') {
-      i = watString(form, i + 1).end;
+      i = watStringEnd(form, i + 1);
     } else if (form[i] === "(") {
       let depth = 1;
       i++;
       while (i < form.length && depth > 0) {
-        if (form[i] === '"') i = watString(form, i + 1).end;
+        if (form[i] === '"') i = watStringEnd(form, i + 1);
         else {
           if (form[i] === "(") depth++;
           else if (form[i] === ")") depth--;

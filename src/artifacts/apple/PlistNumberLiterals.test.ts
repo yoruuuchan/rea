@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { PlistNumberLiterals } from "../../domain/apple/plistNumbers.js";
 import {
   decodeBinaryPlistNumbers,
   scanBinaryPlistNumberLiterals,
@@ -36,5 +37,41 @@ describe("binary plist number rewriting", () => {
     expect(bytes.subarray(13, 30)).toEqual(
       Buffer.from([0x14, ...Array<number>(16).fill(0xff)]),
     );
+  });
+
+  it("applies wide-integer and date rewrites on one copy", () => {
+    const bytes = Buffer.alloc(34);
+    bytes[0] = 0x14;
+    bytes.writeBigUInt64BE(1n, 1);
+    bytes.writeBigUInt64BE(2n, 9);
+    bytes.writeDoubleBE(0.1, 18);
+    bytes.writeDoubleBE(0.1005, 26);
+    const original = Buffer.from(bytes);
+    const literals: PlistNumberLiterals = {
+      integers: new Map(),
+      reals: new Set(),
+      unsafeIntegerLiterals: 1,
+      incomplete: false,
+    };
+    const value = (1n << 64n) | 2n;
+    const decoded = decodeBinaryPlistNumbers(
+      bytes,
+      { literals, wideIntegers: [{ offset: 0, value }] },
+      [18, 26],
+    );
+    expect(decoded).not.toBe(bytes);
+    expect(bytes).toEqual(original);
+    expect(decoded[0]).toBe(0x23);
+    expect(decoded.readDoubleBE(1)).toBe(Number(value));
+    expect(decoded.readDoubleBE(18)).toBe(0.1);
+    expect(Number.isNaN(decoded.readDoubleBE(26))).toBe(true);
+    const representableOnly = {
+      literals: { ...literals, unsafeIntegerLiterals: 0 },
+      wideIntegers: [],
+    };
+    expect(decodeBinaryPlistNumbers(bytes, representableOnly, [18])).toBe(
+      bytes,
+    );
+    expect(decodeBinaryPlistNumbers(bytes, representableOnly, [])).toBe(bytes);
   });
 });

@@ -1,3 +1,4 @@
+import { artifactTargetRefusal } from "../../domain/apple/artifactTargetApplicability.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { ResolvedAppBundleResourceRoot } from "../AppBundleExecutable.js";
 import { binaryTargetSummary } from "./BinaryTargetSummary.js";
@@ -62,6 +63,17 @@ export const binarySessionStatus = async ({
       compareUnicodeCodePoints(left.operation, right.operation),
     )
     .map((descriptor) => {
+      const targetRefusal =
+        target === undefined
+          ? undefined
+          : artifactTargetRefusal(descriptor.operation, target);
+      if (targetRefusal !== undefined && descriptor.available)
+        return {
+          ...descriptor,
+          available: false as const,
+          availabilityCode: targetRefusal.code,
+          reason: targetRefusal.reason,
+        };
       const unavailable = runtimeUnavailability.get(descriptor.operation);
       return unavailable === undefined
         ? descriptor

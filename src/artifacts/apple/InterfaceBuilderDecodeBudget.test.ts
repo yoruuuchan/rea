@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { analyzeInterfaceBuilderBundle } from "./InterfaceBuilderAnalysis.js";
 import { preflightPropertyListDecode } from "./InterfaceBuilderDecodeBudget.js";
+import { unknownDateLimitation } from "../../domain/apple/plistValue.js";
 import { parseXmlPropertyList } from "../../domain/propertyListKeys.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 
@@ -139,5 +140,54 @@ describe("inert XML declaration examples in Interface Builder archives", () => {
     expect(
       preflightPropertyListDecode(Buffer.from(xml), 16 * 1024 * 1024),
     ).toMatchObject({ binaryPrototypeKeyObserved: false });
+  });
+});
+
+describe("binary Interface Builder plist dates", () => {
+  const control = Buffer.from(
+    "62706c6973743030d4010203040506090c5924617263686976657258246f626a656374735424746f70582476657273696f6e5f100f4e534b657965644172636869766572a2070855246e756c6c333fb999999999999ad10a0b54726f6f74800112000186a008111b24293244474d56595e600000000000000101000000000000000d00000000000000000000000000000065",
+    "hex",
+  );
+  const marker = Buffer.alloc(9);
+  marker[0] = 0x33;
+  marker.writeDoubleBE(0.1, 1);
+
+  const nib = async (bytes: Buffer, name: string) => {
+    const root = await createTestTempDirectory(`rea-ib-date-${name}-`);
+    const bundle = join(root, "Example.app");
+    await mkdir(bundle);
+    await writeFile(join(bundle, "Panel.nib"), bytes);
+    return analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "a".repeat(64),
+    });
+  };
+
+  it("refuses an invalid reachable date marker without projecting a timestamp", async () => {
+    const bytes = Buffer.from(control);
+    const offset = bytes.indexOf(marker);
+    bytes[offset] = 0x30;
+    const result = await nib(bytes, "marker");
+    expect(JSON.stringify(result)).not.toContain("2001-01-01T00:00:00.100Z");
+    expect(result.limitations.join("\n")).toContain(
+      "binary plist date marker 0x30 is invalid",
+    );
+  });
+
+  it("counts a sub-millisecond date as unknown and keeps the canonical control known", async () => {
+    const submillisecond = Buffer.from(control);
+    const offset = submillisecond.indexOf(marker);
+    submillisecond.writeDoubleBE(0.1005, offset + 1);
+    const unknown = await nib(submillisecond, "subms");
+    expect(unknown.limitations).toContain(
+      `Panel.nib: ${unknownDateLimitation(1)}`,
+    );
+    expect(JSON.stringify(unknown)).not.toContain("2001-01-01T00:00:00.100Z");
+
+    const known = await nib(Buffer.from(control), "known");
+    expect(known.limitations.join("\n")).not.toContain("date value(s)");
+    expect(known.limitations.join("\n")).not.toContain(
+      "binary plist date marker",
+    );
   });
 });

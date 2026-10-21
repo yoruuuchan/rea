@@ -79,7 +79,11 @@ export const decodeKeyedArchiveBytes = (
     binaryExpansion !== undefined
       ? {
           value: parseBinary(
-            decodeBinaryPlistNumbers(bytes, binaryNumberMetadata!),
+            decodeBinaryPlistNumbers(
+              bytes,
+              binaryNumberMetadata!,
+              binaryExpansion.binaryDatePayloadOffsets,
+            ),
           ),
           numberLiterals: binaryNumberMetadata!.literals,
           omittedPrototypeKeys: binaryExpansion.binaryPrototypeKeyObserved

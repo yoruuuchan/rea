@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, type FileHandle } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import {
@@ -12,6 +12,7 @@ import { ArtifactFileCleanupFailure } from "../../artifacts/ArtifactFileOperatio
 import { RegularFileCleanupFailure } from "../../filesystem/OwnedRegularFile.js";
 import { readFileHandleChunks } from "../../filesystem/readFileHandleChunks.js";
 import { streamChunkToBuffer } from "../../artifacts/StreamBytes.js";
+import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { SafeOutputTree } from "../../artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../../artifacts/SafeOutputTreeCreationFailure.js";
@@ -26,15 +27,69 @@ import type {
   WrittenBundleFile,
 } from "./environmentExport.js";
 
+/**
+ * A host failure on one file the bundle writer was reading or writing.
+ * Descriptor operations such as `read`, `write` and `fsync` fail without a
+ * path, so this names the file and the direction of the failed operation.
+ */
+export class BundleFileHostFailure extends Error {
+  constructor(
+    readonly path: string,
+    readonly operation: "reading" | "writing",
+    cause: Error,
+  ) {
+    super(`${cause.message}, ${operation} ${path}`, { cause });
+  }
+}
+
+/** An untyped host system failure, which carries an errno-style code. */
+const isHostSystemFailure = (cause: unknown): cause is Error =>
+  cause instanceof Error &&
+  !(cause instanceof ArtifactReaderFailure) &&
+  typeof Reflect.get(cause, "code") === "string";
+
+/** Attribute a pathless host failure to the bundle file being written. */
+const writingBundleFile = async <Result>(
+  directory: string,
+  relative: string,
+  write: () => Promise<Result>,
+): Promise<Result> => {
+  try {
+    return await write();
+  } catch (cause: unknown) {
+    if (isHostSystemFailure(cause) && Reflect.get(cause, "path") === undefined)
+      throw new BundleFileHostFailure(
+        join(directory, relative),
+        "writing",
+        cause,
+      );
+    throw cause;
+  }
+};
+
+/** Read the admitted tarball, attributing host failures to the source. */
+async function* tarballChunks(source: BundleTarball): AsyncIterable<unknown> {
+  try {
+    yield* readFileHandleChunks(source.handle);
+  } catch (cause: unknown) {
+    if (isHostSystemFailure(cause))
+      throw new BundleFileHostFailure(source.path, "reading", cause);
+    throw cause;
+  }
+}
+
 const writeBytes = async (
   tree: SafeOutputTree,
+  directory: string,
   relative: string,
   bytes: Buffer,
 ): Promise<WrittenBundleFile> => {
-  const written = await tree.write(relative, Readable.from([bytes]), {
-    bytes: bytes.length,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-  });
+  const written = await writingBundleFile(directory, relative, () =>
+    tree.write(relative, Readable.from([bytes]), {
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    }),
+  );
   return { path: written.relativePath, bytes: written.bytesWritten };
 };
 
@@ -47,28 +102,49 @@ interface BundleTarball {
 /** Hash and copy only the instance retained before destination admission. */
 const writeTarball = async (
   tree: SafeOutputTree,
+  directory: string,
   relative: string,
   source: BundleTarball,
 ): Promise<WrittenBundleFile> => {
   const hash = createHash("sha256");
   let observed = 0;
-  for await (const chunk of readFileHandleChunks(source.handle)) {
+  for await (const chunk of tarballChunks(source)) {
     const bytes = streamChunkToBuffer(chunk);
     observed += bytes.length;
     if (observed > source.size) throw new RegularFileChangedError(source.path);
     hash.update(bytes);
   }
   if (observed !== source.size) throw new RegularFileChangedError(source.path);
-  const written = await tree.write(
-    relative,
-    readFileHandleChunks(source.handle),
-    {
+  const sha256 = hash.digest("hex");
+  const written = await writingBundleFile(directory, relative, () =>
+    tree.write(relative, Readable.from(tarballChunks(source)), {
       bytes: source.size,
-      sha256: hash.digest("hex"),
-    },
+      sha256,
+    }),
   );
   return { path: written.relativePath, bytes: written.bytesWritten };
 };
+
+/**
+ * Only destination admission can blame the selected directory. Path failures
+ * after admission are host write failures on bundle files, not argument refusals.
+ */
+const directoryRefusal = (cause: unknown): unknown =>
+  cause instanceof ArtifactReaderFailure &&
+  cause.reason === "path" &&
+  cause.cleanup === undefined
+    ? new AnalysisInputError(
+        ENVIRONMENT_EXPORT_OPERATION,
+        { cause, userMessage: cause.message },
+        [
+          {
+            path: ["directory"],
+            reason: "invalid_value",
+            message: cause.message,
+          },
+        ],
+      )
+    : cause;
 
 /** The output owner anchors every create and verifies the complete tree before publication. */
 const writeBundleFiles = async (
@@ -79,6 +155,7 @@ const writeBundleFiles = async (
   const resources = new ArtifactResourceScope();
   let tree: SafeOutputTree | undefined;
   let written: WrittenBundleFile[] | undefined;
+  let admitted = false;
   let outcome:
     | {
         readonly kind: "completed";
@@ -95,19 +172,37 @@ const writeBundleFiles = async (
       if (cause instanceof SafeOutputTreeCreationFailure) tree = cause.tree;
       throw cause;
     }
+    admitted = true;
     written = [];
     for (const file of plan.files)
       written.push(
-        await writeBytes(tree, file.path, Buffer.from(file.content)),
+        await writeBytes(
+          tree,
+          input.directory,
+          file.path,
+          Buffer.from(file.content),
+        ),
       );
     written.push(
-      await writeBytes(tree, plan.copies.manifest, input.manifest.bytes),
+      await writeBytes(
+        tree,
+        input.directory,
+        plan.copies.manifest,
+        input.manifest.bytes,
+      ),
     );
     written.push(
-      await writeBytes(tree, plan.copies.evidence, input.evidence.bytes),
+      await writeBytes(
+        tree,
+        input.directory,
+        plan.copies.evidence,
+        input.evidence.bytes,
+      ),
     );
     if (plan.copies.tarball !== null && tarball !== undefined)
-      written.push(await writeTarball(tree, plan.copies.tarball, tarball));
+      written.push(
+        await writeTarball(tree, input.directory, plan.copies.tarball, tarball),
+      );
     await tree.commit();
     outcome = { kind: "completed", files: written };
   } catch (cause: unknown) {
@@ -125,7 +220,7 @@ const writeBundleFiles = async (
   }
   if (outcome.kind === "failed") {
     if (owner?.published === true && written !== undefined) return written;
-    throw outcome.cause;
+    throw admitted ? outcome.cause : directoryRefusal(outcome.cause);
   }
   return outcome.files;
 };

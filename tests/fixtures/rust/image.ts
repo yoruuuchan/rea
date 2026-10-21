@@ -261,3 +261,75 @@ export const createRustHashOverflowImage = (): Buffer => {
   }
   return bytes;
 };
+
+/** Valid Rust evidence beside an independently invalid Go metadata section. */
+export const createRustImageWithGoSection = (
+  format: "elf" | "macho",
+  fault:
+    | "compressed"
+    | "unmapped"
+    | "zero-fill"
+    | "duplicate"
+    | "out-of-file"
+    | "zero-address",
+): Buffer => {
+  const bytes = createRustImage({ format });
+  const count = fault === "duplicate" ? 2 : 1;
+  if (format === "elf") {
+    const nameOffset = Number(bytes.readBigUInt64LE(320 + 32));
+    const name = Buffer.from(".go.buildinfo\0");
+    name.copy(bytes, 768 + nameOffset);
+    bytes.writeBigUInt64LE(BigInt(nameOffset + name.length), 320 + 32);
+    bytes.writeUInt16LE(4 + count, 60);
+    for (let index = 0; index < count; index++) {
+      const header = 512 + index * 64;
+      bytes.writeUInt32LE(nameOffset, header);
+      bytes.writeUInt32LE(fault === "zero-fill" ? 8 : 1, header + 4);
+      bytes.writeBigUInt64LE(fault === "compressed" ? 0x800n : 0n, header + 8);
+      bytes.writeBigUInt64LE(
+        fault === "zero-address"
+          ? 0n
+          : fault === "unmapped"
+            ? 0x600000n
+            : 0x400c00n,
+        header + 16,
+      );
+      bytes.writeBigUInt64LE(
+        fault === "out-of-file" ? 4088n : 3072n,
+        header + 24,
+      );
+      bytes.writeBigUInt64LE(fault === "zero-address" ? 16n : 32n, header + 32);
+      if (fault === "zero-address")
+        Buffer.from("additional data\0", "ascii").copy(bytes, 3072);
+    }
+  } else {
+    if (fault === "compressed") throw new Error("Not a Mach-O section flag");
+    if (fault === "zero-address") throw new Error("Not an ELF section address");
+    bytes.writeUInt32LE(2 + count, 16);
+    bytes.writeUInt32LE((2 + count) * 152, 20);
+    for (let index = 0; index < count; index++) {
+      const command = 336 + index * 152;
+      const little: RustImageWrite["little"] = (offset, value, width) => {
+        if (width === 16) bytes.writeUInt16LE(value, offset);
+        else if (width === 32) bytes.writeUInt32LE(value, offset);
+        else bytes.writeBigUInt64LE(BigInt(value), offset);
+      };
+      writeMachoSegment({
+        bytes,
+        little,
+        command,
+        segment: "__EXTRA",
+        section: "__go_buildinfo",
+        body: Buffer.alloc(32),
+        fileOffset: 3072,
+        protection: fault === "unmapped" ? 0 : 3,
+        flags: fault === "zero-fill" ? 1 : 0,
+      });
+      if (fault === "out-of-file") bytes.writeUInt32LE(4088, command + 72 + 48);
+      bytes.writeBigUInt64LE(0x200000000n, command + 24);
+      bytes.writeBigUInt64LE(0x200000000n, command + 72 + 32);
+      if (fault === "unmapped") bytes.writeBigUInt64LE(0n, command + 32);
+    }
+  }
+  return bytes;
+};

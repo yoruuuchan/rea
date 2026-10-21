@@ -51,6 +51,9 @@ export const artifactInventoryViewRequestSchema = z.discriminatedUnion(
       collection: z.literal("occurrences"),
       occurrence_ids: z.array(prefixedDigestSchema("occ")).optional(),
       logical_paths: z.array(z.string()).optional(),
+      entry_kinds: z
+        .array(artifactOccurrenceSchema.shape.entry_kind)
+        .optional(),
       fields: z.array(artifactOccurrenceSchema.keyof()).optional(),
     }),
     z.strictObject({
@@ -104,6 +107,7 @@ export const artifactInventorySummarySchema = z.strictObject({
     directory: z.number().int().nonnegative(),
     symlink: z.number().int().nonnegative(),
     slice: z.number().int().nonnegative(),
+    metadata: z.number().int().nonnegative().exactOptional(),
   }),
   source_complete: z.boolean(),
   inventory_evidence_ids: z.array(prefixedDigestSchema("ev")).min(1),
@@ -140,6 +144,7 @@ interface InventorySource {
   index?: {
     byId: ReadonlyMap<string, number>;
     byPath: ReadonlyMap<string, readonly number[]>;
+    byKind: ReadonlyMap<ArtifactOccurrence["entry_kind"], readonly number[]>;
   };
   counts?: InventoryCounts;
 }
@@ -241,7 +246,9 @@ export const projectArtifactInventoryView = (
         ?.format_metadata ?? null;
   const rootMetadata = source.rootMetadata;
   const includeCoverage =
-    view.kind === "inventory" || inventory.manifest.root_format === "godot-pck";
+    view.kind === "inventory" ||
+    inventory.manifest.root_format === "godot-pck" ||
+    inventory.manifest.root_format === "pyinstaller";
   const sourceCoverage = includeCoverage
     ? { source_coverage: inventory.coverage }
     : {};
@@ -309,7 +316,15 @@ export const projectArtifactInventoryView = (
           edges: inventory.edges.length,
           integrity_contradictions: inventory.integrityContradictions.length,
         },
-        observed_entry_kind_counts: counts.kinds,
+        observed_entry_kind_counts: {
+          file: counts.kinds.file,
+          directory: counts.kinds.directory,
+          symlink: counts.kinds.symlink,
+          slice: counts.kinds.slice,
+          ...(counts.kinds.metadata === 0
+            ? {}
+            : { metadata: counts.kinds.metadata }),
+        },
         ...(includeCoverage
           ? { available_hash_status_counts: counts.hashes }
           : {}),
@@ -406,7 +421,7 @@ const nodePage = (
 
 const inventoryCounts = (source: InventorySource): InventoryCounts => {
   if (source.counts !== undefined) return source.counts;
-  const kinds = { file: 0, directory: 0, symlink: 0, slice: 0 };
+  const kinds = { file: 0, directory: 0, symlink: 0, slice: 0, metadata: 0 };
   const hashes = {
     verified: 0,
     mismatched: 0,
@@ -435,27 +450,43 @@ const occurrenceIndices = (
   source: InventorySource,
   view: OccurrenceView,
 ): number[] | undefined => {
-  if (view.occurrence_ids === undefined && view.logical_paths === undefined)
+  if (
+    view.occurrence_ids === undefined &&
+    view.logical_paths === undefined &&
+    view.entry_kinds === undefined
+  )
     return undefined;
-  if (view.occurrence_ids?.length === 0 || view.logical_paths?.length === 0)
+  if (
+    view.occurrence_ids?.length === 0 ||
+    view.logical_paths?.length === 0 ||
+    view.entry_kinds?.length === 0
+  )
     return [];
   if (source.index === undefined) {
     const byId = new Map<string, number>();
     const byPath = new Map<string, number[]>();
+    const byKind = new Map<ArtifactOccurrence["entry_kind"], number[]>();
     for (const [index, row] of source.inventory.occurrences.entries()) {
       byId.set(row.occurrence_id, index);
       const existing = byPath.get(row.logical_path);
       if (existing === undefined) byPath.set(row.logical_path, [index]);
       else existing.push(index);
+      const kind = byKind.get(row.entry_kind);
+      if (kind === undefined) byKind.set(row.entry_kind, [index]);
+      else kind.push(index);
     }
-    source.index = { byId, byPath };
+    source.index = { byId, byPath, byKind };
   }
   const lookup = source.index;
   const paths =
     view.logical_paths === undefined ? undefined : new Set(view.logical_paths);
   const selected =
     view.occurrence_ids === undefined
-      ? [...(paths ?? [])].flatMap((path) => lookup.byPath.get(path) ?? [])
+      ? paths === undefined
+        ? [...new Set(view.entry_kinds)].flatMap(
+            (kind) => lookup.byKind.get(kind) ?? [],
+          )
+        : [...paths].flatMap((path) => lookup.byPath.get(path) ?? [])
       : [...new Set(view.occurrence_ids)].flatMap((id) => {
           const index = lookup.byId.get(id);
           return index === undefined ||
@@ -464,7 +495,15 @@ const occurrenceIndices = (
             ? []
             : [index];
         });
-  return selected.sort((left, right) => left - right);
+  const kinds =
+    view.entry_kinds === undefined ? undefined : new Set(view.entry_kinds);
+  return selected
+    .filter(
+      (index) =>
+        kinds === undefined ||
+        kinds.has(source.inventory.occurrences[index]!.entry_kind),
+    )
+    .sort((left, right) => left - right);
 };
 
 const nodeIndices = (

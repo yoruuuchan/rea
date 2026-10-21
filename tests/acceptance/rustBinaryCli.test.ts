@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
@@ -7,6 +8,8 @@ import { toolContract } from "../../src/contracts/toolContracts.js";
 import { machoImageWithUnknownCommand } from "../../src/artifacts/apple/MachoImage.fixture.js";
 import {
   createRustImage,
+  createRustImageWithGoSection,
+  RUSTC_HASH,
   rustDependencyPayload,
 } from "../fixtures/rust/image.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
@@ -228,4 +231,95 @@ cliTest(
     ]);
     expect(await readFile(path)).toEqual(bytes);
   },
+);
+
+cliTest(
+  "keeps Rust evidence independent of Go section errors through public CLI and stdio MCP",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-rust-cli-go-section-");
+    const { client, call } = await connectLocalToolsMcp();
+    for (const [format, fault, code] of [
+      ["elf", "compressed", "unsupported_target"],
+      ["elf", "zero-address", "invalid_request"],
+      ["macho", "zero-fill", "invalid_request"],
+    ] as const) {
+      const bytes = createRustImageWithGoSection(format, fault);
+      if (fault === "zero-address") {
+        const sectionHeader = 512;
+        expect(bytes.readUInt32LE(sectionHeader + 4)).toBe(1);
+        expect(bytes.readBigUInt64LE(sectionHeader + 8)).toBe(0n);
+        expect(bytes.readBigUInt64LE(sectionHeader + 16)).toBe(0n);
+        expect(bytes.readBigUInt64LE(sectionHeader + 24)).toBe(3072n);
+        expect(bytes.readBigUInt64LE(sectionHeader + 32)).toBe(16n);
+        const nameOffset = bytes.readUInt32LE(sectionHeader);
+        expect(
+          bytes.toString(
+            "ascii",
+            768 + nameOffset,
+            768 + nameOffset + ".go.buildinfo".length,
+          ),
+        ).toBe(".go.buildinfo");
+      }
+      const path = join(root, `mixed.${format}`);
+      await writeFile(path, bytes);
+      const result = await cli.run({
+        arguments: ["inspect-rust-binary", path, "--json"],
+      });
+      expect(result.exitCode, result.stderr).toBe(0);
+      const evidence = toolContract("inspect_rust_binary").outputSchema.parse(
+        result.json,
+      );
+      expect(evidence.normalized_result).toMatchObject({
+        artifact: {
+          path,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          bytes: bytes.length,
+        },
+        format,
+        auditable_metadata: {
+          file_offset: 1024,
+          root_package_index: 1,
+          packages: [
+            { name: "itoa", version: "1.0.18" },
+            { name: "sample", version: "0.1.0", root: true },
+          ],
+          dependency_edges: [{ from_index: 1, to_index: 0 }],
+        },
+        rustc_commit: {
+          evidence_kind: "inferred",
+          hashes: [{ hash: RUSTC_HASH, file_offset: 2048 }],
+        },
+      });
+      const response = await call("inspect_rust_binary", { path });
+      expect(response.isError, JSON.stringify(response)).not.toBe(true);
+      expect(response.structuredContent).toEqual(evidence);
+      const go = await cli.run({
+        arguments: ["inspect-go-binary", path, "--json"],
+      });
+      expect(go.exitCode).toBe(1);
+      expect(go.json).toMatchObject({
+        code,
+        details: { operation: "inspect_go_binary" },
+      });
+      if (fault === "zero-address")
+        expect(go.json).toMatchObject({
+          details: {
+            issues: [{ path: ["path"], reason: "invalid_format" }],
+          },
+        });
+      const goResponse = await call("inspect_go_binary", { path });
+      expect(parseMcpToolError(goResponse).error).toMatchObject({
+        code,
+        details: { operation: "inspect_go_binary" },
+      });
+      if (fault === "zero-address")
+        expect(parseMcpToolError(goResponse).error).toMatchObject({
+          details: {
+            issues: [{ path: ["path"], reason: "invalid_format" }],
+          },
+        });
+    }
+    await client.ping();
+  },
+  30000,
 );

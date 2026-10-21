@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, chmod, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
@@ -246,6 +246,75 @@ it("returns actionable unavailable without creating a workspace when tools are a
     },
   });
 });
+
+it.each([
+  { tool: "wasm-validate", stdout: "1.0.41\n", stderr: "" },
+  { tool: "wasm-objdump", stdout: "", stderr: "" },
+  { tool: "wasm2wat", stdout: "1.0.42\n", stderr: "launcher warning\n" },
+  {
+    tool: "wasm-objdump",
+    stdout: "",
+    stderr: "version launcher failed\n",
+    exitCode: 2,
+  },
+])(
+  "retains the exact rejected $tool version probe and configuration recovery",
+  async ({ tool, stdout, stderr, exitCode = 0 }) => {
+    const root = await realpath(
+      await createTestTempDirectory("rea-wabt-version-recovery-"),
+    );
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    for (const name of ["wasm-validate", "wasm-objdump", "wasm2wat"])
+      await writeFile(join(root, name + suffix), "owned executable seam", {
+        mode: 0o700,
+      });
+    const commands: string[] = [];
+    const provider = new WabtArtifactProvider(
+      { REA_WABT_BIN_DIRECTORY: root },
+      (input) => {
+        expect(input.arguments).toEqual(["--version"]);
+        commands.push(input.command);
+        const selected = input.command === join(root, tool + suffix);
+        return spawnOwnedProviderProcess({
+          ...input,
+          command: process.execPath,
+          arguments: [
+            "-e",
+            `process.stdout.write(${JSON.stringify(selected ? stdout : "1.0.42\n")}); process.stderr.write(${JSON.stringify(selected ? stderr : "")}); process.exit(${String(selected ? exitCode : 0)});`,
+          ],
+          expectedCommand: null,
+        });
+      },
+    );
+    try {
+      const result = await provider.inspect({
+        path: "/must-not-read-before-configuration.wasm",
+        glue_paths: [],
+        candidate_paths: [],
+      });
+      if (result.ok) throw new Error("Expected WABT configuration rejection");
+      const projected = projectAnalysisError(result.error);
+      expect(projected).toMatchObject({
+        code: "capability_unavailable",
+        retryable: false,
+        details: {
+          diagnostics: {
+            configuration_key: "REA_WABT_BIN_DIRECTORY",
+            executable_path: join(root, tool + suffix),
+            tool,
+            expected_version: "1.0.42",
+          },
+          captured_output: { stdout, stderr, truncated: false },
+        },
+      });
+      expect(projected.remediation.action).toContain("--version");
+      expect(projected.remediation.action).toContain("restart");
+      expect(commands.at(-1)).toBe(join(root, tool + suffix));
+    } finally {
+      await provider.close();
+    }
+  },
+);
 
 it("retries a retained input descriptor before admitting the next WABT operation", async () => {
   const root = await createTestTempDirectory("rea-wabt-read-cleanup-");

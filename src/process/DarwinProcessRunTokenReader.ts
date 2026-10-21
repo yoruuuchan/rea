@@ -518,6 +518,9 @@ export const createDarwinProcessRunTokenReader = (
     } catch (cause: unknown) {
       operation.primaryFailure = { cause };
       if (operationRoot !== undefined) {
+        // execFileOutput has settled, so inherited compiler pipes are closed.
+        // That is not proof for a child that did not inherit them; this owner
+        // does not signal processes it did not launch.
         try {
           await cleanupRoot(operationRoot);
         } catch (cleanup: unknown) {

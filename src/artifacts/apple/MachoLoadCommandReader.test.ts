@@ -142,6 +142,112 @@ it("uses legacy simulator and device platform facts when resolving dylibs", asyn
   );
 });
 
+it.each([false, true] as const)(
+  "applies macOS dyld's implicit platform to a platform-less dylib and traces its required child present=%s",
+  async (childPresent) => {
+    const root = await createTestTempDirectory("rea-dylib-platform-unknown-");
+    const executablePath = "Contents/MacOS/probe";
+    const dylibPath = "Contents/Frameworks/libA.dylib";
+    const fallbackPath = "Contents/Fallbacks/libA.dylib";
+    const childPath = "Contents/Frameworks/libMissing.dylib";
+    const fallbackChildPath = "Contents/Fallbacks/libFallbackOnly.dylib";
+    const executable = machoImage({
+      cpu: CPU.arm64,
+      commands: [
+        buildVersionCommand(1),
+        rpathCommand("@executable_path/../Frameworks"),
+        rpathCommand("@executable_path/../Fallbacks"),
+        dylibCommand(LC.LOAD_DYLIB, "@rpath/libA.dylib"),
+      ],
+    });
+    const dylib = machoImage({
+      cpu: CPU.arm64,
+      fileType: FILE_TYPE.dylib,
+      commands: [
+        rpathCommand("@loader_path"),
+        dylibCommand(LC.LOAD_DYLIB, "@rpath/libMissing.dylib"),
+      ],
+    });
+    const child = machoImage({
+      cpu: CPU.arm64,
+      fileType: FILE_TYPE.dylib,
+      commands: [buildVersionCommand(1)],
+    });
+    const fallback = machoImage({
+      cpu: CPU.arm64,
+      fileType: FILE_TYPE.dylib,
+      commands: [
+        rpathCommand("@loader_path"),
+        dylibCommand(LC.LOAD_DYLIB, "@rpath/libFallbackOnly.dylib"),
+      ],
+    });
+    const fallbackChild = machoImage({
+      cpu: CPU.arm64,
+      fileType: FILE_TYPE.dylib,
+      commands: [buildVersionCommand(1)],
+    });
+    await mkdir(join(root, "Contents/MacOS"), { recursive: true });
+    await mkdir(join(root, "Contents/Frameworks"), { recursive: true });
+    await mkdir(join(root, "Contents/Fallbacks"), { recursive: true });
+    await writeFile(join(root, executablePath), executable);
+    await writeFile(join(root, dylibPath), dylib);
+    await writeFile(join(root, fallbackPath), fallback);
+    await writeFile(join(root, fallbackChildPath), fallbackChild);
+    if (childPresent) await writeFile(join(root, childPath), child);
+
+    const trace = await traceDylibResolution({
+      rootPath: root,
+      targetPath: join(root, executablePath),
+      targetSha256: createHash("sha256").update(executable).digest("hex"),
+      enumerateRoots: false,
+      parameters: { roots: [executablePath] },
+    });
+
+    expect(
+      trace.images.find(({ path }) => path === executablePath)?.slices[0],
+    ).toMatchObject({ platform: 1, platforms: [1] });
+    expect(
+      trace.images.find(({ path }) => path === dylibPath)?.slices[0],
+    ).toMatchObject({ platform: null, platforms: [] });
+    expect(trace.edges[0]).toMatchObject({
+      loader: executablePath,
+      install_name: "@rpath/libA.dylib",
+      candidates: [
+        {
+          outcome: "resolved",
+          resolved_path: dylibPath,
+          platform_basis: "macos-dyld-implicit",
+        },
+      ],
+      resolution: { status: "resolved", image: dylibPath },
+    });
+    expect(trace.edges[1]).toMatchObject({
+      loader: dylibPath,
+      install_name: "@rpath/libMissing.dylib",
+      resolution: childPresent
+        ? { status: "resolved", image: childPath }
+        : { status: "unresolved", image: null },
+      loader_conditional: false,
+    });
+    expect(trace.images.map(({ path }) => path)).toEqual(
+      childPresent
+        ? [executablePath, childPath, dylibPath].sort()
+        : [executablePath, dylibPath].sort(),
+    );
+    expect(trace.images.map(({ path }) => path)).not.toContain(fallbackPath);
+    expect(trace.images.map(({ path }) => path)).not.toContain(
+      fallbackChildPath,
+    );
+    expect(trace.coverage.status).toBe("complete");
+    expect(trace.limitations).toContainEqual(
+      expect.stringContaining(dylibPath),
+    );
+    expect(trace.findings.map(({ kind }) => kind)).toEqual(
+      childPresent ? [] : ["required-load-unresolved"],
+    );
+  },
+);
+
 describe("absolute dyld candidate paths at the filesystem reader boundary", () => {
   it.each(["install-name", "rpath"] as const)(
     "resolves an absolute in-root %s while preserving its source path",

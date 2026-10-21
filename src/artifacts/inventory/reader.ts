@@ -7,6 +7,7 @@ import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
 import { GodotPckArtifactReader } from "../GodotPckArtifactReader.js";
 import { MachOSliceArtifactReader } from "../MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "../NativeDmgArtifactReader.js";
+import { PyInstallerArtifactReader } from "../PyInstallerArtifactReader.js";
 import { ZipArtifactReader } from "../ZipArtifactReader.js";
 import type {
   ArtifactInventoryCoverage,
@@ -31,6 +32,8 @@ export const createReader = (
       return new DirectoryArtifactReader(path);
     case "asar":
       return new AsarArtifactReader(path);
+    case "pyinstaller":
+      return new PyInstallerArtifactReader(path, rootSource);
     case "godot-pck":
       return new GodotPckArtifactReader(path, rootSource);
     case "mach-o-universal":

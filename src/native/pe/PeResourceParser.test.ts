@@ -22,6 +22,59 @@ const parse = (bytes: Buffer, maxEntries = 4096, signal?: AbortSignal) =>
     signal,
   );
 
+describe("word-aligned PE resource records", () => {
+  it.each([false, true])(
+    "preserves word-aligned resource records after UTF-16 names (PE32+ = %s)",
+    async (plus) => {
+      for (const identities of [
+        { type: 10, name: 1, language: "AB" },
+        { type: "AB", name: 1, language: 1033 },
+      ]) {
+        const payload = Buffer.from("opaque resource");
+        const fixture = peResourceFixture(
+          plus,
+          [{ ...identities, payload }],
+          65536,
+          2,
+        );
+        const dataOffset = fixture.dataOffsets[0];
+        if (dataOffset === undefined)
+          throw new Error("Missing fixture data entry");
+        expect(fixture.dataOffsets.some((at) => at % 4 === 2)).toBe(true);
+        if (typeof identities.type === "string")
+          expect(fixture.directoryOffsets.some((at) => at % 4 === 2)).toBe(
+            true,
+          );
+        const result = peResourcesSchema.parse(await parse(fixture.bytes));
+        expect(
+          result.directories.map(({ location }) => location.offset),
+        ).toEqual(fixture.directoryOffsets);
+        expect(result.coverage).toMatchObject({
+          status: "complete",
+          resources: 1,
+        });
+        expect(result.resources[0]?.data_entry_location).toEqual({
+          offset: dataOffset,
+          bytes: 16,
+        });
+        expect(result.resources[0]?.payload.sha256).toBe(
+          createHash("sha256").update(payload).digest("hex"),
+        );
+        expect(result.resources[0]?.payload.location.offset).toBe(
+          fixture.bytes.readUInt32LE(dataOffset) - 0x1c00,
+        );
+        fixture.bytes.writeUInt32LE(
+          dataOffset - 0x400 + 15,
+          fixture.directoryAt + 4,
+        );
+        await expect(parse(fixture.bytes)).rejects.toMatchObject({
+          reason: "format",
+        });
+      }
+    },
+  );
+});
+
 describe("portable PE resource parsing", () => {
   it.each([false, true])(
     "preserves original identities, ranges, hashes and icon candidates (PE32+ = %s)",

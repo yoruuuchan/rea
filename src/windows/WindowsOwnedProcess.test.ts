@@ -135,10 +135,13 @@ describe("Windows native release retry", () => {
       );
 
       shouldFailClose = false;
+      const callsBeforeRetry = calls.length;
       const cleanup = child.cleanup();
-      await vi.advanceTimersByTimeAsync(25);
-      expect(await cleanup).toMatchObject({ cleaned: true });
+      expect(await cleanup).toMatchObject({ cleaned: true, signaled: false });
       await closed;
+      expect(
+        calls.slice(callsBeforeRetry).map(({ operation }) => operation),
+      ).toEqual(["process_close"]);
       expect(child.stdout.writableEnded).toBe(true);
       expect(child.stderr.writableEnded).toBe(true);
     } finally {

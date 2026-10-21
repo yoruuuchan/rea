@@ -51,6 +51,13 @@ const dependencyCommandSchema = z.enum([
   "LC_LOAD_UPWARD_DYLIB",
 ]);
 
+const IMPLICIT_MACOS_PLATFORM = 1;
+const MACOS_DYLD_IMPLICIT_PLATFORM_CPU_TYPES = new Set([
+  7, // CPU_TYPE_I386
+  0x01000007, // CPU_TYPE_X86_64
+  0x0100000c, // CPU_TYPE_ARM64, including arm64 subtypes
+]);
+
 const dependencySchema = z.strictObject({
   command: dependencyCommandSchema,
   encoding: z.enum([
@@ -145,6 +152,7 @@ const candidateSchema = z.strictObject({
     "undetermined",
   ]),
   resolved_path: z.string().nullable(),
+  platform_basis: z.enum(["macos-dyld-implicit"]).optional(),
 });
 
 const edgeSchema = z.strictObject({
@@ -227,7 +235,7 @@ interface LoadedImage {
   readonly slice: MachoSlice;
   /** Images from the process root to this image; the rpath stack, outermost first. */
   readonly chain: readonly string[];
-  /** Some edge on the chain was conditional: an unknown earlier candidate may load instead. */
+  /** Some edge on the chain has unresolved candidate or platform facts. */
   readonly conditional: boolean;
 }
 
@@ -240,6 +248,8 @@ interface ProcessContext {
   >;
   readonly searchOverrides: readonly DyldSearchOverride[];
   readonly environmentRoots: Set<string>;
+  readonly unknownPlatformCandidates: Set<string>;
+  readonly implicitMacOSPlatformCandidates: Set<string>;
   readonly platforms: readonly number[];
   readonly executable: string | null;
   readonly loaded: Map<string, LoadedImage>;
@@ -346,47 +356,75 @@ const evaluateCandidate = async (
     // also admits main executables and bundles for different operations.
     else if (slice.file_type_code !== 6) outcome = "not-loadable";
     else {
-      const platformResult = platformLoadability(
-        context.platforms,
-        slice.platforms,
-        slice.file_type_code,
-        context.processIdentity.architecture,
-      );
+      const platformResult = platformLoadability(context, slice);
       outcome =
-        platformResult === "compatible"
+        platformResult.outcome === "compatible"
           ? "resolved"
-          : platformResult === "incompatible"
+          : platformResult.outcome === "incompatible"
             ? "platform-mismatch"
             : "undetermined";
+      if (outcome === "undetermined")
+        context.unknownPlatformCandidates.add(lookup.path);
+      if (platformResult.basis !== undefined) {
+        context.implicitMacOSPlatformCandidates.add(lookup.path);
+        return {
+          ...base,
+          outcome,
+          resolved_path: lookup.path,
+          platform_basis: platformResult.basis,
+        };
+      }
     }
   }
   return { ...base, outcome, resolved_path: lookup.path };
 };
 
 type PlatformLoadability = "compatible" | "incompatible" | "unknown";
+type PlatformLoadabilityResult = {
+  readonly outcome: PlatformLoadability;
+  readonly basis?: Candidate["platform_basis"];
+};
 
 /** Apply dyld's documented cross-platform load cases and retain uncertain host cases. */
 const platformLoadability = (
-  processPlatforms: readonly number[],
-  imagePlatforms: readonly number[],
-  fileType: number,
-  architecture: string,
-): PlatformLoadability => {
-  if (processPlatforms.length === 0 || imagePlatforms.length === 0)
-    return "unknown";
+  context: Pick<ProcessContext, "platforms" | "executable">,
+  image: MachoSlice,
+): PlatformLoadabilityResult => {
+  const { platforms: processPlatforms } = context;
+  const { file_type_code: fileType, platforms: imagePlatforms } = image;
+  let effectiveImagePlatforms = imagePlatforms;
+  let basis: Candidate["platform_basis"];
+  if (imagePlatforms.length === 0) {
+    // macOS dyld supplies an implicit macOS platform to old dylibs on these
+    // CPU types. Keep the parsed platform facts untouched; this is only the
+    // compatibility interpretation used for an explicitly macOS process.
+    if (
+      context.executable !== null &&
+      processPlatforms.length === 1 &&
+      processPlatforms[0] === IMPLICIT_MACOS_PLATFORM &&
+      MACOS_DYLD_IMPLICIT_PLATFORM_CPU_TYPES.has(image.cpu_type)
+    ) {
+      effectiveImagePlatforms = [IMPLICIT_MACOS_PLATFORM];
+      basis = "macos-dyld-implicit";
+    } else return { outcome: "unknown" };
+  }
+  if (processPlatforms.length === 0) return { outcome: "unknown" };
   const outcomes = processPlatforms.map((processPlatform) =>
     imageLoadabilityForPlatform(
       processPlatform,
-      imagePlatforms,
+      effectiveImagePlatforms,
       fileType,
-      architecture,
+      image.architecture,
     ),
   );
   if (outcomes.every((outcome) => outcome === "compatible"))
-    return "compatible";
+    return { outcome: "compatible", ...(basis === undefined ? {} : { basis }) };
   if (outcomes.every((outcome) => outcome === "incompatible"))
-    return "incompatible";
-  return "unknown";
+    return {
+      outcome: "incompatible",
+      ...(basis === undefined ? {} : { basis }),
+    };
+  return { outcome: "unknown", ...(basis === undefined ? {} : { basis }) };
 };
 
 const imageLoadabilityForPlatform = (
@@ -572,7 +610,7 @@ const traceProcess = async (
       context.loaded.set(image, {
         slice,
         chain: [...current.chain, image],
-        // dyld may load an unknown earlier candidate instead of this fallback.
+        // A modeled earlier search uncertainty can make this image conditional.
         conditional:
           current.conditional || edge.resolution.status === "conditional",
       });
@@ -587,6 +625,69 @@ const traceProcess = async (
     pending.push(...created.reverse());
   }
   return edges;
+};
+
+const projectTraceResult = (input: {
+  readonly images: ReadonlyMap<string, MachoImageFacts>;
+  readonly roots: DylibTrace["roots"];
+  readonly rootSlices: readonly TracedRootSlice[];
+  readonly edges: readonly Edge[];
+  readonly withoutArchitecture: readonly string[];
+  readonly environmentRoots: ReadonlySet<string>;
+  readonly unknownPlatformCandidates: ReadonlySet<string>;
+  readonly implicitMacOSPlatformCandidates: ReadonlySet<string>;
+}): DylibTrace => {
+  const reported = [...input.images.entries()]
+    .filter(([, facts]) => facts.status !== "not-mach-o")
+    .sort(([left], [right]) => compare(left, right));
+  const unparsed = reported
+    .filter(([, facts]) => facts.status !== "parsed")
+    .map(([path]) => path);
+  return {
+    roots: input.roots,
+    images: reported.map(([path, facts]) => ({
+      path,
+      parse_status:
+        facts.status === "not-mach-o" ? "unsupported" : facts.status,
+      reason:
+        facts.status === "parsed" || facts.status === "not-mach-o"
+          ? null
+          : facts.reason,
+      slices:
+        facts.status === "parsed" ? facts.slices.map(withoutDependencies) : [],
+    })),
+    edges: [...input.edges],
+    findings: deriveFindings(input.edges, input.rootSlices),
+    coverage: {
+      status:
+        unparsed.length === 0 &&
+        input.withoutArchitecture.length === 0 &&
+        input.environmentRoots.size === 0 &&
+        input.unknownPlatformCandidates.size === 0
+          ? "complete"
+          : "partial",
+      unparsed_images: unparsed,
+      roots_without_architecture: [...input.withoutArchitecture],
+    },
+    limitations: [
+      ...DYLIB_RESOLUTION_LIMITATIONS,
+      ...(input.environmentRoots.size === 0
+        ? []
+        : [
+            `Roots ${[...input.environmentRoots].join(", ")} request applicable image-selection inputs through LC_DYLD_ENVIRONMENT that are not modeled; affected dependencies or inserted images remain uncertain.`,
+          ]),
+      ...(input.unknownPlatformCandidates.size === 0
+        ? []
+        : [
+            `In-root dylib candidates ${[...input.unknownPlatformCandidates].sort(compare).join(", ")} have unknown platform compatibility and are not treated as incompatible. Their dependent graphs may be incomplete.`,
+          ]),
+      ...(input.implicitMacOSPlatformCandidates.size === 0
+        ? []
+        : [
+            `In-root dylib candidates ${[...input.implicitMacOSPlatformCandidates].sort(compare).join(", ")} have no observed platform load command; macOS compatibility was derived from dyld's implicit-platform rule for an executable root with explicit macOS platform and a supported CPU type. Reported platform facts remain unchanged.`,
+          ]),
+    ],
+  };
 };
 
 /** Trace dyld load paths from each process root through the analyzed root. */
@@ -608,6 +709,8 @@ export const traceDylibLoading = async (
   const edges: Edge[] = [];
   const withoutArchitecture: string[] = [];
   const environmentRoots = new Set<string>();
+  const unknownPlatformCandidates = new Set<string>();
+  const implicitMacOSPlatformCandidates = new Set<string>();
   for (const root of request.roots) {
     const facts = await view.image(root);
     images.set(root, facts);
@@ -647,6 +750,8 @@ export const traceDylibLoading = async (
             },
             searchOverrides,
             environmentRoots,
+            unknownPlatformCandidates,
+            implicitMacOSPlatformCandidates,
             platforms: slice.platforms,
             executable,
             loaded: new Map(),
@@ -659,46 +764,16 @@ export const traceDylibLoading = async (
       );
     }
   }
-  const reported = [...images.entries()]
-    .filter(([, facts]) => facts.status !== "not-mach-o")
-    .sort(([left], [right]) => compare(left, right));
-  const unparsed = reported
-    .filter(([, facts]) => facts.status !== "parsed")
-    .map(([path]) => path);
-  return {
+  return projectTraceResult({
+    images,
     roots,
-    images: reported.map(([path, facts]) => ({
-      path,
-      parse_status:
-        facts.status === "not-mach-o" ? "unsupported" : facts.status,
-      reason:
-        facts.status === "parsed" || facts.status === "not-mach-o"
-          ? null
-          : facts.reason,
-      slices:
-        facts.status === "parsed" ? facts.slices.map(withoutDependencies) : [],
-    })),
+    rootSlices,
     edges,
-    findings: deriveFindings(edges, rootSlices),
-    coverage: {
-      status:
-        unparsed.length === 0 &&
-        withoutArchitecture.length === 0 &&
-        environmentRoots.size === 0
-          ? "complete"
-          : "partial",
-      unparsed_images: unparsed,
-      roots_without_architecture: withoutArchitecture,
-    },
-    limitations: [
-      ...DYLIB_RESOLUTION_LIMITATIONS,
-      ...(environmentRoots.size === 0
-        ? []
-        : [
-            `Roots ${[...environmentRoots].join(", ")} request applicable image-selection inputs through LC_DYLD_ENVIRONMENT that are not modeled; affected dependencies or inserted images remain uncertain.`,
-          ]),
-    ],
-  };
+    withoutArchitecture,
+    environmentRoots,
+    unknownPlatformCandidates,
+    implicitMacOSPlatformCandidates,
+  });
 };
 
 const withoutDependencies = (

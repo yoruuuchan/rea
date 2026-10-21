@@ -3,13 +3,13 @@ import {
   validateFatSlice,
 } from "../domain/apple/machoContainer.js";
 import {
-  GoBinaryFormatFailure,
-  GoBinaryResourceFailure,
+  BinaryFormatFailure,
+  BinaryResourceFailure,
   mappedFileOffset,
   isZeroFilledSpan,
-  type GoBinaryContainer,
-} from "../go/GoBinaryContainer.js";
-import { readGoBinaryContainer } from "../go/GoBinaryImage.js";
+  type BinaryContainer,
+} from "../native/metadata/BinaryContainer.js";
+import { readBinaryContainer } from "../native/metadata/readBinaryContainer.js";
 import { applyElfRelativeRelocationsSteps } from "./ElfRelocations.js";
 import { Il2cppBinaryFormatFailure } from "./Il2cppBinaryFormat.js";
 const MACHO_CPU = new Map([
@@ -64,7 +64,7 @@ const selectImage = (
 
 export interface NativeImage {
   readonly bytes: Buffer;
-  readonly container: GoBinaryContainer;
+  readonly container: BinaryContainer;
   readonly imageBase: bigint;
   readonly unresolvedPointerSlots: ReadonlySet<bigint>;
   readonly zeroFillPointers: ReadonlyMap<bigint, bigint>;
@@ -75,16 +75,16 @@ export function* openImageSteps(
   architecture: string | undefined,
 ): Generator<void, NativeImage> {
   let image = selectImage(bytes, architecture);
-  let container: GoBinaryContainer;
+  let container: BinaryContainer;
   try {
-    container = readGoBinaryContainer(image);
+    container = readBinaryContainer(image);
   } catch (cause) {
-    if (cause instanceof GoBinaryResourceFailure)
+    if (cause instanceof BinaryResourceFailure)
       throw new Il2cppBinaryFormatFailure(
         "native-index-capacity",
         cause.message,
       );
-    if (cause instanceof GoBinaryFormatFailure)
+    if (cause instanceof BinaryFormatFailure)
       throw new Il2cppBinaryFormatFailure(
         cause.kind === "unsupported"
           ? "unsupported-container"
@@ -121,7 +121,7 @@ export function* openImageSteps(
         container.zero_fills,
       );
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure)
+    if (cause instanceof BinaryFormatFailure)
       throw new Il2cppBinaryFormatFailure("malformed-container", cause.message);
     throw cause;
   }
@@ -172,7 +172,7 @@ export const readPointer = (
     );
     return image.bytes.readBigUInt64LE(offset);
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure) return null;
+    if (cause instanceof BinaryFormatFailure) return null;
     throw cause;
   }
 };
@@ -195,7 +195,7 @@ export const readUInt32 = (
       ),
     );
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure) return null;
+    if (cause instanceof BinaryFormatFailure) return null;
     throw cause;
   }
 };
@@ -205,7 +205,7 @@ export const isMapped = (image: NativeImage, address: bigint, size: number) => {
     mappedFileOffset(image.container.mappings, address, size);
     return true;
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure) return false;
+    if (cause instanceof BinaryFormatFailure) return false;
     throw cause;
   }
 };
@@ -262,7 +262,7 @@ export const hasPointerArrayCoverage = (
         );
       }
     } catch (cause) {
-      if (cause instanceof GoBinaryFormatFailure) return false;
+      if (cause instanceof BinaryFormatFailure) return false;
       throw cause;
     }
     cursor += BigInt(size);
@@ -284,7 +284,7 @@ export const isExecutable = (image: NativeImage, address: bigint): boolean => {
       mappedFileOffset(image.container.executable_mappings ?? [], address, 1)
     );
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure) return false;
+    if (cause instanceof BinaryFormatFailure) return false;
     throw cause;
   }
 };
@@ -312,7 +312,7 @@ export const readSlot = (
   try {
     return isZeroFilled(image, address, 8) ? 0n : readPointer(image, address);
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure)
+    if (cause instanceof BinaryFormatFailure)
       throw new Il2cppBinaryFormatFailure("malformed-container", cause.message);
     throw cause;
   }

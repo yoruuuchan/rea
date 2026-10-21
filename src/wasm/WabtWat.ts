@@ -1,5 +1,5 @@
 import { parseWabtInterface } from "./WabtInterface.js";
-import { watString } from "./WabtString.js";
+import { watString, watStringEnd } from "./WabtString.js";
 
 /** Read only module-name metadata from WABT's preserved name-section payload. */
 const moduleNames = (bytes: Uint8Array): string[] => {
@@ -48,20 +48,22 @@ export const parseWabtWat = (text: string) => {
   const debugModuleNames: string[] = [];
   let depth = 0;
   let start = 0;
-  let quoted = false;
   let commentDepth = 0;
   let lineComment = false;
   let closed = false;
+  const boundaries = /[()";]/gu;
   for (let index = 0; index < text.length; index++) {
+    // Instructions and whitespace inside a form cannot change its framing.
+    if (depth > 0 && !lineComment && commentDepth === 0) {
+      boundaries.lastIndex = index;
+      const boundary = boundaries.exec(text);
+      if (boundary === null) break;
+      index = boundary.index;
+    }
     const char = text[index];
     const next = text[index + 1];
     if (lineComment) {
       if (char === "\n") lineComment = false;
-      continue;
-    }
-    if (quoted) {
-      if (char === "\\") index++;
-      else if (char === '"') quoted = false;
       continue;
     }
     if (commentDepth > 0) {
@@ -87,7 +89,7 @@ export const parseWabtWat = (text: string) => {
     if (char === '"') {
       if (depth === 0)
         throw new Error("Unexpected string outside WABT WAT module.");
-      quoted = true;
+      index = watStringEnd(text, index + 1) - 1;
       continue;
     }
     if (char === "(") {
@@ -133,7 +135,7 @@ export const parseWabtWat = (text: string) => {
     } else if (depth === 0 && char !== undefined && !/\s/u.test(char))
       throw new Error("Unexpected text outside WABT WAT module.");
   }
-  if (depth !== 0 || quoted || commentDepth !== 0)
+  if (depth !== 0 || commentDepth !== 0)
     throw new Error("Incomplete WABT WAT output.");
   return {
     imports,

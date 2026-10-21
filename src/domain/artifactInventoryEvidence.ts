@@ -348,19 +348,20 @@ const orderOccurrences = (
     .flatMap(([path, group]) => {
       if (group.length < 2) return group;
       const ordinalById = new Map<string, number>();
-      const first = group[0];
-      if (first === undefined)
-        throw new TypeError("Duplicate occurrence group is empty");
+      const kinds = new Set(group.map(({ entry_kind }) => entry_kind));
       for (let ordinal = 0; ordinal < group.length; ordinal++) {
-        ordinalById.set(
-          occurrenceIdForLocation({
-            rootArtifactId,
-            logicalPath: path,
-            entryKind: first.entry_kind,
-            ...(ordinal === 0 ? {} : { duplicateOrdinal: ordinal }),
-          }),
-          ordinal,
-        );
+        // Entry kinds come from a fixed schema enum, so work stays linear in
+        // the group size without changing or guessing producer identities.
+        for (const entryKind of kinds)
+          ordinalById.set(
+            occurrenceIdForLocation({
+              rootArtifactId,
+              logicalPath: path,
+              entryKind,
+              ...(ordinal === 0 ? {} : { duplicateOrdinal: ordinal }),
+            }),
+            ordinal,
+          );
       }
       return group.sort(
         (left, right) =>

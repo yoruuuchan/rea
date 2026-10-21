@@ -1,10 +1,10 @@
 import {
-  GoBinaryFormatFailure,
+  BinaryFormatFailure,
   mappedFileOffset,
   isZeroFilledSpan,
-  type GoFileMapping,
-  type GoZeroFillMapping,
-} from "../go/GoBinaryContainer.js";
+  type FileMapping,
+  type ZeroFillMapping,
+} from "../native/metadata/BinaryContainer.js";
 import { Il2cppBinaryFormatFailure } from "./Il2cppBinaryFormat.js";
 
 const DT_RELA = 7n,
@@ -26,8 +26,8 @@ interface RelocatedImage {
 }
 interface RelocationSource {
   readonly image: Buffer;
-  readonly mappings: readonly GoFileMapping[];
-  readonly zeroFills: readonly GoZeroFillMapping[];
+  readonly mappings: readonly FileMapping[];
+  readonly zeroFills: readonly ZeroFillMapping[];
   readonly relative: number;
   readonly unknownPointerKinds: ReadonlySet<number>;
 }
@@ -101,14 +101,14 @@ function* dynamicTags(image: Buffer): Generator<void, Map<bigint, bigint>> {
 }
 
 const fileOffset = (
-  mappings: readonly GoFileMapping[],
+  mappings: readonly FileMapping[],
   address: bigint,
   size: number,
 ): number | null => {
   try {
     return mappedFileOffset(mappings, address, size);
   } catch (cause) {
-    if (cause instanceof GoBinaryFormatFailure) return null;
+    if (cause instanceof BinaryFormatFailure) return null;
     throw cause;
   }
 };
@@ -178,8 +178,8 @@ function* applyRelaTable(
 /** Materialize relative pointers in a private copy, preserving unknown and .bss facts. */
 export function* applyElfRelativeRelocationsSteps(
   image: Buffer,
-  mappings: readonly GoFileMapping[],
-  zeroFills: readonly GoZeroFillMapping[],
+  mappings: readonly FileMapping[],
+  zeroFills: readonly ZeroFillMapping[],
 ): Generator<void, RelocatedImage> {
   if (image.length < 64) throw malformed("ELF header is truncated");
   const kinds = RELOCATION_KINDS.get(image.readUInt16LE(18));

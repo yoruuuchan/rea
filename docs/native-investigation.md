@@ -714,7 +714,12 @@ leap seconds) and out-of-range dates remain explicit unknowns. REA does not
 emulate CoreFoundation's normalization of overflowing calendar fields. Invalid
 dates returned by other decoders retain `{ "$plist_type": "date", "iso8601": null }`
 with a counted limitation. `inspect_plist` and Interface Builder decoding use
-the same projection.
+the same projection. Binary keyed-archive and Interface Builder plist decoding
+refuse a reachable date whose marker is not `0x33`. A valid `0x33` date is
+reported with an ISO-8601 timestamp only when its float64 seconds are exactly
+the canonical encoding of that millisecond instant. Any other finite binary
+date uses `{ "$plist_type": "date", "iso8601": null }` and the counted
+limitation; the archive bytes remain the source of the instant.
 
 A negative-zero real is reported as `{ "$plist_type": "real", "value": "-0" }`
 because a JSON number cannot carry the sign of zero. `inspect_plist` and
