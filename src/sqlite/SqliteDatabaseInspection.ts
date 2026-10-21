@@ -10,8 +10,13 @@ import {
 } from "../domain/sqlite/sqliteDatabase.js";
 import {
   SQLITE_DATABASE_LIMITS,
+  SqliteColumnEvaluationFailure,
   SqliteInspectionFailure,
+  sqlitePrimaryResultCode,
 } from "./SqliteDatabaseLimits.js";
+
+/** SQLite's generic SQL error, raised while compiling or evaluating an expression. */
+const SQLITE_ERROR = 1;
 
 const natural = z
   .bigint()
@@ -419,6 +424,107 @@ const readSchema = (
   return { schema, selectedTable };
 };
 
+/** Byte length of one cell's projected representation, without copying its value. */
+const cellByteLength = (name: string): string => {
+  const column = quoteIdentifier(name);
+  return `CASE typeof(${column}) WHEN 'text' THEN length(CAST(${column} AS BLOB)) WHEN 'blob' THEN length(${column}) ELSE 0 END`;
+};
+
+/** Ordinary and stored generated columns, read without evaluating an expression; skips undecodable names. */
+const storedColumnNames = (
+  db: DatabaseSync,
+  table: string,
+  encoding: DatabaseEncoding,
+): string[] => {
+  const names: string[] = [];
+  for (const raw of db
+    .prepare(
+      "SELECT CAST(name AS BLOB) AS name FROM temp.pragma_table_xinfo(?, 'main') WHERE hidden IN (0, 3) ORDER BY cid",
+    )
+    .iterate(table)) {
+    const { name } = z.object({ name: z.instanceof(Uint8Array) }).parse(raw);
+    try {
+      names.push(decodeSchemaText(name, encoding, "column name"));
+    } catch (cause: unknown) {
+      // An unrelated malformed name cannot be selected exactly, so it is not recommended.
+      if (!(cause instanceof SqliteInspectionFailure)) throw cause;
+    }
+  }
+  return names;
+};
+
+/**
+ * Attribute an SQL error from selected cells to the virtual generated columns
+ * that raise it on this connection. Each column is probed alone over the same
+ * sampled rows, so only columns whose probe succeeds are recommended; any
+ * other cause keeps its original classification.
+ */
+const columnEvaluationFailure = (
+  db: DatabaseSync,
+  cause: unknown,
+  selection: {
+    readonly table: SelectedTableFacts;
+    readonly columns: readonly string[];
+    readonly source: string;
+    readonly limit: number;
+    readonly encoding: DatabaseEncoding;
+  },
+): unknown => {
+  if (sqlitePrimaryResultCode(cause) !== SQLITE_ERROR) return cause;
+  const { table, columns, source, limit, encoding } = selection;
+  // The aggregate evaluates exactly the sampled cells, as the length pass does.
+  const probe = (name: string): { readonly failure: unknown } | undefined => {
+    try {
+      db.prepare(
+        `SELECT count(${cellByteLength(name)}) FROM (SELECT ${quoteIdentifier(name)} FROM ${source} LIMIT ?)`,
+      ).get(limit);
+      return undefined;
+    } catch (failure: unknown) {
+      return { failure };
+    }
+  };
+  const failures = new Map<string, unknown>();
+  for (const name of new Set(columns)) {
+    const failed = probe(name);
+    if (failed !== undefined) failures.set(name, failed.failure);
+  }
+  const generated = new Set(
+    table.columns
+      .filter((column) => column.hidden === 2)
+      .map((column) => column.name),
+  );
+  if (
+    ![...failures].some(
+      ([name, failure]) =>
+        generated.has(name) &&
+        sqlitePrimaryResultCode(failure) === SQLITE_ERROR,
+    )
+  )
+    return cause;
+  const remaining = columns.filter((name) => !failures.has(name));
+  const readableStoredColumns = (): string[] => {
+    try {
+      return storedColumnNames(db, table.name, encoding).filter(
+        (name) => !failures.has(name) && probe(name) === undefined,
+      );
+    } catch {
+      // Discovery only refines recovery; it must not replace the attributed failure.
+      return [];
+    }
+  };
+  return new SqliteColumnEvaluationFailure(
+    `SQLite cannot evaluate selected column(s) of table ${JSON.stringify(table.name)} on REA's read-only connection: ${[
+      ...failures,
+    ]
+      .map(
+        ([name, failure]) =>
+          `${JSON.stringify(name)}: ${failure instanceof Error ? failure.message : String(failure)}`,
+      )
+      .join("; ")}`,
+    remaining.length > 0 ? remaining : readableStoredColumns(),
+  );
+};
+
 const readRows = (
   db: DatabaseSync,
   input: InspectSqliteDatabaseInput,
@@ -460,19 +566,6 @@ const readRows = (
     })
     .join(", ");
   const source = `main.${quoteIdentifier(input.table)} NOT INDEXED`;
-  const lengths = db.prepare(
-    `SELECT ${columns
-      .map((name) => {
-        const column = quoteIdentifier(name);
-        return `CASE typeof(${column}) WHEN 'text' THEN length(CAST(${column} AS BLOB)) WHEN 'blob' THEN length(${column}) ELSE 0 END`;
-      })
-      .join(", ")} FROM ${source} LIMIT ?`,
-  );
-  lengths.setReturnArrays(true);
-  for (const raw of lengths.iterate(limit))
-    budget.beforeProjection(cellByteLengths.parse(raw));
-  const statement = db.prepare(`SELECT ${projection} FROM ${source} LIMIT ?`);
-  statement.setReturnArrays(true);
   const rows: NonNullable<SqliteDatabase["rows"]> = {
     table: input.table,
     columns,
@@ -482,13 +575,33 @@ const readRows = (
     truncated: false,
     order: "unspecified",
   };
-  for (const raw of statement.iterate(limit)) {
-    const rawRow = arrayRow.parse(raw);
-    // Hex expansion already belongs to the retained-output budget, before decoding/copying cells.
-    budget.beforeDecode(rawRow);
-    const values = rawRow.map((value) => cell(value, encoding));
-    budget.retain(values);
-    rows.values.push(values);
+  // SQLite compiles and evaluates only selected cells, so an SQL error here is
+  // attributed to the selected generated expressions rather than the file.
+  try {
+    const lengths = db.prepare(
+      `SELECT ${columns.map(cellByteLength).join(", ")} FROM ${source} LIMIT ?`,
+    );
+    lengths.setReturnArrays(true);
+    for (const raw of lengths.iterate(limit))
+      budget.beforeProjection(cellByteLengths.parse(raw));
+    const statement = db.prepare(`SELECT ${projection} FROM ${source} LIMIT ?`);
+    statement.setReturnArrays(true);
+    for (const raw of statement.iterate(limit)) {
+      const rawRow = arrayRow.parse(raw);
+      // Hex expansion already belongs to the retained-output budget, before decoding/copying cells.
+      budget.beforeDecode(rawRow);
+      const values = rawRow.map((value) => cell(value, encoding));
+      budget.retain(values);
+      rows.values.push(values);
+    }
+  } catch (cause: unknown) {
+    throw columnEvaluationFailure(db, cause, {
+      table,
+      columns,
+      source,
+      limit,
+      encoding,
+    });
   }
   rows.returned_rows = rows.values.length;
   rows.truncated =
@@ -549,7 +662,7 @@ export const inspectSqliteDatabaseSnapshot = (
       "SQLite reports current schema and selected committed rows from its valid database/WAL state. Deleted records, uncommitted or invalid WAL tails, encrypted databases, forensic recovery, and full integrity verification are outside this profile.",
       "Stored CREATE statements preserve index/view/trigger definitions. Views, triggers, and virtual/shadow table rows are not executed; virtual-table column expansion is unsupported.",
       "Selected rows have unspecified order and are a bounded sample. Text display may replace invalid sequences; bytes_hex and encoding preserve SQLite's text byte representation, not original on-disk page offsets.",
-      "Resource boundaries: at most two concurrent inspections per provider; combined input 256 MiB per inspection, complete worker JSON 16 MiB, native SQLite value/record and SQL statement lengths 16 MiB, owned-worker JavaScript heap 256 MiB and supervised deadline 30 seconds. These are distinct from total resident memory; an overall native SQLite heap cap is not claimed. Failures return no partial success.",
+      "Resource boundaries: at most two concurrent inspections per provider; combined input 256 MiB per inspection, complete worker JSON 16 MiB, native SQLite value/record and SQL statement lengths 16 MiB, owned-worker JavaScript heap 256 MiB. The parent applies a separate supervised worker deadline, reported in worker_timeout_ms. These are distinct from total resident memory; an overall native SQLite heap cap is not claimed. Failures return no partial success.",
     ];
     const budget = new OutputBudget();
     const { schema, selectedTable } = readSchema(db, input, {

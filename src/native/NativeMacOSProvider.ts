@@ -1,9 +1,12 @@
 import {
   plistSourceFormat,
+  isBinaryPlistDescription,
+  readNativePlistBytes,
   requireRegularPlist,
   nativePlistFailure,
   resolveNativePlistSelection,
   unreadablePlist,
+  type NativePlistSelection,
 } from "./NativePlistSource.js";
 import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
@@ -50,7 +53,6 @@ import type { EvidenceLocation } from "../domain/evidence.js";
 import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
-  AnalysisInputError,
   AnalysisOutputError,
   AnalysisResourceConstraintError,
   AnalysisTimeoutError,
@@ -105,8 +107,10 @@ import { parseDemangledSymbols } from "./parsers/demangle.js";
 import { parseLipoOutput } from "./parsers/lipo.js";
 import {
   parsePlistJson,
+  parsePlistBinary,
   parsePlistXml,
   plistJsonNeedsNumberTypes,
+  type ParsedPlist,
 } from "./parsers/plist.js";
 import {
   architectureLocations,
@@ -127,6 +131,12 @@ import { resolveBundleResourcePlistSelection } from "./NativePlistSource.js";
 type SignatureRuntimeRootFactory = () => Promise<
   Pick<PrivateRuntimeRoot, "path" | "close">
 >;
+
+interface NativePlistReadContext {
+  readonly selection: NativePlistSelection;
+  readonly resources: ArtifactResourceScope;
+  readonly signal: AbortSignal | undefined;
+}
 
 /** Read-only semantic provider composed from Xcode command-line utilities. */
 export class NativeMacOSProvider implements AnalysisProvider {
@@ -887,7 +897,7 @@ class NativeMacOSClient implements AnalysisClient {
                   requested,
                 );
           if (!plist.ok) return plist;
-          const fileInput = {
+          const fileInput: NativePlistReadContext = {
             selection: plist.value,
             resources: this.#plistResources,
             signal,
@@ -901,98 +911,12 @@ class NativeMacOSClient implements AnalysisClient {
             { signal },
           );
           if (!classified.ok) return classified;
-          const json = await this.#run(
-            "inspect_plist",
-            "plutil",
-            ["-convert", "json", "-o", "-", "--", plist.value.path],
-            { signal, acceptNonZero: true },
-          );
-          if (!json.ok) return json;
-          // JSON cannot express data, dates, or non-finite reals; plutil rejects
-          // such plists, so decode its lossless XML conversion instead. JSON also
-          // prints an integral <real> like an <integer>, so a number beyond the
-          // exact JSON range takes its element type from the XML conversion.
-          const jsonDecoded = json.value.exitCode === 0;
-          const xml =
-            jsonDecoded && !plistJsonNeedsNumberTypes(json.value.stdout)
-              ? undefined
-              : await this.#run(
-                  "inspect_plist",
-                  "plutil",
-                  ["-convert", "xml1", "-o", "-", "--", plist.value.path],
-                  { signal, acceptNonZero: !jsonDecoded },
-                );
-          if (xml !== undefined && !xml.ok) return xml;
-          if (xml !== undefined && xml.value.exitCode !== 0) {
-            const capture = failureCapture(xml.value, false);
-            return err(
-              unreadablePlist(
-                plist.value,
-                `plutil could not decode it as a property list (${plutilDiagnostic(capture, plist.value.path)})`,
-                {
-                  capturedOutput: {
-                    stdout: capture.stdout,
-                    stderr: capture.stderr,
-                    truncated: capture.truncated,
-                    stdout_bytes: capture.stdoutBytes,
-                    stderr_bytes: capture.stderrBytes,
-                    exit_code: capture.exitCode,
-                    signal: capture.signal,
-                  },
-                },
-              ),
-            );
-          }
-          const parsed =
-            xml === undefined
-              ? parsePlistJson(json.value.stdout)
-              : jsonDecoded
-                ? parsePlistJson(json.value.stdout, xml.value.stdout)
-                : parsePlistXml(xml.value.stdout);
-          if (!parsed.ok) return parsed;
-          const provenance = [
+          const binary = await this.#inspectBinaryPlist(
+            fileInput,
             classified.value,
-            json.value,
-            ...(xml === undefined ? [] : [xml.value]),
-          ].map((item) => invocation(item, plist.value.path, "$PLIST"));
-          const converted = xml?.value ?? json.value;
-          const format = await plistSourceFormat(classified.value.stdout, {
-            ...fileInput,
-            capturedOutput: {
-              stdout: converted.stdout,
-              stderr: converted.stderr,
-              truncated: false,
-              stdout_bytes: converted.stdoutBytes,
-              stderr_bytes: converted.stderrBytes,
-              exit_code: converted.exitCode,
-              signal: converted.signal,
-            },
-          });
-          if (!format.ok) return format;
-          const result = inspectPlistSchema.parse({
-            format: format.value,
-            value: parsed.value.value,
-            bundle: parsed.value.bundle,
-            source_path: plist.value.path,
-            ...(this.bundleResourceRoot === undefined
-              ? {}
-              : {
-                  resource_root: {
-                    caller_path: this.bundleResourceRoot.callerPath,
-                    canonical_path: this.bundleResourceRoot.canonicalPath,
-                    info_plist_path: this.bundleResourceRoot.infoPlistPath,
-                    layout: this.bundleResourceRoot.layout,
-                    executable_sha256: this.bundleResourceRoot.executableSha256,
-                  },
-                }),
-            provenance,
-            limitations: parsed.value.limitations,
-          });
-          return ok({
-            result: jsonValueSchema.parse(result),
-            limitations: parsed.value.limitations,
-            locations: [{ kind: "artifact-path", path: plist.value.path }],
-          });
+          );
+          if (binary !== undefined) return binary;
+          return await this.#inspectConvertedPlist(fileInput, classified.value);
         } catch (cause: unknown) {
           // Producer failures stay opaque; only scope admission failures reach the file mapper.
           return err(nativeOutputFailure("inspect_plist", cause));
@@ -1001,6 +925,122 @@ class NativeMacOSClient implements AnalysisClient {
     } catch (cause: unknown) {
       return err(nativePlistFailure(cause, undefined));
     }
+  }
+
+  async #inspectBinaryPlist(
+    fileInput: NativePlistReadContext,
+    classified: NativeCommandCapture,
+  ): Promise<Result<NativeObservation, AnalysisError> | undefined> {
+    if (!isBinaryPlistDescription(classified.stdout)) return undefined;
+    const source = await readNativePlistBytes(fileInput);
+    if (!source.ok) return source;
+    const parsed = parsePlistBinary(source.value);
+    if (!parsed.ok) {
+      return parsed.error instanceof AnalysisOutputError
+        ? err(
+            unreadablePlist(
+              fileInput.selection,
+              "binary property list could not be decoded",
+              { cause: parsed.error },
+            ),
+          )
+        : parsed;
+    }
+    return ok(
+      nativePlistObservation({
+        parsed: parsed.value,
+        format: "binary",
+        path: fileInput.selection.path,
+        resourceRoot: this.bundleResourceRoot,
+        provenance: [
+          invocation(classified, fileInput.selection.path, "$PLIST"),
+        ],
+      }),
+    );
+  }
+
+  async #inspectConvertedPlist(
+    fileInput: NativePlistReadContext,
+    classified: NativeCommandCapture,
+  ): Promise<Result<NativeObservation, AnalysisError>> {
+    const { path } = fileInput.selection;
+    const { signal } = fileInput;
+    const json = await this.#run(
+      "inspect_plist",
+      "plutil",
+      ["-convert", "json", "-o", "-", "--", path],
+      { signal, acceptNonZero: true },
+    );
+    if (!json.ok) return json;
+    // JSON cannot express data, dates, or non-finite reals; plutil rejects
+    // such plists, so decode its XML conversion instead. JSON also prints an
+    // integral <real> like an <integer>, so XML identifies unsafe number types.
+    const jsonDecoded = json.value.exitCode === 0;
+    const xml =
+      jsonDecoded && !plistJsonNeedsNumberTypes(json.value.stdout)
+        ? undefined
+        : await this.#run(
+            "inspect_plist",
+            "plutil",
+            ["-convert", "xml1", "-o", "-", "--", path],
+            { signal, acceptNonZero: !jsonDecoded },
+          );
+    if (xml !== undefined && !xml.ok) return xml;
+    if (xml !== undefined && xml.value.exitCode !== 0) {
+      const capture = failureCapture(xml.value, false);
+      return err(
+        unreadablePlist(
+          fileInput.selection,
+          `plutil could not decode it as a property list (${plutilDiagnostic(capture, path)})`,
+          {
+            capturedOutput: {
+              stdout: capture.stdout,
+              stderr: capture.stderr,
+              truncated: capture.truncated,
+              stdout_bytes: capture.stdoutBytes,
+              stderr_bytes: capture.stderrBytes,
+              exit_code: capture.exitCode,
+              signal: capture.signal,
+            },
+          },
+        ),
+      );
+    }
+    const parsed =
+      xml === undefined
+        ? parsePlistJson(json.value.stdout)
+        : jsonDecoded
+          ? parsePlistJson(json.value.stdout, xml.value.stdout)
+          : parsePlistXml(xml.value.stdout);
+    if (!parsed.ok) return parsed;
+    const provenance = [
+      classified,
+      json.value,
+      ...(xml === undefined ? [] : [xml.value]),
+    ].map((item) => invocation(item, path, "$PLIST"));
+    const converted = xml?.value ?? json.value;
+    const format = await plistSourceFormat(classified.stdout, {
+      ...fileInput,
+      capturedOutput: {
+        stdout: converted.stdout,
+        stderr: converted.stderr,
+        truncated: false,
+        stdout_bytes: converted.stdoutBytes,
+        stderr_bytes: converted.stderrBytes,
+        exit_code: converted.exitCode,
+        signal: converted.signal,
+      },
+    });
+    if (!format.ok) return format;
+    return ok(
+      nativePlistObservation({
+        parsed: parsed.value,
+        format: format.value,
+        path,
+        resourceRoot: this.bundleResourceRoot,
+        provenance,
+      }),
+    );
   }
 
   async #inspectMacho(
@@ -1431,6 +1471,40 @@ const invocation = (
   stdout_bytes: capture.stdoutBytes,
   stderr_bytes: capture.stderrBytes,
 });
+
+const nativePlistObservation = (input: {
+  readonly parsed: ParsedPlist;
+  readonly format: z.infer<typeof inspectPlistSchema>["format"];
+  readonly path: string;
+  readonly resourceRoot: ResolvedAppBundleResourceRoot | undefined;
+  readonly provenance: readonly NativeCommandInvocation[];
+}): NativeObservation => {
+  const { parsed, format, path, resourceRoot, provenance } = input;
+  const result = inspectPlistSchema.parse({
+    format,
+    value: parsed.value,
+    bundle: parsed.bundle,
+    source_path: path,
+    ...(resourceRoot === undefined
+      ? {}
+      : {
+          resource_root: {
+            caller_path: resourceRoot.callerPath,
+            canonical_path: resourceRoot.canonicalPath,
+            info_plist_path: resourceRoot.infoPlistPath,
+            layout: resourceRoot.layout,
+            executable_sha256: resourceRoot.executableSha256,
+          },
+        }),
+    provenance,
+    limitations: parsed.limitations,
+  });
+  return {
+    result: jsonValueSchema.parse(result),
+    limitations: parsed.limitations,
+    locations: [{ kind: "artifact-path", path }],
+  };
+};
 
 const parseEntitlements = (
   output: string,

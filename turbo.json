@@ -3,13 +3,20 @@
   "cacheMaxAge": "7d",
   "cacheMaxSize": "500MB",
   "globalDependencies": [".nvmrc", ".npmrc"],
-  "globalPassThroughEnv": ["GOMAXPROCS", "GOMEMLIMIT", "UV_THREADPOOL_SIZE"],
+  "globalPassThroughEnv": [
+    "GOMAXPROCS",
+    "GOMEMLIMIT",
+    "UV_THREADPOOL_SIZE",
+    "REA_TYPESCRIPT_COMPILER"
+  ],
   "tasks": {
     "compile": {
       "dependsOn": ["metadata:check"],
       "inputs": [
         "package.json",
         "package-lock.json",
+        "scripts/run-turbo.mjs",
+        "scripts/run-typescript.mjs",
         "scripts/check-dependency-install.mjs",
         "scripts/clean-build-output.mjs",
         "scripts/bundle-runtime.mjs",
@@ -22,12 +29,15 @@
         "tsconfig.json",
         "tsconfig.build.json"
       ],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": ["REA_TYPESCRIPT_COMPILER"]
     },
     "typecheck": {
       "inputs": [
         "package.json",
         "package-lock.json",
+        "scripts/run-turbo.mjs",
+        "scripts/run-typescript.mjs",
         "src/**/*.{cts,mts,ts,tsx}",
         "src/**/package.json",
         "tests/**/*.{cts,mts,ts,tsx}",
@@ -44,7 +54,8 @@
         "!docs/.vitepress/cache/**",
         "!docs/.vitepress/dist/**"
       ],
-      "outputs": []
+      "outputs": [],
+      "env": ["REA_TYPESCRIPT_COMPILER"]
     },
     "metadata:check": {
       "inputs": [

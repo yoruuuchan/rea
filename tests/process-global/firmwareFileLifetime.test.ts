@@ -689,6 +689,7 @@ const publication = async (
     files: new FirmwareFileAccess(),
     workspacePath,
     deadline,
+    analysisTimeoutMs: 120_000,
     outputDirectory: join(root, "published"),
     entries: [],
     normalized,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { build, buildBinary, type PlistValue } from "plist";
-import { estimateBinaryPlistExpansion } from "./InterfaceBuilderDecodeBudget.js";
+import { estimateBinaryPlistExpansion } from "./PropertyListDecodeBudget.js";
 import {
   decodeKeyedArchiveBytes,
   inspectBundleKeyedArchive,
@@ -12,6 +12,13 @@ import {
 import { unknownDateLimitation } from "../../domain/apple/plistValue.js";
 import { deeplyNestedXmlPlist } from "../../../tests/fixtures/keyedArchiveXmlNesting.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
+import { scanBinaryPlistScalars } from "./PlistScalars.js";
+import { embedSubmillisecondDateInWideIntegerPayload } from "../../../tests/fixtures/binaryPlistScalarAlias.js";
+import {
+  readBinaryPlistObjectOffset,
+  readBinaryPlistObjectTableLayout,
+  writeBinaryPlistObjectOffset,
+} from "../../../tests/fixtures/binaryPlistObjectTable.js";
 
 const archive = {
   $archiver: "NSKeyedArchiver",
@@ -32,6 +39,146 @@ const archive = {
   ],
   $top: { root: { UID: 1 }, other: { UID: 2 } },
 };
+
+const binaryArchiveWithDate = (): Buffer =>
+  Buffer.from(
+    buildBinary({
+      ...archive,
+      $objects: ["$null", new Date("2001-01-01T00:00:00.100Z")],
+      $top: { root: { UID: 1 } },
+    }),
+  );
+
+const binaryArchiveWithOverlappingDate = (): Buffer => {
+  const bytes = Buffer.from(
+    buildBinary({
+      ...archive,
+      $objects: [
+        "$null",
+        new Date("2001-01-01T00:00:00.000Z"),
+        Buffer.alloc(0),
+      ],
+      $top: { root: { UID: 1 } },
+    }),
+  );
+  const date = scanBinaryPlistScalars(bytes).dates[0];
+  if (date === undefined)
+    throw new Error("binary archive fixture lost its date");
+  bytes.writeDoubleBE(0.0005, date.payloadOffset);
+  const objectTable = readBinaryPlistObjectTableLayout(bytes);
+  for (let objectId = 0; objectId < objectTable.objectCount; objectId += 1) {
+    const offset = readBinaryPlistObjectOffset(bytes, objectTable, objectId);
+    if (offset !== date.offset && bytes[offset] === 0x40) {
+      writeBinaryPlistObjectOffset(
+        bytes,
+        objectTable,
+        objectId,
+        date.payloadOffset + 1,
+      );
+      return bytes;
+    }
+  }
+  throw new Error("binary archive fixture lost its empty data object");
+};
+
+const binaryArchiveDateCrossingOffsetTable = (): Buffer => {
+  const bytes = Buffer.from(binaryArchiveWithDate());
+  const date = scanBinaryPlistScalars(bytes).dates[0];
+  if (date === undefined)
+    throw new Error("binary archive fixture lost its date");
+  const objectTable = readBinaryPlistObjectTableLayout(bytes);
+  let dateObjectId = -1;
+  for (let objectId = 0; objectId < objectTable.objectCount; objectId += 1) {
+    if (
+      readBinaryPlistObjectOffset(bytes, objectTable, objectId) === date.offset
+    )
+      dateObjectId = objectId;
+  }
+  if (dateObjectId < 0)
+    throw new Error("binary archive fixture lost its date object-table entry");
+
+  const crossingOffset = objectTable.tableOffset - 1;
+  bytes[crossingOffset] = 0x33;
+  writeBinaryPlistObjectOffset(
+    bytes,
+    objectTable,
+    dateObjectId,
+    crossingOffset,
+  );
+  return bytes;
+};
+
+describe("keyed archive scalar projection", () => {
+  it("preserves the exact integer and unknown date through archive projection", () => {
+    const source = Buffer.from(
+      buildBinary({
+        ...archive,
+        $objects: ["$null", Buffer.alloc(16), new Date(0)],
+        $top: { root: { UID: 1 } },
+      }),
+    );
+    const { bytes, integerDecimal } =
+      embedSubmillisecondDateInWideIntegerPayload(source);
+
+    const graph = decodeKeyedArchiveBytes(bytes, {
+      root: "root",
+      offset: 1,
+      limit: 2,
+    });
+
+    expect(graph.objects).toContainEqual(
+      expect.objectContaining({
+        id: 1,
+        value: { $plist_type: "integer", decimal: integerDecimal },
+      }),
+    );
+    expect(graph.objects).toContainEqual(
+      expect.objectContaining({
+        id: 2,
+        value: { $plist_type: "date", iso8601: null },
+      }),
+    );
+  });
+
+  it("rejects a reachable date whose payload enters the offset table", () => {
+    expect(() =>
+      decodeKeyedArchiveBytes(binaryArchiveDateCrossingOffsetTable(), {
+        root: "root",
+        offset: 0,
+        limit: 2,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        message: "binary plist date object is truncated",
+      }),
+    );
+  });
+
+  it("keeps overlapping date precision unknown without changing its sibling object", () => {
+    const graph = decodeKeyedArchiveBytes(binaryArchiveWithOverlappingDate(), {
+      root: "root",
+      offset: 0,
+      limit: 4,
+    });
+
+    expect(graph.objects).toContainEqual(
+      expect.objectContaining({
+        id: 1,
+        value: { $plist_type: "date", iso8601: null },
+      }),
+    );
+    expect(graph.objects).toContainEqual(
+      expect.objectContaining({
+        id: 2,
+        value: { $plist_type: "data", base64: "" },
+      }),
+    );
+    expect(graph.limitations).toContainEqual(
+      expect.stringContaining("sub-millisecond source records overlap"),
+    );
+  });
+});
+
 describe("inert keyed archive decoding", () => {
   it.each(["bplist00", "NIBArchive"])(
     "rejects high-bit mutations of %s as malformed bytes rather than another archive kind",

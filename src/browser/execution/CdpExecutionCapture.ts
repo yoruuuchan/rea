@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { BrowserObservationError } from "../../domain/browserObservationError.js";
 import {
   AnalysisCancelledError,
@@ -37,9 +38,18 @@ export const captureWebExecution = async (
     sources.check();
     window.check();
     if (window.reason !== undefined)
-      throw new BrowserObservationError(session.operation, "target_changed", {
-        detail: `Selected target ${session.target.target_id} ended with ${window.reason} before execution observation could be armed.`,
-      });
+      throw new BrowserObservationError(
+        session.operation,
+        window.reason === "session_detached"
+          ? "target_session_detached"
+          : "target_changed",
+        {
+          detail: executionWindowEndDetail(
+            session.target.target_id,
+            window.reason,
+          ),
+        },
+      );
     const waiting = window.start(input.observation_ms);
     // Cancellation may arrive while asynchronous progress is being delivered.
     void waiting.catch(() => undefined);
@@ -64,7 +74,7 @@ export const captureWebExecution = async (
       raw = await session.command("Profiler.takePreciseCoverage");
     }
     collection.freezeMetadata();
-    await session.command("Profiler.stopPreciseCoverage");
+    await stopPreciseCoverage(session, reason);
     session.preciseCoverageMayBeActive = false;
     const requestItems = requests.result();
     const parsed =
@@ -160,4 +170,37 @@ export const captureWebExecution = async (
   } finally {
     collection.close();
   }
+};
+
+const stopPreciseCoverage = async (
+  session: CdpRuntimeSources["session"],
+  reason: WebExecution["window"]["end_reason"],
+): Promise<void> => {
+  try {
+    await session.command("Profiler.stopPreciseCoverage");
+  } catch (cause: unknown) {
+    if (
+      (reason !== "target_terminated" && reason !== "session_detached") ||
+      !(cause instanceof AnalysisError)
+    )
+      throw cause;
+    cause.retainDiagnostics({
+      observed_window: {
+        target_id: session.target.target_id,
+        end_reason: reason,
+      },
+    });
+    throw cause;
+  }
+};
+
+const executionWindowEndDetail = (
+  targetId: string,
+  reason: WebExecution["window"]["end_reason"],
+): string => {
+  if (reason === "session_detached")
+    return `The debugging session for selected target ${targetId} detached before execution observation could be armed; the target may still exist.`;
+  if (reason === "target_terminated")
+    return `Selected target ${targetId} crashed before execution observation could be armed.`;
+  return `Selected target ${targetId} changed documents before execution observation could be armed.`;
 };

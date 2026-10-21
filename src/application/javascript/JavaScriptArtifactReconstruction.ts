@@ -158,7 +158,7 @@ export const reconstructJavaScriptArtifact = async (
           ? {}
           : { fileNodes: input.max_semantic_nodes_per_file }),
       });
-      const worker = createJavaScriptSourceAnalysis(
+      const worker = await createJavaScriptSourceAnalysis(
         {
           heapMb:
             input.max_heap_mb ?? JAVASCRIPT_ANALYSIS_RESOURCE_DEFAULTS.heapMb,
@@ -169,6 +169,7 @@ export const reconstructJavaScriptArtifact = async (
         files.files.filter(
           (file) => file.kind === "javascript" && file.text.included,
         ).length,
+        { scope },
       );
       let outcome;
       let cleanupFailure: AnalysisError | undefined;

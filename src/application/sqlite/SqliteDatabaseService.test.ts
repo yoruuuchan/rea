@@ -4,11 +4,13 @@ import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCo
 import { err } from "../../domain/result.js";
 import { ok } from "../../domain/result.js";
 import { createAnalysisExecution } from "../AnalysisProvider.js";
+import { sqliteDatabaseSchema } from "../../domain/sqlite/sqliteDatabase.js";
 
 const fixture = () => ({
   artifact: { path: "/selected.db", sha256: "a".repeat(64), bytes: 4096 },
   wal: null,
   engine: { name: "SQLite", version: "3.50.2" },
+  worker_timeout_ms: 30_000,
   database_encoding: "UTF-8",
   schema: {
     scope: "inventory",
@@ -43,6 +45,10 @@ it.each([
     table: "data",
     row_limit: Number.MAX_SAFE_INTEGER + 1,
   },
+  ...[0, -1, 1.5, 2_147_483_648, "1000", null].map((worker_timeout_ms) => ({
+    path: "/selected.db",
+    worker_timeout_ms,
+  })),
 ])(
   "rejects invalid SQLite selection before provider effects: %j",
   async (input) => {
@@ -57,6 +63,70 @@ it.each([
     });
   },
 );
+
+it("preserves the selected worker budget in provider input and Evidence", async () => {
+  const report = { ...fixture(), worker_timeout_ms: 1234 };
+  const service = new SqliteDatabaseService({
+    inspect: async (input) => {
+      expect(input.worker_timeout_ms).toBe(1234);
+      return ok(execution(report));
+    },
+  });
+  const result = await service.inspect({
+    path: "/selected.db",
+    worker_timeout_ms: 1234,
+  });
+  if (!result.ok) throw result.error;
+  expect(result.value.parameters).toMatchObject({ worker_timeout_ms: 1234 });
+  expect(result.value.normalized_result).toMatchObject({
+    worker_timeout_ms: 1234,
+  });
+});
+
+it.each([
+  { selected: undefined, reported: undefined },
+  { selected: undefined, reported: 1234 },
+  { selected: 1234, reported: undefined },
+  { selected: 1234, reported: 30_000 },
+])(
+  "rejects a missing or changed fresh producer budget: %j",
+  async ({ selected, reported }) => {
+    const { worker_timeout_ms: _default, ...report } = fixture();
+    const service = new SqliteDatabaseService({
+      inspect: async () =>
+        ok(
+          execution({
+            ...report,
+            ...(reported === undefined ? {} : { worker_timeout_ms: reported }),
+          }),
+        ),
+    });
+    expect(
+      await service.inspect({
+        path: "/selected.db",
+        ...(selected === undefined ? {} : { worker_timeout_ms: selected }),
+      }),
+    ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
+  },
+);
+
+it("retains the actual default without inventing an explicit caller selection", async () => {
+  const service = new SqliteDatabaseService({
+    inspect: async () => ok(execution(fixture())),
+  });
+  const result = await service.inspect({ path: "/selected.db" });
+  if (!result.ok) throw result.error;
+  expect(result.value.normalized_result).toMatchObject({
+    worker_timeout_ms: 30_000,
+  });
+  expect(result.value.parameters).not.toHaveProperty("worker_timeout_ms");
+});
+
+it("parses historical report omissions as unknown without supplying a default", () => {
+  const { worker_timeout_ms: _default, ...historical } = fixture();
+  const parsed = sqliteDatabaseSchema.parse(historical);
+  expect(parsed).not.toHaveProperty("worker_timeout_ms");
+});
 
 it("preserves producer failures and rejects pre-cancelled requests before effects", async () => {
   const failure = new AnalysisCapabilityUnavailableError(

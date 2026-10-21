@@ -40,6 +40,7 @@ export const webExecutionSchema = z.object({
       "window_elapsed",
       "document_changed",
       "target_terminated",
+      "session_detached",
     ]),
     producer_started_seconds: z.number().min(0),
     producer_sampled_seconds: z.number().min(0).nullable(),

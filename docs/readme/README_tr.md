@@ -270,6 +270,7 @@ Web sitesindeki [uygulamalı rehberlerden](https://rea.tools/tr/guides/) başlay
 
 - [Yükleme ve kurulum](../installation.md): ajan kaydı, sağlayıcı yapılandırması, güncellemeler ve kaldırma.
 - [Hazırlık ve sorun giderme](../installation.md#check-readiness-for-your-task): belirli bir ajanı veya analiz motorunu tanılama.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI ve Evidence](../cli.md): komutlar, sağlayıcı seçimi, anlık görüntüler, içe/dışa aktarma ve çıkış durumları.
 - [MCP sözleşmeleri](../mcp-contracts.md) ve [ajan istemleri](../mcp-prompts.md): araç sonuçları, oturumlar ve yönlendirmeli araştırmalar.

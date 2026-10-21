@@ -10,6 +10,10 @@ it.each([
   { path: "/module", glue_paths: ["relative"] },
   { path: "/module", candidate_paths: ["relative"] },
   { path: "/module", fetch: true },
+  ...[0, -1, 1.5, 2_147_483_648, "1000", null].map((command_timeout_ms) => ({
+    path: "/module",
+    command_timeout_ms,
+  })),
 ])("rejects invalid selection before effects: %j", async (input) => {
   const service = new WasmArtifactService({
     close: () => Promise.resolve(),
@@ -21,6 +25,39 @@ it.each([
     ok: false,
     error: { _tag: "AnalysisInputError" },
   });
+});
+
+it("preserves the selected command budget in provider input and Evidence", async () => {
+  const value = wasmArtifactFixture();
+  value.tool_profile.timeout_ms = 42_000;
+  const service = new WasmArtifactService({
+    close: () => Promise.resolve(),
+    inspect: async (input) => {
+      expect(input).toMatchObject({ command_timeout_ms: 42_000 });
+      return ok(wasmArtifactExecution(value));
+    },
+  });
+  const result = await service.inspect({
+    path: value.artifact.path,
+    command_timeout_ms: 42_000,
+  });
+  if (!result.ok) throw result.error;
+  expect(result.value.parameters).toMatchObject({ command_timeout_ms: 42_000 });
+  expect(result.value.normalized_result).toEqual(value);
+});
+
+it("rejects a provider report that silently changes the selected command budget", async () => {
+  const value = wasmArtifactFixture();
+  const service = new WasmArtifactService({
+    close: () => Promise.resolve(),
+    inspect: async () => ok(wasmArtifactExecution(value)),
+  });
+  expect(
+    await service.inspect({
+      path: value.artifact.path,
+      command_timeout_ms: 42_000,
+    }),
+  ).toMatchObject({ ok: false, error: { _tag: "AnalysisOutputError" } });
 });
 it.each(["path", "digest", "wat", "candidates", "glue"])(
   "rejects mismatched upstream observation: %s",

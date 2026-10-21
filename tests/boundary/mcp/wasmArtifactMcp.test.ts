@@ -164,10 +164,14 @@ it.each(["bin", "hop"])(
 
 it("advertises exact valid schemas and records inline WASM interface evidence without a binary target", async () => {
   const value = wasmArtifactFixture();
+  value.tool_profile.timeout_ms = 42_000;
   const close = vi.fn(() => Promise.resolve());
   const service = new WasmArtifactService({
     close,
-    inspect: () => Promise.resolve(ok(wasmArtifactExecution(value))),
+    inspect: (input) => {
+      expect(input.command_timeout_ms).toBe(42_000);
+      return Promise.resolve(ok(wasmArtifactExecution(value)));
+    },
   });
   const session = createTestBinarySession(() => {
     throw new Error("deep provider must not start");
@@ -184,6 +188,20 @@ it("advertises exact valid schemas and records inline WASM interface evidence wi
   );
   const { ajv, inputSchema } = schemas;
   expect(ajv.validate(inputSchema, { path: value.artifact.path })).toBe(true);
+  for (const command_timeout_ms of [1, 42_000, 2_147_483_647])
+    expect(
+      ajv.validate(inputSchema, {
+        path: value.artifact.path,
+        command_timeout_ms,
+      }),
+    ).toBe(true);
+  for (const command_timeout_ms of [0, -1, 1.5, 2_147_483_648, "1000", null])
+    expect(
+      ajv.validate(inputSchema, {
+        path: value.artifact.path,
+        command_timeout_ms,
+      }),
+    ).toBe(false);
   expect(
     ajv.validate(inputSchema, {
       path: value.artifact.path,
@@ -193,7 +211,7 @@ it("advertises exact valid schemas and records inline WASM interface evidence wi
   ).toBe(false);
   const response = await client.callTool({
     name: "inspect_wasm_artifact",
-    arguments: { path: value.artifact.path },
+    arguments: { path: value.artifact.path, command_timeout_ms: 42_000 },
   });
   assertRecordedMcpEvidence(
     response,

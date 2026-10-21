@@ -298,13 +298,20 @@ markup, including UTF-8 and BOM-marked UTF-16 sources. Unidentified text and
 OpenStep plists, including a data-only value such as `<deadbeef>`, report
 `unknown` even when plutil decodes their values through an XML conversion.
 
+Binary plist inspection reads the original bytes through an owned file descriptor,
+so conversion cannot erase control characters, fractional dates, negative zero,
+or the high word of a 128-bit integer. It accepts at most 64 MiB of input and
+reserves an estimated 64 MiB decode budget before parsing; this estimate is not
+a hard process-memory bound. Binary-source provenance records the `file`
+classification without claiming a `plutil` conversion.
+
 A plist explicitly selected through the path input or as the active plist target
 reports an unreadable or malformed selection as `invalid_request`. A missing or
 unreadable default plist of another target reports `capability_unavailable`.
 Permission failures remain `access_denied`; output and cleanup failures retain
 their own error categories.
 
-A plist decode refusal includes plutil's diagnostic from either output stream.
+A conversion refusal includes plutil's diagnostic from either output stream.
 `details.captured_output` retains bounded stdout/stderr excerpts, observed byte
 totals and exit status. `truncated: true` means those excerpts are incomplete.
 
@@ -444,6 +451,13 @@ complete observation.
   an unfixed zero in a nullable ABI field is treated as null. Incomplete or
   conflicting fixup streams keep affected pointers unresolved; coverage reports
   parsing and resource limits while retaining validated prefix facts.
+  Conformance records preserve the raw three-bit `type_reference_kind`. Kinds
+  0 and 1 identify direct and indirect nominal descriptors; kind 2 preserves
+  the inline Objective-C class name and its source location. Kind 3 preserves
+  an imported class binding or the local class-object address when available,
+  but class metadata/name recovery requiring the Objective-C runtime remains
+  partial. Unknown kinds retain the raw kind and reference location without
+  being treated as absent or assigned a guessed type name.
 
   So an external superclass resolves from its `_OBJC_CLASS_$_` bind (for
   example `NSObject`). The `pointer_fixups` coverage facet names the mechanism.
@@ -714,8 +728,9 @@ leap seconds) and out-of-range dates remain explicit unknowns. REA does not
 emulate CoreFoundation's normalization of overflowing calendar fields. Invalid
 dates returned by other decoders retain `{ "$plist_type": "date", "iso8601": null }`
 with a counted limitation. `inspect_plist` and Interface Builder decoding use
-the same projection. Binary keyed-archive and Interface Builder plist decoding
-refuse a reachable date whose marker is not `0x33`. A valid `0x33` date is
+the same projection. Binary plist decoding refuses a reachable date whose marker
+is not `0x33`; date and numeric payloads must end before the offset table.
+Valid overlapping object records retain their independent source values. A valid `0x33` date is
 reported with an ISO-8601 timestamp only when its float64 seconds are exactly
 the canonical encoding of that millisecond instant. Any other finite binary
 date uses `{ "$plist_type": "date", "iso8601": null }` and the counted

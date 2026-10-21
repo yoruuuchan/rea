@@ -25,10 +25,11 @@ export class CdpExecutionWindow {
 
   /** Collection ends on a main-document replacement, never follows source URLs into another context. */
   ingest(event: CdpEvent): void {
-    if (
-      event.method === "Target.detachedFromTarget" ||
-      event.method === "Inspector.targetCrashed"
-    ) {
+    if (event.method === "Target.detachedFromTarget") {
+      this.end("session_detached");
+      return;
+    }
+    if (event.method === "Inspector.targetCrashed") {
       this.end("target_terminated");
       return;
     }
@@ -101,7 +102,7 @@ export class CdpExecutionWindow {
     });
   }
 
-  /** Transport loss ends the window; instrumentation cleanup still requires confirmation. */
+  /** A producer lifecycle fact ends the window; instrumentation cleanup still requires confirmation. */
   end(reason: EndReason): void {
     if (this.reason !== undefined || this.#failure !== undefined) return;
     this.reason = reason;

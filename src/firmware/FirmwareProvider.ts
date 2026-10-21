@@ -7,6 +7,7 @@ import {
 } from "../application/AnalysisProvider.js";
 import {
   firmwareResultSchemas,
+  DEFAULT_FIRMWARE_ANALYSIS_TIMEOUT_MS,
   type FirmwareRequest,
   type FirmwarePartialObservation,
 } from "../domain/firmware/firmwareAnalysis.js";
@@ -26,7 +27,6 @@ import type { ProviderProcessSupervisor } from "../process/ProviderProcess.js";
 import type { SafeOutputTree } from "../artifacts/SafeOutputTree.js";
 import { publishFirmwareExtraction } from "./FirmwarePublication.js";
 import {
-  FIRMWARE_LIMITS,
   BINWALK_PROVIDER_IDENTITY,
   UNBLOB_PROVIDER_IDENTITY,
 } from "./FirmwareRelease.js";
@@ -324,7 +324,9 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
         : AbortSignal.any([options.signal, phase.signal]);
     // Extraction and publication have separate budgets: publication time depends on the
     // destination filesystem, so it must not be charged to the extraction deadline.
-    let deadline = startFirmwareDeadline("analysis", FIRMWARE_LIMITS.timeoutMs);
+    const analysisTimeoutMs =
+      request.input.analysis_timeout_ms ?? DEFAULT_FIRMWARE_ANALYSIS_TIMEOUT_MS;
+    let deadline = startFirmwareDeadline("analysis", analysisTimeoutMs);
     let signal = withCaller(deadline);
     let outcome: Outcome;
     try {
@@ -356,6 +358,7 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
           cwd: root?.path ?? "",
           environment: this.environment,
           signal,
+          deadline,
           retainCleanup: (supervisor) => {
             this.#pendingCleanup.set(ownedRoot.path, {
               supervisor,
@@ -415,6 +418,7 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
           signal,
         });
         result = firmwareResultSchemas.inspect_firmware_regions.parse({
+          analysis_timeout_ms: analysisTimeoutMs,
           engine,
           input_size: target.size,
           regions: normalizeBinwalkReport(
@@ -497,6 +501,7 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
         );
         signal = withCaller(deadline);
         result = await publishFirmwareExtraction({
+          analysisTimeoutMs,
           files: this.#files,
           workspacePath: root.path,
           deadline,

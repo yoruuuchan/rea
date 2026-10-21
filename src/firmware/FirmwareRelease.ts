@@ -31,5 +31,5 @@ export const FIRMWARE_LIMITS = {
   reportBytes: 8 * 1024 * 1024,
   diagnosticBytes: 8 * 1024 * 1024,
   addressSpaceBytes: 1024 * 1024 * 1024,
-  timeoutMs: 120_000,
+  cpuSeconds: 120,
 } as const;

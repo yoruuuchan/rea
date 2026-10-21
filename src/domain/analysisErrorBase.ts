@@ -143,17 +143,21 @@ export abstract class AnalysisError extends Error {
     this.#ownedCleanupResources = [...resources];
   }
 
-  /** Retain a later lifecycle failure without replacing the original typed error. */
+  /** Retain diagnostic facts without replacing the original typed error. */
+  retainDiagnostics(diagnostics: Readonly<Record<string, JsonValue>>): this {
+    Object.assign(this, {
+      diagnostics: structuredClone({ ...this.diagnostics, ...diagnostics }),
+    });
+    return this;
+  }
+
   retainSecondaryFailure(
     failure: AnalysisError,
     diagnostics?: Readonly<Record<string, JsonValue>>,
   ): this {
     // Secondary resources remain owned by their cleanup lifecycle; preserve
     // the primary error's live cleanup status and original output.
-    if (diagnostics !== undefined)
-      Object.assign(this, {
-        diagnostics: structuredClone({ ...this.diagnostics, ...diagnostics }),
-      });
+    if (diagnostics !== undefined) this.retainDiagnostics(diagnostics);
     this.#secondaryFailures.push(failure);
     return this;
   }

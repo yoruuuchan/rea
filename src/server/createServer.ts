@@ -1,3 +1,5 @@
+import { createGpuCodeObjectsService } from "../composition/gpu.js";
+import { registerGpuCodeObjectsTools } from "./registerGpuCodeObjectsTools.js";
 import type { PacketCaptureService } from "../application/captures/PacketCaptureService.js";
 import { UNTRUSTED_CONTENT_INSTRUCTIONS } from "./toolResultEncoding.js";
 import { createPacketCaptureService } from "../composition/captures.js";
@@ -332,6 +334,7 @@ export const createServer = (
   const goBinary = options.goBinary ?? createGoBinaryService();
   const rustBinary = options.rustBinary ?? createRustBinaryService();
   const modelArtifact = createModelArtifactService();
+  const gpuCodeObjects = createGpuCodeObjectsService();
   const il2cppMetadata =
     options.il2cppMetadata ?? createIl2cppMetadataService();
   const peResources = createPeResourcesService();
@@ -420,6 +423,7 @@ export const createServer = (
       rustBinary.close(),
       il2cppMetadata.close(),
       modelArtifact.close(),
+      gpuCodeObjects.close(),
       peResources.close(),
       electronFuses.close(),
       webNetworkCapture.close(),
@@ -498,6 +502,14 @@ export const createServer = (
   registerModelArtifactTools(
     server,
     modelArtifact,
+    toolLogger,
+    recordEvidence,
+    analysisAdmission,
+    evidenceById,
+  );
+  registerGpuCodeObjectsTools(
+    server,
+    gpuCodeObjects,
     toolLogger,
     recordEvidence,
     analysisAdmission,
@@ -777,6 +789,7 @@ const registerConfiguredAnalysisTools = (
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
+    evidenceById,
   );
   registerWasmTools(
     server,

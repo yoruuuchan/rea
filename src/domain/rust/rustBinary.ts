@@ -1,6 +1,21 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
 import { localPathStringSchema } from "../localPath.js";
+import { BINARY_ARCHITECTURES } from "../binaryTargetTypes.js";
+
+/** Preserve the format owner's architecture spelling separately from Evidence vocabulary. */
+export const rustArchitectureForSubject = (architecture: string) => {
+  switch (architecture) {
+    case "386":
+      return "x86";
+    case "amd64":
+      return "x86_64";
+    default:
+      return BINARY_ARCHITECTURES.find(
+        (supported) => supported === architecture,
+      );
+  }
+};
 
 /** Known revisions used to interpret compatible cargo-auditable documents. */
 export const RUST_AUDITABLE_FORMAT_VERSIONS = [0, 1, 8] as const;

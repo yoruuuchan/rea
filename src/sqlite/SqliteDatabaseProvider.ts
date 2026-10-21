@@ -27,6 +27,7 @@ import {
   sqliteDatabaseSchema,
   type InspectSqliteDatabaseInput,
   SQLITE_PROVIDER_IDENTITY,
+  DEFAULT_SQLITE_WORKER_TIMEOUT_MS,
   sqliteInspectionParameters,
 } from "../domain/sqlite/sqliteDatabase.js";
 import { isAbsolute } from "node:path";
@@ -39,7 +40,10 @@ import type {
   ProviderProcessStopResult,
   ProviderProcessSupervisor,
 } from "../process/ProviderProcess.js";
-import { sqliteDatabaseFailure } from "./SqliteDatabaseFailures.js";
+import {
+  createSqliteCleanupError,
+  sqliteDatabaseFailure,
+} from "./SqliteDatabaseFailures.js";
 import { captureSqliteDatabaseSnapshot } from "./SqliteDatabaseSnapshot.js";
 import { SQLITE_DATABASE_LIMITS } from "./SqliteDatabaseLimits.js";
 
@@ -257,6 +261,8 @@ export class SqliteDatabaseProvider implements SqliteDatabasePort {
     let retainedOutput: AnalysisCapturedOutput | undefined;
     let phase = "configuration";
     let result: Result<AnalysisExecution, AnalysisError>;
+    const workerTimeoutMs =
+      input.worker_timeout_ms ?? DEFAULT_SQLITE_WORKER_TIMEOUT_MS;
     try {
       if (options?.signal?.aborted)
         throw new AnalysisCancelledError(operation, {
@@ -283,6 +289,7 @@ export class SqliteDatabaseProvider implements SqliteDatabasePort {
         input,
         root: root.path,
         snapshotPath: snapshot.snapshotPath,
+        timeoutMs: workerTimeoutMs,
         environment: this.environment,
         resourceScope: this.#artifactResources,
         ...(this.launcher === undefined ? {} : { launcher: this.launcher }),
@@ -299,6 +306,7 @@ export class SqliteDatabaseProvider implements SqliteDatabasePort {
         artifact: snapshot.artifact,
         wal: snapshot.wal,
         ...inspection,
+        worker_timeout_ms: workerTimeoutMs,
       });
       if (!validated.success)
         throw new AnalysisOutputError(
@@ -322,6 +330,7 @@ export class SqliteDatabaseProvider implements SqliteDatabasePort {
         input.path,
         phase,
         options?.signal,
+        workerTimeoutMs,
       );
       retainedOutput ??= failure.capturedOutput;
       result = err(failure);
@@ -495,17 +504,14 @@ const sqliteCleanupFailure = (
   const partialObservation = result.ok
     ? completedSqliteEvidence(input, result.value)
     : result.error.partialObservation;
-  return new ProviderCleanupError(
-    SQLITE_PROVIDER_IDENTITY.id,
+  return createSqliteCleanupError(
     resources,
     {
       ...details,
       reason,
-      previous_error: result.ok ? null : projectAnalysisError(result.error),
-      ...(output === undefined ? {} : { captured_output: { ...output } }),
     },
     {
-      operation,
+      ...(output === undefined ? {} : { capturedOutput: output }),
       ...(result.ok ? {} : { cleanupPrimary: result.error }),
       ...(cause === undefined ? {} : { cause }),
       ...(partialObservation === undefined ? {} : { partialObservation }),

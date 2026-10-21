@@ -14,17 +14,19 @@ import { completeWithinViewCoverage } from "./analysisViewCoverage.js";
 import type { UnsignedAnalysisView } from "./analysisView.js";
 import { WebNetworkProjectionAccumulator } from "./WebNetworkProjectionAccumulator.js";
 import {
-  applyTemplateRules,
   compareTools,
   parameterNames,
   pathTemplate,
-  SIBLING_VARIANCE_SEGMENT_LIMIT,
   toolName,
   toolNameRegistry,
+} from "./environmentManifestNames.js";
+import {
+  applyTemplateRules,
+  SEGMENT_LIMITED_RULES,
+  SIBLING_VARIANCE_SEGMENT_LIMIT,
   type BodyShape,
   type JsonTypeName,
   type LiteralPart,
-  type ManifestRule,
   type TemplateRule,
   type ToolGroup,
 } from "./environmentManifestRules.js";
@@ -40,6 +42,7 @@ import {
   scanRouteTemplate,
   textBytes,
   type RecordedRequestLine,
+  type RouteRule,
   type RouteTemplate,
 } from "./webNetworkRouteTemplates.js";
 
@@ -72,7 +75,7 @@ type MutablePart =
   | LiteralPart
   | {
       readonly kind: "param";
-      readonly rule: ManifestRule;
+      readonly rule: RouteRule;
       readonly values: Set<string>;
     };
 
@@ -453,12 +456,10 @@ export class EnvironmentManifestAccumulator extends WebNetworkProjectionAccumula
       )
     )
       return [];
-    return (["sibling-variance", "sibling-pair-variance"] as const)
-      .filter((rule) => this.#rules.has(rule))
-      .map(
-        (rule) =>
-          `Routes with more than ${String(SIBLING_VARIANCE_SEGMENT_LIMIT)} segments are not compared by ${rule}; they keep their grouped templates.`,
-      );
+    return SEGMENT_LIMITED_RULES.filter((rule) => this.#rules.has(rule)).map(
+      (rule) =>
+        `Routes with more than ${String(SIBLING_VARIANCE_SEGMENT_LIMIT)} segments are not compared by ${rule}; they keep their grouped templates.`,
+    );
   }
 
   /** Project the complete manifest; tools, records and exclusions are sorted deterministically. */

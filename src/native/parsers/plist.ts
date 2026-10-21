@@ -1,8 +1,13 @@
 import { z } from "zod";
+import { parseBinary } from "plist";
 
-import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisOutputError,
+  AnalysisResourceConstraintError,
+} from "../../domain/analysisErrorCore.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import {
+  binaryDatePrecisionOverlapLimitation,
   negativeZeroReal,
   negativeZeroRealLimitation,
   nonFiniteRealLimitation,
@@ -20,8 +25,22 @@ import { err, ok, type Result } from "../../domain/result.js";
 
 import {
   incompletePlistNumberLimitation,
+  createPlistNumberProjection,
   type PlistNumberLiterals,
 } from "../../domain/apple/plistNumbers.js";
+import {
+  decodeBinaryPlistScalars,
+  scanBinaryPlistScalars,
+} from "../../artifacts/apple/PlistScalars.js";
+import {
+  estimateBinaryPlistExpansion,
+  PropertyListDecodeBudgetFailure,
+} from "../../artifacts/apple/PropertyListDecodeBudget.js";
+import { hasBinaryPlistSignature } from "../../domain/apple/appleArchiveFormat.js";
+
+/** Input ceiling matches native command output; projection is bounded separately. */
+export const MAX_NATIVE_PLIST_BYTES = 64 * 1024 * 1024;
+const MAX_NATIVE_PLIST_DECODE_BYTES = 64 * 1024 * 1024;
 
 const plistObject = z.record(z.string(), z.unknown());
 
@@ -204,16 +223,7 @@ export const parsePlistXml = (
     bundle: projectPlistBundle(value),
     limitations: [
       'plutil cannot express this plist as JSON, so it was decoded from plutil\'s XML conversion; data and date values are typed objects such as { "$plist_type": "data", "base64": ... }.',
-      ...(projected.nonFiniteRealCount === 0
-        ? []
-        : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
-      ...negativeZeroLimitations(projected.negativeZeroRealCount),
-      ...(projected.unknownDateCount === 0
-        ? []
-        : [unknownDateLimitation(projected.unknownDateCount)]),
-      ...(projected.unknownScalarCount === 0
-        ? []
-        : [unknownScalarLimitation(projected.unknownScalarCount)]),
+      ...projectedScalarLimitations(projected),
       ...(literals.incomplete ? [incompletePlistNumberLimitation] : []),
       ...numberLimitations(exactIntegerCount, ambiguousNumberCount),
       ...prototypeKeyLimitations(omittedPrototypeKeys),
@@ -221,8 +231,93 @@ export const parsePlistXml = (
   });
 };
 
+/** Decode binary plist source bytes before conversion can erase scalar facts. */
+export const parsePlistBinary = (
+  bytes: Buffer,
+): Result<
+  ParsedPlist,
+  AnalysisOutputError | AnalysisResourceConstraintError
+> => {
+  try {
+    if (!hasBinaryPlistSignature(bytes))
+      throw new TypeError("selected file does not have a binary plist header");
+    const expansion = estimateBinaryPlistExpansion(
+      bytes,
+      MAX_NATIVE_PLIST_DECODE_BYTES,
+      {
+        budget: "the native plist decode budget",
+        numberProjection: true,
+        fail: (kind, message) =>
+          kind === "cycle"
+            ? new TypeError(
+                "binary plist object references form a cycle, which a property list cannot represent",
+              )
+            : new PropertyListDecodeBudgetFailure(kind, message),
+      },
+    );
+    const scalarMetadata = scanBinaryPlistScalars(bytes, expansion);
+    const decoded = parseBinary(
+      decodeBinaryPlistScalars(bytes, scalarMetadata, expansion),
+    );
+    const projected = projectPlistValue(decoded);
+    const numbers = createPlistNumberProjection(scalarMetadata.literals);
+    const value = numbers.project(projected.value);
+    return ok({
+      value,
+      bundle: projectPlistBundle(value),
+      limitations: [
+        ...projectedScalarLimitations(projected),
+        ...(expansion.datePrecisionOverlapCount === 0
+          ? []
+          : [
+              binaryDatePrecisionOverlapLimitation(
+                expansion.datePrecisionOverlapCount,
+              ),
+            ]),
+        ...numbers.limitations(),
+        ...(expansion.binaryPrototypeKeyObserved
+          ? [omittedPrototypeKeysLimitation(null)]
+          : []),
+      ],
+    });
+  } catch (cause: unknown) {
+    if (cause instanceof PropertyListDecodeBudgetFailure)
+      return err(
+        new AnalysisResourceConstraintError(
+          "inspect_plist",
+          "memory",
+          cause.message,
+          { maximum_decoded_bytes: MAX_NATIVE_PLIST_DECODE_BYTES },
+          { cause, retryable: false },
+        ),
+      );
+    return err(
+      new AnalysisOutputError(
+        "inspect_plist",
+        cause instanceof Error ? cause.message : String(cause),
+        { cause },
+      ),
+    );
+  }
+};
+
 const prototypeKeyLimitations = (count: number): string[] =>
   count === 0 ? [] : [omittedPrototypeKeysLimitation(count)];
+
+const projectedScalarLimitations = (
+  projected: ProjectedPlistValue,
+): string[] => [
+  ...(projected.nonFiniteRealCount === 0
+    ? []
+    : [nonFiniteRealLimitation(projected.nonFiniteRealCount)]),
+  ...negativeZeroLimitations(projected.negativeZeroRealCount),
+  ...(projected.unknownDateCount === 0
+    ? []
+    : [unknownDateLimitation(projected.unknownDateCount)]),
+  ...(projected.unknownScalarCount === 0
+    ? []
+    : [unknownScalarLimitation(projected.unknownScalarCount)]),
+];
 
 const negativeZeroLimitations = (count: number): string[] =>
   count === 0 ? [] : [negativeZeroRealLimitation(count)];

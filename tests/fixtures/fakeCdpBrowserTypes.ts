@@ -92,7 +92,8 @@ export interface FakeOptions {
   readonly sessionTimeline?:
     | "same_origin"
     | "outside_policy"
-    | "target_detached";
+    | "target_detached"
+    | "target_crashed";
   readonly sessionTimelineEventCount?: number;
   readonly sessionRedirectResourceType?: "Document" | "Fetch" | "Script";
   readonly closeAfterMethod?: string;

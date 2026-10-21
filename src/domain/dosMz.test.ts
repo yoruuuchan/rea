@@ -109,15 +109,32 @@ describe("DOS MZ load-module validation", () => {
   });
 
   it.each([
-    ["page count", (bytes: Buffer) => bytes.writeUInt16LE(0, 4)],
-    ["final-page size", (bytes: Buffer) => bytes.writeUInt16LE(512, 2)],
-    ["header size", (bytes: Buffer) => bytes.writeUInt16LE(1, 8)],
-    ["entry point", (bytes: Buffer) => bytes.writeUInt16LE(128, 20)],
+    [
+      "page count",
+      (bytes: Buffer) => bytes.writeUInt16LE(0, 4),
+      "invalid DOS MZ page count or final-page size",
+    ],
+    [
+      "final-page size",
+      (bytes: Buffer) => bytes.writeUInt16LE(512, 2),
+      "invalid DOS MZ page count or final-page size",
+    ],
+    [
+      "header size",
+      (bytes: Buffer) => bytes.writeUInt16LE(1, 8),
+      "invalid DOS MZ header size or empty load module",
+    ],
+    [
+      "entry point",
+      (bytes: Buffer) => bytes.writeUInt16LE(128, 20),
+      "DOS MZ entry point lies outside its initialized load module",
+    ],
     [
       "relocation-table bounds",
       (bytes: Buffer) => {
         bytes.writeUInt16LE(2, 6);
       },
+      "DOS MZ relocation table lies outside its header",
     ],
     [
       "relocation target",
@@ -125,11 +142,12 @@ describe("DOS MZ load-module validation", () => {
         bytes.writeUInt16LE(1, 6);
         bytes.writeUInt16LE(127, 28);
       },
+      "DOS MZ relocation 0 points outside its load module",
     ],
-  ] as const)("rejects invalid %s", (_name, damage) => {
+  ] as const)("rejects invalid %s", (_name, damage, error) => {
     const bytes = dosMz();
     damage(bytes);
-    expect(parseDosMzHeader(bytes).ok).toBe(false);
+    expect(parseDosMzHeader(bytes)).toEqual({ ok: false, error });
   });
 
   it("rejects a truncated relocation table even when the file size is known", () => {

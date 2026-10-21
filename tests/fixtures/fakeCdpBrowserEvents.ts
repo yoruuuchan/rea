@@ -305,6 +305,8 @@ const emitSessionTimeline = (
         sessionId: command.sessionId,
         targetId: "allowed-page",
       });
+    if (options.sessionTimeline === "target_crashed")
+      event(socket, "Inspector.targetCrashed", command.sessionId, {});
   }
 };
 

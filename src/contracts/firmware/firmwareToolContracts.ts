@@ -13,7 +13,7 @@ export const FIRMWARE_TOOL_CONTRACTS = [
     ...toolContractMetadata("inspect_firmware_regions"),
     kind: "firmware-provider",
     description:
-      "Inspect signature candidates in a local firmware file with Binwalk 3.1.x (verified with 3.1.0). Returns offsets, reported lengths, descriptions and raw confidence values. Length validation and runtime addresses remain unknown. No extraction or target execution. Linux, caller-supplied tool and util-linux prlimit required; 128 MiB input limit, one worker and 120-second deadline.",
+      "Inspect signature candidates in a local firmware file with Binwalk 3.1.x (verified with 3.1.0). Returns offsets, reported lengths, descriptions and raw confidence values. Length validation and runtime addresses remain unknown. No extraction or target execution. Linux, caller-supplied tool and util-linux prlimit required; 128 MiB input limit, one worker. Adjust analysis_timeout_ms for the analysis wall-clock budget (default 120000); fixed per-process limits are unchanged.",
     inputSchema: firmwareInputSchemas.inspect_firmware_regions,
     outputSchema: evidenceResultOf(
       firmwareResultSchemas.inspect_firmware_regions,

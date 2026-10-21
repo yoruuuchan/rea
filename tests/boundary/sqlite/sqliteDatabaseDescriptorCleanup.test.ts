@@ -296,7 +296,16 @@ it("retains reply-read cancellation and retries the failed reply descriptor clos
           code: "cleanup_incomplete",
           details: {
             resources: [dirname(descriptorCleanup.path)],
-            diagnostics: { previous_error: cancelled },
+            captured_output: cancelled.details.captured_output,
+            diagnostics: {
+              previous_error: {
+                code: cancelled.code,
+                details: {
+                  execution_failure: "cancelled",
+                  resources: cancelled.details.resources,
+                },
+              },
+            },
           },
         }
       : cancelled,

@@ -8,29 +8,21 @@ import {
   AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
-import { BINARY_ARCHITECTURES } from "../../domain/binaryTargetTypes.js";
 import {
-  inspectRustBinaryInputSchema,
+  rustArchitectureForSubject,
   rustBinarySchema,
 } from "../../domain/rust/rustBinary.js";
+import { inspectRustBinaryRequestSchema } from "../../domain/rust/rustBinaryQuery.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { completeProviderEvidence } from "../ProviderOperationExecution.js";
+import {
+  requireAnalysisViewRetention,
+  projectRetainedAnalysis,
+  type AnalysisViewRetention,
+} from "../analysisView/AnalysisViewService.js";
 
 const OPERATION = "inspect_rust_binary";
-
-const architectureForSubject = (architecture: string) => {
-  switch (architecture) {
-    case "386":
-      return "x86";
-    case "amd64":
-      return "x86_64";
-    default:
-      return BINARY_ARCHITECTURES.find(
-        (supported) => supported === architecture,
-      );
-  }
-};
 
 /** Shared exact input validation and artifact-bound Evidence for CLI and MCP. */
 export class RustBinaryService {
@@ -44,12 +36,16 @@ export class RustBinaryService {
   async inspect(
     rawInput: unknown,
     options?: ExecutionOptions,
+    retention: AnalysisViewRetention = {
+      recordEvidence: undefined,
+      evidenceById: undefined,
+    },
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted)
       return err(
         new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
       );
-    const input = inspectRustBinaryInputSchema.safeParse(rawInput);
+    const input = inspectRustBinaryRequestSchema.safeParse(rawInput);
     if (!input.success)
       return err(
         analysisInputErrorFromIssues(OPERATION, input.error.issues, rawInput, {
@@ -66,7 +62,13 @@ export class RustBinaryService {
           },
         ]),
       );
-    const inspected = await this.provider.inspect(input.data, options);
+    const { detail, view, ...parameters } = input.data;
+    const compact = detail === "summary" || view !== undefined;
+    if (compact) {
+      const ready = requireAnalysisViewRetention(OPERATION, retention);
+      if (!ready.ok) return ready;
+    }
+    const inspected = await this.provider.inspect(parameters, options);
     if (!inspected.ok) return inspected;
     const report = rustBinarySchema.safeParse(inspected.value);
     if (!report.success || report.data.artifact.path !== input.data.path)
@@ -76,10 +78,17 @@ export class RustBinaryService {
           "Rust dependency reader returned malformed metadata or changed the selected artifact identity.",
         ),
       );
-    return completeProviderEvidence(
-      evidenceFor(this.provider.identity, input.data, report.data),
+    const completed = completeProviderEvidence(
+      evidenceFor(this.provider.identity, parameters, report.data),
       options?.signal,
     );
+    return compact && completed.ok
+      ? projectRetainedAnalysis(
+          completed.value,
+          retention,
+          view === undefined ? { kind: "summary" } : { kind: "rust", ...view },
+        )
+      : completed;
   }
 }
 
@@ -88,7 +97,7 @@ const evidenceFor = (
   parameters: { readonly path: string },
   value: ReturnType<typeof rustBinarySchema.parse>,
 ): Evidence => {
-  const architecture = architectureForSubject(value.architecture);
+  const architecture = rustArchitectureForSubject(value.architecture);
   const section = value.auditable_metadata;
   return createEvidence(
     {

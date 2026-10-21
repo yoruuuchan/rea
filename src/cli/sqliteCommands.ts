@@ -7,6 +7,7 @@ import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
+import { inspectSqliteDatabaseInputSchema } from "../domain/sqlite/sqliteDatabase.js";
 
 /** Resolve an operator-selected SQLite snapshot through the shared inspection workflow. */
 export const registerSqliteCommands = (
@@ -22,6 +23,7 @@ export const registerSqliteCommands = (
       path: z.string().describe("Local SQLite database snapshot"),
     }),
     options: z.object({
+      workerTimeoutMs: inspectSqliteDatabaseInputSchema.shape.worker_timeout_ms,
       table: z
         .string()
         .optional()
@@ -55,6 +57,9 @@ export const registerSqliteCommands = (
               service.inspect(
                 {
                   path: absoluteCallerPath(args.path),
+                  ...(options.workerTimeoutMs === undefined
+                    ? {}
+                    : { worker_timeout_ms: options.workerTimeoutMs }),
                   ...(options.table === undefined
                     ? {}
                     : { table: options.table }),

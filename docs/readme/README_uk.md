@@ -265,6 +265,7 @@ npx rea-agents@latest setup
 
 - [Встановлення й налаштування](../installation.md): реєстрація агентів, конфігурація провайдерів, оновлення та видалення.
 - [Готовність та усунення неполадок](../installation.md#check-readiness-for-your-task): діагностика конкретного агента або рушія аналізу.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI та Evidence](../cli.md): команди, вибір провайдера, знімки, імпорт/експорт і статуси завершення.
 - [Контракти MCP](../mcp-contracts.md) і [промпти агентів](../mcp-prompts.md): результати інструментів, сеанси й керовані дослідження.

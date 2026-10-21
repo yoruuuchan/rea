@@ -278,6 +278,7 @@ npx rea-agents@latest setup
 
 - [Εγκατάσταση και ρύθμιση](../installation.md): καταχώριση agents, ρύθμιση παρόχων ανάλυσης, ενημερώσεις και απεγκατάσταση.
 - [Έλεγχος ετοιμότητας και αντιμετώπιση προβλημάτων](../installation.md#check-readiness-for-your-task): διάγνωση ενός agent ή μιας μηχανής ανάλυσης.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI και Evidence](../cli.md): εντολές, επιλογή παρόχου, στιγμιότυπα, εισαγωγή/εξαγωγή και κωδικοί εξόδου.
 - [Προδιαγραφές MCP](../mcp-contracts.md) και [prompts για agents](../mcp-prompts.md): αποτελέσματα εργαλείων, συνεδρίες και καθοδηγούμενες διερευνήσεις.

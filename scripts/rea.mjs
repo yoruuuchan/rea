@@ -80,7 +80,7 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   writeStdout(result.output);
   process.exitCode = result.exitCode;
 } else {
-  const { cliConfigurationError, createCli } =
+  const { cliConfigurationError, closeCliJavaScriptResources, createCli } =
     await import("../dist/cli-runtime/cli.js");
   const { createCliResultOutput } =
     await import("../dist/cli-runtime/cliResultOutput.js");
@@ -94,47 +94,97 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   const cliArgs = normalizeCliArguments(args);
   const outputArguments = validateCliOutputArguments(cliArgs);
   const configurationError = cliConfigurationError(process.env);
-  // Doctor is the readiness report for this failure. Other commands still stop
-  // here so they do not run with an unusable log level.
-  if (configurationError !== undefined && !isDoctorCommand(cliArgs)) {
-    process.stderr.write(`${configurationError}\n`);
-    process.exitCode = 1;
-  } else if (!outputArguments.ok) {
-    writeStdout(renderCliOutputArgumentError(outputArguments));
-    process.exitCode = 1;
-  } else {
-    let wroteOutput = false;
-    const resultOutput = createCliResultOutput(cliArgs, process.stdout);
-    try {
-      await createCli(process.env, resultOutput).serve(cliArgs, {
-        stdout: (output) => {
-          if (resultOutput?.handled) {
-            if (resultOutput.failed && !stdoutClosed)
-              process.stderr.write(output);
-            return;
-          }
-          if (output.length > 0) wroteOutput = true;
-          writeStdout(output);
-        },
-        // A command failure caused by the closed pipe keeps the pipe's status.
-        exit: (code) => process.exit(stdoutClosed ? SIGPIPE_EXIT_STATUS : code),
-      });
-    } catch (cause) {
-      if (wroteOutput) throw cause;
-      const recovered = await resultOutput
-        ?.recoverFormattingFailure(cause)
-        .catch((writeFailure) => {
-          // Recovery writes outside Incur's command boundary. A reader that
-          // declined this document keeps the same quiet SIGPIPE outcome.
-          if (!stdoutClosed) throw writeFailure;
-          return true;
+  let dispatchFailure;
+  // Incur can exit from the callback below before this function returns.
+  // That callback owns the status, including a closed-pipe exit of 141.
+  let exiting = false;
+  try {
+    // Doctor is the readiness report for this failure. Other commands still stop
+    // here so they do not run with an unusable log level.
+    if (configurationError !== undefined && !isDoctorCommand(cliArgs)) {
+      process.stderr.write(`${configurationError}\n`);
+      process.exitCode = 1;
+    } else if (!outputArguments.ok) {
+      writeStdout(renderCliOutputArgumentError(outputArguments));
+      process.exitCode = 1;
+    } else {
+      let wroteOutput = false;
+      const resultOutput = createCliResultOutput(cliArgs, process.stdout);
+      try {
+        await createCli(process.env, resultOutput).serve(cliArgs, {
+          stdout: (output) => {
+            if (resultOutput?.handled) {
+              if (resultOutput.failed && !stdoutClosed)
+                process.stderr.write(output);
+              return;
+            }
+            if (output.length > 0) wroteOutput = true;
+            writeStdout(output);
+          },
+          // A command failure caused by the closed pipe keeps the pipe's status.
+          // Worker shutdown is shared with the dispatch finally below. A failed
+          // shutdown is reported here because this callback is what exits.
+          exit: (code) => {
+            exiting = true;
+            const status = stdoutClosed ? SIGPIPE_EXIT_STATUS : code;
+            void Promise.resolve()
+              .then(() => closeCliJavaScriptResources())
+              .then(
+                () => {
+                  process.exit(status);
+                },
+                (cleanup) => {
+                  process.stderr.write(
+                    `Failed to close the JavaScript analysis worker: ${cleanupFailureText(cleanup)}\n`,
+                  );
+                  process.exit(
+                    stdoutClosed
+                      ? SIGPIPE_EXIT_STATUS
+                      : status === 0
+                        ? 1
+                        : status,
+                  );
+                },
+              );
+          },
         });
-      if (!recovered) throw cause;
-      process.exitCode = stdoutClosed ? SIGPIPE_EXIT_STATUS : 1;
+      } catch (cause) {
+        if (wroteOutput) throw cause;
+        const recovered = await resultOutput
+          ?.recoverFormattingFailure(cause)
+          .catch((writeFailure) => {
+            // Recovery writes outside Incur's command boundary. A reader that
+            // declined this document keeps the same quiet SIGPIPE outcome.
+            if (!stdoutClosed) throw writeFailure;
+            return true;
+          });
+        if (!recovered) throw cause;
+        process.exitCode = stdoutClosed ? SIGPIPE_EXIT_STATUS : 1;
+      }
+      if (!wroteOutput && !resultOutput?.handled)
+        writeStdout(renderEmptyFilteredCliOutput(cliArgs) ?? "");
     }
-    if (!wroteOutput && !resultOutput?.handled)
-      writeStdout(renderEmptyFilteredCliOutput(cliArgs) ?? "");
+  } catch (cause) {
+    dispatchFailure = cause;
+  } finally {
+    // Serve and output rendering can throw after a worker is parked. Stop it
+    // on that path too, and keep the dispatch failure when both fail.
+    try {
+      await closeCliJavaScriptResources();
+    } catch (cleanup) {
+      // The exit callback reports this same shared failure and then exits.
+      if (!exiting) {
+        dispatchFailure =
+          dispatchFailure === undefined
+            ? cleanup
+            : new AggregateError(
+                [dispatchFailure, cleanup],
+                "CLI dispatch failed and the JavaScript analysis worker remained owned",
+              );
+      }
+    }
   }
+  if (!exiting && dispatchFailure !== undefined) throw dispatchFailure;
 }
 
 /** True when the first positional command is `doctor`, after global output flags. */
@@ -164,6 +214,11 @@ function isDoctorCommand(arguments_) {
  * with the status a SIGPIPE-terminated writer reports. MCP stdio keeps its own
  * client lifecycle.
  */
+function cleanupFailureText(cleanup) {
+  if (cleanup instanceof Error) return cleanup.stack ?? cleanup.message;
+  return String(cleanup);
+}
+
 function guardClosedStdout() {
   process.stdout.on("error", (cause) => {
     if (cause?.code === "EPIPE") {

@@ -7,6 +7,7 @@ import {
   AnalysisUnsupportedTargetError,
 } from "../../domain/analysisErrorCore.js";
 import {
+  binaryDatePrecisionOverlapLimitation,
   negativeZeroRealLimitation,
   nonFiniteRealLimitation,
   unknownDateLimitation,
@@ -14,9 +15,9 @@ import {
 } from "../../domain/apple/plistValue.js";
 import { createPlistNumberProjection } from "../../domain/apple/plistNumbers.js";
 import {
-  decodeBinaryPlistNumbers,
-  scanBinaryPlistNumberLiterals,
-} from "./PlistNumberLiterals.js";
+  decodeBinaryPlistScalars,
+  scanBinaryPlistScalars,
+} from "./PlistScalars.js";
 import {
   omittedPrototypeKeysLimitation,
   parseXmlPropertyList,
@@ -36,7 +37,7 @@ import {
   hasBinaryPlistSignature,
   hasNibArchiveSignature,
 } from "../../domain/apple/appleArchiveFormat.js";
-import { estimateBinaryPlistExpansion } from "./InterfaceBuilderDecodeBudget.js";
+import { estimateBinaryPlistExpansion } from "./PropertyListDecodeBudget.js";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 /** Decoded representation budget, the same 8:1 ratio Interface Builder uses. */
@@ -72,20 +73,20 @@ export const decodeKeyedArchiveBytes = (
         numberProjection: true,
       })
     : undefined;
-  const binaryNumberMetadata = binary
-    ? scanBinaryPlistNumberLiterals(bytes)
+  const binaryScalarMetadata = binary
+    ? scanBinaryPlistScalars(bytes, binaryExpansion)
     : undefined;
   const parsed =
     binaryExpansion !== undefined
       ? {
           value: parseBinary(
-            decodeBinaryPlistNumbers(
+            decodeBinaryPlistScalars(
               bytes,
-              binaryNumberMetadata!,
-              binaryExpansion.binaryDatePayloadOffsets,
+              binaryScalarMetadata!,
+              binaryExpansion!,
             ),
           ),
-          numberLiterals: binaryNumberMetadata!.literals,
+          numberLiterals: binaryScalarMetadata!.literals,
           omittedPrototypeKeys: binaryExpansion.binaryPrototypeKeyObserved
             ? null
             : 0,
@@ -131,6 +132,14 @@ export const decodeKeyedArchiveBytes = (
       ...(unknownDateCount === 0
         ? []
         : [unknownDateLimitation(unknownDateCount)]),
+      ...(binaryExpansion === undefined ||
+      binaryExpansion.datePrecisionOverlapCount === 0
+        ? []
+        : [
+            binaryDatePrecisionOverlapLimitation(
+              binaryExpansion.datePrecisionOverlapCount,
+            ),
+          ]),
       ...(unknownScalarCount === 0
         ? []
         : [unknownScalarLimitation(unknownScalarCount)]),

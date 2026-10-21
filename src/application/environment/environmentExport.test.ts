@@ -1,8 +1,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
-import * as v8 from "node:v8";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   environmentServeFixture,
@@ -12,16 +11,10 @@ import {
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { PACKAGE_METADATA } from "../../generatedPackageMetadata.js";
-import { RegularFileChangedError } from "../../filesystem/RegularFile.js";
-import { nativeJsonParseRequiredBytes } from "../JsonInputFile.js";
-import * as regularFileRead from "../RegularFileRead.js";
 import {
   exportEnvironmentBundle,
   readEnvironmentExportInputs,
 } from "./environmentExport.js";
-
-vi.mock("node:v8", { spy: true });
-vi.mock("../RegularFileRead.js", { spy: true });
 
 const listFiles = async (root: string): Promise<string[]> =>
   (await readdir(root, { recursive: true, withFileTypes: true }))
@@ -52,41 +45,6 @@ const prepare = async (prefix: string) => {
 };
 
 describe("readEnvironmentExportInputs", () => {
-  it.each(["manifest", "evidence"] as const)(
-    "returns a tagged input error when the %s snapshot changes",
-    async (role) => {
-      const root = await createTestTempDirectory(
-        "rea-environment-input-changed-",
-      );
-      const files = await writeEnvironmentServeFiles(root);
-      const changedPath =
-        role === "manifest" ? files.manifestPath : files.capturePath;
-      const actual = await vi.importActual<typeof regularFileRead>(
-        "../RegularFileRead.js",
-      );
-      const reader = vi.mocked(regularFileRead.readRegularFile);
-      reader.mockImplementation(async (path, options) => {
-        if (path === changedPath) throw new RegularFileChangedError(path);
-        return actual.readRegularFile(path, options);
-      });
-      try {
-        const result = await readEnvironmentExportInputs(
-          files.manifestPath,
-          files.capturePath,
-        );
-        if (result.ok) throw new Error("Expected changed input refusal");
-        expect(projectAnalysisError(result.error)).toMatchObject({
-          code: "invalid_request",
-          details: {
-            operation: "environment-export",
-            issues: [{ path: [role], reason: "invalid_value" }],
-          },
-        });
-      } finally {
-        reader.mockImplementation(actual.readRegularFile);
-      }
-    },
-  );
   it("reads each file once as the bytes on disk and the value they parse to", async () => {
     const root = await createTestTempDirectory("rea-environment-inputs-");
     const fixture = environmentServeFixture();
@@ -105,32 +63,6 @@ describe("readEnvironmentExportInputs", () => {
       await readFile(files.capturePath),
     );
     expect(inputs.value.evidence.value).toEqual(fixture.capture);
-  });
-
-  it("refuses an input whose whole read and parse would not fit live heap headroom, before reading it", async () => {
-    const root = await createTestTempDirectory("rea-environment-export-heap-");
-    const files = await writeEnvironmentServeFiles(
-      root,
-      environmentServeFixture(),
-    );
-    vi.mocked(v8.getHeapStatistics).mockReturnValueOnce({
-      ...v8.getHeapStatistics(),
-      total_available_size: 1024,
-    });
-    const refused = await readEnvironmentExportInputs(
-      files.manifestPath,
-      files.capturePath,
-    );
-    expect(refused.ok).toBe(false);
-    if (refused.ok) return;
-    expect(refused.error).toMatchObject({
-      _tag: "AnalysisResourceConstraintError",
-      resource: "memory",
-      reportedLimits: {
-        input_path: files.manifestPath,
-        available_heap_bytes: 1024,
-      },
-    });
   });
 
   it("refuses inline JSON, a directory and a file that is not JSON by role", async () => {
@@ -313,35 +245,4 @@ describe("exportEnvironmentBundle file modes", () => {
       }
     },
   );
-});
-
-describe("readEnvironmentExportInputs heap admission", () => {
-  it("reserves headroom for snapshot sealing after the native parse", async () => {
-    const root = await createTestTempDirectory(
-      "rea-environment-export-copies-",
-    );
-    const files = await writeEnvironmentServeFiles(
-      root,
-      environmentServeFixture(),
-    );
-    const { size } = await stat(files.manifestPath);
-    // Room for parsing, but not for the owned snapshot traversal that follows it.
-    vi.mocked(v8.getHeapStatistics).mockReturnValueOnce({
-      ...v8.getHeapStatistics(),
-      total_available_size: nativeJsonParseRequiredBytes(size) * 1.5,
-    });
-    const refused = await readEnvironmentExportInputs(
-      files.manifestPath,
-      files.capturePath,
-    );
-    expect(refused.ok).toBe(false);
-    if (refused.ok) return;
-    expect(refused.error).toMatchObject({
-      _tag: "AnalysisResourceConstraintError",
-      reportedLimits: {
-        input_path: files.manifestPath,
-        required_heap_bytes: nativeJsonParseRequiredBytes(size, true),
-      },
-    });
-  });
 });

@@ -265,6 +265,7 @@ Zacznij od [przewodników z przykładami](https://rea.tools/pl/guides/) na stron
 
 - [Instalacja i konfiguracja](../installation.md): rejestracja agentów, konfiguracja dostawców analizy, aktualizacje i odinstalowanie.
 - [Gotowość i rozwiązywanie problemów](../installation.md#check-readiness-for-your-task): diagnostyka jednego agenta lub silnika analizy.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI i Evidence](../cli.md): polecenia, wybór dostawcy, migawki, import/eksport i kody zakończenia.
 - [Kontrakty MCP](../mcp-contracts.md) i [prompty dla agentów](../mcp-prompts.md): wyniki narzędzi, sesje i prowadzone analizy.

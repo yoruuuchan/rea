@@ -7,7 +7,10 @@ import {
   AnalysisTimeoutError,
 } from "./analysisErrorCore.js";
 import { analysisErrorWithCleanupFailure } from "./analysisErrorCleanup.js";
-import { projectAnalysisError } from "./analysisErrorProjection.js";
+import {
+  projectAnalysisError,
+  projectAnalysisErrorWithoutCapturedOutput,
+} from "./analysisErrorProjection.js";
 import {
   analysisErrorCategory,
   analysisErrorRemediationAction,
@@ -15,6 +18,60 @@ import {
 } from "./analysisErrorPresentation.js";
 import { ProviderCleanupError } from "./providerCleanupError.js";
 import { createEvidence } from "./evidence.js";
+
+it.each([false, true])(
+  "keeps each owner's capture without text-based deduplication (matching: %s)",
+  (matching) => {
+    const primary = new AnalysisTimeoutError("inspect", 1234, {
+      capturedOutput: {
+        stdout: "primary-capture-sentinel",
+        stderr: "",
+        truncated: false,
+      },
+    });
+    const cleanup = new ProviderCleanupError(
+      "fixture",
+      ["owned-worker"],
+      {},
+      {
+        capturedOutput: {
+          stdout: matching
+            ? "primary-capture-sentinel"
+            : "cleanup-capture-sentinel",
+          stderr: "",
+          truncated: true,
+        },
+      },
+    );
+    const composed = analysisErrorWithCleanupFailure(
+      primary,
+      cleanup,
+      "inspect",
+    );
+    const projected = projectAnalysisError(composed);
+    expect(projected.details?.captured_output).toEqual(primary.capturedOutput);
+    expect(projected.details?.diagnostics).toMatchObject({
+      primary_error: {
+        code: "provider_timeout",
+        details: { timeout_ms: 1234 },
+      },
+      cleanup_error: { details: { captured_output: cleanup.capturedOutput } },
+    });
+    expect(
+      JSON.stringify(projected).split("primary-capture-sentinel"),
+    ).toHaveLength(matching ? 3 : 2);
+    if (!matching)
+      expect(
+        JSON.stringify(projected).split("cleanup-capture-sentinel"),
+      ).toHaveLength(2);
+    expect(
+      projectAnalysisErrorWithoutCapturedOutput(primary).details,
+    ).not.toHaveProperty("captured_output");
+    expect(projectAnalysisError(primary).details?.captured_output).toEqual(
+      primary.capturedOutput,
+    );
+  },
+);
 
 it("keeps dependency-owned resources empty after the final owner releases", () => {
   const file = new ProviderCleanupError("fixture", ["file-owner"], {});
@@ -113,7 +170,10 @@ it.each([
   const projected = projectAnalysisError(composed);
   expect(projected).toMatchObject(original);
   expect(projected.details?.cleanup_history).toMatchObject({
-    primary_error: original,
+    primary_error:
+      primary.capturedOutput === undefined
+        ? original
+        : projectAnalysisErrorWithoutCapturedOutput(primary),
     cleanup_error: { code: "cleanup_incomplete" },
   });
   expect(projected.details).not.toHaveProperty("cleanup", "incomplete");

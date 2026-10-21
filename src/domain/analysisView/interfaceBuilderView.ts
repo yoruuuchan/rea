@@ -2,11 +2,11 @@ import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { analysisViewInputError } from "./analysisViewErrors.js";
 import { uniqueSorted } from "../canonicalOrdering.js";
+import { canBorrowParsedJsonSnapshot } from "../immutableJson.js";
 import {
   interfaceBuilderAnalysisSchema,
   interfaceBuilderDocumentSchema,
 } from "../apple/interfaceBuilderGraph.js";
-import { bundleResourceRootSchema } from "../apple/bundleResourceRoot.js";
 import {
   nativeInvestigationCoverageSchema,
   nativeInvestigationEdgeSchema,
@@ -15,6 +15,7 @@ import {
 } from "../native/nativeInvestigationGraph.js";
 import { err, ok, type Result } from "../result.js";
 import { parseAnalysisViewResult } from "./analysisViewParent.js";
+import { selectViewRows } from "./selectViewRows.js";
 import type {
   AnalysisViewParent,
   AnalysisViewRequest,
@@ -96,15 +97,47 @@ const tally = (values: readonly string[]): Record<string, number> => {
 };
 
 type InterfaceBuilderReport = z.output<typeof interfaceBuilderAnalysisSchema>;
+type InterfaceBuilderPage = z.output<typeof interfaceBuilderViewRequestSchema>;
+
+const pageRows = <Row>(rows: readonly Row[], view: InterfaceBuilderPage) => ({
+  rows: rows.slice(view.offset, view.offset + view.limit),
+  total: rows.length,
+});
+
+const selectDocumentRows = <
+  Row extends { readonly evidence: readonly { artifact_path: unknown }[] },
+>(
+  rows: readonly Row[],
+  view: InterfaceBuilderPage,
+  document: string | undefined,
+) =>
+  document === undefined
+    ? pageRows(rows, view)
+    : selectViewRows(
+        rows,
+        view,
+        (row) =>
+          row.evidence.some((evidence) => evidence.artifact_path === document),
+        (row) => row,
+      );
+
+// Exact owned snapshot identity, with no second retained graph or live-file cache.
+// Weak membership ends with the Evidence lifetime; failed/mutable imports are not reused.
+const checkedReports = new WeakSet<object>();
 
 /** Admit a well-formed report bound to its recorded target, if one exists. */
 const parseInterfaceBuilderReport = (
   parent: AnalysisViewParent,
 ): Result<InterfaceBuilderReport, AnalysisError> => {
-  const parsed = parseAnalysisViewResult(
-    interfaceBuilderAnalysisSchema,
-    parent,
-  );
+  const source = parent.normalizedResult;
+  const reusable =
+    parent.sealedResult === true &&
+    typeof source === "object" &&
+    source !== null;
+  const known = reusable && checkedReports.has(source);
+  const parsed = known
+    ? ok(source as InterfaceBuilderReport)
+    : parseAnalysisViewResult(interfaceBuilderAnalysisSchema, parent);
   if (!parsed.ok) return parsed;
   const report = parsed.value;
   if (
@@ -122,6 +155,10 @@ const parseInterfaceBuilderReport = (
         },
       ]),
     );
+  if (!known && reusable && canBorrowParsedJsonSnapshot(source, report)) {
+    checkedReports.add(source);
+    return ok(source);
+  }
   return ok(report);
 };
 
@@ -229,31 +266,24 @@ export const projectInterfaceBuilderView = (
         },
       ]),
     );
-  const inDocument = <
-    Row extends { readonly evidence: readonly { artifact_path: unknown }[] },
-  >(
-    candidates: readonly Row[],
-  ): readonly Row[] =>
-    document === undefined
-      ? candidates
-      : candidates.filter((row) =>
-          row.evidence.some((evidence) => evidence.artifact_path === document),
-        );
-  const rows =
+  const selected =
     view.collection === "documents"
-      ? report.documents
+      ? pageRows(report.documents, view)
       : view.collection === "coverage"
-        ? graph.coverage
+        ? pageRows(graph.coverage, view)
         : view.collection === "nodes"
-          ? inDocument(graph.nodes)
-          : inDocument(graph.edges);
-  const items = rows.slice(view.offset, view.offset + view.limit);
+          ? selectDocumentRows(graph.nodes, view, document)
+          : selectDocumentRows(graph.edges, view, document);
   return ok({
     kind: "interface-builder",
     view,
-    items,
+    items: selected.rows,
     ...shared,
     source_truncated: graph.truncated,
-    coverage: pageViewCoverage(view.offset, items.length, rows.length),
+    coverage: pageViewCoverage(
+      view.offset,
+      selected.rows.length,
+      selected.total,
+    ),
   });
 };

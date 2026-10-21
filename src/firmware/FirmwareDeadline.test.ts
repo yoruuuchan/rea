@@ -10,6 +10,31 @@ import { startFirmwareDeadline } from "./FirmwareDeadline.js";
 
 afterEach(() => vi.restoreAllMocks());
 
+it.each(["inspect_firmware_regions", "extract_firmware"] as const)(
+  "validates %s analysis timer boundaries and preserves omission",
+  (operation) => {
+    const parse = (settings: Record<string, unknown>) =>
+      firmwareRequestSchema.parse({
+        operation,
+        input: {
+          path: "/firmware.bin",
+          ...(operation === "extract_firmware"
+            ? { output_directory: "/output" }
+            : {}),
+          ...settings,
+        },
+      });
+    expect(parse({}).input).not.toHaveProperty("analysis_timeout_ms");
+    for (const value of [1, 2_147_483_647])
+      expect(parse({ analysis_timeout_ms: value }).input).toHaveProperty(
+        "analysis_timeout_ms",
+        value,
+      );
+    for (const value of [0, -1, 0.5, 2_147_483_648, null, "120000"])
+      expect(() => parse({ analysis_timeout_ms: value })).toThrow();
+  },
+);
+
 it("enforces absolute expiry before the timer callback while preserving observed caller cancellation", () => {
   const now = vi.spyOn(performance, "now").mockReturnValue(100);
   const deadline = startFirmwareDeadline("publication", 1_000);
@@ -109,3 +134,34 @@ it("keeps a distinct caller cancellation when the phase deadline has also expire
     }),
   ).toBe(original);
 });
+
+it.each([1234, 2_147_483_647])(
+  "names the actual adjustable analysis budget %s without suggesting publication repair",
+  (timeoutMs) => {
+    const reason = new Error("analysis deadline");
+    const failure = firmwareFailure(
+      new AnalysisCancelledError("inspect_firmware_regions", { cause: reason }),
+      {
+        engine: "binwalk",
+        operation: "inspect_firmware_regions",
+        deadline: {
+          phase: "analysis",
+          signal: AbortSignal.abort(reason),
+          timeoutMs,
+          expiresAtMs: 0,
+        },
+      },
+    );
+    const projected = projectAnalysisError(failure);
+    expect(projected).toMatchObject({
+      code: "provider_timeout",
+      details: { timeout_ms: timeoutMs, diagnostics: { phase: "analysis" } },
+      remediation: { action: expect.stringContaining("analysis_timeout_ms") },
+    });
+    expect(projected.remediation.action).toContain("--analysis-timeout-ms");
+    expect(projected.remediation.action).toContain("publication_timeout_ms");
+    expect(projected.remediation.action).toContain("CPU");
+    if (timeoutMs === 2_147_483_647)
+      expect(projected.remediation.action).toContain("maximum");
+  },
+);

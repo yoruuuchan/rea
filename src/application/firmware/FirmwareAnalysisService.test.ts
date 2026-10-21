@@ -2,59 +2,72 @@ import { expect, it } from "vitest";
 
 import { FirmwareAnalysisService } from "./FirmwareAnalysisService.js";
 import { createAnalysisExecution } from "../AnalysisProvider.js";
-import { firmwareResultSchemas } from "../../domain/firmware/firmwareAnalysis.js";
+import {
+  firmwareResultSchemas,
+  type FirmwareOperation,
+} from "../../domain/firmware/firmwareAnalysis.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { err, ok } from "../../domain/result.js";
+
+const fixture = (
+  operation: FirmwareOperation,
+  budget: number | null = 120_000,
+) => {
+  const path = "/owned-fixture/input.bin";
+  const input = {
+    path,
+    ...(operation === "extract_firmware"
+      ? { output_directory: "/owned-fixture/output" }
+      : {}),
+  };
+  const engine = {
+    name: "fixture",
+    version: "1",
+    executable_path: "/fixture/engine",
+    executable_sha256: "b".repeat(64),
+    source_revision: null,
+    worker_count: 1,
+  };
+  const normalized = firmwareResultSchemas[operation].parse(
+    operation === "inspect_firmware_regions"
+      ? { engine, input_size: 1, regions: [], coverage: "signature_scan" }
+      : {
+          engine,
+          selection: { offset: 0, length: 1, sha256: "a".repeat(64) },
+          output_directory: "/owned-fixture/output",
+          coverage: "complete",
+          files: [],
+          unpublished_entries: [],
+          chunks: [],
+          derivations: [],
+          depth_limited_paths: [],
+          diagnostics: [],
+          extraction_gaps: [],
+          extraction_continuations: [],
+          published_bytes: 0,
+        },
+  );
+  const execution = createAnalysisExecution(
+    budget === null
+      ? normalized
+      : { ...normalized, analysis_timeout_ms: budget },
+    { id: "fixture", name: "Fixture firmware", version: "1" },
+    {
+      subject: {
+        path,
+        format: "file",
+        sha256: "a".repeat(64),
+      },
+      rawResult: { source: "controlled producer" },
+    },
+  );
+  return { input, execution };
+};
 
 it.each(["inspect_firmware_regions", "extract_firmware"] as const)(
   "retains %s Evidence after late cancellation and preserves provider failure precedence",
   async (operation) => {
-    const path = "/owned-fixture/input.bin";
-    const input = {
-      path,
-      ...(operation === "extract_firmware"
-        ? { output_directory: "/owned-fixture/output" }
-        : {}),
-    };
-    const engine = {
-      name: "fixture",
-      version: "1",
-      executable_path: "/fixture/engine",
-      executable_sha256: "b".repeat(64),
-      source_revision: null,
-      worker_count: 1,
-    };
-    const normalized = firmwareResultSchemas[operation].parse(
-      operation === "inspect_firmware_regions"
-        ? { engine, input_size: 1, regions: [], coverage: "signature_scan" }
-        : {
-            engine,
-            selection: { offset: 0, length: 1, sha256: "a".repeat(64) },
-            output_directory: "/owned-fixture/output",
-            coverage: "complete",
-            files: [],
-            unpublished_entries: [],
-            chunks: [],
-            derivations: [],
-            depth_limited_paths: [],
-            diagnostics: [],
-            extraction_gaps: [],
-            extraction_continuations: [],
-            published_bytes: 0,
-          },
-    );
-    const execution = createAnalysisExecution(
-      normalized,
-      { id: "fixture", name: "Fixture firmware", version: "1" },
-      {
-        subject: {
-          path,
-          format: "file",
-          sha256: "a".repeat(64),
-        },
-        rawResult: { source: "controlled producer" },
-      },
-    );
+    const { input, execution } = fixture(operation);
     const control = await new FirmwareAnalysisService({
       execute: async () => ok(execution),
     }).execute(operation, input);
@@ -89,3 +102,72 @@ it.each(["inspect_firmware_regions", "extract_firmware"] as const)(
     ).toEqual(err(failure));
   },
 );
+
+for (const operation of [
+  "inspect_firmware_regions",
+  "extract_firmware",
+] as const) {
+  it(`preserves a selected ${operation} analysis budget independently of publication`, async () => {
+    const { input, execution } = fixture(operation, 1234);
+    const service = new FirmwareAnalysisService({
+      execute: async (request) => {
+        expect(request.input).toMatchObject({ analysis_timeout_ms: 1234 });
+        if (request.operation === "extract_firmware")
+          expect(request.input.publication_timeout_ms).toBe(120_000);
+        return ok(execution);
+      },
+    });
+    const result = await service.execute(operation, {
+      ...input,
+      analysis_timeout_ms: 1234,
+    });
+    if (!result.ok) throw result.error;
+    expect(result.value.normalized_result).toMatchObject({
+      analysis_timeout_ms: 1234,
+    });
+    expect(result.value.parameters).toMatchObject({
+      analysis_timeout_ms: 1234,
+    });
+  });
+
+  it(`retains the known ${operation} default without inventing an explicit input`, async () => {
+    const { input, execution } = fixture(operation);
+    const result = await new FirmwareAnalysisService({
+      execute: async () => ok(execution),
+    }).execute(operation, input);
+    if (!result.ok) throw result.error;
+    expect(result.value.normalized_result).toMatchObject({
+      analysis_timeout_ms: 120_000,
+    });
+    expect(result.value.parameters).not.toHaveProperty("analysis_timeout_ms");
+  });
+
+  it.each([
+    { selected: undefined, reported: null },
+    { selected: undefined, reported: 1234 },
+    { selected: 1234, reported: null },
+    { selected: 1234, reported: 120_000 },
+  ])(
+    `rejects missing or changed fresh ${operation} settings: %j`,
+    async ({ selected, reported }) => {
+      const { input, execution } = fixture(operation, reported);
+      const result = await new FirmwareAnalysisService({
+        execute: async () => ok(execution),
+      }).execute(operation, {
+        ...input,
+        ...(selected === undefined ? {} : { analysis_timeout_ms: selected }),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisOutputError" },
+      });
+    },
+  );
+
+  it(`keeps historical ${operation} budget omissions unknown`, () => {
+    const { execution } = fixture(operation, null);
+    expect(
+      firmwareResultSchemas[operation].parse(execution.result),
+    ).not.toHaveProperty("analysis_timeout_ms");
+  });
+}

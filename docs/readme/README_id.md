@@ -290,6 +290,7 @@ Untuk mengetahui opsi, prasyarat, dan kontrak hasil secara tepat:
 
 - [Instalasi dan penyiapan](../installation.md): pendaftaran agen, konfigurasi penyedia, pembaruan, dan penghapusan instalasi.
 - [Kesiapan dan pemecahan masalah](../installation.md#check-readiness-for-your-task): mendiagnosis satu agen atau mesin analisis.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI dan Bukti](../cli.md): perintah, pemilihan penyedia, snapshot, impor/ekspor, dan status keluar.
 - [Kontrak MCP](../mcp-contracts.md) dan [prompt agen](../mcp-prompts.md): hasil alat, sesi, dan investigasi terpandu.

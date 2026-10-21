@@ -50,7 +50,7 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   process.exit(1);
 }
 
-const { cliConfigurationError, createCli } =
+const { cliConfigurationError, closeCliJavaScriptResources, createCli } =
   await import("../../../dist/cli-runtime/cli.js");
 const { createCliResultOutput } =
   await import("../../../dist/cli-runtime/cliResultOutput.js");
@@ -89,7 +89,10 @@ process.stdin.on("data", (chunk) => {
   }
 });
 process.stdin.on("end", () => {
-  chain.finally(() => process.exit(0));
+  chain.finally(async () => {
+    await closeCliJavaScriptResources();
+    process.exit(0);
+  });
 });
 
 async function handle(value) {

@@ -433,6 +433,38 @@
         "members": 315,
         "expanded_bytes": 1301927
       }
+    },
+    {
+      "id": "alpine-ripgrep-rust",
+      "file": "ripgrep",
+      "bytes": 3416168,
+      "sha256": "78387bbe12b2110df8d2ce364390a00c190f4543a2f40b8279e49f6c5c85af9c",
+      "provenance": {
+        "project": "ripgrep",
+        "version": "14.1.1-r0",
+        "upstreamFile": "ripgrep-14.1.1-r0.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/ripgrep-14.1.1-r0.apk",
+        "transport_sha256": "213dd0b047163f6627cc2fdd6fbfe205009476eb4fc48c352a3f5b9ab647f6d4",
+        "transport_bytes": 1422830,
+        "aports_revision": "4e899d119e4c983a938436d6f397a509521225d1",
+        "derivation": "selected regular APK tar member usr/bin/rg; read-only static inspection; never executed"
+      }
+    },
+    {
+      "id": "alpine-zellij-rust",
+      "file": "zellij",
+      "bytes": 17151864,
+      "sha256": "9a86e9ca47902a869fdf1886f4cf17714f4fa5655427128beadff498cfb392db",
+      "provenance": {
+        "project": "zellij",
+        "version": "0.40.0-r0",
+        "upstreamFile": "zellij-0.40.0-r0.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/zellij-0.40.0-r0.apk",
+        "transport_sha256": "575075945415b221857563e19c5f4c661af9f98bbba54f0994c7385c0e432432",
+        "transport_bytes": 6722129,
+        "aports_revision": "3be26a3a26e76e1bf3eff784bffe3956d29d77a0",
+        "derivation": "selected regular APK tar member usr/bin/zellij; read-only static inspection; never executed"
+      }
     }
   ]
 }

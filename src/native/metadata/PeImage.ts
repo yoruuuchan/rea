@@ -1,3 +1,4 @@
+import { readPeSectionHeader } from "./NativeSectionDirectory.js";
 import {
   observeMzWindowsHeader,
   parseDosMzHeader,
@@ -95,16 +96,15 @@ export const readPeImage = (bytes: Buffer): BinaryContainer => {
   const sections: ImageSection[] = [];
   for (let index = 0; index < count; index++) {
     const entry = start + index * 40;
-    const sectionName = peSectionName(
-      reader.range(entry, 8, "PE section name"),
-    );
-    const virtualSize = reader.u32(entry + 8);
-    const virtualAddress = reader.u32(entry + 12);
-    const size = reader.u32(entry + 16);
-    const offset = reader.u32(entry + 20);
-    const characteristics = reader.u32(entry + 36);
-    // SizeOfRawData includes file-alignment padding. VirtualSize is the content.
-    const contentSize = virtualSize === 0 ? size : Math.min(virtualSize, size);
+    const {
+      name: sectionName,
+      virtual_size: virtualSize,
+      virtual_address: virtualAddress,
+      raw_size: size,
+      offset,
+      characteristics,
+      size: contentSize,
+    } = readPeSectionHeader(reader.range(entry, 40, "PE section header"));
     sections.push(
       peImageSection({
         reader,
@@ -160,11 +160,6 @@ export const readPeImage = (bytes: Buffer): BinaryContainer => {
     zero_fills: zeroFills,
     sections,
   };
-};
-
-const peSectionName = (bytes: Buffer): string => {
-  const nul = bytes.indexOf(0);
-  return bytes.toString("latin1", 0, nul < 0 ? bytes.length : nul);
 };
 
 const peImageSection = ({

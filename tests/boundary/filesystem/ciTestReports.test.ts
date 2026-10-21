@@ -243,10 +243,22 @@ it("keeps diagnosis available after merge failure and publishes only complete su
   const diagnosis = steps.find((step) => step.with?.name === "test-results");
   expect(diagnosis?.if).toContain("!cancelled()");
   expect(diagnosis?.if).not.toContain("success()");
-  const history = steps.find((step) => step.with?.name === "test-timings");
+  const history = steps.find(
+    (step) => step.name === "Publish successful timing history",
+  );
   expect(history?.if).toContain("success()");
   expect(history?.if).toContain("needs.test-shard.result == 'success'");
   expect(history?.if).toContain("needs.changes.outputs.tier == 'full'");
+  expect(history?.if).toContain(
+    "needs.changes.outputs.tier == 'fast' && needs.test-source.result == 'success'",
+  );
+  expect(history?.if).toContain("github.event_name == 'push'");
+  expect(history?.if).toContain(
+    "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+  );
+  expect(history?.with?.name).toBe(
+    "test-timings-${{ needs.changes.outputs.tier }}",
+  );
   expect(history?.with?.path).toBe(".cache/ci-test-history/test-results.json");
   const buildSteps = (await workflow()).build!.steps;
   const lookup = buildSteps.find((step) =>
@@ -256,11 +268,14 @@ it("keeps diagnosis available after merge failure and publishes only complete su
     CI_REPOSITORY: "${{ github.repository }}",
     CI_REPOSITORY_ID: "${{ github.repository_id }}",
     CI_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}",
+    CI_TIMING_TIER: "${{ needs.changes.outputs.tier }}",
   });
   const download = buildSteps.find(
     (step) => step.name === "Download previous timing report",
   );
-  expect(download?.with?.name).toBe(history?.with?.name);
+  expect(download?.with?.name).toBe(
+    "${{ steps.history.outputs.artifact-name }}",
+  );
   expect(download?.with?.["run-id"]).toBe(
     "${{ steps.history.outputs.run-id }}",
   );
@@ -349,7 +364,7 @@ it("runs the existing onboarding and Python producer guards from their selected 
     "node scripts/run-exclusive.mjs artifacts npm run check:ci:fast:tasks",
   );
   expect(scripts["check:ci:fast:tasks"]).toBe(
-    "turbo run typecheck lint:built format:check",
+    "node scripts/run-turbo.mjs run typecheck lint:built format:check",
   );
   expect(scripts["test:python"]).toContain(
     "bridge/native/test_rea_lldb_tracer.py",

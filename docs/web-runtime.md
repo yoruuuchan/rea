@@ -32,7 +32,9 @@ A document replacement ends the window; final coverage then remains unavailable.
 
 Same-document navigation such as `history.pushState()` remains valid when the frame and known loader identity stay stable and the current origin is allowed. Unknown loader identity retains a conservative URL check; newly reported or replaced loaders are rejected. Malformed producer events end an armed window immediately and trigger cleanup, independently of the selected duration.
 
-Target detachment ends the window even when the browser's root connection stays open. When the closed session cannot acknowledge cleanup, the operation returns a failure with the selected target, failed commands and original producer reason; it does not claim successful cleanup.
+Target detachment ends the window with `session_detached`, even when the browser's root connection stays open. An `Inspector.targetCrashed` event ends it with `target_terminated`. A lost transport records `transport_disconnected` in browser observation; execution capture returns the typed transport failure. These outcomes retain the selected target and the observed lifecycle fact.
+
+When an ended session cannot acknowledge cleanup, the operation returns a failure with the failed commands and original typed producer reason. A coverage-stop failure also retains the observed window's end reason in its diagnostics; cleanup remains unconfirmed until the owning session can resolve it.
 
 Child frames, workers, service workers, WebAssembly, chronological execution order and framework-specific causal interpretation are outside this operation. Script ownership comes from frame/context metadata, never URL equality. Repeated URLs and synthetic names therefore retain separate identities.
 

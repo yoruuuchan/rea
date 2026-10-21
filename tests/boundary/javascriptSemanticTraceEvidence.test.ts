@@ -1,13 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 
 import { createApplicationMcpHarness } from "../fixtures/applicationMcpHarness.js";
 import { parseMcpToolError } from "../fixtures/mcpToolError.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
-import { createCli } from "../../src/cli.js";
+import { closeCliJavaScriptResources, createCli } from "../../src/cli.js";
 import { createEvidence, parseEvidence } from "../../src/domain/evidence.js";
 import type { JsonValue } from "../../src/domain/jsonValue.js";
 import { analysisCliErrorEnvelopeSchema } from "../../src/contracts/errorSchemas.js";
@@ -17,6 +17,10 @@ import { javaScriptSemanticTraceResultSchema } from "../../src/domain/javascript
 import { resolveJavaScriptSemanticEvidence } from "../../src/domain/javascript/javascriptSemanticGraph.js";
 
 const SEMANTIC_GRAPH_ID = `jsrg_${"0".repeat(64)}`;
+
+// In-process serve keeps the CLI worker for this file. Stop it before the
+// worker process exits so the private runtime root is not left behind.
+afterAll(closeCliJavaScriptResources);
 
 it("reports invalid nested semantic graph Evidence as caller input through CLI and SDK MCP", async () => {
   const root = await createTestTempDirectory("rea-semantic-trace-input-");

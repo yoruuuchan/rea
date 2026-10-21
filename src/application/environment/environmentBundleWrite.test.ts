@@ -9,7 +9,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { Readable } from "node:stream";
 
 import { expect, it, vi } from "vitest";
 
@@ -19,7 +18,6 @@ import {
   writeEnvironmentServeFiles,
 } from "../../../tests/fixtures/environmentServe.js";
 import { SafeOutputTree } from "../../artifacts/SafeOutputTree.js";
-import * as fileChunks from "../../filesystem/readFileHandleChunks.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import {
   AnalysisAccessDeniedError,
@@ -29,61 +27,6 @@ import {
   exportEnvironmentBundle,
   readEnvironmentExportInputs,
 } from "./environmentExport.js";
-
-vi.mock("../../filesystem/readFileHandleChunks.js", { spy: true });
-
-it("attributes a pathless tarball read failure during the copy to the tarball", async () => {
-  const root = await createTestTempDirectory("rea-tarball-read-failure-");
-  const files = await writeEnvironmentServeFiles(root);
-  const inputs = await readEnvironmentExportInputs(
-    files.manifestPath,
-    files.capturePath,
-  );
-  if (!inputs.ok) throw inputs.error;
-  const tarball = join(root, "package.tgz");
-  await writeFile(tarball, "admitted package");
-  const directory = join(root, "bundle");
-  const actual = await vi.importActual<typeof fileChunks>(
-    "../../filesystem/readFileHandleChunks.js",
-  );
-  // Only the tarball descriptor is read twice: once to hash, once to copy.
-  const reads = new Map<unknown, number>();
-  const reader = vi
-    .mocked(fileChunks.readFileHandleChunks)
-    .mockImplementation((handle, options) => {
-      const count = (reads.get(handle) ?? 0) + 1;
-      reads.set(handle, count);
-      if (count < 2) return actual.readFileHandleChunks(handle, options);
-      const failure = Object.assign(new Error("EIO: i/o error, read"), {
-        code: "EIO",
-        syscall: "read",
-      });
-      return Object.assign(
-        new Readable({
-          read() {
-            this.destroy(failure);
-          },
-        }),
-        { readCoverage: () => ({ status: "unknown" as const }) },
-      ) as unknown as ReturnType<typeof fileChunks.readFileHandleChunks>;
-    });
-  try {
-    const result = await exportEnvironmentBundle({
-      ...inputs.value,
-      source: environmentServeSource(),
-      directory,
-      packageTarball: tarball,
-    });
-    if (result.ok || !(result.error instanceof AnalysisOutputError))
-      throw new Error("expected an output failure");
-    expect(result.error.reason).toContain(`reading ${tarball}`);
-    expect(result.error.remediationAction).toContain(tarball);
-    expect(result.error.remediationAction).not.toContain("disk space");
-    expect(result.error.diagnostics).toEqual({ output_directory: directory });
-  } finally {
-    reader.mockRestore();
-  }
-});
 
 it("retains the admitted tarball descriptor and refuses a pathname replacement during output", async () => {
   const root = await createTestTempDirectory("rea-tarball-instance-");

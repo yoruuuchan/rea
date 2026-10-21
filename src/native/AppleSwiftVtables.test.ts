@@ -52,6 +52,10 @@ it("preserves a required conformance pointer's unknown reason", () => {
         address: `0x${address.toString(16)}`,
         file_offset: Number(address),
       }),
+      targetLocation: (address) => ({
+        address: `0x${address.toString(16)}`,
+        file_offset: Number(address),
+      }),
       evidence: () => [],
       offset: (address) => Number(address),
     },
@@ -200,6 +204,10 @@ it("returns a located issue for an emitted unresolved witness slot", () => {
       }),
       string: (address) => (address === 0x600n ? "Proto" : "Widget"),
       location: (address) => ({
+        address: `0x${address.toString(16)}`,
+        file_offset: Number(address),
+      }),
+      targetLocation: (address) => ({
         address: `0x${address.toString(16)}`,
         file_offset: Number(address),
       }),

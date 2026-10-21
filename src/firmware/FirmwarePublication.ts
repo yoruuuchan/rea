@@ -91,6 +91,7 @@ export const publishFirmwareExtraction = async (context: {
   files: FirmwareFileAccess;
   workspacePath: string;
   deadline: FirmwareDeadline;
+  analysisTimeoutMs: number;
   outputDirectory: string;
   entries: readonly FirmwareEntry[];
   normalized: ReturnType<typeof normalizeUnblobReport>;
@@ -169,6 +170,7 @@ export const publishFirmwareExtraction = async (context: {
       });
     }
     result = firmwareResultSchemas.extract_firmware.parse({
+      analysis_timeout_ms: context.analysisTimeoutMs,
       engine: context.engine,
       selection: context.selection,
       output_directory: tree.outputRoot,

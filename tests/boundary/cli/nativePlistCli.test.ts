@@ -281,15 +281,27 @@ describe.skipIf(process.platform !== "darwin")(
               ],
             },
             bundle: { identifier: "com.example.types", executable: "App" },
-            provenance: [
-              { tool: "file" },
-              { command: expect.arrayContaining(["json"]), exit: { code: 1 } },
-              { command: expect.arrayContaining(["xml1"]), exit: { code: 0 } },
-            ],
-            limitations: [
-              expect.stringContaining("XML conversion"),
-              expect.stringContaining("2 non-finite real"),
-            ],
+            provenance:
+              format === "xml"
+                ? [
+                    { tool: "file" },
+                    {
+                      command: expect.arrayContaining(["json"]),
+                      exit: { code: 1 },
+                    },
+                    {
+                      command: expect.arrayContaining(["xml1"]),
+                      exit: { code: 0 },
+                    },
+                  ]
+                : [{ tool: "file" }],
+            limitations:
+              format === "xml"
+                ? [
+                    expect.stringContaining("XML conversion"),
+                    expect.stringContaining("2 non-finite real"),
+                  ]
+                : [expect.stringContaining("2 non-finite real")],
           },
         });
       },

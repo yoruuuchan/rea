@@ -1,7 +1,7 @@
 import { Writable } from "node:stream";
 import { createInterface } from "node:readline";
 
-const { cliConfigurationError, createCli } =
+const { cliConfigurationError, closeCliJavaScriptResources, createCli } =
   await import("../../../dist/cli-runtime/cli.js");
 const { createCliResultOutput } =
   await import("../../../dist/cli-runtime/cliResultOutput.js");
@@ -137,3 +137,4 @@ for await (const line of lines) {
   if (line.trim().length === 0) continue;
   await acceptRequest(line);
 }
+await closeCliJavaScriptResources();

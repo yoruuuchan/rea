@@ -22,6 +22,7 @@ import {
 } from "./analysisViewCoverage.js";
 import { analysisViewInputError } from "./analysisViewErrors.js";
 import { parseAnalysisViewResult } from "./analysisViewParent.js";
+import { selectViewRows } from "./selectViewRows.js";
 
 const indexSchema = z.number().int().nonnegative();
 const count = z.number().int().nonnegative();
@@ -121,23 +122,6 @@ const parseReport = (
   const report = reusable ? (key as GoBinary) : parsed.value;
   if (reusable) checkedReports.set(key, report);
   return ok(report);
-};
-
-const selectRows = <Source, Row>(
-  rows: readonly Source[],
-  view: { readonly offset: number; readonly limit: number },
-  matches: (row: Source, index: number) => boolean,
-  project: (row: Source, index: number) => Row,
-): { rows: Row[]; total: number } => {
-  const selected: Row[] = [];
-  let total = 0;
-  for (const [index, row] of rows.entries()) {
-    if (!matches(row, index)) continue;
-    if (total >= view.offset && selected.length < view.limit)
-      selected.push(project(row, index));
-    total++;
-  }
-  return { rows: selected, total };
 };
 
 /** Query the existing metadata owner's facts; never reopen or reinterpret a file. */
@@ -259,7 +243,7 @@ export const projectGoBinaryView = (
     view.fields === undefined ? undefined : new Set<string>(view.fields);
   if (view.collection === "dependencies") {
     const paths = view.paths === undefined ? undefined : new Set(view.paths);
-    const selected = selectRows(
+    const selected = selectViewRows(
       info?.module.dependencies ?? [],
       view,
       (row, index) =>
@@ -287,7 +271,7 @@ export const projectGoBinaryView = (
     });
   }
   const keys = view.keys === undefined ? undefined : new Set(view.keys);
-  const selected = selectRows(
+  const selected = selectViewRows(
     info?.module.settings ?? [],
     view,
     (row, index) =>

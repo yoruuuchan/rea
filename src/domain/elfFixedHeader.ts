@@ -9,6 +9,7 @@ export interface ElfFixedHeader {
   readonly byteOrder: "little" | "big";
   readonly headerSize: number;
   readonly machine: number;
+  readonly osAbi: number;
   readonly architecture: Exclude<
     BinaryArchitecture,
     RawOnlyArchitecture
@@ -52,16 +53,19 @@ export const readElfFixedHeader = (
     littleEndian ? bytes.readUInt16LE(offset) : bytes.readUInt16BE(offset);
   const readU32 = (offset: number): number =>
     littleEndian ? bytes.readUInt32LE(offset) : bytes.readUInt32BE(offset);
-  if (readU32(20) !== 1) return err("unsupported ELF header version");
+  const machine = readU16(18);
+  // NVIDIA CUBIN uses ELFOSABI_CUDA and a vendor ABI version in e_version.
+  if (readU32(20) !== 1 && !(machine === 190 && bytes[7] === 0x33))
+    return err("unsupported ELF header version");
   const headerSize = readU16(elfClass === 32 ? 40 : 52);
   if (headerSize < minimumSize || headerSize > totalBytes)
     return err("invalid ELF header size");
-  const machine = readU16(18);
   return ok({
     elfClass,
     byteOrder: littleEndian ? "little" : "big",
     headerSize,
     machine,
+    osAbi: bytes[7]!,
     architecture: elfArchitecture(machine) ?? null,
   });
 };

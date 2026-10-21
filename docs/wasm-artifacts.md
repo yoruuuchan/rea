@@ -75,7 +75,27 @@ The tool profile preserves upstream release/source identity, resolved executable
 paths, executable digests, exact banners and arguments. Executable digests are
 checked again after each command. Caller-supplied tools are trusted programs;
 version and digest recording are not publisher authentication or an OS sandbox.
-Each subprocess has a 30-second deadline and 32 MiB combined output budget.
+Each WABT version/analysis command defaults to a 30,000 ms deadline. Set optional
+MCP `command_timeout_ms`, or CLI `--command-timeout-ms <milliseconds>`, to select a
+positive integer up to 2,147,483,647 ms (the runtime timer range) for that call.
+The selected deadline is retained as `tool_profile.timeout_ms` and, when supplied,
+in Evidence parameters. It applies separately to each command, not the whole
+inspection, file admission or cleanup. The MCP client must allow time for all
+commands, file checks, cleanup and delivery. A provider timeout reports the
+actual selected deadline and these recovery controls; increasing only the client
+deadline does not change the provider budget. No server restart is required to
+change this per-call setting. Resolve incomplete cleanup before another attempt.
+
+For example, `rea inspect-wasm-artifact /artifacts/module.wasm
+--command-timeout-ms 60000 --format json` uses a 60-second per-command deadline;
+the equivalent MCP input is `{"path":"/artifacts/module.wasm",
+"command_timeout_ms":60000,"detail":"summary"}`. Summary delivery retains the
+complete Evidence but does not reduce WABT analysis work.
+
+The 8 MiB input allowance and 32 MiB combined command-output budget remain fixed;
+increasing `command_timeout_ms`, host memory or the client deadline does not raise
+them. Do not truncate required module bytes to fit. Select another suitable
+complete artifact only if it answers the question, otherwise report the limit.
 Inspection output past the budget fails with `resource_constraint`; an oversized
 `--version` probe still reports `unreadable_output`. Both streams share the
 budget, so a stream that starts after the other has filled it retains nothing.

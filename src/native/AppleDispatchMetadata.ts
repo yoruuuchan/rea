@@ -44,6 +44,7 @@ import {
   createSwiftRelativeReader,
   decodeSwiftDispatchFacets,
   type DispatchRecordBudget,
+  type SwiftRelativeTargetLocation,
 } from "./AppleSwiftDispatchFacets.js";
 import { decodeSwiftClassVtables } from "./AppleSwiftVtables.js";
 import { inspectObjcClassImportBindings } from "./AppleObjcClassImportBindings.js";
@@ -97,6 +98,16 @@ export const decodeAppleDispatchMetadata = (
     address: `0x${address.toString(16)}`,
     file_offset: offset(address),
   });
+  const targetLocation = (address: bigint): SwiftRelativeTargetLocation => {
+    let fileOffset: number | null;
+    try {
+      fileOffset = offset(address);
+    } catch (cause) {
+      if (!(cause instanceof RangeError)) throw cause;
+      fileOffset = null;
+    }
+    return { address: `0x${address.toString(16)}`, file_offset: fileOffset };
+  };
   const evidence = (address: bigint, description: string) => [
     {
       kind: "binary_metadata" as const,
@@ -164,6 +175,7 @@ export const decodeAppleDispatchMetadata = (
     bound,
     string,
     location,
+    targetLocation,
     evidence,
     offset,
   };

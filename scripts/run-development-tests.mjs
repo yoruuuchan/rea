@@ -59,7 +59,7 @@ try {
         "scripts/run-exclusive.mjs",
         "artifacts",
         process.execPath,
-        resolve("node_modules/turbo/bin/turbo"),
+        resolve("scripts/run-turbo.mjs"),
         "run",
         ...(plan.needsBuild ? ["artifacts:skills"] : []),
         ...plan.artifactTasks,

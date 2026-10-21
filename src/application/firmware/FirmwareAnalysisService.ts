@@ -2,6 +2,8 @@ import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { FirmwareAnalysisPort } from "./FirmwareAnalysisPort.js";
 import {
   firmwareRequestSchema,
+  firmwareExecutionBudgetSchema,
+  DEFAULT_FIRMWARE_ANALYSIS_TIMEOUT_MS,
   type FirmwareOperation,
 } from "../../domain/firmware/firmwareAnalysis.js";
 import {
@@ -51,6 +53,21 @@ export class FirmwareAnalysisService {
         new AnalysisOutputError(
           operation,
           "Firmware execution did not bind its source artifact",
+        ),
+      );
+    // Providers own normalized facts. Check only fresh execution metadata here,
+    // without reparsing/copying potentially large extraction inventories.
+    const budget = firmwareExecutionBudgetSchema.safeParse(execution.result);
+    if (
+      !budget.success ||
+      budget.data.analysis_timeout_ms !==
+        (parsed.data.input.analysis_timeout_ms ??
+          DEFAULT_FIRMWARE_ANALYSIS_TIMEOUT_MS)
+    )
+      return err(
+        new AnalysisOutputError(
+          operation,
+          "Firmware execution did not retain its selected analysis budget",
         ),
       );
     return completeProviderEvidence(

@@ -63,6 +63,31 @@ function classifyPackage(base, head) {
   const after = JSON.parse(git("show", `${head}:package.json`));
   const { scripts: beforeScripts, ...beforeRest } = before;
   const { scripts: afterScripts, ...afterRest } = after;
+  const compilerDependencies = (metadata) => ({
+    dependencies: {
+      typescript: metadata.dependencies?.typescript,
+      tsrs: metadata.dependencies?.tsrs,
+    },
+    devDependencies: {
+      typescript: metadata.devDependencies?.typescript,
+      tsrs: metadata.devDependencies?.tsrs,
+    },
+  });
+  const compilerScripts = [
+    "compile",
+    "typecheck",
+    "build",
+    "build:cached",
+    "test:prepare",
+    "docs:prepare",
+    "verify:frida:bindings",
+  ].flatMap((name) => [name, `pre${name}`, `post${name}`]);
+  selected.package ||=
+    JSON.stringify(compilerDependencies(before)) !==
+      JSON.stringify(compilerDependencies(after)) ||
+    compilerScripts.some(
+      (name) => beforeScripts?.[name] !== afterScripts?.[name],
+    );
   if (JSON.stringify(beforeRest) !== JSON.stringify(afterRest)) {
     full("Package metadata or dependencies changed");
     return;

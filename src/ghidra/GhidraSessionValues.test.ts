@@ -36,19 +36,30 @@ const session = (
   },
 });
 
+const rejectedHandshake = (value: ReturnType<typeof session>) => {
+  const parsed = parseGhidraSessionInfo(value, expected);
+  if (parsed.ok) throw new Error("expected an invalid Ghidra handshake");
+  return parsed.error;
+};
+
 describe("Ghidra DOS import commitment", () => {
   it("accepts the exact admitted real-mode language and compiler", () => {
-    expect(parseGhidraSessionInfo(session(), expected).ok).toBe(true);
+    const parsed = parseGhidraSessionInfo(session(), expected);
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.target).toMatchObject({
+      language_id: expected.expectedLanguageId,
+      compiler_spec_id: expected.expectedCompilerSpecId,
+    });
   });
   it("rejects a 32-bit interpretation even when artifact and profile hashes match", () => {
-    expect(
-      parseGhidraSessionInfo(session("x86:LE:32:default"), expected).ok,
-    ).toBe(false);
+    expect(rejectedHandshake(session("x86:LE:32:default")).message).toBe(
+      "Ghidra bridge handshake identity is invalid",
+    );
   });
   it("rejects compiler drift independently of the language", () => {
-    expect(
-      parseGhidraSessionInfo(session(undefined, "windows"), expected).ok,
-    ).toBe(false);
+    expect(rejectedHandshake(session(undefined, "windows")).message).toBe(
+      "Ghidra bridge handshake identity is invalid",
+    );
   });
 });
 

@@ -9,7 +9,10 @@ import { parseConfig } from "../../src/config/parseConfig.js";
 import { analysisCliErrorEnvelopeSchema } from "../../src/contracts/errorSchemas.js";
 import type { AnalysisError } from "../../src/domain/analysisErrorBase.js";
 import { AnalysisTimeoutError } from "../../src/domain/analysisErrorCore.js";
-import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.js";
+import {
+  projectAnalysisError,
+  projectAnalysisErrorWithoutCapturedOutput,
+} from "../../src/domain/analysisErrorProjection.js";
 import { parseEvidence } from "../../src/domain/evidence.js";
 import { ProviderCleanupError } from "../../src/domain/providerCleanupError.js";
 import { err, ok } from "../../src/domain/result.js";
@@ -270,15 +273,24 @@ describe("managed one-shot cleanup outcomes", () => {
       cause: primaryError,
       errors: [primaryError, cleanupError],
     });
-    expect(projectAnalysisError(result.error)).toMatchObject({
+    const projected = projectAnalysisError(result.error);
+    expect(projected).toMatchObject({
       code: "cleanup_incomplete",
       details: {
+        captured_output: primaryError.capturedOutput,
         diagnostics: {
-          primary_error: projectAnalysisError(primaryError),
+          primary_error:
+            projectAnalysisErrorWithoutCapturedOutput(primaryError),
           cleanup_error: projectAnalysisError(cleanupError),
         },
       },
     });
+    expect(projected).not.toHaveProperty(
+      "details.diagnostics.primary_error.details.captured_output",
+    );
+    expect(
+      JSON.stringify(projected).split("retained observation"),
+    ).toHaveLength(2);
   });
 
   it("exposes managed cleanup failure to the CLI error classifier", async () => {

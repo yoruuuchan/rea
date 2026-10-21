@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseBinary } from "plist";
 import { z } from "zod";
 
-import { preflightPropertyListDecode } from "../artifacts/apple/InterfaceBuilderDecodeBudget.js";
+import { preflightPropertyListDecode } from "../artifacts/apple/PropertyListDecodeBudget.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { isPathWithinRoot } from "../domain/localPath.js";
 import {

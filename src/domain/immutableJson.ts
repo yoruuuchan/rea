@@ -38,8 +38,10 @@ export const immutableJsonSnapshotMember = (
   return member;
 };
 
-/** Match a completed snapshot to its parsed representation without recursion. */
-export const canBorrowParsedJsonSnapshot = <Parsed extends JsonValue>(
+/** Match a completed snapshot to its parsed representation without recursion.
+ * Parsed schemas may permit optional undefined members; only exact JSON matches borrow.
+ */
+export const canBorrowParsedJsonSnapshot = <Parsed>(
   source: unknown,
   parsed: Parsed,
 ): source is Parsed => {

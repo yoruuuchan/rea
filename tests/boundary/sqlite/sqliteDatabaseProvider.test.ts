@@ -51,6 +51,135 @@ const createFixture = async (wal = false) => {
 const expectPrivateRootRemoved = (path: string) =>
   expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
 
+it("enforces a selected worker budget and completes the corrected same-database retry", async () => {
+  const { database } = await createFixture();
+  const original = await readFile(database.path);
+  let first = true;
+  let root = "";
+  const provider = new SqliteDatabaseProvider(process.env, (spawn) => {
+    root = spawn.cwd ?? "";
+    if (first) {
+      first = false;
+      return spawnOwnedProviderProcess({
+        ...spawn,
+        arguments: [
+          spawn.arguments[0] ?? "--max-old-space-size=256",
+          "-e",
+          `process.argv[2]=process.argv[1];setTimeout(()=>import(${JSON.stringify(workerUrl.href)}),250)`,
+          spawn.arguments[2] ?? "",
+        ],
+      });
+    }
+    return spawnOwnedProviderProcess({
+      ...spawn,
+      arguments: spawn.arguments.map((arg, index) =>
+        index === 1 ? fileURLToPath(workerUrl) : arg,
+      ),
+    });
+  });
+  onTestFinished(() => provider.close());
+  const failed = await provider.inspect({
+    path: database.path,
+    worker_timeout_ms: 50,
+  });
+  if (failed.ok) throw new Error("Worker deadline was ignored");
+  expect(projectAnalysisError(failed.error)).toMatchObject({
+    code: "provider_timeout",
+    details: { timeout_ms: 50 },
+  });
+  expect(failed.error.cleanupIncomplete).toBe(false);
+  await expectPrivateRootRemoved(root);
+  const corrected = await provider.inspect({
+    path: database.path,
+    worker_timeout_ms: 2000,
+  });
+  if (!corrected.ok) throw corrected.error;
+  expect(corrected.value.result).toMatchObject({
+    worker_timeout_ms: 2000,
+    schema: { completeness: "complete" },
+  });
+  await expectPrivateRootRemoved(root);
+  expect(await readFile(database.path)).toEqual(original);
+});
+
+nativeTest(
+  "retains a timed-out worker's budget and one output copy through owned cleanup retry",
+  async () => {
+    const { database } = await createFixture();
+    const original = await readFile(database.path);
+    let cleanupAllowed = false;
+    let launches = 0;
+    let root = "";
+    const provider = new SqliteDatabaseProvider(process.env, async (spawn) => {
+      launches += 1;
+      root = spawn.cwd ?? "";
+      const launched = await spawnOwnedProviderProcess({
+        ...spawn,
+        arguments: [
+          "-e",
+          "process.stdout.write('ready\\n');setTimeout(()=>process.stdout.write('sqlite-timeout-marker'),100);setInterval(()=>{},1000)",
+        ],
+      });
+      return {
+        ...launched,
+        cleanup: async () =>
+          cleanupAllowed
+            ? await (launched.cleanup?.() ??
+                cleanupOwnedProcessGroup(launched.ownership))
+            : { cleaned: false, reason: "owned timeout cleanup denied" },
+      };
+    });
+    onTestFinished(async () => {
+      cleanupAllowed = true;
+      await provider.close();
+    });
+    const result = await provider.inspect({
+      path: database.path,
+      worker_timeout_ms: 3000,
+    });
+    if (result.ok) throw new Error("Expected timeout with unresolved cleanup");
+    const projected = projectAnalysisError(result.error);
+    expect(projected).toMatchObject({
+      code: "cleanup_incomplete",
+      retryable: false,
+      details: {
+        resources: expect.arrayContaining([root]),
+        diagnostics: {
+          previous_error: {
+            code: "provider_timeout",
+            details: { timeout_ms: 3000 },
+            remediation: {
+              action: expect.stringContaining("worker_timeout_ms"),
+            },
+          },
+        },
+      },
+    });
+    expect(
+      JSON.stringify(projected).split("sqlite-timeout-marker"),
+    ).toHaveLength(2);
+    await expect(access(root)).resolves.toBeUndefined();
+    expect(await provider.inspect({ path: database.path })).toMatchObject({
+      ok: false,
+      error: { cleanupIncomplete: true },
+    });
+    expect(launches).toBe(1);
+    cleanupAllowed = true;
+    await provider.close();
+    const resolved = projectAnalysisError(result.error);
+    expect(resolved).toMatchObject({
+      code: "provider_timeout",
+      details: { timeout_ms: 3000 },
+    });
+    expect(
+      JSON.stringify(resolved).split("sqlite-timeout-marker"),
+    ).toHaveLength(2);
+    expect(result.error.cleanupResources).toEqual([]);
+    await expectPrivateRootRemoved(root);
+    expect(await readFile(database.path)).toEqual(original);
+  },
+);
+
 it.each(["completed reply", "malformed reply"] as const)(
   "preserves the primary result for a %s while retaining unconfirmed cleanup ownership",
   async (replyKind) => {
@@ -291,7 +420,13 @@ it.each(["late-cancellation", "cleanup-failure"])(
       await provider.close();
     });
     const result = await provider.inspect(
-      { path: database.path, table: "records", columns: ["id"], row_limit: 1 },
+      {
+        path: database.path,
+        table: "records",
+        columns: ["id"],
+        row_limit: 1,
+        worker_timeout_ms: 42000,
+      },
       { signal: controller.signal },
     );
     if (scenario === "late-cancellation") {
@@ -313,8 +448,12 @@ it.each(["late-cancellation", "cleanup-failure"])(
               table: "records",
               columns: ["id"],
               row_limit: 1,
+              worker_timeout_ms: 42000,
             },
-            normalized_result: { rows: { columns: ["id"], returned_rows: 1 } },
+            normalized_result: {
+              worker_timeout_ms: 42000,
+              rows: { columns: ["id"], returned_rows: 1 },
+            },
           },
         },
       });
@@ -338,8 +477,12 @@ it.each(["late-cancellation", "cleanup-failure"])(
               table: "records",
               columns: ["id"],
               row_limit: 1,
+              worker_timeout_ms: 42000,
             },
-            normalized_result: { rows: { columns: ["id"], returned_rows: 1 } },
+            normalized_result: {
+              worker_timeout_ms: 42000,
+              rows: { columns: ["id"], returned_rows: 1 },
+            },
           },
         },
       });

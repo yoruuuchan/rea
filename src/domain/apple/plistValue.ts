@@ -28,6 +28,10 @@ export interface ProjectedPlistValue {
 export const unknownDateLimitation = (count: number): string =>
   `${String(count)} date value(s) are reported as { "$plist_type": "date", "iso8601": null } because the decoder could not represent their timestamps.`;
 
+/** Limitation when shared binary bytes prevent safely normalizing date precision. */
+export const binaryDatePrecisionOverlapLimitation = (count: number): string =>
+  `${String(count)} date value(s) are reported with unknown timestamps because their sub-millisecond source records overlap another reachable binary object and the public date projection cannot express their exact instants.`;
+
 /** Limitation for XML scalar literals whose values were not established. */
 export const unknownScalarLimitation = (count: number): string =>
   `${String(count)} XML scalar value(s) could not be established; their exact literals and reasons are retained in { "$plist_type": "unknown", "element": ..., "literal": ..., "reason": ... } wrappers.`;

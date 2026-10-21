@@ -61,11 +61,18 @@ const parserSchema = (
   return schema instanceof z.ZodObject ? schema : undefined;
 };
 
+/**
+ * Reject a key only when an object parse that omits it fails.
+ * `exactOptional()` rejects explicit `undefined` and still accepts omission.
+ */
 const omissionRejected = (schema: z.ZodObject | undefined): string[] =>
   Object.entries(schema?.shape ?? {})
-    .filter(([, field]) => !field.safeParse(undefined).success)
+    .filter(([key, field]) => !acceptsOmittedKey(key, field))
     .map(([key]) => key)
     .sort();
+
+const acceptsOmittedKey = (key: string, field: z.ZodType): boolean =>
+  z.object({ [key]: field }).safeParse({}).success;
 
 describe("CLI advertised input schemas", () => {
   it("require exactly the inputs whose omission the parser rejects", async () => {
@@ -102,6 +109,30 @@ describe("CLI advertised input schemas", () => {
       }
     }
     expect(mismatches).toEqual([]);
+  });
+
+  it("allows an omitted WASM timeout while validating explicitly supplied values", async () => {
+    const cli = createCli({});
+    const advertised = await advertisedSchema(cli, "inspect-wasm-artifact");
+    const options = parserSchema(cli, "inspect-wasm-artifact", "options");
+    expect(options).toBeDefined();
+    const validate = new Ajv2020({ strict: false }).compile(
+      advertised.options ?? {},
+    );
+
+    expect(options?.safeParse({}).success).toBe(true);
+    expect(validate({})).toBe(true);
+    expect(options?.safeParse({ commandTimeoutMs: undefined }).success).toBe(
+      false,
+    );
+    for (const commandTimeoutMs of [1, 30_000, 2_147_483_647]) {
+      expect(options?.safeParse({ commandTimeoutMs }).success).toBe(true);
+      expect(validate({ commandTimeoutMs })).toBe(true);
+    }
+    for (const commandTimeoutMs of [0, 1.5, 2_147_483_648]) {
+      expect(options?.safeParse({ commandTimeoutMs }).success).toBe(false);
+      expect(validate({ commandTimeoutMs })).toBe(false);
+    }
   });
 
   it("accepts the one-argument keyed-archive call and keeps its constraints", async () => {

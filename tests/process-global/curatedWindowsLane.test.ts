@@ -136,3 +136,16 @@ it("keeps every explicit focused CI test path executable after file moves", asyn
   );
   expect(missing.filter((path) => path !== undefined)).toEqual([]);
 }, 10_000);
+
+it("checks the complete source with the fallback compiler before Windows build reuse", async () => {
+  const workflow = workflowSchema.parse(
+    parse(await readFile(WORKFLOW, "utf8")),
+  );
+  const steps = workflow.jobs["windows-curated"]?.steps ?? [];
+  const checked = steps.findIndex(
+    (step) => step.run === "npm run typecheck -- --checkers 2",
+  );
+  const built = steps.findIndex((step) => step.run === "npm run build:cached");
+  expect(checked).toBeGreaterThan(-1);
+  expect(built).toBeGreaterThan(checked);
+});

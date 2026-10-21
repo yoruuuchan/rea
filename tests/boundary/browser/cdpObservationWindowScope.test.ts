@@ -268,6 +268,8 @@ it("fails closed on an untimestamped out-of-scope redirect during clock sampling
 it.each([
   [
     "Inspector.targetCrashed",
+    "target_terminated",
+    "target_terminated",
     {
       method: "Inspector.targetCrashed",
       sessionId: "session-1",
@@ -276,6 +278,8 @@ it.each([
   ],
   [
     "Target.detachedFromTarget",
+    "session_detached",
+    "session_detached",
     {
       method: "Target.detachedFromTarget",
       params: { sessionId: "session-1", targetId: "allowed-page" },
@@ -283,7 +287,7 @@ it.each([
   ],
 ] as const)(
   "ends on buffered untimestamped %s before collecting later events",
-  async (_method, terminalEvent) => {
+  async (_method, endReason, eventType, terminalEvent) => {
     const { observation } = await observeWithFake({
       eventsBeforeReply: ["Performance.getMetrics"],
       commandResult: (command) =>
@@ -310,10 +314,10 @@ it.each([
       },
     });
 
-    expect(observation.window.end_reason).toBe("target_terminated");
+    expect(observation.window.end_reason).toBe(endReason);
     expect(observation.timeline).toContainEqual(
       expect.objectContaining({
-        type: "target_terminated",
+        type: eventType,
         timestamp: null,
       }),
     );

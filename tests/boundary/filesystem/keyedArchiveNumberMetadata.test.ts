@@ -1,8 +1,13 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, it } from "vitest";
 
 import { inspectBundleKeyedArchive } from "../../../src/artifacts/apple/KeyedArchiveReader.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
-import { keyedArchiveWideIntegerFixture } from "../../fixtures/keyedArchiveWideIntegers.js";
+import {
+  keyedArchiveSharedEntryFixture,
+  keyedArchiveWideIntegerFixture,
+} from "../../fixtures/keyedArchiveWideIntegers.js";
 import {
   archiveNumberMetadataCases,
   expectKeyedArchiveNumberMetadata,
@@ -72,6 +77,55 @@ cliTest(
         }),
       ]),
     });
+  },
+);
+
+const sharedEntryObjects = [
+  expect.objectContaining({
+    id: 1,
+    status: "observed",
+    value: { $plist_type: "integer", decimal: "9007199254740993" },
+  }),
+  expect.objectContaining({
+    id: 2,
+    status: "observed",
+    value: { $plist_type: "integer", decimal: "9007199254740993" },
+  }),
+  expect.objectContaining({
+    id: 3,
+    status: "observed",
+    value: { $plist_type: "integer", decimal: "1152921504606846979" },
+  }),
+];
+
+it("keeps exact integers when two object-table entries share one record", async () => {
+  const fixture = await keyedArchiveSharedEntryFixture();
+  const result = await inspectBundleKeyedArchive({
+    bundlePath: fixture.root,
+    targetSha256: fixture.digest,
+    parameters: { path: "archive.plist" },
+  });
+  expect(result.archive_sha256).toBe(fixture.digest);
+  expect(result.objects.slice(1)).toEqual(sharedEntryObjects);
+  expect(result.limitations).not.toContainEqual(
+    expect.stringMatching(/metadata could not be completely observed/u),
+  );
+  expect(await readFile(fixture.path)).toEqual(fixture.bytes);
+});
+
+cliTest(
+  "compiled CLI keeps exact integers when object-table entries share one record",
+  async ({ cli }) => {
+    const fixture = await keyedArchiveSharedEntryFixture();
+    const output = await cli.run({
+      arguments: ["inspect-keyed-archive", fixture.path, "--json"],
+      environment: { REA_LOG_LEVEL: "silent", REA_ANALYSIS_PROVIDER: "auto" },
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const result = parseEvidence(output.json).normalized_result as {
+      objects: unknown[];
+    };
+    expect(result.objects.slice(1)).toEqual(sharedEntryObjects);
   },
 );
 

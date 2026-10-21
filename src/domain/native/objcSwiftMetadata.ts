@@ -214,8 +214,14 @@ export type MachoImportBinding = z.infer<typeof machoImportBindingSchema>;
 /** Swift protocol conformance and its associated witness-table location. */
 export const swiftConformanceSchema = z.strictObject({
   type_name: z.string().min(1).nullable(),
+  /** Raw three-bit Swift ABI type-reference kind; absent in older Evidence. */
+  type_reference_kind: z.number().int().min(0).max(7).optional(),
+  /** Address of the descriptor, class-name string, or resolved ObjC class reference. */
+  type_reference_target: nativeMetadataLocationSchema.optional(),
   type_binding: machoImportBindingSchema.nullable().optional(),
   protocol_name: z.string().min(1).nullable(),
+  /** Resolved protocol descriptor address, retained when its bytes are unavailable. */
+  protocol_target: nativeMetadataLocationSchema.optional(),
   protocol_binding: machoImportBindingSchema.nullable().optional(),
   module: z.string().nullable(),
   witness_table: nativeMetadataLocationSchema,

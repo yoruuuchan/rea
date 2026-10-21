@@ -60,6 +60,8 @@ export const startFakeCdpBrowser = async (
       const commandError = options.commandError?.(command);
       if (commandError !== undefined) {
         sendCommandReply(socket, command, { error: commandError });
+        if (options.closeAfterMethod === command.method)
+          setImmediate(() => socket.close());
         return;
       }
       if (options.closeOnMethod === command.method) {

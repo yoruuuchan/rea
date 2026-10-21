@@ -364,6 +364,179 @@ it("rejects the combined representation of individually small generated cells", 
   }
 });
 
+it("attributes compile and row evaluation errors to each failing generated column", async () => {
+  const workspace = await createTestWorkspace("rea-sqlite-evaluation-");
+  onTestFinished(() => removeTestWorkspace(workspace.root));
+  const path = workspace.path("private.db");
+  // Writable schema plants an expression that fails only for the second
+  // stored row; virtual cells are not stored, so record layout is unchanged.
+  const producer = new DatabaseSync(path, { defensive: false });
+  try {
+    producer.function("application_digest", { deterministic: true }, (value) =>
+      String(value),
+    );
+    producer.exec(`
+      CREATE TABLE t(
+        id INTEGER,
+        payload TEXT,
+        digest TEXT GENERATED ALWAYS AS (application_digest(payload)) VIRTUAL,
+        stored_digest TEXT GENERATED ALWAYS AS (application_digest(payload)) STORED,
+        field GENERATED ALWAYS AS (payload) VIRTUAL,
+        upper_payload GENERATED ALWAYS AS (upper(payload)) VIRTUAL
+      );
+      INSERT INTO t(id, payload) VALUES (1, '{"k":1}'), (2, 'not json');
+      PRAGMA writable_schema = ON;
+      UPDATE sqlite_schema
+        SET sql = replace(sql, 'field GENERATED ALWAYS AS (payload)', 'field GENERATED ALWAYS AS (json_extract(payload, ''$.k''))')
+        WHERE name = 't';
+      PRAGMA writable_schema = OFF;
+    `);
+  } finally {
+    producer.close();
+  }
+  const failure = (input: { columns?: string[]; row_limit?: number }) => {
+    try {
+      inspectSqliteDatabaseSnapshot(path, { path, table: "t", ...input });
+    } catch (cause: unknown) {
+      return cause;
+    }
+    throw new Error("Expected a generated-column evaluation failure");
+  };
+  const prefix = `SQLite cannot evaluate selected column(s) of table "t" on REA's read-only connection: `;
+  expect(failure({})).toMatchObject({
+    reason: "column-evaluation",
+    message: `${prefix}"digest": unknown function: application_digest(); "field": malformed JSON`,
+    readableColumns: ["id", "payload", "stored_digest", "upper_payload"],
+  });
+  expect(failure({ columns: ["field", "id", "field"] })).toMatchObject({
+    message: `${prefix}"field": malformed JSON`,
+    readableColumns: ["id"],
+  });
+  // With no readable selection left, stored columns remain available without evaluation.
+  expect(failure({ columns: ["digest"] })).toMatchObject({
+    message: `${prefix}"digest": unknown function: application_digest()`,
+    readableColumns: ["id", "payload", "stored_digest"],
+  });
+  // Only sampled rows are evaluated, and stored or built-in generated cells are read.
+  expect(
+    inspectSqliteDatabaseSnapshot(path, {
+      path,
+      table: "t",
+      columns: ["field", "stored_digest", "upper_payload"],
+      row_limit: 1,
+    }).rows,
+  ).toMatchObject({
+    values: [
+      [
+        { type: "integer", value: "1" },
+        { type: "text", value: '{"k":1}' },
+        { type: "text", value: '{"K":1}' },
+      ],
+    ],
+    truncated: true,
+  });
+});
+
+const createApplicationDatabase = async (
+  sql: string,
+  edit?: (bytes: Buffer) => void,
+): Promise<string> => {
+  const workspace = await createTestWorkspace("rea-sqlite-evaluation-");
+  onTestFinished(() => removeTestWorkspace(workspace.root));
+  const path = workspace.path("private.db");
+  const producer = new DatabaseSync(path);
+  try {
+    // The producing application supplies a function REA's connection lacks.
+    producer.function("application_digest", { deterministic: true }, (value) =>
+      String(value),
+    );
+    producer.exec(sql);
+  } finally {
+    producer.close();
+  }
+  if (edit !== undefined) {
+    const bytes = await readFile(path);
+    edit(bytes);
+    await writeFile(path, bytes);
+  }
+  return path;
+};
+
+it("never recommends a selected column whose own probe fails for another reason", async () => {
+  const path = await createApplicationDatabase(`
+    CREATE TABLE t(
+      id INTEGER,
+      digest TEXT GENERATED ALWAYS AS (application_digest(id)) VIRTUAL,
+      payload BLOB GENERATED ALWAYS AS (zeroblob(72 * 1024 * 1024)) VIRTUAL
+    );
+    INSERT INTO t(id) VALUES (1);
+  `);
+  expect(() =>
+    inspectSqliteDatabaseSnapshot(path, {
+      path,
+      table: "t",
+      columns: ["payload", "digest", "id"],
+    }),
+  ).toThrow(
+    expect.objectContaining({
+      reason: "column-evaluation",
+      message: `SQLite cannot evaluate selected column(s) of table "t" on REA's read-only connection: "payload": string or blob too big; "digest": unknown function: application_digest()`,
+      readableColumns: ["id"],
+    }),
+  );
+});
+
+it("recommends stored columns outside an inventory-scope selection without decoding malformed names", async () => {
+  const path = await createApplicationDatabase(
+    `
+    CREATE TABLE t(
+      id INTEGER,
+      "col" TEXT,
+      payload TEXT,
+      digest TEXT GENERATED ALWAYS AS (application_digest(payload)) VIRTUAL
+    );
+    INSERT INTO t(id, "col", payload) VALUES (1, 'kept', 'value');
+  `,
+    (bytes) => {
+      const marker = Buffer.from('"col"');
+      const offset = bytes.indexOf(marker);
+      if (offset < 0 || bytes.indexOf(marker, offset + 1) !== -1)
+        throw new Error("Expected unique authored column marker");
+      bytes[offset + 1] = 0xff;
+    },
+  );
+  expect(() =>
+    inspectSqliteDatabaseSnapshot(path, {
+      path,
+      table: "t",
+      schema_scope: "inventory",
+      columns: ["digest"],
+    }),
+  ).toThrow(
+    expect.objectContaining({
+      reason: "column-evaluation",
+      message: `SQLite cannot evaluate selected column(s) of table "t" on REA's read-only connection: "digest": unknown function: application_digest()`,
+      readableColumns: ["id", "payload"],
+    }),
+  );
+  // The recommended stored columns are themselves selectable in the same scope.
+  expect(
+    inspectSqliteDatabaseSnapshot(path, {
+      path,
+      table: "t",
+      schema_scope: "inventory",
+      columns: ["id", "payload"],
+    }).rows,
+  ).toMatchObject({
+    values: [
+      [
+        { type: "integer", value: "1" },
+        { type: "text", value: "value" },
+      ],
+    ],
+  });
+});
+
 it("samples above 1000 rows and safe integer limits within the byte budget", async () => {
   const path = await createDatabase(`CREATE TABLE items(value INTEGER);
     WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 1002)

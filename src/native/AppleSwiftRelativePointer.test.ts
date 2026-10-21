@@ -18,6 +18,10 @@ const readers = (bytes: Buffer) => ({
     address: `0x${address.toString(16)}`,
     file_offset: Number(address),
   }),
+  targetLocation: (address: bigint) => ({
+    address: `0x${address.toString(16)}`,
+    file_offset: Number(address),
+  }),
   evidence: (address: bigint, description: string) => [
     {
       kind: "binary_metadata" as const,

@@ -1174,3 +1174,246 @@ it.each([
     expect(projected.records).toHaveLength(values.length);
   },
 );
+
+it("templates a literal that another method's opt-in parameter observed at the same position, at any depth", () => {
+  const routes = syntheticCapture([
+    ["GET", "https://k.test/api/v1/collections/0RZ51AB"],
+    ["GET", "https://k.test/api/v1/collections/0RZ52CD"],
+    ["GET", "https://k.test/api/v1/collections/0RZ53EF"],
+    ["PATCH", "https://k.test/api/v1/collections/0RZ53EF", null, "{}"],
+    ["DELETE", "https://k.test/api/v1/collections/0RZ53EF", null],
+    ["GET", "https://k.test/api/v1/collections/0RZ52CD/books"],
+    ["GET", "https://k.test/api/v1/collections/layout"],
+    ["POST", "https://k.test/api/v1/collections/search", null, "{}"],
+  ]);
+  const shared = manifest(["sibling-variance", "prefix-variance"], routes);
+  expect(shared.tools.map(line)).toEqual([
+    "GET /api/v1/collections/layout",
+    "POST /api/v1/collections/search",
+    "DELETE /api/v1/collections/{collection_id}",
+    "GET /api/v1/collections/{collection_id}",
+    "PATCH /api/v1/collections/{collection_id}",
+    "GET /api/v1/collections/{collection_id}/books",
+  ]);
+  expect(shared.tools.find((tool) => tool.method === "PATCH")).toMatchObject({
+    name: "patch_collections_by_collection_id",
+    api_surface_template: "/api/v1/collections/0RZ53EF",
+    params: [
+      {
+        index: 3,
+        name: "collection_id",
+        rule: "prefix-variance",
+        basis: "inferred",
+        observed_values: ["0RZ53EF"],
+      },
+    ],
+    record_ordinals: [3],
+  });
+  expect(
+    shared.tools.find((tool) => tool.path_template.endsWith("/books"))?.name,
+  ).toBe("get_collections_books_by_collection_id");
+  expect(manifest(["sibling-variance"], routes).tools.map(line)).toEqual([
+    "GET /api/v1/collections/0RZ52CD/books",
+    "DELETE /api/v1/collections/0RZ53EF",
+    "PATCH /api/v1/collections/0RZ53EF",
+    "GET /api/v1/collections/layout",
+    "POST /api/v1/collections/search",
+    "GET /api/v1/collections/{collection_id}",
+  ]);
+});
+
+it("templates an unobserved literal only when it carries a digit and is spelled like an observed value", () => {
+  const projected = manifest(
+    ["sibling-variance", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://k.test/api/readlists/0RZ51KSZKA53J"],
+      ["GET", "https://k.test/api/readlists/0RZ56NR37AC1T"],
+      ["PATCH", "https://k.test/api/readlists/0RZ576R5KA57B", null, "{}"],
+      ["PUT", "https://k.test/api/readlists/0rz576r5ka57b", null, "{}"],
+      ["DELETE", "https://k.test/api/readlists/ABCDEFGHIJ", null],
+      ["POST", "https://k.test/api/readlists/Metrics::12", null, "{}"],
+      ["GET", "https://k.test/api/items/a1"],
+      ["GET", "https://k.test/api/items/b2"],
+      ["PUT", "https://k.test/api/items/v2", null, "{}"],
+    ]),
+  );
+  expect(projected.tools.map(line)).toEqual([
+    "PUT /api/items/v2",
+    "GET /api/items/{item_id}",
+    "PUT /api/readlists/0rz576r5ka57b",
+    "DELETE /api/readlists/ABCDEFGHIJ",
+    "POST /api/readlists/Metrics::12",
+    "GET /api/readlists/{readlist_id}",
+    "PATCH /api/readlists/{readlist_id}",
+  ]);
+});
+
+it("merges tools whose routes now match and keeps the parameter a tool templated by its own rule", () => {
+  const routes = syntheticCapture([
+    ["GET", "https://b.test/api/boards/b-2/cards/c-3"],
+    ["GET", "https://b.test/api/boards/b-1"],
+    ["GET", "https://b.test/api/boards/b-2"],
+    ["GET", "https://b.test/api/boards/b-1/cards/c-1"],
+    ["GET", "https://b.test/api/boards/b-1/cards/c-2"],
+    ["GET", "https://b.test/api/subjects/red-one"],
+    ["GET", "https://b.test/api/subjects/blue-two"],
+    ["GET", "https://b.test/api/subjects/green-three"],
+    ["GET", "https://b.test/api/subjects/red-one/versions/1"],
+    ["GET", "https://b.test/api/subjects/blue-two/versions/2"],
+  ]);
+  const projected = manifest(["sibling-variance", "prefix-variance"], routes);
+  expect(projected.tools.map(line)).toEqual([
+    "GET /api/boards/{board_id}",
+    "GET /api/boards/{board_id}/cards/{card_id}",
+    "GET /api/subjects/{subject_id}",
+    "GET /api/subjects/{subject_id}/versions/{numeric}",
+  ]);
+  const params = (template: string) =>
+    projected.tools
+      .find((tool) => tool.path_template === template)
+      ?.params.map((param) => [param.name, param.rule, param.observed_values]);
+  expect(params("/api/boards/{board_id}/cards/{card_id}")).toEqual([
+    ["board_id", "prefix-variance", ["b-1", "b-2"]],
+    ["card_id", "sibling-variance", ["c-1", "c-2", "c-3"]],
+  ]);
+  expect(params("/api/subjects/{subject_id}/versions/{numeric}")).toEqual([
+    ["subject_id", "prefix-variance", ["blue-two", "red-one"]],
+    ["id", "numeric", ["1", "2"]],
+  ]);
+  expect(manifest(["sibling-variance"], routes).tools.map(line)).toEqual([
+    "GET /api/boards/b-1/cards/{card_id}",
+    "GET /api/boards/b-2/cards/c-3",
+    "GET /api/boards/{board_id}",
+    "GET /api/subjects/blue-two/versions/{numeric}",
+    "GET /api/subjects/red-one/versions/{numeric}",
+    "GET /api/subjects/{subject_id}",
+  ]);
+});
+
+it("shares no format-rule position and compares no route beyond the segment limit", () => {
+  const tail = Array.from(
+    { length: 36 },
+    (_, index) => `s${String(index)}`,
+  ).join("/");
+  const projected = manifest(
+    ["sibling-variance", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://t.test/api/teams/1"],
+      ["GET", "https://t.test/api/teams/2"],
+      ["PATCH", "https://t.test/api/teams/t3", null, "{}"],
+      ["GET", "https://t.test/api/items/a1"],
+      ["GET", "https://t.test/api/items/b2"],
+      ["GET", `https://t.test/api/items/b2/${tail}`],
+    ]),
+  );
+  expect(projected.tools.map(line)).toEqual([
+    `GET /api/items/b2/${tail}`,
+    "GET /api/items/{item_id}",
+    "PATCH /api/teams/t3",
+    "GET /api/teams/{numeric}",
+  ]);
+  expect(projected.limitations).toContain(
+    "Routes with more than 32 segments are not compared by prefix-variance; they keep their grouped templates.",
+  );
+});
+
+it("shares both halves of a templated pair and keeps each half's name", () => {
+  const projected = manifest(
+    ["sibling-pair-variance", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://g.test/api/repos/lighthouse-rota/lamp-log/issues"],
+      ["GET", "https://g.test/api/repos/granite-ledger/ledger-core/issues"],
+      ["GET", "https://g.test/api/repos/blue-heron/recipe-book/issues"],
+      [
+        "POST",
+        "https://g.test/api/repos/granite-ledger/ledger-core/issues",
+        null,
+        "{}",
+      ],
+      ["DELETE", "https://g.test/api/repos/blue-heron/recipe-book", null],
+    ]),
+  );
+  expect(projected.tools.map(line)).toEqual([
+    "DELETE /api/repos/{repo_namespace}/{repo_name}",
+    "GET /api/repos/{repo_namespace}/{repo_name}/issues",
+    "POST /api/repos/{repo_namespace}/{repo_name}/issues",
+  ]);
+  expect(
+    projected.tools[0]?.params.map((param) => [param.name, param.rule]),
+  ).toEqual([
+    ["repo_namespace", "prefix-variance"],
+    ["repo_name", "prefix-variance"],
+  ]);
+});
+
+it("templates a digit-free literal only as a member of a fixed-length identifier family", () => {
+  const projected = manifest(
+    ["sibling-variance", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://n.test/api/workflows/yDr9n16753TZr7Zc"],
+      ["GET", "https://n.test/api/workflows/5LPA94ML1gYbgAQx"],
+      ["PATCH", "https://n.test/api/workflows/FkMwxmXNGaGVsXFG", null, "{}"],
+      ["DELETE", "https://n.test/api/workflows/listForAccounts", null],
+      ["PUT", "https://n.test/api/workflows/fkmw-xmxn-gagv-x", null, "{}"],
+      ["GET", "https://n.test/api/tags/a1"],
+      ["GET", "https://n.test/api/tags/b22"],
+      ["DELETE", "https://n.test/api/tags/cc", null],
+      ["GET", "https://n.test/api/labels/ab12cd34"],
+      ["GET", "https://n.test/api/labels/ef56gh78"],
+      ["DELETE", "https://n.test/api/labels/abcdefgh", null],
+    ]),
+  );
+  expect(projected.tools.map(line)).toEqual([
+    "DELETE /api/labels/{label_id}",
+    "GET /api/labels/{label_id}",
+    "DELETE /api/tags/cc",
+    "GET /api/tags/{tag_id}",
+    "PUT /api/workflows/fkmw-xmxn-gagv-x",
+    "DELETE /api/workflows/listForAccounts",
+    "GET /api/workflows/{workflow_id}",
+    "PATCH /api/workflows/{workflow_id}",
+  ]);
+});
+
+it("shares a literal with the parameter that observed it when parameters of different rules share a position", () => {
+  const projected = manifest(
+    ["opaque-token", "sibling-variance", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://i.test/api/items/aaaa12bb34cc/details"],
+      ["GET", "https://i.test/api/items/a1"],
+      ["GET", "https://i.test/api/items/b2"],
+      ["PATCH", "https://i.test/api/items/b2", null, "{}"],
+    ]),
+  );
+  // The token parameter is earlier, but only the sibling parameter observed b2.
+  expect(projected.tools.map(line)).toEqual([
+    "GET /api/items/{item_id}",
+    "PATCH /api/items/{item_id}",
+    "GET /api/items/{uid}/details",
+  ]);
+  expect(
+    projected.tools.map((tool) =>
+      tool.params.map((param) => [param.name, param.rule]),
+    ),
+  ).toEqual([
+    [["item_id", "sibling-variance"]],
+    [["item_id", "prefix-variance"]],
+    [["uid", "opaque-token"]],
+  ]);
+});
+
+it("templates a digit-free literal in a fixed-length family that one opt-in parameter observed once", () => {
+  const projected = manifest(
+    ["opaque-token", "prefix-variance"],
+    syntheticCapture([
+      ["GET", "https://w.test/api/workflows/ydr9n16753tzr7zc"],
+      ["PATCH", "https://w.test/api/workflows/fkmwxmxngagvsxfg", null, "{}"],
+      ["DELETE", "https://w.test/api/workflows/notifications", null],
+    ]),
+  );
+  expect(projected.tools.map(line)).toEqual([
+    "DELETE /api/workflows/notifications",
+    "GET /api/workflows/{uid}",
+    "PATCH /api/workflows/{uid}",
+  ]);
+});

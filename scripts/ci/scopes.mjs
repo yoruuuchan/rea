@@ -92,6 +92,17 @@ export const SCOPES = {
   ],
   // Four-host installed-package matrix and the Windows curated lane.
   package: [
+    // Both host compilers must be exercised when their installation, options,
+    // or entrypoints change; Linux's accelerated checker cannot stand in for Go.
+    "scripts/run-typescript.*",
+    "scripts/run-turbo.mjs",
+    "turbo.json",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "tsconfig.frida-verification.json",
+    "package-lock.json",
+    ".nvmrc",
+    ".npmrc",
     ".github/actions/publish-mcp/**",
     ".github/actions/prepare-release-package/**",
     ".github/workflows/release-recovery.yml",
@@ -135,6 +146,7 @@ export const SCOPES = {
     "src/application/DshCordis*.ts",
     "src/cli/interactiveSetup.ts",
     "src/cli/setupCommands.ts",
+    "tests/boundary/filesystem/typescriptCompiler.test.ts",
     "tests/boundary/filesystem/binaryTarget.test.ts",
     "tests/boundary/filesystem/safeOutputTree.test.ts",
     "tests/boundary/providers/native/artifactProvider.archiveSafety.test.ts",

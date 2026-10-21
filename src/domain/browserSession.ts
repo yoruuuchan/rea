@@ -29,6 +29,8 @@ const timelineEventSchema = z.object({
     "load_failed",
     "lifecycle",
     "target_terminated",
+    "session_detached",
+    "transport_disconnected",
   ]),
   timestamp: z
     .number()
@@ -63,6 +65,8 @@ export const webObservationSessionSchema = z.object({
       "window_elapsed",
       "target_left_scope",
       "target_terminated",
+      "session_detached",
+      "transport_disconnected",
     ]),
   }),
   timeline: z.array(timelineEventSchema),

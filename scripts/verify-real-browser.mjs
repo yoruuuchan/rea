@@ -546,14 +546,21 @@ async function verifyPageScopedTransport(provider, proxy, origin) {
   const disconnected = await disconnectedPromise;
   if (
     !disconnected.ok ||
-    disconnected.value.window.end_reason !== "target_terminated" ||
+    disconnected.value.window.end_reason !== "transport_disconnected" ||
     !disconnected.value.timeline.some(
-      ({ type }) => type === "target_terminated",
-    )
+      ({ type }) => type === "transport_disconnected",
+    ) ||
+    disconnected.value.timeline.some(({ type }) => type === "target_terminated")
   )
     throw new Error(
-      "Page-scoped CDP disconnect was not reported as target_terminated",
+      "Page-scoped CDP disconnect must report transport loss without claiming a target crash",
     );
+  const remaining = await provider.listTargets(
+    listBrowserTargetsInputSchema.parse({ cdp_endpoint: proxy.endpoint }),
+  );
+  if (!remaining.ok) throw remaining.error;
+  if (!remaining.value.targets.some(({ target_id }) => target_id === target))
+    throw new Error("Page-scoped CDP disconnect removed its live target");
 }
 
 async function browserExecutable() {

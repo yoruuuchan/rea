@@ -265,6 +265,7 @@ Comece pelos [guias práticos](https://rea.tools/pt-BR/guides/) do site. Para op
 
 - [Instalação e configuração](../installation.md): registro de agentes, configuração de provedores, atualizações e desinstalação.
 - [Prontidão e solução de problemas](../installation.md#check-readiness-for-your-task): diagnóstico de um agente ou motor de análise específico.
+- [CUDA / HIP](../gpu-code-objects.md)
 - [GGUF / safetensors](../model-artifacts.md)
 - [CLI e Evidence](../cli.md): comandos, seleção de provedores, snapshots, importação/exportação e status de saída.
 - [Contratos MCP](../mcp-contracts.md) e [prompts para agentes](../mcp-prompts.md): resultados das ferramentas, sessões e investigações guiadas.

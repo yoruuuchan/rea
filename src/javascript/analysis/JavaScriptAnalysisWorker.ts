@@ -105,7 +105,7 @@ export class JavaScriptAnalysisWorker {
   #parentCapacityExhausted = false;
   #sourcesRemaining: number | undefined;
   #deadline: ProviderStartupDeadline | undefined;
-  readonly #resultBudgetBytes: number;
+  #resultBudgetBytes = 0;
   /** Null when the runtime enforces the V8 heap flags instead. */
   readonly #processMemoryLimitBytes: number | null;
   readonly #onStdout = (chunk: Buffer | string): void => {
@@ -179,8 +179,50 @@ export class JavaScriptAnalysisWorker {
     this.#processMemoryLimitBytes = javaScriptWorkerMemoryLimitBytes(
       limits.heapMb,
     );
-    // Reserve host-side control, schema/Evidence work and a maximum record's
-    // transient copies. Admission also accounts for retained earlier files.
+    this.#refreshResultBudget();
+  }
+
+  /**
+   * Whether this idle process can analyze another application. A failed,
+   * cancelled, or still-open job must not be reused.
+   */
+  canReuse(): boolean {
+    return (
+      this.#ready &&
+      this.#activeJobId === undefined &&
+      this.#primaryFailure === undefined &&
+      this.#lastFailure === undefined &&
+      this.#frames.length === 0 &&
+      this.#pending === "" &&
+      this.#runtime.inputFailure === undefined &&
+      !this.#runtime.hasPendingCleanup &&
+      this.#runtime.supervisor !== undefined
+    );
+  }
+
+  /**
+   * Reset per-analysis admission for one idle process. The worker heap limit
+   * stays the one selected at launch; callers must not reuse across limits.
+   */
+  prepareForAnotherAnalysis(sourceCount: number): boolean {
+    if (!this.canReuse()) return false;
+    if (!Number.isSafeInteger(sourceCount) || sourceCount < 0)
+      throw new RangeError(
+        "JavaScript worker source count must be a nonnegative safe integer",
+      );
+    this.#sourcesRemaining = sourceCount;
+    this.#estimatedRetainedBytes = 0;
+    this.#parentCapacityExhausted = false;
+    this.#applicationProjectionFailure = undefined;
+    this.#refreshResultBudget();
+    return true;
+  }
+
+  /**
+   * Reserve host-side control, schema/Evidence work, and a maximum record's
+   * transient copies. Admission also accounts for retained earlier files.
+   */
+  #refreshResultBudget(): void {
     this.#resultBudgetBytes = Math.max(
       0,
       Math.floor(

@@ -123,10 +123,10 @@ it.runIf(!unsupportedHost)(
     if (result.ok) throw new Error("Expected compounded lifecycle failure");
     expect(result.error).toMatchObject({
       cleanupIncomplete: true,
+      capturedOutput: { truncated: true, stderr: "" },
       diagnostics: {
         primary_error: {
           code: "unreadable_output",
-          details: { captured_output: { truncated: true, stderr: "" } },
         },
         cleanup_error: {
           code: "cleanup_incomplete",
@@ -136,6 +136,22 @@ it.runIf(!unsupportedHost)(
         },
       },
     });
+    const projected = projectAnalysisError(result.error);
+    expect(projected.details?.captured_output).toEqual(
+      result.error.capturedOutput,
+    );
+    expect(projected).not.toHaveProperty(
+      "details.diagnostics.primary_error.details.captured_output",
+    );
+    const output = result.error.capturedOutput?.stdout;
+    if (!output) throw new Error("Expected retained truncated worker output");
+    // Preserve the cleanup owner's separate snapshot, but not a redundant
+    // captured_output copy in generic primary history.
+    expect(projected).toHaveProperty(
+      "details.diagnostics.cleanup_error.details.diagnostics.captured_output.stdout",
+      output,
+    );
+    expect(JSON.stringify(projected).split(output)).toHaveLength(3);
     await expect(access(ownedPath)).resolves.toBeUndefined();
     cleanupAllowed = true;
     await provider.close();

@@ -38,7 +38,7 @@ describe("JavaScript source selection cancellation boundary", () => {
         controller.signal,
         sourcePaths,
       );
-      const worker = createJavaScriptSourceAnalysis(
+      const worker = await createJavaScriptSourceAnalysis(
         { heapMb: 512, timeoutMs: 30_000 },
         1,
       );

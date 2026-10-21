@@ -12,6 +12,7 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
   createAnalysisExecution,
   type AnalysisProviderCandidate,
+  type AnalysisProviderInspectionOptions,
   type CapabilityDescriptor,
   type ProviderIdentity,
 } from "../../../src/application/AnalysisProvider.js";
@@ -411,7 +412,9 @@ it.each(["ready", "cancelled", "physical"] as const)(
       new AnalysisProviderRegistry([
         {
           ...base,
-          inspectAvailability: async ({ signal } = {}) => {
+          inspectAvailability: async ({
+            signal,
+          }: AnalysisProviderInspectionOptions = {}) => {
             enter();
             await gate;
             if (mode === "physical")

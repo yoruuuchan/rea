@@ -181,6 +181,8 @@ explicit path or endpoint and do not need it.
   absent metadata does not prove a binary is not Go, and unparsed text records
   remain explicit. See the
   [Go binary guide](https://github.com/morluto/rea/blob/main/docs/go-binaries.md).
+- Embedded CUDA/HIP code objects: `inspect_gpu_code_objects`; inventory targets
+  first, then decode selected payloads and query retained GPU Evidence.
 - Bundled GGUF or safetensors model declarations: `inspect_model_artifact`
   with the explicit local file. Default header hashing leaves full-file identity
   unknown; `hash: "full"` additionally reads all weights for SHA-256. MCP returns
@@ -207,6 +209,12 @@ explicit path or endpoint and do not need it.
   package order, dependency indices, and the section file range. A missing
   `.dep-v0` section is null metadata, not proof the binary has no dependencies.
   A rustc commit hash is an inference from a read-only `/rustc/<40-hex>/` path.
+  For selected crates, use `view: {collection: "packages", names: [...],
+  fields: ["name", "version", "source"]}` on the first call; explicitly include
+  `dependencies` for direct index references. Use `detail: "summary"` for counts
+  and ranges, or retained `inspect_analysis_view` Rust package/edge pages for
+  subsequent filters. Keep the complete parent Evidence accessible; CLI compact
+  delivery requires `--evidence_output`.
   See the
   [Rust binary guide](https://github.com/morluto/rea/blob/main/docs/rust-binaries.md).
 

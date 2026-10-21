@@ -196,6 +196,8 @@ const createBuildCacheFixture = async (): Promise<string> => {
     "tsconfig.json",
     "tsconfig.build.json",
     "scripts/check-dependency-install.mjs",
+    "scripts/run-turbo.mjs",
+    "scripts/run-typescript.mjs",
     "scripts/run-exclusive.mjs",
     "scripts/run-exclusive-command.mjs",
     "scripts/lib/windows-owned-command.mjs",
@@ -277,7 +279,7 @@ const runTurbo = (cwd: string, environment: NodeJS.ProcessEnv = process.env) =>
   run(
     process.execPath,
     [
-      join(cwd, "node_modules", "turbo", "bin", "turbo"),
+      join(cwd, "scripts", "run-turbo.mjs"),
       "run",
       "artifacts:skills",
       "--output-logs=full",

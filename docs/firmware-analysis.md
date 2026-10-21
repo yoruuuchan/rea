@@ -158,7 +158,13 @@ tree semantics, vulnerability scanning, emulation or hardware runtime capture.
   Supply a stable copy within the allowance. No in-place source modification.
 - One queued heavy operation per provider instance; Binwalk one thread and
   Unblob one worker. No automatic parallel extraction engines.
-- **120-second** analysis deadline through inventory. Publication and final
+- Analysis defaults to **120 seconds**, from tool resolution and input snapshot
+  through inspection and its final private-workspace cleanup, or extraction
+  through report consumption and inventory, excluding queue waiting and retained
+  cleanup admission. Inspection has no publication phase. Select `analysis_timeout_ms` in either MCP operation or
+  `--analysis-timeout-ms` in either CLI command for slower analysis. Current
+  results retain the actual budget; an absent historical value means unknown.
+  Extraction publication and its final
   cleanup start a separate **120-second** budget; select
   `publication_timeout_ms` in MCP or `--publication-timeout-ms` in CLI for a slow
   destination. Valid budgets are integers from 1 through 2,147,483,647 ms (the
@@ -168,6 +174,11 @@ tree semantics, vulnerability scanning, emulation or hardware runtime capture.
   both phases and final cleanup. Phase handoff, publication commit and final
   completion also check monotonic elapsed time, so delayed timer callbacks
   cannot revive an expired budget.
+- Analysis timeout recovery names the selected budget and the analysis control,
+  not the later publication control. Keep the client call timeout above analysis,
+  publication and cleanup headroom; keep the input/range/question unchanged.
+  Resolve any reported incomplete cleanup before retrying. Raising wall time
+  does not raise fixed CPU, memory, report, diagnostic or input limits.
 - Inherited **1 GiB per-process address-space** limit,
   120 CPU seconds and zero core-dump allowance through `prlimit`.
 - JSON reports: at most **8 MiB** and valid UTF-8; malformed encoding and

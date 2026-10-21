@@ -204,6 +204,7 @@ const browserErrorCategory = (
     reason === "target_not_allowed" ||
     reason === "service_worker_blocked" ||
     reason === "target_changed" ||
+    reason === "target_session_detached" ||
     reason === "endpoint_unreachable" ||
     reason === "disconnected"
   )
