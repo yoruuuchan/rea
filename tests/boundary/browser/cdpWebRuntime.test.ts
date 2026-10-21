@@ -109,6 +109,45 @@ describe("native runtime producer boundary", () => {
 });
 
 describe("runtime window and producer granularity", () => {
+  it("fails malformed frame identity and completes execution cleanup", async () => {
+    const { browser, provider, execution } = await fixture();
+    const result = await provider.observeExecution(
+      { ...execution, observation_ms: 30_000 },
+      {
+        progress: {
+          report: async (update) => {
+            if (update.completed !== 1) return;
+            browser.emitEvent({
+              method: "Page.frameNavigated",
+              sessionId: "session-1",
+              params: {
+                frame: {
+                  id: "other-frame",
+                  parentId: 7,
+                  url: "https://example.test/child",
+                },
+              },
+            });
+          },
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "BrowserObservationError", reason: "protocol_error" },
+    });
+    expect(
+      browser.commands.some(
+        (command) => command.method === "Profiler.stopPreciseCoverage",
+      ),
+    ).toBe(true);
+    expect(
+      browser.commands.some(
+        (command) => command.method === "Target.detachFromTarget",
+      ),
+    ).toBe(true);
+  });
+
   it("ends at document replacement and leaves coverage explicitly unavailable", async () => {
     const { browser, provider, execution } = await fixture();
     const result = await provider.observeExecution(

@@ -6,12 +6,12 @@ import {
   startFakeCdpBrowser,
   type FakeOptions,
 } from "../../fixtures/fakeCdpBrowser.js";
-import { trackBrowser } from "./cdpBrowserProvider.support.js";
+import { frameNavigated, trackBrowser } from "./cdpBrowserProvider.support.js";
 
 const observeDuringClockSampling = async (
   commandEvents: NonNullable<FakeOptions["commandEvents"]>,
 ) => {
-  const browser = await startFakeCdpBrowser({
+  return observeWithFake({
     eventsBeforeReply: ["Performance.getMetrics"],
     commandResult: (command) =>
       command.method === "Performance.getMetrics"
@@ -19,6 +19,10 @@ const observeDuringClockSampling = async (
         : undefined,
     commandEvents,
   });
+};
+
+const observeWithFake = async (options: FakeOptions) => {
+  const browser = await startFakeCdpBrowser(options);
   trackBrowser(browser);
   const result = await new CdpBrowserProvider().observeSession(
     observeWebSessionInputSchema.parse({
@@ -32,34 +36,47 @@ const observeDuringClockSampling = async (
   return { browser, observation: result.value };
 };
 
+const laterInWindowRequest = (
+  command: Parameters<NonNullable<FakeOptions["commandEvents"]>>[0],
+  origin: string,
+) => ({
+  method: "Network.requestWillBeSent",
+  sessionId: command.sessionId,
+  params: {
+    requestId: "later-in-window-request",
+    timestamp: 21,
+    type: "Document",
+    frameId: "frame-main",
+    redirectResponse: { url: `${origin}/prior` },
+    request: { url: `${origin}/later` },
+  },
+});
+
+const expectNoCommittedFrameWithInvalidTimeline = (
+  observation: Awaited<ReturnType<typeof observeWithFake>>["observation"],
+) => {
+  expect(observation.timeline).not.toContainEqual(
+    expect.objectContaining({ type: "navigation_committed" }),
+  );
+  expect(observation.completeness.excluded).toContainEqual(
+    expect.objectContaining({
+      section: "timeline",
+      reason: "invalid_protocol_value",
+    }),
+  );
+};
+
 it("fails closed on an untimestamped cross-origin main-frame commit during clock sampling", async () => {
   const { observation } = await observeDuringClockSampling(
     (command, origin) => {
       if (command.method !== "Performance.getMetrics") return undefined;
       return [
-        {
-          method: "Page.frameNavigated",
-          sessionId: command.sessionId,
-          params: {
-            frame: {
-              id: "frame-main",
-              loaderId: "outside-loader",
-              url: "https://outside.invalid/path",
-            },
-          },
-        },
-        {
-          method: "Network.requestWillBeSent",
-          sessionId: command.sessionId,
-          params: {
-            requestId: "later-in-window-request",
-            timestamp: 21,
-            type: "Document",
-            frameId: "frame-main",
-            redirectResponse: { url: `${origin}/prior` },
-            request: { url: `${origin}/later` },
-          },
-        },
+        frameNavigated(command, {
+          id: "frame-main",
+          loaderId: "outside-loader",
+          url: "https://outside.invalid/path",
+        }),
+        laterInWindowRequest(command, origin),
       ];
     },
   );
@@ -80,6 +97,93 @@ it("fails closed on an untimestamped cross-origin main-frame commit during clock
   );
 });
 
+it("keeps an unidentifiable frame commit unknown without inventing a main-frame event", async () => {
+  const { observation } = await observeDuringClockSampling((command) =>
+    command.method === "Performance.getMetrics"
+      ? [frameNavigated(command, { url: "https://outside.invalid/unknown" })]
+      : undefined,
+  );
+
+  expect(observation.window.end_reason).toBe("window_elapsed");
+  expectNoCommittedFrameWithInvalidTimeline(observation);
+});
+
+it("marks a frame event with absent parameters as unknown timeline evidence", async () => {
+  const { observation } = await observeDuringClockSampling((command) =>
+    command.method === "Performance.getMetrics"
+      ? [
+          {
+            method: "Page.frameNavigated",
+            sessionId: command.sessionId,
+            params: undefined,
+          },
+        ]
+      : undefined,
+  );
+
+  expectNoCommittedFrameWithInvalidTimeline(observation);
+  expect(observation.completeness.unavailable_sections).toContain("timeline");
+});
+
+it("records a malformed child identity without treating it as the main frame", async () => {
+  const { observation } = await observeDuringClockSampling((command) =>
+    command.method === "Performance.getMetrics"
+      ? [
+          frameNavigated(command, {
+            id: 3,
+            parentId: "frame-main",
+            url: "https://outside.invalid/child",
+          }),
+        ]
+      : undefined,
+  );
+
+  expect(observation.window.end_reason).toBe("window_elapsed");
+  expectNoCommittedFrameWithInvalidTimeline(observation);
+});
+
+it("updates the main frame from a pre-arm root replacement without inventing a navigation row", async () => {
+  const { observation } = await observeDuringClockSampling((command, origin) =>
+    command.method === "Performance.getMetrics"
+      ? [
+          frameNavigated(command, {
+            id: "replacement-main",
+            loaderId: "replacement-loader",
+            url: `${origin}/app?token=frame-secret`,
+          }),
+          {
+            method: "Page.lifecycleEvent",
+            sessionId: command.sessionId,
+            params: {
+              frameId: "replacement-main",
+              loaderId: "replacement-loader",
+              name: "DOMContentLoaded",
+              timestamp: 21,
+            },
+          },
+        ]
+      : undefined,
+  );
+
+  expect(observation.timeline).not.toContainEqual(
+    expect.objectContaining({ type: "navigation_committed" }),
+  );
+  expect(observation.timeline).toContainEqual(
+    expect.objectContaining({
+      type: "lifecycle",
+      frame_id: "replacement-main",
+      loader_id: "replacement-loader",
+      timestamp: 21,
+      detail: "domcontentloaded",
+    }),
+  );
+  expect(observation.limitations).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("Buffered events with unknown timing"),
+    ]),
+  );
+});
+
 it("fails closed on an untimestamped out-of-scope main-frame request during clock sampling", async () => {
   const { observation } = await observeDuringClockSampling(
     (command, origin) => {
@@ -94,18 +198,7 @@ it("fails closed on an untimestamped out-of-scope main-frame request during cloc
             reason: "scriptInitiated",
           },
         },
-        {
-          method: "Network.requestWillBeSent",
-          sessionId: command.sessionId,
-          params: {
-            requestId: "later-in-window-request",
-            timestamp: 21,
-            type: "Document",
-            frameId: "frame-main",
-            redirectResponse: { url: `${origin}/prior` },
-            request: { url: `${origin}/later` },
-          },
-        },
+        laterInWindowRequest(command, origin),
       ];
     },
   );
@@ -191,7 +284,7 @@ it.each([
 ] as const)(
   "ends on buffered untimestamped %s before collecting later events",
   async (_method, terminalEvent) => {
-    const browser = await startFakeCdpBrowser({
+    const { observation } = await observeWithFake({
       eventsBeforeReply: ["Performance.getMetrics"],
       commandResult: (command) =>
         command.method === "Performance.getMetrics"
@@ -216,35 +309,25 @@ it.each([
         ];
       },
     });
-    trackBrowser(browser);
-    const result = await new CdpBrowserProvider().observeSession(
-      observeWebSessionInputSchema.parse({
-        cdp_endpoint: browser.endpoint,
-        allowed_origins: [browser.allowedOrigin],
-        target_id: "allowed-page",
-        observation_ms: 20,
-      }),
-    );
 
-    if (!result.ok) throw result.error;
-    expect(result.value.window.end_reason).toBe("target_terminated");
-    expect(result.value.timeline).toContainEqual(
+    expect(observation.window.end_reason).toBe("target_terminated");
+    expect(observation.timeline).toContainEqual(
       expect.objectContaining({
         type: "target_terminated",
         timestamp: null,
       }),
     );
-    expect(result.value.timeline).not.toContainEqual(
+    expect(observation.timeline).not.toContainEqual(
       expect.objectContaining({ request_id: "after-terminal-event" }),
     );
-    expect(result.value.limitations).toContain(
+    expect(observation.limitations).toContain(
       "Timeline rows without a comparable producer timestamp have a null timestamp. Buffered events with unknown timing are retained as context only; they do not establish activity inside the selected observation window.",
     );
   },
 );
 
 it("represents absent timeline timestamps as unknown and preserves an observed zero", async () => {
-  const browser = await startFakeCdpBrowser({
+  const { browser, observation } = await observeWithFake({
     eventsBeforeReply: ["Page.setLifecycleEventsEnabled"],
     commandEvents: (command, origin) => {
       if (command.method !== "Page.setLifecycleEventsEnabled") return undefined;
@@ -271,18 +354,8 @@ it("represents absent timeline timestamps as unknown and preserves an observed z
       ];
     },
   });
-  trackBrowser(browser);
-  const result = await new CdpBrowserProvider().observeSession(
-    observeWebSessionInputSchema.parse({
-      cdp_endpoint: browser.endpoint,
-      allowed_origins: [browser.allowedOrigin],
-      target_id: "allowed-page",
-      observation_ms: 20,
-    }),
-  );
 
-  if (!result.ok) throw result.error;
-  expect(result.value.timeline).toEqual(
+  expect(observation.timeline).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
         type: "same_document_navigation",

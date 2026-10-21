@@ -1,9 +1,9 @@
 import type { PointerFixups } from "./AppleMachoFixups.js";
 import type { MachoLayout } from "./AppleMachoSelection.js";
-import type { ObjcClassImportBinding } from "../domain/native/objcSwiftMetadata.js";
+import type { MachoImportBinding } from "../domain/native/objcSwiftMetadata.js";
 
 export interface ObjcClassImportBindingScan {
-  readonly bindings: readonly ObjcClassImportBinding[];
+  readonly bindings: readonly MachoImportBinding[];
   readonly coverage: {
     readonly status: "complete" | "partial" | "unsupported" | "not_requested";
     readonly reason: string | null;
@@ -51,7 +51,7 @@ export const inspectObjcClassImportBindings = (input: {
     );
   for (const failure of fixups.failures) reasons.add(failure);
 
-  const bindings: ObjcClassImportBinding[] = [];
+  const bindings: MachoImportBinding[] = [];
   const examinedAddresses = new Set<string>();
   const candidates = addresses.slice(0, maxRecords);
   if (candidates.length < addresses.length)
@@ -73,6 +73,10 @@ export const inspectObjcClassImportBindings = (input: {
       const raw = bytes.readBigUInt64LE(offset);
       const decoded = fixups.decode(parsedAddress, raw);
       if (decoded.kind === "unsupported") {
+        reasons.add(`${requestedAddress}: ${decoded.reason}`);
+        continue;
+      }
+      if (decoded.kind === "unknown") {
         reasons.add(`${requestedAddress}: ${decoded.reason}`);
         continue;
       }

@@ -30,7 +30,7 @@ const LINK_MODES = [
   {
     mode: "dyld-info",
     flags: ["-Wl,-no_fixup_chains"],
-    fixups: "LC_DYLD_INFO rebase opcodes were not decoded",
+    fixups: "LC_DYLD_INFO rebase opcodes",
     swift: true,
   },
   { mode: "chained", flags: [], fixups: "chained fixups:", swift: true },
@@ -70,6 +70,7 @@ const inspect = async (path) => {
 };
 
 const checkObjc = (metadata, mode) => {
+  assert.equal(fixupCoverage(metadata)?.status, "complete");
   const fixture = metadata.objc_classes.find(
     ({ name, is_meta_class: meta }) => name === "ReaDispatchFixture" && !meta,
   );
@@ -159,6 +160,7 @@ const checkObjc = (metadata, mode) => {
 };
 
 const checkSwift = (metadata, mode) => {
+  assert.equal(fixupCoverage(metadata)?.status, "complete");
   if (
     !metadata.swift_dispatch_slots.some(
       (slot) =>

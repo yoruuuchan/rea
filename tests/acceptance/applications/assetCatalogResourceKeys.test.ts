@@ -97,6 +97,7 @@ cliTest.skipIf(process.platform !== "darwin")(
       const result = appleAssetCatalogResultSchema.parse(
         parseEvidence(inspected.json).normalized_result,
       );
+      const executableSha256 = createHash("sha256").update(mach).digest("hex");
       expect(result.catalogs).toEqual([]);
       expect(result).toMatchObject({
         total_records: 0,
@@ -122,13 +123,35 @@ cliTest.skipIf(process.platform !== "darwin")(
               },
             ],
       );
-      const opened = await call("open_binary", { path: app });
+      const opened = await call("open_bundle_resources", { path: app });
       expect(opened.isError).not.toBe(true);
       const mcp = await call("inspect_asset_catalog", { offset: 1 });
       expect(mcp.isError).not.toBe(true);
       expect(parseEvidence(mcp.structuredContent).normalized_result).toEqual(
         result,
       );
+
+      const binaryOpened = await call("open_binary", { path: app });
+      expect(binaryOpened.isError).not.toBe(true);
+      const binary = await call("inspect_asset_catalog", { offset: 1 });
+      expect(binary.isError).not.toBe(true);
+      const binaryResult = appleAssetCatalogResultSchema.parse(
+        parseEvidence(binary.structuredContent).normalized_result,
+      );
+      expect(binaryResult.target_sha256).toBe(executableSha256);
+      expect(binaryResult.resource_root).toBeUndefined();
+      expect(binaryResult).toEqual({
+        target_sha256: executableSha256,
+        catalogs: result.catalogs,
+        total_records: result.total_records,
+        offset: result.offset,
+        limit: result.limit,
+        records: result.records,
+        resource_key_matches: result.resource_key_matches,
+        next_offset: result.next_offset,
+        truncated: result.truncated,
+        limitations: result.limitations,
+      });
     }
   },
   30_000,

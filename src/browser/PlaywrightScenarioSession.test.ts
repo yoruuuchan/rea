@@ -216,7 +216,7 @@ const policyResponse = (method: string): unknown =>
       ? { result: { value: null } }
       : {};
 
-const prepareLateStopRetry = async () => {
+const prepareHeldPolicyRestoration = async () => {
   const { cleanup, page, storage } = fixture();
   const cancellation = new AbortController();
   storage?.close.mockResolvedValue({ loadingStopped: false });
@@ -241,6 +241,28 @@ const prepareLateStopRetry = async () => {
     return policyResponse(method);
   });
 
+  return {
+    cleanup,
+    page,
+    storage,
+    cancellation,
+    session,
+    finishRestoration,
+    started,
+    transportClosed,
+  };
+};
+
+const prepareLateStopRetry = async () => {
+  const {
+    cleanup,
+    page,
+    cancellation,
+    session,
+    finishRestoration,
+    started,
+    transportClosed,
+  } = await prepareHeldPolicyRestoration();
   vi.useFakeTimers();
   try {
     const firstClose = session.close(false).then(
@@ -417,29 +439,16 @@ it("transfers a late stop request after storage has already released", async () 
 it.each(["pending", "settled"] as const)(
   "honors a late stop after policy restoration is %s",
   async (phase) => {
-    const { cleanup, page, storage } = fixture();
-    const cancellation = new AbortController();
-    storage?.close.mockResolvedValue({ loadingStopped: false });
-    const attached = connectedScenario("block");
-    const session = await PlaywrightScenarioSession.open(
-      attached,
-      {},
-      { signal: cancellation.signal },
-    );
-    const { promise: held, resolve: finishRestoration } = deferred();
-    const { promise: started, resolve: restorationStarted } = deferred();
-    const { promise: transportClosed, resolve: signalTransportClosed } =
-      deferred();
-    mocks.policyTransportClose.mockImplementation(async () => {
-      signalTransportClosed();
-    });
-    mocks.policySend.mockImplementation(async (method: string) => {
-      if (method === "Runtime.evaluate") {
-        restorationStarted();
-        await held;
-      }
-      return policyResponse(method);
-    });
+    const {
+      cleanup,
+      page,
+      storage,
+      cancellation,
+      session,
+      finishRestoration,
+      started,
+      transportClosed,
+    } = await prepareHeldPolicyRestoration();
 
     vi.useFakeTimers();
     try {

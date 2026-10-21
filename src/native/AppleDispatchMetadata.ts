@@ -76,10 +76,18 @@ export const decodeAppleDispatchMetadata = (
   const u32 = (address: bigint) => bytes.readUInt32LE(offset(address, 4));
   const decodePointer = (address: bigint) =>
     fixups.decode(address, bytes.readBigUInt64LE(offset(address, 8)));
-  /** Rebased target of a pointer; a bind to another image reads as 0. */
+  /** In-image target of a raw or rebased pointer; a bind is not an address. */
   const pointer = (address: bigint) => {
     const decodedPointer = decodePointer(address);
-    return decodedPointer.kind === "rebase" ? decodedPointer.target : 0n;
+    if (decodedPointer.kind === "rebase" || decodedPointer.kind === "raw")
+      return decodedPointer.target;
+    if (decodedPointer.kind === "bind") return 0n;
+    // Preserve the on-disk observation for structural Objective-C metadata.
+    // `raw` is not promoted to an authoritative fixup result: the shared
+    // pointer-fixup coverage remains partial, and consumers that need to
+    // distinguish null from an unresolved bind use resolvePointer directly.
+    if (decodedPointer.kind === "unknown") return decodedPointer.raw;
+    throw new RangeError(decodedPointer.reason);
   };
   const bound = (address: bigint) => {
     const decodedPointer = decodePointer(address);
@@ -152,6 +160,7 @@ export const decodeAppleDispatchMetadata = (
     i32: (address: bigint) => bytes.readInt32LE(offset(address, 4)),
     u64: (address: bigint) => bytes.readBigUInt64LE(offset(address, 8)),
     pointer,
+    resolvePointer: decodePointer,
     bound,
     string,
     location,

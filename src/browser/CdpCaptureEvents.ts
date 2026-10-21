@@ -45,6 +45,7 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
   ]);
   originViolation = false;
   navigationDuringCapture = false;
+  unknownRootIdentity = false;
   mainFrameId: string | undefined = undefined;
   committedDocument: string | undefined = undefined;
 
@@ -60,6 +61,7 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
     this.mainFrameId = frameId;
     this.originViolation = false;
     this.navigationDuringCapture = false;
+    this.unknownRootIdentity = false;
     this.committedDocument = undefined;
     this.scripts.clear();
     this.scriptMetadataBudgetOmissionsById.clear();
@@ -122,6 +124,10 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
   }
 
   ingest(event: CdpEvent): void {
+    if (event.method === "Page.frameNavigated") {
+      handlers.handleFrameNavigated(this, event.params);
+      return;
+    }
     const params = recordValue(event.params);
     if (params === undefined) return;
     switch (event.method) {
@@ -157,9 +163,6 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
         break;
       case "Runtime.consoleAPICalled":
         handlers.handleConsoleAPICalled(this, params);
-        break;
-      case "Page.frameNavigated":
-        handlers.handleFrameNavigated(this, params);
         break;
       case "Network.webSocketCreated":
         handlers.handleWebSocketCreated(this, params);

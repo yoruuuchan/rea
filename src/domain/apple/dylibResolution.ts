@@ -114,6 +114,8 @@ export type DylibTreeEntry =
 
 /** Read-only, lazily probed view of the analyzed root. Paths are root-relative. */
 export interface DylibTreeView {
+  /** Map an absolute source path only when it is spelled beneath this root. */
+  rootRelativePath(absolutePath: string): string | undefined;
   entry(path: string): Promise<DylibTreeEntry | undefined>;
   image(path: string): Promise<MachoImageFacts>;
 }
@@ -252,6 +254,24 @@ interface CandidateTemplate {
   readonly rpathOwner: string | null;
 }
 
+const expandCandidatePath = (
+  raw: string,
+  ownerDirectory: string,
+  context: ProcessContext,
+): Expansion =>
+  expandPrefix(raw, {
+    ownerDirectory,
+    executable: context.executable,
+    rootRelativePath: (absolutePath) =>
+      context.view.rootRelativePath(absolutePath),
+  });
+
+const appendRpath = (base: string, rest: string): string => {
+  if (base === "") return rest;
+  if (base === "/") return `/${rest}`;
+  return `${base.replace(/\/+$/u, "")}/${rest}`;
+};
+
 const candidateTemplates = (
   dependency: MachoDependency,
   loader: string,
@@ -266,10 +286,7 @@ const candidateTemplates = (
         : "literal";
     return [
       {
-        expansion: expandPrefix(name, {
-          ownerDirectory: directoryOf(loader),
-          executable: context.executable,
-        }),
+        expansion: expandCandidatePath(name, directoryOf(loader), context),
         source,
         rpath: null,
         rpathOwner: null,
@@ -280,16 +297,17 @@ const candidateTemplates = (
   const owners = [...(context.loaded.get(loader)?.chain ?? [loader])].reverse();
   return owners.flatMap((owner) =>
     (context.loaded.get(owner)?.slice.rpaths ?? []).map((rpath) => {
-      const base = expandPrefix(rpath, {
-        ownerDirectory: directoryOf(owner),
-        executable: context.executable,
-      });
+      const base = expandCandidatePath(rpath, directoryOf(owner), context);
+      const lookupPath = base.scope === "target" ? base.lookupPath : undefined;
       const expansion: Expansion = {
         scope: base.scope,
         path:
-          base.scope === "outside"
-            ? `${base.path.replace(/\/+$/u, "")}/${rest}`
+          base.scope === "outside" || lookupPath !== undefined
+            ? appendRpath(base.path, rest)
             : `${base.path}${base.path === "" ? "" : "/"}${rest}`,
+        ...(lookupPath === undefined
+          ? {}
+          : { lookupPath: appendRpath(lookupPath, rest) }),
       };
       return { expansion, source: "rpath" as const, rpath, rpathOwner: owner };
     }),
@@ -310,7 +328,10 @@ const evaluateCandidate = async (
     return { ...base, outcome: "outside-target", resolved_path: null };
   if (template.expansion.scope === "undetermined")
     return { ...base, outcome: "undetermined", resolved_path: null };
-  const lookup = await resolveTreePath(context.view, template.expansion.path);
+  const lookup = await resolveTreePath(
+    context.view,
+    template.expansion.lookupPath ?? template.expansion.path,
+  );
   if (lookup.kind === "escapes")
     return { ...base, outcome: "escapes-target", resolved_path: null };
   if (lookup.kind !== "file")

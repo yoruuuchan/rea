@@ -8,21 +8,132 @@ import {
 } from "./CdpCaptureValues.js";
 import type { CdpEvent } from "./CdpConnection.js";
 
-/** Identify a top-level navigation event from its untrusted CDP envelope. */
-export const isMainFrameNavigation = (
+export type FrameSelection = "main" | "other" | "unknown";
+export type FrameParentRelation =
+  | "root"
+  | "child"
+  | "unknown"
+  | "not_applicable";
+
+/** Normalized frame identity facts shared by all selected-frame consumers. */
+export interface CdpFrameIdentity {
+  readonly applicability: "applicable" | "not_applicable";
+  readonly selection: FrameSelection;
+  readonly isRootReplacement: boolean;
+  readonly frameId: string | null;
+  readonly identityIssue:
+    | "missing_params"
+    | "invalid_params"
+    | "missing_frame"
+    | "missing_id"
+    | "invalid_id"
+    | null;
+  readonly parentRelation: FrameParentRelation;
+  readonly parentId: string | null;
+  readonly parentIssue:
+    | "invalid_parent_id"
+    | "self_parent"
+    | "main_frame_has_parent"
+    | null;
+}
+
+const nonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+const identityIssueFor = (
+  navigated: boolean,
+  frame: UnknownRecord | undefined,
+  rawId: unknown,
+): CdpFrameIdentity["identityIssue"] => {
+  if (navigated && frame === undefined) return "missing_frame";
+  if (rawId === undefined) return "missing_id";
+  return nonEmptyString(rawId) === undefined ? "invalid_id" : null;
+};
+
+const parentFacts = (
+  navigated: boolean,
+  frame: UnknownRecord | undefined,
+): Pick<CdpFrameIdentity, "parentRelation" | "parentId" | "parentIssue"> => {
+  if (!navigated)
+    return {
+      parentRelation: "not_applicable",
+      parentId: null,
+      parentIssue: null,
+    };
+  if (frame === undefined)
+    return { parentRelation: "unknown", parentId: null, parentIssue: null };
+  if (!("parentId" in frame))
+    return { parentRelation: "root", parentId: null, parentIssue: null };
+  const parentId = nonEmptyString(frame.parentId);
+  return parentId === undefined || parentId === nonEmptyString(frame.id)
+    ? {
+        parentRelation: "unknown",
+        parentId: null,
+        parentIssue:
+          parentId === undefined ? "invalid_parent_id" : "self_parent",
+      }
+    : { parentRelation: "child", parentId, parentIssue: null };
+};
+
+/** Parse required frame identity separately from the optional parent fact. */
+export const cdpFrameIdentity = (
   event: CdpEvent,
   mainFrameId: string,
-): boolean => {
+): CdpFrameIdentity => {
+  const navigated = event.method === "Page.frameNavigated";
+  const requested = event.method === "Page.frameRequestedNavigation";
+  const sameDocument = event.method === "Page.navigatedWithinDocument";
+  if (!navigated && !requested && !sameDocument)
+    return {
+      applicability: "not_applicable",
+      selection: "unknown",
+      isRootReplacement: false,
+      frameId: null,
+      identityIssue: null,
+      parentRelation: "not_applicable",
+      parentId: null,
+      parentIssue: null,
+    };
   const params = recordValue(event.params);
-  if (params === undefined) return false;
-  const frameId =
-    event.method === "Page.frameNavigated"
-      ? cdpStringValue(recordValue(params.frame)?.id)
-      : event.method === "Page.frameRequestedNavigation" ||
-          event.method === "Page.navigatedWithinDocument"
-        ? cdpStringValue(params.frameId)
-        : undefined;
-  return frameId === mainFrameId;
+  if (params === undefined)
+    return {
+      applicability: "applicable",
+      selection: "unknown",
+      isRootReplacement: false,
+      frameId: null,
+      identityIssue:
+        event.params === undefined ? "missing_params" : "invalid_params",
+      parentRelation: "not_applicable",
+      parentId: null,
+      parentIssue: null,
+    };
+  const frame = navigated ? recordValue(params.frame) : undefined;
+  const rawId = navigated ? frame?.id : params.frameId;
+  const frameId = nonEmptyString(rawId);
+  const selection =
+    frameId === undefined
+      ? "unknown"
+      : frameId === mainFrameId
+        ? "main"
+        : "other";
+  const identityIssue = identityIssueFor(navigated, frame, rawId);
+  const parent = parentFacts(navigated, frame);
+  return {
+    applicability: "applicable",
+    selection,
+    isRootReplacement:
+      selection === "other" && parent.parentRelation === "root",
+    frameId: frameId ?? null,
+    identityIssue,
+    parentRelation: parent.parentRelation,
+    parentId: parent.parentId,
+    parentIssue:
+      selection === "main" &&
+      (parent.parentRelation === "child" ||
+        parent.parentIssue === "self_parent")
+        ? "main_frame_has_parent"
+        : parent.parentIssue,
+  };
 };
 
 export const firstCallFrame = (

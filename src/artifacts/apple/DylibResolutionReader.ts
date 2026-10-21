@@ -1,6 +1,6 @@
 import type { BigIntStats } from "node:fs";
 import { lstat, readlink, realpath } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { resolveTreePath } from "../../domain/apple/dyldPaths.js";
@@ -36,9 +36,24 @@ class FilesystemTreeView implements DylibTreeView {
 
   constructor(
     private readonly root: string,
+    private readonly sourceRoot: string,
     private readonly files: DylibFileAccess,
     private readonly signal?: AbortSignal,
   ) {}
+
+  rootRelativePath(absolutePath: string): string | undefined {
+    const roots = isAbsolute(this.sourceRoot)
+      ? [this.root, this.sourceRoot]
+      : [this.root];
+    for (let root of roots) {
+      while (root.length > 1 && root.endsWith(sep)) root = root.slice(0, -1);
+      if (absolutePath === root) return "";
+      const prefix = root === sep ? sep : `${root}${sep}`;
+      if (absolutePath.startsWith(prefix))
+        return absolutePath.slice(prefix.length).split(sep).join("/");
+    }
+    return undefined;
+  }
 
   entry(path: string): Promise<DylibTreeEntry | undefined> {
     const cached = this.#entries.get(path);
@@ -113,7 +128,12 @@ export const traceDylibResolution = async (options: {
         .split(sep)
         .join("/");
       assertArtifactReadActive(options.signal);
-      const view = new FilesystemTreeView(root, files, options.signal);
+      const view = new FilesystemTreeView(
+        root,
+        options.rootPath,
+        files,
+        options.signal,
+      );
       const { roots: requested, unclassified } =
         parsed.data.roots !== undefined
           ? { roots: parsed.data.roots, unclassified: [] }

@@ -68,7 +68,13 @@ export const joinPath = (directory: string, rest: string): string =>
   directory === "" ? rest : rest === "" ? directory : `${directory}/${rest}`;
 
 export type Expansion =
-  | { readonly scope: "target"; readonly path: string }
+  | {
+      readonly scope: "target";
+      /** Source-facing expansion retained in candidate Evidence. */
+      readonly path: string;
+      /** Root-relative lookup identity when `path` is an absolute source path. */
+      readonly lookupPath?: string;
+    }
   | { readonly scope: "outside"; readonly path: string }
   | { readonly scope: "undetermined"; readonly path: string };
 
@@ -78,6 +84,7 @@ export const expandPrefix = (
   context: {
     readonly ownerDirectory: string;
     readonly executable: string | null;
+    readonly rootRelativePath: (absolutePath: string) => string | undefined;
   },
 ): Expansion => {
   const variable = /^@(executable_path|loader_path)(?:\/(.*))?$/u.exec(raw);
@@ -92,7 +99,12 @@ export const expandPrefix = (
           path: joinPath(directoryOf(context.executable), rest),
         };
   }
-  if (raw.startsWith("/")) return { scope: "outside", path: raw };
+  if (raw.startsWith("/")) {
+    const lookupPath = context.rootRelativePath(raw);
+    return lookupPath === undefined
+      ? { scope: "outside", path: raw }
+      : { scope: "target", path: raw, lookupPath };
+  }
   return { scope: "undetermined", path: raw };
 };
 

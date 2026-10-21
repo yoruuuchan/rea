@@ -4,19 +4,22 @@ import type { DecodeIssue } from "./AppleDispatchDecodeFacts.js";
 import type { FacetDecodeFacts } from "./AppleDispatchDecodeFacts.js";
 
 const describeFixups = (fixups: PointerFixups): string => {
-  const unread =
-    fixups.unreadRebaseBytes > 0
-      ? `LC_DYLD_INFO rebase opcodes were not decoded (${fixups.unreadRebaseBytes} bytes)`
-      : undefined;
-  const kind =
-    fixups.kind === "chained"
-      ? `chained fixups: ${fixups.formats.join(", ") || "no fixup segments"}`
-      : fixups.kind === "dyld-info"
-        ? "LC_DYLD_INFO bind opcodes"
-        : unread === undefined
-          ? "no fixup load commands"
-          : undefined;
-  return [unread, kind].filter((line) => line !== undefined).join("; ");
+  const descriptions: string[] = [];
+  if (fixups.unreadRebaseBytes > 0)
+    descriptions.push(
+      `LC_DYLD_INFO rebase opcodes were not decoded (${fixups.unreadRebaseBytes} bytes)`,
+    );
+  if (fixups.kind === "chained")
+    descriptions.push(
+      `chained fixups: ${fixups.formats.join(", ") || "no fixup segments"}`,
+    );
+  if (fixups.legacyRebaseStreams > 0)
+    descriptions.push("LC_DYLD_INFO rebase opcodes");
+  if (fixups.legacyBindStreams > 0)
+    descriptions.push("LC_DYLD_INFO bind opcodes");
+  return descriptions.length === 0
+    ? "no fixup load commands"
+    : descriptions.join("; ");
 };
 
 /** Append the per-facet coverage of one Apple dispatch metadata decode. */

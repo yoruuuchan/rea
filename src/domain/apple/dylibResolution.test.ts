@@ -80,6 +80,7 @@ const memoryView = (
     entries.set(path, { kind: "symlink", target });
   }
   return {
+    rootRelativePath: () => undefined,
     entry: (path) => Promise.resolve(entries.get(path)),
     image: (path) => {
       const facts = files[path];

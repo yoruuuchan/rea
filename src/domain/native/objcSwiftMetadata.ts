@@ -199,10 +199,24 @@ export const objcCategorySchema = z.strictObject({
   evidence: z.array(nativeMetadataEvidenceSchema).min(1),
 });
 
+/** Exact Mach-O import binding observed at a pointer slot. */
+export const machoImportBindingSchema = z.strictObject({
+  requested_address: z.string().min(1),
+  symbol: z.string().min(1),
+  binding_source: z.enum(["chained", "bind", "weak", "lazy"]),
+  library_ordinal: z.number().int().min(-3).max(Number.MAX_SAFE_INTEGER),
+  library: z.string().nullable(),
+  weak: z.boolean(),
+  addend: z.string().regex(/^-?\d+$/u),
+});
+export type MachoImportBinding = z.infer<typeof machoImportBindingSchema>;
+
 /** Swift protocol conformance and its associated witness-table location. */
 export const swiftConformanceSchema = z.strictObject({
-  type_name: z.string().min(1),
-  protocol_name: z.string().min(1),
+  type_name: z.string().min(1).nullable(),
+  type_binding: machoImportBindingSchema.nullable().optional(),
+  protocol_name: z.string().min(1).nullable(),
+  protocol_binding: machoImportBindingSchema.nullable().optional(),
   module: z.string().nullable(),
   witness_table: nativeMetadataLocationSchema,
   location: nativeMetadataLocationSchema,
@@ -218,6 +232,7 @@ export const swiftDispatchSlotSchema = z.strictObject({
   requirement: z.string().nullable(),
   implementation: z.string().nullable(),
   implementation_address: z.string().nullable(),
+  implementation_binding: machoImportBindingSchema.nullable().optional(),
   thunk_address: z.string().nullable(),
   location: nativeMetadataLocationSchema,
   decode: nativeMetadataDecodeSchema,
@@ -231,6 +246,8 @@ export const relativePointerSchema = z.strictObject({
   displacement: z.number().int(),
   indirectable: z.boolean(),
   indirect: z.boolean().nullable(),
+  encoding_tag: z.number().int().nonnegative().optional(),
+  binding: machoImportBindingSchema.optional(),
   decode: nativeMetadataDecodeSchema,
   evidence: z.array(nativeMetadataEvidenceSchema).min(1),
 });
@@ -253,17 +270,7 @@ export const nativeMetadataCoverageSchema = z.strictObject({
   decoded: z.number().int().nonnegative(),
 });
 
-/** Exact Mach-O import binding observed at a caller-selected pointer slot. */
-export const objcClassImportBindingSchema = z.strictObject({
-  requested_address: z.string().min(1),
-  symbol: z.string().min(1),
-  binding_source: z.enum(["chained", "bind", "weak", "lazy"]),
-  library_ordinal: z.number().int().min(-3).max(Number.MAX_SAFE_INTEGER),
-  library: z.string().nullable(),
-  weak: z.boolean(),
-  addend: z.string().regex(/^-?\d+$/u),
-});
-export const objcClassImportIdentitySchema = objcClassImportBindingSchema.omit({
+export const objcClassImportIdentitySchema = machoImportBindingSchema.omit({
   requested_address: true,
 });
 export const objcClassImportBindingCoverageSchema = z.strictObject({
@@ -273,9 +280,6 @@ export const objcClassImportBindingCoverageSchema = z.strictObject({
   examined: z.number().int().nonnegative(),
   decoded: z.number().int().nonnegative(),
 });
-export type ObjcClassImportBinding = z.infer<
-  typeof objcClassImportBindingSchema
->;
 export type ObjcClassImportBindingCoverage = z.infer<
   typeof objcClassImportBindingCoverageSchema
 >;
@@ -348,7 +352,7 @@ export const objcSwiftMetadataSchema = z.strictObject({
   swift_conformances: z.array(swiftConformanceSchema).default([]),
   swift_dispatch_slots: z.array(swiftDispatchSlotSchema).default([]),
   swift_symbols: z.array(swiftSymbolSchema).default([]),
-  objc_class_import_bindings: z.array(objcClassImportBindingSchema).optional(),
+  objc_class_import_bindings: z.array(machoImportBindingSchema).optional(),
   objc_class_import_binding_coverage:
     objcClassImportBindingCoverageSchema.optional(),
   target_selection: machoTargetSelectionSchema.optional(),

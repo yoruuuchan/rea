@@ -25,7 +25,7 @@ import {
   initiatorLocation,
   integerOrNull,
   isJsonMediaType,
-  isMainFrameNavigation,
+  cdpFrameIdentity,
 } from "./CdpCaptureEventHelpers.js";
 import type { CdpCaptureEventsState } from "./CdpCaptureEventState.js";
 import {
@@ -607,25 +607,47 @@ export const handleWebSocketCreated = (
 
 export const handleFrameNavigated = (
   state: CdpCaptureEventsState,
-  params: UnknownRecord,
+  params: unknown,
 ): void => {
-  const frame = recordValue(params.frame);
   if (state.mainFrameId === undefined) return;
-  if (
-    !isMainFrameNavigation(
-      { method: "Page.frameNavigated", params },
-      state.mainFrameId,
+  const identity = cdpFrameIdentity(
+    { method: "Page.frameNavigated", params },
+    state.mainFrameId,
+  );
+  if (identity.identityIssue !== null || identity.parentIssue !== null) {
+    state.completeness.exclude("frames", "invalid_protocol_value");
+    if (
+      identity.selection === "unknown" &&
+      identity.parentRelation === "child" &&
+      identity.identityIssue !== null
     )
-  )
+      return;
+    state.unknownRootIdentity = true;
     return;
+  }
+  if (identity.selection === "other" && identity.parentRelation === "child")
+    return;
+  if (identity.selection === "unknown") {
+    state.completeness.exclude("frames", "invalid_protocol_value");
+    state.unknownRootIdentity = true;
+    return;
+  }
+  if (identity.selection === "other" && !identity.isRootReplacement) {
+    state.completeness.exclude("frames", "invalid_protocol_value");
+    state.unknownRootIdentity = true;
+    return;
+  }
+  const frame = recordValue(recordValue(params)?.frame);
   const rawUrl = cdpStringValue(frame?.url);
   const loaderId = cdpStringValue(frame?.loaderId);
   // `frameNavigated` re-fires for a document already reported (same URL and
   // loader). Treating that as a navigation aborted a valid capture with
   // `target_changed`, which is a false claim that the target moved.
-  const document = `${String(loaderId ?? "")}\0${String(rawUrl ?? "")}`;
+  const document = `${String(identity.frameId ?? "")}\0${String(loaderId ?? "")}\0${String(rawUrl ?? "")}`;
   if (state.committedDocument === document) return;
   state.committedDocument = document;
+  if (identity.isRootReplacement)
+    state.mainFrameId = identity.frameId ?? undefined;
   state.navigationDuringCapture = true;
   if (
     isHttpUrl(rawUrl) &&

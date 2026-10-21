@@ -26,6 +26,7 @@ export interface CdpCaptureEventsState {
   readonly completeness: CdpCaptureCompleteness;
   originViolation: boolean;
   navigationDuringCapture: boolean;
+  unknownRootIdentity: boolean;
   mainFrameId: string | undefined;
   /**
    * Identity of the document last observed in the main frame. `frameNavigated`

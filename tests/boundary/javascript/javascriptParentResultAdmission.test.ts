@@ -1,0 +1,100 @@
+import { createHash } from "node:crypto";
+import { afterAll, expect, it, vi } from "vitest";
+
+// Give the parent a stable 64 MiB result envelope after its transfer reserve.
+// The child analyzer remains a real separately owned Node process with its
+// normal heap and real transfer files/descriptors.
+vi.mock("node:v8", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:v8")>();
+  return {
+    ...actual,
+    getHeapStatistics: () => ({
+      ...actual.getHeapStatistics(),
+      heap_size_limit: process.memoryUsage().heapUsed + 320 * 1024 * 1024,
+    }),
+  };
+});
+
+import { JavaScriptAnalysisWorker } from "../../../src/javascript/analysis/JavaScriptAnalysisWorker.js";
+import { AnalysisResourceConstraintError } from "../../../src/domain/analysisErrorCore.js";
+import type { JavaScriptArtifactFile } from "../../../src/domain/javascript/javascriptArtifactFiles.js";
+
+afterAll(() => {
+  vi.doUnmock("node:v8");
+  vi.resetModules();
+});
+
+it("retains module facts and declines only the graph when its real transfer exceeds parent admission", async () => {
+  const methodsCount = 600;
+  const text = Array.from(
+    { length: methodsCount },
+    (_, index) =>
+      `export function method_${String(index)}(input) { const value = input + ${String(index)}; const pair = { value }; return pair.value; }`,
+  ).join("\n");
+  const file: JavaScriptArtifactFile = {
+    path: "a-large.mjs",
+    sha256: createHash("sha256").update(text).digest("hex"),
+    container_sha256: "1".repeat(64),
+    bytes: Buffer.byteLength(text),
+    inventory_artifact_id: "parent-admission-fixture",
+    kind: "javascript",
+    unpacked: false,
+    text: { included: true, value: text },
+  };
+  const worker = new JavaScriptAnalysisWorker({
+    heapMb: 1024,
+    timeoutMs: 30_000,
+  });
+  try {
+    const result = await worker.analyze(file, {
+      nodes: 20_000,
+      unknowns: 20_000,
+    });
+    if (result.ok)
+      throw new Error(
+        "Expected the parent to decline the large semantic graph",
+      );
+    const { error, javascript, module, projection } = result.error;
+    expect(javascript?.parse_status).toBe("complete");
+    expect(module?.callables).toHaveLength(methodsCount);
+    expect(projection).toBeNull();
+    expect(error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      resource: "memory",
+      reason:
+        "Semantic graph for a-large.mjs exceeds the parent's remaining result budget; static and module facts were retained",
+    });
+    if (!(error instanceof AnalysisResourceConstraintError))
+      throw new Error("Expected a typed resource constraint");
+    expect(error.reportedLimits).toMatchObject(
+      process.versions.bun === undefined
+        ? { worker_old_space_mb: 1024 }
+        : { worker_heap_limit_bytes: null },
+    );
+    const limits = error.reportedLimits;
+    if (limits === null)
+      throw new Error("Parent admission omitted its measured limits");
+    expect(limits.parent_result_budget_bytes).toBeLessThanOrEqual(
+      64 * 1024 * 1024,
+    );
+    expect(limits.parent_result_budget_bytes).toBeGreaterThan(0);
+    const moduleEstimate = limits.module_retention_estimate_bytes;
+    const graphEstimate = limits.graph_retention_estimate_bytes;
+    const available = limits.parent_available_result_budget_bytes;
+    expect(typeof moduleEstimate).toBe("number");
+    expect(typeof graphEstimate).toBe("number");
+    expect(typeof available).toBe("number");
+    if (
+      typeof moduleEstimate !== "number" ||
+      typeof graphEstimate !== "number" ||
+      typeof available !== "number"
+    )
+      throw new Error(
+        "Parent admission omitted its measured transfer estimates",
+      );
+    expect(moduleEstimate).toBeLessThanOrEqual(available);
+    expect(moduleEstimate + graphEstimate).toBeGreaterThan(available);
+  } finally {
+    await worker.close();
+  }
+});

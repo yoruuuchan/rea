@@ -120,6 +120,236 @@ const fixture = (
 };
 const provenance = { path: "/fixture/app", sha256: "a".repeat(64) };
 
+const swiftExternalSwiftBindingImage = (
+  boundField: "protocol" | "type" = "protocol",
+) => {
+  const bytes = fixture();
+  const sectionCommand = 32;
+  bytes.writeUInt32LE(232, sectionCommand + 4);
+  bytes.writeUInt32LE(2, sectionCommand + 64);
+  bytes.write("__swift5_proto", 184);
+  bytes.write("__DATA", 200);
+  bytes.writeBigUInt64LE(base + 0xa00n, 216);
+  bytes.writeBigUInt64LE(4n, 224);
+  bytes.writeUInt32LE(0xa00, 232);
+  bytes.writeUInt32LE(2, 236);
+
+  const dyldInfo = sectionCommand + 232;
+  bytes.writeUInt32LE(0x80000022, dyldInfo);
+  bytes.writeUInt32LE(48, dyldInfo + 4);
+  bytes.writeUInt32LE(0xf00, dyldInfo + 16);
+  const bind = Buffer.from([
+    0x11, // SET_DYLIB_ORDINAL_IMM 1
+    0x40,
+    ...Buffer.from(`${boundField === "protocol" ? "_$sSQMp" : "_$sSiMn"}\0`),
+    0x70,
+    0x80,
+    0x16, // SET_SEGMENT_AND_OFFSET_ULEB segment 0 + offset 0xb00
+    0x90,
+    0x00,
+  ]);
+  bytes.writeUInt32LE(bind.length, dyldInfo + 20);
+  const dylibCommand = dyldInfo + 48;
+  bytes.writeUInt32LE(0xc, dylibCommand); // LC_LOAD_DYLIB
+  bytes.writeUInt32LE(56, dylibCommand + 4);
+  bytes.writeUInt32LE(24, dylibCommand + 8);
+  bytes.write("/usr/lib/libswiftCore.dylib\0", dylibCommand + 24);
+  bytes.writeUInt32LE(3, 16); // segment, dyld info, and dependent dylib
+  bytes.writeUInt32LE(336, 20);
+  bind.copy(bytes, 0xf00);
+
+  // Conformance at 0xa10: one reference is an indirect relative pointer to
+  // the import slot at 0xb00; the sibling reference points to local metadata.
+  bytes.writeInt32LE(0x10, 0xa00);
+  bytes.writeInt32LE(boundField === "protocol" ? 0x1ec : 0xec, 0xa14);
+  bytes.writeInt32LE(0, 0xa18); // Nullable witness-table pattern.
+  bytes.writeUInt32LE(boundField === "protocol" ? 0 : 8, 0xa1c);
+  bytes.writeInt32LE(boundField === "protocol" ? 0xf1 : 0x2f0, 0xa10); // Protocol reference: imported indirect slot or local descriptor.
+  bytes.writeBigUInt64LE(0n, 0xb00); // Bound slot has no in-image pointer.
+  bytes.writeUInt32LE(16, 0xc00);
+  bytes.writeInt32LE(0x1f8, 0xc08);
+  if (boundField === "type") {
+    bytes.writeUInt32LE(3, 0xd00);
+    bytes.writeInt32LE(0xf8, 0xd08);
+    bytes.write("Equatable\0", 0xe00);
+  } else {
+    bytes.write("Widget\0", 0xe00);
+  }
+  return bytes;
+};
+
+const swiftBoundWitnessSlotImage = () => {
+  const bytes = fixture();
+  const sectionCommand = 32;
+  bytes.writeUInt32LE(232, sectionCommand + 4);
+  bytes.writeUInt32LE(2, sectionCommand + 64);
+  bytes.write("__swift5_proto", 184);
+  bytes.write("__DATA", 200);
+  bytes.writeBigUInt64LE(base + 0xa00n, 216);
+  bytes.writeBigUInt64LE(4n, 224);
+  bytes.writeUInt32LE(0xa00, 232);
+  bytes.writeUInt32LE(2, 236);
+
+  const dyldInfo = sectionCommand + 232;
+  bytes.writeUInt32LE(0x80000022, dyldInfo);
+  bytes.writeUInt32LE(48, dyldInfo + 4);
+  bytes.writeUInt32LE(0xf20, dyldInfo + 8);
+  bytes.writeUInt32LE(6, dyldInfo + 12);
+  bytes.writeUInt32LE(0xf00, dyldInfo + 16);
+  const bind = Buffer.from([
+    0x11,
+    0x40,
+    ...Buffer.from("_externalWitnessImpl\0"),
+    0x70,
+    0x88,
+    0x1c, // SET_SEGMENT_AND_OFFSET_ULEB segment 0 + witness slot 0xe08
+    0x90,
+    0x00,
+  ]);
+  bytes.writeUInt32LE(bind.length, dyldInfo + 20);
+  const dylibCommand = dyldInfo + 48;
+  bytes.writeUInt32LE(0xc, dylibCommand);
+  bytes.writeUInt32LE(56, dylibCommand + 4);
+  bytes.writeUInt32LE(24, dylibCommand + 8);
+  bytes.write("/usr/lib/libswiftCore.dylib\0", dylibCommand + 24);
+  bytes.writeUInt32LE(3, 16);
+  bytes.writeUInt32LE(336, 20);
+  bind.copy(bytes, 0xf00);
+  // One unrelated, valid local rebase proves unmatched structural pointers
+  // stay known-raw after the complete legacy stream is walked.
+  Buffer.from([0x11, 0x20, 0xa0, 0x1c, 0x51, 0]).copy(bytes, 0xf20);
+
+  bytes.writeInt32LE(0x10, 0xa00);
+  bytes.writeInt32LE(0x1ec, 0xa14);
+  bytes.writeInt32LE(0x3e8, 0xa18);
+  bytes.writeUInt32LE(0, 0xa1c);
+  bytes.writeInt32LE(0x2f0, 0xa10);
+  bytes.writeUInt32LE(16, 0xc00);
+  bytes.writeInt32LE(0x238, 0xc08);
+  bytes.writeUInt32LE(3, 0xd00);
+  bytes.writeInt32LE(0x148, 0xd08);
+  bytes.writeUInt32LE(0, 0xd0c);
+  bytes.writeUInt32LE(1, 0xd10);
+  bytes.writeUInt32LE(1, 0xd18);
+  bytes.writeBigUInt64LE(base + 0xa10n, 0xe00);
+  bytes.write("Widget\0", 0xe40);
+  bytes.write("Equatable\0", 0xe50);
+  return bytes;
+};
+
+describe("Swift imported protocol references", () => {
+  it("preserves bind identity without reading VM address zero and marks coverage partial", () => {
+    const result = decodeAppleDispatchMetadata(
+      swiftExternalSwiftBindingImage(),
+      100,
+      provenance,
+    );
+
+    expect(result.swift_conformances).toMatchObject([
+      {
+        type_name: "Widget",
+        protocol_name: null,
+        protocol_binding: {
+          symbol: "_$sSQMp",
+          requested_address: "0x100000b00",
+        },
+        decode: { status: "partial" },
+      },
+    ]);
+    expect(
+      result.relative_pointers.find(
+        ({ field }) => field.address === "0x100000a10",
+      ),
+    ).toMatchObject({
+      target: { address: null, file_offset: null },
+      binding: { symbol: "_$sSQMp" },
+      decode: { status: "partial" },
+    });
+    expect(
+      result.coverage.find(
+        ({ facet }) => facet === "swift_conformances_static_witness_slots",
+      ),
+    ).toMatchObject({ status: "partial" });
+  });
+
+  it("preserves an indirect imported type reference as a typed binding", () => {
+    const result = decodeAppleDispatchMetadata(
+      swiftExternalSwiftBindingImage("type"),
+      100,
+      provenance,
+    );
+
+    expect(result.swift_conformances).toMatchObject([
+      {
+        type_name: null,
+        type_binding: {
+          symbol: "_$sSiMn",
+          requested_address: "0x100000b00",
+        },
+        protocol_name: "Equatable",
+        protocol_binding: null,
+        decode: { status: "partial" },
+      },
+    ]);
+    expect(
+      result.coverage.find(
+        ({ facet }) => facet === "swift_conformances_static_witness_slots",
+      ),
+    ).toMatchObject({ status: "partial" });
+  });
+
+  it("reports only the legacy stream mechanisms actually examined", () => {
+    const bytes = swiftBoundWitnessSlotImage();
+    const dyldInfo = 32 + 232;
+    bytes.writeUInt32LE(0, dyldInfo + 16);
+    bytes.writeUInt32LE(0, dyldInfo + 20);
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    expect(
+      result.coverage.find(({ facet }) => facet === "pointer_fixups"),
+    ).toEqual({
+      facet: "pointer_fixups",
+      status: "complete",
+      reason: "LC_DYLD_INFO rebase opcodes",
+      examined: 1,
+      decoded: 1,
+    });
+  });
+
+  it("retains an unmatched local witness header beside a legacy rebase and preserves a bound implementation", () => {
+    const result = decodeAppleDispatchMetadata(
+      swiftBoundWitnessSlotImage(),
+      100,
+      provenance,
+    );
+
+    expect(result.swift_conformances).toMatchObject([
+      {
+        type_name: "Widget",
+        protocol_name: "Equatable",
+        witness_table: { address: "0x100000e00" },
+        decode: { status: "decoded" },
+      },
+    ]);
+    expect(result.swift_dispatch_slots).toMatchObject([
+      {
+        table_kind: "witness_table",
+        slot_index: 1,
+        implementation_address: null,
+        implementation_binding: {
+          symbol: "_externalWitnessImpl",
+          requested_address: "0x100000e08",
+        },
+        decode: { status: "partial" },
+      },
+    ]);
+    expect(
+      result.coverage.find(
+        ({ facet }) => facet === "swift_conformances_static_witness_slots",
+      ),
+    ).toMatchObject({ status: "partial" });
+  });
+});
+
 const withProtocolListSection = (bytes: Buffer): Buffer => {
   const pointer = (at: number, offset: number) =>
     bytes.writeBigUInt64LE(base + BigInt(offset), at);
@@ -254,6 +484,37 @@ describe("Apple dispatch pointer fixup metadata", () => {
   });
 });
 describe("Apple dispatch binary metadata", () => {
+  it("retains structural Objective-C records when legacy rebase coverage is unknown", () => {
+    const bytes = fixture();
+    // Add LC_DYLD_INFO_ONLY with a nonempty rebase stream. Legacy rebase
+    // stream is malformed, so provenance is unknown while readable
+    // nonzero structural pointer words must remain useful.
+    bytes.writeUInt32LE(2, 16);
+    bytes.writeUInt32LE(200, 20);
+    bytes.writeUInt32LE(0x80000022, 184);
+    bytes.writeUInt32LE(48, 188);
+    bytes.writeUInt32LE(4000, 192);
+    bytes.writeUInt32LE(1, 196);
+    bytes.writeUInt8(0xf0, 4000);
+
+    const result = decodeAppleDispatchMetadata(bytes, 100, provenance);
+    expect(result.objc_classes[0]?.name).toBe("Fixture");
+    expect(result.objc_classes[0]?.methods).toMatchObject([
+      { selector: "performAction:" },
+    ]);
+    expect(result.objc_classes[0]?.decode).toMatchObject({
+      status: "partial",
+    });
+    expect(
+      result.coverage.find(
+        ({ facet }) => facet === "objc_class_method_ivar_metadata",
+      ),
+    ).toMatchObject({ status: "partial" });
+    expect(
+      result.coverage.find(({ facet }) => facet === "pointer_fixups"),
+    ).toMatchObject({ status: "partial" });
+  });
+
   it.each([false, true])(
     "decodes stripped absolute/relative method lists (relative=%s) with exact offsets",
     (relative) => {
@@ -906,7 +1167,12 @@ describe("malformed Apple dispatch metadata", () => {
     const coverage = result.coverage.find(
       ({ facet }) => facet === "swift_class_vtable_descriptors",
     );
-    expect(coverage).toMatchObject({ status: "partial", examined: 3 });
+    expect(coverage).toMatchObject({
+      status: "partial",
+      examined: 2,
+      decoded: 2,
+      reason: expect.stringContaining("class name is empty"),
+    });
   });
 
   it("rejects malformed command and section boundaries", () => {

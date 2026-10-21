@@ -5,7 +5,10 @@ import { expect, it, vi } from "vitest";
 
 import {
   withRegularFile,
+  readRegularFile,
+  RegularFileReadFailure,
   retryRegularFileCleanup,
+  retryRegularFileCleanupFailures,
 } from "../../../src/application/RegularFileRead.js";
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { RegularFileOperationCancelled } from "../../../src/filesystem/RegularFile.js";
@@ -87,6 +90,190 @@ it.each(
     }
   },
 );
+
+it("preserves a cleanup-shaped physical read rejection without borrowing its owner", async () => {
+  const root = await createTestTempDirectory(
+    "rea-file-physical-cleanup-shape-",
+  );
+  const input = join(root, "input.txt");
+  const foreignPath = join(root, "foreign.txt");
+  await writeFile(input, "input");
+  await writeFile(foreignPath, "foreign owner bytes");
+  const foreignOwner = new OwnedFileHandle(await open(foreignPath, "r"));
+  const reason = new RegularFileCleanupFailure(
+    foreignPath,
+    foreignOwner,
+    { kind: "completed", value: "foreign value" },
+    new Error("foreign cleanup failure"),
+  );
+  const probe = await open(input, "r");
+  const inputIdentity = await probe.stat();
+  const prototype = probe.constructor.prototype as {
+    read: (...arguments_: never[]) => Promise<unknown>;
+  };
+  await probe.close();
+  const originalRead = prototype.read;
+  prototype.read = async function (
+    this: typeof probe,
+    ...arguments_: never[]
+  ): Promise<unknown> {
+    const state = await this.stat();
+    if (state.dev === inputIdentity.dev && state.ino === inputIdentity.ino)
+      throw reason;
+    return originalRead.apply(this, arguments_);
+  };
+  try {
+    await expect(readRegularFile(input)).rejects.toBe(reason);
+    expect(foreignOwner.handle.fd).toBeGreaterThanOrEqual(0);
+  } finally {
+    prototype.read = originalRead;
+    await foreignOwner.close();
+  }
+});
+
+it("retries only the owned close when a cleanup-shaped physical read remains pending", async () => {
+  const root = await createTestTempDirectory(
+    "rea-file-physical-cleanup-retry-",
+  );
+  const input = join(root, "input.txt");
+  const foreignPath = join(root, "foreign.txt");
+  await writeFile(input, "input");
+  await writeFile(foreignPath, "foreign owner bytes");
+  const foreignOwner = new OwnedFileHandle(await open(foreignPath, "r"));
+  const reason = new RegularFileCleanupFailure(
+    foreignPath,
+    foreignOwner,
+    { kind: "completed", value: "foreign value" },
+    new Error("foreign cleanup failure"),
+  );
+  const controller = new AbortController();
+  const probe = await open(input, "r");
+  const inputIdentity = await probe.stat();
+  const fileHandlePrototype = probe.constructor.prototype as {
+    read: (...arguments_: never[]) => Promise<unknown>;
+  };
+  await probe.close();
+  const originalRead = fileHandlePrototype.read;
+  const ownerPrototype = OwnedFileHandle.prototype;
+  const originalClose = ownerPrototype.close;
+  let closeFailures = 0;
+  fileHandlePrototype.read = async function (
+    this: typeof probe,
+    ...arguments_: never[]
+  ): Promise<unknown> {
+    const state = await this.stat();
+    if (state.dev === inputIdentity.dev && state.ino === inputIdentity.ino) {
+      controller.abort(reason);
+      throw reason;
+    }
+    return originalRead.apply(this, arguments_);
+  };
+  ownerPrototype.close = async function (this: OwnedFileHandle): Promise<void> {
+    const state = await this.handle.stat();
+    if (state.dev === inputIdentity.dev && state.ino === inputIdentity.ino) {
+      closeFailures += 1;
+      if (closeFailures <= 2)
+        throw new Error(`owned close failure ${closeFailures}`);
+    }
+    return originalClose.call(this);
+  };
+  const resources = new ArtifactResourceScope();
+  try {
+    const failure = await readRegularFile(input, {
+      resources,
+      signal: controller.signal,
+    }).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(RegularFileCleanupFailure);
+    if (!(failure instanceof RegularFileCleanupFailure))
+      throw new Error("Expected the opened input owner to remain retained");
+    expect(failure.outcome).toMatchObject({ kind: "failed", cause: reason });
+    expect(failure.operationFailure).toBeDefined();
+
+    const retried = await retryRegularFileCleanupFailures(failure, resources);
+    expect(retried.primary).toBe(reason);
+    expect(retried.failures).toEqual([failure]);
+    expect(retried.cleanup).toBeUndefined();
+    expect(closeFailures).toBe(3);
+    expect(foreignOwner.handle.fd).toBeGreaterThanOrEqual(0);
+  } finally {
+    fileHandlePrototype.read = originalRead;
+    ownerPrototype.close = originalClose;
+    await resources.retryCleanup();
+    await foreignOwner.close();
+  }
+});
+
+it("retains physical read provenance for an opted-in caller after close retry", async () => {
+  const root = await createTestTempDirectory(
+    "rea-file-physical-cleanup-recovered-",
+  );
+  const input = join(root, "input.txt");
+  const foreignPath = join(root, "foreign.txt");
+  await writeFile(input, "input");
+  await writeFile(foreignPath, "foreign owner bytes");
+  const foreignOwner = new OwnedFileHandle(await open(foreignPath, "r"));
+  const reason = new RegularFileCleanupFailure(
+    foreignPath,
+    foreignOwner,
+    { kind: "completed", value: "foreign value" },
+    new Error("foreign cleanup failure"),
+  );
+  const controller = new AbortController();
+  const probe = await open(input, "r");
+  const inputIdentity = await probe.stat();
+  const fileHandlePrototype = probe.constructor.prototype as {
+    read: (...arguments_: never[]) => Promise<unknown>;
+  };
+  await probe.close();
+  const originalRead = fileHandlePrototype.read;
+  const ownerPrototype = OwnedFileHandle.prototype;
+  const originalClose = ownerPrototype.close;
+  let closeFailures = 0;
+  let cancellationFactoryCalls = 0;
+  fileHandlePrototype.read = async function (
+    this: typeof probe,
+    ...arguments_: never[]
+  ): Promise<unknown> {
+    const state = await this.stat();
+    if (state.dev === inputIdentity.dev && state.ino === inputIdentity.ino) {
+      controller.abort(reason);
+      throw reason;
+    }
+    return originalRead.apply(this, arguments_);
+  };
+  ownerPrototype.close = async function (this: OwnedFileHandle): Promise<void> {
+    const state = await this.handle.stat();
+    if (state.dev === inputIdentity.dev && state.ino === inputIdentity.ino) {
+      closeFailures += 1;
+      if (closeFailures === 1) throw new Error("transient owned close failure");
+    }
+    return originalClose.call(this);
+  };
+  const resources = new ArtifactResourceScope();
+  try {
+    const failure = await readRegularFile(input, {
+      resources,
+      signal: controller.signal,
+      cancellationFailure: (abortReason) => {
+        cancellationFactoryCalls += 1;
+        return new Error("cancelled", { cause: abortReason });
+      },
+    }).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(RegularFileReadFailure);
+    if (!(failure instanceof RegularFileReadFailure))
+      throw new Error("Expected the physical read failure marker");
+    expect(failure.operationCause).toBe(reason);
+    expect(cancellationFactoryCalls).toBe(0);
+    expect(closeFailures).toBe(2);
+    expect(resources.hasPending).toBe(false);
+    expect(foreignOwner.handle.fd).toBeGreaterThanOrEqual(0);
+  } finally {
+    fileHandlePrototype.read = originalRead;
+    ownerPrototype.close = originalClose;
+    await resources.retryCleanup();
+    await foreignOwner.close();
+  }
+});
 
 it.each([false, true])(
   "preserves a nested read cancellation with the same signal=%s",

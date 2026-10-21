@@ -74,7 +74,10 @@ export const retryClientConfigurationCleanup = async (
       if (retried.cleanup !== undefined) observations.push(retried.cleanup);
       primary = retried.primary;
       const last = retried.failures.at(-1)!;
-      nested = last.outcome.kind === "failed" ? last.outcome.cause : undefined;
+      nested =
+        last.operationFailure === undefined && last.outcome.kind === "failed"
+          ? last.outcome.cause
+          : undefined;
     } else {
       const released = await resources.release({
         kind: "lease",

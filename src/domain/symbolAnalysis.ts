@@ -1,7 +1,7 @@
 import type { JsonValue } from "./jsonValue.js";
 import type { AddressedName } from "./hopperValues.js";
 import type {
-  ObjcClassImportBinding,
+  MachoImportBinding,
   ObjcClassImportBindingCoverage,
 } from "./native/objcSwiftMetadata.js";
 import {
@@ -31,7 +31,7 @@ export interface ObjcClassDiscoveryCoverage {
 }
 
 export interface ObjcClassImportBindingScan {
-  readonly bindings: readonly ObjcClassImportBinding[];
+  readonly bindings: readonly MachoImportBinding[];
   readonly coverage: ObjcClassDiscoveryCoverage;
 }
 
@@ -247,22 +247,19 @@ const uniqueByAddressAndName = (
 };
 
 interface ObjcClassOutputEntry extends AddressedName {
-  readonly binding_identity?: Omit<
-    ObjcClassImportBinding,
-    "requested_address"
-  > & {
+  readonly binding_identity?: Omit<MachoImportBinding, "requested_address"> & {
     readonly slot_addresses: readonly string[];
   };
 }
 
 const coalesceBoundClassAliases = (
   candidates: readonly AddressedName[],
-  bindings: readonly ObjcClassImportBinding[],
+  bindings: readonly MachoImportBinding[],
 ): ObjcClassOutputEntry[] => {
   const bindingsByAddress = new Map(
     bindings.map((binding) => [binding.requested_address, binding]),
   );
-  const bindingKey = (binding: ObjcClassImportBinding) =>
+  const bindingKey = (binding: MachoImportBinding) =>
     JSON.stringify([
       binding.symbol,
       binding.binding_source,
@@ -271,7 +268,7 @@ const coalesceBoundClassAliases = (
       binding.weak,
       binding.addend,
     ]);
-  const groupedBindings = new Map<string, ObjcClassImportBinding[]>();
+  const groupedBindings = new Map<string, MachoImportBinding[]>();
   for (const binding of bindings) {
     const key = bindingKey(binding);
     const existing = groupedBindings.get(key);

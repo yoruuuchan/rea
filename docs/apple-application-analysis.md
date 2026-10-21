@@ -228,9 +228,13 @@ root supplies. Every edge below it has `loader_conditional: true`, and a
 request that reuses it by install name is `conditional` too. Findings on those
 edges say that they apply only if the conditional image loads.
 
-Absolute install names such as `/usr/lib/libSystem.B.dylib` are
-`outside-target`. On macOS 11 and later most of them live in the dyld shared
-cache rather than on disk, so REA does not check them against the host.
+Absolute install names that name a path beneath the analyzed root are checked
+within that root, with symlinks and `..` resolved by the same bounded tree
+resolver. Absolute paths outside the root, such as
+`/usr/lib/libSystem.B.dylib`, are `outside-target`; on macOS 11 and later most
+system libraries live in the dyld shared cache rather than on disk, so REA does
+not check them against the host. Mach-O path strings are not converted from
+`file:` URLs or looked up through unrelated host paths.
 
 `findings` are derived, not observed:
 

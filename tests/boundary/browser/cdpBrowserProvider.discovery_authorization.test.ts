@@ -5,8 +5,30 @@ import {
   inspectWebPageInputSchema,
   listBrowserTargetsInputSchema,
 } from "../../../src/domain/browserObservation.js";
-import { startFakeCdpBrowser } from "../../fixtures/fakeCdpBrowser.js";
-import { trackBrowser } from "./cdpBrowserProvider.support.js";
+import {
+  startFakeCdpBrowser,
+  type FakeOptions,
+} from "../../fixtures/fakeCdpBrowser.js";
+import { frameNavigated, trackBrowser } from "./cdpBrowserProvider.support.js";
+
+const inspectWithNetworkEvents = async (
+  commandEvents: NonNullable<FakeOptions["commandEvents"]>,
+) => {
+  const browser = await startFakeCdpBrowser({
+    eventsBeforeReply: ["Network.enable"],
+    commandEvents,
+  });
+  trackBrowser(browser);
+  const result = await new CdpBrowserProvider().inspectPage(
+    inspectWebPageInputSchema.parse({
+      cdp_endpoint: browser.endpoint,
+      allowed_origins: [browser.allowedOrigin],
+      target_id: "allowed-page",
+      observation_ms: 1,
+    }),
+  );
+  return { browser, result };
+};
 
 describe("CdpBrowserProvider: discovery authorization 1", () => {
   it("discovers pages and captures a selected target without an origin list", async () => {
@@ -155,6 +177,107 @@ describe("CdpBrowserProvider: discovery authorization 1", () => {
     expect(
       browser.commands.every(({ sessionId }) => sessionId === undefined),
     ).toBe(true);
+  });
+});
+
+it("fails with a protocol error after an unidentifiable frame event and detaches", async () => {
+  const { browser, result } = await inspectWithNetworkEvents((command) =>
+    command.method === "Network.enable"
+      ? [
+          {
+            method: "Page.frameNavigated",
+            ...(command.sessionId === undefined
+              ? {}
+              : { sessionId: command.sessionId }),
+            params: undefined,
+          },
+        ]
+      : undefined,
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { _tag: "BrowserObservationError", reason: "protocol_error" },
+  });
+  await expect.poll(() => browser.activeConnectionCount()).toBe(0);
+});
+
+it("retains malformed child-frame identity as frame coverage while completing capture", async () => {
+  const { browser, result } = await inspectWithNetworkEvents((command) =>
+    command.method === "Network.enable"
+      ? [
+          frameNavigated(command, {
+            id: 3,
+            parentId: "frame-main",
+            url: "https://outside.invalid/child",
+          }),
+        ]
+      : undefined,
+  );
+  if (!result.ok) throw result.error;
+  expect(result.value.completeness.unavailable_sections).toContain("frames");
+  expect(result.value.target.url).toBe(
+    `${browser.allowedOrigin}/app?token=frame-secret`,
+  );
+});
+
+it("fails capture on a contradictory self-parented frame instead of accepting it as a child", async () => {
+  const { browser, result } = await inspectWithNetworkEvents(
+    (command, origin) =>
+      command.method === "Network.enable"
+        ? [
+            frameNavigated(command, {
+              id: "candidate-root",
+              parentId: "candidate-root",
+              url: `${origin}/app?token=frame-secret`,
+            }),
+          ]
+        : undefined,
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { reason: "protocol_error" },
+  });
+  await expect.poll(() => browser.activeConnectionCount()).toBe(0);
+});
+
+it("tracks a known root replacement through later frame-scope events", async () => {
+  const { result } = await inspectWithNetworkEvents((command, origin) =>
+    command.method === "Network.enable"
+      ? [
+          frameNavigated(command, {
+            id: "replacement-main",
+            loaderId: "replacement-loader",
+            url: `${origin}/app?token=frame-secret`,
+          }),
+          frameNavigated(command, {
+            id: "replacement-main",
+            loaderId: "outside-loader",
+            url: "https://outside.invalid/path",
+          }),
+        ]
+      : undefined,
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { _tag: "BrowserObservationError", reason: "target_not_allowed" },
+  });
+});
+
+it("treats a same-URL and same-loader root frame ID change as a capture change", async () => {
+  const { result } = await inspectWithNetworkEvents((command, origin) =>
+    command.method === "Network.enable"
+      ? [
+          frameNavigated(command, {
+            id: "replacement-main",
+            loaderId: "loader-main",
+            url: `${origin}/app?token=frame-secret`,
+          }),
+        ]
+      : undefined,
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { _tag: "BrowserObservationError", reason: "target_changed" },
   });
 });
 
