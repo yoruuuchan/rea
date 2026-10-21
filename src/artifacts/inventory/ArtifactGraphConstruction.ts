@@ -1,6 +1,6 @@
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
 import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
-import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import { asarHeaderAdmissionFailure } from "../AsarHeader.js";
 import { hasDestinationPath } from "../ArtifactPaths.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import { isJavaScriptSourcePath } from "../../domain/javascript/javascriptArtifactFiles.js";
@@ -529,11 +529,7 @@ export const classifyArtifactContent = (
     path.toLowerCase().endsWith(".asar") &&
     asarHeader.state !== "rejected"
   ) {
-    if (asarHeader.state === "limit")
-      throw new ArtifactReaderFailure(
-        "limit",
-        "ASAR header exceeds the bounded classification or decode budget",
-      );
+    if (asarHeader.state === "limit") throw asarHeaderAdmissionFailure();
     if (asarHeader.state === "matched")
       return { kind: "container", format: "asar" };
   }

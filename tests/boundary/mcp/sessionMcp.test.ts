@@ -592,7 +592,7 @@ describe("json depth bounds over MCP", () => {
             {
               path: [],
               reason: "invalid_value",
-              message: `left.parameters: JSON value exceeds maximum nesting depth of ${MAX_JSON_DEPTH}`,
+              message: `left.parameters: JSON value exceeds maximum nesting depth of ${MAX_JSON_DEPTH}. This release has no runtime override.`,
             },
           ],
         },

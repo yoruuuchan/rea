@@ -93,7 +93,9 @@ describe("rea environment-export", () => {
         status: "exported",
         directory,
         name: "grafana-example",
-        tool_count: 19,
+        // The served read tools of the state the export derived, as the bundle's server serves them.
+        tool_count: 14,
+        state: { served: true, evidence_id: expect.stringMatching(/^ev_/u) },
         package_source: { kind: "registry" },
       });
       const document = result.json as {
@@ -125,7 +127,19 @@ describe("rea environment-export", () => {
         "utf8",
       );
       expect(dockerfile).toMatch(/^FROM node:24\.18\.0-bookworm-slim\n/u);
-      expect(dockerfile).toContain('CMD ["rea","environment-serve"');
+      expect(dockerfile).toContain(
+        'CMD ["rea","environment-serve","/env/manifest.json","--evidence","/env/evidence.json"]',
+      );
+      const verifier = await readFile(
+        join(directory, "artifacts/check_grafana-example/verify.py"),
+        "utf8",
+      );
+      expect(verifier).toContain("TOOL_COUNT = 14\n");
+      expect(verifier).toContain('TOOL = "get_annotations"\n');
+      expect(verifier).toContain("EXPECTED_STATUS = 200\n");
+      expect(await readFile(join(directory, "README.md"), "utf8")).toContain(
+        "This bundle serves from the state",
+      );
     },
   );
 

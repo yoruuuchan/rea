@@ -321,6 +321,9 @@ it("discovers an oversized native dossier by exact metadata and reads its retain
   expect(broadError.remediation?.action).toContain(
     "get_evidence_bundle and detail: summary",
   );
+  expect(broadError.remediation?.action).toContain(
+    "REA_MCP_MAX_RESPONSE_BYTES",
+  );
   const response = await client.callTool({
     name: "get_evidence_bundle",
     arguments: {

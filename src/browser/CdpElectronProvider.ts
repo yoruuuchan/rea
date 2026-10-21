@@ -11,6 +11,7 @@ import {
   type InspectElectronPageInput,
   type ListElectronTargetsInput,
 } from "../domain/javascript/electronObservation.js";
+import { selectedCdpCommandTimeoutMs } from "../domain/browserDeadline.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
@@ -277,7 +278,11 @@ export class CdpElectronProvider implements ElectronObservationPort {
         target,
         "inspect_electron_page",
         options.signal,
-        undefined,
+        {
+          commandTimeoutMs: selectedCdpCommandTimeoutMs(
+            input.command_timeout_ms,
+          ),
+        },
         this.#owner,
       );
       result = ok(

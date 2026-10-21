@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { webRuntimeCommandTimeoutSchema } from "./browserDeadline.js";
 import {
   browserScenarioActionSchema,
   BROWSER_SCENARIO_START_STEP_ID,
@@ -34,6 +35,7 @@ export const browserScenarioInputSchema = z.strictObject({
       "Optional environment-variable references for values used in actions, URLs, storage, or replay, and for redacting matching observed text. Secret values are never supplied inline.",
     ),
   capture: browserScenarioCaptureSchema,
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 });
 
 type ScenarioShape = z.infer<typeof browserScenarioInputSchema>;

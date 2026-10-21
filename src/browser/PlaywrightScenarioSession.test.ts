@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   finishEvents: vi.fn(),
   policySend: vi.fn(),
   policyTransportClose: vi.fn(),
+  policyBeginCleanupGrace: vi.fn(),
   policyEvent: undefined as
     | ((event: { method: string; params: unknown; sessionId?: string }) => void)
     | undefined,
@@ -33,6 +34,7 @@ vi.mock("./CdpTargetSession.js", () => ({
         return () => undefined;
       },
       close: mocks.policyTransportClose,
+      beginCleanupGrace: mocks.policyBeginCleanupGrace,
     },
   }),
   attachCdpTargetSession: async (connection: unknown) => ({

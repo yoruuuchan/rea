@@ -114,7 +114,7 @@ describe("browser process startup", () => {
         startupTimeoutMs: 20,
       });
       expect(String(failure)).toContain("stderr=<empty>");
-      expect(String(failure)).toContain("startup_timeout_ms=20");
+      expect(String(failure)).toContain("timeoutMs=20");
     } finally {
       child.kill("SIGKILL");
       expect(await waitForExit(child, 5_000)).toBe(true);
@@ -144,7 +144,7 @@ describe("browser process startup", () => {
       startupTimeoutMs: BROWSER_DEVTOOLS_STARTUP_TIMEOUT_MS,
     });
     expect(String(failure)).toContain(
-      `startup_timeout_ms=${String(BROWSER_DEVTOOLS_STARTUP_TIMEOUT_MS)}`,
+      `timeoutMs=${String(BROWSER_DEVTOOLS_STARTUP_TIMEOUT_MS)}`,
     );
   });
 

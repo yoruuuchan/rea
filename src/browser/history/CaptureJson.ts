@@ -33,7 +33,7 @@ export const parseCaptureJson = (
     if (frames.length > WEB_NETWORK_CAPTURE_LIMITS.depth)
       throw new CaptureFormatError(
         "input-limit",
-        `${format} exceeds the 64-level complete-evidence nesting budget.`,
+        `${format} exceeds the 64-level complete-evidence nesting budget. This release has no runtime override.`,
         valuePointer(),
       );
   };

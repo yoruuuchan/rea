@@ -36,18 +36,27 @@ export const startFakeCdpBrowser = async (
   );
   const webSockets = new WebSocketServer({ noServer: true });
   http.on("upgrade", (request, socket, head) => {
-    if (
-      request.url !== "/devtools/browser/fake" &&
-      request.url !== "/devtools/page/allowed-page" &&
-      request.url !== "/devtools/page/allowed-page-with-socket" &&
-      request.url !== "/devtools/page/electron-page"
-    ) {
-      socket.destroy();
+    const accept = (): void => {
+      if (socket.destroyed) return;
+      if (
+        request.url !== "/devtools/browser/fake" &&
+        request.url !== "/devtools/page/allowed-page" &&
+        request.url !== "/devtools/page/allowed-page-with-socket" &&
+        request.url !== "/devtools/page/electron-page"
+      ) {
+        socket.destroy();
+        return;
+      }
+      webSockets.handleUpgrade(request, socket, head, (webSocket) =>
+        webSockets.emit("connection", webSocket, request),
+      );
+    };
+    if (options.handshakeDelayMs === undefined) {
+      accept();
       return;
     }
-    webSockets.handleUpgrade(request, socket, head, (webSocket) =>
-      webSockets.emit("connection", webSocket, request),
-    );
+    const timer = setTimeout(accept, options.handshakeDelayMs);
+    socket.once("close", () => clearTimeout(timer));
   });
   webSockets.on("connection", (socket: WebSocket, request: IncomingMessage) => {
     const directPage = request.url?.startsWith("/devtools/page/") === true;
@@ -146,8 +155,15 @@ const respondToHttpRequest = (
   response.setHeader("content-type", "application/json");
   const portNumber = port();
   if (serveSourceMap(request, response, options)) return;
+  const finish = (body: string): void => {
+    if (options.discoveryDelayMs === undefined) {
+      response.end(body);
+      return;
+    }
+    setTimeout(() => response.end(body), options.discoveryDelayMs);
+  };
   if (request.url === "/json/version") {
-    response.end(
+    finish(
       options.oversizedDiscovery === true
         ? " ".repeat(65 * 1_024)
         : options.malformedDiscovery === true
@@ -169,7 +185,7 @@ const respondToHttpRequest = (
     return;
   }
   if (request.url === "/json/list") {
-    response.end(JSON.stringify(targets(portNumber, options)));
+    finish(JSON.stringify(targets(portNumber, options)));
     return;
   }
   response.statusCode = 404;

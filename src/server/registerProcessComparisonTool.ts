@@ -8,33 +8,22 @@ import { describeValidationFailure } from "../domain/evidenceBundle.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import {
   createEvidence,
-  parseEvidence,
   type Evidence,
   type EvidenceLocation,
 } from "../domain/evidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { compareProcessCaptures } from "../domain/process/processComparison.js";
-import {
-  parseProcessCapture,
-  type ProcessCapture,
-} from "../domain/process/processCaptureParsing.js";
+import type { ProcessCapture } from "../domain/process/processCaptureParsing.js";
+import { parseProcessCaptureEvidence } from "../application/process/ProcessEvidence.js";
 import type { RecordUnknownInput } from "../domain/residualUnknown.js";
-import { err, ok, type Result } from "../domain/result.js";
+import { err, type Result } from "../domain/result.js";
 import { recordDerivedEvidence } from "./recordDerivedEvidence.js";
 import { recordSessionEvidenceSources } from "./sessionEvidence.js";
 import { runDerivedOperation } from "./runDerivedOperation.js";
-import {
-  PROCESS_PROVIDER,
-  isProcessEvidenceProvider,
-} from "../domain/process/processEvidenceProvider.js";
+import { PROCESS_PROVIDER } from "../domain/process/processEvidenceProvider.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import { withAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
-
-const PROCESS_CAPTURE_EVIDENCE = {
-  operation: "capture_process_scenario",
-  predicate: "rea.process-capture",
-} as const;
 
 const sourceLocations = (
   left: readonly EvidenceLocation[] | undefined,
@@ -53,52 +42,47 @@ const parseCaptureSide = (
   { readonly record: Evidence; readonly capture: ProcessCapture },
   AnalysisError
 > => {
-  let record: Evidence;
-  try {
-    record = parseEvidence(value);
-  } catch (cause: unknown) {
-    return err(
-      new EvidenceIntegrityError(`${side} Evidence failed validation`, {
-        cause,
-        userMessage: `The ${side} Evidence failed validation (${describeValidationFailure(cause)}). Supply unmodified capture Evidence from capture_process_scenario.`,
-      }),
-    );
-  }
-  if (
-    record.operation !== PROCESS_CAPTURE_EVIDENCE.operation ||
-    record.predicate_type !== PROCESS_CAPTURE_EVIDENCE.predicate
-  )
-    return err(
-      new AnalysisInputError(operation, undefined, [
-        {
-          path: [side],
-          reason: "invalid_value",
-          message: `Expected process capture Evidence (operation ${PROCESS_CAPTURE_EVIDENCE.operation}, predicate ${PROCESS_CAPTURE_EVIDENCE.predicate}); the ${side} Evidence has operation ${record.operation} and predicate ${record.predicate_type}.`,
-        },
-      ]),
-    );
-  if (!isProcessEvidenceProvider(record.provider))
-    return err(
-      new AnalysisInputError(operation, undefined, [
-        {
-          path: [side, "provider"],
-          reason: "invalid_value",
-          message: `The ${side} Evidence provider ${record.provider.id} v${record.provider.version} (${record.provider.name}) is not the current or supported legacy ${PROCESS_PROVIDER.id} v${PROCESS_PROVIDER.version} process capture provider.`,
-        },
-      ]),
-    );
-  try {
-    return ok({
-      record,
-      capture: parseProcessCapture(record.normalized_result),
-    });
-  } catch (cause: unknown) {
-    return err(
-      new EvidenceIntegrityError(`${side} process capture failed validation`, {
-        cause,
-        userMessage: `The ${side} Evidence has an invalid process capture result (${describeValidationFailure(cause)}). Recreate the capture with capture_process_scenario.`,
-      }),
-    );
+  const parsed = parseProcessCaptureEvidence(value);
+  if (parsed.ok) return parsed;
+  const failure = parsed.error;
+  switch (failure.kind) {
+    case "invalid-evidence":
+      return err(
+        new EvidenceIntegrityError(`${side} Evidence failed validation`, {
+          cause: failure.cause,
+          userMessage: `The ${side} Evidence failed validation (${describeValidationFailure(failure.cause)}). Supply unmodified capture Evidence from capture_process_scenario.`,
+        }),
+      );
+    case "wrong-workflow":
+      return err(
+        new AnalysisInputError(operation, undefined, [
+          {
+            path: [side],
+            reason: "invalid_value",
+            message: `Expected process capture Evidence (operation ${failure.expected.operation}, predicate ${failure.expected.predicate}); the ${side} Evidence has operation ${failure.actual.operation} and predicate ${failure.actual.predicate}.`,
+          },
+        ]),
+      );
+    case "unsupported-provider":
+      return err(
+        new AnalysisInputError(operation, undefined, [
+          {
+            path: [side, "provider"],
+            reason: "invalid_value",
+            message: `The ${side} Evidence provider ${failure.provider.id} v${failure.provider.version} (${failure.provider.name}) is not the current or supported legacy ${PROCESS_PROVIDER.id} v${PROCESS_PROVIDER.version} process capture provider.`,
+          },
+        ]),
+      );
+    case "invalid-capture":
+      return err(
+        new EvidenceIntegrityError(
+          `${side} process capture failed validation`,
+          {
+            cause: failure.cause,
+            userMessage: `The ${side} Evidence has an invalid process capture result (${describeValidationFailure(failure.cause)}). Recreate the capture with capture_process_scenario.`,
+          },
+        ),
+      );
   }
 };
 

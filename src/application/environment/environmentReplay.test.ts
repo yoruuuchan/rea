@@ -13,13 +13,13 @@ import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { inspectAnalysisView } from "../analysisView/AnalysisViewService.js";
 import {
   REPLAY_BODY_LIMIT_BYTES,
+  type EnvironmentSource,
+  type RecordedExchange,
+} from "./environmentSource.js";
+import {
   replayEnvironmentTool,
   selectReplayExchange,
 } from "./environmentReplay.js";
-import type {
-  EnvironmentSource,
-  RecordedExchange,
-} from "./environmentSource.js";
 
 const source = environmentServeSource();
 

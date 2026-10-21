@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { webRuntimeCommandTimeoutSchema } from "./browserDeadline.js";
 import {
   browserAllowedOriginsSchema,
   browserObservationEndpointSchema,
@@ -13,6 +14,7 @@ export const observeWebSessionInputSchema = z.strictObject({
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().trim().min(1),
   observation_ms: z.number().int().min(1).default(10_000),
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 });
 export type ObserveWebSessionInput = z.infer<
   typeof observeWebSessionInputSchema

@@ -13,6 +13,7 @@ import type {
   Page,
 } from "playwright-core";
 
+import { DEFAULT_CDP_COMMAND_TIMEOUT_MS } from "../domain/browserDeadline.js";
 import { browserScenarioSchema } from "../domain/browserScenario.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import {
@@ -1010,4 +1011,314 @@ it("bounds an opening failure response while retaining the same late cleanup lea
     await lease.release();
     vi.useRealTimers();
   }
+});
+
+const scenarioActions = [
+  { step_id: "settle", action: "wait_for_timeout" as const, duration_ms: 1 },
+];
+
+it("applies command_timeout_ms to launch startup", async () => {
+  let timeout: number | undefined;
+  const scenario = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: process.execPath },
+    start_url: { url: "https://example.test" },
+    command_timeout_ms: 4_321,
+    actions: scenarioActions,
+  });
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async () => {
+            throw new Error("Unexpected connection");
+          },
+          launchPersistentContext: async (_profile, options) => {
+            timeout = options?.timeout;
+            throw new Error("launch boundary reached");
+          },
+        },
+      },
+    ),
+  ).rejects.toThrow("launch boundary reached");
+  expect(timeout).toBe(4_321);
+});
+
+it("uses the default command deadline for an omitted launch timeout", async () => {
+  let timeout: number | undefined;
+  const scenario = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: process.execPath },
+    start_url: { url: "https://example.test" },
+    actions: scenarioActions,
+  });
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async () => {
+            throw new Error("Unexpected connection");
+          },
+          launchPersistentContext: async (_profile, options) => {
+            timeout = options?.timeout;
+            throw new Error("launch boundary reached");
+          },
+        },
+      },
+    ),
+  ).rejects.toThrow("launch boundary reached");
+  expect(timeout).toBe(DEFAULT_CDP_COMMAND_TIMEOUT_MS);
+});
+
+it("applies command_timeout_ms to the primary connect handshake when service workers are allowed", async () => {
+  let timeout: number | undefined;
+  const started = performance.now();
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "primary-handshake",
+    },
+    start_url: { url: "https://example.test" },
+    environment: { service_workers: "allow" },
+    command_timeout_ms: 50,
+    actions: scenarioActions,
+  });
+  const opening = openPlaywrightScenarioBrowser(
+    scenario,
+    {},
+    {
+      launcher: {
+        connectOverCDP: async (_endpoint, options) => {
+          timeout = options?.timeout;
+          return new Promise(() => undefined);
+        },
+        launchPersistentContext: async () => {
+          throw new Error("Unexpected launch");
+        },
+      },
+    },
+  );
+  const failure = await opening.then(
+    () => undefined,
+    (cause: unknown) => cause,
+  );
+  expect(failure).toMatchObject({
+    reason: "timeout",
+    userMessage: expect.stringContaining("50 ms command_timeout_ms"),
+    remediationAction: expect.stringContaining("capture-browser-scenario JSON"),
+  });
+  expect(
+    (failure as { remediationAction?: string }).remediationAction,
+  ).not.toContain("--command-timeout-ms");
+  expect(timeout).toBe(50);
+  expect(performance.now() - started).toBeLessThan(2_000);
+});
+
+it("applies command_timeout_ms to primary target lookup when service workers are allowed", async () => {
+  const started = performance.now();
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "primary-target-info",
+    },
+    start_url: { url: "https://example.test" },
+    environment: { service_workers: "allow" },
+    command_timeout_ms: 50,
+    actions: scenarioActions,
+  });
+  const browser = {
+    close: async () => undefined,
+    contexts: () => [
+      {
+        pages: () => [{} as Page],
+        newCDPSession: async () =>
+          ({
+            send: () => new Promise(() => undefined),
+            detach: async () => undefined,
+          }) as unknown as CDPSession,
+      } as unknown as BrowserContext,
+    ],
+    isConnected: () => true,
+    version: () => "fixture",
+  };
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async (_endpoint, options) => {
+            expect(options?.timeout).toBe(50);
+            return browser;
+          },
+          launchPersistentContext: async () => {
+            throw new Error("Unexpected launch");
+          },
+        },
+      },
+    ),
+  ).rejects.toMatchObject({
+    reason: "timeout",
+    userMessage: expect.stringContaining("Target.getTargetInfo"),
+  });
+  expect(performance.now() - started).toBeLessThan(2_000);
+});
+
+it("closes a context that launches after its deadline before removing the profile", async () => {
+  const order: string[] = [];
+  let profilePath = "";
+  const scenario = browserScenarioSchema.parse({
+    browser: { mode: "launch", executable_path: process.execPath },
+    start_url: { url: "https://example.test" },
+    command_timeout_ms: 40,
+    actions: scenarioActions,
+  });
+  const failure = await openPlaywrightScenarioBrowser(
+    scenario,
+    {},
+    {
+      launcher: {
+        connectOverCDP: async () => {
+          throw new Error("Unexpected connection");
+        },
+        launchPersistentContext: async (profile) => {
+          profilePath = profile;
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          order.push("launched");
+          return {
+            close: async () => {
+              order.push("close");
+            },
+          } as unknown as BrowserContext;
+        },
+      },
+    },
+  ).then(
+    () => undefined,
+    (cause: unknown) => cause,
+  );
+  expect(failure).toMatchObject({ reason: "timeout" });
+  expect(
+    (failure as { remediationAction?: string }).remediationAction,
+  ).not.toContain("--command-timeout-ms");
+  expect(order).toEqual(["launched", "close"]);
+  await expect(access(profilePath)).rejects.toThrow();
+});
+
+it("closes a browser that connects after its deadline without waiting to report the timeout", async () => {
+  let closed = false;
+  const started = performance.now();
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "late-connect-target",
+    },
+    start_url: { url: "https://example.test" },
+    environment: { service_workers: "allow" },
+    command_timeout_ms: 40,
+    actions: scenarioActions,
+  });
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            return {
+              close: async () => {
+                closed = true;
+              },
+              contexts: () => [],
+              isConnected: () => true,
+              version: () => "late-connect",
+            };
+          },
+          launchPersistentContext: async () => {
+            throw new Error("Unexpected launch");
+          },
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ reason: "timeout" });
+  expect(performance.now() - started).toBeLessThan(2_000);
+  for (let attempt = 0; attempt < 50 && !closed; attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(closed).toBe(true);
+});
+
+it("restores an environment mutation that completes after its deadline", async () => {
+  let restored = false;
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "connect",
+      cdp_endpoint: "http://127.0.0.1:9222",
+      target_id: "late-environment-target",
+    },
+    start_url: { url: "https://example.test" },
+    environment: { service_workers: "allow" },
+    command_timeout_ms: 40,
+    actions: scenarioActions,
+  });
+  const discoverySession = {
+    send: vi.fn(async () => ({
+      targetInfo: { targetId: "late-environment-target" },
+    })),
+    detach: vi.fn(async () => undefined),
+  } as unknown as CDPSession;
+  const environmentSession = {
+    send: vi.fn(async () => undefined),
+    detach: vi.fn(async () => undefined),
+  } as unknown as CDPSession;
+  const page = {
+    emulateMedia: vi.fn(async (options: { colorScheme?: string | null }) => {
+      if (options.colorScheme === null) {
+        restored = true;
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }),
+    isClosed: vi.fn(() => false),
+  } as unknown as Page;
+  const context = {
+    pages: () => [page],
+    newCDPSession: vi
+      .fn()
+      .mockResolvedValueOnce(discoverySession)
+      .mockResolvedValueOnce(environmentSession),
+  } as unknown as BrowserContext;
+  const browser = {
+    close: vi.fn(async () => undefined),
+    contexts: () => [context],
+    isConnected: vi.fn(() => true),
+    version: () => "late-environment",
+  };
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async () => browser,
+          launchPersistentContext: async () => {
+            throw new Error("Unexpected launch");
+          },
+        },
+      },
+    ),
+  ).rejects.toMatchObject({
+    reason: "timeout",
+    userMessage: expect.stringContaining("Emulation.setEmulatedMedia"),
+  });
+  expect(restored).toBe(true);
+  expect(environmentSession.send).not.toHaveBeenCalledWith(
+    "Emulation.clearDeviceMetricsOverride",
+  );
+  expect(browser.close).toHaveBeenCalledOnce();
 });

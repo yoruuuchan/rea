@@ -17,6 +17,8 @@ import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import {
   WEB_NETWORK_CAPTURE_LIMITS,
+  selectedWebNetworkCaptureTimeoutMs,
+  webNetworkCaptureTimeoutRecovery,
   type InspectWebNetworkCaptureInput,
 } from "../../domain/webNetworkCapture.js";
 import { OwnedCommandFailure } from "../../process/OwnedCommand.js";
@@ -75,11 +77,16 @@ export const historicalCaptureFailure = (
               : undefined
             : cause.cancellation.reason,
       });
-    if (cause.reason === "timeout")
+    if (cause.reason === "timeout") {
+      const timeoutMs = selectedWebNetworkCaptureTimeoutMs(
+        input.capture_timeout_ms,
+      );
       return new AnalysisTimeoutError(
         OPERATION,
-        WEB_NETWORK_CAPTURE_LIMITS.timeoutMs,
+        timeoutMs,
+        webNetworkCaptureTimeoutRecovery(timeoutMs),
       );
+    }
     if (cause.reason === "output-limit")
       return new AnalysisOutputError(OPERATION, cause.message);
     // The job's own notification is runtime-independent; Bun's exit status
@@ -140,7 +147,7 @@ export const historicalCaptureFailure = (
         reason: cause.reason === "limit" ? "out_of_range" : "invalid_format",
         message:
           cause.reason === "limit"
-            ? `${cause.message}. Select a ${sourceLabel} within the ${WEB_NETWORK_CAPTURE_LIMITS.inputBytes}-byte input budget.`
+            ? `${cause.message}. Select a ${sourceLabel} within the ${String(WEB_NETWORK_CAPTURE_LIMITS.inputBytes)}-byte input budget. This release has no runtime override. capture_timeout_ms does not raise it.`
             : cause.message,
         ...(cause.reason === "limit"
           ? {

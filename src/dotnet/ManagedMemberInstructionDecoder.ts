@@ -496,6 +496,8 @@ export const decodeInstructions = (
     issue =
       cause instanceof Error ? cause.message : "Instruction decode failed";
   }
+  if (issue === null && prefixStart !== null)
+    issue = `CIL prefix chain at IL offset ${String(prefixStart)} has no following instruction`;
   const truncated = offset < il.length && issue === null ? 1 : 0;
   return { parsed, instructionStarts, count: parsed.length, truncated, issue };
 };

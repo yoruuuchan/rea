@@ -276,3 +276,41 @@ it("keeps a timeout distinct from caller cancellation", async () => {
     vi.useRealTimers();
   }
 });
+
+it("applies a non-default decode deadline and releases its runtime", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "performance"],
+  });
+  let runtimePath: string | undefined;
+  try {
+    const result = await runSourceMapCommand(
+      "{}",
+      "/probe/source.map",
+      undefined,
+      {
+        prepareOwnership: async () => {},
+        createRuntime: async () => {
+          const runtime = await PrivateRuntimeRoot.create({
+            prefix: "rea-source-map-selected-deadline-",
+          });
+          runtimePath = runtime.path;
+          return runtime;
+        },
+        launcher: async () => {
+          await vi.advanceTimersByTimeAsync(251);
+          throw new Error("launcher settled after deadline");
+        },
+      },
+      250,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected timeout");
+    expect(result.error).toBeInstanceOf(AnalysisTimeoutError);
+    expect(result.error.userMessage).toContain("250");
+    expect(result.error.userMessage).toContain("decode_timeout_ms");
+    if (runtimePath === undefined) throw new Error("runtime was not acquired");
+    await expect(access(runtimePath)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    vi.useRealTimers();
+  }
+});

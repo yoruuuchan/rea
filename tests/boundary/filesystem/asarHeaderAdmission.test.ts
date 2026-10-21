@@ -3,11 +3,18 @@ import { join } from "node:path";
 import { createPackage } from "@electron/asar";
 import { expect, it, vi } from "vitest";
 
+import { translateArtifactFailure } from "../../../src/artifacts/ArtifactOperationFailure.js";
+import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import {
   admitAsarHeader,
+  asarHeaderAdmissionRecovery,
   MAX_ASAR_HEADER_BYTES,
 } from "../../../src/artifacts/AsarHeader.js";
+import { ArtifactOperationError } from "../../../src/domain/artifactOperationError.js";
+import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
+import { inventoryArtifact } from "../../fixtures/artifactInventory.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 
 const createFixture = async () => {
   const root = await createTestTempDirectory("rea-asar-header-admission-");
@@ -126,6 +133,110 @@ it("separates the header decode budget from container validity at its exact boun
         jsonBytes: 2,
       });
     else
-      await expect(admit(archive)).rejects.toMatchObject({ reason: "limit" });
+      await expect(admit(archive)).rejects.toMatchObject({
+        reason: "limit",
+        message: asarHeaderAdmissionRecovery(),
+        admission: {
+          kind: "asar-header",
+          maximumBytes: MAX_ASAR_HEADER_BYTES,
+        },
+      });
   }
+});
+
+const writeOversizedHeaderArchive = async (): Promise<string> => {
+  const root = await createTestTempDirectory("rea-asar-header-recovery-");
+  const archive = join(root, "app.asar");
+  const headerBytes = MAX_ASAR_HEADER_BYTES + 4;
+  const json = Buffer.from("{}");
+  const prefix = Buffer.alloc(16);
+  prefix.writeUInt32LE(4, 0);
+  prefix.writeUInt32LE(headerBytes, 4);
+  prefix.writeUInt32LE(headerBytes - 4, 8);
+  prefix.writeUInt32LE(json.length, 12);
+  await writeFile(archive, Buffer.concat([prefix, json]));
+  await truncate(archive, headerBytes + 8);
+  return archive;
+};
+
+it("names the fixed header admission budget when source selection cannot bypass it", async () => {
+  const recovery = asarHeaderAdmissionRecovery();
+  expect(MAX_ASAR_HEADER_BYTES).toBe(16 * 1024 * 1024);
+  expect(recovery).toContain("ASAR header/index admission");
+  expect(recovery).toContain(
+    `${String(MAX_ASAR_HEADER_BYTES / (1024 * 1024))} MiB / ${String(MAX_ASAR_HEADER_BYTES)} bytes`,
+  );
+  expect(recovery).toContain("no runtime override");
+  expect(recovery).toContain("Selecting fewer sources");
+  expect(recovery).toContain("does not bypass header admission");
+  expect(recovery).toContain("extracted application directory");
+  expect(recovery).not.toContain("Narrow the requested path");
+
+  const archive = await writeOversizedHeaderArchive();
+  let inventoryFailure: unknown;
+  try {
+    await inventoryArtifact(archive);
+  } catch (cause: unknown) {
+    inventoryFailure = cause;
+  }
+  expect(inventoryFailure).toBeInstanceOf(ArtifactReaderFailure);
+  if (!(inventoryFailure instanceof ArtifactReaderFailure))
+    throw new Error("inventory failure was not an artifact reader failure");
+  expect(inventoryFailure.cleanup).toBeUndefined();
+  const wrapped = ArtifactReaderFailure.withCleanup(inventoryFailure, {
+    reason: "close failed",
+    resources: ["header"],
+  });
+  expect(wrapped.message).toBe(recovery);
+  expect(wrapped.admission).toEqual(inventoryFailure.admission);
+  const inventory = projectAnalysisError(
+    translateArtifactFailure("inventory_artifact", inventoryFailure),
+  );
+  expect(inventory).toMatchObject({
+    code: "truncated",
+    message: recovery,
+    remediation: { action: recovery },
+    details: {
+      reason: "limit",
+      truncated: true,
+      detail: recovery,
+      admission: "asar-header",
+      maximum_header_bytes: MAX_ASAR_HEADER_BYTES,
+    },
+  });
+  expect(
+    projectAnalysisError(translateArtifactFailure("inspect_artifact", wrapped))
+      .message,
+  ).toBe(recovery);
+
+  const selected = await analyzeJavaScriptApplication({
+    input_path: archive,
+    source_paths: ["package.json"],
+    max_heap_mb: 2048,
+  });
+  const unselected = await analyzeJavaScriptApplication({
+    input_path: archive,
+  });
+  if (selected.ok || unselected.ok)
+    throw new Error("ASAR header admission succeeded");
+  expect(projectAnalysisError(selected.error).message).toBe(recovery);
+  expect(projectAnalysisError(unselected.error).message).toBe(recovery);
+  expect(projectAnalysisError(selected.error).remediation.action).toBe(
+    recovery,
+  );
+});
+
+it("keeps unrelated artifact limit recovery distinct from header admission", () => {
+  expect(
+    projectAnalysisError(
+      new ArtifactOperationError(
+        "inventory_artifact",
+        "limit",
+        undefined,
+        "Directory traversal reached its examined-entry budget",
+      ),
+    ).message,
+  ).toBe(
+    "Artifact is too large to process safely. Narrow the requested path or use a smaller artifact.",
+  );
 });

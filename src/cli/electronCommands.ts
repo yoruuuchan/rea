@@ -19,6 +19,7 @@ import { parseCliJsonInput, resolveCliJsonPaths } from "../cliJsonInput.js";
 import {
   electronPageInspectionOptions,
   javascriptApplicationOptions,
+  selectedCommandTimeout,
 } from "../cliObservationOptions.js";
 import { runCliJavaScriptApplicationAnalysis } from "./javascriptApplicationAnalysis.js";
 import { withCommandCancellation } from "./commandCancellation.js";
@@ -266,6 +267,7 @@ const registerElectronPageInspection = (
             target_id: args.targetId,
             observation_ms: options.observationMs,
             include_script_sources: options.includeScriptSources,
+            ...selectedCommandTimeout(options.commandTimeoutMs),
           };
           const parsed = inspectElectronPageInputSchema.safeParse(input);
           if (!parsed.success)

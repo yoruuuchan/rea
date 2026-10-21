@@ -211,8 +211,17 @@ const resolveInside = async (
       hops += 1;
       if (hops > MAX_SYMLINK_HOPS) return { kind: "loop" };
       const target = await readlink(absolute);
-      if (isAbsolute(target)) return { kind: "escapes" };
-      pending.unshift(...target.split("/").filter((part) => part !== ""));
+      // Lexical only: another alias of this root (/tmp vs /private/tmp)
+      // is still an escape. Later hops stay lstat- and containment-checked.
+      const absoluteTarget = isAbsolute(target);
+      const relativeTarget = absoluteTarget
+        ? relativeInside(root, target)
+        : target;
+      if (relativeTarget === null) return { kind: "escapes" };
+      if (absoluteTarget) resolved.length = 0;
+      pending.unshift(
+        ...relativeTarget.split("/").filter((part) => part !== ""),
+      );
       continue;
     }
     if (metadata.isDirectory()) {

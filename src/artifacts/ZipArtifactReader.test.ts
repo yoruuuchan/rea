@@ -9,11 +9,12 @@ import {
   Uint8ArrayWriter,
   ZipWriter,
 } from "@zip.js/zip.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 
 import { ZipArtifactReader } from "./ZipArtifactReader.js";
+import { openRegularFile } from "../filesystem/RegularFile.js";
 import { MINIMUM_ARTIFACT_EXPANDED_BYTES } from "../domain/artifactExpansionBudget.js";
 
 /** Small real ZIP carriers with forged sizes; metadata-only controls, never decompressed. */
@@ -52,6 +53,165 @@ const enumerate = async (reader: ZipArtifactReader): Promise<number> => {
     if (entry.kind === "file") files += 1;
   return files;
 };
+
+const admittedZip = async () => {
+  const directory = await createTestTempDirectory("rea-zip-short-read-");
+  const path = join(directory, "valid.zip");
+  const content = "Complete ZIP member bytes, including café.";
+  const writer = new ZipWriter(new Uint8ArrayWriter());
+  await writer.add("member.txt", new TextReader(content));
+  await writeFile(path, await writer.close());
+  const handle = await openRegularFile(path, { symlinks: "reject" });
+  // Keep the actual descriptor, but select the positional overload used by
+  // the ZIP adapter so the spy does not infer FileHandle.read's options form.
+  const positional: {
+    read(
+      buffer: Buffer,
+      offset: number,
+      length: number,
+      position: number,
+    ): Promise<{ bytesRead: number; buffer: Buffer }>;
+  } = handle;
+  return { path, content, handle, positional, initial: await handle.stat() };
+};
+
+describe("ZipArtifactReader positional reads", () => {
+  it("enumerates and extracts a real ZIP when each descriptor read returns a short prefix", async () => {
+    const fixture = await admittedZip();
+    const nativeRead = fixture.positional.read.bind(fixture.handle);
+    const reads = vi
+      .spyOn(fixture.positional, "read")
+      .mockImplementation(async (...args) => {
+        const [buffer, offset, length, position] = args;
+        return nativeRead(buffer, offset, Math.min(length, 3), position);
+      });
+    const reader = new ZipArtifactReader(
+      fixture.path,
+      "zip",
+      undefined,
+      fixture,
+    );
+    try {
+      const entries = [];
+      for await (const entry of reader.entries()) entries.push(entry);
+      expect(entries.map(({ path }) => path)).toEqual(["member.txt"]);
+      const entry = entries[0];
+      if (entry === undefined) throw new Error("Expected a ZIP member");
+      const chunks: Buffer[] = [];
+      for await (const chunk of await reader.open(entry))
+        chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks)).toEqual(Buffer.from(fixture.content));
+      expect(reads.mock.calls.length).toBeGreaterThan(3);
+    } finally {
+      reads.mockRestore();
+      await reader.close();
+      await fixture.handle.close();
+    }
+  });
+
+  it("reports premature EOF inside the admitted extent as an integrity failure", async () => {
+    const fixture = await admittedZip();
+    const nativeRead = fixture.positional.read.bind(fixture.handle);
+    let calls = 0;
+    const reads = vi
+      .spyOn(fixture.positional, "read")
+      .mockImplementation(async (...args) => {
+        const [buffer, offset, length, position] = args;
+        if (calls++ > 0) return { buffer, bytesRead: 0 };
+        return nativeRead(buffer, offset, Math.min(length, 3), position);
+      });
+    const reader = new ZipArtifactReader(
+      fixture.path,
+      "zip",
+      undefined,
+      fixture,
+    );
+    try {
+      await expect(enumerate(reader)).rejects.toMatchObject({
+        reason: "integrity",
+      });
+      expect(calls).toBe(2);
+    } finally {
+      reads.mockRestore();
+      await reader.close();
+      await fixture.handle.close();
+    }
+  });
+
+  it("keeps metadata allocation admission ahead of short reads", async () => {
+    const fixture = await admittedZip();
+    const reads = vi.spyOn(fixture.positional, "read");
+    const reader = new ZipArtifactReader(fixture.path, "zip", 2, fixture);
+    try {
+      await expect(enumerate(reader)).rejects.toMatchObject({
+        reason: "limit",
+      });
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      await reader.close();
+      await fixture.handle.close();
+    }
+  });
+
+  it("does not publish an entry cancelled during short metadata reads", async () => {
+    const fixture = await admittedZip();
+    const controller = new AbortController();
+    const nativeRead = fixture.positional.read.bind(fixture.handle);
+    const reads = vi
+      .spyOn(fixture.positional, "read")
+      .mockImplementation(async (...args) => {
+        const [buffer, offset, length, position] = args;
+        const result = await nativeRead(
+          buffer,
+          offset,
+          Math.min(length, 3),
+          position,
+        );
+        controller.abort();
+        return result;
+      });
+    const reader = new ZipArtifactReader(
+      fixture.path,
+      "zip",
+      undefined,
+      fixture,
+    );
+    const iterator = reader.entries(controller.signal)[Symbol.asyncIterator]();
+    try {
+      await expect(iterator.next()).rejects.toMatchObject({
+        reason: "cancelled",
+      });
+    } finally {
+      await iterator.return?.();
+      reads.mockRestore();
+      await reader.close();
+      await fixture.handle.close();
+    }
+  });
+
+  it("rejects a changed admitted descriptor before reading ZIP bytes", async () => {
+    const fixture = await admittedZip();
+    await writeFile(fixture.path, Buffer.alloc(0));
+    const reads = vi.spyOn(fixture.positional, "read");
+    const reader = new ZipArtifactReader(
+      fixture.path,
+      "zip",
+      undefined,
+      fixture,
+    );
+    try {
+      await expect(enumerate(reader)).rejects.toMatchObject({
+        reason: "integrity",
+      });
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      await reader.close();
+      await fixture.handle.close();
+    }
+  });
+});
 
 describe("ZipArtifactReader decompression budget", () => {
   it("refuses an archive whose entries declare more than its size can justify", async () => {

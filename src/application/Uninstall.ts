@@ -53,7 +53,6 @@ import {
   redirectedWriteBlocker,
   type MsixPackageView,
 } from "./MsixPackageStorage.js";
-export { isUninstallFailure } from "./UninstallFailure.js";
 
 interface ManagedPathStats {
   readonly uid?: number;

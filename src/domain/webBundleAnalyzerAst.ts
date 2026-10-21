@@ -1,6 +1,7 @@
 import * as t from "@babel/types";
 
 import { sanitizeBrowserUrl } from "./browserObservation.js";
+import { hasScheme } from "./artifactPathSyntax.js";
 import {
   isNullishJavaScriptSyntax,
   readExactJavaScriptLiteral,
@@ -33,7 +34,7 @@ export const isUrlLikeModuleSpecifier = (specifier: string): boolean =>
   specifier.startsWith("/") ||
   specifier.startsWith("./") ||
   specifier.startsWith("../") ||
-  /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(specifier);
+  hasScheme(specifier);
 
 export const resolveSpecifier = (
   specifier: string,

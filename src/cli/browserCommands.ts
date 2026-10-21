@@ -21,6 +21,7 @@ import {
   browserPageInspectionOptions,
   browserScopeOptions,
   observationDuration,
+  selectedCommandTimeout,
 } from "../cliObservationOptions.js";
 import { withCommandCancellation } from "./commandCancellation.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
@@ -48,7 +49,9 @@ const registerTargetList = (
         .string()
         .describe("Loopback CDP HTTP endpoint or browser WebSocket URL"),
     }),
-    options: z.object({ ...browserScopeOptions }),
+    options: z.object({
+      allowedOrigins: browserScopeOptions.allowedOrigins,
+    }),
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, "list-browser-targets", async () => {
@@ -112,6 +115,7 @@ const registerPageInspection = (
             include_script_sources: options.includeScriptSources,
             include_storage_keys: options.includeStorageKeys,
             include_storage_fingerprints: options.includeStorageFingerprints,
+            ...selectedCommandTimeout(options.commandTimeoutMs),
           };
           const parsed = inspectWebPageInputSchema.safeParse(input);
           if (!parsed.success)
@@ -162,6 +166,8 @@ const registerBundleAnalysis = (
       analysisTimeoutMs: analyzeWebBundleInputSchema.shape.analysis_timeout_ms,
       totalAnalysisTimeoutMs:
         analyzeWebBundleInputSchema.shape.total_analysis_timeout_ms,
+      sourceMapFetchTimeoutMs:
+        analyzeWebBundleInputSchema.shape.source_map_fetch_timeout_ms,
     }),
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
@@ -183,6 +189,12 @@ const registerBundleAnalysis = (
             ...(options.totalAnalysisTimeoutMs === undefined
               ? {}
               : { total_analysis_timeout_ms: options.totalAnalysisTimeoutMs }),
+            ...(options.sourceMapFetchTimeoutMs === undefined
+              ? {}
+              : {
+                  source_map_fetch_timeout_ms: options.sourceMapFetchTimeoutMs,
+                }),
+            ...selectedCommandTimeout(options.commandTimeoutMs),
           };
           const parsed = analyzeWebBundleInputSchema.safeParse(input);
           if (!parsed.success)
@@ -234,6 +246,7 @@ const registerObservationSession = (
             allowed_origins: options.allowedOrigins,
             target_id: args.targetId,
             observation_ms: options.observationMs,
+            ...selectedCommandTimeout(options.commandTimeoutMs),
           };
           const parsed = observeWebSessionInputSchema.safeParse(input);
           if (!parsed.success)

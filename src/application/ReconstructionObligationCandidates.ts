@@ -114,7 +114,7 @@ const deriveApplicationCandidates = (
         candidates,
         generatedCandidate({
           key: `application:${node.node_id}:${candidatePolicy.family}`,
-          title: node.observations[0]?.label ?? `${node.kind} boundary`,
+          title: node.observations[0]?.label?.trim() || `${node.kind} boundary`,
           policy: candidatePolicy,
           artifactSha256: source.rootArtifactSha256,
           applicationNodeId: node.node_id,
@@ -143,7 +143,7 @@ const deriveApplicationCandidates = (
           candidates,
           generatedCandidate({
             key: `semantic:${node.node_id}:${candidatePolicy.family}`,
-            title: node.label ?? `${node.kind} semantic boundary`,
+            title: node.label?.trim() || `${node.kind} semantic boundary`,
             policy: candidatePolicy,
             artifactSha256: node.identity.artifact_sha256,
             applicationNodeId: node.application_node_ids[0] ?? null,

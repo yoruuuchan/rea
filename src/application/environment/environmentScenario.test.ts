@@ -13,6 +13,7 @@ import {
 } from "./environmentBundle.js";
 import { replayEnvironmentTool } from "./environmentReplay.js";
 import { loadEnvironmentSource } from "./environmentSource.js";
+import { prepareServedState } from "./environmentState.js";
 
 const fixture = scenarioServeFixture();
 
@@ -114,6 +115,8 @@ describe("environment manifests from capture_browser_scenario parents", () => {
     });
     const planned = planEnvironmentBundle(source.value, {
       packageSource: registryPackageSource(),
+      served: (name) =>
+        prepareServedState(source.value, fixture.capture, { name }),
     });
     if (!planned.ok) throw planned.error;
     const readme =

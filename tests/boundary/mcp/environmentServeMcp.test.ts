@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -7,6 +9,7 @@ import { describe, expect } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
   environmentServeSource,
+  environmentStateServeFixture,
   writeEnvironmentServeFiles,
 } from "../../fixtures/environmentServe.js";
 import { startListeningProcess } from "../../support/mcp/streamableHttpProcess.js";
@@ -17,9 +20,12 @@ import {
 
 const HTTP_BOUNDARY_TIMEOUT_MS = 90_000;
 const CARD_PATH = "/.well-known/agent-env.json";
+/** SHA-256 of the 12,818-byte card served for the fixture named "renamed", its descriptions naming each tool's recorded responses; pure replay must serve these bytes. */
+const REPLAY_CARD_SHA256 =
+  "7c65ab63f0c00ce79b570024c4611c225729677b44fc49bbde32b2d65f868961";
 
-/** Serve the fixture pair through the built CLI and connect an SDK client to it. */
-const serveFixture = async (
+/** Serve the fixture pair as pure replay through the built CLI. */
+const serveReplayOnly = async (
   processes: TestProcesses,
   environment: Readonly<Record<string, string>> = {},
 ) => {
@@ -32,6 +38,7 @@ const serveFixture = async (
       files.manifestPath,
       "--evidence",
       files.capturePath,
+      "--replay-only",
       "--port",
       "0",
     ],
@@ -47,12 +54,12 @@ const connect = async (url: URL) => {
   return client;
 };
 
-describe("rea environment-serve", () => {
+describe("rea environment-serve --replay-only", () => {
   processTest(
     "lists one tool per manifest tool and replays exact and best-effort records as untrusted target content",
     async ({ processes }) => {
       const source = environmentServeSource();
-      const started = await serveFixture(processes);
+      const started = await serveReplayOnly(processes);
       expect(started.url.hostname).toBe("127.0.0.1");
       expect(started.url.pathname).toBe("/mcp");
       const client = await connect(started.url);
@@ -62,6 +69,15 @@ describe("rea environment-serve", () => {
         expect(tools.map(({ name }) => name).sort()).toEqual(
           source.manifest.tools.map(({ name }) => name).sort(),
         );
+        const users = tools.find(({ name }) => name === "get_users_by_id");
+        expect(users?.description).toContain(
+          '; returns a JSON object with fields "id", "uid", "login", "email"; recorded statuses 200;',
+        );
+        expect(users?.annotations).toEqual({
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        });
         const exact = await client.callTool({
           name: "get_users_by_id",
           arguments: { id: "2" },
@@ -104,16 +120,20 @@ describe("rea environment-serve", () => {
   );
 
   processTest(
-    "serves the environment card named by ENVIRONMENT_NAME and refuses every data-plane method",
+    "serves the stateless environment card named by ENVIRONMENT_NAME and refuses every data-plane method",
     async ({ processes }) => {
       const source = environmentServeSource();
-      const started = await serveFixture(processes, {
+      const started = await serveReplayOnly(processes, {
         ENVIRONMENT_NAME: "renamed",
       });
       const origin = new URL(started.url).origin;
       const card = await fetch(new URL(CARD_PATH, origin));
       expect(card.status).toBe(200);
-      const body: unknown = await card.json();
+      const text = await card.text();
+      expect(createHash("sha256").update(text).digest("hex")).toBe(
+        REPLAY_CARD_SHA256,
+      );
+      const body: unknown = JSON.parse(text);
       expect(body).toMatchObject({
         name: "renamed",
         protocolVersion: "1.0",
@@ -137,6 +157,125 @@ describe("rea environment-serve", () => {
         error: { code: -32601, message: "method not found: data/reset" },
       });
       expect(started.stderr()).toContain('"transport":"streamable-http"');
+    },
+    HTTP_BOUNDARY_TIMEOUT_MS,
+  );
+});
+
+describe("rea environment-serve", () => {
+  processTest(
+    "serves read tools from the state it derives from the capture and loads a replacement state through the data plane",
+    async ({ processes }) => {
+      const root = await createTestTempDirectory("rea-environment-state-mcp-");
+      const fixture = environmentStateServeFixture();
+      // Only the manifest and the capture: the server derives the state itself.
+      const files = await writeEnvironmentServeFiles(root, fixture);
+      const started = await startListeningProcess(processes, [
+        "environment-serve",
+        files.manifestPath,
+        "--evidence",
+        files.capturePath,
+        "--port",
+        "0",
+      ]);
+      expect(started.stderr()).not.toContain("Environment state unavailable");
+      const origin = new URL(started.url).origin;
+      const card = (await (await fetch(new URL(CARD_PATH, origin))).json()) as {
+        capabilities: {
+          operations: string[];
+          extensions: { uri: string }[] | null;
+          tools: { name: string }[];
+        };
+      };
+      expect(card.capabilities.operations).toEqual([
+        "data/reset",
+        "data/add",
+        "data/get",
+      ]);
+      expect(card.capabilities.extensions).toMatchObject([
+        { uri: "urn:agentenv:intake/v1" },
+      ]);
+      const names = card.capabilities.tools.map(({ name }) => name);
+      expect(names).toContain("get_users_by_id");
+      for (const write of [
+        "post_annotations",
+        "delete_dashboards_by_uid",
+        "post_folders",
+        "put_folders_by_uid",
+        "delete_teams_by_id",
+      ])
+        expect(names).not.toContain(write);
+      const rpc = async (method: string, params?: unknown) =>
+        (
+          await fetch(new URL("/agentenv", origin), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          })
+        ).json() as Promise<{
+          result?: {
+            parts: [
+              {
+                data: {
+                  rea_state: {
+                    state_evidence_id: string;
+                    entities: unknown[];
+                  };
+                };
+              },
+            ];
+          };
+          error?: { code: number };
+        }>;
+      await expect(rpc("data/add", { parts: [] })).resolves.toMatchObject({
+        error: { code: -32602 },
+      });
+      const current = await rpc("data/get");
+      const document = current.result?.parts[0].data;
+      // The derived state is the one inspect-analysis-view projects from the capture.
+      expect(document?.rea_state.state_evidence_id).toBe(
+        fixture.state.evidence_id,
+      );
+      expect(document?.rea_state.entities.length).toBeGreaterThan(0);
+      const client = await connect(started.url);
+      try {
+        const before = await client.callTool({
+          name: "get_users_by_id",
+          arguments: { id: "3" },
+        });
+        expect(before.structuredContent).toMatchObject({
+          body: { login: "viewer" },
+          state: { source: "state", view: "item", id: "3" },
+        });
+        await expect(
+          rpc("data/add", {
+            parts: [
+              {
+                kind: "data",
+                data: { rea_state: { ...document?.rea_state, entities: [] } },
+              },
+            ],
+          }),
+        ).resolves.toMatchObject({ result: {} });
+        const emptied = await client.callTool({
+          name: "get_users_by_id",
+          arguments: { id: "3" },
+        });
+        expect(emptied.isError).toBe(true);
+        expect(emptied._meta).toMatchObject({
+          provenance: { untrusted_content: true },
+        });
+        await expect(rpc("data/reset")).resolves.toMatchObject({ result: {} });
+        const restored = await client.callTool({
+          name: "get_users_by_id",
+          arguments: { id: "3" },
+        });
+        expect(restored.structuredContent).toMatchObject({
+          body: { login: "viewer" },
+        });
+      } finally {
+        await client.close();
+      }
     },
     HTTP_BOUNDARY_TIMEOUT_MS,
   );

@@ -40,6 +40,7 @@ import {
   type EnvironmentPackageSource,
 } from "./environmentBundle.js";
 import type { EnvironmentSource } from "./environmentSource.js";
+import { prepareServedState, type PreparedState } from "./environmentState.js";
 
 /** One input file read once: the bytes the bundle copies and the value they parse to. */
 export interface EnvironmentExportFile {
@@ -55,7 +56,7 @@ export interface EnvironmentExportInputs {
 }
 
 export interface EnvironmentExportInput extends EnvironmentExportInputs {
-  /** The authenticated pair the bundle replays, loaded from the parsed values of the two files. */
+  /** The authenticated pair the bundle serves, loaded from the parsed values of the two files. */
   readonly source: EnvironmentSource;
   /** Absolute bundle root; absent or empty. */
   readonly directory: string;
@@ -74,9 +75,12 @@ export interface EnvironmentExportResult {
   readonly status: "exported";
   readonly directory: string;
   readonly name: string;
+  /** Tools the bundle serves. */
   readonly tool_count: number;
   readonly evidence_id: string;
   readonly manifest_evidence_id: string;
+  /** Whether the bundle serves from the state the export derived, as `environment-serve` reports it. */
+  readonly state: PreparedState["report"];
   readonly package_source: JsonValue;
   readonly files: readonly WrittenBundleFile[];
 }
@@ -328,9 +332,15 @@ export const exportEnvironmentBundle = async (
     input.packageTarball === undefined
       ? registryPackageSource()
       : { kind: "tarball", path: input.packageTarball };
+  // The bundle's server prepares the state at startup; preparing it here, once the name is checked, predicts what it serves.
   const plan = planEnvironmentBundle(input.source, {
     name: input.name,
     packageSource,
+    served: (name) =>
+      prepareServedState(input.source, input.evidence.value, {
+        name,
+        operation: ENVIRONMENT_EXPORT_OPERATION,
+      }),
   });
   if (!plan.ok) return plan;
   let files: readonly WrittenBundleFile[];
@@ -398,6 +408,7 @@ export const exportEnvironmentBundle = async (
     tool_count: plan.value.toolCount,
     evidence_id: input.source.evidenceId,
     manifest_evidence_id: input.source.manifestEvidenceId,
+    state: plan.value.state,
     package_source: packageSourceValue(plan.value.packageSource),
     files,
   });

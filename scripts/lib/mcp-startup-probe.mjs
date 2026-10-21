@@ -35,11 +35,22 @@ export async function measureMcpStartup({
   const startedAt = performance.now();
   rss.start();
   try {
-    await client.connect(transport, { timeout: policy.initializeBudgetMs });
+    await withFixedPhaseBudget(
+      "MCP initialize phase budget",
+      policy.initializeBudgetMs,
+      "ms",
+      () => client.connect(transport, { timeout: policy.initializeBudgetMs }),
+    );
     const initializedAt = performance.now();
-    const tools = await client.listTools(undefined, {
-      timeout: policy.toolsListBudgetMs,
-    });
+    const tools = await withFixedPhaseBudget(
+      "MCP tools/list phase budget",
+      policy.toolsListBudgetMs,
+      "ms",
+      () =>
+        client.listTools(undefined, {
+          timeout: policy.toolsListBudgetMs,
+        }),
+    );
     const listedAt = performance.now();
     rss.stop();
     const measurement = {
@@ -52,7 +63,11 @@ export async function measureMcpStartup({
     assertStartupBudgets(measurement, policy);
     return measurement;
   } catch (cause) {
-    throw new Error(`packaged MCP startup probe failed: ${stderr}`, { cause });
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `packaged MCP startup probe failed: ${detail}${stderr.length === 0 ? "" : `\n${stderr}`}`,
+      { cause },
+    );
   } finally {
     rss.stop();
     await Promise.allSettled([client.close(), transport.close()]);
@@ -82,12 +97,24 @@ export async function profileMcpModuleLoading({
     version: "1.0.0",
   });
   try {
-    await client.connect(transport, {
-      timeout: policy.doctorDeadlineMs,
-    });
-    await client.listTools(undefined, {
-      timeout: policy.toolsListBudgetMs,
-    });
+    await withFixedPhaseBudget(
+      "MCP doctor startup deadline",
+      policy.doctorDeadlineMs,
+      "ms",
+      () =>
+        client.connect(transport, {
+          timeout: policy.doctorDeadlineMs,
+        }),
+    );
+    await withFixedPhaseBudget(
+      "MCP tools/list phase budget",
+      policy.toolsListBudgetMs,
+      "ms",
+      () =>
+        client.listTools(undefined, {
+          timeout: policy.toolsListBudgetMs,
+        }),
+    );
     return profile.result();
   } finally {
     await Promise.allSettled([client.close(), transport.close()]);
@@ -197,16 +224,46 @@ const createLinuxRssSampler = (pid) => {
   };
 };
 
+/** Same sentence as `fixedMcpPhaseBudgetRecovery`; this script cannot import that TypeScript module. */
+export const fixedMcpStartupPhaseBudgetRecovery = (phase, value, unit) =>
+  `REA's fixed ${phase} is ${String(value)} ${unit} and this release has no runtime override.`;
+
+const phaseTimeout = (cause) => {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return (
+    message.includes("Request timed out") ||
+    message.includes("Maximum total timeout exceeded") ||
+    message.includes("timed out")
+  );
+};
+
+const withFixedPhaseBudget = async (phase, value, unit, operation) => {
+  try {
+    return await operation();
+  } catch (cause) {
+    if (!phaseTimeout(cause)) throw cause;
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `${detail} ${fixedMcpStartupPhaseBudgetRecovery(phase, value, unit)}`,
+      { cause },
+    );
+  }
+};
+
 const assertStartupBudgets = (measurement, policy) => {
   if (measurement.process_started_to_initialized_ms > policy.initializeBudgetMs)
-    throw new Error("packaged MCP exceeded the initialize regression budget");
+    throw new Error(
+      `packaged MCP exceeded the initialize phase budget. ${fixedMcpStartupPhaseBudgetRecovery("MCP initialize phase budget", policy.initializeBudgetMs, "ms")}`,
+    );
   if (measurement.initialized_to_tools_list_ms > policy.toolsListBudgetMs)
-    throw new Error("packaged MCP exceeded the tools/list regression budget");
+    throw new Error(
+      `packaged MCP exceeded the tools/list phase budget. ${fixedMcpStartupPhaseBudgetRecovery("MCP tools/list phase budget", policy.toolsListBudgetMs, "ms")}`,
+    );
   if (
     measurement.process_started_to_tools_list_ms > policy.firstCatalogBudgetMs
   )
     throw new Error(
-      "packaged MCP exceeded the first-catalog regression budget",
+      `packaged MCP exceeded the first-catalog phase budget. ${fixedMcpStartupPhaseBudgetRecovery("MCP first-catalog phase budget", policy.firstCatalogBudgetMs, "ms")}`,
     );
 };
 

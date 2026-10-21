@@ -25,7 +25,7 @@ export interface StateToolFacts {
   readonly record_ordinals: readonly number[];
 }
 
-/** A record's response body as JSON, or unusable when absent, cut, not JSON or not exactly representable. */
+/** A record's response body as JSON, or unusable when absent, cut, not JSON, not exactly representable or carrying a `__proto__` member. */
 export type ParsedBody =
   | { readonly kind: "json"; readonly value: JsonValue }
   | { readonly kind: "unusable" };
@@ -42,12 +42,20 @@ export type RecordedViewReason =
   | "query-body"
   | "no-init-recording"
   | "body-unusable"
-  | "not-entity"
   | "no-identity"
+  | "path-varies"
   | "query-varies"
   | "fields-differ"
   | "envelope-varies"
-  | "list-differs";
+  | "list-differs"
+  | "rendered-oversize";
+
+/**
+ * Recorded response text, and a document value rendered back to JSON, stay within this many UTF-8
+ * bytes. A larger recorded body is not parsed; a parsed value whose JSON rendering exceeds it stays
+ * a recorded replay (`rendered-oversize`) rather than a document the server would have to refuse.
+ */
+export const STATE_BODY_LIMIT_BYTES = 256 * 1024;
 
 export interface StateType {
   readonly collection_template: string;
@@ -189,7 +197,7 @@ export const normalizedPath = (path: string): string =>
 
 /** An item record's collection is its path without the identity segment; a list record's is its path. */
 export const collectionPathOf = (
-  record: StateRecordFacts,
+  record: Pick<StateRecordFacts, "path">,
   item: boolean,
 ): string =>
   item
@@ -201,10 +209,13 @@ export const isQueryPost = (method: string, path: string): boolean =>
   method === "POST" &&
   segmentsOf(path).some((segment) => QUERY_SEGMENTS.has(segment.toLowerCase()));
 
-/** Whether a record may change state: a successful or unanswered write that is not a query POST. */
+/** Whether a request with this method and path may change state: a write method that is not a query POST. */
+export const changesState = (method: string, path: string): boolean =>
+  WRITE_METHODS.has(method) && !isQueryPost(method, path);
+
+/** Whether a record may change state: a successful or unanswered request that `changesState` names. */
 export const isStateWrite = (record: StateRecordFacts): boolean =>
-  WRITE_METHODS.has(record.method) &&
-  !isQueryPost(record.method, record.path) &&
+  changesState(record.method, record.path) &&
   (record.status === null || (record.status >= 200 && record.status < 400));
 
 /** Whether any write overlaps the span from one record's start to a later record's end; writes come in timeline order. */
@@ -282,6 +293,24 @@ export const jsonBytes = (value: JsonValue): number => {
   return ENTRY_BYTES;
 };
 
+/** Whether a JSON value nests more than `limit` levels below its root. */
+export const deeperThan = (value: JsonValue, limit: number): boolean => {
+  const pending: { readonly value: JsonValue; readonly depth: number }[] = [
+    { value, depth: 0 },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.depth > limit) return true;
+    const children = Array.isArray(next.value)
+      ? next.value
+      : isObject(next.value)
+        ? Object.values(next.value)
+        : [];
+    for (const child of children)
+      pending.push({ value: child, depth: next.depth + 1 });
+  }
+  return false;
+};
+
 /** JSON parsers keep a `__proto__` member that plain object construction would turn into a prototype. */
 export const hasPrototypeKey = (value: JsonValue): boolean =>
   Array.isArray(value)
@@ -293,29 +322,55 @@ export const hasPrototypeKey = (value: JsonValue): boolean =>
 
 export const pointerTo = (name: string): string =>
   `/${name.replaceAll("~", "~0").replaceAll("/", "~1")}`;
-const pointerName = (pointer: string): string =>
-  pointer.slice(1).replaceAll("~1", "/").replaceAll("~0", "~");
+/** The unescaped reference tokens of a pointer. */
+export const pointerTokens = (pointer: string): string[] =>
+  pointer === ""
+    ? []
+    : pointer
+        .slice(1)
+        .split("/")
+        .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
 
-/** The value at a pointer of depth at most one. */
+const memberOf = (
+  body: JsonValue | undefined,
+  name: string,
+): JsonValue | undefined =>
+  isObject(body) && Object.hasOwn(body, name) ? body[name] : undefined;
+
+/** The element of a one-element array. */
+const soleElement = (value: JsonValue | undefined): JsonValue | undefined =>
+  Array.isArray(value) && value.length === 1 ? value[0] : undefined;
+
+/** The value at a pointer: the root, one member, or element 0 of a one-element array at the root or in one member. */
 export const at = (body: JsonValue, pointer: string): JsonValue | undefined => {
-  if (pointer === "") return body;
-  if (!isObject(body)) return undefined;
-  const name = pointerName(pointer);
-  return Object.hasOwn(body, name) ? body[name] : undefined;
+  const [first, second, ...rest] = pointerTokens(pointer);
+  if (first === undefined) return body;
+  if (second !== undefined)
+    return second === "0" && rest.length === 0
+      ? soleElement(memberOf(body, first))
+      : undefined;
+  return Array.isArray(body)
+    ? first === "0"
+      ? soleElement(body)
+      : undefined
+    : memberOf(body, first);
 };
 
-/** A copy of `body` with the value at a pointer of depth at most one replaced. */
+/** A copy of `body` with the value `at` reads at the pointer replaced; unchanged when it reads none. */
 export const replaceAt = (
   body: JsonValue,
   pointer: string,
   value: JsonValue,
 ): JsonValue => {
-  if (pointer === "" || !isObject(body)) return value;
-  const name = pointerName(pointer);
+  const [first, second] = pointerTokens(pointer);
+  if (first === undefined) return value;
+  if (at(body, pointer) === undefined) return body;
+  if (!isObject(body)) return [value];
+  const replaced = second === undefined ? value : [value];
   return Object.fromEntries(
     Object.entries(body).map(([key, item]) => [
       key,
-      key === name ? value : item,
+      key === first ? replaced : item,
     ]),
   );
 };
@@ -323,20 +378,36 @@ export const replaceAt = (
 const matchingKeys = (object: JsonObject, value: string): string[] =>
   Object.keys(object).filter((key) => scalarText(object[key]) === value);
 
-/** The entity object an item response carries, at the root or in one wrapper property, with the keys repeating its path value. */
+/** The entity object an item response carries with the keys repeating its path value: at the root or in one wrapper member, else as the element of a one-element array there. */
 export const locateItem = (
   body: JsonValue,
   value: string,
 ): { readonly pointer: string; readonly keys: string[] } | undefined => {
-  if (!isObject(body)) return undefined;
-  const root = matchingKeys(body, value);
-  if (root.length > 0) return { pointer: "", keys: root };
-  const wrapped = Object.entries(body).flatMap(([name, item]) => {
-    if (!isObject(item)) return [];
-    const keys = matchingKeys(item, value);
-    return keys.length > 0 ? [{ pointer: pointerTo(name), keys }] : [];
-  });
-  return wrapped.length === 1 ? wrapped[0] : undefined;
+  const located = (
+    object: JsonValue | undefined,
+    pointer: string,
+    named = false,
+  ) => {
+    const keys = isObject(object)
+      ? matchingKeys(object, value).filter(
+          (key) => !named || IDENTITY_NAMES.includes(key),
+        )
+      : [];
+    return keys.length > 0 ? [{ pointer, keys }] : [];
+  };
+  const members = isObject(body) ? Object.entries(body) : [];
+  // Objects take precedence; an array element needs an identity name, since a filtered list may
+  // answer with one element that repeats its parent's value.
+  const tiers = [
+    located(body, ""),
+    members.flatMap(([name, item]) => located(item, pointerTo(name))),
+    located(soleElement(body), "/0", true),
+    members.flatMap(([name, item]) =>
+      located(soleElement(item), `${pointerTo(name)}/0`, true),
+    ),
+  ];
+  const chosen = tiers.find((tier) => tier.length > 0);
+  return chosen?.length === 1 ? chosen[0] : undefined;
 };
 
 /** Whether every item carries `name` as a distinct string or number. */
@@ -344,12 +415,33 @@ export const identifies = (
   items: readonly JsonObject[],
   name: string,
 ): boolean => {
-  const values = items.map((item) => scalarText(item[name]));
-  return (
-    values.every((value) => value !== undefined) &&
-    new Set(values).size === values.length
-  );
+  // Stop at the first missing or repeated value, so a sparse list costs one read per field.
+  const seen = new Set<string>();
+  for (const item of items) {
+    const value = scalarText(item[name]);
+    if (value === undefined || seen.has(value)) return false;
+    seen.add(value);
+  }
+  return true;
 };
+
+/** Fields ending in one of these may identify listed items that no identity name identifies. */
+const IDENTITY_SUFFIX = /(?:Id|_id)$/u;
+
+/** Keys of the first item, in its order, that end like an identity field and identify every item. */
+const suffixIdentities = (items: readonly JsonObject[]): string[] =>
+  Object.keys(items[0] ?? {}).filter(
+    (name) =>
+      IDENTITY_SUFFIX.test(name) &&
+      !IDENTITY_NAMES.includes(name) &&
+      identifies(items, name),
+  );
+
+/** Fields that identify every listed item, in precedence order: identity names, then suffix-named fields. */
+export const identityCandidates = (items: readonly JsonObject[]): string[] => [
+  ...IDENTITY_NAMES.filter((name) => identifies(items, name)),
+  ...suffixIdentities(items),
+];
 
 /** The array of entity objects a list response carries, at the root or in one property of an envelope that is not itself an entity. */
 export const locateList = (
@@ -366,20 +458,24 @@ export const locateList = (
     (entry): entry is [string, JsonObject[]] =>
       Array.isArray(entry[1]) && entry[1].every(isObject),
   );
-  const carrying = arrays.filter(
-    ([, items]) =>
-      items.length > 0 &&
-      (idField === undefined
-        ? IDENTITY_NAMES.some((name) => identifies(items, name))
-        : identifies(items, idField)),
-  );
-  const chosen =
-    carrying.length === 1
-      ? carrying[0]
-      : carrying.length === 0 && arrays.length === 1
-        ? arrays[0]
-        : undefined;
-  return chosen === undefined ? undefined : pointerTo(chosen[0]);
+  const carrying = (test: (items: JsonObject[]) => boolean) =>
+    arrays.filter(([, items]) => items.length > 0 && test(items));
+  // Identity names take precedence over suffix-named fields, which need two items to show
+  // distinct values; with neither, the one array of objects.
+  const tiers =
+    idField === undefined
+      ? [
+          carrying((items) =>
+            IDENTITY_NAMES.some((name) => identifies(items, name)),
+          ),
+          carrying(
+            (items) => items.length > 1 && suffixIdentities(items).length > 0,
+          ),
+          arrays,
+        ]
+      : [carrying((items) => identifies(items, idField)), arrays];
+  const chosen = tiers.find((entries) => entries.length > 0);
+  return chosen?.length === 1 ? pointerTo(chosen[0]![0]) : undefined;
 };
 
 export const listItems = (

@@ -23,9 +23,21 @@ that rejection does not roll back browser effects. REA removes its owned
 future-document scripts, restores live frame methods, then disconnects.
 Add secret declarations, storage seeds, and additional artifact or event
 capture only when needed. Action, secret, and storage counts are not capped.
-Duration, action, and navigation timeouts remain fixed provider-owned liveness
-limits. `capture.limits` controls retained event and network-content budgets;
-it does not change those liveness deadlines.
+Duration, action, and navigation timeouts remain separate from CDP command
+deadlines. `command_timeout_ms` (default 20000; omit it to keep that default
+and leave it out of Evidence) bounds launch startup, the connect-over-CDP
+handshake, target lookup, environment commands, and storage CDP commands,
+including replies from attached child targets. Set it in the scenario JSON.
+`capture-browser-scenario` has no `--command-timeout-ms` option.
+It does not change action `timeout_ms`, `wait_for_timeout.duration_ms`, or
+navigation. Service-worker restoration keeps a fixed 5000 ms grace and does
+not inherit a raised `command_timeout_ms`. CDP discovery stays on its own
+fixed deadline. When service workers are blocked, the registration check
+before discovery has its own fixed 10000 ms deadline; `command_timeout_ms`
+does not apply because discovery has not started. The discovery deadline
+covers endpoint discovery only. The following WebSocket handshake and
+`Target.attachToTarget` each use `command_timeout_ms`. `capture.limits` controls retained event and network-content
+budgets; it does not change those liveness deadlines.
 
 ## Minimal launch example
 

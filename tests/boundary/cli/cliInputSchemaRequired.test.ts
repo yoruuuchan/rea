@@ -8,6 +8,7 @@ import {
   apktoolInputSchemas,
   MAX_SELECTED_LOCALES,
 } from "../../../src/domain/apktool/apktoolResourceAnalysis.js";
+import { presentOmittableDefaults } from "../../../src/cli/omittableDefaults.js";
 
 type CliInstance = ReturnType<typeof createCli>;
 type CommandMap = NonNullable<ReturnType<typeof Cli.toCommands.get>>;
@@ -164,6 +165,22 @@ describe("CLI advertised input schemas", () => {
     expect(help.stdout).toContain(
       "archive  Relative archive path when the target is a bundle",
     );
+  });
+
+  it("advertises defaults as omittable on a mounted group root", async () => {
+    const group = Cli.create("group", {
+      args: z.object({ scope: z.enum(["all", "selected"]).default("all") }),
+      run: () => ({ ok: true }),
+    }).command("child", { run: () => ({ ok: true }) });
+    const cli = Cli.create("group-root-test", { sync: false }).command(group);
+
+    presentOmittableDefaults(cli as unknown as CliInstance);
+
+    const advertised = await advertisedSchema(
+      cli as unknown as CliInstance,
+      "group",
+    );
+    expect(advertised.args?.required ?? []).not.toContain("scope");
   });
 });
 

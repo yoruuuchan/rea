@@ -276,6 +276,17 @@ export interface AdbPackageDetails {
 const DETAIL_LINE = /^\s+([A-Za-z][A-Za-z0-9_]*)=(.*)$/u;
 
 /**
+ * Package Manager prints its `String` fields by concatenation, so an absent
+ * `installerPackageName` appears as the literal text `null`
+ * (morluto/rea#3943). No installer can be named "null", so an empty value or
+ * that sentinel is the absence of the fact and becomes the nullable result's
+ * null. `versionName` keeps the printed text: a manifest may declare the
+ * string "null" on purpose, and the parser cannot tell the two apart.
+ */
+const absentInstallerOrName = (value: string): string | null =>
+  value === "" || value === "null" ? null : value;
+
+/**
  * Project `dumpsys package PACKAGE` output. Only the listed fields are
  * extracted; the input is version-dependent and everything else is ignored
  * by design rather than guessed.
@@ -340,7 +351,7 @@ export const parseDumpsysPackageOutput = (
       key === "installerPackageName" &&
       details.installerPackageName === null
     )
-      details.installerPackageName = value === "" ? null : value;
+      details.installerPackageName = absentInstallerOrName(value);
     else if (key === "userId" && details.userId === null) {
       const parsed = /^(\d+)/u.exec(value);
       if (parsed !== null) details.userId = Number(parsed[1]!);

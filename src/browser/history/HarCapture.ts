@@ -132,7 +132,7 @@ const projectHar = (
     if (depth > WEB_NETWORK_CAPTURE_LIMITS.depth)
       throw new CaptureFormatError(
         "input-limit",
-        "HAR exceeds the 64-level complete-evidence nesting budget.",
+        "HAR exceeds the 64-level complete-evidence nesting budget. This release has no runtime override.",
         pointer,
       );
     if (

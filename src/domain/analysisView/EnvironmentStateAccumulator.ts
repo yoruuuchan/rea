@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import { parseExactJson } from "../exactJsonNumber.js";
+import { MAX_JSON_DEPTH, type JsonValue } from "../jsonValue.js";
 import { ok, type Result } from "../result.js";
 import {
   WEB_NETWORK_CAPTURE_LIMITS,
@@ -14,7 +15,10 @@ import {
 import { EnvironmentStateExtraction } from "./EnvironmentStateExtraction.js";
 import type { TemplateRule } from "./environmentManifestRules.js";
 import {
+  deeperThan,
+  hasPrototypeKey,
   isStateWrite,
+  STATE_BODY_LIMIT_BYTES,
   type ParsedBody,
   type StateRecordFacts,
   type StateTimeline,
@@ -22,6 +26,7 @@ import {
 import {
   base64PrefixChars,
   readRecordedResponseBody,
+  type RecordedResponseBody,
 } from "./recordedResponseBody.js";
 import {
   ENTRY_BYTES,
@@ -46,8 +51,36 @@ type StateFields = Pick<
   | "limitations"
 >;
 
-/** Bodies beyond this many UTF-8 bytes are not parsed into state; their views stay recorded. */
-export const STATE_BODY_LIMIT_BYTES = 256 * 1024;
+export { STATE_BODY_LIMIT_BYTES };
+
+/**
+ * Levels the state's own nesting adds above a recorded value: Evidence, a `data/get` reply and a
+ * JSON-RPC response hold a body's members about ten levels down, so a body must leave this much
+ * room under the JSON depth limit to be sealed and served.
+ */
+const STATE_NESTING_DEPTH = 16;
+
+/** A recorded response body as state JSON: a JSON-like media type, complete UTF-8 text within the state body limit, exact numbers and no `__proto__` member; otherwise undefined. */
+export const stateBodyJson = (
+  contentType: string | null,
+  body: RecordedResponseBody,
+): JsonValue | undefined => {
+  if (
+    contentType === null ||
+    !isJsonLike(mediaTypeEssence(contentType)) ||
+    body.bodyText === null ||
+    body.bodyEncoding === "base64" ||
+    body.bodyCut === true ||
+    Buffer.byteLength(body.bodyText, "utf8") > STATE_BODY_LIMIT_BYTES
+  )
+    return undefined;
+  const value = parseExactJson(body.bodyText);
+  return value === undefined ||
+    hasPrototypeKey(value) ||
+    deeperThan(value, MAX_JSON_DEPTH - STATE_NESTING_DEPTH)
+    ? undefined
+    : value;
+};
 
 const timingSchema = z.object({
   startedDateTime: z.string(),
@@ -189,9 +222,10 @@ export class EnvironmentStateAccumulator extends EnvironmentManifestAccumulator 
     return ok(undefined);
   }
 
-  /** Parse one retained response body as exact JSON, charging its decoding and tree as temporary work. */
+  /** Parse one retained response body as state JSON, charging its decoding and tree as temporary work. */
   #body(ordinal: number): ParsedBody | null {
     const entry = this.#entries.get(ordinal);
+    // A body that is not JSON-like is refused before its decoding is charged.
     if (entry === undefined || !isJsonLike(mediaTypeEssence(entry.contentType)))
       return { kind: "unusable" };
     const content = contentSchema.safeParse(entry.record.reported);
@@ -202,15 +236,10 @@ export class EnvironmentStateAccumulator extends EnvironmentManifestAccumulator 
       return { kind: "unusable" };
     if (!this.temporary(RECORD_SCRATCH_BYTES + textBytes(length) * 4))
       return null;
-    const body = readRecordedResponseBody(entry.record, STATE_BODY_LIMIT_BYTES);
-    if (
-      body.bodyText === null ||
-      body.bodyEncoding === "base64" ||
-      body.bodyCut === true ||
-      Buffer.byteLength(body.bodyText, "utf8") > STATE_BODY_LIMIT_BYTES
-    )
-      return { kind: "unusable" };
-    const value = parseExactJson(body.bodyText);
+    const value = stateBodyJson(
+      entry.contentType,
+      readRecordedResponseBody(entry.record, STATE_BODY_LIMIT_BYTES),
+    );
     return value === undefined ? { kind: "unusable" } : { kind: "json", value };
   }
 

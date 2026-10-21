@@ -202,10 +202,38 @@ Function dossiers retain this same string evidence. Native call edges retain
 Hopper's partial `CallReference` classification and exact endpoints; detailed
 reference flags remain unavailable rather than being invented.
 Regex searches use ECMAScript Unicode syntax in a cancellable worker with a
-five-second matching deadline and a 128 MiB worker heap. Deadline or
+five-second matching deadline and a worker old-generation heap. Deadline or
 cancellation stops matching while leaving the Hopper API available. This
-release has no runtime override for that deadline or heap. Literal mode
-retains Unicode casefold matching.
+release has no runtime override for that deadline. The worker requests 128
+MiB. A positive Node.js `--max-old-space-size` on the process that starts
+REA, including `NODE_OPTIONS`, overrides that request and sets the effective
+heap. `--max-old-space-size-percentage` takes precedence over that flag in
+either order. REA does not turn the percentage into a MiB, so the effective
+heap stays unestablished instead of the 128 MiB request or the absolute flag.
+The reported `NODE_OPTIONS` value is the process initial environment when that
+block can be read. A later edit to the environment is not the value Node
+applied, and an unreadable initial value leaves the effective heap
+unestablished. The launch Node options are the initial command line on Linux
+when that buffer still has a program entry, not a later edit to
+`process.execArgv`. A preload can clear that array after V8 has applied the
+flags. Setting `process.title` or `--title` overwrites the command line, so a
+buffer without a program entry leaves the effective heap unestablished.
+`--env-file` or `--env-file-if-exists` can supply `NODE_OPTIONS`
+when the initial environment has none. That file is not part of the initial
+environment block, so the effective heap stays unestablished instead of the
+128 MiB request. An initial `NODE_OPTIONS` is still used, because Node does
+not let the file replace it. A positive `--max-heap-size`, including the
+underscore form and launch `NODE_OPTIONS` on Node versions that allow it,
+sets the total heap rather than the old generation and can be lower than the
+128 MiB request. The effective old generation stays unestablished while that
+value is in effect. A zero or empty value clears it.
+`--experimental-config-file` or `--experimental-default-config-file` can set
+`nodeOptions`, including a heap percentage, from a file that is not read
+back. The effective heap stays unestablished when either flag is present,
+including when an absolute `--max-old-space-size` is also on the command
+line or in the recovered `NODE_OPTIONS`. Node accepts the config path as
+`=` or the next argument.
+Literal mode retains Unicode casefold matching.
 
 ## Bounded static traces
 

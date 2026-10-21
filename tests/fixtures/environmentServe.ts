@@ -6,10 +6,17 @@ import {
   loadEnvironmentSource,
   type EnvironmentSource,
 } from "../../src/application/environment/environmentSource.js";
+import {
+  loadEnvironmentState,
+  prepareServedState,
+  type EnvironmentState,
+  type PreparedState,
+} from "../../src/application/environment/environmentState.js";
 import type { Evidence } from "../../src/domain/evidence.js";
 import {
   analysisViewCaptureEvidence,
   environmentManifestCaptureFixture,
+  environmentStateCaptureFixture,
 } from "./analysisView.js";
 
 /** Every opt-in rule, so the fixture yields `uid` and `plugin_id` parameters. */
@@ -47,6 +54,14 @@ export const environmentServeSource = (
   const source = loadEnvironmentSource(fixture.manifest, fixture.capture);
   if (!source.ok) throw source.error;
   return source.value;
+};
+
+/** The fixture source and the state its server prepares at startup, as serving and export prepare it. */
+export const environmentServeServed = (
+  fixture: EnvironmentServeFixture = environmentServeFixture(),
+): { readonly source: EnvironmentSource; readonly served: PreparedState } => {
+  const source = environmentServeSource(fixture);
+  return { source, served: prepareServedState(source, fixture.capture) };
 };
 
 /** Paths of the two Evidence files the serve command reads. */
@@ -89,4 +104,40 @@ export const environmentServeSourceWithBody = (
     bodyText,
   };
   return { ...source, exchanges: new Map([[ordinal, exchange]]) };
+};
+
+/** Manifest, capture and environment-state Evidence projected from one capture with the same rules. */
+export interface EnvironmentStateServeFixture extends EnvironmentServeFixture {
+  readonly state: Evidence;
+}
+
+/** Project a capture's manifest and state through the real view service; defaults to the timed Grafana-shaped capture. */
+export const environmentStateServeFixture = (
+  capture: Evidence = analysisViewCaptureEvidence(
+    environmentStateCaptureFixture(),
+  ),
+): EnvironmentStateServeFixture => {
+  const project = (kind: "environment-manifest" | "environment-state") => {
+    const projected = inspectAnalysisView({
+      source: { kind: "inline", evidence: capture },
+      view: { kind, template_rules: [...ALL_TEMPLATE_RULES] },
+    });
+    if (!projected.ok) throw projected.error;
+    return projected.value;
+  };
+  return {
+    manifest: project("environment-manifest"),
+    capture,
+    state: project("environment-state"),
+  };
+};
+
+/** The served source and the state Evidence loaded for it, as derivation checks it. */
+export const environmentStateServeInputs = (
+  fixture: EnvironmentStateServeFixture = environmentStateServeFixture(),
+): { readonly source: EnvironmentSource; readonly state: EnvironmentState } => {
+  const source = environmentServeSource(fixture);
+  const state = loadEnvironmentState(fixture.state, source);
+  if (!state.ok) throw state.error;
+  return { source, state: state.value };
 };

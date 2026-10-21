@@ -5,8 +5,36 @@ import { assertArtifactReadActive } from "./ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import { err, ok, type Result } from "../domain/result.js";
 
-/** Shared resource budget for the eagerly decoded ASAR header, not member bytes. */
+/**
+ * Fixed header/index admission for this release. The header is decoded before
+ * any member path can be selected. There is no caller or configuration override.
+ */
 export const MAX_ASAR_HEADER_BYTES = 16 * 1024 * 1024;
+
+const MEBIBYTE = 1024 * 1024;
+
+/** User-visible recovery for the fixed ASAR header/index admission budget. */
+export const asarHeaderAdmissionRecovery = (): string => {
+  const bytes = MAX_ASAR_HEADER_BYTES;
+  const mebibytes = bytes / MEBIBYTE;
+  const allowance = Number.isInteger(mebibytes)
+    ? `${String(mebibytes)} MiB / ${String(bytes)} bytes`
+    : `${String(bytes)} bytes`;
+  return [
+    `ASAR header/index admission is limited to ${allowance}.`,
+    "This release has no runtime override.",
+    "Selecting fewer sources or narrowing an internal path does not bypass header admission, because the archive index is read before any member can be selected.",
+    "Raising max_heap_mb or available host memory does not raise it.",
+    "Analyze an extracted application directory, which does not admit an ASAR header, or supply an archive whose header fits this allowance.",
+    "Repeating the unchanged request fails the same way.",
+  ].join(" ");
+};
+
+/** Refuse an ASAR whose header/index exceeds the fixed admission budget. */
+export const asarHeaderAdmissionFailure = (): ArtifactReaderFailure =>
+  new ArtifactReaderFailure("limit", asarHeaderAdmissionRecovery(), {
+    admission: { kind: "asar-header", maximumBytes: MAX_ASAR_HEADER_BYTES },
+  });
 
 /** Absolute archive prefix required to inspect an admitted header. */
 export const MAX_ASAR_HEADER_PROBE_BYTES = MAX_ASAR_HEADER_BYTES + 8;
@@ -345,10 +373,7 @@ export const admitAsarHeader = async (
   const parsed = parseAsarHeaderExtents(prefix, observed.size);
   if (!parsed.ok) throw parsed.error;
   if (parsed.value.headerBytes > MAX_ASAR_HEADER_BYTES)
-    throw new ArtifactReaderFailure(
-      "limit",
-      `ASAR header exceeds the ${String(MAX_ASAR_HEADER_BYTES)} byte decode budget`,
-    );
+    throw asarHeaderAdmissionFailure();
   return {
     archiveBytes: observed.size,
     ...parsed.value,

@@ -53,7 +53,7 @@ export const decodeSazCapture = async (
       if (declaredBytes > WEB_NETWORK_CAPTURE_LIMITS.inputBytes)
         throw new CaptureFormatError(
           "expanded-limit",
-          "SAZ expanded members exceed the 32 MiB complete-evidence budget.",
+          "SAZ expanded members exceed the 32 MiB complete-evidence budget. This release has no runtime override.",
         );
       inventory.push({
         path: entry.path,

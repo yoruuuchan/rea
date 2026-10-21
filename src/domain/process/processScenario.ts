@@ -298,8 +298,8 @@ export const processScenarioSchema = z
       if (event.at_ms > scenario.timeout_ms) {
         context.addIssue({
           code: "custom",
-          message: "event occurs after the scenario timeout",
-          path: ["events"],
+          message: `event at ${String(event.at_ms)} ms occurs after the ${String(scenario.timeout_ms)} ms scenario timeout`,
+          path: ["events", index],
         });
       }
     }

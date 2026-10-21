@@ -210,3 +210,30 @@ it("applies the selected scrollback budget to every scheduled resize", () => {
     }).success,
   ).toBe(true);
 });
+
+it("identifies each event scheduled after the scenario timeout", () => {
+  const parsed = processScenarioSchema.safeParse({
+    executable: "/bin/true",
+    timeout_ms: 1_000,
+    events: [
+      { type: "input", at_ms: 1_000, data: "a" },
+      { type: "input", at_ms: 1_500, data: "b" },
+      { type: "signal", at_ms: 2_000, signal: "SIGINT" },
+    ],
+  });
+
+  expect(parsed.success).toBe(false);
+  if (parsed.success) throw new Error("expected late event rejection");
+  expect(parsed.error.issues).toEqual([
+    expect.objectContaining({
+      code: "custom",
+      path: ["events", 1],
+      message: "event at 1500 ms occurs after the 1000 ms scenario timeout",
+    }),
+    expect.objectContaining({
+      code: "custom",
+      path: ["events", 2],
+      message: "event at 2000 ms occurs after the 1000 ms scenario timeout",
+    }),
+  ]);
+});

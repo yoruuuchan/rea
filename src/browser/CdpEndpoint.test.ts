@@ -3,6 +3,7 @@ import { once } from "node:events";
 
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
+import { WEB_RUNTIME_LIMITS } from "../domain/webRuntime.js";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -204,6 +205,49 @@ describe("CDP discovery cancellation ownership", () => {
     expect(failure).toBeInstanceOf(BrowserObservationError);
     expect(failure).toMatchObject({ reason: "timeout" });
   });
+});
+
+it("names the browser-socket message budget when that discovery deadline expires", async () => {
+  const failure = await withCdpDiscoveryDeadline(
+    "list_browser_targets",
+    undefined,
+    (signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      }),
+    1,
+  ).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(BrowserObservationError);
+  if (!(failure instanceof BrowserObservationError)) return;
+  expect(failure.userMessage).toContain(
+    `${String(WEB_RUNTIME_LIMITS.protocolBytes)}-byte browser-socket message budget`,
+  );
+  expect(failure.userMessage).not.toContain(
+    "8388608-byte discovery document budget",
+  );
+});
+
+it("names the HTTP discovery document budget when that response deadline expires", async () => {
+  const { endpoint } = await listen(() => undefined);
+  const failure = await readCdpJson(
+    new URL(endpoint),
+    "list_browser_targets",
+    undefined,
+    { bytes: 8 * 1024 * 1024, timeoutMs: 20 },
+  ).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(BrowserObservationError);
+  if (!(failure instanceof BrowserObservationError)) return;
+  expect(failure.userMessage).toContain(
+    "8388608-byte discovery document budget",
+  );
+  expect(failure.userMessage).toContain("20 ms");
+  expect(failure.userMessage).not.toContain(
+    `${String(WEB_RUNTIME_LIMITS.protocolBytes)}-byte browser-socket message budget`,
+  );
 });
 
 it("preserves an independent typed cancellation when the discovery deadline also expires", async () => {

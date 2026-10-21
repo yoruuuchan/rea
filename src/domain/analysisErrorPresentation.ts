@@ -39,6 +39,13 @@ import {
 } from "./analysisErrorBase.js";
 import type { AnalysisErrorProjection } from "./analysisErrorProjection.js";
 
+/** File export when one MCP frame cannot carry the retained session bundle. */
+export const MCP_TRANSPORT_EVIDENCE_EXPORT =
+  "Export complete retained session evidence through export_evidence_bundle to a caller-selected path, or use complete CLI JSON output. The connection remains usable.";
+
+/** Next step when one MCP frame cannot carry a complete retained session bundle. */
+export const MCP_TRANSPORT_EVIDENCE_DISCOVERY = `Discover retained records with get_evidence_bundle and detail: summary, then inspect compatible records through inspect_analysis_view using an exact Evidence reference. ${MCP_TRANSPORT_EVIDENCE_EXPORT}`;
+
 export const analysisErrorRemediationAction = (
   error: AnalysisError,
 ): string => {
@@ -46,6 +53,11 @@ export const analysisErrorRemediationAction = (
   if (
     (error instanceof ProviderAdapterError ||
       error instanceof AnalysisCapabilityUnavailableError) &&
+    error.remediationAction !== undefined
+  )
+    return error.remediationAction;
+  if (
+    error instanceof BrowserObservationError &&
     error.remediationAction !== undefined
   )
     return error.remediationAction;
@@ -76,7 +88,7 @@ export const analysisErrorRemediationAction = (
         : error.resource === "capacity"
           ? "Wait for an active analysis to complete, then retry within the reported admission limits."
           : error.resource === "transport"
-            ? "Discover retained records with get_evidence_bundle and detail: summary, then inspect compatible records through inspect_analysis_view using an exact Evidence reference. Export complete retained session evidence through export_evidence_bundle to a caller-selected path, or use complete CLI JSON output. The connection remains usable."
+            ? MCP_TRANSPORT_EVIDENCE_DISCOVERY
             : error.resource === "cpu"
               ? "Review the reported worker CPU limits and observed signal. Retry with sufficient CPU time or a smaller artifact; REA retains tighter inherited limits."
               : error.resource === "file-size"

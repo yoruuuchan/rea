@@ -14,15 +14,20 @@ export class BrowserObservationError extends AnalysisError {
   override cleanupIncomplete: boolean;
   override readonly userCategory: "cancelled" | undefined;
   override readonly userMessage: string | undefined;
+  readonly remediationAction: string | undefined;
 
   constructor(
     readonly operation: BrowserObservationOperation,
     readonly reason: BrowserObservationFailureReason,
-    options?: AnalysisErrorOptions & { readonly detail?: string },
+    options?: AnalysisErrorOptions & {
+      readonly detail?: string;
+      readonly remediationAction?: string;
+    },
   ) {
     super(`Browser observation ${operation} failed: ${reason}`, options);
     this.userMessage =
       options?.detail ?? observationFailureMessage(operation, reason);
+    this.remediationAction = options?.remediationAction;
     this.cleanupIncomplete =
       this.cleanup !== undefined || reason === "cleanup_failed";
     this.setCleanupResources(

@@ -314,3 +314,13 @@ export const scenarioServeFixture = (
   if (!manifest.ok) throw manifest.error;
   return { manifest: manifest.value, capture };
 };
+
+/** A scenario capture that kept header values but no bodies: it yields a manifest but no environment state. */
+export const scenarioHeaderOnlyCaptureEvidence = (): Evidence =>
+  scenarioCaptureEvidence(
+    scenarioCaptureFixture(undefined, {
+      request_body: false,
+      response_body: false,
+      header_values: true,
+    }),
+  );

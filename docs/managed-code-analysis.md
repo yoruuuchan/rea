@@ -622,6 +622,9 @@ which managed methods executed or how the CLR resolved them.
 
 Managed member comparisons report a `metadata` dimension when an observed
 MethodDef flags or implementation flags value differs, including accessibility
-or synchronization changes. This is separate from the CIL/signature matching
-tiers: identical instructions do not establish unchanged method metadata. The
-reported difference is static metadata evidence, not proof of runtime behavior.
+or synchronization changes. Observed method-body `init_locals` and `max_stack`
+differences also contribute to `metadata`, even when CIL decoding is incomplete.
+An unavailable header value keeps body coverage unknown rather than establishing
+equality or a difference. These comparisons are separate from the CIL/signature
+matching tiers: identical instructions do not establish unchanged method metadata.
+The reported difference is static metadata evidence, not proof of runtime behavior.

@@ -59,6 +59,49 @@ linux("allows a symlink to a regular mitmdump executable", async () => {
   ).resolves.toMatchObject({ command });
 });
 
+it("applies a non-default capture deadline and releases its runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-capture-deadline-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "capture.har");
+  await writeFile(path, JSON.stringify(historicalHar()));
+  let runtimePath: string | undefined;
+  const decoder = new HistoricalCaptureDecoder(
+    [
+      {
+        format: "har",
+        identity: HAR_CAPTURE_PROVIDER_IDENTITY,
+        command: () =>
+          Promise.resolve({
+            command: process.execPath,
+            arguments: ["-e", "setInterval(() => {}, 1_000_000)"],
+          }),
+      },
+    ],
+    process.env,
+    async () => {
+      const runtime = await PrivateRuntimeRoot.create({
+        prefix: "rea-capture-deadline-",
+      });
+      runtimePath = runtime.path;
+      return runtime;
+    },
+  );
+  const result = await decoder.inspect(
+    inspectWebNetworkCaptureInputSchema.parse({
+      capture_path: path,
+      format: "har",
+      capture_timeout_ms: 250,
+    }),
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("expected capture timeout");
+  expect(result.error._tag).toBe("AnalysisTimeoutError");
+  expect(result.error.userMessage).toContain("250");
+  expect(result.error.userMessage).toContain("capture_timeout_ms");
+  if (runtimePath === undefined) throw new Error("runtime was not acquired");
+  await expect(access(runtimePath)).rejects.toMatchObject({ code: "ENOENT" });
+}, 8_000);
+
 it.each([true, false])(
   "binds decoder replies to the complete selected provider identity (matching name: %s)",
   async (matching) => {

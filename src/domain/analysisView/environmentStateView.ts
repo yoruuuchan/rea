@@ -32,7 +32,7 @@ const entityViewFields = {
   pointer: z
     .string()
     .describe(
-      "JSON pointer, of depth at most one, to the entity object or array within the response.",
+      "JSON pointer to the entity object or array within the response: the root or one member, or for an item the element of a one-element array there (/0 or /<member>/0).",
     ),
   fields: z
     .array(z.string())
@@ -76,12 +76,13 @@ const viewSchema = z.discriminatedUnion("shape", [
       "query-body",
       "no-init-recording",
       "body-unusable",
-      "not-entity",
       "no-identity",
+      "path-varies",
       "query-varies",
       "fields-differ",
       "envelope-varies",
       "list-differs",
+      "rendered-oversize",
     ]),
   }),
 ]);
@@ -103,7 +104,7 @@ export const environmentStateFields = {
       id_basis: z
         .enum(["path-parameter", "field-name"])
         .describe(
-          "path-parameter: item responses repeat the requested path value in this field; field-name: an inferred identity name every listed item carries distinctly.",
+          "path-parameter: item responses repeat the requested path value in this field; field-name: inferred from listed items as the first identity name, else the first field ending in Id or _id shown distinct across at least two items, that every listed item carries distinctly.",
         ),
       init_before_ordinal: z
         .number()

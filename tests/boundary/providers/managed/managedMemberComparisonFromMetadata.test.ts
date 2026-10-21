@@ -171,6 +171,47 @@ describe("managed member structural matching", () => {
 });
 
 describe("managed member comparison", () => {
+  it.each([
+    { label: "initialization flag", flags: 0x3013, maxStack: 8 },
+    { label: "maximum stack", flags: 0x3003, maxStack: 16 },
+  ])("retains a changed $label with identical CIL", ({ flags, maxStack }) => {
+    const observe = (headerFlags: number, stack: number, path: string) => {
+      const body = Buffer.alloc(13);
+      body.writeUInt16LE(headerFlags, 0);
+      body.writeUInt16LE(stack, 2);
+      body.writeUInt32LE(1, 4);
+      body[12] = 0x2a; // ret
+      return inspect(buildManagedPeFixture({ ilBody: body }), path);
+    };
+    const left = observe(0x3003, 8, "/tmp/header-left.dll");
+    const right = observe(flags, maxStack, "/tmp/header-right.dll");
+    expect(left.result.methods[0]?.body).toMatchObject({
+      status: "present",
+      init_locals: false,
+      max_stack: 8,
+    });
+    expect(right.result.methods[0]?.body).toMatchObject({
+      status: "present",
+      init_locals: (flags & 0x10) !== 0,
+      max_stack: maxStack,
+      il_sha256: left.result.methods[0]?.body.il_sha256,
+      normalized_il_sha256: left.result.methods[0]?.body.normalized_il_sha256,
+    });
+    const comparison = managedMemberComparisonResultSchema.parse(
+      compareManagedMembers(left, right),
+    );
+    expect(comparison.methods[0]).toMatchObject({
+      status: "changed",
+      match: { basis: "exact-il-signature", confidence: "exact" },
+      dimensions: ["metadata"],
+    });
+    expect(comparison.summary).toMatchObject({ changed: 1, unchanged: 1 });
+    expect(compareManagedMembers(left, left).methods[0]).toMatchObject({
+      status: "unchanged",
+      dimensions: [],
+    });
+  });
+
   it("remaps renamed methods by exact CIL/signature without using names", () => {
     const leftBytes = buildManagedPeFixture();
     const rightBytes = buildManagedPeFixture({

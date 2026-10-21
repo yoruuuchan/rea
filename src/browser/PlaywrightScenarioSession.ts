@@ -286,6 +286,7 @@ export class PlaywrightScenarioSession implements BrowserScenarioSessionPort {
             opened.page,
             scenario.browser.cdp_endpoint,
             scenario.browser.target_id,
+            scenario.command_timeout_ms,
           )
         : undefined;
     try {

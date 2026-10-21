@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { webRuntimeCommandTimeoutSchema } from "./browserDeadline.js";
 import { browserCompletenessSchema } from "./browserCompleteness.js";
 import {
   browserAllowedOriginsSchema,
@@ -37,6 +38,7 @@ export const captureWebScreenshotInputSchema = z.strictObject({
   cdp_endpoint: browserObservationEndpointSchema,
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().trim().min(1),
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 });
 export type CaptureWebScreenshotInput = z.infer<
   typeof captureWebScreenshotInputSchema

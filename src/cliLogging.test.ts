@@ -13,16 +13,10 @@ import {
   options as setupOptions,
 } from "./application/Setup.fixture.js";
 import { err } from "./domain/result.js";
-import {
-  isUpdateFailure,
-  runUpdate,
-  type UpdateHost,
-} from "./application/Update.js";
-import {
-  isUninstallFailure,
-  runUninstall,
-  type UninstallHost,
-} from "./application/Uninstall.js";
+import { runUpdate, type UpdateHost } from "./application/Update.js";
+import { isUpdateFailure } from "./application/UpdateFailure.js";
+import { runUninstall, type UninstallHost } from "./application/Uninstall.js";
+import { isUninstallFailure } from "./application/UninstallFailure.js";
 import { CLI_COMMANDS } from "./cliCommandNames.js";
 
 it("does not treat ordinary error-looking data or nested Evidence as command failure", () => {

@@ -390,14 +390,25 @@ entry keep stdio.
 
 ## Serve an environment manifest
 
-`rea environment-serve <manifest.json> --evidence <capture.json> [--host H]
-[--port N]` serves an environment manifest projected by `inspect-analysis-view`
-as an agent environment: an MCP server at `/mcp` with one tool per manifest
-tool, each replaying the retained capture records it cites, the environment
-card at `/.well-known/agent-env.json`, and a `/agentenv` data plane that
-answers every method with JSON-RPC `-32601`. The manifest's
-`parent_evidence_id` must equal the evidence file's `evidence_id`; otherwise
-the command refuses with `invalid_request` before binding.
+`rea environment-serve <manifest.json> --evidence <capture.json>
+[--replay-only] [--host H] [--port N]` serves an environment manifest
+projected by `inspect-analysis-view` as an agent environment: an MCP server at
+`/mcp`, the environment card at `/.well-known/agent-env.json`, and a
+`/agentenv` data plane. The manifest's `parent_evidence_id` must equal the
+evidence file's `evidence_id`; otherwise the command refuses with
+`invalid_request` before binding. Before binding it derives the
+`environment-state` view of the capture with the manifest's `template_rules`,
+as `inspect-analysis-view` would, and serves from it: read tools whose views
+are state-backed answer from a live state, write tools are not served, and
+`/agentenv` serves `data/reset`, `data/add` and `data/get`. When the state
+cannot be derived, or its catalog exceeds the discovery reservation, it logs a
+warning with the error code and message and serves replay; `--replay-only` serves replay without deriving. In replay every
+manifest tool replays the retained capture records it cites and `/agentenv`
+answers every method with JSON-RPC `-32601`. The stopped document's `state`
+member is `{"served": true, "evidence_id": …}`,
+`{"served": false, "reason": "replay-only"}` or
+`{"served": false, "reason": "unavailable", "code": …, "message": …}`; see
+[serve from the state](agent-environments.md#serve-from-the-state).
 
 ```sh
 rea environment-serve manifest.json --evidence capture.json --port 8765
@@ -408,8 +419,8 @@ rea environment-serve manifest.json --evidence capture.json --port 8765
 the served environment; set but blank, it is refused as `configuration_invalid`
 like a blank `MCP_HOST`. The bound URL is written to stderr as one JSON log line
 (`"msg":"MCP transport listening"`). See
-[agent environments](agent-environments.md) for what replay returns and does
-not establish.
+[agent environments](agent-environments.md) for what the state and replay
+return and do not establish.
 
 ## Export an environment bundle
 
@@ -417,9 +428,11 @@ not establish.
 [--package-tarball <path>] [--name <override>]` writes the same manifest and
 capture pair as a bundle folder the agentenv framework runs with
 `agent-env run <dir>`. It reads each file once, authenticates and cross-checks
-the pair with the same checks as `environment-serve`, copies the bytes it
-authenticated, refuses to write into a directory that exists and is not empty,
-and never overwrites a file.
+the pair with the same checks as `environment-serve`, checks the bundle name,
+then prepares the state under that name as the bundle's server will at startup
+to predict what the bundle serves (replay when the state is unavailable),
+copies the bytes it authenticated, refuses to write into a directory that
+exists and is not empty, and never overwrites a file.
 
 ```sh
 rea environment-export manifest.json --evidence capture.json ./grafana-example --json
@@ -429,14 +442,16 @@ The folder holds a `README.md` with the bundle's provenance, an env folder
 `envs/<name>/` with a `Dockerfile` that installs this exact `rea-agents`
 version and serves the copied `manifest.json` and `evidence.json` (written
 with mode `0600` on POSIX; Windows retains inherited ACLs) with
-`environment-serve`, a Python verifier under `artifacts/check_<name>/` and the
-smoke task `tasks/smoke.json`. `--package-tarball` copies a packed `rea-agents`
+`environment-serve` (from the state by default), a Python verifier under
+`artifacts/check_<name>/` that checks the served tool count and one served
+answer, and the smoke task `tasks/smoke.json`. `--package-tarball` copies a packed `rea-agents`
 tarball into the env folder and installs it instead of the registry package,
 which is how the hosted lane proves a checkout rather than a release. `--name`
 replaces the manifest's kebab-case name as the env folder and env id; a device
 name Windows reserves (`con`, `nul`, `com1` and the like) is refused. The
-command prints one JSON document listing the written files with their sizes
-and the pinned package source. See
+command prints one JSON document listing the written files with their sizes,
+the pinned package source, the served `tool_count`, and `state` in the shape
+of the serve command's stopped document. See
 [agent environments](agent-environments.md#export-a-bundle) for the folder
 layout and what the smoke task checks.
 
@@ -488,8 +503,8 @@ SIGTERM, closes the listener, then prints one structured
 `{"status":"stopped", …}` document naming the URL, environment and tool count
 and exits `130` or `143` through the shared cancellation handler below.
 Refusals before binding (unreadable files, non-Evidence JSON, capture Evidence
-in a format other than HAR, a manifest whose parent is not the supplied
-evidence, an unbindable port) print a structured
+in a format other than HAR, a manifest or state whose parent is not the
+supplied evidence, an unbindable port) print a structured
 error and exit `1`, as does a listener that fails after binding.
 `rea environment-export` is one-shot: it prints the written files and exits
 `0`, or prints a structured `invalid_request` error and exits `1` for the same

@@ -1,8 +1,4 @@
-import {
-  modelTypeRowSchema,
-  modelArtifactViewRequestSchema,
-} from "../model/modelArtifactQuery.js";
-export { modelArtifactViewRequestSchema } from "../model/modelArtifactQuery.js";
+import { modelTypeRowSchema } from "../model/modelArtifactQuery.js";
 import { z } from "zod";
 import {
   modelArtifactSchema,

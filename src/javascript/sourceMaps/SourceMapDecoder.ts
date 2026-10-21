@@ -10,7 +10,9 @@ import {
 import { ArtifactOperationError } from "../../domain/artifactOperationError.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
+import { noRuntimeOverrideSentence } from "../../domain/browserDeadline.js";
 import {
+  DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS,
   WEB_SOURCE_MAP_LIMITS,
   type WebSourceMapReport,
 } from "../../domain/webSourceLocation.js";
@@ -94,7 +96,7 @@ export class SourceMapDecoder implements WebSourceMapPort {
         OPERATION,
         "limit",
         undefined,
-        `${input.path}: Source-map input exceeds the 4 MiB map or 32 MiB encoded request budget.`,
+        `${input.path}: Source-map input exceeds the ${String(WEB_SOURCE_MAP_LIMITS.mapBytes)}-byte map or ${String(WEB_SOURCE_MAP_LIMITS.outputBytes)}-byte encoded request budget. ${noRuntimeOverrideSentence("Those budgets stay fixed.", "decode_timeout_ms")}`,
       );
     if (Buffer.byteLength(input.text) > WEB_SOURCE_MAP_LIMITS.mapBytes)
       return err(capacityFailure());
@@ -117,6 +119,7 @@ export class SourceMapDecoder implements WebSourceMapPort {
       input.path,
       options,
       this.dependencies,
+      input.decodeTimeoutMs ?? DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS,
     );
     if (!response.ok) {
       if (response.error instanceof SourceMapCleanupFailure)

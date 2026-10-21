@@ -1,7 +1,11 @@
 import type { WebPageInspection } from "../domain/browserObservationSchemas.js";
-import type {
-  AnalyzeWebBundleInput,
-  WebBundleAnalysis,
+import {
+  DEFAULT_WEB_BUNDLE_HEAP_MB,
+  DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS,
+  DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS,
+  webBundleTotalTimeoutRecovery,
+  type AnalyzeWebBundleInput,
+  type WebBundleAnalysis,
 } from "../domain/webBundleAnalysis.js";
 import { buildCapturedWebBundleAnalysis } from "../domain/webBundleAnalyzerResult.js";
 import { isIncludedScript } from "../domain/webBundleAnalyzerInspection.js";
@@ -19,7 +23,6 @@ import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { ProviderStartupDeadline } from "../process/ProviderDeadline.js";
 import { WebBundleAnalysisWorker } from "./WebBundleAnalysisWorker.js";
-import { WEB_BUNDLE_WORKER_LIMITS } from "./WebBundleAnalysisWorkerProtocol.js";
 
 // A process-wide admission, rather than one permit per provider instance, bounds
 // simultaneous web analyzer children and their source/result transfer reservations.
@@ -147,8 +150,7 @@ export class IsolatedWebBundleAnalyzer {
     ];
     const caller = AbortSignal.any(signals);
     const deadline = new ProviderStartupDeadline(
-      input.total_analysis_timeout_ms ??
-        WEB_BUNDLE_WORKER_LIMITS.totalTimeoutMs,
+      input.total_analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS,
       caller,
     );
     let failure: AnalysisError | undefined;
@@ -162,7 +164,7 @@ export class IsolatedWebBundleAnalyzer {
           detail: caller.aborted
             ? "The operation was cancelled before this script was started."
             : deadline.interruption === "timeout"
-              ? `The total captured-script analysis deadline of ${String(input.total_analysis_timeout_ms ?? WEB_BUNDLE_WORKER_LIMITS.totalTimeoutMs)} ms expired before this script was started.`
+              ? `The total_analysis_timeout_ms deadline of ${String(input.total_analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS)} ms expired before this script was started (deadlineExpired). This is not the per-script analysis_timeout_ms. A per-script timeout above the total is rejected.`
               : resultCapacityExhausted
                 ? "The host could not reserve more web-analysis result capacity; this script was not started."
                 : "An earlier analyzer failure prevented this script from starting.",
@@ -171,13 +173,13 @@ export class IsolatedWebBundleAnalyzer {
     try {
       await WebBundleAnalysisWorker.retryPending();
       this.#worker = this.createWorker(
-        input.max_heap_mb ?? WEB_BUNDLE_WORKER_LIMITS.heapMb,
+        input.max_heap_mb ?? DEFAULT_WEB_BUNDLE_HEAP_MB,
       );
       for (const script of scripts) {
         if (deadline.signal.aborted) break;
         const analyzed = await this.#worker.analyze(
           script,
-          input.analysis_timeout_ms ?? WEB_BUNDLE_WORKER_LIMITS.scriptTimeoutMs,
+          input.analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS,
           deadline.signal,
         );
         if (analyzed.ok) results.push(analyzed.value);
@@ -198,8 +200,8 @@ export class IsolatedWebBundleAnalyzer {
               detail:
                 error instanceof AnalysisResourceConstraintError &&
                 error.reportedLimits !== null
-                  ? `${error.message} Reported limits: ${JSON.stringify(error.reportedLimits)}`
-                  : error.message,
+                  ? `${error.userMessage ?? error.reason} Reported limits: ${JSON.stringify(error.reportedLimits)}`
+                  : (error.userMessage ?? error.message),
             },
           );
           if (error.cleanupIncomplete) {
@@ -283,13 +285,15 @@ export class IsolatedWebBundleAnalyzer {
             ).bindCleanupDependencies([cancelled, failure])
           : cancelled;
     } else if (!hasPrimaryFailure && deadline.interruption === "timeout") {
+      const totalTimeoutMs =
+        input.total_analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS;
       const timeout = new AnalysisTimeoutError(
         "analyze_web_bundle",
-        input.total_analysis_timeout_ms ??
-          WEB_BUNDLE_WORKER_LIMITS.totalTimeoutMs,
+        totalTimeoutMs,
         {
           cause: deadline.signal.reason,
           partialObservation: partial ?? inspection,
+          ...webBundleTotalTimeoutRecovery(totalTimeoutMs),
         },
       );
       failure =

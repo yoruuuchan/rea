@@ -381,6 +381,8 @@ export class ArtifactAnalysisResources {
         effectiveLimits === undefined
           ? "The effective inherited limit was not reported."
           : `The effective inherited limits are ${String(effectiveLimits.address_space_bytes)} bytes of address space, ${String(effectiveLimits.file_bytes)} bytes per file, and ${String(effectiveLimits.cpu_seconds)} CPU seconds.`;
+      // A producer can raise SIGXCPU/SIGXFSZ without exhausting the retained
+      // rlimit, so an unchanged retry is not a proven failure.
       return new AnalysisResourceConstraintError(
         operation,
         signal === "SIGXFSZ" ? "file-size" : "cpu",
@@ -388,7 +390,8 @@ export class ArtifactAnalysisResources {
         effectiveLimits === undefined ? null : { ...effectiveLimits },
         {
           ...detail,
-          remediationAction: `${reported} REA retains the tighter inherited limit. This release has no runtime override for that ceiling. A smaller artifact may finish inside the retained limit. Repeating the unchanged request fails the same way.`,
+          retryable: true,
+          remediationAction: `${reported} REA retains the tighter inherited limit. This release has no runtime override for that ceiling. A smaller artifact may finish inside the retained limit. The signal does not prove that ceiling was exhausted, so an unchanged retry may succeed or may fail the same way.`,
         },
       );
     }

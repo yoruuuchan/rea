@@ -47,7 +47,7 @@ export const decodeProtobufBody = async (
     framing,
     offset_basis:
       framing === "grpc-web-text" ? "base64-decoded-body" : "retained-body",
-    decoded_bytes: body.length,
+    decoded_bytes: 0,
     status: "complete",
     examined_bytes: 0,
     frames: [],

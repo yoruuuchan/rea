@@ -247,17 +247,23 @@ it("decodes independently padded base64 chunks with explicit coordinates and rej
     ["offset:12", "2"],
   ]);
   expect(decoded.fields.map(({ index }) => index)).toEqual([0, 1]);
-  expect(
-    (
+  for (const text of ["AB==", "!!!!", first.toString("base64") + "AB=="])
+    expect(
       await decodeProtobufBody(
-        Buffer.from("AB=="),
+        Buffer.from(text),
         "grpc-web-text",
         source,
         same,
         new ProtobufBudget(),
-      )
-    ).status,
-  ).toBe("partial");
+      ),
+    ).toMatchObject({
+      decoded_bytes: 0,
+      status: "partial",
+      examined_bytes: 0,
+      frames: [],
+      fields: [],
+      error: { offset: 0 },
+    });
 });
 
 it("keeps compressed payloads explicitly unknown and rejects frames beyond the body", async () => {

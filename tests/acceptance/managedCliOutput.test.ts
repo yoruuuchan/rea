@@ -8,6 +8,51 @@ import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
 
 cliTest(
+  "managed CLI preserves malformed prefix evidence without a complete CIL fingerprint",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-managed-cil-prefix-");
+    for (const [name, il, status, coverage] of [
+      ["dangling", [0xfe, 0x13], "malformed", "partial"],
+      ["complete", [0x00, 0x2a], "present", "complete"],
+    ] as const) {
+      const path = join(root, `${name}.dll`);
+      await writeFile(
+        path,
+        buildManagedPeFixture({
+          ilBody: Buffer.from([(il.length << 2) | 2, ...il]),
+        }),
+      );
+      const result = await cli.run({
+        arguments: ["inspect-managed-members", path, "--json"],
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.json).toMatchObject({
+        operation: "inspect_managed_members",
+        subject: { local_path: path },
+        normalized_result: {
+          coverage: { state: coverage },
+          user_strings: { state: coverage },
+          methods: [
+            expect.objectContaining({
+              body: expect.objectContaining({
+                status,
+                il_sha256: expect.any(String),
+                normalized_il_sha256:
+                  status === "malformed" ? null : expect.any(String),
+                issue:
+                  status === "malformed"
+                    ? "CIL prefix chain at IL offset 0 has no following instruction"
+                    : null,
+              }),
+            }),
+          ],
+        },
+      });
+    }
+  },
+);
+
+cliTest(
   "managed CLI retains metadata and CIL after repeated local constructor owner lookups",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-managed-row-lookup-");

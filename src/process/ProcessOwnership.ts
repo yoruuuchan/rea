@@ -106,8 +106,6 @@ export type ProcessIdentityObservation =
     }
   | { readonly state: "unavailable"; readonly reason: string };
 
-export type { ProcessLifecycleObservation } from "./ProcessLifecycle.js";
-
 /** Parent and process-group membership from the same native identity read. */
 export type ProcessNativeRelationObservation =
   | {

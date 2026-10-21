@@ -3,6 +3,11 @@ import {
   browserAllowedOriginsSchema,
   browserEndpointSchema,
 } from "./browserObservation.js";
+import {
+  CDP_CLEANUP_GRACE_MS,
+  DEFAULT_CDP_COMMAND_TIMEOUT_MS,
+  webRuntimeCommandTimeoutSchema,
+} from "./browserDeadline.js";
 import { jsonObjectSchema } from "./jsonValue.js";
 
 // CDP positions are zero-based and relative to the resource named by url.
@@ -30,6 +35,7 @@ export const webRuntimeScopeSchema = z.strictObject({
   cdp_endpoint: browserEndpointSchema,
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().min(1),
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 });
 
 /** Source evidence is bound by the selected CDP session's script ID, never URL equality. */
@@ -90,6 +96,6 @@ export const WEB_RUNTIME_LIMITS = {
   protocolBytes: 64 * 1024 * 1024,
   retainedEventBytes: 8 * 1024 * 1024,
   sourceBytes: 32 * 1024 * 1024,
-  commandTimeoutMs: 20_000,
-  cleanupTimeoutMs: 5_000,
+  commandTimeoutMs: DEFAULT_CDP_COMMAND_TIMEOUT_MS,
+  cleanupTimeoutMs: CDP_CLEANUP_GRACE_MS,
 } as const;

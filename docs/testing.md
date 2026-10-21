@@ -1804,9 +1804,11 @@ projects the `environment-manifest` view with all three template rules through
 the built CLI, packs the checkout with `npm pack`, exports the bundle with
 `--package-tarball` so the image installs this checkout rather than the
 registry package, and runs `agent-env run` on the bundle. It checks that the
-export reports the planned file set with the inputs copied byte-exact, that
-the runner exits `0` with `tasks/smoke.json` reported as passed and the
-verifier's description naming the tool count, and that no container exists
+export reports the planned file set with the inputs copied byte-exact and a
+bundle served from the derived state, which serves fewer tools than the
+manifest because write tools are not served, that the runner exits `0` with
+`tasks/smoke.json` reported as passed and the verifier's description naming
+that served tool count, and that no container exists
 after the run that did not exist before; the container inventory runs even when
 the run fails or times out, so a failed receipt still lists what it left. The one exception is the framework's
 own image-store helper, `agentenv-registry` (or `agentenv-registry-<port>`),

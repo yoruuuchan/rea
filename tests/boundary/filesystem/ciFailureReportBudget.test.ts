@@ -1,12 +1,14 @@
 import { expect, it } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import type {
+  CiRun,
+  StaticDiagnostic,
+  StaticEvidence,
+} from "../../../scripts/ci/artifacts.mjs";
 import {
   reportCiFailures,
   createGitHubApi,
-  type CiRun,
   type FailureReportApi,
-  type StaticDiagnostic,
-  type StaticEvidence,
 } from "../../../scripts/ci/failure-report.mjs";
 
 const repository = "owner/rea";

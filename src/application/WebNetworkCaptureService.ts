@@ -250,6 +250,9 @@ export class WebNetworkCaptureService {
             },
           }),
       sensitive_value_count: input.sensitive_values.length,
+      ...(input.capture_timeout_ms === undefined
+        ? {}
+        : { capture_timeout_ms: input.capture_timeout_ms }),
     });
     return ok(
       createEvidence(

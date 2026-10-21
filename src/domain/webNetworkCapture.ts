@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  browserDeadlineIncrease,
+  browserDeadlineRetry,
+  noRuntimeOverrideSentence,
+  optionalBrowserDeadlineMs,
+  selectedBrowserDeadlineMs,
+} from "./browserDeadline.js";
 import { jsonValueSchema } from "./jsonValue.js";
 import { localPathStringSchema } from "./localPath.js";
 import {
@@ -15,6 +22,23 @@ export const WEB_NETWORK_CAPTURE_LIMITS = {
   timeoutMs: 30_000,
   depth: 64,
 } as const;
+
+/** Capture deadline used when capture_timeout_ms is omitted. */
+export const DEFAULT_WEB_NETWORK_CAPTURE_TIMEOUT_MS =
+  WEB_NETWORK_CAPTURE_LIMITS.timeoutMs;
+
+export const selectedWebNetworkCaptureTimeoutMs = (
+  selected: number | undefined,
+): number =>
+  selectedBrowserDeadlineMs(selected, DEFAULT_WEB_NETWORK_CAPTURE_TIMEOUT_MS);
+
+/** Caller-visible capture deadline. Byte and depth caps stay fixed. */
+export const webNetworkCaptureTimeoutRecovery = (
+  timeoutMs: number,
+): { readonly userMessage: string; readonly remediationAction: string } => ({
+  userMessage: `inspect_web_network_capture reached its ${String(timeoutMs)} ms capture deadline (deadlineExpired) for capture_timeout_ms. No partial capture is returned. This is not the MCP client deadline.`,
+  remediationAction: `${browserDeadlineIncrease("capture_timeout_ms", timeoutMs, DEFAULT_WEB_NETWORK_CAPTURE_TIMEOUT_MS, "--capture-timeout-ms")} ${browserDeadlineRetry} ${noRuntimeOverrideSentence(`The ${String(WEB_NETWORK_CAPTURE_LIMITS.inputBytes)}-byte input budget, ${String(WEB_NETWORK_CAPTURE_LIMITS.outputBytes)}-byte reply budget, and ${String(WEB_NETWORK_CAPTURE_LIMITS.depth)}-level nesting cap stay fixed.`, "capture_timeout_ms")}`,
+});
 
 export const WEB_NETWORK_CAPTURE_FORMATS = [
   "har",
@@ -43,6 +67,9 @@ export const inspectWebNetworkCaptureInputSchema = z.strictObject({
     .describe(
       "Literal text excluded from capture payloads, byte/numeric projections, producer coordinates, artifact paths/digests and diagnostic text. Declaration strings are never persisted in Evidence parameters. Canonical contract keys, enums and provider identities remain intact.",
     ),
+  capture_timeout_ms: optionalBrowserDeadlineMs(
+    `Capture wall-clock deadline in milliseconds (default ${String(DEFAULT_WEB_NETWORK_CAPTURE_TIMEOUT_MS)}), from decoder start through process exit. Omitted means ${String(DEFAULT_WEB_NETWORK_CAPTURE_TIMEOUT_MS)} and applies on the next capture. deadlineExpired returns no partial capture. Does not raise the fixed ${String(WEB_NETWORK_CAPTURE_LIMITS.inputBytes)}-byte input budget, ${String(WEB_NETWORK_CAPTURE_LIMITS.outputBytes)}-byte reply budget, or ${String(WEB_NETWORK_CAPTURE_LIMITS.depth)}-level nesting cap. Those have no runtime override.`,
+  ),
 });
 
 /** Read declarations through their owning schema for service and adapter failures. */

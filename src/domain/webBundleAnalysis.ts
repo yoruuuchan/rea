@@ -1,42 +1,222 @@
 import { z } from "zod";
 
+import {
+  MAX_BROWSER_DEADLINE_MS,
+  browserDeadlineIncrease,
+  browserDeadlineRetry,
+  noRuntimeOverrideSentence,
+  optionalBrowserDeadlineMs,
+} from "./browserDeadline.js";
 import { emptyArraySchema } from "./emptyArraySchema.js";
 import { inspectWebPageWithSourceInputSchema } from "./browserObservation.js";
 import { webTextArtifactSchema } from "./webContentArtifact.js";
 
+/** Isolated analyzer heap used when max_heap_mb is omitted. */
+export const DEFAULT_WEB_BUNDLE_HEAP_MB = 1024;
+export const MIN_WEB_BUNDLE_HEAP_MB = 128;
+export const MAX_WEB_BUNDLE_HEAP_MB = 16_384;
+/** Per-script deadline used when analysis_timeout_ms is omitted. */
+export const DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS = 30_000;
+/** Total analysis deadline used when total_analysis_timeout_ms is omitted. */
+export const DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS = 300_000;
+/** Source-map fetch deadline used when source_map_fetch_timeout_ms is omitted. */
+export const DEFAULT_SOURCE_MAP_FETCH_TIMEOUT_MS = 30_000;
+
+const webBundleHeapDescription = `Heap phase: maximum V8 old-space for the isolated inert-script analyzer, in MiB (default ${String(DEFAULT_WEB_BUNDLE_HEAP_MB)}, range ${String(MIN_WEB_BUNDLE_HEAP_MB)}..${String(MAX_WEB_BUNDLE_HEAP_MB)}). Omitted means ${String(DEFAULT_WEB_BUNDLE_HEAP_MB)} and applies on the next call. This is not a total process RSS limit, not analysis_timeout_ms, and not total_analysis_timeout_ms. Bun ignores V8 flags; Windows Bun uses an owned process commit limit plus a 512 MiB runtime reserve, while other Bun hosts have no enforced memory limit. Raising max_heap_mb does not raise the fixed worker protocol or result byte budgets.`;
+
+const webBundleScriptTimeoutDescription = `Per-script deadline phase: maximum startup, analysis and result transfer time for one captured script, in milliseconds (default ${String(DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS)}, range 1..${String(MAX_BROWSER_DEADLINE_MS)}). Omitted means ${String(DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS)}. deadlineExpired for one script is not total_analysis_timeout_ms. A per-script value above the effective total is rejected. Timed-out scripts are explicit unknowns and other scripts may still be analyzed. Applies on the next call.`;
+
+const webBundleTotalTimeoutDescription = `Total analysis deadline phase: maximum time for all captured-script analysis, in milliseconds (default ${String(DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS)}, range 1..${String(MAX_BROWSER_DEADLINE_MS)}). Omitted means ${String(DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS)}. This is not the per-script analysis_timeout_ms, not capture, and not source-map fetch. A per-script timeout above this total is rejected. Unstarted scripts remain explicit unknowns. Applies on the next call.`;
+
 /** Capture-and-analyze input with optional source-map fetching. */
-export const analyzeWebBundleInputSchema =
-  inspectWebPageWithSourceInputSchema.safeExtend({
+export const analyzeWebBundleInputSchema = inspectWebPageWithSourceInputSchema
+  .safeExtend({
     fetch_source_maps: z.boolean().default(false),
     max_heap_mb: z
       .number()
       .int()
-      .min(128)
-      .max(16_384)
+      .min(MIN_WEB_BUNDLE_HEAP_MB)
+      .max(MAX_WEB_BUNDLE_HEAP_MB)
       .optional()
-      .describe(
-        "Maximum V8 old-space heap in MiB for the isolated inert-script analyzer; defaults to 1024. This is not a total process RSS limit. Bun ignores V8 flags; Windows Bun uses an owned process commit limit plus a 512 MiB runtime reserve, while other Bun hosts have no enforced memory limit.",
-      ),
-    analysis_timeout_ms: z
-      .number()
-      .int()
-      .min(1)
-      .max(2_147_483_647)
-      .optional()
-      .describe(
-        "Maximum startup, analysis and result transfer time per captured script, in milliseconds; defaults to 30000. Timed-out scripts are explicit unknowns and other scripts may still be analyzed.",
-      ),
-    total_analysis_timeout_ms: z
-      .number()
-      .int()
-      .min(1)
-      .max(2_147_483_647)
-      .optional()
-      .describe(
-        "Maximum time for all captured-script analysis, in milliseconds; defaults to 300000. Capture and optional source-map fetching have separate budgets. Unstarted scripts remain explicit unknowns.",
-      ),
+      .describe(webBundleHeapDescription),
+    analysis_timeout_ms: optionalBrowserDeadlineMs(
+      webBundleScriptTimeoutDescription,
+    ),
+    total_analysis_timeout_ms: optionalBrowserDeadlineMs(
+      webBundleTotalTimeoutDescription,
+    ),
+    source_map_fetch_timeout_ms: optionalBrowserDeadlineMs(
+      `Source-map fetch deadline in milliseconds (default ${String(DEFAULT_SOURCE_MAP_FETCH_TIMEOUT_MS)}). Omitted means ${String(DEFAULT_SOURCE_MAP_FETCH_TIMEOUT_MS)} and applies on the next fetch. A fetch overrun is an item limitation (fetch_failed), not a thrown analysis timeout. Does not raise the fixed 64 MiB response budget or the source-map decode deadline. The response budget has no runtime override.`,
+    ),
+  })
+  .superRefine((input, context) => {
+    const perScript =
+      input.analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS;
+    const total =
+      input.total_analysis_timeout_ms ?? DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS;
+    if (perScript <= total) return;
+    context.addIssue({
+      code: "custom",
+      path:
+        input.analysis_timeout_ms === undefined
+          ? ["total_analysis_timeout_ms"]
+          : ["analysis_timeout_ms"],
+      message: `analysis_timeout_ms ${String(perScript)} ms is the per-script deadline and must be less than or equal to total_analysis_timeout_ms ${String(total)} ms. A per-script timeout above the total is rejected. Omitted analysis_timeout_ms means ${String(DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS)}; omitted total_analysis_timeout_ms means ${String(DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS)}.`,
+    });
   });
 export type AnalyzeWebBundleInput = z.infer<typeof analyzeWebBundleInputSchema>;
+
+/** Per-script deadlineExpired text. It is not the total analysis deadline. */
+export const webBundleScriptTimeoutRecovery = (
+  timeoutMs: number,
+): { readonly userMessage: string; readonly remediationAction: string } => ({
+  userMessage: `analyze_web_bundle reached its ${String(timeoutMs)} ms per-script deadline (deadlineExpired) for analysis_timeout_ms. This is not total_analysis_timeout_ms and not the MCP client deadline.`,
+  remediationAction: `${browserDeadlineIncrease("analysis_timeout_ms", timeoutMs, DEFAULT_WEB_BUNDLE_SCRIPT_TIMEOUT_MS, "--analysis-timeout-ms")} Keep it less than or equal to total_analysis_timeout_ms (omitted means ${String(DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS)}); a per-script timeout above the total is rejected. ${browserDeadlineRetry} analysis_timeout_ms does not raise max_heap_mb, total_analysis_timeout_ms, or the fixed worker protocol and result byte budgets.`,
+});
+
+/** Total captured-script deadlineExpired text. */
+export const webBundleTotalTimeoutRecovery = (
+  timeoutMs: number,
+): { readonly userMessage: string; readonly remediationAction: string } => ({
+  userMessage: `analyze_web_bundle reached its ${String(timeoutMs)} ms total captured-script analysis deadline (deadlineExpired) for total_analysis_timeout_ms. This is not the per-script analysis_timeout_ms, not capture, and not source-map fetch.`,
+  remediationAction: `${browserDeadlineIncrease("total_analysis_timeout_ms", timeoutMs, DEFAULT_WEB_BUNDLE_TOTAL_TIMEOUT_MS, "--total-analysis-timeout-ms")} A per-script analysis_timeout_ms above the total is rejected. ${browserDeadlineRetry} total_analysis_timeout_ms does not raise analysis_timeout_ms, max_heap_mb, source_map_fetch_timeout_ms, or the fixed worker byte budgets.`,
+});
+
+/**
+ * Which resource the analyzer actually exhausted.
+ * Node enforces the V8 old-space flag. Windows Bun enforces a process commit
+ * limit of that heap plus a 512 MiB reserve. Other Bun hosts enforce neither.
+ */
+export type WebBundleMemoryExhaustion =
+  | { readonly kind: "v8-heap"; readonly heapMb: number }
+  | {
+      readonly kind: "process-commit";
+      readonly heapMb: number;
+      readonly limitBytes: number;
+    }
+  | {
+      readonly kind: "bun-allocation";
+      readonly heapMb: number;
+      readonly processMemoryLimitBytes: number | null;
+    };
+
+/** Map host facts onto the exhausted resource. The worker supplies those facts. */
+export const webBundleMemoryExhaustion = (input: {
+  readonly runtime: "node" | "bun";
+  readonly heapMb: number;
+  readonly memoryLimitReached: boolean;
+  readonly processMemoryLimitBytes: number | null;
+}): WebBundleMemoryExhaustion => {
+  if (input.runtime === "node")
+    return { kind: "v8-heap", heapMb: input.heapMb };
+  if (input.memoryLimitReached && input.processMemoryLimitBytes !== null)
+    return {
+      kind: "process-commit",
+      heapMb: input.heapMb,
+      limitBytes: input.processMemoryLimitBytes,
+    };
+  return {
+    kind: "bun-allocation",
+    heapMb: input.heapMb,
+    processMemoryLimitBytes: input.processMemoryLimitBytes,
+  };
+};
+
+const webBundleHeapRange = (): string =>
+  `range ${String(MIN_WEB_BUNDLE_HEAP_MB)}..${String(MAX_WEB_BUNDLE_HEAP_MB)}; omitted means ${String(DEFAULT_WEB_BUNDLE_HEAP_MB)}`;
+
+const webBundleHeapIncrease = (heapMb: number): string =>
+  heapMb < MAX_WEB_BUNDLE_HEAP_MB
+    ? `Increase max_heap_mb above ${String(heapMb)} (integer MiB from ${String(MIN_WEB_BUNDLE_HEAP_MB)} to ${String(MAX_WEB_BUNDLE_HEAP_MB)}; omitted means ${String(DEFAULT_WEB_BUNDLE_HEAP_MB)}), or use --max-heap-mb on the CLI.`
+    : `max_heap_mb is already at the maximum ${String(MAX_WEB_BUNDLE_HEAP_MB)} MiB; do not increase it further.`;
+
+const webBundleHeapDoesNotRaise =
+  "Applies on the next call. Raising max_heap_mb does not raise analysis_timeout_ms, total_analysis_timeout_ms, or the fixed worker protocol and result byte budgets. Those byte budgets have no runtime override.";
+
+/** Heap exhaustion names the resource this runtime actually exhausted. */
+export const webBundleHeapExhaustedReason = (
+  exhaustion: WebBundleMemoryExhaustion,
+): string => {
+  const range = webBundleHeapRange();
+  switch (exhaustion.kind) {
+    case "v8-heap":
+      return `Owned web analyzer exhausted its max_heap_mb V8 old-space heap of ${String(exhaustion.heapMb)} MiB (${range}). This is the isolated analyzer heap, not a process RSS limit.`;
+    case "process-commit":
+      return `Owned web analyzer reached its ${String(exhaustion.limitBytes)}-byte process commit limit. That limit is max_heap_mb ${String(exhaustion.heapMb)} MiB plus a 512 MiB Bun runtime reserve (${range}). Bun ignores the V8 old-space flag, so this is not V8 old-space exhaustion.`;
+    case "bun-allocation":
+      return exhaustion.processMemoryLimitBytes === null
+        ? `Owned web analyzer ran out of memory. Bun ignores the V8 old-space flag, so this exit is not the configured max_heap_mb of ${String(exhaustion.heapMb)} MiB (${range}). This host enforces no analyzer process commit limit.`
+        : `Owned web analyzer ran out of memory before its ${String(exhaustion.processMemoryLimitBytes)}-byte process commit limit was reported as reached. That configured limit is max_heap_mb ${String(exhaustion.heapMb)} MiB plus a 512 MiB Bun runtime reserve (${range}). Bun ignores the V8 old-space flag, so this exit is not V8 old-space exhaustion.`;
+  }
+};
+
+export const webBundleHeapExhaustedRemediation = (
+  exhaustion: WebBundleMemoryExhaustion,
+): string => {
+  switch (exhaustion.kind) {
+    case "v8-heap":
+      return `${webBundleHeapIncrease(exhaustion.heapMb)} ${webBundleHeapDoesNotRaise}`;
+    case "process-commit":
+      return `${webBundleHeapIncrease(exhaustion.heapMb)} That raises the Windows process commit limit (max_heap_mb plus the fixed 512 MiB Bun runtime reserve), not a V8 old-space heap. ${webBundleHeapDoesNotRaise}`;
+    case "bun-allocation":
+      return exhaustion.processMemoryLimitBytes === null
+        ? `Bun ignores V8 heap flags, so raising max_heap_mb does not change this exit. A reached Windows process commit limit is reported separately. Other Bun hosts enforce no analyzer heap limit. Reduce the analysis instead of increasing max_heap_mb. ${webBundleHeapDoesNotRaise}`
+        : `The configured ${String(exhaustion.processMemoryLimitBytes)}-byte process commit limit was not reported as reached, so raising max_heap_mb does not change this exit. A reached Windows process commit limit is reported separately. Reduce the analysis instead of increasing max_heap_mb. ${webBundleHeapDoesNotRaise}`;
+  }
+};
+
+export const webBundleFixedByteBudget = (
+  budgetBytes: number,
+  label: string,
+): string =>
+  noRuntimeOverrideSentence(
+    `The ${String(budgetBytes)}-byte web-bundle ${label} has no further room.`,
+    "max_heap_mb",
+  );
+
+/**
+ * Result admission failed because `min(fixedRemaining, hostCapacity)` is not
+ * positive. The fixed allowance wins when it has no room left. Host pressure
+ * is named only while that allowance still has room.
+ */
+export const webBundleResultAdmissionFailure = (input: {
+  readonly fixedBudgetBytes: number;
+  readonly fixedRemainingBytes: number;
+  readonly hostCapacityBytes: number;
+}):
+  | {
+      readonly kind: "fixed-budget";
+      readonly reason: string;
+      readonly reportedLimits: { readonly result_bytes: number };
+    }
+  | {
+      readonly kind: "host-capacity";
+      readonly reason: string;
+      readonly remediationAction: string;
+      readonly reportedLimits: {
+        readonly result_bytes: number;
+        readonly result_budget_remaining_bytes: number;
+        readonly host_result_capacity_bytes: number;
+      };
+    } => {
+  if (input.fixedRemainingBytes <= 0)
+    return {
+      kind: "fixed-budget",
+      reason: webBundleFixedByteBudget(input.fixedBudgetBytes, "result budget"),
+      reportedLimits: { result_bytes: input.fixedBudgetBytes },
+    };
+  return {
+    kind: "host-capacity",
+    reason: `The CLI/MCP host heap has no remaining reserved capacity for another web-bundle result (host result capacity ${String(input.hostCapacityBytes)} bytes). The fixed ${String(input.fixedBudgetBytes)}-byte result budget still has ${String(input.fixedRemainingBytes)} bytes available. This is host memory pressure, not exhaustion of that fixed allowance.`,
+    remediationAction:
+      "Retry when the CLI/MCP process has more heap headroom. On Node, set NODE_OPTIONS (for example --max-old-space-size=<MiB>) in the environment that starts the CLI or MCP server, then restart that process, to raise this host heap. Raising max_heap_mb changes the isolated analyzer, not this host admission. The fixed result budget is separate and was not exhausted.",
+    reportedLimits: {
+      result_bytes: input.fixedBudgetBytes,
+      result_budget_remaining_bytes: input.fixedRemainingBytes,
+      host_result_capacity_bytes: input.hostCapacityBytes,
+    },
+  };
+};
 
 const sourceLocationSchema = z.object({
   script_key: z.string(),

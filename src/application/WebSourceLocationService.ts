@@ -17,6 +17,7 @@ import {
   webArtifactFileSchema,
 } from "../domain/webScriptArtifacts.js";
 import {
+  DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS,
   WEB_SOURCE_MAP_LIMITS,
   webSourceLocationInputSchema,
   webSourceLocationResultSchema,
@@ -52,17 +53,19 @@ const LIMITATIONS = [
   "Lookup returns all segments at the greatest generated position not greater than the selected point, including earlier lines and generated-only segments. A mapped point does not establish an executed range or UI causality.",
   "Regular maps and inline indexed sections are supported. External section URLs are unsupported; unknown extensions are retained in raw map text and are not interpreted.",
 ];
-const CODEC_BUDGET =
-  "Complete evidence has a 4 MiB map, 32 MiB reply, 262144 decoded rows/segments and 64-level section budget. The owned codec has a 20-second deadline";
+const codecBudget = (timeoutMs: number): string =>
+  `Complete evidence has a 4 MiB map, 32 MiB reply, 262144 decoded rows/segments and 64-level section budget. The owned codec has a ${String(timeoutMs)} ms decode_timeout_ms deadline`;
 /** Bun accepts but ignores the codec's V8 heap flags; Windows enforces a commit limit instead. */
 const codecBudgetLimitation = (
   runtime: WebSourceMapReport["runtime"],
+  timeoutMs: number,
 ): string => {
+  const budget = codecBudget(timeoutMs);
   if (runtime.id === "node-v8")
-    return `${CODEC_BUDGET}, ${String(WEB_SOURCE_MAP_LIMITS.codecHeapMiB)} MiB old-generation heap and one V8 worker; cleanup may extend the deadline. V8 heap limits do not establish aggregate RSS limits.`;
+    return `${budget}, ${String(WEB_SOURCE_MAP_LIMITS.codecHeapMiB)} MiB old-generation heap and one V8 worker; cleanup may extend the deadline. V8 heap limits do not establish aggregate RSS limits.`;
   return runtime.process_memory_limit_bytes === null
-    ? `${CODEC_BUDGET}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags, so no codec heap limit is established.`
-    : `${CODEC_BUDGET}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags; a Windows Job Object limited its committed memory to ${String(runtime.process_memory_limit_bytes)} bytes, which is not a heap or RSS limit.`;
+    ? `${budget}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags, so no codec heap limit is established.`
+    : `${budget}; cleanup may extend the deadline. The codec ran on Bun, which does not enforce REA's V8 heap flags; a Windows Job Object limited its committed memory to ${String(runtime.process_memory_limit_bytes)} bytes, which is not a heap or RSS limit.`;
 };
 
 /** Join verified captured bytes with an explicitly selected source-map point. */
@@ -125,15 +128,20 @@ export class WebSourceLocationService {
         path: map.file.path,
         url: map.url,
         position: input.generated_position,
+        ...(input.decode_timeout_ms === undefined
+          ? {}
+          : { decodeTimeoutMs: input.decode_timeout_ms }),
       },
       options,
     );
     if (!traced.ok) return traced;
     const report = verifyReport(input, map.file.sha256, traced.value);
     if (!report.ok) return report;
+    const decodeTimeoutMs =
+      input.decode_timeout_ms ?? DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS;
     const limitations = [
       ...LIMITATIONS,
-      codecBudgetLimitation(report.value.runtime),
+      codecBudgetLimitation(report.value.runtime, decodeTimeoutMs),
     ];
     const normalized = webSourceLocationResultSchema.safeParse({
       ...report.value,

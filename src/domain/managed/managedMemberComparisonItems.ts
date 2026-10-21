@@ -66,7 +66,18 @@ const methodDimensions = (
   readonly bodyUnknown: boolean;
 } => {
   const dimensions: MethodItem["dimensions"] = [];
-  if (left.flags !== right.flags || left.impl_flags !== right.impl_flags)
+  const headerFields = ["max_stack", "init_locals"] as const;
+  const headerChanged = headerFields.some(
+    (field) =>
+      left.body[field] !== null &&
+      right.body[field] !== null &&
+      left.body[field] !== right.body[field],
+  );
+  if (
+    left.flags !== right.flags ||
+    left.impl_flags !== right.impl_flags ||
+    headerChanged
+  )
     dimensions.push("metadata");
   if (signatureIdentity(left.signature) !== signatureIdentity(right.signature))
     dimensions.push("signature");
@@ -104,7 +115,12 @@ const methodDimensions = (
     canonicalize(right.body.exception_regions)
   )
     dimensions.push("exception-shape");
-  return { dimensions, bodyUnknown: false };
+  return {
+    dimensions,
+    bodyUnknown: headerFields.some(
+      (field) => left.body[field] === null || right.body[field] === null,
+    ),
+  };
 };
 
 const callShape = (anchors: Method["body"]["anchors"]): string =>

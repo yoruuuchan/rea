@@ -56,6 +56,9 @@ const parameters = (
         target_id: input.target_id,
         observation_ms: input.observation_ms,
         include_script_sources: input.include_script_sources,
+        ...(input.command_timeout_ms === undefined
+          ? {}
+          : { command_timeout_ms: input.command_timeout_ms }),
       }
     : {}),
 });

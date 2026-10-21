@@ -178,4 +178,4 @@ const browserStartupMessage = (
     readonly stderr: string;
   },
 ): string =>
-  `Chrome CDP startup ${failure}; executable=${diagnostics.executable}; elapsed_ms=${String(diagnostics.elapsedMs)}; startup_timeout_ms=${String(diagnostics.startupTimeoutMs)}; exit_code=${diagnostics.exitCode === null ? "null" : String(diagnostics.exitCode)}; signal=${diagnostics.signalCode ?? "null"}; stderr=${diagnostics.stderr.length === 0 ? "<empty>" : diagnostics.stderr}`;
+  `Chrome CDP startup ${failure}; executable=${diagnostics.executable}; elapsed_ms=${String(diagnostics.elapsedMs)}; timeoutMs=${String(diagnostics.startupTimeoutMs)} (DevToolsActivePort wait; omitted means ${String(BROWSER_DEVTOOLS_STARTUP_TIMEOUT_MS)} ms); exit_code=${diagnostics.exitCode === null ? "null" : String(diagnostics.exitCode)}; signal=${diagnostics.signalCode ?? "null"}; stderr=${diagnostics.stderr.length === 0 ? "<empty>" : diagnostics.stderr}`;

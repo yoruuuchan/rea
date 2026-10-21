@@ -18,6 +18,22 @@ export const MCP_STARTUP_POLICY = {
   doctorStderrBytes: 64 * 1024,
 } as const;
 
+/**
+ * Recovery for a fixed MCP startup phase budget. Codex's startup figure is
+ * client guidance and is not named here; doctor text adds that distinction
+ * because its deadline uses the same 30 second magnitude.
+ */
+export const fixedMcpPhaseBudgetRecovery = (
+  phase: string,
+  value: number,
+  unit: "ms" | "bytes",
+): string =>
+  `REA's fixed ${phase} is ${String(value)} ${unit} and this release has no runtime override.`;
+
+/** Doctor startup recovery. The Codex figure is client guidance REA does not enforce. */
+export const mcpDoctorDeadlineRecovery = (budgetMs: number): string =>
+  `${fixedMcpPhaseBudgetRecovery("MCP doctor startup deadline", budgetMs, "ms")} Codex startup_timeout_sec of ${String(MCP_STARTUP_POLICY.codexStartupTimeoutSeconds)} seconds is client guidance; REA does not enforce that figure as this deadline.`;
+
 /** Parsed startup and upstream request budgets affecting a client's tool deadline. */
 export interface McpToolTimeoutInputs {
   readonly analysisProvider: AnalysisProviderSelector;

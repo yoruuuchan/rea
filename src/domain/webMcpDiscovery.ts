@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { webRuntimeCommandTimeoutSchema } from "./browserDeadline.js";
 import { browserCompletenessSchema } from "./browserCompleteness.js";
 import {
   browserAllowedOriginsSchema,
@@ -15,6 +16,7 @@ export const discoverWebMcpToolsInputSchema = z.strictObject({
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().trim().min(1),
   observation_ms: z.number().int().min(0).default(100),
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 });
 export type DiscoverWebMcpToolsInput = z.infer<
   typeof discoverWebMcpToolsInputSchema

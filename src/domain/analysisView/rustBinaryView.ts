@@ -7,10 +7,6 @@ import {
   rustcCommitSchema,
   type RustBinary,
 } from "../rust/rustBinary.js";
-export {
-  rustBinaryViewPageSchema,
-  rustBinaryViewRequestSchema,
-} from "../rust/rustBinaryQuery.js";
 import { isImmutableJsonSnapshot } from "../immutableJson.js";
 import { err, ok, type Result } from "../result.js";
 import type {

@@ -554,8 +554,57 @@ it("says REA retains the tighter inherited limit when a producer signal fires", 
     expect(projected.remediation.action).toContain(
       "This release has no runtime override",
     );
+    expect(projected.remediation.action).toContain(
+      "an unchanged retry may succeed or may fail the same way",
+    );
+    expect(projected.remediation.action).not.toContain(
+      "Repeating the unchanged request fails the same way.",
+    );
+    expect(projected.retryable).toBe(true);
     expect(projected.details).toMatchObject({
       reported_limits: { cpu_seconds: 30 },
+    });
+  } finally {
+    await resources.close();
+  }
+});
+
+it("keeps an unchanged SIGXFSZ retry uncertain when the inherited limit was not reported", async () => {
+  const resources = new ArtifactAnalysisResources(
+    "fixture",
+    "inspect_packet_fields",
+    readStableArtifact,
+    readLinuxResourceLimits,
+    { message: "busy", details: {} },
+  );
+  const empty = { text: "", bytes: 0, observedBytes: 0 };
+  const failure = new OwnedCommandFailure("process", "producer signal", {
+    stdout: empty,
+    stderr: empty,
+    exitCode: null,
+    signal: "SIGXFSZ",
+  });
+  try {
+    const projected = projectAnalysisError(
+      resources.commandFailure(
+        failure,
+        { command_timeout_ms: 30_000, output_bytes: 4_194_304 },
+        undefined,
+      ),
+    );
+    expect(projected.remediation.action).toContain(
+      "The effective inherited limit was not reported.",
+    );
+    expect(projected.remediation.action).toContain(
+      "an unchanged retry may succeed or may fail the same way",
+    );
+    expect(projected.remediation.action).not.toContain(
+      "Repeating the unchanged request fails the same way.",
+    );
+    expect(projected.retryable).toBe(true);
+    expect(projected.details).toMatchObject({
+      resource: "file-size",
+      reported_limits: null,
     });
   } finally {
     await resources.close();

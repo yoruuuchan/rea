@@ -43,6 +43,30 @@ it.each(["REDACTED", "[", "]", "/capture.har"])(
   },
 );
 
+it("records an explicit capture deadline and omits the default", async () => {
+  const seen: Array<number | undefined> = [];
+  const service = new WebNetworkCaptureService({
+    inspect: (input) => {
+      seen.push(input.capture_timeout_ms);
+      return Promise.resolve(ok(fixture()));
+    },
+  });
+  const explicit = await service.inspect({
+    capture_path: "/capture.har",
+    format: "har",
+    capture_timeout_ms: 250,
+  });
+  if (!explicit.ok) throw explicit.error;
+  expect(explicit.value.parameters.capture_timeout_ms).toBe(250);
+  const omitted = await service.inspect({
+    capture_path: "/capture.har",
+    format: "har",
+  });
+  if (!omitted.ok) throw omitted.error;
+  expect(omitted.value.parameters).not.toHaveProperty("capture_timeout_ms");
+  expect(seen).toEqual([250, undefined]);
+});
+
 it("keeps observed artifact identity when the entire sensitive path is excluded", async () => {
   const result = await new WebNetworkCaptureService({
     inspect: () => Promise.resolve(ok(fixture())),

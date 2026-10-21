@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  browserDeadlineIncrease,
+  browserDeadlineRetry,
+  noRuntimeOverrideSentence,
+  optionalBrowserDeadlineMs,
+} from "./browserDeadline.js";
 import { digestSchema } from "./digests.js";
 import { localPathStringSchema } from "./localPath.js";
 import { exportedWebScriptSchema } from "./webScriptExport.js";
@@ -29,6 +35,9 @@ export const webSourceLocationInputSchema = selectedWebScriptInputSchema.extend(
         ),
     }),
     generated_position: webSourcePositionSchema,
+    decode_timeout_ms: optionalBrowserDeadlineMs(
+      "Source-map decode deadline in milliseconds (default 20000), for the owned codec process. Omitted means 20000 and applies on the next trace_web_source_location call. deadlineExpired returns no partial mapping. Does not raise the fixed 4 MiB map budget, 32 MiB reply budget, or 192 MiB codec heap. Those have no runtime override.",
+    ),
   },
 );
 export type WebSourceLocationInput = z.output<
@@ -121,6 +130,18 @@ export const WEB_SOURCE_MAP_LIMITS = {
   /** V8 old-generation heap for the codec, and its Bun process budget. */
   codecHeapMiB: 192,
 } as const;
+
+/** Decode deadline used when decode_timeout_ms is omitted. */
+export const DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS =
+  WEB_SOURCE_MAP_LIMITS.decodeTimeoutMs;
+
+/** Source-map decode deadlineExpired text for trace_web_source_location. */
+export const webSourceMapDecodeTimeoutRecovery = (
+  timeoutMs: number,
+): { readonly userMessage: string; readonly remediationAction: string } => ({
+  userMessage: `trace_web_source_location reached its ${String(timeoutMs)} ms source-map decode deadline (deadlineExpired) for decode_timeout_ms. No partial mapping is returned. This is not the MCP client deadline.`,
+  remediationAction: `${browserDeadlineIncrease("decode_timeout_ms", timeoutMs, DEFAULT_WEB_SOURCE_MAP_DECODE_TIMEOUT_MS, "--decode-timeout-ms")} ${browserDeadlineRetry} ${noRuntimeOverrideSentence(`The ${String(WEB_SOURCE_MAP_LIMITS.mapBytes)}-byte map budget, ${String(WEB_SOURCE_MAP_LIMITS.outputBytes)}-byte reply budget, and ${String(WEB_SOURCE_MAP_LIMITS.codecHeapMiB)} MiB codec heap stay fixed.`, "decode_timeout_ms")}`,
+});
 export type WebSourceMapReport = z.output<typeof webSourceMapReportSchema>;
 
 /** Selected capture/map byte identities and complete point attribution inline. */

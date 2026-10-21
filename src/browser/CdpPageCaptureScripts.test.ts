@@ -4,6 +4,10 @@ import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { inspectWebPageInputSchema } from "../domain/browserObservation.js";
 import { CdpCaptureEvents } from "./CdpCaptureEvents.js";
 import type { CdpConnection } from "./CdpConnection.js";
+import {
+  CDP_SCRIPT_SOURCE_BYTES_OMISSION_REASON,
+  CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON,
+} from "./CdpScriptSourceBudget.js";
 import { captureScripts } from "./CdpPageCaptureScripts.js";
 import type { CaptureContext } from "./CdpPageCapture.js";
 import type { CapturedScript } from "./CdpCaptureEventTypes.js";
@@ -74,8 +78,7 @@ it("admits a prefix and fitting suffix around an oversized script source", async
   expect(byId.get("prefix")).toMatchObject({ included: true });
   expect(byId.get("oversized")).toEqual({
     included: false,
-    reason:
-      "script source was omitted because the aggregate 32 MiB source budget was exhausted",
+    reason: CDP_SCRIPT_SOURCE_BYTES_OMISSION_REASON,
   });
   expect(byId.get("suffix")).toMatchObject({ included: true });
   expect(events.completeness.snapshot().excluded).toContainEqual({
@@ -174,13 +177,11 @@ it("stops source reads at the shared collection deadline and retains metadata", 
     expect(result.inventory.items.map((item) => item.source)).toEqual([
       {
         included: false,
-        reason:
-          "script source was omitted because the 20-second source collection deadline elapsed",
+        reason: CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON,
       },
       {
         included: false,
-        reason:
-          "script source was omitted because the 20-second source collection deadline elapsed",
+        reason: CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON,
       },
     ]);
     expect(events.completeness.snapshot().excluded).toContainEqual({

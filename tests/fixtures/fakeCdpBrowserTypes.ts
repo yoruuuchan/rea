@@ -46,6 +46,10 @@ export interface FakeOptions {
     command: FakeCdpCommand,
     origin: string,
   ) => readonly CdpEvent[] | undefined;
+  /** Delay each HTTP discovery document so a short command deadline can be observed separately. */
+  readonly discoveryDelayMs?: number;
+  /** Delay WebSocket upgrade acceptance so handshake and attach deadlines stay distinct. */
+  readonly handshakeDelayMs?: number;
   readonly malformedDiscovery?: boolean;
   readonly oversizedDiscovery?: boolean;
   readonly invalidBrowserWebSocket?: boolean;

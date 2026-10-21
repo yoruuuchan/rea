@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { webRuntimeCommandTimeoutSchema } from "../browserDeadline.js";
 import { browserCompletenessSchema } from "../browserCompleteness.js";
 import { browserEndpointSchema } from "../browserObservation.js";
 import { browserVersionSchema } from "../browserObservationSchemas.js";
@@ -23,6 +24,7 @@ const inspectElectronPageFacts = {
   ...approvedElectronInput,
   target_id: z.string().trim().min(1),
   observation_ms: z.number().int().min(0).default(100),
+  command_timeout_ms: webRuntimeCommandTimeoutSchema,
 } as const;
 export const inspectElectronPageInputSchema = z.union([
   z.strictObject({

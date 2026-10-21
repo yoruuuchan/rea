@@ -64,7 +64,9 @@ describe("jsonValueSchema depth bound", () => {
     const result = jsonValueSchema.safeParse(deepObject(MAX_JSON_DEPTH + 1));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.error.issues[0]?.message).toContain("maximum nesting depth");
+    expect(result.error.issues[0]?.message).toBe(
+      `JSON value exceeds maximum nesting depth of ${MAX_JSON_DEPTH}. This release has no runtime override.`,
+    );
   });
 
   it.each(["object", "array"])(

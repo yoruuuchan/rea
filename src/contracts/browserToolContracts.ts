@@ -139,7 +139,7 @@ export const BROWSER_TOOL_CONTRACTS = [
     name: "list_browser_targets",
     ...toolContractMetadata("list_browser_targets"),
     description:
-      "List page targets exposed by the selected loopback Chrome DevTools Protocol endpoint. Optionally filter by exact origin. URLs preserve query values and fragments; only URL userinfo credentials are removed.",
+      "List page targets exposed by the selected loopback Chrome DevTools Protocol endpoint. Optionally filter by exact origin. URLs preserve query values and fragments; only URL userinfo credentials are removed. HTTP discovery and browser-socket discovery use the fixed 10-second discovery deadline, then the socket closes without a later command. This operation accepts no command_timeout_ms; that listing deadline has no runtime override.",
     kind: "browser-provider",
     inputSchema: listBrowserTargetsInputSchema,
     outputSchema: listOutputSchema,

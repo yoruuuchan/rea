@@ -15,10 +15,51 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import type { Result } from "../domain/result.js";
 import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
 import {
+  MCP_TRANSPORT_EVIDENCE_DISCOVERY,
+  MCP_TRANSPORT_EVIDENCE_EXPORT,
+} from "../domain/analysisErrorPresentation.js";
+import {
+  nodeStringCeilingRecovery,
+  stdioResponseBudgetRecovery,
+} from "../config/mcpResponseBudget.js";
+import {
   encodeToolResult,
   MCP_RESULT_STRING_LIMIT,
+  NODE_MAX_STRING_LENGTH,
   TARGET_CONTENT_RESULT_META,
 } from "./toolResultEncoding.js";
+
+/** Project a response-budget refusal without labeling REA's reserved string limit as Node's ceiling. */
+export const mcpResponseOverflowProjection = (input: {
+  readonly completed: boolean;
+  readonly constraint: "receive-buffer" | "string-length";
+  readonly effectiveResponseBytes: number;
+  readonly nextStep: string;
+}): { readonly reason: string; readonly remediationAction: string } => {
+  const facts =
+    input.constraint === "string-length"
+      ? nodeStringCeilingRecovery(
+          MCP_RESULT_STRING_LIMIT,
+          NODE_MAX_STRING_LENGTH,
+        )
+      : stdioResponseBudgetRecovery(
+          input.effectiveResponseBytes,
+          MCP_RESULT_STRING_LIMIT,
+          NODE_MAX_STRING_LENGTH,
+        );
+  const summary =
+    input.constraint === "string-length"
+      ? input.completed
+        ? "The operation completed, but its complete MCP response exceeds REA's reserved single-string limit."
+        : "The tool failed, but its complete error response exceeds REA's reserved single-string limit."
+      : input.completed
+        ? "The operation completed, but its complete MCP response exceeds the stdio response budget. The analysis result was not truncated."
+        : "The tool failed, but its complete error response exceeds the MCP response budget.";
+  return {
+    reason: `${summary} ${facts} ${input.nextStep}`,
+    remediationAction: `${input.nextStep} ${facts}`,
+  };
+};
 
 /** Create one delivery policy from the already selected, parsed response budget. */
 export const createToolResultDelivery = (
@@ -50,10 +91,32 @@ const retainedEvidenceContinuation = (
   };
 };
 
+/**
+ * A summary projection has already used `detail: "summary"`.
+ * Export still writes the retained bundle outside one MCP frame.
+ */
+const evidenceBundleSummary = (value: JsonValue): boolean => {
+  const payload =
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "result" in value
+      ? value.result
+      : value;
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    !Array.isArray(payload) &&
+    payload.kind === "evidence-bundle-summary"
+  );
+};
+
 /** Immutable encoding and recovery policy shared by one MCP server. */
 export class ToolResultDelivery {
+  readonly maximumResponseBytes: number;
   readonly resultBudgetBytes: number;
   constructor(maximumResponseBytes: number) {
+    this.maximumResponseBytes = maximumResponseBytes;
     this.resultBudgetBytes = maximumResponseBytes - 1024;
     Object.freeze(this);
   }
@@ -176,21 +239,27 @@ export class ToolResultDelivery {
           : {}),
       };
     const retainedEvidence = recovery.evidence_reference !== undefined;
-    const recoveryAdvice =
+    const nextStep =
       recovery.continuation !== undefined
         ? "Call inspect_analysis_view with the supplied continuation arguments to read retained analysis. Follow coverage.next_offset for subsequent pages; reduce the page limit if needed, or export the complete retained Evidence."
         : retainedEvidence
           ? "Export retained evidence to consume the complete analysis, or use complete CLI JSON output."
-          : encoded.constraint === "string-length"
-            ? "Use complete CLI JSON output to consume the analysis."
-            : "Use a larger MCP response budget with a matching client receive buffer, or use complete CLI JSON output to consume the analysis.";
+          : contract.name === "get_evidence_bundle"
+            ? evidenceBundleSummary(value)
+              ? MCP_TRANSPORT_EVIDENCE_EXPORT
+              : MCP_TRANSPORT_EVIDENCE_DISCOVERY
+            : "Use complete CLI JSON output to consume the analysis.";
+    const projected = mcpResponseOverflowProjection({
+      completed: true,
+      constraint: encoded.constraint,
+      effectiveResponseBytes: this.maximumResponseBytes,
+      nextStep,
+    });
     return this.toErrorToolResult(
       new AnalysisResourceConstraintError(
         contract.name,
         "transport",
-        encoded.constraint === "string-length"
-          ? `The operation completed, but its complete MCP response exceeds Node's single-string representation limit. ${recoveryAdvice}`
-          : `The operation completed, but its complete MCP response exceeds the stdio response budget. The analysis result was not truncated. ${recoveryAdvice}`,
+        projected.reason,
         {
           boundary: "mcp-response",
           default_receive_buffer_bytes: STDIO_DEFAULT_MAX_BUFFER_SIZE,
@@ -201,9 +270,7 @@ export class ToolResultDelivery {
           constraint: encoded.constraint,
           ...recovery,
         },
-        recovery.continuation === undefined
-          ? undefined
-          : { remediationAction: recoveryAdvice },
+        { remediationAction: projected.remediationAction },
       ),
       contract.returnsTargetContent,
     );

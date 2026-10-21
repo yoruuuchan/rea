@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { evidenceInputSchema } from "../evidenceInputContracts.js";
+import { evidenceInputSchema } from "../../domain/evidenceReference.js";
 
 // Borrow inline payloads until application admission; advertise the exact public
 // Evidence/reference union without a pre-admission recursive SDK clone.

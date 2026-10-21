@@ -6,6 +6,7 @@ import type {
   StringLiteral,
 } from "@babel/types";
 import { traverseJavaScriptAst } from "./javascript/javascriptSemanticTraversal.js";
+import { readExactJavaScriptLiteral } from "./javascript/javascriptAstValues.js";
 import {
   parseRecoveredJavaScript,
   parserPluginsForPath,
@@ -92,8 +93,10 @@ const moduleSpecifierFromExpression = (
 ):
   | { specifier: string; parseState: ReferenceSourceImportParseState }
   | undefined => {
-  if (isStringLiteral(expression))
-    return { specifier: expression.value, parseState: "parsed" };
+  if (expression === null || expression === undefined) return undefined;
+  const literal = readExactJavaScriptLiteral(expression);
+  if (literal.found && typeof literal.value === "string")
+    return { specifier: literal.value, parseState: "parsed" };
   if (
     isCallExpression(expression) &&
     isImport(expression.callee) &&
@@ -256,11 +259,10 @@ const extractRequireAndDynamicImports = (
       continue;
     }
     const first = call.arguments[0];
-    if (
-      isRequireCallee(call.callee) &&
-      unshadowedRequireCalls.has(call) &&
-      isModuleExpression(first)
-    ) {
+    // The shared exact-literal reader owns argument exactness: it unwraps
+    // runtime-transparent TS wrappers (`as const`, `!`, `satisfies`) and
+    // admits quoted and expression-free template spellings alike.
+    if (isRequireCallee(call.callee) && unshadowedRequireCalls.has(call)) {
       const result = moduleSpecifierFromExpression(first);
       if (result !== undefined) {
         appendRelationship(relationships, limitations, {

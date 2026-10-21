@@ -3,6 +3,15 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Frame, Page } from "playwright-core";
 
+import {
+  CDP_CLEANUP_GRACE_MS,
+  CDP_DISCOVERY_RESPONSE_TIMEOUT_MS,
+  selectedCdpCommandTimeoutMs,
+} from "../domain/browserDeadline.js";
+import {
+  AnalysisCancelledError,
+  AnalysisTimeoutError,
+} from "../domain/analysisErrorCore.js";
 import { browserObservationEndpointSchema } from "../domain/browserObservation.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { CdpConnection } from "./CdpConnection.js";
@@ -18,7 +27,64 @@ const OPERATION = "capture_browser_scenario" as const;
 // Restoration performs several sequential CDP mutations before the transport's
 // own bounded close. A single round-trip deadline is too short for the complete
 // chain on a loaded Windows browser, while retries must still stay bounded.
-const POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS = 5_000;
+const POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS = CDP_CLEANUP_GRACE_MS;
+/**
+ * First blocked-service-worker registration check, before discovery starts.
+ * It keeps the previous fixed 10-second bound. command_timeout_ms does not
+ * apply yet, and this timer is not the discovery or attach deadline.
+ */
+export const SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS =
+  CDP_DISCOVERY_RESPONSE_TIMEOUT_MS;
+
+const serviceWorkerPolicyCheckTimeout = (): AnalysisTimeoutError => {
+  const timeoutMs = SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS;
+  return new AnalysisTimeoutError(OPERATION, timeoutMs, {
+    userMessage: `Blocked service-worker policy check exceeded its ${String(timeoutMs)} ms deadline before CDP discovery. command_timeout_ms does not apply to this check.`,
+    remediationAction: `The ${String(timeoutMs)} ms blocked service-worker policy check stays fixed. This release has no runtime override. command_timeout_ms does not raise it.`,
+  });
+};
+
+const withServiceWorkerPolicyDeadline = <Value>(
+  work: () => Promise<Value>,
+  signal: AbortSignal,
+): Promise<Value> => {
+  if (signal.aborted)
+    return Promise.reject(
+      new AnalysisCancelledError(OPERATION, { cause: signal.reason }),
+    );
+  return new Promise<Value>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      fail(serviceWorkerPolicyCheckTimeout());
+    }, SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS);
+    timer.unref();
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const succeed = (value: Value): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onAbort = (): void => {
+      fail(new AnalysisCancelledError(OPERATION, { cause: signal.reason }));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    void work().then(succeed, fail);
+  });
+};
 const scriptResponse = z.object({ identifier: z.string() });
 const restorationResponse = z.object({
   result: z.object({ value: z.literal("policy_owned").nullable() }),
@@ -60,6 +126,9 @@ export class PlaywrightScenarioServiceWorkers {
     private readonly page: Page,
     private readonly endpoint: string,
     private readonly targetId: string,
+    private readonly commandTimeoutMs: number = selectedCdpCommandTimeoutMs(
+      undefined,
+    ),
   ) {}
 
   initialize(): Promise<void> {
@@ -67,41 +136,47 @@ export class PlaywrightScenarioServiceWorkers {
   }
 
   private async install(): Promise<void> {
-    this.#session = await withCdpDiscoveryDeadline(
+    await withServiceWorkerPolicyDeadline(
+      () => this.assertBlocked(),
+      this.#setup.signal,
+    );
+    // Discovery stays on its fixed deadline. The following handshake and
+    // Target.attachToTarget each use command_timeout_ms.
+    const opened = await withCdpDiscoveryDeadline(
       OPERATION,
       this.#setup.signal,
-      async (signal) => {
-        await withPlaywrightExecutionBoundary(
-          () => this.assertBlocked(),
-          undefined,
-          signal,
-        );
-        const opened = await openCdpEndpoint(
+      (signal) =>
+        openCdpEndpoint(
           browserObservationEndpointSchema.parse(this.endpoint),
           OPERATION,
           signal,
-        );
-        const target = opened.discovery.targets.find(
-          ({ id }) => id === this.targetId,
-        );
-        if (target === undefined) {
-          await opened.connection?.close();
-          throw new BrowserObservationError(OPERATION, "target_not_found");
-        }
-        const connection =
-          opened.connection ??
-          (await CdpConnection.connect(
-            opened.discovery.webSocket.url,
-            OPERATION,
-            signal,
-          ));
-        return await attachCdpTargetSession(
-          connection,
-          target,
-          OPERATION,
-          signal,
-        );
-      },
+          undefined,
+          undefined,
+          this.commandTimeoutMs,
+        ),
+    );
+    const target = opened.discovery.targets.find(
+      ({ id }) => id === this.targetId,
+    );
+    if (target === undefined) {
+      await opened.connection?.close();
+      throw new BrowserObservationError(OPERATION, "target_not_found");
+    }
+    const transport =
+      opened.connection ??
+      (await CdpConnection.connect(
+        opened.discovery.webSocket.url,
+        OPERATION,
+        this.#setup.signal,
+        { commandTimeoutMs: this.commandTimeoutMs },
+      ));
+    if (this.#closed)
+      transport.beginCleanupGrace(POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS);
+    this.#session = await attachCdpTargetSession(
+      transport,
+      target,
+      OPERATION,
+      this.#setup.signal,
     );
     const connection = this.#session.connection;
     this.#removeListener = connection.onEvent((event) => {
@@ -318,6 +393,10 @@ export class PlaywrightScenarioServiceWorkers {
   close(stopLoading = false): Promise<void> {
     this.#closed = true;
     this.#stopRequested ||= stopLoading;
+    // Restoration commands keep the fixed grace even when command_timeout_ms was raised.
+    this.#session?.connection.beginCleanupGrace(
+      POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS,
+    );
     // Abort discovery/handshakes and reads, never an already-sent page mutation.
     this.#setup.abort();
     const restoration = (this.#restoration ??= this.restore());
@@ -372,6 +451,9 @@ export class PlaywrightScenarioServiceWorkers {
 
   private async restore(): Promise<void> {
     await this.#initialization?.catch(() => undefined);
+    this.#session?.connection.beginCleanupGrace(
+      POLICY_CLEANUP_CONFIRMATION_TIMEOUT_MS,
+    );
     if (this.#released) return;
     const session = this.#session;
     if (session === undefined) return;

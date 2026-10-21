@@ -106,6 +106,15 @@ only reduces delivery; source selection reduces text acquisition and analysis.
 Explicit native provider or snapshot routing rejects `--source-path` rather
 than ignoring it.
 
+ASAR header/index admission is a fixed 16 MiB / 16777216 bytes for this
+release. There is no runtime override. The archive index is read before any
+member can be selected, so `source_paths`, `--source-path`, `detail:
+"summary"`, `max_heap_mb`, and available host memory do not bypass or raise
+it. When the header exceeds that allowance, the failure names this budget.
+Analyze an extracted application directory, which does not admit an ASAR
+header, or supply an archive whose header fits. Repeating the unchanged
+request fails the same way.
+
 ## Read the analysis
 
 `analyze_javascript_application` returns the complete analysis Evidence by
@@ -172,7 +181,8 @@ for the tool-result contract.
 
 Use MCP `detail: "summary"` for a large application, then read selected views of
 the retained analysis. Summary changes delivery only. To reduce source parsing,
-select exact [source paths](#select-sources-before-analysis).
+select exact [source paths](#select-sources-before-analysis). Source selection
+does not bypass ASAR header/index admission.
 
 If a complete response exceeds the transport budget, use its retained Evidence
 ID for a summary, module page, or item, or export the bundle. See

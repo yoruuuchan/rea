@@ -118,9 +118,11 @@ describe("exportEnvironmentBundle", () => {
       status: "exported",
       directory,
       name: "grafana-example",
-      tool_count: 19,
+      // The bundle serves the state the export derived: the manifest's read tools.
+      tool_count: 14,
       evidence_id: input.source.evidenceId,
       manifest_evidence_id: input.source.manifestEvidenceId,
+      state: { served: true, evidence_id: expect.stringMatching(/^ev_/u) },
       package_source: {
         kind: "registry",
         specifier: `rea-agents@${PACKAGE_METADATA.version}`,

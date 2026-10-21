@@ -16,9 +16,10 @@ import type { WebSourceMapRequest } from "./WebSourceMapFetcher.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type { BrowserObservationOperation } from "../domain/browserObservationErrors.js";
+import { selectedCdpCommandTimeoutMs } from "../domain/browserDeadline.js";
 import {
   CDP_SCRIPT_SOURCE_BYTES_OMISSION_REASON,
-  CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON,
+  cdpScriptSourceDeadlineOmissionReason,
   CdpScriptSourceBudget,
 } from "./CdpScriptSourceBudget.js";
 
@@ -59,9 +60,14 @@ export const captureScripts = async (
     readonly sourceMapRawUrl: string | null;
   }[] = [];
   const scripts = [...events.scripts.values()];
+  const commandTimeoutMs = selectedCdpCommandTimeoutMs(
+    context.input.command_timeout_ms,
+  );
+  const deadlineOmission =
+    cdpScriptSourceDeadlineOmissionReason(commandTimeoutMs);
   const sourceBudget =
     context.input.include_script_sources && scripts.length > 0
-      ? new CdpScriptSourceBudget(context.signal)
+      ? new CdpScriptSourceBudget(context.signal, commandTimeoutMs)
       : undefined;
   try {
     for (const script of scripts) {
@@ -76,7 +82,7 @@ export const captureScripts = async (
       };
       let source: WebPageInspection["scripts"]["items"][number]["source"] =
         context.input.include_script_sources
-          ? sourceExcluded(CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON)
+          ? sourceExcluded(deadlineOmission)
           : sourceExcluded("source capture was not selected");
       if (
         context.input.include_script_sources &&
@@ -166,7 +172,9 @@ const captureScriptSource = async (
       "script_sources",
       "resource_budget_exhausted",
     );
-    return sourceExcluded(CDP_SCRIPT_SOURCE_DEADLINE_OMISSION_REASON);
+    return sourceExcluded(
+      cdpScriptSourceDeadlineOmissionReason(sourceBudget.commandTimeoutMs),
+    );
   }
   if (!sourceBudget.admit(content)) {
     state.events.completeness.exclude(

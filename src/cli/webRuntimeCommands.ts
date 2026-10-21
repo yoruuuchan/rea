@@ -4,6 +4,7 @@ import { browserCliError } from "../cliBrowserContext.js";
 import {
   browserScopeOptions,
   observationDuration,
+  selectedCommandTimeout,
 } from "../cliObservationOptions.js";
 import { logCliCommand } from "../cliLogging.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
@@ -49,6 +50,7 @@ export const registerWebRuntimeCommands = (
                   target_id: args.targetId,
                   allowed_origins: options.allowedOrigins,
                   observation_ms: options.observationMs,
+                  ...selectedCommandTimeout(options.commandTimeoutMs),
                 },
                 { progress: runtimeProgress, signal },
               ),
@@ -89,6 +91,7 @@ export const registerWebRuntimeCommands = (
                   target_id: args.targetId,
                   selector: args.selector,
                   allowed_origins: options.allowedOrigins,
+                  ...selectedCommandTimeout(options.commandTimeoutMs),
                 },
                 { signal },
               ),

@@ -1,4 +1,4 @@
-import type { EvidenceInput } from "../contracts/evidenceInputContracts.js";
+import type { EvidenceInput } from "../domain/evidenceReference.js";
 import type { Evidence } from "../domain/evidence.js";
 import { EvidenceReferenceError } from "../domain/evidenceErrors.js";
 import { err, ok, type Result } from "../domain/result.js";

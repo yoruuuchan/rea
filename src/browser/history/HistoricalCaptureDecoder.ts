@@ -42,6 +42,7 @@ import { analysisErrorWithCleanupFailure } from "../../domain/analysisErrorClean
 import { err, ok, type Result } from "../../domain/result.js";
 import {
   WEB_NETWORK_CAPTURE_LIMITS,
+  selectedWebNetworkCaptureTimeoutMs,
   webNetworkCapturePayloadSchema,
   type InspectWebNetworkCaptureInput,
   type WebNetworkCapture,
@@ -175,7 +176,9 @@ export class HistoricalCaptureDecoder {
           hostEnvironment: environment,
         },
         {
-          timeoutMs: WEB_NETWORK_CAPTURE_LIMITS.timeoutMs,
+          timeoutMs: selectedWebNetworkCaptureTimeoutMs(
+            input.capture_timeout_ms,
+          ),
           diagnosticBytes: 1024 * 1024,
         },
         options?.signal === undefined ? {} : { signal: options.signal },
@@ -285,7 +288,7 @@ export class HistoricalCaptureDecoder {
           "This is retained producer evidence, without live browser transaction IDs, scenario provenance, execution attribution or deployment authenticity. Recorded URLs are never fetched.",
           "Every record is decoded before selection; no partial success is returned on malformed input or a resource limit.",
           "Known authentication headers/cookies and explicitly marked literal values are excluded. Unknown extension names do not establish sensitivity.",
-          `A 32 MiB input, 96 MiB reply and 64-level nesting budget bound complete evidence. ${nodeMemoryLimitation()}; mitmproxy decoding uses a 768 MiB Linux address-space limit. Each owned command has a 30-second deadline with independent cleanup.`,
+          `Complete evidence is bounded by a ${String(WEB_NETWORK_CAPTURE_LIMITS.inputBytes)}-byte input budget, a ${String(WEB_NETWORK_CAPTURE_LIMITS.outputBytes)}-byte reply budget, and a ${String(WEB_NETWORK_CAPTURE_LIMITS.depth)}-level nesting cap. Those have no runtime override. capture_timeout_ms is ${String(selectedWebNetworkCaptureTimeoutMs(input.capture_timeout_ms))} ms (omitted means ${String(WEB_NETWORK_CAPTURE_LIMITS.timeoutMs)}). ${nodeMemoryLimitation()}; mitmproxy decoding uses a 768 MiB Linux address-space limit.`,
         ],
       };
       if (input.format === "qlog") {

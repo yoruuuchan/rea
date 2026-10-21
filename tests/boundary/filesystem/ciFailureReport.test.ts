@@ -6,15 +6,15 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { normalizeWorkflowRun } from "../../../scripts/ci/workflow-run.mjs";
 
 import {
+  classifyFailure,
   readStaticCheckArtifact,
   selectStaticCheckArtifact,
-} from "../../../scripts/ci/artifacts.mjs";
-import {
-  classifyFailure,
-  createGitHubApi,
-  reportCiFailures,
   type CiRun,
   type CiJob,
+} from "../../../scripts/ci/artifacts.mjs";
+import {
+  createGitHubApi,
+  reportCiFailures,
   type FailureReportApi,
 } from "../../../scripts/ci/failure-report.mjs";
 

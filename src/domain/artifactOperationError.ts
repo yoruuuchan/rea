@@ -7,9 +7,17 @@ import {
   type AnalysisErrorOptions,
 } from "./analysisErrorBase.js";
 
+/** Fixed admission named by the producing reader, with its effective byte ceiling. */
+export interface ArtifactAdmissionLimit {
+  readonly kind: "asar-header";
+  readonly maximumBytes: number;
+}
+
 /** Artifact inventory or extraction failed a typed safety boundary. */
 export class ArtifactOperationError extends AnalysisError {
   readonly _tag = "ArtifactOperationError";
+  override readonly userMessage: string | undefined;
+  readonly admission: ArtifactAdmissionLimit | undefined;
 
   constructor(
     readonly operation:
@@ -37,7 +45,10 @@ export class ArtifactOperationError extends AnalysisError {
     readonly artifactDetails?: ArtifactIntegrityDetails,
     /** The specific constraint that failed, such as the colliding path. */
     readonly detail?: string,
-    options?: AnalysisErrorOptions,
+    options?: AnalysisErrorOptions & {
+      readonly userMessage?: string;
+      readonly admission?: ArtifactAdmissionLimit;
+    },
   ) {
     super(
       artifactDetails === undefined
@@ -45,6 +56,10 @@ export class ArtifactOperationError extends AnalysisError {
         : artifactDetailsMessage(operation, reason, artifactDetails),
       options,
     );
+    this.admission = options?.admission;
+    this.userMessage =
+      options?.userMessage ??
+      (options?.admission === undefined ? undefined : detail);
   }
 }
 

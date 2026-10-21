@@ -188,6 +188,7 @@ const artifactFailureToOperationError = (
       ...(cause.partialObservation === undefined
         ? {}
         : { partialObservation: cause.partialObservation }),
+      ...(cause.admission === undefined ? {} : { admission: cause.admission }),
     },
   );
 

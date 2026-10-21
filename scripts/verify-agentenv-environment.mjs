@@ -142,7 +142,11 @@ try {
   );
   assert.equal(exported.status, "exported");
   assert.equal(exported.name, "grafana-example");
-  assert.equal(exported.tool_count, toolCount);
+  // The bundle serves the state its server derives from the capture, which leaves the
+  // manifest's write tools unserved; the export reports the count the bundle serves.
+  assert.equal(exported.state.served, true);
+  const servedCount = exported.tool_count;
+  assert.ok(servedCount > 0 && servedCount < toolCount);
   assert.equal(exported.package_source.kind, "tarball");
   assert.deepEqual(exported.files.map((file) => file.path).sort(), [
     "README.md",
@@ -219,7 +223,7 @@ try {
   assert.match(
     snapshot.stdout.text,
     new RegExp(
-      `replay: listed ${String(toolCount)} tools, expected ${String(toolCount)};`,
+      `serve: listed ${String(servedCount)} tools, expected ${String(servedCount)};`,
       "u",
     ),
   );

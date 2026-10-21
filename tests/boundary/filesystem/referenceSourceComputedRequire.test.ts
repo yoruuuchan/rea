@@ -128,6 +128,13 @@ it("distinguishes computed require member values from literal members in source 
       resolution: "unknown",
       parse_state: "partial",
     },
+    {
+      from_path: "unknown.cjs",
+      to: "dep.js",
+      kind: "requires",
+      resolution: "internal",
+      parse_state: "parsed",
+    },
   ]);
   expect(graph.entries).toHaveLength(Object.keys(sources).length);
   for (const [path, source] of Object.entries(sources)) {

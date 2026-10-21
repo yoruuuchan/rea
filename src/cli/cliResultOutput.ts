@@ -1,7 +1,7 @@
 import { constants } from "node:buffer";
 import type { Writable } from "node:stream";
 
-import { Cli, Filter, Formatter } from "incur";
+import { Filter, Formatter } from "incur";
 import { estimateTokenCount, sliceByTokens } from "tokenx";
 
 import {
@@ -23,6 +23,10 @@ import {
   writeOutputText,
 } from "./jsonOutput.js";
 import type { CliInstance } from "./types.js";
+import {
+  visitRegisteredCommands,
+  type RegisteredCommand,
+} from "./visitRegisteredCommands.js";
 
 /** Result metadata supplied by the command that actually ran. */
 export interface CliResultOutputMetadata {
@@ -41,40 +45,18 @@ export interface CliResultOutput {
   recoverFormattingFailure(cause: unknown): Promise<boolean>;
 }
 
-type CommandMap = NonNullable<ReturnType<typeof Cli.toCommands.get>>;
-type CommandDefinition = Extract<
-  CommandMap extends Map<string, infer Entry> ? Entry : never,
-  { run: unknown }
->;
-const registeredCommands: WeakMap<object, CommandMap> = Cli.toCommands;
-
 /** Install formatting once, after registration, for every ordinary CLI result. */
 export const streamCliCommandResults = (
   cli: CliInstance,
   output: CliResultOutput,
 ): void => {
-  const commands = registeredCommands.get(cli);
-  if (commands !== undefined) wrapCommands(commands, [], output);
-};
-
-const wrapCommands = (
-  commands: CommandMap,
-  parents: readonly string[],
-  output: CliResultOutput,
-): void => {
-  for (const [name, entry] of commands) {
-    const path = [...parents, name];
-    if ("_group" in entry) {
-      wrapCommands(entry.commands, path, output);
-      if (entry.root !== undefined)
-        wrapCommand(entry.root, path.join(" "), output);
-    } else if (!("_alias" in entry) && !("_fetch" in entry))
-      wrapCommand(entry, path.join(" "), output);
-  }
+  visitRegisteredCommands(cli, (command, path) =>
+    wrapCommand(command, path, output),
+  );
 };
 
 const wrapCommand = (
-  command: Pick<CommandDefinition, "run">,
+  command: Pick<RegisteredCommand, "run">,
   name: string,
   output: CliResultOutput,
 ): void => {

@@ -784,6 +784,33 @@ it("projects package details from dumpsys package output", async () => {
   });
 });
 
+// Package Manager prints an absent installer as the text "null"; the
+// normalized result must report the absence, not a package named "null"
+// (morluto/rea#3943).
+it("reports a null installer declaration as an absent installer", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "dumpsys:package": `Packages:
+  Package [com.example] (abcdef):
+    versionName=1.2.3
+    installerPackageName=null
+    requested permissions:
+      android.permission.INTERNET
+`,
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_package",
+    input: { serial: "emulator-5554", package: "com.example" },
+  });
+  expect(result).toMatchObject({
+    version_name: "1.2.3",
+    installer_package_name: null,
+    requested_permissions_count: 1,
+    coverage: "complete",
+  });
+});
+
 // PackageInfo.getLongVersionCode() combines versionCodeMajor and versionCode
 // into a signed 64-bit long, which JSON numbers cannot hold exactly.
 it.each(["9007199254740993", "-4294967296"])(

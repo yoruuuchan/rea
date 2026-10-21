@@ -234,11 +234,14 @@ The destination changes only when a complete export is atomically published.
 
 Clients that explicitly configure a larger receive buffer can set the REA
 server's `REA_MCP_MAX_RESPONSE_BYTES` environment variable to the same byte
-count. This setting must be a safe decimal integer at least 10485760; REA
-reserves 1024 bytes for the envelope. Raising it restores complete inline
-delivery for responses that fit that buffer and Node's single-string limit.
-It does not change the client's buffer, analysis coverage, or retained content.
-Ordinary responses keep their existing complete result contract.
+count. This setting must be a safe decimal integer at least 10485760 (10 MiB);
+REA reserves 1024 bytes for the envelope. The value is read when the REA
+process starts, so a change requires a restart and a matching client receive
+buffer. Raising it restores complete inline delivery for responses that fit
+that buffer. It does not raise REA's reserved single-string limit, which is
+1024 UTF-16 code units below Node's single-string ceiling, and it does not
+raise that Node ceiling. It does not change analysis coverage or retained
+content. Ordinary responses keep their existing complete result contract.
 
 ### Error recovery and deadline ownership
 
@@ -329,7 +332,7 @@ See [environment manifests](web-network-captures.md#environment-manifest).
 
 `inspect_analysis_view` also accepts `environment-state` for the same parents,
 extracting the initial state the recorded reads observed: entity types with an
-identity field, entities, documents for written non-entity paths, and a render
+identity field, entities, documents for non-entity reads, and a render
 plan per read tool that reproduces its recordings from the state or names why it
 cannot. Types and identity are inferences, so the Evidence is always inferred.
 See [environment state](web-network-captures.md#environment-state).

@@ -7,6 +7,52 @@ import {
   parseWindowFocusOutput,
 } from "./AdbShellOutput.js";
 
+const packageDump = (installerLine: string | undefined): string =>
+  [
+    "Packages:",
+    "  Package [com.example] (abcdef):",
+    "    versionName=1.2.3",
+    ...(installerLine === undefined ? [] : [`    ${installerLine}`]),
+    "    pkgFlags=[ HAS_CODE ]",
+    "",
+  ].join("\n");
+
+describe("parseDumpsysPackageOutput", () => {
+  it("keeps a reported installer package name", () => {
+    expect(
+      parseDumpsysPackageOutput(
+        packageDump("installerPackageName=com.android.vending"),
+      ).installerPackageName,
+    ).toBe("com.android.vending");
+  });
+
+  // Package Manager prints an absent String field as the text "null"; a
+  // missing or empty declaration means the same absence (morluto/rea#3943).
+  it.each([
+    ["the literal null sentinel", "installerPackageName=null"],
+    ["an empty value", "installerPackageName="],
+    ["a missing line", undefined],
+  ])("reports an absent installer as null for %s", (_case, line) => {
+    expect(parseDumpsysPackageOutput(packageDump(line))).toMatchObject({
+      versionName: "1.2.3",
+      installerPackageName: null,
+    });
+  });
+
+  // A manifest may declare the literal string "null" as its version name and
+  // dumpsys prints it the same way as an absent one, so the text is kept.
+  it("keeps a version name printed as the text null", () => {
+    expect(
+      parseDumpsysPackageOutput(
+        packageDump("installerPackageName=null").replace(
+          "versionName=1.2.3",
+          "versionName=null",
+        ),
+      ).versionName,
+    ).toBe("null");
+  });
+});
+
 describe("parseWindowFocusOutput display contexts", () => {
   it.each([false, true])(
     "retains both display owners independent of block order: %s",
