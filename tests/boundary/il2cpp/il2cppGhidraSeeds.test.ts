@@ -13,6 +13,7 @@ import {
   IL2CPP_METADATA_SECTION_NAMES,
   type Il2cppMetadata,
 } from "../../../src/domain/il2cpp/il2cppMetadata.js";
+import { analysisErrorRemediationAction } from "../../../src/domain/analysisErrorPresentation.js";
 
 const type = (
   name: string,
@@ -188,12 +189,16 @@ it("bounds folded-name retention against the actual Ghidra file admission", () =
   if (!(caught instanceof AnalysisResourceConstraintError))
     throw new Error("Expected seed-file allowance refusal");
   expect(caught.message).toMatch(/byte admission/);
-  expect(caught.remediationAction).toContain(
+  expect(analysisErrorRemediationAction(caught)).toContain(
     "The IL2CPP Ghidra seed-file allowance",
   );
-  expect(caught.remediationAction).toContain("fixed byte allowance");
-  expect(caught.remediationAction).not.toContain("fixed count");
-  expect(caught.remediationAction).not.toContain("seed-name allowance");
+  expect(analysisErrorRemediationAction(caught)).toContain(
+    "fixed byte allowance",
+  );
+  expect(analysisErrorRemediationAction(caught)).not.toContain("fixed count");
+  expect(analysisErrorRemediationAction(caught)).not.toContain(
+    "seed-name allowance",
+  );
   expect(caught.retryable).toBe(false);
 });
 it("refuses cyclic type ancestry before emitting a seed", () => {
@@ -229,10 +234,12 @@ it("refuses names the real Ghidra seed parser cannot admit", () => {
   if (!(caught instanceof AnalysisResourceConstraintError))
     throw new Error("Expected seed-name allowance refusal");
   expect(caught.message).toMatch(/character admission/);
-  expect(caught.remediationAction).toContain(
+  expect(analysisErrorRemediationAction(caught)).toContain(
     "The IL2CPP Ghidra seed-name allowance",
   );
-  expect(caught.remediationAction).toContain("fixed count");
-  expect(caught.remediationAction).not.toContain("fixed byte allowance");
+  expect(analysisErrorRemediationAction(caught)).toContain("fixed count");
+  expect(analysisErrorRemediationAction(caught)).not.toContain(
+    "fixed byte allowance",
+  );
   expect(caught.retryable).toBe(false);
 });

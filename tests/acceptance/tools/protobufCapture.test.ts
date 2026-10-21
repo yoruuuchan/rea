@@ -629,3 +629,39 @@ captureTest.for(
     expect(await readFile(path, "utf8")).toBe(original);
   },
 );
+
+captureTest(
+  "keeps automatic framing partial when a HAR mimeType is excluded through MCP",
+  async ({ mcp }) => {
+    const root = await createTestTempDirectory("rea-protobuf-mime-");
+    const path = join(root, "capture.har");
+    await writeFile(path, protobufHar());
+    const reply = await mcp.call("inspect_web_network_capture", {
+      capture_path: path,
+      format: "har",
+      record_ordinals: [0],
+      sensitive_values: ["grpc-web+proto"],
+    });
+    expect(reply.isError, JSON.stringify(reply)).not.toBe(true);
+    const report = webNetworkCaptureSchema.parse(
+      parseEvidence(reply.structuredContent).normalized_result,
+    );
+    expect(report.records[0]?.redactions).toContainEqual({
+      pointer: "/response/content/mimeType",
+      reason: "explicit-sensitive-value",
+    });
+    expect(report.records[0]?.binary_fields[0]).toMatchObject({
+      pointer: "/response/content/text",
+      state: "retained",
+    });
+    expect(report.records[0]?.protobuf).toBeUndefined();
+    expect(report.records[0]?.limitations).toContainEqual(
+      expect.stringMatching(/^Selected body's MIME metadata is excluded/),
+    );
+    expect(report.protobuf_coverage).toEqual({
+      status: "partial",
+      selected_records: 1,
+      inspected_records: 1,
+    });
+  },
+);

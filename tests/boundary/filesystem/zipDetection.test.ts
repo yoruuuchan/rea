@@ -184,6 +184,166 @@ describe("nested container family", () => {
   );
 });
 
+const SCRIPT_STUB = Buffer.from("#!/bin/sh\nexit 0\n");
+
+const memberZip = async (): Promise<Buffer> => {
+  const writer = new ZipWriter(new Uint8ArrayWriter());
+  await writer.add("a.txt", new TextReader("hello world\n"));
+  await writer.add("d/b.txt", new TextReader("x\n"));
+  return Buffer.from(await writer.close());
+};
+
+/** Prepend bytes; optionally shift stored offsets as `zip -A` does. */
+const withLeadingBytes = (
+  zip: Buffer,
+  leading: Buffer,
+  adjustOffsets: boolean,
+): Buffer => {
+  const bytes = Buffer.concat([leading, zip]);
+  if (!adjustOffsets) return bytes;
+  const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const directory = bytes.readUInt32LE(end + 16) + leading.length;
+  bytes.writeUInt32LE(directory, end + 16);
+  for (let at = directory; at < end;) {
+    bytes.writeUInt32LE(bytes.readUInt32LE(at + 42) + leading.length, at + 42);
+    at +=
+      46 +
+      bytes.readUInt16LE(at + 28) +
+      bytes.readUInt16LE(at + 30) +
+      bytes.readUInt16LE(at + 32);
+  }
+  return bytes;
+};
+
+/** Members by content-derived identity and verification state. */
+const members = async (path: string) => {
+  const inventory = await inventoryArtifact(path);
+  return ["a.txt", "d/b.txt"].map((member) => {
+    const occurrence = artifactOccurrenceAt(inventory, member);
+    return [member, occurrence.hash_status, occurrence.artifact_id];
+  });
+};
+
+describe("ZIP archives after leading bytes", () => {
+  it.each([
+    { style: "offsets that include the leading bytes", adjust: true },
+    { style: "offsets written before the bytes were prepended", adjust: false },
+  ])(
+    "admits a ZIP after an unclaimed script stub with $style",
+    async ({ adjust }) => {
+      const root = await createTestTempDirectory("rea-zip-leading-");
+      const plain = join(root, "plain.zip");
+      const prefixed = join(root, "installer.bin");
+      const zip = await memberZip();
+      await writeFile(plain, zip);
+      await writeFile(prefixed, withLeadingBytes(zip, SCRIPT_STUB, adjust));
+
+      expect(
+        (await classifyAndHashRoot(prefixed, false, await lstat(prefixed)))
+          .format,
+      ).toBe("zip");
+      expect(await parseBinaryTarget(prefixed)).toMatchObject({
+        ok: true,
+        value: { kind: "archive", format: "zip" },
+      });
+      // Members are the same verified bytes as in the plain archive.
+      const expected = await members(plain);
+      expect(expected.map(([, status]) => status)).toEqual([
+        "verified",
+        "verified",
+      ]);
+      expect(await members(prefixed)).toEqual(expected);
+    },
+  );
+
+  it("keeps the root App Pack family for a ZIP after a script stub", async () => {
+    const root = await createTestTempDirectory("rea-zip-leading-app-pack-");
+    const path = join(root, "Example.app");
+    await writeFile(
+      path,
+      withLeadingBytes(await memberZip(), SCRIPT_STUB, false),
+    );
+    expect(
+      (await classifyAndHashRoot(path, false, await lstat(path))).format,
+    ).toBe("app-pack");
+    expect(await parseBinaryTarget(path)).toMatchObject({
+      ok: true,
+      value: { kind: "archive", format: "app-pack" },
+    });
+  });
+
+  it.each([
+    { family: "ELF", leading: Buffer.from([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1]) },
+    {
+      family: "MZ",
+      leading: Buffer.concat([Buffer.from("MZ"), Buffer.alloc(62)]),
+    },
+    {
+      family: "Mach-O",
+      leading: Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]),
+    },
+  ])(
+    "keeps a $family-led file with an appended ZIP out of the ZIP route",
+    async ({ leading }) => {
+      const root = await createTestTempDirectory("rea-zip-claimed-lead-");
+      const path = join(root, "program");
+      await writeFile(path, withLeadingBytes(await memberZip(), leading, true));
+      expect(
+        (await classifyAndHashRoot(path, false, await lstat(path))).format,
+      ).not.toBe("zip");
+      expect(await parseBinaryTarget(path)).not.toMatchObject({
+        ok: true,
+        value: { format: "zip" },
+      });
+    },
+  );
+
+  it.each([
+    {
+      shape: "bytes after the end record",
+      mutate: (bytes: Buffer) => Buffer.concat([bytes, Buffer.from("junk")]),
+    },
+    {
+      shape: "a corrupt central directory header",
+      mutate: (bytes: Buffer) => {
+        bytes.write("XXXX", bytes.indexOf(Buffer.from([0x50, 0x4b, 1, 2])));
+        return bytes;
+      },
+    },
+    {
+      shape: "a Zip64 directory offset",
+      mutate: (bytes: Buffer) => {
+        const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6]));
+        bytes.writeUInt32LE(0xffffffff, end + 16);
+        return bytes;
+      },
+    },
+    {
+      shape: "an empty archive record",
+      mutate: (bytes: Buffer) => {
+        const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6]));
+        bytes.writeUInt16LE(0, end + 8);
+        bytes.writeUInt16LE(0, end + 10);
+        return bytes;
+      },
+    },
+  ])("does not locate a trailing ZIP with $shape", async ({ mutate }) => {
+    const root = await createTestTempDirectory("rea-zip-leading-negative-");
+    const path = join(root, "input.bin");
+    await writeFile(
+      path,
+      mutate(withLeadingBytes(await memberZip(), SCRIPT_STUB, true)),
+    );
+    expect(
+      (await classifyAndHashRoot(path, false, await lstat(path))).format,
+    ).toBe("file");
+    expect(await parseBinaryTarget(path)).toMatchObject({
+      ok: false,
+      error: { _tag: "BinaryTargetError" },
+    });
+  });
+});
+
 describe("package signature byte identity", () => {
   it.each([
     { extension: "pkg", signature: "xar!", offset: 0, size: 4 },

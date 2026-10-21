@@ -410,6 +410,46 @@ it("cancels a wait without window_index while the app has no window", async () =
   ]);
 });
 
+it("records actions after a cancelled action as not executed", async () => {
+  const controller = new AbortController();
+  const reload = vi.fn(async () => undefined);
+  const page = {
+    locator: () => ({
+      click: () => {
+        queueMicrotask(() => controller.abort());
+        return new Promise<never>(() => undefined);
+      },
+    }),
+    reload,
+  };
+
+  const actions = await runElectronActions(
+    { windows: () => [page] } as unknown as ElectronApplication,
+    electronActiveObservationInputSchema.parse({
+      executable_path: "/opt/electron",
+      application_path: "/opt/app/main.js",
+      application_root: "/opt/app",
+      actions: [
+        { step_id: "open", kind: "click", selector: "#open" },
+        { step_id: "reload", kind: "renderer-reload" },
+      ],
+    }),
+    { signal: controller.signal },
+  );
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(actions.map(({ step_id, status }) => [step_id, status])).toEqual([
+    ["open", "cancelled"],
+    ["reload", "cancelled"],
+  ]);
+  expect(actions[1]).toMatchObject({
+    window_index: 0,
+    target: null,
+    elapsed_ms: 0,
+    error: "not executed after scenario request cancellation",
+  });
+});
+
 it("bounds a final state read that is still pending after cancellation", async () => {
   vi.useFakeTimers();
   const controller = new AbortController();

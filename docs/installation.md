@@ -1189,8 +1189,10 @@ truncation markers. Darwin ownership-helper compilation failures also retain
 the compiler outcome, exit code or signal, and bounded stderr; a timed-out
 compiler remains distinguishable from a compiler that exited with an error.
 The helper compile deadline defaults to 120,000 ms; set
-`REA_SWIFTC_COMPILE_TIMEOUT_MS` to an integer between 1 and 2,147,483,647 when
-a busy host needs longer.
+`REA_SWIFTC_COMPILE_TIMEOUT_MS` to an integer between 1 and 2,147,483,647 in
+the environment that starts REA when a busy host needs longer. Restart REA to
+apply a change; the next ownership-helper compile uses the new value. A
+timeout names that effective deadline.
 On macOS, the Java prerequisite probe waits for this independently bounded
 preparation before starting its five-second command deadline. Caller cancellation
 still interrupts preparation, and failed helper cleanup remains owned for retry.

@@ -218,6 +218,12 @@ export class JavaScriptAnalysisWorker {
     return true;
   }
 
+  /** Keep the limit and usage in one V8 observation for every admission path. */
+  #remainingParentHeapBytes(): number {
+    const { heap_size_limit, used_heap_size } = getHeapStatistics();
+    return heap_size_limit - used_heap_size;
+  }
+
   /**
    * Reserve host-side control, schema/Evidence work, and a maximum record's
    * transient copies. Admission also accounts for retained earlier files.
@@ -226,8 +232,7 @@ export class JavaScriptAnalysisWorker {
     this.#resultBudgetBytes = Math.max(
       0,
       Math.floor(
-        (getHeapStatistics().heap_size_limit -
-          process.memoryUsage().heapUsed -
+        (this.#remainingParentHeapBytes() -
           24 * JAVASCRIPT_ANALYSIS_TRANSFER_RECORD_BYTES) /
           2,
       ),
@@ -674,12 +679,7 @@ export class JavaScriptAnalysisWorker {
         OPERATION,
         "JavaScript static checkpoint byte count exceeds or differs from its declared budget",
       );
-    if (
-      bytes * 16 + 4 * MIB >
-      getHeapStatistics().heap_size_limit -
-        process.memoryUsage().heapUsed -
-        64 * MIB
-    )
+    if (bytes * 16 + 4 * MIB > this.#remainingParentHeapBytes() - 64 * MIB)
       throw new AnalysisResourceConstraintError(
         OPERATION,
         "memory",
@@ -778,8 +778,7 @@ export class JavaScriptAnalysisWorker {
       0,
       Math.min(
         this.#resultBudgetBytes - this.#estimatedRetainedBytes,
-        getHeapStatistics().heap_size_limit -
-          process.memoryUsage().heapUsed -
+        this.#remainingParentHeapBytes() -
           24 * JAVASCRIPT_ANALYSIS_TRANSFER_RECORD_BYTES,
       ),
     );

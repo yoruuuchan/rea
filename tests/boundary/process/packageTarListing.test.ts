@@ -35,7 +35,7 @@ async function verifyListing(listing: string) {
     `import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
-import { CATALOG_IDENTITY } from ${JSON.stringify(catalogUrl)};
+import { FULL_CATALOG_IDENTITY } from ${JSON.stringify(catalogUrl)};
 let bridgeParsed = false;
 childProcess.execFile = () => { throw new Error("Expected promisified execution"); };
 childProcess.execFile[promisify.custom] = async (command, args) => {
@@ -45,7 +45,7 @@ childProcess.execFile[promisify.custom] = async (command, args) => {
   else if (command === "tar" && args[0] === "-xOf" && args[2] === "package/package.json")
     stdout = JSON.stringify({ bin: { rea: "scripts/rea.mjs", "rea-agents": "scripts/rea.mjs" }, mcpName: "io.github.morluto/rea", dependencies: { "@lydell/node-pty": "1.1.0" } });
   else if (command === "tar" && args[0] === "-xOf" && args[2] === "package/skills/reverse-engineer-anything/SKILL.md")
-    stdout = "  tool_count: " + CATALOG_IDENTITY.counts.mcp_tools + "\\n";
+    stdout = "  tool_count: " + FULL_CATALOG_IDENTITY.counts.mcp_tools + "\\n";
   else if (command === "tar" && args[0] === "-xf") stdout = "";
   else if (command === "python3") { bridgeParsed = true; stdout = ""; }
   else throw new Error("Unexpected command: " + command + " " + JSON.stringify(args));

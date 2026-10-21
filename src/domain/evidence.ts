@@ -112,7 +112,8 @@ export const evidenceLocationSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const evidenceAuthoritySchema = z.enum([
+/** Source authority vocabulary owned by Evidence and reused by its consumers. */
+export const evidenceAuthoritySchema = z.enum([
   "shipped-artifact",
   "controlled-replay",
   "historical-reference",

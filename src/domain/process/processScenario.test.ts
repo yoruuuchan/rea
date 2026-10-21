@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 
+import { SESSION_TOOL_CONTRACTS } from "../../contracts/sessionToolContracts.js";
 import {
   digestProcessCommitment,
   parseProcessScenario,
@@ -151,6 +152,20 @@ it("admits the default and the exact combined terminal-cell budget", () => {
   ).toBe(true);
 });
 
+it("tells the agent the terminal cell budget has no runtime override", () => {
+  const description = SESSION_TOOL_CONTRACTS.find(
+    (tool) => tool.name === "capture_process_scenario",
+  )?.description;
+  expect(PROCESS_TERMINAL_CELL_BUDGET).toBe(1_000_000);
+  expect(description).toContain("1,000,000 combined terminal cells");
+  expect(description).toContain(
+    "This release has no runtime override for that cell budget.",
+  );
+  expect(processScenarioSchema.shape.terminal.unwrap().description).toContain(
+    "This release has no runtime override.",
+  );
+});
+
 it("rejects an oversized initial buffer without clamping caller dimensions", () => {
   const input = {
     executable: "/bin/true",
@@ -165,7 +180,7 @@ it("rejects an oversized initial buffer without clamping caller dimensions", () 
       code: "custom",
       path: ["terminal"],
       message: expect.stringContaining(
-        `${String(PROCESS_TERMINAL_CELL_BUDGET)} renderer cells`,
+        `${String(PROCESS_TERMINAL_CELL_BUDGET)} renderer cells. This release has no runtime override.`,
       ),
     }),
   );

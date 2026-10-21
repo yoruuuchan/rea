@@ -22,6 +22,8 @@ import { err, ok, type Result } from "../../../src/domain/result.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
+import { advertisedInputJsonSchema } from "../../../src/contracts/toolSchemaMetadata.js";
+import { toolContract } from "../../../src/contracts/toolContracts.js";
 
 const providerIdentity: ProviderIdentity = {
   id: "test-browser-scenario",
@@ -257,6 +259,10 @@ describe("browser scenario MCP tool", () => {
       strict: false,
       validateFormats: false,
     }).compile(comparisonTool.inputSchema);
+    const validateFullComparison = new Ajv2020({
+      strict: false,
+      validateFormats: false,
+    }).compile(advertisedInputJsonSchema(toolContract("compare_web_captures")));
     expect(
       validateComparison(comparisonInput),
       JSON.stringify(validateComparison.errors),
@@ -266,12 +272,14 @@ describe("browser scenario MCP tool", () => {
       { before_scenario: captureResult, after: captureResult },
       { ...comparisonInput, before: captureResult, after: captureResult },
     ]) {
-      expect(validateComparison(malformed)).toBe(false);
+      expect(validateFullComparison(malformed)).toBe(false);
       const rejected = await client.callTool({
         name: "compare_web_captures",
         arguments: malformed,
       });
-      expect(rejected.isError).toBe(true);
+      expect(parseMcpToolError(rejected)).toMatchObject({
+        error: { code: "invalid_request", category: "invalid_input" },
+      });
     }
     const compared = await client.callTool({
       name: "compare_web_captures",

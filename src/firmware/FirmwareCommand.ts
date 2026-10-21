@@ -291,7 +291,12 @@ export const runFirmwareCommand = async (context: {
   };
 };
 
-/** Preserve tool failure diagnostics when an accepted exit 1 has no usable report. */
+/**
+ * Consume the report a completed command was asked to write. A successful exit
+ * status is not analysis Evidence by itself: an absent, empty or malformed report
+ * fails with the observed report state and command facts, without retrying or
+ * substituting an empty result.
+ */
 export const readFirmwareCommandReport = async (context: {
   path: string;
   engine: string;
@@ -308,33 +313,43 @@ export const readFirmwareCommandReport = async (context: {
     );
   } catch (cause: unknown) {
     if (cause instanceof ArtifactReaderFailure) throw cause;
-    if (context.execution.exit_code === 1)
-      throw new ProviderAdapterError(context.engine, context.operation, {
+    const { engine, operation, execution } = context;
+    const reportFailure =
+      cause instanceof AnalysisOutputError
+        ? cause.reason
+        : `Report could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
+    const diagnostics = {
+      ...(cause instanceof AnalysisOutputError ? cause.diagnostics : {}),
+      report_path: context.path,
+      report_failure: reportFailure,
+      command: execution.command,
+      args: execution.args,
+      resource_limiter: execution.resource_limiter,
+      exit_code: execution.exit_code ?? null,
+      signal: execution.signal,
+      stdout: execution.stdout.text,
+      stderr: execution.stderr.text,
+      stdout_bytes: execution.stdout.bytes,
+      stderr_bytes: execution.stderr.bytes,
+    };
+    if (execution.exit_code === 1)
+      throw new ProviderAdapterError(engine, operation, {
         cause,
         diagnostics: {
           reason:
             "Tool exited 1 without a usable analysis report; inspect stderr for startup, sandbox or dependency failures",
-          report_failure:
-            cause instanceof Error ? cause.message : String(cause),
-          exit_code: 1,
-          signal: context.execution.signal,
-          stdout: context.execution.stdout.text,
-          stderr: context.execution.stderr.text,
-          stdout_bytes: context.execution.stdout.bytes,
-          stderr_bytes: context.execution.stderr.bytes,
+          ...diagnostics,
         },
       });
-    const diagnostics = `stdout (${context.execution.stdout.bytes} bytes): ${context.execution.stdout.text}; stderr (${context.execution.stderr.bytes} bytes): ${context.execution.stderr.text}`;
-    if (cause instanceof AnalysisOutputError)
-      throw new AnalysisOutputError(
-        context.operation,
-        `${cause.reason}; ${diagnostics}`,
-        { cause },
-      );
     throw new AnalysisOutputError(
-      context.operation,
-      `Tool did not produce the expected complete report: ${context.path}; ${diagnostics}`,
-      { cause },
+      operation,
+      `${engine} exited ${String(execution.exit_code)} without a usable report: ${reportFailure}`,
+      {
+        cause,
+        diagnostics,
+        userMessage: `${engine} exited successfully but left no usable report (${reportFailure}), so ${operation} produced no Evidence. A successful exit status is not an empty or complete result.`,
+        remediationAction: `Review diagnostics.report_state, the exit status and captured stdout/stderr. REA did not retry or substitute an empty result. diagnostics.command and diagnostics.args record what ran; their workspace paths are REA-private and removed after the attempt, so they cannot be replayed as-is. Rerun the same REA request to check whether this is intermittent; each attempt uses a fresh workspace. If it recurs, copy the selected input bytes into a new directory and run diagnostics.command with the same flags, replacing every private path with your copy and a new report path, under the documented firmware resource limits; confirm that it writes the requested report. \`rea doctor\` checks configuration only and cannot recover this report.`,
+      },
     );
   }
 };

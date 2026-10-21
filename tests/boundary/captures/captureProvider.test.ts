@@ -15,6 +15,7 @@ import { createDeferred } from "../../fixtures/binarySession.js";
 import { Cli } from "incur";
 import { registerCaptureCommands } from "../../../src/cli/captureCommands.js";
 import { silentLogger } from "../../../src/logger.js";
+import { analysisErrorRemediationAction } from "../../../src/domain/analysisErrorPresentation.js";
 
 // A command-boundary simulator: real process ownership/filesystem, not real TShark coverage.
 const fixture = async (mode = "ok", failCleanup = false) => {
@@ -477,6 +478,9 @@ it("preserves termination signal and effective file ceiling as a resource failur
     reportedLimits: { file_bytes: 1048576 },
     capturedOutput: { signal: "SIGXFSZ", stderr: "before file limit\n" },
   });
+  expect(analysisErrorRemediationAction(result.error)).toContain(
+    "REA retains the tighter inherited limit",
+  );
 });
 
 it("rejects oversized selector lists and UTF-8 argv expansion before provider work", async () => {
@@ -623,10 +627,10 @@ it.each([
       reportedLimits: { output_bytes: 32 * 1024 * 1024 },
       retryable: false,
     });
-    expect(result.error.remediationAction).toContain(
+    expect(analysisErrorRemediationAction(result.error)).toContain(
       "The retained command-output allowance",
     );
-    expect(result.error.remediationAction).not.toMatch(
+    expect(analysisErrorRemediationAction(result.error)).not.toMatch(
       /Review the reported worker memory limits/u,
     );
   }

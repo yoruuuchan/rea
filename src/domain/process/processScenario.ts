@@ -164,7 +164,7 @@ export const processScenarioSchema = z
         scrollback: z.number().int().safe().nonnegative().default(1_000),
       })
       .describe(
-        "The visible terminal and scrollback together must use at most 1,000,000 xterm renderer cells: columns × (rows + scrollback). Resize events use the same scrollback and limit.",
+        "The visible terminal and scrollback together must use at most 1,000,000 xterm renderer cells: columns × (rows + scrollback). Resize events use the same scrollback and limit. This release has no runtime override.",
       )
       .default({ columns: 80, rows: 24, scrollback: 1_000 }),
     events: z
@@ -268,7 +268,7 @@ export const processScenarioSchema = z
       context.addIssue({
         code: "custom",
         path: ["terminal"],
-        message: `terminal columns × (rows + scrollback) must not exceed ${String(PROCESS_TERMINAL_CELL_BUDGET)} renderer cells`,
+        message: `terminal columns × (rows + scrollback) must not exceed ${String(PROCESS_TERMINAL_CELL_BUDGET)} renderer cells. This release has no runtime override.`,
       });
     for (let index = 1; index < scenario.events.length; index += 1) {
       const event = scenario.events[index];
@@ -293,7 +293,7 @@ export const processScenarioSchema = z
         context.addIssue({
           code: "custom",
           path: ["events", index],
-          message: `resize event at ${String(event.at_ms)} ms exceeds the ${String(PROCESS_TERMINAL_CELL_BUDGET)}-cell renderer budget with the selected scrollback`,
+          message: `resize event at ${String(event.at_ms)} ms exceeds the ${String(PROCESS_TERMINAL_CELL_BUDGET)}-cell renderer budget with the selected scrollback. This release has no runtime override.`,
         });
       if (event.at_ms > scenario.timeout_ms) {
         context.addIssue({

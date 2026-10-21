@@ -896,7 +896,7 @@ describe("ZIP non-entry coverage", () => {
       left.normalized_result,
     );
     expect(inventory.limitations).toContain(
-      "ZIP inventory lists central-directory entries only. Non-entry bytes, including an APK Signing Block before the central directory or a ZIP comment after it, are not occurrences.",
+      "ZIP inventory lists central-directory entries only. Non-entry bytes, including leading bytes before the first entry such as a self-extractor stub, an APK Signing Block before the central directory or a ZIP comment after it, are not occurrences.",
     );
     expect(
       inventory.occurrences.map(({ logical_path }) => logical_path).sort(),

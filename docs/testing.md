@@ -256,6 +256,22 @@ pass that definition through the SDK's `toolDefinition` call option. This keeps
 the selected output-schema validation without eagerly compiling unrelated
 catalog schemas. Re-read definitions if the server advertises a changed list.
 
+Artifact verification uses `artifactMcpCall` for both lifecycle and analysis
+calls. A fresh SDK client has no held tool listing, so a bare `callTool` can
+skip output-schema validation. The helper discovers actual advertised
+definitions, rejects missing or ambiguous schemas, and validates the requested
+tool without compiling unrelated catalog schemas. REA registers process-static
+tool contracts; bindings share one discovery per negotiated connection and are
+discarded on reconnect or failed discovery. Keep raw artifact calls on this
+shared path and retain explicit request options such as timeouts.
+Caller-supplied tool definitions are rejected: the helper owns selection from
+the advertised catalog so a stale or permissive schema cannot bypass it.
+
+The regression fixture changes only `canonical_path` in a real stdio response
+to a number. The old helper accepts that response; the named schema must reject
+it. This client-boundary fault injection does not establish native Apple
+behavior, which remains covered by the macOS verification lane.
+
 Report unavailable authority as a named skip. Await owned cleanup before a
 verifier reports success. Native process inspectors are released at Vitest
 worker teardown; fork termination does not run Node exit hooks, and per-file
@@ -678,6 +694,14 @@ build and prepack commands, which restore matching outputs or rebuild on a cache
 miss. Native
 artifacts, dependency installs, package archives, and runtime verification remain
 host-local. Keep platform-dependent outputs out of this shared cache.
+
+The Windows native verifier's private-runtime ACL observer reads SID rules once
+for both trustee validation and counting. It deliberately rejects the convenience
+`Access` property, which resolves account names. Its `private-runtime-acl` stderr
+markers report completed phases and elapsed time; inspect these on a timeout
+before attributing it to startup, ACL reads, or identity lookup. The original
+15-second deadline and all ownership, DACL, and readonly assertions remain in
+force. A passing retry alone does not explain a previous timeout.
 
 Record cold and warm preparation separately from fresh test execution when
 benchmarking the optional `npm run check:pr` gate. Compare multiple runs on the

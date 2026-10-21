@@ -7,7 +7,11 @@ import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
 import { createServer } from "../../../src/server/createServer.js";
-import { reviewedObligation } from "../../../src/application/ReconstructionObligationLedger.fixture.js";
+import {
+  MIXED_AUTHORITY_SUMMARY,
+  mixedAuthorityRequest,
+  reviewedObligation,
+} from "../../../src/application/ReconstructionObligationLedger.fixture.js";
 import { observed } from "../../fixtures/analysisExecution.js";
 
 type LedgerRequest = (
@@ -152,6 +156,20 @@ describe("reconstruction obligation ledger MCP parity", () => {
           `Reviewed obligation Evidence is missing: ${missingEvidenceId}`,
         ),
       );
+    });
+  });
+
+  it("summarizes obligations by their cited Evidence authorities", async () => {
+    const input = mixedAuthorityRequest();
+    await withLedgerClient(async (request) => {
+      const result = await request(
+        input.evidence_bundle,
+        input.reviewed_obligations,
+      );
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        normalized_result: { summary: MIXED_AUTHORITY_SUMMARY },
+      });
     });
   });
 

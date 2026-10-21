@@ -731,6 +731,7 @@ export const adbResultSchemas = {
       }),
     ),
     exact_match: z.boolean(),
+    unparsed_lines: z.array(z.string().min(1)),
     coverage: z.enum(["complete", "partial"]),
   }),
   install_adb_package: z.strictObject({

@@ -45,7 +45,7 @@ import {
   type InstalledSkillIdentity,
   type SkillPathIssue,
 } from "./SetupSkill.js";
-import { CATALOG_IDENTITY } from "../catalogIdentity.js";
+import { DEFAULT_CATALOG_IDENTITY } from "../catalogIdentity.js";
 import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
 import {
   readClientRegistrationStatuses,
@@ -178,7 +178,8 @@ interface DoctorIdentity {
   readonly cli_package_version: string;
   readonly expected_skill_version: string;
   readonly sdk: typeof SDK_IDENTITY;
-  readonly catalog: typeof CATALOG_IDENTITY;
+  /** Package default advertisement; the active server reports its selected profile. */
+  readonly catalog: typeof DEFAULT_CATALOG_IDENTITY;
   readonly live_server: {
     readonly state: "unknown";
     readonly remediation: string;
@@ -390,8 +391,8 @@ const collectDoctorIdentity = async (
       expected_skill_version: PRODUCT_IDENTITY.skillVersion,
       sdk: SDK_IDENTITY,
       catalog: {
-        counts: CATALOG_IDENTITY.counts,
-        digests: CATALOG_IDENTITY.digests,
+        counts: DEFAULT_CATALOG_IDENTITY.counts,
+        digests: DEFAULT_CATALOG_IDENTITY.digests,
       },
       live_server: {
         state: "unknown",
@@ -422,7 +423,7 @@ const skillIdentityAligned = (
   identity: InstalledSkillIdentity | undefined,
 ): boolean =>
   identity?.version === PRODUCT_IDENTITY.skillVersion &&
-  identity.toolCount === CATALOG_IDENTITY.counts.mcp_tools &&
+  identity.toolCount === DEFAULT_CATALOG_IDENTITY.counts.mcp_tools &&
   identity.canonical;
 
 const skillIdentityState = (

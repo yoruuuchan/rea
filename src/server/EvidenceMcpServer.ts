@@ -26,7 +26,10 @@ import {
   presentAdvertisedInputSchema,
   type CompactInputSchemaPresentation,
 } from "../contracts/compactInputSchema.js";
-import { CATALOG_IDENTITY, createCatalogIdentity } from "../catalogIdentity.js";
+import {
+  FULL_CATALOG_IDENTITY,
+  createCatalogIdentity,
+} from "../catalogIdentity.js";
 import { transformAdvertisedInputJsonSchema } from "../contracts/toolSchemaMetadata.js";
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
 import {
@@ -165,7 +168,7 @@ export class EvidenceMcpServer extends RequestTrackingMcpServer {
         : { budgetBytes: compactPresentation.budgetBytes };
     this.catalogIdentity =
       this.compactPresentation === undefined && !this.omitOutputSchemas
-        ? CATALOG_IDENTITY
+        ? FULL_CATALOG_IDENTITY
         : createCatalogIdentity(
             this.compactPresentation,
             this.omitOutputSchemas ? "off" : "full",

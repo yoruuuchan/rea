@@ -4,10 +4,12 @@ import type { AnalysisProviderSelector } from "../contracts/providerSelection.js
 
 import type { GhidraLanguageOverride } from "./ghidraLanguageOverride.js";
 import type { McpInputSchemaProfile } from "./mcpInputSchemaProfile.js";
+import type { McpOutputSchemaProfile } from "./mcpOutputSchemaProfile.js";
 
 export interface AppConfig {
   readonly mcpMaxResponseBytes?: number;
   readonly mcpInputSchemaProfile?: McpInputSchemaProfile;
+  readonly mcpOutputSchemaProfile?: McpOutputSchemaProfile;
   readonly analysisProvider: AnalysisProviderSelector;
   readonly idaMcpConfigPath?: string;
   readonly ghidraInstallDir: string | undefined;

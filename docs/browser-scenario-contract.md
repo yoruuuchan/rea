@@ -212,7 +212,9 @@ statements remain under the attached debugger client's control.
 The result is Evidence with an initial state followed by one record per
 declared action. Each step reports action status, elapsed time, sanitized URLs,
 event bounds, and independently typed capture states for screenshot, DOM,
-accessibility, URL, history, and storage. Console, page-error, network,
+accessibility, URL, history, and storage. Actions after a failed or cancelled
+action are not run and are recorded as `cancelled` with a not-executed error.
+Console, page-error, network,
 WebSocket, frame, worker, popup, and cancelled-download events are attributed to
 steps. Retained events and requested artifacts are returned inline; omitted
 events are counted by kind and identify affected network transactions.

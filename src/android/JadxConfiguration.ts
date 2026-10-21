@@ -33,6 +33,7 @@ import { ZipArtifactReader } from "../artifacts/ZipArtifactReader.js";
 import type { DoctorProviderCheck } from "../application/Doctor.js";
 import {
   DEFAULT_JADX_OPERATION_TIMEOUT_MS,
+  jadxOperationTimeoutGuidance,
   JADX_JAR_CONFIGURATION_REMEDIATION,
   JADX_JAVA_PROBE_REMEDIATION,
   JADX_JAVA_RUNTIME_REMEDIATION,
@@ -483,6 +484,7 @@ const archiveCancellation = (
     ? new AnalysisTimeoutError(operation, options.operationDeadline.timeoutMs, {
         cause: reason,
         diagnostics,
+        ...jadxOperationTimeoutGuidance(options.operationDeadline.timeoutMs),
       })
     : new AnalysisCancelledError(operation, { cause: reason, diagnostics });
 };
@@ -544,11 +546,20 @@ const resolveJar = async (
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<string> => {
   const jar = environment.REA_JADX_MCP_JAR;
-  if (jar === undefined || !isAbsolute(jar))
+  if (jar === undefined)
     throw configurationFailure(
       "not_configured",
       JADX_JAR_CONFIGURATION_REMEDIATION,
       { jar_configured: false },
+      "jar",
+    );
+  // A supplied selection stays configured even when rejected, so callers can
+  // tell it from an omitted setting and see the exact value REA refused.
+  if (!isAbsolute(jar))
+    throw configurationFailure(
+      "open_options_invalid",
+      `REA_JADX_MCP_JAR must be an absolute path; received ${JSON.stringify(jar)}. ${JADX_JAR_CONFIGURATION_REMEDIATION}`,
+      { jar_configured: true, jar_path: jar, path_requirement: "absolute" },
       "jar",
     );
   try {

@@ -1,4 +1,4 @@
-import { CATALOG_IDENTITY } from "../catalogIdentity.js";
+import { DEFAULT_CATALOG_IDENTITY } from "../catalogIdentity.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { ok } from "../domain/result.js";
 import type { DoctorHost } from "./Doctor.js";
@@ -36,7 +36,7 @@ export const createDoctorHostFixture = (
   installedSkillIdentity: () =>
     Promise.resolve({
       version: PRODUCT_IDENTITY.skillVersion,
-      toolCount: CATALOG_IDENTITY.counts.mcp_tools,
+      toolCount: DEFAULT_CATALOG_IDENTITY.counts.mcp_tools,
       canonical: true,
     }),
   ...overrides,

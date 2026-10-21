@@ -31,6 +31,7 @@ import { ProviderSelectionError } from "./providerSelectionError.js";
 import { ProviderAdapterError } from "./providerAdapterError.js";
 import { UnknownRegistryError } from "./unknownRegistryError.js";
 import { providerRetryAction } from "./providerOperationHealth.js";
+import { fixedAllowanceRemediation } from "./fixedAllowanceRemediation.js";
 import {
   resolvedAnalysisError,
   type AnalysisError,
@@ -67,15 +68,20 @@ export const analysisErrorRemediationAction = (
   if (error instanceof AnalysisResourceConstraintError)
     return (
       error.remediationAction ??
-      (error.resource === "capacity"
-        ? "Wait for an active analysis to complete, then retry within the reported admission limits."
-        : error.resource === "transport"
-          ? "Discover retained records with get_evidence_bundle and detail: summary, then inspect compatible records through inspect_analysis_view using an exact Evidence reference. Export complete retained session evidence through export_evidence_bundle to a caller-selected path, or use complete CLI JSON output. The connection remains usable."
-          : error.resource === "cpu"
-            ? "Review the reported worker CPU limits and observed signal. Retry with sufficient CPU time or a smaller artifact; REA retains tighter inherited limits."
-            : error.resource === "file-size"
-              ? "Review the reported worker file-size limits and write failure. Retry with a sufficient file-size allowance for the evidence reply; REA retains tighter inherited limits."
-              : "Review the reported worker memory limits and available host memory. Retry with sufficient memory or a smaller artifact; REA retains tighter inherited limits.")
+      (error.fixedAllowance !== undefined
+        ? fixedAllowanceRemediation(
+            error.fixedAllowance.name,
+            error.fixedAllowance.kind,
+          )
+        : error.resource === "capacity"
+          ? "Wait for an active analysis to complete, then retry within the reported admission limits."
+          : error.resource === "transport"
+            ? "Discover retained records with get_evidence_bundle and detail: summary, then inspect compatible records through inspect_analysis_view using an exact Evidence reference. Export complete retained session evidence through export_evidence_bundle to a caller-selected path, or use complete CLI JSON output. The connection remains usable."
+            : error.resource === "cpu"
+              ? "Review the reported worker CPU limits and observed signal. Retry with sufficient CPU time or a smaller artifact; REA retains tighter inherited limits."
+              : error.resource === "file-size"
+                ? "Review the reported worker file-size limits and write failure. Retry with a sufficient file-size allowance for the evidence reply; REA retains tighter inherited limits."
+                : "Review the reported worker memory limits and available host memory. Retry with sufficient memory or a smaller artifact; REA retains tighter inherited limits.")
     );
   if (
     error instanceof AnalysisTimeoutError &&

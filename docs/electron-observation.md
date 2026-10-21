@@ -116,7 +116,9 @@ The CLI and MCP surfaces accept the same schema. For a JSON request file:
 rea capture-electron-scenario scenario.json --json
 ```
 
-The result records action status and targets, correlated app/window/WebContents,
+The result records one status and target per declared action; actions after a
+failed or cancelled action are not run and are recorded as `cancelled` with a
+not-executed error. It also records correlated app/window/WebContents,
 preload, session, navigation, shell, permission, popup, download, protocol,
 native-addon, process, and IPC timeline events. IPC channels and argument-shape
 metadata retain their observed lengths; payload values are never retained.

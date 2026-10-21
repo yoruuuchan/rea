@@ -111,6 +111,7 @@ export class JavaScriptSymbolicBindings {
   readonly #mutated = new Set<string>();
   readonly #electronIdentity: JavaScriptElectronIdentity;
   readonly #namespaceOwners = new Map<string, t.Function>();
+  readonly #moduleFactories = new WeakSet<t.Function>();
   readonly #unsafeExports = new Set<string>();
   readonly #aliasesByBinding = new Map<string, string[]>();
   readonly #bootstrapTables: Array<{
@@ -169,6 +170,11 @@ export class JavaScriptSymbolicBindings {
     });
     for (const table of this.#bootstrapTables)
       this.#invalidateBootstrapTable(table.tableAliases, table.modules);
+  }
+
+  /** Whether a function is a recognized bundle module factory, which runs once per module load. */
+  isModuleFactory(node: t.Node): boolean {
+    return t.isFunction(node) && this.#moduleFactories.has(node);
   }
 
   environmentAt(node: t.Node): SymbolicEnvironment {
@@ -1313,6 +1319,7 @@ export class JavaScriptSymbolicBindings {
     for (const property of bootstrap.table.properties) {
       const factory = moduleFactory(property);
       if (!factory) continue;
+      this.#moduleFactories.add(factory);
       const moduleKey = modulePropertyName(property);
       const values = new Map<string, SymbolicValue>();
       const environment: SymbolicEnvironment = {

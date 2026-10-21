@@ -15,13 +15,32 @@ import {
   runProductionMcpDoctorCli,
 } from "../../../src/mcpDoctor.js";
 import {
-  CATALOG_IDENTITY,
+  FULL_CATALOG_IDENTITY,
   createCatalogIdentity,
 } from "../../../src/catalogIdentity.js";
 import { compactPresentationForMcpInputSchemaProfile } from "../../../src/config/mcpInputSchemaProfile.js";
 import { MCP_STARTUP_POLICY } from "../../../src/mcpStartupPolicy.js";
 
 afterEach(() => vi.useRealTimers());
+
+const assertCliCatalogIdentity = async (
+  environment: NodeJS.ProcessEnv,
+  identity: ReturnType<typeof createCatalogIdentity>,
+) => {
+  for (const command of ["capabilities", "providers"]) {
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [resolve("scripts/rea.mjs"), command, "--json"],
+      { env: environment, timeout: 15_000, maxBuffer: 1024 * 1024 },
+    );
+    const cliStatus: unknown = JSON.parse(stdout);
+    expect(cliStatus, command).toMatchObject({
+      server_identity: {
+        catalog: { counts: identity.counts, digests: identity.digests },
+      },
+    });
+  }
+};
 
 describe("production MCP doctor", () => {
   it("reuses immutable compiled profile digests and preserves custom-budget identity", async () => {
@@ -82,12 +101,22 @@ describe("production MCP doctor", () => {
 
   it.each([
     {
+      name: "default compact input",
+      environment: {
+        REA_MCP_INPUT_SCHEMA_PROFILE: undefined,
+        REA_MCP_OUTPUT_SCHEMA_PROFILE: "full",
+      },
+      identity: createCatalogIdentity(
+        compactPresentationForMcpInputSchemaProfile(undefined),
+      ),
+    },
+    {
       name: "full",
       environment: {
         REA_MCP_INPUT_SCHEMA_PROFILE: "full",
         REA_MCP_OUTPUT_SCHEMA_PROFILE: "full",
       },
-      identity: CATALOG_IDENTITY,
+      identity: FULL_CATALOG_IDENTITY,
     },
     {
       name: "compact",
@@ -119,7 +148,7 @@ describe("production MCP doctor", () => {
       ),
     },
   ])(
-    "connects to the production stdio child and verifies the $name catalog",
+    "verifies the $name catalog through production stdio and both CLI inventories",
     async ({ environment, identity }) => {
       const result = await runProductionMcpDoctor({
         command: process.execPath,
@@ -145,13 +174,17 @@ describe("production MCP doctor", () => {
         result.inventory?.tools.observed,
       );
       expect(result.inventory?.tools.expected).toBe(
-        CATALOG_IDENTITY.counts.mcp_tools,
+        FULL_CATALOG_IDENTITY.counts.mcp_tools,
       );
       expect(result.identity?.expected_catalog_digest).toBe(
         identity.digests.combined_sha256,
       );
       expect(result.identity?.observed_catalog_digest).toBe(
         identity.digests.combined_sha256,
+      );
+      await assertCliCatalogIdentity(
+        { ...process.env, ...environment },
+        identity,
       );
     },
     30_000,
@@ -213,10 +246,10 @@ describe("production MCP doctor probe validation", () => {
       });
       expect(result.healthy).toBe(mode === "valid");
       expect(result.inventory?.tools.observed).toBe(
-        CATALOG_IDENTITY.counts.mcp_tools,
+        FULL_CATALOG_IDENTITY.counts.mcp_tools,
       );
       expect(result.inventory?.prompts.observed).toBe(
-        CATALOG_IDENTITY.counts.mcp_prompts,
+        FULL_CATALOG_IDENTITY.counts.mcp_prompts,
       );
       expect(result.checks).toContainEqual({
         name: "initialize",

@@ -178,6 +178,9 @@ sanitized source even with explicit sensitivity options. If that source pass
 is interrupted, unchecked bodies are not published as partial Evidence.
 Framing overrides apply only to format-owned body coordinates and preserve
 exclusions for the transport declared in MIME metadata.
+Explicitly excluded or conflicting MIME metadata is not treated as absent:
+automatic framing leaves such a non-empty body uninterpreted, adds a record
+limitation and keeps `protobuf_coverage` partial unless `framing` is selected.
 Unknown or explicitly excluded HTTP coding metadata is not treated as absent:
 SAZ/native bodies remain opaque until identity coding is established. Raw
 header values and retained body bytes remain available in source Evidence.

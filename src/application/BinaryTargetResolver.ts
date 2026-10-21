@@ -41,12 +41,14 @@ import {
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
 import {
   hasZipSignature,
+  locateTrailingZipArchive,
   isZipPackageFormat,
-  zipPackageFormatForPath,
+  zipRootPackageFormat,
 } from "../domain/zipPackageFormat.js";
 
 import {
   parseCodeViewData,
+  claimsExecutableHeader,
   parseExecutableHeader,
   parsePeRecord,
   peDebugDirectoryEntry,
@@ -219,12 +221,32 @@ export const parseBinaryTarget = async (
         hostArchitecture,
         signal,
       );
-      if (!detected.ok)
+      if (!detected.ok) {
+        // Only bytes no other format claims may lead a located ZIP, so an
+        // executable with an appended archive keeps its executable route.
+        if (
+          !(await claimsLeadingExecutableHeader(
+            handle,
+            metadata.size,
+            signal,
+          )) &&
+          (await locateTrailingZipArchive(metadata.size, (position, length) =>
+            readHandleRange(handle, position, length, signal),
+          )) !== undefined
+        )
+          return ok({
+            path,
+            sourcePath,
+            sha256: await sha256Handle(handle, path, metadata, signal),
+            kind: "archive",
+            format: zipRootPackageFormat(path),
+          });
         return err(
           new BinaryTargetError(path, detected.error, {
             constraint: "file_format_rejected",
           }),
         );
+      }
       return ok({
         path,
         sourcePath,
@@ -356,12 +378,8 @@ const detectArtifactFormat = async (
       "WebAssembly v1 artifacts are not supported by the native opening route",
       { constraint: "wasm_requires_static_inspection" },
     );
-  if (hasZipSignature(magic.subarray(0, observed.bytesRead))) {
-    // The HarmonyOS App Pack suffix `.app` is a root-input concept; a nested
-    // ZIP member ending in `.app` keeps the generic zip classification.
-    if (lower.endsWith(".app")) return "app-pack";
-    return zipPackageFormatForPath(lower) ?? "zip";
-  }
+  if (hasZipSignature(magic.subarray(0, observed.bytesRead)))
+    return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic.subarray(0, observed.bytesRead)))
     return "godot-pck";
   // Binary plists, including keyed archives, often use other extensions.
@@ -445,6 +463,31 @@ const isArchiveFormat = (
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) ||
   ["asar", "godot-pck", "dmg", "pkg"].includes(format);
+
+/** Whether the leading bytes begin any executable header family, valid or not. */
+const claimsLeadingExecutableHeader = async (
+  handle: FileHandle,
+  size: number,
+  signal?: AbortSignal,
+): Promise<boolean> =>
+  claimsExecutableHeader(
+    Buffer.from(await readHandleRange(handle, 0, Math.min(size, 4096), signal)),
+    size,
+  );
+
+/** Read one bounded range, honoring cancellation around the host read. */
+const readHandleRange = async (
+  handle: FileHandle,
+  position: number,
+  length: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> => {
+  throwIfTargetResolutionCancelled(signal);
+  const bytes = Buffer.alloc(length);
+  const observed = await handle.read(bytes, 0, length, position);
+  throwIfTargetResolutionCancelled(signal);
+  return bytes.subarray(0, observed.bytesRead);
+};
 
 const sha256Handle = async (
   handle: FileHandle,

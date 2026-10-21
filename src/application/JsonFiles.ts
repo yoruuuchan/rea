@@ -29,6 +29,11 @@ import { NonRegularFileReadError } from "../filesystem/RegularFile.js";
 import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";
+import {
+  type AnalysisCleanupLease,
+  AnalysisCleanupLeaseGroup,
+} from "../artifacts/AnalysisCleanupLease.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { OwnedStagedOutput } from "../filesystem/OwnedStagedOutput.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
@@ -212,13 +217,14 @@ export function writeTextParts(
         cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined
           ? cause.cleanup
           : undefined;
-      return err(
-        new EvidenceFileError("write", "io", {
-          cause,
-          path: absoluteCallerPath(path),
-          ...(cleanup === undefined ? {} : { cleanup }),
-        }),
-      );
+      const error = new EvidenceFileError("write", "io", {
+        cause,
+        path: absoluteCallerPath(path),
+        ...(cleanup === undefined ? {} : { cleanup }),
+      });
+      // A failed admission retry names its exact retained leases.
+      bindArtifactFileCleanup(cause, error);
+      return err(error);
     });
 }
 
@@ -268,28 +274,31 @@ const writeTextPartsOwned = async (
         resources: [cause.owner.directory],
       };
       if (cause.outcome.ok)
-        return err(
+        return stagedCleanupFailure(
           new EvidenceFileError("write", "io", {
             cause,
             path: requestedPath,
             cleanup,
             published: { ...cause.outcome.value, path: requestedPath },
           }),
+          cause.lease,
         );
       if (cause.outcome.error instanceof AnalysisCancelledError)
-        return err(
+        return stagedCleanupFailure(
           new AnalysisCancelledError(cause.outcome.error.operation, {
             cause: cause.outcome.error.cause,
             cleanupPrimary: cause.outcome.error,
             cleanup,
           }),
+          cause.lease,
         );
-      return err(
+      return stagedCleanupFailure(
         new EvidenceFileError("write", missingOrIo(cause.outcome.error), {
           cause,
           path: requestedPath,
           cleanup,
         }),
+        cause.lease,
       );
     }
     if (
@@ -312,6 +321,17 @@ const writeTextPartsOwned = async (
       }),
     );
   }
+};
+
+/** The retained staging lease clears this error only when a retry confirms release. */
+const stagedCleanupFailure = <
+  Failure extends EvidenceFileError | AnalysisCancelledError,
+>(
+  error: Failure,
+  lease: AnalysisCleanupLease,
+): Result<never, Failure> => {
+  new AnalysisCleanupLeaseGroup(error, [lease]);
+  return err(error);
 };
 
 /** A missing path or parent is a selection error, not a permission failure. */
@@ -373,7 +393,12 @@ const publishFile = async (
     output: owner,
   });
   if (released.kind === "failed")
-    throw new StagedOutputCleanupFailure(outcome, released.cause, owner);
+    throw new StagedOutputCleanupFailure(
+      outcome,
+      released.cause,
+      owner,
+      released.lease,
+    );
   if (!outcome.ok) throw outcome.error;
   return outcome.value.bytes;
 };
@@ -383,6 +408,7 @@ class StagedOutputCleanupFailure extends Error {
     readonly outcome: Result<PublishedEvidenceFile, unknown>,
     readonly cleanupCause: unknown,
     readonly owner: OwnedStagedOutput,
+    readonly lease: AnalysisCleanupLease,
   ) {
     super("Staged output cleanup failed", {
       cause: outcome.ok ? cleanupCause : outcome.error,

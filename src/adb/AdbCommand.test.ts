@@ -217,8 +217,43 @@ it.each([true, false])(
         ? "live output may change between requests"
         : "Repeating the unchanged request fails the same way.",
     );
+    expect(projected.remediation.action).toContain("1024 bytes");
+    expect(projected.remediation.action).toContain("no runtime override");
   },
 );
+
+it("names the effective adb deadline and says it has no runtime override", async () => {
+  vi.mocked(execFileBytes).mockRejectedValueOnce(
+    Object.assign(new Error("deadline"), {
+      code: "ETIMEDOUT",
+      stdout: "",
+      stderr: "",
+      signal: null,
+      killed: true,
+    }),
+  );
+  const result = await runAdbCapture(
+    "pull_adb_file",
+    { device: "device" },
+    "/host/adb",
+    ["pull", "/remote"],
+    { timeoutMs: 600_000, maxOutputBytes: 1024 },
+    undefined,
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected an adb deadline");
+  const projected = projectAnalysisError(result.error);
+  expect(projected).toMatchObject({
+    code: "provider_timeout",
+    details: { timeout_ms: 600_000 },
+  });
+  expect(projected.message).toContain("600000 ms");
+  expect(projected.message).toContain("no runtime override");
+  expect(projected.remediation.action).toContain("no runtime override");
+  expect(projected.remediation.action).not.toContain(
+    "REA_JADX_OPERATION_TIMEOUT_MS",
+  );
+});
 
 it("keeps a physical failure even when the later abort reason is that same error", async () => {
   const controller = new AbortController();

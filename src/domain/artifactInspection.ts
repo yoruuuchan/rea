@@ -427,10 +427,13 @@ const branch = (
   };
 };
 
+// A completed substep establishes only the coverage its producer examined, so
+// unknown inventory traversal keeps the inspection partial, never complete.
 const inspectionCoverage = (
-  _inventory: ArtifactInventoryResult,
+  inventory: ArtifactInventoryResult,
   omissions: Readonly<Record<string, number>>,
 ): ArtifactInspectionResult["coverage"]["status"] => {
   if (Object.values(omissions).some((count) => count > 0)) return "truncated";
+  if (inventory.coverage.status !== "complete") return "partial";
   return "complete-within-substeps";
 };

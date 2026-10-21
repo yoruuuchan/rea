@@ -167,12 +167,17 @@ const browserConsoleEventSchema = z.object({
     .describe(
       "CDP Runtime.Timestamp in milliseconds since Unix epoch; null when the producer value is absent or invalid.",
     ),
-  argument_types: z.array(z.string()),
+  argument_types: z
+    .array(z.string())
+    .nullable()
+    .describe(
+      "CDP argument types by argument position; null when the producer argument inventory is absent or not an array.",
+    ),
   url: z.string().nullable(),
   line: z.number().int().min(0).nullable(),
   column: z.number().int().min(0).nullable(),
   text_capture: z.object({
-    status: z.enum(["not_approved", "included"]),
+    status: z.enum(["not_approved", "included", "unavailable"]),
     values: z.array(
       z.object({
         argument_index: z.number().int().min(0),

@@ -26,7 +26,11 @@ it("executes the advertised export presence example with matching analyzed Evide
   );
   if (example === undefined)
     throw new Error("Missing advertised presence example");
-  const { client, close } = await createApplicationMcpHarness();
+  const { client, close } = await createApplicationMcpHarness({
+    serverOptions: {
+      environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: "full" },
+    },
+  });
   onTestFinished(close);
   const listing = await client.listTools();
   const advertised = listing.tools.find(

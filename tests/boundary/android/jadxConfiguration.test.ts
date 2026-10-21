@@ -249,7 +249,8 @@ it("preserves exact Java probe output and marks max-buffer capture as truncated"
   );
   expect(failure).toBeInstanceOf(AnalysisCapabilityUnavailableError);
   if (!(failure instanceof AnalysisCapabilityUnavailableError)) return;
-  expect(failure.reason).toContain("exceeded the 1 MiB output budget");
+  expect(failure.reason).toContain("1048576-byte");
+  expect(failure.reason).toContain("no runtime override");
   expect(failure.reason).not.toContain("Select a full JDK");
   expect(failure.capturedOutput).toMatchObject({
     stdout: expect.stringMatching(/^x/u),
@@ -359,7 +360,7 @@ it("reports a killed Java probe as unresolved instead of missing runtime", async
   expect(availability).toMatchObject({
     status: "unavailable",
     code: "version_unresolved",
-    reason: expect.stringContaining("within 10 seconds"),
+    reason: expect.stringContaining("10000 ms"),
     diagnostics: {
       java_executable: java,
       failure: "probe_terminated",
@@ -367,6 +368,7 @@ it("reports a killed Java probe as unresolved instead of missing runtime", async
       deadline_ms: 10_000,
     },
   });
+  expect(availability.reason).toContain("no runtime override");
   expect(availability.reason).not.toContain("Select a full JDK");
 });
 

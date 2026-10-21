@@ -245,17 +245,14 @@ export const projectArtifactInventoryView = (
       inventory.occurrences.find((row) => row.logical_path === ".")
         ?.format_metadata ?? null;
   const rootMetadata = source.rootMetadata;
-  const includeCoverage =
+  // Producer traversal coverage is the owner's fact for every format; missing
+  // coverage would read as unknown, so every view carries it inline.
+  const sourceCoverage = { source_coverage: inventory.coverage };
+  const includeHashCounts =
     view.kind === "inventory" ||
     inventory.manifest.root_format === "godot-pck" ||
     inventory.manifest.root_format === "pyinstaller";
-  const sourceCoverage = includeCoverage
-    ? { source_coverage: inventory.coverage }
-    : {};
-  const counts =
-    includeCoverage || view.kind === "summary"
-      ? inventoryCounts(source)
-      : undefined;
+  const counts = includeHashCounts ? inventoryCounts(source) : undefined;
   const limitations = uniqueSorted([
     ...parent.limitations,
     ...inventory.limitations,
@@ -272,13 +269,12 @@ export const projectArtifactInventoryView = (
     limitations,
     unknowns: [
       "Inventory does not establish application runtime behavior or complete format-specific analysis.",
-      ...(includeCoverage && inventory.coverage.status === "unknown"
+      ...(inventory.coverage.status === "unknown"
         ? [
             "Producer traversal coverage is unknown; missing matches do not prove source absence.",
           ]
         : []),
-      ...(includeCoverage &&
-      counts !== undefined &&
+      ...(counts !== undefined &&
       (counts.hashes.unavailable > 0 || counts.hashes["not-hashed"] > 0)
         ? [
             "Content hashes are unknown for some recorded files; missing node IDs do not prove content absence.",
@@ -325,7 +321,7 @@ export const projectArtifactInventoryView = (
             ? {}
             : { metadata: counts.kinds.metadata }),
         },
-        ...(includeCoverage
+        ...(includeHashCounts
           ? { available_hash_status_counts: counts.hashes }
           : {}),
         source_complete: inventory.complete,

@@ -30,11 +30,12 @@ interface LoaderShape {
 
 /**
  * Prove that `loader(key)` returns the exports of the factory declared at
- * `table[key]`: the loader returns only the dispatched module's exports or a
- * cache entry it created for that module, the table has only literal keys,
- * and the table and cache are referenced only by the loader or through the
- * runtime's `loader.m`/`loader.c` exposure. Literal-key writes through that
- * exposure replace their slot. Returns undefined when any of this is unproven.
+ * `table[key]`: every normal completion of the loader returns the dispatched
+ * module's exports or a cache entry it created for that module, the table has
+ * only literal keys, and the table and cache are referenced only by the loader
+ * or through the runtime's `loader.m`/`loader.c` exposure. Literal-key writes
+ * through that exposure replace their slot. Returns undefined when any of this
+ * is unproven.
  */
 export const proveJavaScriptBootstrapIntegrity = (
   call: t.CallExpression,
@@ -74,12 +75,14 @@ const loaderShape = (
   const parameterId = t.isIdentifier(parameter)
     ? bindingOf(state, parameter)
     : undefined;
-  // A rewritten key would dispatch a different slot than the caller named.
+  // A rewritten key would dispatch a different slot than the caller named,
+  // and falling off the end returns undefined instead of the exports.
   if (
     parameterId === undefined ||
     state.bindingsById.get(parameterId)?.definitions.length !== 1 ||
     loader.async ||
-    loader.generator
+    loader.generator ||
+    completesNormally(loader.body)
   )
     return undefined;
   const dispatches = new Set<t.Node>();
@@ -127,6 +130,35 @@ const loaderShape = (
   )
     ? withCacheReads(loader, shape, state)
     : undefined;
+};
+
+/**
+ * Whether control may reach the end of `statement`. Loops, switches and labels
+ * can absorb a `break`, so they are assumed to complete.
+ */
+const completesNormally = (statement: t.Statement): boolean => {
+  if (t.isReturnStatement(statement) || t.isThrowStatement(statement))
+    return false;
+  if (t.isBlockStatement(statement))
+    return statement.body.every(completesNormally);
+  if (t.isIfStatement(statement))
+    return (
+      statement.alternate === null ||
+      statement.alternate === undefined ||
+      completesNormally(statement.consequent) ||
+      completesNormally(statement.alternate)
+    );
+  if (t.isTryStatement(statement))
+    return (
+      (statement.finalizer === null ||
+        statement.finalizer === undefined ||
+        completesNormally(statement.finalizer)) &&
+      (completesNormally(statement.block) ||
+        (statement.handler !== null &&
+          statement.handler !== undefined &&
+          completesNormally(statement.handler.body)))
+    );
+  return true;
 };
 
 /** `table[key](module, ...)` or `table[key].call(thisArg, module, ...)`. */

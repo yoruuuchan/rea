@@ -61,6 +61,8 @@ const connect = async (
   const server = createServer(
     { kind: "session", session },
     {
+      // These schema conformance cases exercise full nested constraints.
+      environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: "full" },
       ...(binaryLayout === undefined ? {} : { binaryLayout }),
       ...(webNetworkCapture === undefined ? {} : { webNetworkCapture }),
     },

@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import { createEvidence } from "../domain/evidence.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
 import { emptyUnverifiedProcessCapture } from "../domain/process/processCapture.fixture.js";
+import { FINALIZED_PROCESS_CAPTURE_EXAMPLE } from "../domain/process/processCaptureExample.js";
+import { PROCESS_PROVIDER } from "../domain/process/processEvidenceProvider.js";
 import { parseProcessCapture } from "../domain/process/processCaptureParsing.js";
 import {
   digestProcessCommitment,
@@ -177,6 +179,40 @@ describe("reconstruction obligation candidates", () => {
     expect(generated.limitations).toContain(
       `Process capture ${evidence.evidence_id} has no validated executable artifact identity; packaged-process lifecycle obligation was not bound to an artifact.`,
     );
+  });
+
+  it("names the first rejected capture field and the remaining issue count", () => {
+    const {
+      manifest: { completed_at: _completedAt, ...manifest },
+      exit,
+      ...rest
+    } = FINALIZED_PROCESS_CAPTURE_EXAMPLE;
+    const evidence = createEvidence(undefined, PROCESS_PROVIDER, {
+      predicateType: "rea.process-capture",
+      operation: "capture_process_scenario",
+      parameters: {},
+      result: jsonValueSchema.parse({
+        ...rest,
+        manifest,
+        exit: {
+          ...exit,
+          finalization: {
+            ...exit.finalization,
+            signals: [
+              { ...exit.finalization.signals[0], reason: "not allowed here" },
+            ],
+          },
+        },
+      }),
+    });
+    const generated = deriveReconstructionObligationCandidates(
+      createEvidenceBundle([evidence]),
+      [],
+    );
+
+    expect(generated.limitations).toEqual([
+      `Process Evidence ${evidence.evidence_id} could not generate candidates: at manifest.completed_at: Invalid input: expected string, received undefined (1 more issues)`,
+    ]);
   });
 });
 

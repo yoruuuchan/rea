@@ -37,6 +37,14 @@ export const APKTOOL_COMMAND_ENV = "REA_APKTOOL_COMMAND";
 const VERSION_TIMEOUT_MS = 20_000;
 const VERSION_MAX_OUTPUT_BYTES = 64 * 1024;
 
+const apktoolVersionProbeTimeoutGuidance = (): {
+  readonly userMessage: string;
+  readonly remediationAction: string;
+} => ({
+  userMessage: `apktool version probe reached its ${String(VERSION_TIMEOUT_MS)} ms deadline (deadlineExpired). This release has no runtime override.`,
+  remediationAction: `This ${String(VERSION_TIMEOUT_MS)} ms apktool version probe has no runtime override. decode_timeout_ms does not raise it. Allow execution, cleanup and delivery headroom in the outer MCP client deadline. Confirm outstanding work and cleanup before retrying.`,
+});
+
 /** How the apktool launcher was selected for this provider instance. */
 export interface ApktoolCommandSelection {
   readonly command: string;
@@ -102,6 +110,7 @@ export const resolveApktoolCommand = async (
         })
       : new AnalysisTimeoutError("inspect_apktool_client", VERSION_TIMEOUT_MS, {
           diagnostics: { phase: "windows_path_lookup" },
+          ...apktoolVersionProbeTimeoutGuidance(),
         });
   try {
     for (const entry of directories) {
@@ -501,7 +510,11 @@ const versionProbeFailure = (
     return new AnalysisTimeoutError(
       "inspect_apktool_client",
       VERSION_TIMEOUT_MS,
-      { cause, ...(output === undefined ? {} : { capturedOutput: output }) },
+      {
+        cause,
+        ...(output === undefined ? {} : { capturedOutput: output }),
+        ...apktoolVersionProbeTimeoutGuidance(),
+      },
     );
   if (
     cause instanceof Error &&
@@ -519,9 +532,13 @@ const versionProbeFailure = (
       { cause },
     );
   const snapshot = cause instanceof OwnedCommandFailure ? cause.snapshot : null;
+  const outputLimited =
+    cause instanceof OwnedCommandFailure && cause.reason === "output-limit";
   return new ApktoolConfigurationFailure(
     "version_unresolved",
-    "The selected apktool launcher did not report a usable version",
+    outputLimited
+      ? `apktool version output exceeded the ${String(VERSION_MAX_OUTPUT_BYTES)}-byte capture budget. This release has no runtime override. decode_timeout_ms does not raise it.`
+      : "The selected apktool launcher did not report a usable version",
     {
       selected_command: selection.command,
       ...(observed === undefined

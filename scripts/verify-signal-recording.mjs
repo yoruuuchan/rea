@@ -39,6 +39,19 @@ const environment = {
   TEMP: root.path,
 };
 const client = new Client({ name: "signal-recording-verifier", version: "1" });
+// Real sigrok refusals of an unknown decoder ID must name the caller's field.
+const assertRejectedSelector = (response, operation, field) => {
+  assert.equal(response.isError, true);
+  const text = response.content.find((item) => item.type === "text")?.text;
+  const { error } = JSON.parse(text ?? "{}");
+  assert.equal(error.code, "invalid_request");
+  assert.equal(error.details.operation, operation);
+  assert.deepEqual(
+    error.details.issues.map((issue) => issue.path),
+    [[field]],
+  );
+  assert.equal(error.details.captured_output.exit_code, 1);
+};
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [entrypoint, "mcp"],
@@ -244,16 +257,18 @@ try {
     assert.equal(await readFile(pagedPath, "utf8"), pagedSource);
     cases++;
   }
-  for (const input of [
-    { path, decoders: "no_such_decoder" },
-    { path: join(root.path, "absent.vcd"), decoders: "uart" },
-    { path, decoders: "uart", driver: "demo" },
+  for (const [input, rejectedField] of [
+    [{ path, decoders: "no_such_decoder" }, "decoders"],
+    [{ path: join(root.path, "absent.vcd"), decoders: "uart" }],
+    [{ path, decoders: "uart", driver: "demo" }],
   ]) {
     const response = await client.callTool({
       name: advertised.name,
       arguments: input,
     });
     assert.equal(response.isError, true);
+    if (rejectedField !== undefined)
+      assertRejectedSelector(response, advertised.name, rejectedField);
     await client.ping();
     cases++;
   }
@@ -378,7 +393,7 @@ try {
     name: discoveryTool.name,
     arguments: { decoder: "rea_no_such_decoder" },
   });
-  assert.equal(unavailable.isError, true);
+  assertRejectedSelector(unavailable, discoveryTool.name, "decoder");
   cases++;
   await client.close();
   assert.deepEqual((await readdir(root.path)).sort(), [

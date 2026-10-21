@@ -1049,34 +1049,78 @@ exit 0`,
   },
 );
 
-it("pushes a file and verifies the device-side digest", async () => {
-  const { binary, root } = await writeAdbStub(
-    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+const PUSHED_DIGEST =
+  "8748b5d17d1ebcec7d46674fa6a8b92c0f95598a552f27c1c8a132eb58c04043";
+
+it.each([
+  {
+    answer: "a digest line",
+    stdout: `${PUSHED_DIGEST}  /data/local/tmp/payload.bin\n`,
+    exit: 0,
+    verified: true,
+  },
+  {
+    // GNU sha256sum prefixes a line whose echoed name it escaped.
+    answer: "an escaped digest line",
+    stdout: `\\${PUSHED_DIGEST}  /data/local/tmp/pay\\\\load.bin\n`,
+    exit: 0,
+    verified: true,
+  },
+  { answer: "empty output", stdout: "", exit: 0, verified: false },
+  {
+    answer: "a malformed line",
+    stdout: `${PUSHED_DIGEST.slice(1)}  /data/local/tmp/payload.bin\n`,
+    exit: 0,
+    verified: false,
+  },
+  { answer: "a failed command", stdout: "", exit: 127, verified: false },
+])(
+  "derives the push digest source from $answer",
+  async ({ stdout, exit, verified }) => {
+    const { binary, root } = await writeAdbStub(
+      (stubRoot) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$4" = "test" ]; then exit 1; fi
 if [ "$1" = "-s" ] && [ "$3" = "push" ]; then exit 0; fi
-if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then printf '%s  %s\\n' "8748b5d17d1ebcec7d46674fa6a8b92c0f95598a552f27c1c8a132eb58c04043" "$5"; exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then cat "${join(stubRoot, "sha256sum.out")}"; exit ${exit}; fi
 exit 1`,
-  );
-  const localFile = join(root, "payload.bin");
-  await writeFile(localFile, "push-payload");
-  const digest = createHash("sha256").update("push-payload").digest("hex");
-  const pushed = await evidenceResult(providerOver(binary), {
-    operation: "push_adb_file",
-    input: {
-      serial: "emulator-5554",
-      local_path: localFile,
-      device_path: "/data/local/tmp/payload.bin",
-      overwrite: false,
-    },
-  });
-  expect(pushed).toMatchObject({
-    bytes: 12,
-    sha256: digest,
-    device_sha256: digest,
-    overwritten: false,
-    device_digest_source: "device_sha256sum",
-  });
-});
+    );
+    await writeFile(join(root, "sha256sum.out"), stdout);
+    const localFile = join(root, "payload.bin");
+    await writeFile(localFile, "push-payload");
+    const result = await providerOver(binary).execute({
+      operation: "push_adb_file",
+      input: {
+        serial: "emulator-5554",
+        local_path: localFile,
+        device_path: "/data/local/tmp/payload.bin",
+        overwrite: false,
+      },
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.result).toMatchObject({
+      bytes: 12,
+      sha256: PUSHED_DIGEST,
+      overwritten: false,
+      ...(verified
+        ? {
+            device_sha256: PUSHED_DIGEST,
+            device_digest_source: "device_sha256sum",
+          }
+        : { device_sha256: null, device_digest_source: "unavailable" }),
+    });
+    expect(
+      result.value.limitations.some((line) =>
+        line.includes("not device-side verified"),
+      ),
+    ).toBe(!verified);
+    // Unrecognized checksum output stays inspectable instead of being dropped.
+    expect(result.value.rawResult).toEqual(
+      !verified && exit === 0
+        ? { device_sha256sum: { stdout, stderr: "" } }
+        : null,
+    );
+  },
+);
 
 it("pushes the same private bytes that its reported digest identifies", async () => {
   const { binary, root } = await writeAdbStub(
@@ -1617,6 +1661,7 @@ it("resolves packages by case-insensitive substring", async () => {
     },
   ]);
   expect(result.exact_match).toBe(false);
+  expect(result.unparsed_lines).toEqual([]);
   expect(result.coverage).toBe("complete");
 });
 

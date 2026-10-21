@@ -93,6 +93,10 @@ const excludeBody = (
   record.redactions.push({ pointer, reason });
 };
 
+/** A media type's case-insensitive essence; parameters do not select framing. */
+const mediaTypeEssence = (value: string) =>
+  value.split(";", 1)[0]!.trim().toLowerCase();
+
 /** Format-aware owner of body metadata; callers never reinterpret producer JSON. */
 const bodyMetadata = (
   record: WebNetworkCaptureRecord,
@@ -143,28 +147,47 @@ const bodyMetadata = (
       if (typeof name === "string") {
         const key = name.toLowerCase();
         const knownValue = typeof value === "string" ? value : undefined;
+        const previous = headers.get(key);
+        // Repeated declarations agree only when known and equal; media types by essence.
         headers.set(
           key,
-          headers.has(key) && headers.get(key) !== knownValue
-            ? undefined
-            : knownValue,
+          !headers.has(key)
+            ? knownValue
+            : previous !== undefined &&
+                knownValue !== undefined &&
+                (key === "content-type"
+                  ? mediaTypeEssence(previous) === mediaTypeEssence(knownValue)
+                  : previous === knownValue)
+              ? previous
+              : undefined,
         );
       } else headerNamesKnown = false;
     }
   }
+  // A visible declaration selects framing. Absence is established only when every header
+  // name is known; excluded or conflicting values leave framing applicability unknown.
+  const header = headers.get("content-type");
+  const automaticFraming = (contentType: string | undefined) => {
+    const essence =
+      contentType === undefined ? undefined : mediaTypeEssence(contentType);
+    return essence !== undefined && Object.hasOwn(PROTOBUF_FRAMING, essence)
+      ? PROTOBUF_FRAMING[essence as keyof typeof PROTOBUF_FRAMING]
+      : undefined;
+  };
   if (format === "har") {
     if (
       pointer !== `/${side}/${side === "request" ? "postData" : "content"}/text`
     )
       return undefined;
-    const content = object(
+    // HAR requires a string mimeType; any other value is an excluded declaration.
+    const mimeType = object(
       message[side === "request" ? "postData" : "content"],
-    );
+    )?.mimeType;
+    const contentType = typeof mimeType === "string" ? mimeType : header;
     return {
-      contentType:
-        typeof content?.mimeType === "string"
-          ? content.mimeType
-          : headers.get("content-type"),
+      contentType,
+      automaticFraming: automaticFraming(contentType),
+      contentTypeKnown: contentType !== undefined,
       httpIdentityKnown: true,
       httpCodingKnown: true,
     };
@@ -172,7 +195,11 @@ const bodyMetadata = (
   if (pointer !== `/${side}/body` && pointer !== `/${side}/content`)
     return undefined;
   return {
-    contentType: headers.get("content-type"),
+    contentType: header,
+    automaticFraming: automaticFraming(header),
+    contentTypeKnown:
+      header !== undefined ||
+      (headerNamesKnown && !headers.has("content-type")),
     httpCodingKnown:
       headerNamesKnown &&
       ["content-encoding", "transfer-encoding"].every(
@@ -257,17 +284,21 @@ export const prepareCaptureProtobuf = async (
         incomplete = true;
         continue;
       }
-      const contentType = metadata.contentType;
-      const essence = contentType?.split(";", 1)[0]?.trim().toLowerCase();
-      const automatic =
-        essence === undefined
-          ? undefined
-          : PROTOBUF_FRAMING[essence as keyof typeof PROTOBUF_FRAMING];
+      const { contentType, automaticFraming: automatic } = metadata;
       const framing =
         options?.framing === undefined || options.framing === "auto"
           ? automatic
           : options.framing;
-      if (framing === undefined) continue;
+      if (framing === undefined) {
+        // An empty body has no protobuf content under any framing.
+        if (!metadata.contentTypeKnown && field.bytes > 0) {
+          incomplete = true;
+          record.limitations.push(
+            "Selected body's MIME metadata is excluded, conflicting or unavailable, so automatic protobuf framing applicability is unknown; its retained bytes were not interpreted. Select explicit framing to decode them.",
+          );
+        }
+        continue;
+      }
       if (
         field.bytes > WEB_NETWORK_CAPTURE_LIMITS.inputBytes ||
         field.content_base64.length >

@@ -122,6 +122,9 @@ function* xmlPreflightTokens(xml: string) {
   }
 }
 
+/** Deepest binary plist value nesting the reference walk admits. */
+export const MAX_BINARY_PLIST_NESTING_DEPTH = 128;
+
 /** Resource or structural failure found while preflighting a plist. */
 export type BinaryPlistExpansionFailure = "cycle" | "depth" | "expansion";
 
@@ -299,7 +302,7 @@ export const estimateBinaryPlistExpansion = (
       continue;
     }
     pendingObjectCount -= 1;
-    if (entry.depth > 128)
+    if (entry.depth > MAX_BINARY_PLIST_NESTING_DEPTH)
       throw fail("depth", `binary plist nesting exceeds ${budget}`);
     if (active.has(entry.object))
       throw fail("cycle", `binary plist reference cycle exceeds ${budget}`);

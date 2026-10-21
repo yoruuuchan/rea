@@ -10,7 +10,7 @@ import { EvidenceMcpServer } from "../../../src/server/EvidenceMcpServer.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 import { createToolResultDelivery } from "../../../src/server/toolResult.js";
 import type { ToolContract } from "../../../src/contracts/toolContractTypes.js";
-import { CATALOG_IDENTITY } from "../../../src/catalogIdentity.js";
+import { FULL_CATALOG_IDENTITY } from "../../../src/catalogIdentity.js";
 
 const createServer = (omitOutputSchemas: boolean) =>
   new EvidenceMcpServer(
@@ -25,7 +25,7 @@ const createServer = (omitOutputSchemas: boolean) =>
 it("omits only output schema advertisements and keeps canonical MCP output validation", async () => {
   const server = createServer(true);
   expect(server.catalogIdentity.digests.combined_sha256).not.toBe(
-    CATALOG_IDENTITY.digests.combined_sha256,
+    FULL_CATALOG_IDENTITY.digests.combined_sha256,
   );
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();

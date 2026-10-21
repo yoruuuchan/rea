@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { toolContract } from "../../../dist/contracts/toolContracts.js";
 import {
   artifactCliEvidence,
+  artifactMcpCall,
   withArtifactMcp,
   withBundleResourcesMcp,
 } from "../../lib/artifact-e2e.mjs";
@@ -27,7 +28,7 @@ export async function verifyNativeProvenance(app, executable) {
   assert.equal(resourcePlistCli.subject, null);
   assert.equal(resourcePlistCli.raw_result, null);
   await withBundleResourcesMcp(app, async (client) => {
-    const response = await client.callTool({
+    const response = await artifactMcpCall(client, {
       name: "inspect_plist",
       arguments: {},
     });
@@ -58,13 +59,10 @@ export async function verifyNativeProvenance(app, executable) {
   assert.equal(binaryPlistCli.raw_result, null);
   assert.equal(binaryPlistCli.normalized_result.resource_root, undefined);
   await withArtifactMcp(app, async (client) => {
-    const definitions = new Map(
-      (await client.listTools()).tools.map((tool) => [tool.name, tool]),
-    );
-    const plistResponse = await client.callTool(
-      { name: "inspect_plist", arguments: {} },
-      { toolDefinition: definitions.get("inspect_plist") },
-    );
+    const plistResponse = await artifactMcpCall(client, {
+      name: "inspect_plist",
+      arguments: {},
+    });
     assert.notEqual(plistResponse.isError, true, JSON.stringify(plistResponse));
     const binaryPlistMcp = toolContract("inspect_plist").outputSchema.parse(
       plistResponse.structuredContent,
@@ -98,13 +96,10 @@ export async function verifyNativeProvenance(app, executable) {
           arguments_,
         ),
       );
-      const response = await client.callTool(
-        {
-          name: operation,
-          arguments: operation === "demangle_swift" ? { symbols } : {},
-        },
-        { toolDefinition: definitions.get(operation) },
-      );
+      const response = await artifactMcpCall(client, {
+        name: operation,
+        arguments: operation === "demangle_swift" ? { symbols } : {},
+      });
       assert.notEqual(response.isError, true, JSON.stringify(response));
       const mcp = toolContract(operation).outputSchema.parse(
         response.structuredContent,

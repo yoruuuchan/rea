@@ -18,7 +18,7 @@ import type {
 } from "./Doctor.js";
 import type { LinuxDistribution } from "./LinuxHopper.js";
 import { PRODUCT_IDENTITY, SDK_IDENTITY } from "../identity.js";
-import { CATALOG_IDENTITY } from "../catalogIdentity.js";
+import { DEFAULT_CATALOG_IDENTITY } from "../catalogIdentity.js";
 import type { ClientRegistrationStatus } from "./ClientRegistrationStatus.js";
 import { setupRegistrationCommand } from "./SetupHost.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
@@ -228,7 +228,7 @@ export class FakeSetupHost implements SetupHost {
         cli_package_version: PRODUCT_IDENTITY.packageVersion,
         expected_skill_version: PRODUCT_IDENTITY.skillVersion,
         sdk: SDK_IDENTITY,
-        catalog: CATALOG_IDENTITY,
+        catalog: DEFAULT_CATALOG_IDENTITY,
         live_server: {
           state: "unknown",
           remediation: "Inspect the running server.",

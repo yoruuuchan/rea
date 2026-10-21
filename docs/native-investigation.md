@@ -202,8 +202,10 @@ Function dossiers retain this same string evidence. Native call edges retain
 Hopper's partial `CallReference` classification and exact endpoints; detailed
 reference flags remain unavailable rather than being invented.
 Regex searches use ECMAScript Unicode syntax in a cancellable worker with a
-five-second matching deadline. Deadline or cancellation stops matching while
-leaving the Hopper API available. Literal mode retains Unicode casefold matching.
+five-second matching deadline and a 128 MiB worker heap. Deadline or
+cancellation stops matching while leaving the Hopper API available. This
+release has no runtime override for that deadline or heap. Literal mode
+retains Unicode casefold matching.
 
 ## Bounded static traces
 
@@ -302,8 +304,13 @@ Binary plist inspection reads the original bytes through an owned file descripto
 so conversion cannot erase control characters, fractional dates, negative zero,
 or the high word of a 128-bit integer. It accepts at most 64 MiB of input and
 reserves an estimated 64 MiB decode budget before parsing; this estimate is not
-a hard process-memory bound. Binary-source provenance records the `file`
-classification without claiming a `plutil` conversion.
+a hard process-memory bound. A refused input reports non-retryable
+`resource_constraint` with `reported_limits.maximum_input_bytes`,
+`maximum_decoded_bytes` or, for nesting deeper than 128 levels,
+`maximum_nesting_depth`. These are fixed allowances: worker limits and host
+memory do not raise them, and the unchanged request fails the same way.
+Binary-source provenance records the `file` classification without claiming a
+`plutil` conversion.
 
 A plist explicitly selected through the path input or as the active plist target
 reports an unreadable or malformed selection as `invalid_request`. A missing or

@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { CATALOG_IDENTITY } from "../../dist/catalogIdentity.js";
+import { FULL_CATALOG_IDENTITY } from "../../dist/catalogIdentity.js";
 import { TOOL_CONTRACTS } from "../../dist/contracts/toolContracts.js";
 import {
   requireMcpLifecycleResult,
@@ -104,7 +104,7 @@ export async function verifyInstalledCanaryPackage(
       );
     return {
       mcpTools: toolNames.length,
-      canonicalMcpTools: CATALOG_IDENTITY.counts.mcp_tools,
+      canonicalMcpTools: FULL_CATALOG_IDENTITY.counts.mcp_tools,
     };
   } catch (cause) {
     throw new Error(`Installed package MCP verification failed: ${stderr}`, {

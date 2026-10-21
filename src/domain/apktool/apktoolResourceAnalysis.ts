@@ -6,6 +6,10 @@ export const MAX_STRINGS = 2_000;
 export const MAX_SELECTED_LOCALES = 20;
 export const MAX_AGGREGATE_STRINGS = 10_000;
 export const AGGREGATE_STRINGS_XML_MAX_BYTES = 32 * 1024 * 1024;
+/** Decode wall clock used when decode_timeout_ms is omitted. */
+export const DEFAULT_APKTOOL_DECODE_TIMEOUT_MS = 600_000;
+/** Largest delay supported without overflowing Node timers. */
+export const MAX_APKTOOL_DECODE_TIMEOUT_MS = 2_147_483_647;
 const ANDROID_NON_LOCALE_QUALIFIERS = new Set([
   "car",
   "desk",
@@ -90,6 +94,15 @@ export const apktoolInputSchemas = {
       .optional()
       .describe(
         `Project multiple localized string tables from res/values-<locale>/strings.xml alongside the default table (bounded to ${String(MAX_SELECTED_LOCALES)} locales)`,
+      ),
+    decode_timeout_ms: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_APKTOOL_DECODE_TIMEOUT_MS)
+      .exactOptional()
+      .describe(
+        `Decode wall-clock budget in milliseconds (default ${String(DEFAULT_APKTOOL_DECODE_TIMEOUT_MS)}), from apktool d start through process exit. Omitted means ${String(DEFAULT_APKTOOL_DECODE_TIMEOUT_MS)}. Applies on the next decode. Does not raise the fixed output capture allowance or the version probe.`,
       ),
   }),
 } as const;

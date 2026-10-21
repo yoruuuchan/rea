@@ -19,6 +19,7 @@ import {
 import type { McpOutputSchemaProfile } from "./config/mcpOutputSchemaProfile.js";
 import {
   COMPACT_INPUT_SCHEMA_BUDGET_BYTES,
+  compactPresentationForMcpInputSchemaProfile,
   type McpInputSchemaProfile,
 } from "./config/mcpInputSchemaProfile.js";
 import { RECORDED_CATALOG_DIGEST_PROFILES } from "./recordedCatalogDigests.js";
@@ -111,7 +112,7 @@ const digestCatalogs = (
 /**
  * Catalog digests over the given tool contracts. Exported so tests can prove
  * which contract fields the identity covers; production uses
- * {@link CATALOG_IDENTITY}.
+ * {@link FULL_CATALOG_IDENTITY}.
  */
 export const createCatalogDigests = (
   contracts: readonly ToolContract[] = TOOL_CONTRACTS,
@@ -191,7 +192,12 @@ export const createCatalogIdentity = (
 };
 
 /**
- * Stable, schema-sensitive identity; schema digests are recorded at build time
- * or computed on first use.
+ * Full input/output advertisement identity. Digests are recorded at build time
+ * or computed on first use; this is independent of the configured default.
  */
-export const CATALOG_IDENTITY = createCatalogIdentity();
+export const FULL_CATALOG_IDENTITY = createCatalogIdentity();
+
+/** Default MCP advertisement; explicit full/custom selections have their own identity. */
+export const DEFAULT_CATALOG_IDENTITY = createCatalogIdentity(
+  compactPresentationForMcpInputSchemaProfile(undefined),
+);

@@ -46,15 +46,11 @@ export const exportEvidenceBundleCommand = async (
   );
   if (written.ok) return projectWrite(loaded.value, written);
 
-  let cleanupSucceeded = false;
-  try {
-    await resources.close();
-    cleanupSucceeded = true;
-  } catch {
-    // The original error cause retains the same staged-output owner for diagnostics.
-  }
+  // Confirmed release resolves the bound error to its primary outcome; a
+  // failed retry leaves that error incomplete with its exact retained owner.
+  await resources.close().catch(() => undefined);
   if (
-    cleanupSucceeded &&
+    !written.error.cleanupIncomplete &&
     written.error instanceof EvidenceFileError &&
     written.error.published
   ) {

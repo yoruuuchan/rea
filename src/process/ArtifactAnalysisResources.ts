@@ -352,11 +352,11 @@ export class ArtifactAnalysisResources {
           cause.cancellation === undefined ? cause : cause.cancellation.reason,
       });
     if (cause.reason === "timeout")
-      return new AnalysisTimeoutError(
-        operation,
-        limits.command_timeout_ms,
-        detail,
-      );
+      return new AnalysisTimeoutError(operation, limits.command_timeout_ms, {
+        ...detail,
+        userMessage: `The owned producer command reached its fixed ${String(limits.command_timeout_ms)} ms deadline. This is not a client-side timeout; extending only the MCP client's deadline does not change this budget.`,
+        remediationAction: `REA's fixed producer command deadline is ${String(limits.command_timeout_ms)} ms and this release has no runtime override. Inspect any partial output and cleanup before retrying. Repeating the unchanged request reaches the same deadline.`,
+      });
     if (cause.reason === "output-limit")
       return new AnalysisResourceConstraintError(
         operation,
@@ -366,7 +366,7 @@ export class ArtifactAnalysisResources {
         {
           ...detail,
           ...fixedAllowanceOptions(
-            "The retained command-output allowance",
+            `The retained command-output allowance of ${String(limits.output_bytes)} bytes (this release has no runtime override)`,
             "capture",
           ),
         },
@@ -375,14 +375,23 @@ export class ArtifactAnalysisResources {
       cause.reason === "process" &&
       (cause.snapshot?.signal === "SIGXFSZ" ||
         cause.snapshot?.signal === "SIGXCPU")
-    )
+    ) {
+      const signal = cause.snapshot.signal;
+      const reported =
+        effectiveLimits === undefined
+          ? "The effective inherited limit was not reported."
+          : `The effective inherited limits are ${String(effectiveLimits.address_space_bytes)} bytes of address space, ${String(effectiveLimits.file_bytes)} bytes per file, and ${String(effectiveLimits.cpu_seconds)} CPU seconds.`;
       return new AnalysisResourceConstraintError(
         operation,
-        cause.snapshot.signal === "SIGXFSZ" ? "file-size" : "cpu",
-        `Producer terminated with ${cause.snapshot.signal}; the signal's exact cause is not independently established.`,
+        signal === "SIGXFSZ" ? "file-size" : "cpu",
+        `Producer terminated with ${signal}; the signal's exact cause is not independently established.`,
         effectiveLimits === undefined ? null : { ...effectiveLimits },
-        detail,
+        {
+          ...detail,
+          remediationAction: `${reported} REA retains the tighter inherited limit. This release has no runtime override for that ceiling. A smaller artifact may finish inside the retained limit. Repeating the unchanged request fails the same way.`,
+        },
       );
+    }
     return new AnalysisOutputError(operation, cause.message, detail);
   }
 

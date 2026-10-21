@@ -68,7 +68,7 @@ The background export belongs to the session. `close_binary`, or the end of a CL
 
 The assembly label index is scanned once per export reader. Cancelling a request stops its wait without interrupting other readers; closing the session aborts and drains the shared scan before releasing its files.
 
-Regex procedure and string search uses ECMAScript Unicode matching in a cancellable worker with a five-second matching deadline. Literal matching remains the default. Cancellation or a matching deadline leaves the session available.
+Regex procedure and string search uses ECMAScript Unicode matching in a cancellable worker with a five-second matching deadline and a 128 MiB worker heap. Literal matching remains the default. Cancellation or a matching deadline leaves the session available. This release has no runtime override for that deadline or heap.
 
 Single-function subprocess output and each cached source facet share a 16 MiB buffered-text capacity. Cached spans are checked before allocation; larger text remains in the local export and the error identifies the file and range. `analyze_function` initially returns the complete dossier, which can still be large; later retained views do not remove that first transfer. Prefer the individual text tools for a focused question.
 

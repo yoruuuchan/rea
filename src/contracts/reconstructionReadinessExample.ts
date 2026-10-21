@@ -4,7 +4,10 @@ import {
   READINESS_REQUIRED_CHECKS,
   READINESS_STAGE_IDS,
 } from "../domain/reconstructionReadinessJourneyFindings.js";
-import { reconstructionObligationLedgerClosureDigest } from "../domain/reconstructionObligationLedgerIntegrity.js";
+import {
+  reconstructionObligationLedgerClosureDigest,
+  summarizeReconstructionObligations,
+} from "../domain/reconstructionObligationLedgerIntegrity.js";
 import type { ReconstructionObligationLedger } from "../domain/reconstructionObligationLedgerSchemas.js";
 import type { ReconstructionReadinessInput } from "../domain/reconstructionReadinessSchemas.js";
 
@@ -43,59 +46,16 @@ const FIXTURES = [
   "incomplete-reconstruction",
   "broken-runtime",
 ] as const;
-const STATUSES = [
-  "unowned",
-  "characterized",
-  "implemented",
-  "verified",
-  "contradicted",
-  "blocked",
-  "out-of-scope",
-  "unknown",
-] as const;
-const LAYERS = [
-  "cli",
-  "protocol",
-  "electron",
-  "persistence",
-  "process",
-  "runtime",
-  "packaging",
-  "native-abi",
-  "application",
-  "other",
-] as const;
-const EVIDENCE_STATES = [
-  "candidate",
-  "observed",
-  "reviewed",
-  "unknown",
-] as const;
 const READINESS_OBLIGATION_LEDGER = (() => {
-  const ledger: Omit<ReconstructionObligationLedger, "closure_digest"> = {
+  const facts: Omit<
+    ReconstructionObligationLedger,
+    "closure_digest" | "summary"
+  > = {
     schema: "ReconstructionObligationLedger",
     ledger_id: `rol_${HASH}`,
     status: "ready",
     coverage: {
       status: "complete",
-    },
-    summary: {
-      total: 1,
-      required: 1,
-      verified: 1,
-      required_open: 0,
-      by_status: STATUSES.map((key) => ({
-        key,
-        count: key === "verified" ? 1 : 0,
-      })),
-      by_application_layer: LAYERS.map((key) => ({
-        key,
-        count: key === "process" ? 1 : 0,
-      })),
-      by_evidence_authority: EVIDENCE_STATES.map((key) => ({
-        key,
-        count: key === "observed" ? 1 : 0,
-      })),
     },
     reports: {
       missing_owner_obligation_ids: [],
@@ -188,6 +148,10 @@ const READINESS_OBLIGATION_LEDGER = (() => {
     ],
     evidence_links: [EVIDENCE_ID],
     limitations: [],
+  };
+  const ledger = {
+    ...facts,
+    summary: summarizeReconstructionObligations(facts.obligations),
   };
   return {
     ...ledger,

@@ -14,7 +14,37 @@ import { err, ok, type Result } from "../domain/result.js";
 const MATCHING_DEADLINE_MS = 5_000;
 const WORKER_HEAP_MIB = 128;
 /** Shared capability text for the supervised ECMAScript matching boundary. */
-export const REGEX_MATCHING_LIMITATION = `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${String(MATCHING_DEADLINE_MS / 1000)}-second matching deadline; matching failure leaves the service available.`;
+export const REGEX_MATCHING_LIMITATION = `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${String(MATCHING_DEADLINE_MS / 1000)}-second matching deadline and a ${String(WORKER_HEAP_MIB)} MiB worker heap. This release has no runtime override for either cap; matching failure leaves the service available.`;
+
+/** Fixed regex deadline. The worker heap and this deadline are separate caps. */
+export const regexMatchingDeadlineError = (
+  operation: string,
+): AnalysisResourceConstraintError =>
+  new AnalysisResourceConstraintError(
+    operation,
+    "cpu",
+    `Regex matching exceeded its supervised deadline of ${String(MATCHING_DEADLINE_MS)} ms. This release has no runtime override. The service remains available.`,
+    { matching_deadline_ms: MATCHING_DEADLINE_MS },
+    {
+      remediationAction: `The regex matching deadline is ${String(MATCHING_DEADLINE_MS)} ms and this release has no runtime override. Simplify the ECMAScript Unicode regex or use literal mode, then retry in the same session.`,
+    },
+  );
+
+/** Fixed regex worker heap. Inherited limits and host memory do not raise it. */
+export const regexWorkerHeapError = (
+  operation: string,
+  cause: Error,
+): AnalysisResourceConstraintError =>
+  new AnalysisResourceConstraintError(
+    operation,
+    "memory",
+    `Regex worker exhausted its ${String(WORKER_HEAP_MIB)} MiB heap budget. This release has no runtime override.`,
+    { worker_heap_mib: WORKER_HEAP_MIB },
+    {
+      cause,
+      remediationAction: `The regex worker heap is ${String(WORKER_HEAP_MIB)} MiB and this release has no runtime override. Inherited limits and additional host memory do not raise it. Simplify the pattern or use literal mode.`,
+    },
+  );
 const replySchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("matched"),
@@ -84,21 +114,7 @@ export const matchRegexValues = async (input: {
       const onAbort = () =>
         finish(err(new AnalysisCancelledError(input.operation)));
       const timer = setTimeout(
-        () =>
-          finish(
-            err(
-              new AnalysisResourceConstraintError(
-                input.operation,
-                "cpu",
-                "Regex matching exceeded its supervised deadline; the service remains available.",
-                { matching_deadline_ms: MATCHING_DEADLINE_MS },
-                {
-                  remediationAction:
-                    "Simplify the ECMAScript Unicode regex or use literal mode, then retry in the same session.",
-                },
-              ),
-            ),
-          ),
+        () => finish(err(regexMatchingDeadlineError(input.operation))),
         MATCHING_DEADLINE_MS,
       );
       input.signal?.addEventListener("abort", onAbort, { once: true });
@@ -144,13 +160,7 @@ export const matchRegexValues = async (input: {
         finish(
           err(
             cause.code === "ERR_WORKER_OUT_OF_MEMORY"
-              ? new AnalysisResourceConstraintError(
-                  input.operation,
-                  "memory",
-                  "Regex worker exhausted its heap budget",
-                  { worker_heap_mib: WORKER_HEAP_MIB },
-                  { cause },
-                )
+              ? regexWorkerHeapError(input.operation, cause)
               : new AnalysisOutputError(
                   input.operation,
                   `Regex worker failed: ${cause.message}`,

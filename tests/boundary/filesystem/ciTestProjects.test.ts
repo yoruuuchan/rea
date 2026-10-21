@@ -141,3 +141,44 @@ describe("canonical test-project ownership", () => {
     },
   );
 });
+
+describe("test module isolation", () => {
+  it("keeps module mocks out of projects that share one module graph", async () => {
+    // A mock registered after another file in the same worker loaded the
+    // module never applies, so the test's outcome depends on file scheduling.
+    const root = await createTestTempDirectory("rea-vitest-mock-isolation-");
+    const script = join(root, "project-isolation.mjs");
+    await writeFile(
+      script,
+      `
+      import config from ${JSON.stringify(pathToFileURL(join(repository, "vitest.config.ts")).href)};
+      console.log(JSON.stringify(Object.fromEntries(
+        config.test.projects.map(project => [project.test.name, project.test.isolate !== false]),
+      )));
+    `,
+    );
+    const result = await execFileOutput(
+      process.execPath,
+      ["--import", "tsx", script],
+      {
+        cwd: repository,
+        timeout: 10_000,
+        maxBuffer: 64 * 1024,
+        stopSignal: "SIGTERM",
+      },
+    );
+    const isolated = JSON.parse(result.stdout) as Record<string, boolean>;
+    const mocking = execFileSync(
+      "git",
+      ["grep", "-l", "-E", String.raw`vi\.(mock|doMock)\(`, "--", "*.test.ts"],
+      { cwd: repository, encoding: "utf8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    expect(mocking.length).toBeGreaterThan(0);
+    expect(
+      mocking.filter((file) => isolated[projectForTest(file).name] !== true),
+    ).toEqual([]);
+  });
+});

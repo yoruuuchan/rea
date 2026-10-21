@@ -14,7 +14,10 @@ interface PathInputCase {
   readonly invalid: Readonly<Record<string, unknown>>;
 }
 
-const createMcp = async (firmwareCalls: string[]) => {
+const createMcp = async (
+  firmwareCalls: string[],
+  profile?: "full" | "compact",
+) => {
   const session = createTestBinarySession(() => {
     throw new Error("Invalid path input must not acquire a binary provider");
   });
@@ -22,6 +25,7 @@ const createMcp = async (firmwareCalls: string[]) => {
     { kind: "session", session },
     {
       logger: silentLogger,
+      environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: profile },
       firmwareAnalysis: {
         execute: async (request) => {
           firmwareCalls.push(request.operation);
@@ -174,9 +178,9 @@ const inputCases = (
   ];
 };
 
-it("advertises host-absolute path constraints after SDK schema conversion", async () => {
+it("advertises full host-absolute path constraints after SDK schema conversion", async () => {
   const firmwareCalls: string[] = [];
-  const { client, close } = await createMcp(firmwareCalls);
+  const { client, close } = await createMcp(firmwareCalls, "full");
   try {
     const listed = await client.listTools();
     const ajv = new Ajv2020({ strict: false, validateFormats: false });

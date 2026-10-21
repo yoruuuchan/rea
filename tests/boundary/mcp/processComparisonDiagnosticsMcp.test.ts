@@ -7,7 +7,10 @@ import { expect, it, onTestFinished } from "vitest";
 
 import { compareProcessEvidenceFiles } from "../../../src/application/process/ProcessCli.js";
 import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
-import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
+import {
+  EMPTY_PROCESS_CAPTURE_EXAMPLE,
+  FINALIZED_PROCESS_CAPTURE_EXAMPLE,
+} from "../../../src/domain/process/processCaptureExample.js";
 import {
   capture,
   partialSpecification,
@@ -517,5 +520,55 @@ it("names the side and constraint when Evidence is not a usable capture", async 
   expect(await compareProcessEvidenceFiles(leftPath, rightPath)).toMatchObject({
     category: "invalid_input",
     message: expect.stringContaining("Capture evidence is malformed (at "),
+  });
+});
+
+it("keeps structural capture issues alongside semantic ones through MCP and the CLI", async () => {
+  const client = await connect();
+  const capture = captureEvidence("left");
+  const {
+    manifest: { completed_at: _completedAt, ...manifest },
+    exit,
+    ...rest
+  } = FINALIZED_PROCESS_CAPTURE_EXAMPLE;
+  const mixed = createEvidence(undefined, PROCESS_PROVIDER, {
+    predicateType: "rea.process-capture",
+    operation: "capture_process_scenario",
+    parameters: {},
+    result: jsonValueSchema.parse({
+      ...rest,
+      manifest,
+      exit: {
+        ...exit,
+        finalization: {
+          ...exit.finalization,
+          signals: [
+            { ...exit.finalization.signals[0], reason: "not allowed here" },
+          ],
+        },
+      },
+    }),
+  });
+  const described =
+    "(at manifest.completed_at: Invalid input: expected string, received undefined (1 more issues))";
+
+  const response = await client.callTool({
+    name: "compare_process_captures",
+    arguments: { left: capture, right: mixed },
+  });
+  expect(parseMcpToolError(response)).toMatchObject({
+    error: {
+      code: "evidence_integrity_mismatch",
+      message: expect.stringContaining(
+        `The right Evidence has an invalid process capture result ${described}`,
+      ),
+    },
+  });
+  expect(await compareViaCli(capture, mixed)).toMatchObject({
+    code: "invalid_request",
+    category: "invalid_input",
+    message: expect.stringContaining(
+      `Capture evidence is malformed ${described}`,
+    ),
   });
 });

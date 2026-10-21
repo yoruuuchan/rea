@@ -369,7 +369,38 @@ process.stdout.write(JSON.stringify({executable:basename(process.execPath),abiVe
           "-NoProfile",
           "-NonInteractive",
           "-Command",
-          "$ErrorActionPreference='Stop'; $p=$env:REA_TEST_PRIVATE_RUNTIME_PATH; $a=Get-Acl -LiteralPath $p; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User; [IO.File]::SetAttributes($p,[IO.FileAttributes]([int][IO.File]::GetAttributes($p) -bor 1)); @{protected=$a.AreAccessRulesProtected; ownerMatchesUser=($a.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq $u.Value); trusteesOnlyUserAndSystem=(@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object {$_.IdentityReference.Value -ne $u.Value -and $_.IdentityReference.Value -ne 'S-1-5-18'}).Count -eq 0); count=@($a.Access).Count; rootReadonly=(([int][IO.File]::GetAttributes($p) -band 1) -ne 0)} | ConvertTo-Json -Compress",
+          String.raw`
+            $ErrorActionPreference = 'Stop'
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            function Trace-AclPhase([string]$phase) {
+              [Console]::Error.WriteLine('private-runtime-acl: ' + $phase + ' ' + $clock.ElapsedMilliseconds + 'ms')
+            }
+            Trace-AclPhase 'started'
+            $p = $env:REA_TEST_PRIVATE_RUNTIME_PATH
+            $a = Get-Acl -LiteralPath $p
+            Trace-AclPhase 'acl-read'
+            $u = [Security.Principal.WindowsIdentity]::GetCurrent().User
+            $owner = $a.GetOwner([Security.Principal.SecurityIdentifier])
+            Trace-AclPhase 'owner-sid-read'
+            # Guard the independent observer against accidental account-name resolution.
+            # Access is a PowerShell convenience property that requests NTAccount rules.
+            Update-TypeData -TypeName ($a.GetType().FullName) -MemberType ScriptProperty -MemberName Access -Value { throw 'ACL observation must use SID rules' } -Force
+            if ($a.PSObject.Properties['Access'].MemberType -ne [Management.Automation.PSMemberTypes]::ScriptProperty) {
+              throw 'ACL observation Access guard was not installed'
+            }
+            $rules = @($a.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            Trace-AclPhase 'rule-sids-read'
+            [IO.File]::SetAttributes($p, [IO.FileAttributes]([int][IO.File]::GetAttributes($p) -bor 1))
+            Trace-AclPhase 'readonly-set'
+            @{
+              protected = $a.AreAccessRulesProtected
+              ownerMatchesUser = ($owner.Value -eq $u.Value)
+              trusteesOnlyUserAndSystem = (@($rules | Where-Object { $_.IdentityReference.Value -ne $u.Value -and $_.IdentityReference.Value -ne 'S-1-5-18' }).Count -eq 0)
+              count = $rules.Count
+              rootReadonly = (([int][IO.File]::GetAttributes($p) -band 1) -ne 0)
+            } | ConvertTo-Json -Compress
+            Trace-AclPhase 'complete'
+          `,
         ],
         {
           encoding: "utf8",

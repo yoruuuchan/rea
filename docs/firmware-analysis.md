@@ -183,6 +183,9 @@ tree semantics, vulnerability scanning, emulation or hardware runtime capture.
   120 CPU seconds and zero core-dump allowance through `prlimit`.
 - JSON reports: at most **8 MiB** and valid UTF-8; malformed encoding and
   oversized reports fail without repairing or truncating producer data.
+  Exit status 0 is not an empty result: a missing, empty, malformed or
+  oversized report fails with `unreadable_output`, its `report_state`, the
+  command, exit status and captured output. REA does not retry automatically.
   Diagnostic output is bounded with exact captured byte counts.
 - Default staging budget: **256 MiB** and **10,000 entries**, configurable using
   `max_output_bytes` / `max_output_files` (CLI `--max-output-bytes` /

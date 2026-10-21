@@ -18,6 +18,18 @@ const CONSUMER =
 const electronOf = (source: string) =>
   analyzeJavaScriptStaticSource(source).electron;
 
+const expectUnresolved = (source: string) => {
+  const electron = electronOf(source);
+  expect(electron.browser_windows).toEqual([]);
+  // Only direct observations come from this identity; the separate
+  // wrapper-substitution path keeps its own resolution basis.
+  expect(
+    electron.ipc.filter(
+      ({ resolution_basis: basis }) => basis !== "wrapper-substitution",
+    ),
+  ).toEqual([]);
+};
+
 describe("Electron identity through Webpack externals", () => {
   it("follows the default-export getter produced by webpack n.n", () => {
     const source = bootstrap(
@@ -142,15 +154,7 @@ describe("Electron identity through Webpack externals", () => {
       bootstrap(EXTERNAL, CONSUMER.replace("n(45840)", "n(45841)")),
     ],
   ])("keeps %s unresolved", (_name, source) => {
-    const electron = electronOf(source);
-    expect(electron.browser_windows).toEqual([]);
-    // Only direct observations come from this identity; the separate
-    // wrapper-substitution path keeps its own resolution basis.
-    expect(
-      electron.ipc.filter(
-        ({ resolution_basis: basis }) => basis !== "wrapper-substitution",
-      ),
-    ).toEqual([]);
+    expectUnresolved(source);
   });
 });
 
@@ -214,15 +218,7 @@ describe("Webpack externals with a tampered runtime", () => {
       ),
     ],
   ])("keeps %s unresolved", (_name, source) => {
-    const electron = electronOf(source);
-    expect(electron.browser_windows).toEqual([]);
-    // Only direct observations come from this identity; the separate
-    // wrapper-substitution path keeps its own resolution basis.
-    expect(
-      electron.ipc.filter(
-        ({ resolution_basis: basis }) => basis !== "wrapper-substitution",
-      ),
-    ).toEqual([]);
+    expectUnresolved(source);
   });
 });
 
@@ -287,15 +283,7 @@ describe("Webpack externals with a tampered loader or module object", () => {
       ),
     ],
   ])("keeps %s unresolved", (_name, source) => {
-    const electron = electronOf(source);
-    expect(electron.browser_windows).toEqual([]);
-    // Only direct observations come from this identity; the separate
-    // wrapper-substitution path keeps its own resolution basis.
-    expect(
-      electron.ipc.filter(
-        ({ resolution_basis: basis }) => basis !== "wrapper-substitution",
-      ),
-    ).toEqual([]);
+    expectUnresolved(source);
   });
 
   it.each([
@@ -326,6 +314,63 @@ describe("Webpack externals with a tampered loader or module object", () => {
       ),
     ],
   ])("still resolves with %s", (_name, source) => {
+    expect(electronOf(source).browser_windows).toMatchObject([
+      { preload_path: "./preload.js" },
+    ]);
+  });
+});
+
+describe("Webpack externals through the loader's completion paths", () => {
+  const MISS_RETURN = "return m[t](o,o.exports,n),o.exports}";
+  const missPath = (tail: string) =>
+    bootstrap(EXTERNAL, CONSUMER).replace(MISS_RETURN, tail);
+
+  // Falling off the end returns undefined, not the dispatched exports.
+  it.each([
+    ["returns only cached exports", missPath("m[t](o,o.exports,n)}")],
+    [
+      "has no returns",
+      bootstrap(EXTERNAL, CONSUMER).replace(
+        `var r=c[t];if(void 0!==r)return r.exports;var o=c[t]={exports:{}};${MISS_RETURN}`,
+        "var o=c[t]={exports:{}};m[t](o,o.exports,n)}",
+      ),
+    ],
+    [
+      "returns from one branch",
+      missPath("m[t](o,o.exports,n);if(t)return o.exports}"),
+    ],
+    [
+      "returns from a try whose catch falls through",
+      missPath("try{return m[t](o,o.exports,n),o.exports}catch(x){}}"),
+    ],
+    [
+      "falls through a catch past a completing finally",
+      missPath(
+        "try{return m[t](o,o.exports,n),o.exports}catch(x){}finally{t}}",
+      ),
+    ],
+    [
+      "returns another value from a finally",
+      missPath(
+        "try{return m[t](o,o.exports,n),o.exports}finally{return local}}",
+      ),
+    ],
+  ])("keeps a loader that %s unresolved", (_name, source) => {
+    expectUnresolved(source);
+  });
+
+  it.each([
+    [
+      "returns exports from both branches",
+      missPath(
+        "m[t](o,o.exports,n);if(t)return o.exports;else return o.exports}",
+      ),
+    ],
+    [
+      "returns exports from a finally after a falling-through catch",
+      missPath("try{m[t](o,o.exports,n)}catch(x){}finally{return o.exports}}"),
+    ],
+  ])("still resolves a loader that %s", (_name, source) => {
     expect(electronOf(source).browser_windows).toMatchObject([
       { preload_path: "./preload.js" },
     ]);

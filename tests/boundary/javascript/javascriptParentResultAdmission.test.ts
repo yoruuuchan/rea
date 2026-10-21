@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { afterAll, expect, it, vi } from "vitest";
 
+const heapObservation = vi.hoisted(() => ({ reclaimedBytes: 0 }));
+
 // Give the parent a stable 64 MiB result envelope after its transfer reserve.
 // The child analyzer remains a real separately owned Node process with its
 // normal heap and real transfer files/descriptors.
@@ -8,10 +10,17 @@ vi.mock("node:v8", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:v8")>();
   return {
     ...actual,
-    getHeapStatistics: () => ({
-      ...actual.getHeapStatistics(),
-      heap_size_limit: process.memoryUsage().heapUsed + 320 * 1024 * 1024,
-    }),
+    getHeapStatistics: () => {
+      const snapshot = actual.getHeapStatistics();
+      // A separate later memoryUsage() read can observe a collection. Keep the
+      // limit and usage in this earlier snapshot consistent with each other.
+      const used = snapshot.used_heap_size + heapObservation.reclaimedBytes;
+      return {
+        ...snapshot,
+        used_heap_size: used,
+        heap_size_limit: used + 320 * 1024 * 1024,
+      };
+    },
   };
 });
 
@@ -24,7 +33,8 @@ afterAll(() => {
   vi.resetModules();
 });
 
-it("retains module facts and declines only the graph when its real transfer exceeds parent admission", async () => {
+async function verifyParentAdmission(reclaimedBytes: number) {
+  heapObservation.reclaimedBytes = reclaimedBytes;
   const methodsCount = 600;
   const text = Array.from(
     { length: methodsCount },
@@ -74,10 +84,7 @@ it("retains module facts and declines only the graph when its real transfer exce
     const limits = error.reportedLimits;
     if (limits === null)
       throw new Error("Parent admission omitted its measured limits");
-    expect(limits.parent_result_budget_bytes).toBeLessThanOrEqual(
-      64 * 1024 * 1024,
-    );
-    expect(limits.parent_result_budget_bytes).toBeGreaterThan(0);
+    expect(limits.parent_result_budget_bytes).toBe(64 * 1024 * 1024);
     const moduleEstimate = limits.module_retention_estimate_bytes;
     const graphEstimate = limits.graph_retention_estimate_bytes;
     const available = limits.parent_available_result_budget_bytes;
@@ -97,4 +104,9 @@ it("retains module facts and declines only the graph when its real transfer exce
   } finally {
     await worker.close();
   }
-});
+}
+
+it.each([0, 1024 * 1024])(
+  "retains module facts and declines only the graph with %i bytes reclaimed between heap observations",
+  verifyParentAdmission,
+);

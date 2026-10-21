@@ -61,6 +61,8 @@ export const registerApktoolCommands = (
         apktoolInputSchemas.decode_android_resources.shape.locales.describe(
           "Repeat to project multiple localized string tables, e.g. --locales de --locales pt-BR",
         ),
+      decodeTimeoutMs:
+        apktoolInputSchemas.decode_android_resources.shape.decode_timeout_ms,
       strings: z
         .boolean()
         .default(
@@ -81,6 +83,9 @@ export const registerApktoolCommands = (
           : { string_tables_only: options["string-tables-only"] }),
         ...(options.locale === undefined ? {} : { locale: options.locale }),
         ...(options.locales === undefined ? {} : { locales: options.locales }),
+        ...(options.decodeTimeoutMs === undefined
+          ? {}
+          : { decode_timeout_ms: options.decodeTimeoutMs }),
       }),
   });
 };

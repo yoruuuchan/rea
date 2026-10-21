@@ -5,6 +5,9 @@ import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarnes
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { advertisedMcpToolSchemas } from "../../fixtures/advertisedMcpTool.js";
+import { advertisedInputJsonSchema } from "../../../src/contracts/toolSchemaMetadata.js";
+import { toolContract } from "../../../src/contracts/toolContracts.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import {
   analysisViewJavaScriptAnalysis,
   analysisViewJavaScriptEvidence,
@@ -79,12 +82,18 @@ it("pages selected real filesystem observations with shared identities and porta
     "inspect_analysis_view",
   );
   expect(ajv.validate(inputSchema, { source, view: query })).toBe(true);
-  expect(
-    ajv.validate(inputSchema, {
-      source,
-      view: { ...query, property_keys: [""] },
-    }),
-  ).toBe(false);
+  const malformed = { source, view: { ...query, property_keys: [""] } };
+  const fullInputSchema = advertisedInputJsonSchema(
+    toolContract("inspect_analysis_view"),
+  );
+  expect(ajv.validate(fullInputSchema, malformed)).toBe(false);
+  const rejected = await harness.client.callTool({
+    name: "inspect_analysis_view",
+    arguments: malformed,
+  });
+  expect(parseMcpToolError(rejected)).toMatchObject({
+    error: { code: "invalid_request", category: "invalid_input" },
+  });
   const full = await facts(harness, source, query);
   expect(ajv.validate(outputSchema, full.wire.structuredContent)).toBe(true);
   const portable = await facts(

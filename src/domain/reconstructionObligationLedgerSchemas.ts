@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { STABLE_IDENTIFIER_PATTERN } from "./stringPatterns.js";
 
+import { evidenceAuthoritySchema } from "./evidence.js";
 import { evidenceBundleSchema } from "./evidenceBundle.js";
 import { digestSchema } from "./../domain/digests.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
@@ -91,6 +92,13 @@ export const obligationOriginalAuthoritySchema = z.enum([
   "external",
 ]);
 
+const obligationEvidenceStateSchema = z.enum([
+  "candidate",
+  "observed",
+  "reviewed",
+  "unknown",
+]);
+
 const obligationTargetSchema = z.strictObject({
   artifact_sha256: digestSchema.nullable(),
   application_node_id: z
@@ -106,14 +114,8 @@ const obligationTargetSchema = z.strictObject({
 
 const authorityReferenceSchema = z.strictObject({
   evidence_id: evidenceIdSchema,
-  authority: z.enum([
-    "shipped-artifact",
-    "controlled-replay",
-    "historical-reference",
-    "external-service",
-    "analyst-inference",
-  ]),
-  state: z.enum(["candidate", "observed", "reviewed", "unknown"]),
+  authority: evidenceAuthoritySchema,
+  state: obligationEvidenceStateSchema,
   location: textSchema,
 });
 
@@ -235,7 +237,7 @@ export const reconstructionObligationSchema = z.strictObject({
   family: textSchema,
   target: obligationTargetSchema,
   authority_references: z.array(authorityReferenceSchema).min(1),
-  source_state: z.enum(["candidate", "observed", "reviewed", "unknown"]),
+  source_state: obligationEvidenceStateSchema,
   observed_cases: z.array(observedCaseSchema),
   required: z.boolean(),
   required_case_kinds: z.array(obligationCaseKindSchema).min(1),
@@ -295,7 +297,8 @@ const obligationSummariesMatch = (
   countEntriesMatch(
     actual.by_evidence_authority,
     expected.by_evidence_authority,
-  );
+  ) &&
+  countEntriesMatch(actual.by_source_state, expected.by_source_state);
 
 export const reconstructionObligationLedgerSchema = z
   .strictObject({
@@ -313,8 +316,11 @@ export const reconstructionObligationLedgerSchema = z
       required_open: z.number().int().min(0),
       by_status: countBySchema(obligationStatusSchema),
       by_application_layer: countBySchema(obligationLayerSchema),
-      by_evidence_authority: countBySchema(
-        z.enum(["candidate", "observed", "reviewed", "unknown"]),
+      by_evidence_authority: countBySchema(evidenceAuthoritySchema).describe(
+        "Obligations per Evidence authority. An obligation counts once under each distinct authority among its authority_references, so counts can sum above total.",
+      ),
+      by_source_state: countBySchema(obligationEvidenceStateSchema).describe(
+        "Obligations per source_state; each obligation counts once.",
       ),
     }),
     reports: z.strictObject({

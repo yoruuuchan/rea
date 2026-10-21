@@ -435,46 +435,53 @@ it("delivers the source-map response URL through authenticated MCP Evidence", as
   ).toBe(true);
 });
 
-it("records a browser-socket endpoint redacted and reconciles its Evidence", async () => {
-  const browser = await startFakeCdpBrowser();
-  browsers.push(browser);
-  const connected = await connectBrowser();
-  const tool = (await connected.client.listTools()).tools.find(
-    ({ name }) => name === "inspect_web_page",
-  );
-  expect(tool?.inputSchema.properties?.cdp_endpoint).toMatchObject({
-    description: expect.stringContaining("/devtools/browser/ID"),
-  });
-  const inspected = await connected.client.callTool({
-    name: "inspect_web_page",
-    arguments: {
-      cdp_endpoint: browser.browserWebSocketUrl,
-      target_id: "allowed-page",
-      observation_ms: 0,
-      include_script_sources: true,
-    },
-  });
-  expect(inspected.isError).not.toBe(true);
-  expect(inspected.structuredContent).toMatchObject({
-    parameters: {
-      cdp_endpoint: browser.browserWebSocketUrl.replace(/fake$/u, "[REDACTED]"),
-    },
-  });
-  expect(JSON.stringify(inspected.structuredContent)).not.toContain(
-    "/devtools/browser/fake",
-  );
-  const reconciled = await connected.client.callTool({
-    name: "reconcile_javascript_runtime",
-    arguments: {
-      static_layers: JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE.static_layers,
-      runtime_observations: [evidenceFor(inspected.structuredContent)],
-    },
-  });
-  expect(reconciled.isError).not.toBe(true);
-  expect(reconciled.structuredContent).toMatchObject({
-    normalized_result: { summary: { runtime_scripts: 1 } },
-  });
-});
+it.each(["full", "compact"] as const)(
+  "records a browser-socket endpoint redacted and reconciles its Evidence (%s)",
+  async (profile) => {
+    const browser = await startFakeCdpBrowser();
+    browsers.push(browser);
+    const connected = await connectBrowser(profile);
+    const tool = (await connected.client.listTools()).tools.find(
+      ({ name }) => name === "inspect_web_page",
+    );
+    if (profile === "full")
+      expect(tool?.inputSchema.properties?.cdp_endpoint).toMatchObject({
+        description: expect.stringContaining("/devtools/browser/ID"),
+      });
+    const inspected = await connected.client.callTool({
+      name: "inspect_web_page",
+      arguments: {
+        cdp_endpoint: browser.browserWebSocketUrl,
+        target_id: "allowed-page",
+        observation_ms: 0,
+        include_script_sources: true,
+      },
+    });
+    expect(inspected.isError).not.toBe(true);
+    expect(inspected.structuredContent).toMatchObject({
+      parameters: {
+        cdp_endpoint: browser.browserWebSocketUrl.replace(
+          /fake$/u,
+          "[REDACTED]",
+        ),
+      },
+    });
+    expect(JSON.stringify(inspected.structuredContent)).not.toContain(
+      "/devtools/browser/fake",
+    );
+    const reconciled = await connected.client.callTool({
+      name: "reconcile_javascript_runtime",
+      arguments: {
+        static_layers: JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE.static_layers,
+        runtime_observations: [evidenceFor(inspected.structuredContent)],
+      },
+    });
+    expect(reconciled.isError).not.toBe(true);
+    expect(reconciled.structuredContent).toMatchObject({
+      normalized_result: { summary: { runtime_scripts: 1 } },
+    });
+  },
+);
 
 it("does not attach to a target outside the request's allowed origin scope", async () => {
   const browser = await startFakeCdpBrowser();
@@ -538,7 +545,7 @@ it("projects legal oversized PNG dimensions as a memory constraint", async () =>
   });
 });
 
-const connectBrowser = async () => {
+const connectBrowser = async (profile?: "full" | "compact") => {
   const session = createTestBinarySession(() => ({
     execute: () => Promise.resolve(observed(null)),
     close: () => Promise.resolve(resultOk(null)),
@@ -546,6 +553,7 @@ const connectBrowser = async () => {
   const server = createServer(
     { kind: "session", session },
     {
+      environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: profile },
       browserObservation: new CdpBrowserProvider(),
       availabilityPolicy: () => ({
         processCaptureEnabled: false,

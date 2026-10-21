@@ -143,7 +143,8 @@ export const toolFamilyCatalog = (sources) => {
   );
   if (
     familyTotal !== sources.toolContracts.TOOL_CONTRACTS.length ||
-    familyTotal !== sources.catalogIdentity.CATALOG_IDENTITY.counts.mcp_tools
+    familyTotal !==
+      sources.catalogIdentity.FULL_CATALOG_IDENTITY.counts.mcp_tools
   )
     throw new Error("Tool family inventory does not match TOOL_CONTRACTS");
   return { total: familyTotal, families };

@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-import { CATALOG_IDENTITY } from "../dist/catalogIdentity.js";
+import { toolContract } from "../dist/contracts/toolContracts.js";
 import { RECONSTRUCTION_READINESS_EXAMPLE } from "../dist/contracts/reconstructionReadinessExample.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
 import { createEvidenceBundle } from "../dist/domain/evidenceBundle.js";
@@ -52,6 +52,18 @@ const client = new Client({
 
 try {
   await client.connect(transport);
+  const catalog = await client.listTools();
+  const sessionTool = catalog.tools.find(
+    (tool) => tool.name === "binary_session",
+  );
+  assert.ok(sessionTool, "The live server must advertise binary_session");
+  const sessionReply = await client.callTool(
+    { name: "binary_session", arguments: {} },
+    { toolDefinition: sessionTool },
+  );
+  const sessionStatus = toolContract("binary_session").outputSchema.parse(
+    sessionReply.structuredContent,
+  ).result;
   const javascriptMcp = await analyzeMcp(client, javascriptPath);
   const electronMcp = await analyzeMcp(client, electronPath);
   assert.equal(
@@ -68,7 +80,8 @@ try {
   const input = structuredClone(RECONSTRUCTION_READINESS_EXAMPLE);
   input.identity.cli_version = PACKAGE_METADATA.version;
   input.identity.server_version = PACKAGE_METADATA.version;
-  input.identity.catalog_digest = CATALOG_IDENTITY.digests.combined_sha256;
+  input.identity.catalog_digest =
+    sessionStatus.server_identity.catalog.digests.combined_sha256;
   const records = [
     ...input.evidence_bundle.records,
     nativeEvidence,

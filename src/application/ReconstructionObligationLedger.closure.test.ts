@@ -1,72 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  boundProofEvidence,
   build,
   originalCases,
   processEvidence,
   proofEvidence,
+  readyProcessLedgerRequest,
   request,
   reviewedObligation,
 } from "./ReconstructionObligationLedger.fixture.js";
 import { deriveReconstructionObligationCandidates } from "./ReconstructionObligationCandidates.js";
 import { evaluateReconstructionObligationLedger } from "./ReconstructionObligationLedgerEvaluation.js";
-
-/** Build a request whose packaged-process obligation closes as ready. */
-const readyProcessLedgerRequest = () => {
-  const capture = processEvidence();
-  const initial = build(request([capture]));
-  const obligation = initial.obligations[0];
-  if (obligation === undefined) throw new Error("Expected process obligation");
-  const fixtureIds = obligation.required_case_kinds.map(
-    (caseKind) => `packaged.${caseKind}`,
-  );
-  const proof = boundProofEvidence("packaged", {
-    obligation_ids: [obligation.obligation_id],
-    fixture_ids: fixtureIds,
-    case_kinds: obligation.required_case_kinds,
-    verifier_ids: ["verifier.packaged"],
-    claim_ids: ["claim.process"],
-  });
-  const ledgerRequest = request([capture, proof], {
-    manifest: {
-      bindings: [
-        {
-          obligation_id: obligation.obligation_id,
-          owner: {
-            module_path: "src/processOwner.ts",
-            symbol: "runProcess",
-            owner_sha256: "2".repeat(64),
-          },
-          parser_type: null,
-          original_cases: originalCases(obligation, capture.evidence_id),
-          fixtures: obligation.required_case_kinds.map((caseKind) => ({
-            fixture_id: `packaged.${caseKind}`,
-            case_kind: caseKind,
-            authority: "packaged-process",
-            evidence_ids: [proof.evidence_id],
-          })),
-          verifier: {
-            verifier_id: "verifier.packaged",
-            claim_id: "claim.process",
-            command: "npm run verify:package -- process",
-            authority: "packaged-process",
-            status: "pass",
-            result_evidence_id: proof.evidence_id,
-            enumerated_obligation_ids: [obligation.obligation_id],
-            nondeterminism: {
-              mode: "partial-order",
-              specification:
-                "Startup precedes teardown; worker completion is unordered.",
-            },
-          },
-        },
-      ],
-      contradictions: [],
-    },
-  });
-  return ledgerRequest;
-};
 
 describe("reconstruction obligation ledger", () => {
   it("emits the complete deterministic ledger and closure identity", () => {

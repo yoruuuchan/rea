@@ -8,6 +8,8 @@ import { providerCapabilitySet } from "../contracts/toolOutputSchemaPrimitives.j
 import { providerCapabilitySets } from "./binary/BinarySessionStatus.js";
 import { sqliteDatabaseCapability } from "./sqlite/SqliteDatabaseCapability.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
+import { createCatalogIdentity } from "../catalogIdentity.js";
+import { compactPresentationForMcpInputSchemaProfile } from "../config/mcpInputSchemaProfile.js";
 
 /** Read target-free provider status and operation availability. */
 export const runSessionStatus = async (
@@ -33,6 +35,12 @@ export const runSessionStatus = async (
       server_identity: createServerIdentity({
         startedAt: new Date().toISOString(),
         commandPath: CURRENT_ENTRYPOINT_PATH,
+        catalog: createCatalogIdentity(
+          compactPresentationForMcpInputSchemaProfile(
+            config.value.mcpInputSchemaProfile,
+          ),
+          config.value.mcpOutputSchemaProfile ?? "full",
+        ),
       }),
     };
   } finally {

@@ -76,6 +76,61 @@ for (const { jarConfigured, setting } of [
     },
   );
 
+cliTest.skipIf(process.platform === "win32")(
+  "distinguishes a rejected relative REA_JADX_MCP_JAR from an unset one through CLI and MCP",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-android-relative-jar-");
+    const apk = join(root, "fixture.apk");
+    await writeOrderedZip(apk, ["AndroidManifest.xml"]);
+    const run = async (environment: Record<string, string>) => {
+      const cliResult = await cli.run({
+        arguments: ["inspect-android-package", apk, "--json"],
+        environment: { REA_LOG_LEVEL: "silent", ...environment },
+        timeoutMs: 10_000,
+      });
+      expect(cliResult.exitCode).toBe(1);
+      const client = await connect({ REA_LOG_LEVEL: "silent", ...environment });
+      const response = await client.callTool({
+        name: "inspect_android_package",
+        arguments: { path: apk },
+      });
+      expect(response.isError).toBe(true);
+      expect(parseMcpToolError(response)).toEqual({ error: cliResult.json });
+      return cliResult.json as {
+        code: string;
+        message: string;
+        details: { diagnostics: Record<string, unknown> };
+      };
+    };
+
+    const relative = "./tools/jadx-headless-mcp.jar";
+    const rejected = await run({ REA_JADX_MCP_JAR: relative });
+    expect(rejected.code).toBe("capability_unavailable");
+    expect(rejected.details.diagnostics).toEqual({
+      jar_configured: true,
+      jar_path: relative,
+      path_requirement: "absolute",
+      failure_kind: "jar",
+      failure_code: "open_options_invalid",
+    });
+    expect(rejected.message).toContain(`received "${relative}"`);
+
+    const empty = await run({ REA_JADX_MCP_JAR: "" });
+    expect(empty.details.diagnostics).toMatchObject({
+      jar_configured: true,
+      jar_path: "",
+      failure_code: "open_options_invalid",
+    });
+
+    const unset = await run({});
+    expect(unset.details.diagnostics).toEqual({
+      jar_configured: false,
+      failure_kind: "jar",
+      failure_code: "not_configured",
+    });
+  },
+);
+
 cliTest.skipIf(process.platform !== "linux")(
   "preserves the missing firmware command reason through both caller paths",
   async ({ cli }) => {

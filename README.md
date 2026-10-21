@@ -90,6 +90,12 @@ Setup supports Claude Code, Codex, Cursor, Gemini CLI, Grok Build and
 [installation and setup](docs/installation.md) for provider configuration and
 manual MCP registration.
 
+MCP uses compact input schemas by default to reduce context overhead. Set
+`REA_MCP_INPUT_SCHEMA_PROFILE=full` in your MCP registration when you need the
+complete advertised field guidance and nested validation details. Both profiles
+keep the full tool set and canonical server validation. See
+"Compact input schema profile" in the MCP contracts guide.
+
 ### Ask your agent
 
 ```text

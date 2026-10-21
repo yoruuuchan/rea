@@ -33,7 +33,11 @@ import {
 } from "../artifacts/ArtifactFileOperation.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { NATIVE_MACOS_PROVIDER_IDENTITY as IDENTITY } from "./NativeMacOSProviderMetadata.js";
-import { MAX_NATIVE_PLIST_BYTES } from "./parsers/plist.js";
+import {
+  MAX_NATIVE_PLIST_BYTES,
+  NATIVE_PLIST_INPUT_ALLOWANCE,
+} from "./parsers/plist.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 
 /** Resolved lookup identity and selection intent, independent of file readiness. */
 export interface NativePlistSelection {
@@ -214,15 +218,25 @@ export const nativePlistFailure = (
     );
   if (cause instanceof ArtifactReaderFailure && cause.reason === "limit") {
     const resource = cause.boundary ?? "memory";
-    return new AnalysisResourceConstraintError(
-      "inspect_plist",
-      resource,
-      cause.message,
-      resource === "file-size"
-        ? { maximum_input_bytes: MAX_NATIVE_PLIST_BYTES }
-        : null,
-      { cause, capturedOutput, retryable: false },
-    );
+    return resource === "file-size"
+      ? new AnalysisResourceConstraintError(
+          "inspect_plist",
+          resource,
+          cause.message,
+          { maximum_input_bytes: MAX_NATIVE_PLIST_BYTES },
+          {
+            cause,
+            capturedOutput,
+            ...fixedAllowanceOptions(NATIVE_PLIST_INPUT_ALLOWANCE, "input"),
+          },
+        )
+      : new AnalysisResourceConstraintError(
+          "inspect_plist",
+          resource,
+          cause.message,
+          null,
+          { cause, capturedOutput, retryable: false },
+        );
   }
   if (selection === undefined)
     return new ProviderAdapterError(IDENTITY.id, "inspect_plist", {

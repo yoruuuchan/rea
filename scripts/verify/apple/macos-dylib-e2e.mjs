@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import {
   artifactCliEvidence,
   artifactMcpResult,
+  artifactMcpCall,
   withArtifactMcp,
 } from "../../lib/artifact-e2e.mjs";
 
@@ -180,7 +181,7 @@ export async function verifyDylibResolution(app) {
       await artifactMcpResult(client, "trace_dylib_resolution"),
       trace,
     );
-    const invalid = await client.callTool({
+    const invalid = await artifactMcpCall(client, {
       name: "trace_dylib_resolution",
       arguments: { roots: ["../outside"] },
     });

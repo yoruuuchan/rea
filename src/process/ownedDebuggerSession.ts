@@ -233,7 +233,7 @@ export const stopOwnedDebuggerProcess = async (
     if (detached === undefined)
       return {
         status: "incomplete",
-        reason: `Owned ${debuggerName} inferior detach was not verified within ${DETACH_TIMEOUT_MS} ms.`,
+        reason: `Owned ${debuggerName} inferior detach was not verified within ${String(DETACH_TIMEOUT_MS)} ms. This release has no runtime override.`,
       };
     if (!isVerifiedDetachResult(detached)) {
       detachOutcomes.set(session, "unconfirmed");

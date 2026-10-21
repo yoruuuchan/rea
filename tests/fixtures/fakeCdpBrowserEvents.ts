@@ -78,15 +78,18 @@ const emitMainWebMcpTools = (
             ? options.webMcpConsequential
             : true,
         },
-        stackTrace: {
-          callFrames: [
-            {
-              url: `http://127.0.0.1:${String(port)}/app.js?token=tool-source-secret`,
-              lineNumber: 12,
-              columnNumber: 4,
-            },
-          ],
-        },
+        stackTrace:
+          options.webMcpStackTrace !== undefined
+            ? options.webMcpStackTrace(`http://127.0.0.1:${String(port)}`)
+            : {
+                callFrames: [
+                  {
+                    url: `http://127.0.0.1:${String(port)}/app.js?token=tool-source-secret`,
+                    lineNumber: 12,
+                    columnNumber: 4,
+                  },
+                ],
+              },
       },
       {
         name: "private_tool",

@@ -4,6 +4,67 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { closeVerifierResources } from "./verifier-cleanup.mjs";
+
+// REA registers process-static tool contracts. Bind their parsed definitions to
+// the SDK's negotiated connection identity, including when a Client reconnects.
+const toolBindings = new WeakMap();
+
+const advertisedTool = async (client, name) => {
+  const connection = client.getServerVersion();
+  assert.ok(connection, "MCP must be initialized before binding tool schemas");
+  let binding = toolBindings.get(client);
+  if (binding?.connection !== connection) {
+    binding = {
+      connection,
+      definitions: client.listTools().then(({ tools }) => {
+        const definitions = new Map();
+        for (const tool of tools) {
+          assert.ok(
+            !definitions.has(tool.name),
+            `Duplicate MCP tool: ${tool.name}`,
+          );
+          definitions.set(tool.name, tool);
+        }
+        return definitions;
+      }),
+    };
+    toolBindings.set(client, binding);
+  }
+  let definitions;
+  try {
+    definitions = await binding.definitions;
+    assert.equal(
+      client.getServerVersion(),
+      connection,
+      "MCP connection changed while binding tool schemas",
+    );
+  } catch (cause) {
+    if (toolBindings.get(client) === binding) toolBindings.delete(client);
+    throw cause;
+  }
+  const tool = definitions.get(name);
+  assert.ok(tool, `MCP catalog did not advertise ${name}`);
+  return tool;
+};
+
+/** Call an advertised tool with SDK output validation of its actual schema. */
+export async function artifactMcpCall(client, parameters, options = {}) {
+  options.signal?.throwIfAborted();
+  assert.equal(
+    options.toolDefinition,
+    undefined,
+    "Artifact verification owns the advertised schema; pass request options only",
+  );
+  const toolDefinition = await advertisedTool(client, parameters.name);
+  assert.notEqual(
+    toolDefinition.outputSchema,
+    undefined,
+    `MCP tool omitted its output schema: ${parameters.name}`,
+  );
+  options.signal?.throwIfAborted();
+  return client.callTool(parameters, { ...options, toolDefinition });
+}
 
 const environment = () => {
   const compileCache =
@@ -66,9 +127,10 @@ const withOpenedArtifactMcp = async (target, openTool, verify) => {
     stderr: "pipe",
   });
   const client = new Client({ name: "artifact-real-e2e", version: "1" });
+  let failure;
   try {
     await client.connect(transport);
-    const opened = await client.callTool({
+    const opened = await artifactMcpCall(client, {
       name: openTool,
       arguments: { path: target },
     });
@@ -76,9 +138,15 @@ const withOpenedArtifactMcp = async (target, openTool, verify) => {
     if (openTool === "open_bundle_resources")
       assert.equal(opened.structuredContent?.result?.caller_path, target);
     await verify(client);
+  } catch (cause) {
+    failure = cause;
+    throw cause;
   } finally {
-    await client.close();
-    await transport.close();
+    toolBindings.delete(client);
+    await closeVerifierResources(
+      [() => client.close(), () => transport.close()],
+      failure,
+    );
   }
 };
 
@@ -94,7 +162,10 @@ export async function withBundleResourcesMcp(target, verify) {
 
 /** Require a successful structured MCP tool result rather than its text rendering. */
 export async function artifactMcpResult(client, name, arguments_ = {}) {
-  const result = await client.callTool({ name, arguments: arguments_ });
+  const result = await artifactMcpCall(client, {
+    name,
+    arguments: arguments_,
+  });
   assert.notEqual(result.isError, true, JSON.stringify(result));
   assert.ok(
     result.structuredContent?.normalized_result,

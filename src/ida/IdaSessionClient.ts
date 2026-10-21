@@ -14,6 +14,7 @@ import {
   AnalysisInputError,
   AnalysisTimeoutError,
   AnalysisResourceConstraintError,
+  resourceConstraintRecovery,
 } from "../domain/analysisErrorCore.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
@@ -530,33 +531,35 @@ export class IdaSessionClient implements AnalysisClient {
         ...(cause.userMessage === undefined
           ? {}
           : { userMessage: cause.userMessage }),
-        ...(cause.remediationAction === undefined
-          ? {}
-          : { remediationAction: cause.remediationAction }),
         diagnostics: {
           ...cause.diagnostics,
           startup_operation: cause.operation,
         },
       };
+      const action =
+        cause.remediationAction === undefined
+          ? {}
+          : { remediationAction: cause.remediationAction };
       // Startup is shared, but each accepted operation owns its attribution.
       // Keep the original cached failure unchanged for later callers.
       const failure =
         cause instanceof AnalysisTimeoutError
-          ? new AnalysisTimeoutError(operation, cause.timeoutMs, options)
+          ? new AnalysisTimeoutError(operation, cause.timeoutMs, {
+              ...options,
+              ...action,
+            })
           : cause instanceof AnalysisResourceConstraintError
             ? new AnalysisResourceConstraintError(
                 operation,
                 cause.resource,
                 cause.reason,
                 cause.reportedLimits,
-                {
-                  ...options,
-                  ...(cause.retryable === undefined
-                    ? {}
-                    : { retryable: cause.retryable }),
-                },
+                { ...options, ...resourceConstraintRecovery(cause) },
               )
-            : new ProviderAdapterError(cause.providerId, operation, options);
+            : new ProviderAdapterError(cause.providerId, operation, {
+                ...options,
+                ...action,
+              });
       throw failure
         .bindCleanupDependencies([cause])
         .bindCleanupResourceOwner(cause);

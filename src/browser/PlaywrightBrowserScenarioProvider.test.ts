@@ -362,6 +362,9 @@ describe("PlaywrightBrowserScenarioProvider", () => {
     expect(result.value.steps[1]?.error).toBe(
       "fixture [REDACTED] action failure",
     );
+    expect(result.value.steps[2]?.error).toBe(
+      "not executed after an earlier action failure",
+    );
     expect(session.performCalls).toBe(1);
     expect(session.closeCalls).toBe(1);
     expect(result.value.completeness.equality_eligible).toBe(false);
@@ -713,7 +716,7 @@ describe("PlaywrightBrowserScenarioProvider request cancellation", () => {
     const provider = new PlaywrightBrowserScenarioProvider(() =>
       Promise.resolve(session),
     );
-    const result = await provider.captureScenario(scenario(), {
+    const result = await provider.captureScenario(scenario({ actions: 2 }), {
       signal: controller.signal,
     });
     expect(result).toMatchObject({
@@ -724,12 +727,20 @@ describe("PlaywrightBrowserScenarioProvider request cancellation", () => {
           kind: "browser-scenario-observation",
           capture: {
             browser: { cleanup: "terminated-owned-process" },
-            steps: [{ status: "completed" }, { status: "cancelled" }],
+            steps: [
+              { status: "completed" },
+              { status: "cancelled" },
+              {
+                status: "cancelled",
+                error: "not executed after scenario request cancellation",
+              },
+            ],
           },
         },
       },
     });
     if (result.ok) throw new Error("Expected active scenario cancellation");
+    expect(session.performCalls).toBe(1);
     expect(result.error.cause).toBe(cancellationReason);
     expect(session.closeCalls).toBe(1);
   });

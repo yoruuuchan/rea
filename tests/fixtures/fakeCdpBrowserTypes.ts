@@ -102,6 +102,8 @@ export interface FakeOptions {
   readonly invalidResponseBodyBase64?: boolean;
   readonly webMcpTools?: boolean;
   readonly webMcpConsequential?: JsonValue;
+  /** Replaces the primary tool's registration stack; returning `undefined` omits it. */
+  readonly webMcpStackTrace?: (origin: string) => JsonValue | undefined;
   readonly webMcpSameUrlRegistrations?: "retain" | "remove-second";
   readonly webMcpFrameCount?: number;
   readonly webMcpSchemaPropertyCount?: number;

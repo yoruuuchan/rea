@@ -490,6 +490,80 @@ it("cancels a windowless wait action and cleans up the owned application", async
   expect(result.error.cause).toBe(reason);
 });
 
+it("records actions after a failed action as not executed and keeps the capture", async () => {
+  stubVerifiedElectronCleanup();
+  const state = {
+    windows: [],
+    metrics: [],
+    electronVersion: "44.0.0",
+    hookSnapshot: emptyHookSnapshot(),
+  };
+  vi.spyOn(electronActions, "readApplicationState").mockResolvedValue(state);
+  vi.spyOn(electronActions, "readFinalApplicationState").mockResolvedValue(
+    state,
+  );
+  const click = vi.fn(async () => {
+    throw new Error("strict mode violation");
+  });
+  const waitForTimeout = vi.fn(async () => undefined);
+  const page = { locator: () => ({ click }), waitForTimeout };
+  const application = {
+    process: () => ({ pid: 424242 }),
+    close: vi.fn(async () => undefined),
+    windows: () => [page],
+    firstWindow: async () => page,
+  };
+
+  const result = await captureWithController(
+    new AbortController(),
+    application,
+    [
+      { step_id: "fail", kind: "click", selector: "#duplicate" },
+      { step_id: "settle", kind: "wait", duration_ms: 0, window_index: 0 },
+      {
+        step_id: "link",
+        kind: "deep-link",
+        delivery: "open-url",
+        url: "rea-test://open",
+      },
+    ],
+  );
+
+  if (!result.ok) throw result.error;
+  expect(click).toHaveBeenCalledOnce();
+  expect(waitForTimeout).not.toHaveBeenCalled();
+  expect(application.close).toHaveBeenCalledOnce();
+  expect(result.value.actions).toEqual([
+    {
+      step_id: "fail",
+      kind: "click",
+      window_index: 0,
+      target: "window:0",
+      status: "failed",
+      elapsed_ms: expect.any(Number),
+      error: "strict mode violation",
+    },
+    {
+      step_id: "settle",
+      kind: "wait",
+      window_index: 0,
+      target: null,
+      status: "cancelled",
+      elapsed_ms: 0,
+      error: "not executed after an earlier action failure",
+    },
+    {
+      step_id: "link",
+      kind: "deep-link",
+      window_index: null,
+      target: null,
+      status: "cancelled",
+      elapsed_ms: 0,
+      error: "not executed after an earlier action failure",
+    },
+  ]);
+});
+
 it("cancels a pending initial state read and cleans up the owned application", async () => {
   const cleanupSpies = stubVerifiedElectronCleanup();
   const controller = new AbortController();

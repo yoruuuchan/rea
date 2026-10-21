@@ -592,7 +592,7 @@ describe("identityless exit refresh keeps later confirmation rows", () => {
     ).resolves.toMatchObject({
       cleaned: false,
       reason:
-        "process ownership could not be revalidated: exit refresh confirmation limit exceeded",
+        "process ownership could not be revalidated: the exit refresh confirmation limit of 8 reads was exceeded. This release has no runtime override.",
     });
     expect(signalGroup).not.toHaveBeenCalled();
   });
@@ -875,7 +875,8 @@ describe("identityless cleanup revalidates a group that reappears", () => {
       ),
     ).resolves.toMatchObject({
       cleaned: false,
-      reason: "owned process group 101 reappeared after revalidation",
+      reason:
+        "owned process group 101 reappeared after 2 revalidation passes. This release has no runtime override.",
     });
     expect(signalGroup.mock.calls).toEqual([[100, "SIGKILL"]]);
   });

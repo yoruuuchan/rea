@@ -27,6 +27,7 @@ import {
   createDarwinProcessRunTokenReader,
   DarwinProcessOwnershipInspectionError,
   SWIFTC_INTERRUPT,
+  swiftcCompileTimeoutRecovery,
 } from "../../../src/process/DarwinProcessRunTokenReader.js";
 import { execFileOutput } from "../../../src/process/ExecFileOutput.js";
 import {
@@ -219,7 +220,9 @@ it.skipIf(process.platform === "win32")(
       expect(failure.message).toContain(
         "(compiler result: exit code 1): module cache is not writable",
       );
-      expect(failure.message).toContain("[diagnostics truncated]");
+      expect(failure.message).toContain(
+        "[diagnostics truncated at 512 bytes; this release has no runtime override]",
+      );
       const normalized = normalizeCaptureFailure(failure, undefined);
       if (!(normalized instanceof ProcessCaptureError))
         throw new Error("Expected a normalized process capture error");
@@ -260,14 +263,18 @@ it.skipIf(process.platform === "win32")(
       compileTimeoutMs: 3_000,
     });
     try {
-      await expect(preparationFailure(reader)).resolves.toMatchObject({
-        message:
-          "macOS process ownership helper compilation failed via xcrun (compiler result: timed out after 3000 ms): error: PCH was compiled with module cache path that differs",
-        compilerOutcome: {
-          outcome: "timed_out",
-          code: "ETIMEDOUT",
-          timeoutMs: 3_000,
-        },
+      const failure = await preparationFailure(reader);
+      expect(failure.message).toContain(
+        "macOS process ownership helper compilation failed via xcrun (compiler result: timed out after 3000 ms.",
+      );
+      expect(failure.message).toContain(swiftcCompileTimeoutRecovery(3_000));
+      expect(failure.message).toContain(
+        "error: PCH was compiled with module cache path that differs",
+      );
+      expect(failure.compilerOutcome).toMatchObject({
+        outcome: "timed_out",
+        code: "ETIMEDOUT",
+        timeoutMs: 3_000,
       });
     } finally {
       await reader.close();
@@ -329,7 +336,7 @@ it.skipIf(process.platform === "win32")(
       expect(outcome.stderrBytes).toBe(601);
       expect(outcome.stderrTruncated).toBe(false);
       expect(failure.message).toContain(
-        `: ${"x".repeat(512)}… [diagnostics truncated]`,
+        `: ${"x".repeat(512)}… [diagnostics truncated at 512 bytes; this release has no runtime override]`,
       );
       const excerpt = failure.message.split("): ")[1]?.split("…")[0];
       expect(excerpt).toBe("x".repeat(512));

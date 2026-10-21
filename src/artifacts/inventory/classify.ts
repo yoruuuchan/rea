@@ -8,13 +8,14 @@ import type { OwnedFileHandle } from "../../filesystem/OwnedFileHandle.js";
 import { containsPyInstallerArchive } from "../pyinstaller/CArchiveLayout.js";
 import { classifyArtifactContent } from "./ArtifactGraphConstruction.js";
 import { abortIfNeeded } from "../ArtifactHash.js";
+import { claimsExecutableHeader } from "../../domain/binaryTarget.js";
 import { createArtifactClassificationProbe } from "../ArtifactClassificationProbe.js";
 import type { ArtifactOccurrence } from "../../domain/artifactGraph.js";
 import {
   hasZipSignature,
+  locateTrailingZipArchive,
   isZipPackageFormat,
-  zipPackageFormatForPath,
-  type ZipPackageFormat,
+  zipRootPackageFormat,
 } from "../../domain/zipPackageFormat.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import type { ArtifactResourceOwner } from "../ArtifactResourceScope.js";
@@ -188,6 +189,20 @@ const classifyRootFormat = async (
     },
     archiveBytes,
   ).format;
+  // Only bytes no other format claims may lead a located ZIP, so an
+  // executable with an appended archive keeps its executable classification.
+  if (
+    (format === "file" || format === "unknown") &&
+    !claimsExecutableHeader(evidence.prefix, archiveBytes) &&
+    (await locateTrailingZipArchive(archiveBytes, async (position, length) => {
+      abortIfNeeded(signal);
+      const bytes = Buffer.alloc(length);
+      const read = await handle.read(bytes, 0, length, position);
+      abortIfNeeded(signal);
+      return bytes.subarray(0, read.bytesRead);
+    })) !== undefined
+  )
+    return zipRootPackageFormat(lower);
   if (["elf", "pe", "mach-o", "mach-o-universal"].includes(format)) {
     const packaged = await containsPyInstallerArchive(
       handle,
@@ -242,12 +257,6 @@ const readRootFatSliceHeaders = async (
   }
   return { header, sliceHeadersByOffset };
 };
-
-/** App Pack is a verified ZIP root role; nested .app members retain their observed format. */
-const zipRootPackageFormat = (lower: string): ZipPackageFormat =>
-  lower.endsWith(".app")
-    ? "app-pack"
-    : (zipPackageFormatForPath(lower) ?? "zip");
 
 const hasKolyTrailer = async (
   handle: FileHandle,

@@ -34,13 +34,21 @@ import {
 } from "../../artifacts/apple/PlistScalars.js";
 import {
   estimateBinaryPlistExpansion,
+  MAX_BINARY_PLIST_NESTING_DEPTH,
   PropertyListDecodeBudgetFailure,
 } from "../../artifacts/apple/PropertyListDecodeBudget.js";
+import { fixedAllowanceOptions } from "../../domain/fixedAllowanceRemediation.js";
 import { hasBinaryPlistSignature } from "../../domain/apple/appleArchiveFormat.js";
 
 /** Input ceiling matches native command output; projection is bounded separately. */
 export const MAX_NATIVE_PLIST_BYTES = 64 * 1024 * 1024;
 const MAX_NATIVE_PLIST_DECODE_BYTES = 64 * 1024 * 1024;
+
+const mebibytes = (bytes: number): string =>
+  `${String(bytes / (1024 * 1024))} MiB`;
+
+/** Recovery name for the fixed source-size ceiling. */
+export const NATIVE_PLIST_INPUT_ALLOWANCE = `the fixed ${mebibytes(MAX_NATIVE_PLIST_BYTES)} native plist input allowance`;
 
 const plistObject = z.record(z.string(), z.unknown());
 
@@ -287,8 +295,18 @@ export const parsePlistBinary = (
           "inspect_plist",
           "memory",
           cause.message,
-          { maximum_decoded_bytes: MAX_NATIVE_PLIST_DECODE_BYTES },
-          { cause, retryable: false },
+          cause.kind === "depth"
+            ? { maximum_nesting_depth: MAX_BINARY_PLIST_NESTING_DEPTH }
+            : { maximum_decoded_bytes: MAX_NATIVE_PLIST_DECODE_BYTES },
+          {
+            cause,
+            ...fixedAllowanceOptions(
+              cause.kind === "depth"
+                ? `The ${String(MAX_BINARY_PLIST_NESTING_DEPTH)}-level native binary plist nesting allowance`
+                : `The ${mebibytes(MAX_NATIVE_PLIST_DECODE_BYTES)} native binary plist decode allowance`,
+              "parser",
+            ),
+          },
         ),
       );
     return err(

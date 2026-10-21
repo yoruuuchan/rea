@@ -2,9 +2,11 @@ import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import type { ValidateFunction } from "ajv";
 import { expect, it } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { buildGodotPck } from "../../fixtures/godotPck.js";
 import { ArtifactProvider } from "../../../src/artifacts/ArtifactProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -36,7 +38,28 @@ const viewValidators = async (client: Client) => {
   return { validateInput, validateOutput };
 };
 
-it("validates advertised schemas, batches connected facts and reuses one retained inventory after unlink", async () => {
+const assertInvalidNodeField = async (
+  client: Client,
+  evidenceId: string,
+  validateFullInput?: ValidateFunction,
+) => {
+  const arguments_ = {
+    source: { kind: "retained-evidence", evidence_id: evidenceId },
+    view: { kind: "inventory", collection: "nodes", fields: ["logical_path"] },
+  };
+  if (validateFullInput !== undefined)
+    expect(validateFullInput(arguments_)).toBe(false);
+  const rejected = await client.callTool({
+    name: "inspect_analysis_view",
+    arguments: arguments_,
+  });
+  expect(parseMcpToolError(rejected)).toMatchObject({
+    error: { code: "invalid_request", category: "invalid_input" },
+  });
+};
+
+const profiles = ["full", "compact"] as const;
+it.each(profiles)("reuses retained PCK inventory (%s)", async (profile) => {
   const root = await createTestTempDirectory("rea-pck-mcp-");
   const path = join(root, "game.pck");
   await writeFile(
@@ -47,7 +70,12 @@ it("validates advertised schemas, batches connected facts and reuses one retaine
     ]),
   );
   const session = createTestBinarySession(new ArtifactProvider({}));
-  const server = createServer({ kind: "session", session });
+  const server = createServer(
+    { kind: "session", session },
+    {
+      environment: { ...process.env, REA_MCP_INPUT_SCHEMA_PROFILE: profile },
+    },
+  );
   const client = new Client({ name: "pck-contract-test", version: "1" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -113,16 +141,11 @@ it("validates advertised schemas, batches connected facts and reuses one retaine
       expect(evidence.evidence_links).toContain(parent.evidence_id);
       return analysisViewResultSchema.parse(evidence.normalized_result);
     };
-    expect(
-      validateInput({
-        source,
-        view: {
-          kind: "inventory",
-          collection: "nodes",
-          fields: ["logical_path"],
-        },
-      }),
-    ).toBe(false);
+    await assertInvalidNodeField(
+      client,
+      parent.evidence_id,
+      profile === "full" ? validateInput : undefined,
+    );
     const wanted = graph.occurrences.filter((row) => row.logical_path !== ".");
     const occurrences = await view({
       collection: "occurrences",

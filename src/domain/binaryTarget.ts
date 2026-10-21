@@ -76,6 +76,22 @@ export type ExecutableMetadata =
     };
 
 /**
+ * Whether leading bytes begin an executable header family that
+ * `parseExecutableHeader` interprets, whether or not that header is valid.
+ */
+export const claimsExecutableHeader = (
+  bytes: Buffer,
+  fileSize = bytes.length,
+): boolean =>
+  (bytes.length >= 4 &&
+    (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) ||
+      [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe].includes(
+        bytes.readUInt32BE(0),
+      ))) ||
+  (bytes.length >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a) ||
+  readFatContainerHeader(bytes, fileSize).state !== "not-fat";
+
+/**
  * Parse supported executable headers without I/O. The caller supplies the host
  * architecture used for deterministic FAT Mach-O slice selection.
  */

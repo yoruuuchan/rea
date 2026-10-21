@@ -1,3 +1,4 @@
+import { jadxOperationTimeoutGuidance } from "./JadxRelease.js";
 import { JadxInterruption } from "./JadxInterruption.js";
 import { z } from "zod";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -108,6 +109,7 @@ const observeJadxFailure = (
       : timeout.aborted && cancellation.reason === timeout.reason
         ? new AnalysisTimeoutError(request.operation, timeoutMs, {
             cause: cancellation.reason,
+            ...jadxOperationTimeoutGuidance(timeoutMs),
           })
         : new AnalysisCancelledError(request.operation, {
             cause: cancellation.reason,
@@ -185,11 +187,10 @@ const presentDiagnosticFailure = (
   if (failure.kind === "cancelled")
     return new AnalysisCancelledError(failure.operation, options);
   if (failure.kind === "timeout")
-    return new AnalysisTimeoutError(
-      failure.operation,
-      failure.timeoutMs,
-      options,
-    );
+    return new AnalysisTimeoutError(failure.operation, failure.timeoutMs, {
+      ...options,
+      ...jadxOperationTimeoutGuidance(failure.timeoutMs),
+    });
   if (failure.kind === "output")
     return new AnalysisOutputError(failure.operation, failure.reason, options);
   if (failure.kind === "startup") {

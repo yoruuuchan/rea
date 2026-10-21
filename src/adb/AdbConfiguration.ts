@@ -141,7 +141,7 @@ export const inspectAdbClient = async (
         ? {}
         : { capturedOutput: adbCommandCapturedOutput(failure) }),
     };
-    if (failure?.outputTruncated === true)
+    if (failure?.outputTruncated === true) {
       throw new AnalysisResourceConstraintError(
         "inspect_adb_client",
         "memory",
@@ -150,17 +150,18 @@ export const inspectAdbClient = async (
         {
           ...options,
           ...fixedAllowanceOptions(
-            "The adb version-output capture allowance",
+            `The adb version-output capture allowance of ${String(VERSION_MAX_OUTPUT_BYTES)} bytes (this release has no runtime override)`,
             "capture",
           ),
         },
       );
+    }
     if (failure?.code === "ETIMEDOUT")
-      throw new AnalysisTimeoutError(
-        "inspect_adb_client",
-        VERSION_TIMEOUT_MS,
-        options,
-      );
+      throw new AnalysisTimeoutError("inspect_adb_client", VERSION_TIMEOUT_MS, {
+        ...options,
+        userMessage: `adb version probe reached its ${String(VERSION_TIMEOUT_MS)} ms deadline (deadlineExpired). This release has no runtime override.`,
+        remediationAction: `This ${String(VERSION_TIMEOUT_MS)} ms adb version probe has no runtime override. Allow execution, cleanup and delivery headroom in the outer MCP client deadline. Confirm outstanding work and cleanup before retrying.`,
+      });
     if (failure?.code === "ENOENT")
       throw new AdbConfigurationFailure(
         "binary_missing",

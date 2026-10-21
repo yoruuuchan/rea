@@ -1,6 +1,7 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { buildBinary } from "plist";
 import { describe, expect } from "vitest";
 import { z } from "zod";
 
@@ -244,6 +245,80 @@ describe.skipIf(process.platform !== "darwin")(
           );
         }
         expect(await readFile(path, "utf8")).toBe(source);
+      },
+    );
+  },
+);
+
+describe.skipIf(process.platform !== "darwin")(
+  "native plist CLI fixed allowances",
+  () => {
+    const hostMemoryAdvice = /available host memory|worker file-size limits/u;
+
+    cliTest(
+      "names the binary plist decode allowance instead of host memory",
+      async ({ cli }) => {
+        const root = await createTestTempDirectory("rea-plist-decode-limit-");
+        const path = join(root, "large.plist");
+        // The decode estimate exceeds 64 MiB below the 64 MiB input ceiling.
+        const source = buildBinary({
+          data: Buffer.alloc(22 * 1024 * 1024, 0x78),
+        });
+        await writeFile(path, source);
+        const runs = [];
+        for (let attempt = 0; attempt < 2; attempt += 1)
+          runs.push(
+            await cli.run({
+              arguments: ["inspect-plist", path, "--json"],
+              environment,
+            }),
+          );
+        const [first, second] = runs;
+        expect(first?.exitCode).toBe(1);
+        expect(second?.json).toEqual(first?.json);
+        expect(first?.json).toMatchObject({
+          code: "resource_constraint",
+          retryable: false,
+          remediation: {
+            action:
+              "The 64 MiB native binary plist decode allowance is a fixed allowance. Worker memory limits, inherited limits, and additional host memory do not raise it. Select another complete input within the allowance when that preserves the needed observation. Repeating the unchanged request fails the same way.",
+          },
+          details: {
+            operation: "inspect_plist",
+            resource: "memory",
+            reported_limits: { maximum_decoded_bytes: 64 * 1024 * 1024 },
+          },
+        });
+        expect(Buffer.compare(await readFile(path), source)).toBe(0);
+      },
+    );
+
+    cliTest(
+      "names the binary plist input allowance instead of worker file-size limits",
+      async ({ cli }) => {
+        const root = await createTestTempDirectory("rea-plist-input-limit-");
+        const path = join(root, "huge.plist");
+        await writeFile(path, "bplist00");
+        await truncate(path, 64 * 1024 * 1024 + 1);
+        const result = await cli.run({
+          arguments: ["inspect-plist", path, "--json"],
+          environment,
+        });
+        expect(result.exitCode).toBe(1);
+        expect(result.json).toMatchObject({
+          code: "resource_constraint",
+          retryable: false,
+          remediation: {
+            action: expect.stringContaining(
+              "Select a suitable complete artifact within the fixed 64 MiB native plist input allowance.",
+            ),
+          },
+          details: {
+            resource: "file-size",
+            reported_limits: { maximum_input_bytes: 64 * 1024 * 1024 },
+          },
+        });
+        expect(JSON.stringify(result.json)).not.toMatch(hostMemoryAdvice);
       },
     );
   },

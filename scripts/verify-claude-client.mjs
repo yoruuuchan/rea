@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
-import { CATALOG_IDENTITY } from "../dist/catalogIdentity.js";
+import { createCatalogIdentity } from "../dist/catalogIdentity.js";
+import {
+  compactPresentationForMcpInputSchemaProfile,
+  parseMcpInputSchemaProfile,
+} from "../dist/config/mcpInputSchemaProfile.js";
+import { parseMcpOutputSchemaProfile } from "../dist/config/mcpOutputSchemaProfile.js";
 import {
   TOOL_CONTRACTS,
   toolContract,
@@ -166,10 +171,21 @@ const fixture = await createAnthropicModelFixture({
           ...parsedStatus,
           result: expandMcpSessionStatus(parsedStatus.result),
         };
+        const inputProfile = parseMcpInputSchemaProfile(
+          environment.REA_MCP_INPUT_SCHEMA_PROFILE,
+        );
+        const outputProfile = parseMcpOutputSchemaProfile(
+          environment.REA_MCP_OUTPUT_SCHEMA_PROFILE,
+        );
+        assert.ok(inputProfile.ok);
+        assert.ok(outputProfile.ok);
         assert.deepEqual(
           status.result.server_identity.catalog,
-          CATALOG_IDENTITY,
-          "binary_session must return the exact compact catalog counts and digests",
+          createCatalogIdentity(
+            compactPresentationForMcpInputSchemaProfile(inputProfile.value),
+            outputProfile.value ?? "full",
+          ),
+          "binary_session must return the selected input/output profile's catalog identity",
         );
         assert.equal(
           Object.hasOwn(status.result.server_identity.catalog, "tools"),
