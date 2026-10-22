@@ -8,7 +8,7 @@ import {
 } from "./webBundleAnalyzer.js";
 import { buildCapturedWebBundleAnalysis } from "./webBundleAnalyzerResult.js";
 import { webBundleAnalysisSchema } from "./webBundleAnalysis.js";
-import { isIncludedScript } from "./webBundleAnalyzerInspection.js";
+import { isIncludedScript } from "./webBundleAnalyzerState.js";
 import { webBundleScriptAnalysisSchema } from "./webBundleScriptAnalysis.js";
 import { createWebTextArtifact } from "./webContentArtifact.js";
 

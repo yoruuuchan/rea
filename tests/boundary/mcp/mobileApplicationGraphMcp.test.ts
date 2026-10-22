@@ -12,6 +12,7 @@ import { afterEach, expect, it } from "vitest";
 
 import { createDirectAnalysis } from "../../../src/composition/directAnalysis.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
+import { fragmentInventoryEvidence } from "../../fixtures/artifactEvidence.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -84,9 +85,10 @@ it("advertises and executes Android and Apple inventory projections", async () =
   const apkInventory = parseEvidence(
     await runProviderAnalysis(await writeApk(root), "inventory_artifact", {}),
   );
+  const apkSources = fragmentInventoryEvidence(apkInventory, 2).toReversed();
   const android = await client.callTool({
     name: "project_android_application_graph",
-    arguments: { inventory_evidence: [apkInventory] },
+    arguments: { inventory_evidence: apkSources },
   });
   if (android.isError === true)
     throw new Error(JSON.stringify(android, null, 2));
@@ -94,6 +96,38 @@ it("advertises and executes Android and Apple inventory projections", async () =
     operation: "project_android_application_graph",
     provider: { id: "rea-android-application" },
   });
+  const androidEvidence = parseEvidence(android.structuredContent);
+  const androidBundle = await client.callTool({
+    name: "get_evidence_bundle",
+    arguments: {},
+  });
+  expect(androidBundle.structuredContent).toMatchObject({
+    result: {
+      records: expect.arrayContaining([...apkSources, androidEvidence]),
+    },
+  });
+
+  const tamperedSource = {
+    ...apkSources[0]!,
+    evidence_id: apkSources[1]!.evidence_id,
+  };
+  const rejected = await client.callTool({
+    name: "project_android_application_graph",
+    arguments: { inventory_evidence: [tamperedSource] },
+  });
+  expect(rejected.isError).toBe(true);
+  const bundleAfterRejectedSource = await client.callTool({
+    name: "get_evidence_bundle",
+    arguments: {},
+  });
+  expect(bundleAfterRejectedSource.structuredContent).toMatchObject({
+    result: {
+      records: expect.arrayContaining([...apkSources, androidEvidence]),
+    },
+  });
+  expect(bundleAfterRejectedSource.structuredContent).toEqual(
+    androidBundle.structuredContent,
+  );
 
   const ipaInventory = parseEvidence(
     await runProviderAnalysis(await writeIpa(root), "inventory_artifact", {}),

@@ -1,3 +1,4 @@
+import { WorkerFrameSignal } from "../../process/WorkerFrameSignal.js";
 import type { JavaScriptSemanticProjectionCapacity } from "../../domain/javascript/javascriptSemanticFileProjection.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -100,7 +101,7 @@ export class JavaScriptAnalysisWorker {
   #ready = false;
   #heapLimitBytes = 0;
   #frames: JavaScriptWorkerMessage[] = [];
-  #frameWaiters = new Set<(outcome: "frame" | "failure") => void>();
+  readonly #frameSignal = new WorkerFrameSignal();
   #pending = "";
   #decoder = new StringDecoder("utf8");
   #primaryFailure: WorkerPrimaryFailure | undefined;
@@ -141,7 +142,7 @@ export class JavaScriptAnalysisWorker {
         const frame = javaScriptWorkerMessageSchema.parse(raw);
         this.#frames.push(frame);
         this.#observeJobFrame(frame);
-        this.#wakeFrameWaiters("frame");
+        this.#frameSignal.wake("frame");
       }
       if (Buffer.byteLength(this.#pending) > DEFAULTS.protocolBytes)
         this.#latchOutputFailure(
@@ -837,7 +838,7 @@ export class JavaScriptAnalysisWorker {
       )
     ) {
       this.#primaryFailure = { ...this.#primaryFailure, heapExhaustion: true };
-      this.#wakeFrameWaiters("failure");
+      this.#frameSignal.wake("failure");
     }
     if (event.type === "exit" && (event.code !== 0 || event.signal !== null)) {
       if (this.#primaryFailure === undefined)
@@ -860,7 +861,7 @@ export class JavaScriptAnalysisWorker {
           ...this.#primaryFailure,
           heapExhaustion: true,
         };
-        this.#wakeFrameWaiters("failure");
+        this.#frameSignal.wake("failure");
       }
     }
   }
@@ -880,7 +881,7 @@ export class JavaScriptAnalysisWorker {
         this.#primaryFailure?.kind === "memory" ||
         this.#primaryFailure?.kind === "exit"
       )
-        this.#wakeFrameWaiters("failure");
+        this.#frameSignal.wake("failure");
     }
   }
   #observeJobFrame(frame: JavaScriptWorkerMessage): void {
@@ -906,7 +907,7 @@ export class JavaScriptAnalysisWorker {
             kind: "output",
             reason: "JavaScript worker completed before a static checkpoint",
           };
-        this.#wakeFrameWaiters("failure");
+        this.#frameSignal.wake("failure");
         return;
       }
       this.#terminalResponseId = frame.id;
@@ -925,48 +926,20 @@ export class JavaScriptAnalysisWorker {
     if (this.#deadline?.interruption !== undefined) return;
     if (this.#primaryFailure === undefined)
       this.#primaryFailure = { kind: "output", reason };
-    this.#wakeFrameWaiters("failure");
+    this.#frameSignal.wake("failure");
   }
   #latchInputFailure(cause: Error): void {
     if (this.#deadline?.interruption !== undefined) return;
     if (this.#primaryFailure === undefined)
       this.#primaryFailure = { kind: "input", cause };
-    this.#wakeFrameWaiters("failure");
+    this.#frameSignal.wake("failure");
   }
   async #waitForFrameOrOutputClose(
     supervisor: ProviderProcessSupervisor,
     deadline: ProviderStartupDeadline,
   ): Promise<"frame" | "failure" | "closed" | "interrupted"> {
     if (this.#frames.length !== 0) return "frame";
-    let wakeFrame!: (outcome: "frame" | "failure") => void;
-    const frameArrival = new Promise<"frame" | "failure">((resolve) => {
-      wakeFrame = resolve;
-      this.#frameWaiters.add(wakeFrame);
-    });
-    const outputCloseController = new AbortController();
-    const interruptOutputClose = () =>
-      outputCloseController.abort(deadline.signal.reason);
-    if (deadline.signal.aborted) interruptOutputClose();
-    else
-      deadline.signal.addEventListener("abort", interruptOutputClose, {
-        once: true,
-      });
-    try {
-      const outputClose = supervisor
-        .waitForOutputClose(undefined, outputCloseController.signal)
-        .then((closed): "closed" | "interrupted" =>
-          closed ? "closed" : "interrupted",
-        );
-      return await Promise.race([frameArrival, outputClose]);
-    } finally {
-      outputCloseController.abort();
-      deadline.signal.removeEventListener("abort", interruptOutputClose);
-      this.#frameWaiters.delete(wakeFrame);
-    }
-  }
-  #wakeFrameWaiters(outcome: "frame" | "failure"): void {
-    for (const wake of this.#frameWaiters) wake(outcome);
-    this.#frameWaiters.clear();
+    return this.#frameSignal.waitForOutputClose(supervisor, deadline.signal);
   }
   #selectedWorkerFailure(path: string): AnalysisError {
     if (this.#primaryFailure !== undefined)
@@ -1231,7 +1204,7 @@ export class JavaScriptAnalysisWorker {
   #resetState(): void {
     this.#ready = false;
     this.#frames = [];
-    this.#frameWaiters.clear();
+    this.#frameSignal.clear();
     this.#pending = "";
     this.#decoder = new StringDecoder("utf8");
     this.#primaryFailure = undefined;

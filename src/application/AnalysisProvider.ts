@@ -1,3 +1,4 @@
+import type { EvidenceCreationOptions } from "../domain/evidence.js";
 import type { ProviderInspectionScope } from "../providers/ProviderInspectionScope.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { OfficialToolName } from "../contracts/officialToolContracts.js";
@@ -146,6 +147,7 @@ export const createAnalysisExecutionEvidence = (
   input: unknown,
   execution: AnalysisExecution,
   confidence: "observed" | "derived",
+  options?: EvidenceCreationOptions,
 ): Evidence =>
   createEvidence(
     execution.subject === undefined
@@ -167,6 +169,7 @@ export const createAnalysisExecutionEvidence = (
       locations: execution.locations,
       confidence,
     },
+    options,
   );
 
 /** Provider-neutral application capability for one analysis operation. */

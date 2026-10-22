@@ -4,13 +4,13 @@ import { z } from "zod";
 import { uniqueSorted } from "../domain/canonicalOrdering.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
+import { parseProcessCaptureEvidence } from "../application/process/ProcessEvidence.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import type { PromptCompletionKind } from "../contracts/promptContracts.js";
 import { addressedValueSchema } from "../domain/native/nativeInventory.js";
 import { currentMcpRequestSignal } from "./EvidenceMcpServer.js";
 import { parseArtifactInventoryEvidence } from "../domain/artifactInventoryEvidence.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
-import { parseProcessCapture } from "../domain/process/processCaptureParsing.js";
 
 const documentListSchema = z.array(z.string().min(1));
 const procedureInventorySchema = z.array(
@@ -216,13 +216,20 @@ const artifactInventoryValues = (
 };
 
 const isProcessCaptureEvidence = (evidence: LedgerEvidence): boolean => {
-  if (evidence.operation !== "capture_process_scenario") return false;
-  try {
-    parseProcessCapture(evidence.normalized_result);
-    return true;
-  } catch (cause: unknown) {
-    if (cause instanceof TypeError || cause instanceof z.ZodError) return false;
-    throw cause;
+  const parsed = parseProcessCaptureEvidence(evidence);
+  if (parsed.ok) return true;
+  switch (parsed.error.kind) {
+    case "wrong-workflow":
+    case "unsupported-provider":
+      return false;
+    case "invalid-evidence":
+    case "invalid-capture":
+      if (
+        parsed.error.cause instanceof TypeError ||
+        parsed.error.cause instanceof z.ZodError
+      )
+        return false;
+      throw parsed.error.cause;
   }
 };
 

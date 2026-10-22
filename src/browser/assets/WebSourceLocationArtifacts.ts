@@ -8,7 +8,7 @@ import {
   type WebSourceLocationInput,
 } from "../../domain/webSourceLocation.js";
 import { err, ok } from "../../domain/result.js";
-import { webArtifactCleanupFailures } from "../WebArtifactCleanup.js";
+import { closeWebArtifactResources } from "../WebArtifactCleanup.js";
 import { LocalWebScriptArtifacts } from "./LocalWebScriptArtifacts.js";
 import { decodeWebArtifact, webArtifactReadError } from "./WebArtifactReads.js";
 
@@ -30,34 +30,11 @@ export class LocalWebSourceLocationArtifacts implements WebSourceLocationArtifac
   }
 
   async close(): Promise<void> {
-    const closeScript =
-      this.scripts instanceof LocalWebScriptArtifacts &&
-      this.scripts.resources === this.#resources
-        ? undefined
-        : this.scripts.close?.bind(this.scripts);
-    const results = await Promise.allSettled([
-      Promise.resolve().then(() => this.#resources.close()),
-      ...(closeScript === undefined
-        ? []
-        : [Promise.resolve().then(closeScript)]),
-    ]);
-    const failures = results.flatMap((result, index) =>
-      result.status === "rejected"
-        ? [
-            {
-              cause: result.reason,
-              resource:
-                index === 0 ? "web source-location artifacts" : "web scripts",
-            },
-          ]
-        : [],
-    );
-    const error = webArtifactCleanupFailures(
+    return closeWebArtifactResources(
       "web-source-location-artifacts",
-      "trace_web_source_location",
-      failures,
+      this.#resources,
+      this.scripts,
     );
-    if (error !== undefined) throw error;
   }
 
   /** Preserve actual map identity separately from the selected deployment URL. */
@@ -83,39 +60,24 @@ export class LocalWebSourceLocationArtifacts implements WebSourceLocationArtifac
   async #load(input: WebSourceLocationInput, options?: ExecutionOptions) {
     const loaded = await this.scripts.load(input, options);
     if (!loaded.ok) return loaded;
-    try {
-      const data = await readStableArtifact(
-        input.source_map.path,
-        WEB_SOURCE_MAP_LIMITS.mapBytes,
-        options?.signal,
-        undefined,
-        this.#resources,
-      );
-      return ok({
-        ...loaded.value,
-        sourceMap: {
-          file: {
-            path: input.source_map.path,
-            sha256: data.sha256,
-            bytes: data.bytes.length,
-          },
-          url: input.source_map.url,
-          text: decodeWebArtifact(data.bytes),
+    const data = await readStableArtifact(
+      input.source_map.path,
+      WEB_SOURCE_MAP_LIMITS.mapBytes,
+      options?.signal,
+      undefined,
+      this.#resources,
+    );
+    return ok({
+      ...loaded.value,
+      sourceMap: {
+        file: {
+          path: input.source_map.path,
+          sha256: data.sha256,
+          bytes: data.bytes.length,
         },
-      });
-    } catch (cause: unknown) {
-      return err(
-        webArtifactReadError(
-          cause,
-          {
-            operation: "trace_web_source_location",
-            field: ["source_map", "path"],
-            targetPath: input.source_map.path,
-            callerSelected: true,
-          },
-          options?.signal,
-        ),
-      );
-    }
+        url: input.source_map.url,
+        text: decodeWebArtifact(data.bytes),
+      },
+    });
   }
 }

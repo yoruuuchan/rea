@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { digestSchema, prefixedDigestSchema } from "./digests.js";
-import { localPathStringSchema } from "./localPath.js";
+import {
+  absoluteLocalPathStringSchema,
+  localPathStringSchema,
+} from "./localPath.js";
 import { artifactTraversalOmissionKindSchema } from "./artifactGraph.js";
 
 export const desktopFamilySchema = z.enum([
@@ -13,7 +16,7 @@ export const desktopFamilySchema = z.enum([
   "electron",
 ]);
 export const inspectDesktopApplicationInputSchema = z.strictObject({
-  path: localPathStringSchema,
+  path: absoluteLocalPathStringSchema,
   max_entries: z.number().int().positive().max(100_000).default(20_000),
   max_probe_bytes: z
     .number()

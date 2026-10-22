@@ -32,16 +32,13 @@ export const readEvidenceFileSource = async (
         cause: signal.reason,
       }),
     );
-  const loaded = await readJsonFile(path, signal, resources);
-  if (!loaded.ok) {
-    if (loaded.error instanceof AnalysisCancelledError)
-      return err(
-        new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {
-          cause: loaded.error.cause,
-        }),
-      );
-    return loaded;
-  }
+  const loaded = await readJsonFile(
+    path,
+    signal,
+    resources,
+    INSPECT_ANALYSIS_VIEW_OPERATION,
+  );
+  if (!loaded.ok) return loaded;
   if (signal?.aborted)
     return err(
       new AnalysisCancelledError(INSPECT_ANALYSIS_VIEW_OPERATION, {

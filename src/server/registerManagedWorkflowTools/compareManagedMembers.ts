@@ -40,12 +40,8 @@ export const registerCompareManagedMembers = (
               rightResolved,
               compareContract,
             );
-          const [left] = leftResolved.value;
-          const [right] = rightResolved.value;
-          if (left === undefined || right === undefined)
-            throw new TypeError(
-              "Managed comparison Evidence resolution failed",
-            );
+          const left = leftResolved.value;
+          const right = rightResolved.value;
           const parsed = { left, right };
           const result = await logToolExecution(
             options.logger,

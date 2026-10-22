@@ -9,6 +9,7 @@ import {
   type EvidenceSubjectTarget,
 } from "../domain/evidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
+import type { MobileApplicationProjectionWithSources } from "../domain/mobileApplicationGraphProjection.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { requestInputError, workflowInputError } from "./workflowInputError.js";
 
@@ -23,13 +24,20 @@ interface InventoryProjectionResult {
   readonly limitations: readonly string[];
 }
 
+export interface InventoryProjectionEvidenceResult {
+  readonly evidence: Evidence;
+  readonly sources: readonly Evidence[];
+}
+
 interface InventoryProjectionOptions<
   Input extends InventoryProjectionInput,
   Output extends InventoryProjectionResult,
 > {
   readonly rawInput: unknown;
   readonly schema: z.ZodType<Input>;
-  readonly project: (input: Input) => Output;
+  readonly project: (
+    input: Input,
+  ) => MobileApplicationProjectionWithSources<Output>;
   readonly operation: string;
   readonly predicateType: string;
   readonly provider: EvidenceProvider;
@@ -43,17 +51,18 @@ export const projectInventoryEvidence = <
   Output extends InventoryProjectionResult,
 >(
   options: InventoryProjectionOptions<Input, Output>,
-): Result<Evidence, AnalysisError> => {
+): Result<InventoryProjectionEvidenceResult, AnalysisError> => {
   const parsed = options.schema.safeParse(options.rawInput);
   if (!parsed.success)
     return err(
       requestInputError(options.operation, parsed.error, options.rawInput),
     );
   try {
-    const result = options.project(parsed.data);
-    const first = parsed.data.inventory_evidence[0];
-    return ok(
-      createEvidence(
+    const projected = options.project(parsed.data);
+    const result = projected.projection;
+    const first = projected.sources[0];
+    return ok({
+      evidence: createEvidence(
         first?.subject === null || first?.subject === undefined
           ? undefined
           : {
@@ -80,7 +89,8 @@ export const projectInventoryEvidence = <
           evidenceLinks: result.source_evidence_ids,
         },
       ),
-    );
+      sources: projected.sources,
+    });
   } catch (cause: unknown) {
     return err(
       cause instanceof TypeError || cause instanceof z.ZodError

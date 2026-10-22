@@ -2,7 +2,7 @@ import { z } from "zod";
 import { canBorrowParsedJsonSnapshot } from "../immutableJson.js";
 
 import { pwntoolsTimeoutField } from "./nativeDeadlines.js";
-import { localPathStringSchema } from "../localPath.js";
+import { absoluteLocalPathStringSchema } from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 
 const unsignedHex = z.string().regex(/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/);
@@ -19,7 +19,7 @@ const name = z.strictObject({
 
 /** Explicit local object selection, independent of an active disassembler target. */
 export const inspectBinaryLayoutInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to the selected binary",
   ),
   pwntools_timeout_ms: pwntoolsTimeoutField,

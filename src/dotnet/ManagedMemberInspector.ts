@@ -14,9 +14,9 @@ import {
 } from "./ManagedPeReader.js";
 import {
   readManagedResourceDirectory,
-  managedTableRowCounts,
   readManagedMetadataInventory,
 } from "./ManagedMetadataInventory.js";
+import { managedPeInspectionEnvelope } from "./ManagedPeInspectionEnvelope.js";
 import { readManagedMetadataLayout } from "./ManagedMetadataLayout.js";
 import {
   appendManagedParseIssues,
@@ -286,23 +286,13 @@ export const inspectManagedMembersBytes = (
     return managedMemberInspectionSchema.parse(
       admitManagedProjection(
         {
-          artifact: {
-            path: target.path,
-            sha256: target.sha256,
-            byte_length: bytes.length,
-            format: "pe",
-          },
-          module: inventory.module,
-          metadata: {
-            status: issues.length === 0 ? "complete" : "partial",
-            version: layout.version,
-            table_row_counts: managedTableRowCounts(layout),
-          },
-          identity_scope: {
-            token_identity: "build-local",
-            requires_artifact_sha256: target.sha256,
-            requires_mvid: inventory.module?.mvid ?? null,
-          },
+          ...managedPeInspectionEnvelope(
+            target,
+            bytes.length,
+            layout,
+            inventory.module,
+            issues,
+          ),
           types,
           signature_resolution: "type-names-v1",
           nesting_read: parsedTypes.nesting.complete,

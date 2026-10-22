@@ -1,12 +1,9 @@
-import { isAbsolute } from "node:path";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { WasmArtifactPort } from "./WasmArtifactPort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisInputError,
   AnalysisOutputError,
-  type AnalysisInputIssue,
 } from "../../domain/analysisErrorCore.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
 import {
@@ -48,29 +45,6 @@ export class WasmArtifactService {
           cause: input.error,
         }),
       );
-    const pathIssues = [
-      { value: input.data.path, path: ["path"] },
-      ...input.data.glue_paths.map((value, index) => ({
-        value,
-        path: ["glue_paths", index],
-      })),
-      ...input.data.candidate_paths.map((value, index) => ({
-        value,
-        path: ["candidate_paths", index],
-      })),
-    ].flatMap<AnalysisInputIssue>(({ value, path }) =>
-      isAbsolute(value)
-        ? []
-        : [
-            {
-              path,
-              reason: "invalid_format",
-              message: "Expected an absolute filesystem path on this host.",
-            },
-          ],
-    );
-    if (pathIssues.length > 0)
-      return err(new AnalysisInputError(OPERATION, undefined, pathIssues));
     const inspected = await this.provider.inspect(input.data, options);
     if (!inspected.ok) return inspected;
     const execution = inspected.value;

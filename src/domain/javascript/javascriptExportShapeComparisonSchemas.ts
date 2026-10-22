@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { javascriptSourceRangeSchema } from "./javascriptSourceCoordinates.js";
+
 import { evidenceSchema } from "../evidence.js";
 import { prefixedDigestSchema } from "../digests.js";
 
@@ -30,29 +32,6 @@ function isJsonPointer(value: string): boolean {
 const jsonPointerSchema = z
   .string()
   .refine(isJsonPointer, "Expected an RFC 6901 JSON Pointer");
-
-const sourcePointSchema = z.strictObject({
-  line: z.number().int().min(1),
-  column: z.number().int().min(0),
-});
-
-const sourceRangeSchema = z
-  .strictObject({
-    start: sourcePointSchema,
-    end: sourcePointSchema,
-  })
-  .superRefine((range, context) => {
-    if (
-      range.end.line < range.start.line ||
-      (range.end.line === range.start.line &&
-        range.end.column < range.start.column)
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["end"],
-        message: "Source range end must not precede its start",
-      });
-  });
 
 /** Check that export-shape comparisons bind distinct source Evidence. */
 const validateJavaScriptExportShapeIdentities = (
@@ -136,7 +115,7 @@ export type ProjectedPropertyCoverage = z.infer<
 
 const projectedReturnShapeSchema = z
   .strictObject({
-    source_range: sourceRangeSchema,
+    source_range: javascriptSourceRangeSchema,
     value_status: z.enum([
       "literal",
       "union",
@@ -269,8 +248,8 @@ export const javaScriptExportShapeComparisonChangeSchema = z.strictObject({
   }),
   left: valueAvailabilitySchema,
   right: valueAvailabilitySchema,
-  left_source_range: sourceRangeSchema.nullable(),
-  right_source_range: sourceRangeSchema.nullable(),
+  left_source_range: javascriptSourceRangeSchema.nullable(),
+  right_source_range: javascriptSourceRangeSchema.nullable(),
   evidence_links: z.array(evidenceIdSchema).length(2),
   limitations: z.array(textSchema),
 });
@@ -285,7 +264,7 @@ const propertyInventorySchema = z.strictObject({
   variant_index: z.number().int().nonnegative(),
   discriminant: discriminantSchema.nullable(),
   paired: z.boolean(),
-  source_range: sourceRangeSchema,
+  source_range: javascriptSourceRangeSchema,
   properties: z.array(jsonPointerSchema),
   property_coverage: z.array(inventoryPropertyCoverageSchema),
 });

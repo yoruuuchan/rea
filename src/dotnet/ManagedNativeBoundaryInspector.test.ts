@@ -333,6 +333,17 @@ describe("independent managed metadata facets", () => {
         ]),
       });
     }
+    expect({
+      artifact: native.artifact,
+      module: native.module,
+      metadata: native.metadata,
+      identity_scope: native.identity_scope,
+    }).toEqual({
+      artifact: members.artifact,
+      module: members.module,
+      metadata: members.metadata,
+      identity_scope: members.identity_scope,
+    });
     expect(members.methods[0]?.name).toBe("Main");
     expect(native.pinvoke_imports[0]?.import_name).toBe("MessageBoxW");
     expect(native.cli_native?.ready_to_run_signature).toBe(true);

@@ -66,8 +66,11 @@ async function createCompleteAppleProjection() {
   });
 
   if (!result.ok) throw new TypeError("Could not project fixture inventory");
+  expect(result.value.sources.map(({ evidence_id }) => evidence_id)).toEqual(
+    fragments.map(({ evidence_id }) => evidence_id),
+  );
   const projection = appleApplicationProjectionResultSchema.parse(
-    result.value.normalized_result,
+    result.value.evidence.normalized_result,
   );
   expect([...projection.source_evidence_ids].sort()).toEqual(
     fragments.map(({ evidence_id }) => evidence_id).sort(),
@@ -481,7 +484,7 @@ describe("Apple application projection completeness", () => {
     if (!result.ok) throw result.error;
     expect(
       appleApplicationProjectionResultSchema.parse(
-        result.value.normalized_result,
+        result.value.evidence.normalized_result,
       ),
     ).toMatchObject({
       application_roots: [applicationRoot],

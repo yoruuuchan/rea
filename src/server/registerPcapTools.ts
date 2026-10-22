@@ -10,7 +10,7 @@ import {
 } from "./contractToolHandler.js";
 import {
   toolRegistrationOptions,
-  applicationValidatedInputSchema,
+  applicationToolRegistrationOptions,
 } from "./toolRegistrationOptions.js";
 import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
 import {
@@ -43,7 +43,6 @@ export const registerPcapTools = (
     handler(clientContract),
   );
   const contract = toolContract("inspect_pcap_capture");
-  const registration = toolRegistrationOptions(contract);
   const capture = createEvidenceToolHandler(
     server,
     async (rawInput, options) => {
@@ -74,10 +73,7 @@ export const registerPcapTools = (
   );
   server.registerTool(
     contract.name,
-    {
-      ...registration,
-      inputSchema: applicationValidatedInputSchema(registration.inputSchema),
-    },
+    applicationToolRegistrationOptions(contract),
     capture(contract),
   );
 };

@@ -2,12 +2,14 @@ import { z } from "zod";
 
 import { emptyArraySchema } from "../emptyArraySchema.js";
 import { evidenceSchema } from "../evidence.js";
-import { cliMetadataGuidSchema } from "./managedArtifact.js";
+import {
+  cliMetadataGuidSchema,
+  managedMetadataTokenSchema,
+} from "./managedArtifact.js";
 import { digestSchema } from "../digests.js";
 import { prefixedDigestSchema } from "../digests.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
-const tokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
 const textSchema = z.string().min(1);
 
 const nativeSymbolSchema = z.strictObject({
@@ -25,8 +27,8 @@ export type NativeSymbol = z.infer<typeof nativeSymbolSchema>;
 const pinvokeVerificationContextShape = {
   item_id: prefixedDigestSchema("mnv_pinvoke"),
   managed: z.strictObject({
-    token: tokenSchema,
-    member_token: tokenSchema.nullable(),
+    token: managedMetadataTokenSchema,
+    member_token: managedMetadataTokenSchema.nullable(),
     member_name: z.string().nullable(),
     import_name: z.string().min(1),
     import_scope_name: z.string().nullable(),

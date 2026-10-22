@@ -11,11 +11,8 @@ import {
   assertComparisonFindingLinks,
 } from "./comparisonSourceEvidence.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
+import { hasComparisonEvidenceIdentity } from "./comparisonEvidenceIdentity.js";
 import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
-import {
-  PROCESS_PROVIDER,
-  isProcessEvidenceProvider,
-} from "./process/processEvidenceProvider.js";
 import type { JsonValue } from "./jsonValue.js";
 import {
   comparisonStatusSchema,
@@ -144,26 +141,6 @@ export type StaticRuntimeCorrelationResult = z.infer<
 type Mapping = z.infer<typeof mappingSchema>;
 type CorrelationItem = z.infer<typeof correlationItemSchema>;
 type ComparisonStatus = z.infer<typeof comparisonStatusSchema>;
-
-type ComparisonIdentity = readonly [string | readonly string[], string, string];
-
-const EXPECTED: Readonly<Record<string, ComparisonIdentity>> = {
-  compare_artifacts: [
-    "rea.artifact-comparison",
-    "rea-artifact-comparison",
-    "REA artifact comparison",
-  ],
-  compare_functions: [
-    "rea.function-comparison",
-    "rea-function-comparison",
-    "REA function comparison",
-  ],
-  compare_process_captures: [
-    "rea.process-comparison",
-    PROCESS_PROVIDER.id,
-    PROCESS_PROVIDER.name,
-  ],
-};
 
 /** Correlate only caller-declared static/runtime hypotheses. */
 export const correlateStaticAndRuntime = (
@@ -381,21 +358,7 @@ const parseRuntime = (input: unknown): Evidence => {
 };
 
 const assertComparisonIdentity = (evidence: Evidence): void => {
-  const expected = EXPECTED[evidence.operation];
-  if (
-    expected === undefined ||
-    !(Array.isArray(expected[0])
-      ? expected[0].includes(evidence.predicate_type)
-      : evidence.predicate_type === expected[0]) ||
-    (evidence.operation === "compare_process_captures"
-      ? !isProcessEvidenceProvider(evidence.provider)
-      : evidence.provider.id !== expected[1] ||
-        evidence.provider.name !== expected[2] ||
-        evidence.provider.version !== "1") ||
-    evidence.confidence !== "derived" ||
-    evidence.authority !== "analyst-inference" ||
-    evidence.subject !== null
-  )
+  if (!hasComparisonEvidenceIdentity(evidence))
     throw new TypeError(
       "Comparison Evidence operation, predicate, provider, or citations disagree",
     );

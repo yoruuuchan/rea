@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { localPathStringSchema } from "../localPath.js";
+import { absoluteLocalPathStringSchema } from "../localPath.js";
 import { solidityMetadataSchema } from "./solidityMetadata.js";
 
 const byteOffset = z.number().int().nonnegative();
@@ -12,7 +12,7 @@ export const MAX_EVM_TIMEOUT_MS = 2_147_483_647;
 
 /** Select the carrier representation explicitly; no RPC or deployed-contract lookup is implied. */
 export const inspectEvmInterfaceInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute path to caller-selected local bytecode carrier",
   ),
   encoding: z

@@ -14,10 +14,7 @@ import { toolContract } from "../contracts/toolContracts.js";
 import type { Logger } from "pino";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
-import {
-  toolRegistrationOptions,
-  applicationValidatedInputSchema,
-} from "./toolRegistrationOptions.js";
+import { applicationToolRegistrationOptions } from "./toolRegistrationOptions.js";
 
 /** Bind historical inspection to its named contract and caller-owned Evidence writer. */
 export const registerWebNetworkCaptureTool = (
@@ -29,11 +26,10 @@ export const registerWebNetworkCaptureTool = (
   evidenceById?: EvidenceLookup,
 ): void => {
   const contract = toolContract("inspect_web_network_capture");
-  const registration = toolRegistrationOptions(contract);
+  const registration = applicationToolRegistrationOptions(contract);
   // Keep the exact advertised contract; the shared service validates raw input
   // before effects so caller-declared sensitivity also covers invalid arguments.
   // SDK pre-validation otherwise emits unprojected issue paths as plain text.
-  const inputSchema = applicationValidatedInputSchema(registration.inputSchema);
   const handler = createEvidenceToolHandler(
     server,
     async (rawInput, options) => {
@@ -65,9 +61,5 @@ export const registerWebNetworkCaptureTool = (
     recordEvidence,
     withAdmittedAnalysis,
   );
-  server.registerTool(
-    contract.name,
-    { ...registration, inputSchema },
-    handler(contract),
-  );
+  server.registerTool(contract.name, registration, handler(contract));
 };

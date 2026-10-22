@@ -9,12 +9,10 @@ import type {
 import { readKunaConfiguration } from "./KunaConfiguration.js";
 import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
-import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { kunaRetainedResourceCleanupError } from "./KunaCommand.js";
 import {
   createKunaResourceScope,
   inspectKunaInstallation,
-  kunaInstallationCancellation,
   kunaInstallationFailureDiagnostics,
   type KunaReadinessFailure,
 } from "./KunaInstallation.js";
@@ -78,23 +76,11 @@ export const inspectKunaProvider = async (
         ],
       };
     if (!(cause instanceof RegularFileCleanupFailure)) {
-      const cancellation = kunaInstallationCancellation(cause);
-      if (cancellation !== undefined) {
-        const error = new AnalysisCancelledError("doctor", {
-          cause: cancellation.reason,
-          diagnostics: cancellation.diagnostics,
-          ...(!kunaResources.hasPending
-            ? {}
-            : {
-                cleanup: {
-                  reason: "Kuna version-probe process cleanup is unconfirmed.",
-                  resources: kunaResources.cleanupResources ?? [],
-                },
-              }),
-        });
-        kunaResources.bindRetainedFailure(error);
-        throw error;
-      }
+      const cancellation = kunaResources.installationCancellationError(
+        cause,
+        "doctor",
+      );
+      if (cancellation !== undefined) throw cancellation;
       throw cause;
     }
     return {

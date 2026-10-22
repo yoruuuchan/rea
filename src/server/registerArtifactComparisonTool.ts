@@ -3,16 +3,17 @@ import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { compareArtifacts } from "../domain/artifactComparison.js";
+import { ARTIFACT_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
 import { createEvidence, parseEvidence } from "../domain/evidence.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { resolveArtifactComparisonEvidence } from "../application/artifacts/ArtifactComparisonEvidence.js";
 import type { RecordUnknownInput } from "../domain/residualUnknown.js";
 import { recordDerivedEvidence } from "./recordDerivedEvidence.js";
 import { runDerivedOperation } from "./runDerivedOperation.js";
-import { ARTIFACT_COMPARISON_PROVIDER } from "../application/InvestigationProviders.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import { withAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
+import { recordSessionEvidenceSources } from "./sessionEvidence.js";
 
 /** Register Evidence-backed deterministic artifact comparison. */
 export const registerArtifactComparisonTool = (
@@ -58,12 +59,12 @@ export const registerArtifactComparisonTool = (
           if (!computed.ok)
             return server.delivery.toCallToolResult(computed, contract);
           const { left, right, comparison } = computed.value;
-          const sources = [left, right];
-          for (const source of sources) {
-            const recordedSource = session.recordEvidence(source);
-            if (!recordedSource.ok)
-              return server.delivery.toCallToolResult(recordedSource, contract);
-          }
+          const recordedSources = recordSessionEvidenceSources(
+            (source) => session.recordEvidence(source),
+            [left, right],
+          );
+          if (!recordedSources.ok)
+            return server.delivery.toCallToolResult(recordedSources, contract);
           const leftEvidenceIds = [left.evidence_id];
           const rightEvidenceIds = [right.evidence_id];
           const evidence = createEvidence(

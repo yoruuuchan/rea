@@ -1,9 +1,23 @@
+import { dispatchQueuedInterrupts } from "../process/queuedInterrupts.js";
+import { absoluteCallerPath } from "../filesystem/callerPath.js";
+import { requireAuthenticationHeadroom } from "./JsonAuthenticationHeadroom.js";
+
 import {
   EvidenceFileError,
   EvidenceIntegrityError,
+  type PublishedEvidenceFile,
 } from "../domain/evidenceErrors.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import type { EvidenceBundle } from "../domain/evidenceBundle.js";
+import {
+  AnalysisCancelledError,
+  AnalysisInputError,
+} from "../domain/analysisErrorCore.js";
+import type { Evidence } from "../domain/evidence.js";
+import {
+  createImmutableEvidenceBundle,
+  type EvidenceBundle,
+} from "../domain/evidenceBundle.js";
+import type { InspectAnalysisViewInput } from "../domain/analysisView/analysisView.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -14,12 +28,18 @@ import {
   readImmutableEvidenceBundle,
   writeEvidenceBundle,
 } from "./EvidenceBundleFiles.js";
+import { inspectAnalysisViewValidated } from "./analysisView/AnalysisViewService.js";
 
 /** Validate a standalone bundle and report its complete record/revision counts. */
 export const importEvidenceBundleCommand = async (
   path: string,
 ): Promise<Result<JsonValue, AnalysisError>> => {
-  const loaded = await readEvidenceBundle(path);
+  const loaded = await readEvidenceBundle(
+    path,
+    undefined,
+    undefined,
+    "import_evidence_bundle",
+  );
   if (!loaded.ok) return loaded;
   return ok({
     imported: loaded.value.records.length,
@@ -35,16 +55,136 @@ export const exportEvidenceBundleCommand = async (
   overwrite: boolean,
 ): Promise<Result<JsonValue, AnalysisError>> => {
   // The sealed snapshot lets the writer reuse this authentication.
-  const loaded = await readImmutableEvidenceBundle(sourcePath);
+  const loaded = await readImmutableEvidenceBundle(
+    sourcePath,
+    undefined,
+    undefined,
+    "export_evidence_bundle",
+  );
   if (!loaded.ok) return loaded;
+  return projectWrite(
+    loaded.value,
+    await persistEvidenceBundleCommand(loaded.value, outputPath, overwrite),
+  );
+};
+
+/** Publish complete parent Evidence before delivering it or its linked summary. */
+export const deliverAnalysisEvidence = async (
+  evidence: Evidence,
+  outputPath: string,
+  detail: "complete" | "summary" = "complete",
+  signal?: AbortSignal,
+): Promise<Result<Evidence, AnalysisError>> => {
+  const headroom = requireAuthenticationHeadroom(evidence, {
+    operation: evidence.operation,
+    path: absoluteCallerPath(outputPath),
+    description:
+      "Insufficient heap headroom to authenticate the complete parent Evidence",
+  });
+  if (!headroom.ok)
+    return err(headroom.error.retainPartialObservation(evidence));
+  const bundle = createImmutableEvidenceBundle([evidence]);
+  const delivered =
+    detail === "summary"
+      ? inspectAnalysisViewValidated(
+          {
+            source: {
+              kind: "retained-evidence",
+              evidence_id: evidence.evidence_id,
+            },
+            view: { kind: "summary" },
+          },
+          (id) => bundle.records.find((record) => record.evidence_id === id),
+        )
+      : ok(evidence);
+  if (!delivered.ok) return delivered;
+  const written = await persistEvidenceBundleCommand(
+    bundle,
+    outputPath,
+    false,
+    signal,
+    evidence.operation,
+  );
+  // Deliver interrupts queued during final publication cleanup before the
+  // command's signal owner accepts completion and removes its listeners.
+  await dispatchQueuedInterrupts();
+  if (!written.ok) return err(written.error.retainPartialObservation(evidence));
+  if (signal?.aborted)
+    return err(
+      new AnalysisCancelledError(evidence.operation, {
+        cause: signal.reason,
+        partialObservation: delivered.value,
+        diagnostics: { evidence_bundle: { ...written.value } },
+      }),
+    );
+  return delivered;
+};
+
+/** Resolve the caller's exact retained parent from an authenticated portable bundle. */
+export const inspectAnalysisViewFromBundle = async (
+  input: InspectAnalysisViewInput,
+  bundlePath: string,
+  resources: ArtifactResourceScope,
+  signal?: AbortSignal,
+): Promise<Result<Evidence, AnalysisError>> => {
+  if (input.source.kind !== "retained-evidence")
+    return err(
+      new AnalysisInputError("inspect_analysis_view", undefined, [
+        {
+          path: ["source", "kind"],
+          reason: "invalid_value",
+          message:
+            "--evidence-bundle requires a retained-evidence source with the exact parent evidence_id; inline Evidence already supplies its source",
+        },
+      ]),
+    );
+  const loaded = await readImmutableEvidenceBundle(
+    bundlePath,
+    signal,
+    resources,
+    "inspect_analysis_view",
+  );
+  // Authentication and projection are synchronous; dispatch queued interrupts before accepting either result.
+  await dispatchQueuedInterrupts();
+  if (!loaded.ok) return loaded;
+  if (signal?.aborted)
+    return err(
+      new AnalysisCancelledError("inspect_analysis_view", {
+        cause: signal.reason,
+      }),
+    );
+  const projected = inspectAnalysisViewValidated(input, (id) =>
+    loaded.value.records.find((record) => record.evidence_id === id),
+  );
+  await dispatchQueuedInterrupts();
+  if (projected.ok && signal?.aborted)
+    return err(
+      new AnalysisCancelledError("inspect_analysis_view", {
+        cause: signal.reason,
+        partialObservation: projected.value,
+      }),
+    );
+  return projected;
+};
+
+/** Publish a completed bundle and retry its exact staged-output cleanup owner. */
+const persistEvidenceBundleCommand = async (
+  bundle: EvidenceBundle,
+  outputPath: string,
+  overwrite: boolean,
+  signal?: AbortSignal,
+  operation?: string,
+): Promise<Result<PublishedEvidenceFile, AnalysisError>> => {
   const resources = new ArtifactResourceScope();
   const written = await writeEvidenceBundle(
-    loaded.value,
+    bundle,
     outputPath,
     overwrite,
     resources,
+    signal,
+    operation,
   );
-  if (written.ok) return projectWrite(loaded.value, written);
+  if (written.ok) return written;
 
   // Confirmed release resolves the bound error to its primary outcome; a
   // failed retry leaves that error incomplete with its exact retained owner.
@@ -54,10 +194,7 @@ export const exportEvidenceBundleCommand = async (
     written.error instanceof EvidenceFileError &&
     written.error.published
   ) {
-    return projectWrite(loaded.value, {
-      ok: true,
-      value: written.error.published,
-    });
+    return ok(written.error.published);
   }
   return written;
 };
@@ -70,8 +207,18 @@ export const compareEvidenceBundlesCommand = async (input: {
   // Sealed snapshots let comparison and its bundle digests reuse this
   // authentication instead of re-validating every record twice more.
   const [left, right] = await Promise.all([
-    readImmutableEvidenceBundle(input.leftPath),
-    readImmutableEvidenceBundle(input.rightPath),
+    readImmutableEvidenceBundle(
+      input.leftPath,
+      undefined,
+      undefined,
+      "compare_bundles",
+    ),
+    readImmutableEvidenceBundle(
+      input.rightPath,
+      undefined,
+      undefined,
+      "compare_bundles",
+    ),
   ]);
   if (!left.ok) return left;
   if (!right.ok) return right;
@@ -88,7 +235,7 @@ export const compareEvidenceBundlesCommand = async (input: {
 
 const projectWrite = (
   bundle: EvidenceBundle,
-  written: Awaited<ReturnType<typeof writeEvidenceBundle>>,
+  written: Result<PublishedEvidenceFile, AnalysisError>,
 ): Result<JsonValue, AnalysisError> =>
   written.ok
     ? ok({

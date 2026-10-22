@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { localPathStringSchema } from "../localPath.js";
+import { absoluteLocalPathStringSchema } from "../localPath.js";
 import type { JsonValue } from "../jsonValue.js";
 
 /** Format identity is shared by discovery, catalog, and observed SQLite results. */
@@ -28,7 +28,7 @@ const artifactSchema = z.strictObject({
 /** Inspect one frozen database and its sibling WAL, with optional ordinary-table rows. */
 export const inspectSqliteDatabaseInputSchema = z
   .strictObject({
-    path: localPathStringSchema.describe(
+    path: absoluteLocalPathStringSchema.describe(
       "Absolute path to an offline SQLite database snapshot",
     ),
     worker_timeout_ms: workerTimeout

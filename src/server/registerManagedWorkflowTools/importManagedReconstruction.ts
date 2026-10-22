@@ -33,11 +33,7 @@ export const registerImportManagedReconstruction = (
               resolved,
               reconstructionContract,
             );
-          const staticMembers = resolved.value[0];
-          if (staticMembers === undefined)
-            throw new TypeError(
-              "Managed reconstruction Evidence resolution failed",
-            );
+          const staticMembers = resolved.value;
           const parsed = { ...input, static_members: staticMembers };
           const result = await logToolExecution(
             options.logger,

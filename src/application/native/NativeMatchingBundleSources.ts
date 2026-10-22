@@ -83,6 +83,7 @@ export const loadNativeMatchingBundleSources = async ({
       paths[file]!,
       admission.signal,
       resources,
+      admission.operation,
     );
     if (!loaded.ok) throw loaded.error;
     snapshots.push(await recordSnapshot(loaded.value, admission));
@@ -141,6 +142,7 @@ export const loadNativeMatchingBundleSources = async ({
       paths[file]!,
       admission.signal,
       resources,
+      admission.operation,
     );
     if (!loaded.ok) throw loaded.error;
     if ((await recordSnapshot(loaded.value, admission)) !== snapshots[file])

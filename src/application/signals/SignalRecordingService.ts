@@ -4,7 +4,6 @@ import {
   type InspectSignalDecodersInput,
 } from "../../domain/signals/signalDecoders.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
-import { isAbsolute } from "node:path";
 import type {
   AnalysisExecution,
   ExecutionOptions,
@@ -12,7 +11,6 @@ import type {
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisInputError,
   AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
@@ -58,16 +56,6 @@ export class SignalRecordingService {
         analysisInputErrorFromIssues(operation, input.error.issues, raw, {
           cause: input.error,
         }),
-      );
-    if (!isAbsolute(input.data.path))
-      return err(
-        new AnalysisInputError(operation, undefined, [
-          {
-            path: ["path"],
-            reason: "invalid_format",
-            message: "Expected an absolute local path.",
-          },
-        ]),
       );
     const decoded = await this.provider.decode(input.data, options);
     if (!decoded.ok) return decoded;

@@ -1,4 +1,5 @@
 import {
+  semanticCapturedSelectionsAfterPropertyRead,
   semanticProjectedSourceFactsAtRead,
   semanticProjectedSourceEligibilityAtRead,
   semanticNormalizeCapturedSelections,
@@ -806,23 +807,10 @@ const loaderObjectPropertySources = (
       .map((source) => ({
         node: source.node,
         path: [...source.path, ...remaining],
-        capturedSelections: [
-          ...(semanticShiftCapturedSelections(
-            current.capturedSelections,
-            source.path.length - 1,
-          ) ?? []),
-          ...(source.capturedSelectionAt === undefined
-            ? []
-            : [
-                {
-                  at: source.capturedSelectionAt,
-                  depth: source.path.length,
-                  ...(source.ownEnumerable
-                    ? { ownEnumerable: true as const }
-                    : {}),
-                },
-              ]),
-        ],
+        capturedSelections: semanticCapturedSelectionsAfterPropertyRead(
+          current.capturedSelections,
+          source,
+        ),
       })),
   );
 };

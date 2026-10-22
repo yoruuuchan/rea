@@ -533,7 +533,7 @@ describe("CLI result output surface", () => {
       },
     });
     const cli = Cli.create("rea-output-test", { sync: false });
-    registerManagedCommands(cli, silentLogger, async (path, operation) => {
+    registerManagedCommands(cli, silentLogger, async (...[path, operation]) => {
       expect(path).toBe("fixture.dll");
       expect(operation).toBe("inspect_managed_members");
       return value;

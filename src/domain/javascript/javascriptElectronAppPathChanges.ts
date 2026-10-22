@@ -13,6 +13,7 @@ import {
   semanticObjectPropertyReferences,
 } from "./javascriptSemanticObjectReferences.js";
 import {
+  semanticCapturedSelectionsAfterPropertyRead,
   semanticNormalizeCapturedSelections,
   semanticProjectedSourceFactsAtRead,
   semanticShiftCapturedSelections,
@@ -329,23 +330,10 @@ export const createSemanticElectronAppPathChangeQuery = (
                 awaitDepths: current.awaitDepths.filter(
                   (depth) => depth !== path?.length,
                 ),
-                capturedSelections: [
-                  ...(semanticShiftCapturedSelections(
-                    current.capturedSelections,
-                    source.path.length - 1,
-                  ) ?? []),
-                  ...(source.capturedSelectionAt === undefined
-                    ? []
-                    : [
-                        {
-                          at: source.capturedSelectionAt,
-                          depth: source.path.length,
-                          ...(source.ownEnumerable
-                            ? { ownEnumerable: true as const }
-                            : {}),
-                        },
-                      ]),
-                ],
+                capturedSelections: semanticCapturedSelectionsAfterPropertyRead(
+                  current.capturedSelections,
+                  source,
+                ),
               });
         }
       }

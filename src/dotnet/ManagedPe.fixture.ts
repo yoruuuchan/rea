@@ -29,6 +29,7 @@ interface ManagedPeFixtureOptions {
   readonly moduleRowCount?: number;
   readonly assemblyRowCount?: number;
   readonly memberRefParentRaw?: number;
+  readonly memberRefRowCount?: number;
   readonly memberRefName?: string;
   readonly memberRefSignature?: Buffer;
   /** Raw MethodDefOrRef coded values, one MethodSpec row each. */
@@ -771,7 +772,7 @@ const fixtureIndexWidths = ({
     [4, 1],
     [6, options.methodRowCount ?? 1],
     [8, 0],
-    [10, 1],
+    [10, options.memberRefRowCount ?? 1],
     [
       12,
       options.targetFramework === null
@@ -885,7 +886,7 @@ const fixtureMetadataRows = ({
     ],
     [
       10,
-      [
+      repeatedRows(options.memberRefRowCount ?? 1, () =>
         memberRefRow({
           name: indexes.constructorName,
           signature: indexes.constructorSignature,
@@ -896,7 +897,7 @@ const fixtureMetadataRows = ({
             ? {}
             : { parentRaw: options.memberRefParentRaw }),
         }),
-      ],
+      ),
     ],
     [12, customAttributeRows({ options, indexes, heapSizes }, widths)],
     ...(indexes.pinvokeModuleName === null

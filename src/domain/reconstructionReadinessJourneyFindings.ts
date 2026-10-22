@@ -64,8 +64,6 @@ export const READINESS_REQUIRED_CHECKS: Readonly<
   ],
 };
 
-export const READINESS_STAGE_IDS = readinessStageIdSchema.options;
-
 export const readinessJourneyFindings = (
   input: ReconstructionReadinessInput,
   evidenceIds: ReadonlySet<string>,
@@ -142,7 +140,7 @@ const stageFindings = (
   evidenceIds: ReadonlySet<string>,
 ): ReadinessFinding[] => {
   const findings: ReadinessFinding[] = [];
-  for (const stageId of READINESS_STAGE_IDS) {
+  for (const stageId of readinessStageIdSchema.options) {
     const matching = input.stages.filter(({ stage_id: id }) => id === stageId);
     if (matching.length !== 1) {
       findings.push(

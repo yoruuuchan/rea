@@ -9,6 +9,7 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { Result } from "../domain/result.js";
+import { dispatchQueuedInterrupts } from "../process/queuedInterrupts.js";
 
 /** Finish a one-shot CLI operation while retaining primary results through close. */
 export const finishAnalysisCommand = async <
@@ -59,16 +60,18 @@ export const finishAnalysisCommand = async <
       );
     }
     if (result.ok) cleanup.retainPartialObservation(result.value);
-    return projectAnalysisError(
-      result.ok
+    result = {
+      ok: false,
+      error: result.ok
         ? cleanup
         : analysisErrorWithCleanupFailure(
             result.error,
             cleanup,
             canonicalOperation,
           ),
-    );
+    };
   }
+  await dispatchQueuedInterrupts();
   if (result.ok && signal.aborted)
     return projectAnalysisError(
       new AnalysisCancelledError(canonicalOperation, {

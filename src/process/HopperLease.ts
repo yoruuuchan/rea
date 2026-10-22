@@ -273,6 +273,7 @@ const readOwner = (
 ): Promise<HopperTargetLeaseOwner | "missing" | "stale"> =>
   new Promise((resolveOwner, rejectOwner) => {
     const socket = createConnection(socketPath);
+    socket.setEncoding("utf8");
     let response = "";
     let settled = false;
     const fail = (reason: string, cause?: unknown): void => {
@@ -297,8 +298,8 @@ const readOwner = (
       socket.destroy();
       resolveOwner(owner);
     };
-    socket.on("data", (chunk: Buffer) => {
-      response += chunk.toString("utf8");
+    socket.on("data", (chunk: string) => {
+      response += chunk;
       const newline = response.indexOf("\n");
       if (newline < 0) return;
       const parsed = safeParseJson(response.slice(0, newline));

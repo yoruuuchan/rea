@@ -51,7 +51,6 @@ export const CANCELLED: RpcError = {
   data: { reason: "cancelled" },
 };
 
-export { STATE_INTAKE_LIMIT_BYTES };
 /** An https state download must finish within this time. */
 export const STATE_FETCH_TIMEOUT_MS = 30_000;
 

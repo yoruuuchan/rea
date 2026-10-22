@@ -20,6 +20,7 @@ import { err, ok, type Result } from "../domain/result.js";
 import { silentLogger } from "../logger.js";
 import type { Logger } from "pino";
 import { PendingOperations } from "../process/PendingOperations.js";
+import { DecodedNdjsonLineBuffer } from "../process/DecodedNdjsonLineBuffer.js";
 import { ABORTED, waitForAbortable } from "../process/AbortablePromise.js";
 import {
   SharedStartupAttempt,
@@ -50,7 +51,6 @@ import {
   GHIDRA_PROCESS_DIAGNOSTIC_BYTES,
 } from "./GhidraDiagnostics.js";
 import { GhidraLaunchError, type GhidraLaunch } from "./GhidraLauncher.js";
-import { GhidraResponseBuffer } from "./GhidraResponseBuffer.js";
 import { GhidraResponseRouter } from "./GhidraResponseRouter.js";
 import { GhidraRequestQueue } from "./GhidraRequestQueue.js";
 import {
@@ -166,11 +166,11 @@ export class GhidraClient {
       }),
     protocolFailure: (message, cause) => this.#abortProtocol(message, cause),
   });
-  readonly #responseBuffer = new GhidraResponseBuffer({
-    onLine: (line) => this.#responseRouter.route(line),
-  });
-  readonly #onSocketData = (chunk: string): void =>
-    this.#responseBuffer.push(chunk);
+  readonly #responseLines = new DecodedNdjsonLineBuffer();
+  readonly #onSocketData = (chunk: string): void => {
+    for (const line of this.#responseLines.push(chunk))
+      this.#responseRouter.route(line);
+  };
   readonly #onSocketError = (): void => {
     this.#failAll(this.#failure("process", "Ghidra bridge socket failed"));
   };
@@ -974,7 +974,7 @@ export class GhidraClient {
       this.#detachSocket = undefined;
       this.#socket?.destroy();
       this.#socket = undefined;
-      this.#responseBuffer.reset();
+      this.#responseLines.reset();
     }
   }
 
@@ -1119,7 +1119,7 @@ export class GhidraClient {
       this.#endpointPath = undefined;
       this.#token = undefined;
       this.#runId = undefined;
-      this.#responseBuffer.reset();
+      this.#responseLines.reset();
       if (forcedStopFailure !== undefined) throw forcedStopFailure.cause;
       for (const failure of this.#cleanupFailures) failure.resolveCleanup();
       this.#cleanupFailures.clear();

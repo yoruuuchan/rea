@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { javascriptSourceRangeSchema } from "./javascriptSourceCoordinates.js";
 import { digestSchema } from "../digests.js";
 import { prefixedDigestSchema } from "../digests.js";
 
@@ -87,31 +88,10 @@ const applicationArtifactReferenceSchema = z.discriminatedUnion("available", [
   unavailableFactSchema,
 ]);
 
-const sourceRangeSchema = z
-  .strictObject({
-    kind: z.literal("source-range"),
-    source: boundedTextSchema,
-    start: z.strictObject({
-      line: z.number().int().min(1),
-      column: z.number().int().min(0),
-    }),
-    end: z.strictObject({
-      line: z.number().int().min(1),
-      column: z.number().int().min(0),
-    }),
-  })
-  .superRefine((location, context) => {
-    if (
-      location.end.line < location.start.line ||
-      (location.end.line === location.start.line &&
-        location.end.column < location.start.column)
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["end"],
-        message: "Source range end must not precede its start",
-      });
-  });
+const sourceRangeSchema = javascriptSourceRangeSchema.safeExtend({
+  kind: z.literal("source-range"),
+  source: boundedTextSchema,
+});
 
 const fileOffsetRangeSchema = z
   .strictObject({

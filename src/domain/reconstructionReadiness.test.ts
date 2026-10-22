@@ -9,6 +9,7 @@ import {
 } from "./reconstructionObligationLedgerIntegrity.js";
 import { reconstructionObligationLedgerSchema } from "./reconstructionObligationLedgerSchemas.js";
 import {
+  reconstructionReadinessReportSchema,
   reconstructionReadinessInputSchema,
   type ReconstructionReadinessInput,
 } from "./reconstructionReadinessSchemas.js";
@@ -177,6 +178,31 @@ describe("readiness obligation ledger integrity", () => {
       expect(() => reconstructionObligationLedgerSchema.parse(ledger)).toThrow(
         expected,
       );
+    },
+  );
+});
+
+describe("readiness stage identity", () => {
+  it.each(["input", "report"] as const)(
+    "rejects repeated stage IDs in the %s contract",
+    (kind) => {
+      const value =
+        kind === "input"
+          ? input()
+          : createReconstructionReadinessReport(input());
+      value.stages[1] = { ...value.stages[0]! };
+      const schema =
+        kind === "input"
+          ? reconstructionReadinessInputSchema
+          : reconstructionReadinessReportSchema;
+      const parsed = schema.safeParse(value);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) throw new Error("Duplicate stage ID was accepted");
+      expect(parsed.error.issues).toContainEqual({
+        code: "custom",
+        path: ["stages", 1, "stage_id"],
+        message: "Readiness stage IDs must be unique",
+      });
     },
   );
 });

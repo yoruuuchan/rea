@@ -296,6 +296,38 @@ describe("Linux Hopper application leases", () => {
     },
   );
 
+  it("preserves a Unicode owner identity split across socket writes", async () => {
+    const directory = await temporaryDirectory();
+    const socketPath = await releasedApplicationSocket(directory);
+    const owner = { runId: "session-中文-🔬", processId: process.pid };
+    const response = Buffer.from(`${JSON.stringify(owner)}\n`);
+    const split = response.indexOf(Buffer.from("中")) + 1;
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => undefined);
+      socket.write(response.subarray(0, split), () => {
+        // Let the client consume the incomplete UTF-8 sequence before the tail.
+        setImmediate(() =>
+          setImmediate(() => socket.end(response.subarray(split))),
+        );
+      });
+    });
+    server.listen(socketPath);
+    await once(server, "listening");
+    try {
+      expect(
+        await acquireLinuxHopperApplicationLease({ directory, runId: "next" }),
+      ).toEqual({ acquired: false, owner });
+      expect((await lstat(socketPath)).isSocket()).toBe(true);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
   it("recovers a socket left by a process that exited without releasing it", async () => {
     const directory = await temporaryDirectory();
     const socketPath = await releasedApplicationSocket(directory);

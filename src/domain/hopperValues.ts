@@ -250,7 +250,7 @@ export const functionInstructionWindowSchema = z
   })
   .strict();
 
-const availableReferenceKindSchema = z
+export const availableReferenceKindSchema = z
   .object({
     available: z.literal(true),
     provenance: z.string().min(1),

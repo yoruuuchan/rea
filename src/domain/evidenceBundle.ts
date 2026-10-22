@@ -1,3 +1,4 @@
+import { equalJsonText } from "./jsonSerialization.js";
 import { z } from "zod";
 import canonicalize from "canonicalize";
 
@@ -322,7 +323,7 @@ const authenticateBundle = (
     }),
     parsed.unknowns,
   );
-  if (JSON.stringify(parsed) !== JSON.stringify(canonical))
+  if (!equalJsonText(parsed, canonical))
     throw new NonCanonicalEvidenceBundleError();
   if (seal) {
     freezeJsonSnapshot(canonical);

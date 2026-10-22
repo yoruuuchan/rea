@@ -18,7 +18,7 @@ export const resolveEvidenceInput = (
       new EvidenceReferenceError(
         input.evidence_id,
         "missing",
-        "Evidence retained in this session",
+        "Evidence available to the selected source",
         null,
       ),
     );

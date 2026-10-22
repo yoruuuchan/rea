@@ -55,7 +55,6 @@ export const ingestElectronScriptEvent = (input: {
     scriptId,
     rawUrl,
     ...scriptMetadataValues(value),
-    language: cdpStringValue(value?.scriptLanguage) ?? null,
     frameId:
       contextKey === null
         ? null

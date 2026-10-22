@@ -89,7 +89,6 @@ export const handleScriptParsed = (
     url: sanitized.url,
     origin: sanitized.origin,
     ...scriptMetadataValues(params),
-    language: cdpStringValue(params.scriptLanguage) ?? null,
     executionContextKey: executionContext,
     frameId:
       executionContext === null

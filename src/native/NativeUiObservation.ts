@@ -34,10 +34,7 @@ import {
   NATIVE_UI_OUTPUT_BUDGET_BYTES,
   NATIVE_UI_OUTPUT_WEIGHT,
 } from "./NativeUiOutputBudget.js";
-import {
-  NATIVE_UI_DEADLINE_MS,
-  NativeUiInterruptionControl,
-} from "./NativeUiInterruptionControl.js";
+import { NativeUiInterruptionControl } from "./NativeUiInterruptionControl.js";
 
 const helper = fileURLToPath(
   new URL("../../bridge/native/ReaNativeUI.swift", import.meta.url),
@@ -79,7 +76,7 @@ export const observeNativeUi = async (
     new NativeUiInterruptionControl(
       options.signal,
       runtime.signal,
-      runtime.deadlineMs ?? NATIVE_UI_DEADLINE_MS,
+      runtime.deadlineMs ?? DEFAULT_NATIVE_UI_DEADLINE_MS,
     );
   const ownsInterruption = options.interruption === undefined;
   let result: Result<z.infer<typeof nativeUiResultSchema>, AnalysisError>;

@@ -17,12 +17,16 @@ import {
 it("advertises exact valid schemas and records inline layout without a binary target", async () => {
   const value = binaryLayoutFixture();
   let providerClosed = false;
+  let providerCalls = 0;
   const service = new BinaryLayoutService({
     inspectAndClose(input, options) {
       return this.inspect(input, options);
     },
     identity: BINARY_LAYOUT_TEST_PROVIDER,
-    inspect: () => Promise.resolve(ok(value)),
+    inspect: () => {
+      providerCalls++;
+      return Promise.resolve(ok(value));
+    },
     close: async () => {
       providerClosed = true;
     },
@@ -51,6 +55,7 @@ it("advertises exact valid schemas and records inline layout without a binary ta
   );
   const { ajv, inputSchema } = schemas;
   expect(ajv.validate(inputSchema, { path: value.artifact.path })).toBe(true);
+  expect(ajv.validate(inputSchema, { path: "relative.elf" })).toBe(false);
   expect(
     ajv.validate(inputSchema, {
       path: value.artifact.path,
@@ -97,4 +102,5 @@ it("advertises exact valid schemas and records inline layout without a binary ta
       })
     ).isError,
   ).toBe(true);
+  expect(providerCalls).toBe(1);
 });

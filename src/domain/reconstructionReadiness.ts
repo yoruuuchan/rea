@@ -1,12 +1,10 @@
 import { digestCanonicalValue } from "./canonicalDigest.js";
 import { authenticateParsedEvidenceBundle } from "./evidenceBundle.js";
 import { readinessFindingOrder } from "./reconstructionReadinessFindingHelpers.js";
-import {
-  READINESS_STAGE_IDS,
-  readinessJourneyFindings,
-} from "./reconstructionReadinessJourneyFindings.js";
+import { readinessJourneyFindings } from "./reconstructionReadinessJourneyFindings.js";
 import { readinessIntegrityFindings } from "./reconstructionReadinessIntegrityFindings.js";
 import {
+  readinessStageIdSchema,
   reconstructionReadinessInputSchema,
   reconstructionReadinessReportSchema,
   type ReadinessFinding,
@@ -71,7 +69,7 @@ const effectiveStages = (
   input: ReconstructionReadinessInput,
   findings: readonly ReadinessFinding[],
 ): ReconstructionReadinessReport["stages"] =>
-  READINESS_STAGE_IDS.map((stageId) => {
+  readinessStageIdSchema.options.map((stageId) => {
     const stage = input.stages.find(({ stage_id: id }) => id === stageId);
     const stageFindings = findings.filter(({ stage_id: id }) => id === stageId);
     const status = stageFindings.some(

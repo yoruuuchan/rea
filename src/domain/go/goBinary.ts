@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { BINARY_ARCHITECTURES } from "../binaryTargetTypes.js";
 import { digestSchema } from "../digests.js";
-import { localPathStringSchema } from "../localPath.js";
+import {
+  absoluteLocalPathStringSchema,
+  localPathStringSchema,
+} from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 
 /** Map reader architecture names into Evidence identity; unknown names stay unknown. */
@@ -46,7 +49,7 @@ export const goModuleMetadataSchema = z.strictObject({
 
 /** One exact local artifact, independent of any active disassembler target. */
 export const inspectGoBinaryInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to the selected executable or library",
   ),
   detail: z

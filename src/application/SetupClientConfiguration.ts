@@ -405,36 +405,20 @@ export const clientConfigurationAligned = async (
     }
     const original = await readRegularFileText(client.configPath);
     const parsed = parseClientConfiguration(original, client.format);
-    const policy = await readClientPolicyBlock(
+    const desired = await clientConfigurationDesired(
       client,
+      providerEnvironment,
+      command,
       parsed,
-      await clientConfigurationDesired(
-        client,
-        providerEnvironment,
-        command,
-        parsed,
-        files.value,
-        resolveProviderRequestBudget,
-      ),
+      files.value,
+      resolveProviderRequestBudget,
     );
+    const policy = await readClientPolicyBlock(client, parsed, desired);
     if (!policy.ok) {
       throwCleanupFailure(policy.error);
       return false;
     }
-    return (
-      policy.value === undefined &&
-      registrationCurrent(
-        parsed,
-        await clientConfigurationDesired(
-          client,
-          providerEnvironment,
-          command,
-          parsed,
-          files.value,
-          resolveProviderRequestBudget,
-        ),
-      )
-    );
+    return policy.value === undefined && registrationCurrent(parsed, desired);
   } catch (cause: unknown) {
     if (cause instanceof RegularFileCleanupFailure) throw cause;
     // Unreadable configuration is treated as not aligned so setup repairs it.
@@ -544,18 +528,15 @@ const inspectClientDocument = async (
   }
   try {
     const parsed = parseClientConfiguration(original, client.format);
-    const policy = await readClientPolicyBlock(
+    const desired = await clientConfigurationDesired(
       client,
+      providerEnvironment,
+      command,
       parsed,
-      await clientConfigurationDesired(
-        client,
-        providerEnvironment,
-        command,
-        parsed,
-        files.value,
-        resolveProviderRequestBudget,
-      ),
+      files.value,
+      resolveProviderRequestBudget,
     );
+    const policy = await readClientPolicyBlock(client, parsed, desired);
     if (!policy.ok) {
       throwCleanupFailure(policy.error);
       return {
@@ -565,14 +546,6 @@ const inspectClientDocument = async (
     }
     if (policy.value !== undefined)
       return { status: "invalid", remediation: policy.value };
-    const desired = await clientConfigurationDesired(
-      client,
-      providerEnvironment,
-      command,
-      parsed,
-      files.value,
-      resolveProviderRequestBudget,
-    );
     if (registrationCurrent(parsed, desired))
       return { status: "already_current" };
     const fallback = await readZcodeFallbackServers(client, parsed);

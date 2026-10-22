@@ -52,13 +52,14 @@ export const readJsonFile = async (
   path: string,
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
+  operation = "read_evidence_file",
 ): Promise<
   Result<
     unknown,
     EvidenceFileError | AnalysisResourceConstraintError | AnalysisCancelledError
   >
 > => {
-  const read = await readJsonFileWithSource(path, signal, resources);
+  const read = await readJsonFileWithSource(path, signal, resources, operation);
   return read.ok ? ok(read.value.data) : read;
 };
 
@@ -67,6 +68,7 @@ export const readJsonFileWithSource = (
   path: string,
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
+  operation = "read_evidence_file",
 ): Promise<
   Result<
     { readonly data: unknown; readonly path: string },
@@ -78,13 +80,14 @@ export const readJsonFileWithSource = (
     async (selected) => {
       const read = await readJsonInputFile(
         selected,
-        "read_evidence_file",
+        operation,
         signal,
         resources,
       );
       return read.ok ? ok({ data: read.value, path: selected }) : read;
     },
     signal,
+    operation,
   );
 
 /** Read selected JSON members through the same regular-file error boundary. */
@@ -124,6 +127,7 @@ const readJsonFileInput = async <Value>(
     >
   >,
   signal?: AbortSignal,
+  operation = "read_evidence_file",
 ): Promise<
   Result<
     Value,
@@ -153,7 +157,7 @@ const readJsonFileInput = async <Value>(
     if (cause instanceof AnalysisResourceConstraintError) return err(cause);
     if (cause instanceof JsonInputCancellationFailure)
       return err(
-        new AnalysisCancelledError("read_evidence_file", {
+        new AnalysisCancelledError(operation, {
           cause: cause.reason,
         }),
       );
@@ -166,7 +170,7 @@ const readJsonFileInput = async <Value>(
       );
     if (isJsonReadCancellation(cause, signal))
       return err(
-        new AnalysisCancelledError("read_evidence_file", {
+        new AnalysisCancelledError(operation, {
           cause: signal?.reason,
         }),
       );

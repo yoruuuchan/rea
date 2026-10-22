@@ -4,6 +4,50 @@ import {
   requireAuthenticationHeadroom,
 } from "./JsonAuthenticationHeadroom.js";
 describe("JSON authentication headroom", () => {
+  it("does not queue every row while deciding whether a wide report can fit", () => {
+    let pending = 0;
+    let peak = 0;
+    const rows: { admission_probe: boolean }[] = [];
+    for (let index = 0; index < 512; index++) {
+      const row = {
+        get admission_probe() {
+          pending--;
+          return true;
+        },
+      };
+      // Observe reading a row separately from examining its scalar. A width
+      // queue reads every row first; an iterator finishes each row before advancing.
+      Object.defineProperty(rows, index, {
+        enumerable: true,
+        get: () => {
+          peak = Math.max(peak, ++pending);
+          if (pending > 32)
+            throw new Error(
+              "Admission queued report rows before refusing their allocation",
+            );
+          return row;
+        },
+      });
+    }
+    const value = { rows };
+    const result = requireAuthenticationHeadroom(value, {
+      operation: "inspect_managed_members",
+      path: "/tmp/parent.json",
+      description: "Cannot authenticate",
+      availableBytes: 0,
+    });
+    expect(pending).toBe(0);
+    expect(peak).toBe(1);
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisResourceConstraintError",
+        reportedLimits: {
+          serialized_json_utf16_bytes: JSON.stringify(value).length * 2,
+        },
+      },
+    });
+  });
   it("estimates parsed JSON at no less than its UTF-16 text", () => {
     const text = "x".repeat(1000);
     expect(estimateJsonValueBytes(text)).toBeGreaterThanOrEqual(2000);
@@ -40,5 +84,30 @@ describe("JSON authentication headroom", () => {
         availableBytes: 1 << 30,
       }),
     ).toEqual({ ok: true, value: undefined });
+  });
+});
+
+it.each([
+  ["control characters", { text: "\u0000\u0001\b\t\n\f\r".repeat(2000) }],
+  [
+    "escaped keys",
+    { ['\u0000\\"'.repeat(2000)]: [true, false, null, -0, 1e30] },
+  ],
+  ["surrogate boundaries", { text: "😀\ud800x\udfff".repeat(2000) }],
+])("reserves actual escaped JSON storage for %s", (_label, value) => {
+  const result = requireAuthenticationHeadroom(value, {
+    operation: "inspect_analysis_view",
+    path: "/tmp/bundle.json",
+    description: "Cannot authenticate bundle",
+    availableBytes: estimateJsonValueBytes(value) * 2 + 1,
+  });
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      _tag: "AnalysisResourceConstraintError",
+      reportedLimits: {
+        serialized_json_utf16_bytes: JSON.stringify(value).length * 2,
+      },
+    },
   });
 });

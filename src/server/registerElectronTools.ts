@@ -30,7 +30,10 @@ import type { Result } from "../domain/result.js";
 import type { Logger } from "pino";
 import { mcpProgressReporter } from "./mcpProgress.js";
 import { logToolExecution } from "./toolLogging.js";
-import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import {
+  applicationToolRegistrationOptions,
+  toolRegistrationOptions,
+} from "./toolRegistrationOptions.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
@@ -75,6 +78,7 @@ export const registerElectronTools = (
       runElectronTool(
         registration,
         listContract,
+        options.observationLoadFailure,
         { input, context },
         (parsed, { signal }) =>
           listElectronTargets(options.electron, parsed, {
@@ -89,6 +93,7 @@ export const registerElectronTools = (
       runElectronTool(
         registration,
         inspectContract,
+        options.observationLoadFailure,
         { input, context },
         (parsed, { signal, progress }) =>
           inspectElectronPage(options.electron, parsed, {
@@ -104,6 +109,7 @@ export const registerElectronTools = (
       runElectronTool(
         registration,
         analyzeContract,
+        undefined,
         { input, context },
         async ({ detail, ...request }, { signal, progress }) => {
           const analyzed = await analyzeJavaScriptApplicationValidated(
@@ -124,6 +130,7 @@ export const registerElectronTools = (
       runElectronTool(
         registration,
         reconcileContract,
+        undefined,
         { input, context },
         (parsed) =>
           Promise.resolve(reconcileJavaScriptRuntimeEvidenceValidated(parsed)),
@@ -136,6 +143,7 @@ export const registerElectronTools = (
       runElectronTool(
         registration,
         activeContract,
+        options.activeLoadFailure,
         { input, context },
         (parsed, { signal, progress }) =>
           captureElectronScenario(options.electronActive, parsed, {
@@ -160,7 +168,7 @@ const registerElectronFuseTool = (
   );
   server.registerTool(
     contract.name,
-    toolRegistrationOptions(contract),
+    applicationToolRegistrationOptions(contract),
     handler(contract),
   );
 };
@@ -171,6 +179,7 @@ const runElectronTool = async <Input>(
     readonly server: EvidenceMcpServer;
   },
   contract: ToolContract,
+  loadFailure: OptionalProviderLoadFailure | undefined,
   request: {
     readonly input: Input;
     readonly context: ServerContext;
@@ -181,16 +190,9 @@ const runElectronTool = async <Input>(
   ) => Promise<Result<Evidence, AnalysisError>>,
 ) => {
   const { input, context } = request;
-  const failure =
-    contract.name === "capture_electron_scenario"
-      ? options.activeLoadFailure
-      : contract.name === "list_electron_targets" ||
-          contract.name === "inspect_electron_page"
-        ? options.observationLoadFailure
-        : undefined;
-  if (failure !== undefined)
+  if (loadFailure !== undefined)
     return options.delivery.toCallToolResult(
-      err(optionalProviderUnavailable(failure, contract.name)),
+      err(optionalProviderUnavailable(loadFailure, contract.name)),
       contract,
     );
   return runAdmittedToolOperation(

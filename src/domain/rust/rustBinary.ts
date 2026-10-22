@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
-import { localPathStringSchema } from "../localPath.js";
+import {
+  absoluteLocalPathStringSchema,
+  localPathStringSchema,
+} from "../localPath.js";
 import { BINARY_ARCHITECTURES } from "../binaryTargetTypes.js";
 
 /** Preserve the format owner's architecture spelling separately from Evidence vocabulary. */
@@ -68,7 +71,7 @@ export const rustcCommitSchema = z.strictObject({
 
 /** One explicit local executable or library, independent of a disassembler target. */
 export const inspectRustBinaryInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to the selected executable or library",
   ),
 });

@@ -10,8 +10,8 @@ import {
   applicationToolContract,
 } from "../../contracts/applicationToolContracts.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import type { Evidence } from "../../domain/evidence.js";
 import type { Result } from "../../domain/result.js";
+import type { InventoryProjectionEvidenceResult } from "../../application/InventoryProjectionEvidence.js";
 import { recordSessionEvidenceSources } from "../sessionEvidence.js";
 import { logToolExecution } from "../toolLogging.js";
 import { toolRegistrationOptions } from "../toolRegistrationOptions.js";
@@ -47,7 +47,9 @@ const registerProjection = (context: {
   readonly server: EvidenceMcpServer;
   readonly options: ApplicationToolRegistration;
   readonly contract: (typeof APPLICATION_TOOL_CONTRACTS)[number];
-  readonly project: (input: unknown) => Result<Evidence, AnalysisError>;
+  readonly project: (
+    input: unknown,
+  ) => Result<InventoryProjectionEvidenceResult, AnalysisError>;
 }): void => {
   const { server, options, contract, project } = context;
   server.registerTool(
@@ -69,27 +71,16 @@ const registerProjection = (context: {
             return server.delivery.toCallToolResult(result, contract);
           const recordedSources = recordSessionEvidenceSources(
             options.recordEvidence,
-            inventoryEvidenceSources(input),
+            result.value.sources,
           );
           if (!recordedSources.ok)
             return server.delivery.toCallToolResult(recordedSources, contract);
           return recordResult(
             { ...options, delivery: server.delivery },
             contract,
-            result.value,
+            result.value.evidence,
           );
         },
       ),
   );
-};
-
-const inventoryEvidenceSources = (input: unknown): readonly Evidence[] => {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    !("inventory_evidence" in input) ||
-    !Array.isArray(input.inventory_evidence)
-  )
-    return [];
-  return input.inventory_evidence as readonly Evidence[];
 };

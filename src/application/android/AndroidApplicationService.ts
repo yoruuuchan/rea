@@ -1,19 +1,21 @@
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import type { Evidence } from "../../domain/evidence.js";
 import {
   androidApplicationProjectionInputSchema,
   projectAndroidApplication,
 } from "../../domain/android/androidApplication.js";
 import type { Result } from "../../domain/result.js";
 import { ANDROID_APPLICATION_PROVIDER } from "../InvestigationProviders.js";
-import { projectInventoryEvidence } from "../InventoryProjectionEvidence.js";
+import {
+  projectInventoryEvidence,
+  type InventoryProjectionEvidenceResult,
+} from "../InventoryProjectionEvidence.js";
 
 const OPERATION = "project_android_application_graph" as const;
 
 /** Project authenticated APK inventory Evidence into Android application Evidence. */
 export const projectAndroidApplicationEvidence = (
   rawInput: unknown,
-): Result<Evidence, AnalysisError> => {
+): Result<InventoryProjectionEvidenceResult, AnalysisError> => {
   return projectInventoryEvidence({
     rawInput,
     schema: androidApplicationProjectionInputSchema,

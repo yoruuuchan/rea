@@ -85,7 +85,12 @@ it("publishes valid SDK schemas and records the named module trace without a bin
     name: "trace_web_module_imports",
     arguments: { ...args, manifest_path: "relative.json" },
   });
-  expect(invalid.isError).toBe(true);
+  expect(parseMcpToolError(invalid).error).toMatchObject({
+    code: "invalid_request",
+    details: {
+      issues: [{ path: ["manifest_path"], reason: "invalid_format" }],
+    },
+  });
 });
 
 it("retains the module resolver cleanup owner across failed server shutdown", async () => {

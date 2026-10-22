@@ -29,7 +29,6 @@ import {
 import {
   createKunaResourceScope,
   inspectKunaInstallation,
-  kunaInstallationCancellation,
 } from "./KunaInstallation.js";
 import { KunaProjectCache } from "./KunaProjectCache.js";
 import {
@@ -207,25 +206,12 @@ export class KunaProvider implements AnalysisProviderCandidate {
         "kuna:profile",
       );
       if (retainedCleanup !== undefined) return err(retainedCleanup);
-      const cancellation = kunaInstallationCancellation(cause);
-      if (
-        !(cause instanceof RegularFileCleanupFailure) &&
-        cancellation !== undefined
-      ) {
-        const error = new AnalysisCancelledError("kuna:profile", {
-          cause: cancellation.reason,
-          diagnostics: cancellation.diagnostics,
-          ...(!kunaResources.hasPending
-            ? {}
-            : {
-                cleanup: {
-                  reason: "Kuna version-probe process cleanup is unconfirmed.",
-                  resources: kunaResources.cleanupResources ?? [],
-                },
-              }),
-        });
-        kunaResources.bindRetainedFailure(error);
-        return err(error);
+      if (!(cause instanceof RegularFileCleanupFailure)) {
+        const cancellation = kunaResources.installationCancellationError(
+          cause,
+          "kuna:profile",
+        );
+        if (cancellation !== undefined) return err(cancellation);
       }
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
       const error = kunaFileCleanupError(cause, "kuna:profile");

@@ -12,12 +12,9 @@ import {
   assertComparisonFindingLinks,
 } from "./comparisonSourceEvidence.js";
 import { parseEvidence, type Evidence } from "./evidence.js";
+import { hasComparisonEvidenceIdentity } from "./comparisonEvidenceIdentity.js";
 import { parseEvidenceBundle } from "./evidenceBundle.js";
 import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
-import {
-  PROCESS_PROVIDER,
-  isProcessEvidenceProvider,
-} from "./process/processEvidenceProvider.js";
 import { functionDossierSchema } from "./hopperValues.js";
 import { assessFunctionCallCoverage } from "./functionCallCoverage.js";
 import { processCaptureComparisonSchema } from "./process/processComparison.js";
@@ -38,24 +35,10 @@ import {
 } from "./reconstructionUnknowns.js";
 import type { ResidualUnknown } from "./residualUnknown.js";
 
-const providers = {
-  behavioral: {
-    operation: "compare_process_captures",
-    predicates: ["rea.process-comparison"],
-    ...PROCESS_PROVIDER,
-  },
-  "structural-function": {
-    operation: "compare_functions",
-    predicates: ["rea.function-comparison"],
-    id: "rea-function-comparison",
-    name: "REA function comparison",
-  },
-  "structural-artifact": {
-    operation: "compare_artifacts",
-    predicates: ["rea.artifact-comparison"],
-    id: "rea-artifact-comparison",
-    name: "REA artifact comparison",
-  },
+const comparisonOperationsByClaimKind = {
+  behavioral: "compare_process_captures",
+  "structural-function": "compare_functions",
+  "structural-artifact": "compare_artifacts",
 } as const;
 
 interface FunctionSourceFacts {
@@ -63,11 +46,6 @@ interface FunctionSourceFacts {
   readonly callCoverageBlockers: readonly string[];
   readonly callCoverageDiagnostics: readonly string[];
 }
-
-const acceptsPredicate = (
-  expected: readonly string[],
-  actual: string,
-): boolean => expected.some((predicate) => predicate === actual);
 
 /** Verify only explicitly declared claims; no global equivalence is inferred. */
 export const verifyReconstruction = (
@@ -234,18 +212,10 @@ const readValidatedSourceFacts = (
 
 const validateComparisonIdentity = (claim: Claim, evidence: Evidence): void => {
   parseEvidence(evidence);
-  const expected = providers[claim.kind];
+  const expectedOperation = comparisonOperationsByClaimKind[claim.kind];
   if (
-    evidence.operation !== expected.operation ||
-    !acceptsPredicate(expected.predicates, evidence.predicate_type) ||
-    (claim.kind === "behavioral"
-      ? !isProcessEvidenceProvider(evidence.provider)
-      : evidence.provider.id !== expected.id ||
-        evidence.provider.name !== expected.name ||
-        evidence.provider.version !== "1") ||
-    evidence.confidence !== "derived" ||
-    evidence.authority !== "analyst-inference" ||
-    evidence.subject !== null
+    evidence.operation !== expectedOperation ||
+    !hasComparisonEvidenceIdentity(evidence)
   )
     throw new TypeError("Comparison Evidence identity or authority disagrees");
 };

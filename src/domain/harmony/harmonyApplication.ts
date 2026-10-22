@@ -1,3 +1,7 @@
+import {
+  bridgeCandidateCoverageSchema,
+  projectCartesianCandidates,
+} from "../bridgeCandidateProjection.js";
 import { z } from "zod";
 
 import {
@@ -9,8 +13,7 @@ import { prefixedDigestSchema } from "../digests.js";
 import { nativeRuntimeConvention } from "../nativeConvention.js";
 import {
   applicationInventoryProjectionInputSchema,
-  bridgeCandidateCoverageSchema,
-  projectCartesianCandidates,
+  type MobileApplicationProjectionWithSources,
   projectedBridgeCandidateSchema,
   projectedComponentSchema,
   projectedInventoryEntries,
@@ -78,7 +81,7 @@ type Component = z.infer<typeof componentSchema>;
 /** Project exact HarmonyOS package paths and hashes without decoding or executing target code. */
 export const projectHarmonyApplication = (
   input: HarmonyApplicationProjectionInput,
-): HarmonyApplicationProjectionResult => {
+): MobileApplicationProjectionWithSources<HarmonyApplicationProjectionResult> => {
   const parsed = harmonyApplicationProjectionInputSchema.parse(input);
   const { evidence, inventory } = parseArtifactInventoryEvidence(
     parsed.inventory_evidence,
@@ -145,10 +148,13 @@ export const projectHarmonyApplication = (
     ),
     limitations,
   };
-  return harmonyApplicationProjectionResultSchema.parse({
-    ...withoutId,
-    projection_id: `hmp_${projectionDigest(withoutId, "HarmonyOS application projection")}`,
-  });
+  return {
+    projection: harmonyApplicationProjectionResultSchema.parse({
+      ...withoutId,
+      projection_id: `hmp_${projectionDigest(withoutId, "HarmonyOS application projection")}`,
+    }),
+    sources: evidence,
+  };
 };
 
 const harmonyRootFormat = (format: string): RootFormat => {

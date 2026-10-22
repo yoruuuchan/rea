@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { evidenceSchema, type Evidence } from "../evidence.js";
@@ -20,7 +17,7 @@ import {
   type ManagedMemberInspection,
   type ManagedNativeBoundaryInspection,
 } from "./managedArtifact.js";
-import type { JsonValue } from "../jsonValue.js";
+import { digestCanonicalValue } from "../canonicalDigest.js";
 import {
   assessManagedGraphOmissions,
   managedGraphEvidenceCoverage,
@@ -120,13 +117,6 @@ export interface GraphBuildState {
   readonly fieldNodes: Map<string, ApplicationNode>;
 }
 
-const sha256 = (value: JsonValue): string => {
-  const serialized = canonicalize(value);
-  if (serialized === undefined)
-    throw new TypeError("Managed application graph canonicalization failed");
-  return createHash("sha256").update(serialized).digest("hex");
-};
-
 /** Project authenticated managed Evidence records into the application graph. */
 export const projectManagedApplicationGraph = (
   input: ProjectManagedApplicationGraphInput,
@@ -194,7 +184,10 @@ export const projectManagedApplicationGraph = (
   };
   return managedApplicationGraphResultSchema.parse({
     ...withoutId,
-    projection_id: `magp_${sha256(withoutId)}`,
+    projection_id: `magp_${digestCanonicalValue(
+      withoutId,
+      "Managed application graph",
+    )}`,
   });
 };
 

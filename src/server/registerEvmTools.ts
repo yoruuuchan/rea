@@ -13,7 +13,7 @@ import { evmInterfaceModule } from "../composition/evm.js";
 import type { Logger } from "pino";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
-import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import { applicationToolRegistrationOptions } from "./toolRegistrationOptions.js";
 
 /** Bind the named EVM contract to shared validation and session Evidence recording. */
 export const registerEvmTools = (
@@ -55,7 +55,7 @@ export const registerEvmTools = (
   );
   server.registerTool(
     contract.name,
-    toolRegistrationOptions(contract),
+    applicationToolRegistrationOptions(contract),
     handler(contract),
   );
 };

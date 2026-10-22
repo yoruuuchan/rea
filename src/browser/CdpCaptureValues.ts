@@ -49,6 +49,7 @@ export const scriptMetadataValues = (
   readonly hash: string | null;
   readonly length: number | null;
   readonly isModule: boolean | null;
+  readonly language: string | null;
 } => {
   const length = numberValue(value?.length);
   return {
@@ -58,6 +59,7 @@ export const scriptMetadataValues = (
         ? length
         : null,
     isModule: typeof value?.isModule === "boolean" ? value.isModule : null,
+    language: cdpStringValue(value?.scriptLanguage) ?? null,
   };
 };
 

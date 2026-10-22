@@ -25,7 +25,7 @@ import {
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
-import { FUNCTION_COMPARISON_PROVIDER } from "../InvestigationProviders.js";
+import { FUNCTION_COMPARISON_PROVIDER } from "../../domain/comparisonEvidenceIdentity.js";
 
 const OPERATION = "match_native_functions";
 export interface NativeFunctionMatchingResult {

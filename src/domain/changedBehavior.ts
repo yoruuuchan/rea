@@ -11,11 +11,11 @@ import {
   comparisonSourceEvidenceIds,
 } from "./comparisonSourceEvidence.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
-import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
 import {
-  PROCESS_PROVIDER,
-  isProcessEvidenceProvider,
-} from "./process/processEvidenceProvider.js";
+  hasComparisonEvidenceIdentity,
+  isComparisonEvidenceOperation,
+} from "./comparisonEvidenceIdentity.js";
+import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
 import {
   comparisonStatusSchema,
   deriveProcessComparisonStatus,
@@ -111,30 +111,6 @@ type ParsedComparison =
       readonly result: z.infer<typeof artifactComparisonResultSchema>;
     };
 
-const EXPECTED_PROVIDERS = {
-  compare_process_captures: {
-    predicates: ["rea.process-comparison"],
-    ...PROCESS_PROVIDER,
-  },
-  compare_artifacts: {
-    predicates: ["rea.artifact-comparison"],
-    id: "rea-artifact-comparison",
-    name: "REA artifact comparison",
-    version: "1",
-  },
-  compare_functions: {
-    predicates: ["rea.function-comparison"],
-    id: "rea-function-comparison",
-    name: "REA function comparison",
-    version: "1",
-  },
-} as const;
-
-const acceptsPredicate = (
-  expected: readonly string[],
-  actual: string,
-): boolean => expected.some((predicate) => predicate === actual);
-
 /** Find observed runtime changes and separately report static change candidates. */
 interface FoundChangedBehavior {
   readonly result: ChangedBehaviorResult;
@@ -202,29 +178,12 @@ export const findChangedBehavior = (input: unknown): FoundChangedBehavior => {
 
 const parseComparisonEvidence = (input: unknown): ParsedComparison => {
   const evidence = parseEvidence(input);
-  if (!(evidence.operation in EXPECTED_PROVIDERS))
+  if (!isComparisonEvidenceOperation(evidence.operation))
     throw new TypeError(
       "Changed-behavior analysis requires process, artifact, or function comparison Evidence",
     );
-  const operation = z
-    .enum([
-      "compare_process_captures",
-      "compare_artifacts",
-      "compare_functions",
-    ])
-    .parse(evidence.operation);
-  const expected = EXPECTED_PROVIDERS[operation];
-  if (
-    !acceptsPredicate(expected.predicates, evidence.predicate_type) ||
-    (operation === "compare_process_captures"
-      ? !isProcessEvidenceProvider(evidence.provider)
-      : evidence.provider.id !== expected.id ||
-        evidence.provider.name !== expected.name ||
-        evidence.provider.version !== expected.version) ||
-    evidence.confidence !== "derived" ||
-    evidence.authority !== "analyst-inference" ||
-    evidence.subject !== null
-  )
+  const operation = evidence.operation;
+  if (!hasComparisonEvidenceIdentity(evidence))
     throw new TypeError(
       "Comparison Evidence operation, predicate, and provider disagree",
     );

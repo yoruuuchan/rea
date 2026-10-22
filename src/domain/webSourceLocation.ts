@@ -6,7 +6,7 @@ import {
   optionalBrowserDeadlineMs,
 } from "./browserDeadline.js";
 import { digestSchema } from "./digests.js";
-import { localPathStringSchema } from "./localPath.js";
+import { absoluteLocalPathStringSchema } from "./localPath.js";
 import { exportedWebScriptSchema } from "./webScriptExport.js";
 import {
   capturedWebManifestIdentitySchema,
@@ -24,7 +24,7 @@ export const webSourcePositionSchema = z.strictObject({
 export const webSourceLocationInputSchema = selectedWebScriptInputSchema.extend(
   {
     source_map: z.strictObject({
-      path: localPathStringSchema.describe(
+      path: absoluteLocalPathStringSchema.describe(
         "Absolute local source-map path; no fetch",
       ),
       url: z

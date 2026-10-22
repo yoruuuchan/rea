@@ -32,7 +32,10 @@ import {
 } from "../../../src/domain/javascript/javascriptApplicationGraph.fixture.js";
 import { writeVersionedJavaScriptApplicationFixtures } from "../../fixtures/javascriptArtifactApplication.js";
 import { JAVASCRIPT_APPLICATION_PROVIDER } from "../../../src/application/InvestigationProviders.js";
+import { projectManagedApplicationGraphEvidence } from "../../../src/application/managed/ManagedApplicationGraphService.js";
+import { MANAGED_APPLICATION_GRAPH_EXAMPLE } from "../../../src/contracts/managed/managedWorkflowExamples.js";
 import { JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE } from "../../../src/contracts/javascript/javascriptRuntimeReconciliationExample.js";
+import { managedApplicationGraphResultSchema } from "../../../src/domain/managed/managedApplicationGraph.js";
 
 const temporary: string[] = [];
 
@@ -318,6 +321,71 @@ describe("complete comparison projections", () => {
     expect(first.summary.removed).toBe(0);
     expect(first.summary.unknown).toBeGreaterThan(0);
   });
+});
+
+describe("Application graph Evidence envelopes", () => {
+  it.each(["runtime reconciliation", "managed application graph"] as const)(
+    "rejects %s result links outside the authenticated Evidence envelope",
+    (sourceKind) => {
+      const sourceResult =
+        sourceKind === "runtime reconciliation"
+          ? reconcileJavaScriptRuntimeEvidence(
+              JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE,
+            )
+          : projectManagedApplicationGraphEvidence(
+              MANAGED_APPLICATION_GRAPH_EXAMPLE,
+            );
+      if (!sourceResult.ok) throw sourceResult.error;
+      const source = sourceResult.value;
+      const result =
+        sourceKind === "runtime reconciliation"
+          ? javascriptRuntimeReconciliationResultSchema.parse(
+              source.normalized_result,
+            )
+          : managedApplicationGraphResultSchema.parse(source.normalized_result);
+      const extraLink = `ev_${"f".repeat(64)}`;
+      const malformed = createEvidence(undefined, source.provider, {
+        predicateType: source.predicate_type,
+        operation: source.operation,
+        parameters: source.parameters,
+        result: jsonValueSchema.parse({
+          ...result,
+          evidence_links: [...result.evidence_links, extraLink],
+        }),
+        rawResult: source.raw_result,
+        confidence: source.confidence,
+        authority: source.authority,
+        environment: source.environment,
+        limitations: source.limitations,
+        locations: source.locations,
+        evidenceLinks: source.evidence_links,
+      });
+      const workflowInput = {
+        application: source,
+        seed: { kind: "route" as const, value: "/not-present" },
+        direction: "both" as const,
+      };
+
+      expect(traceApplicationFeatureEvidence(workflowInput).ok).toBe(true);
+      const rejected = traceApplicationFeatureEvidence({
+        ...workflowInput,
+        application: malformed,
+      });
+
+      expect(rejected).toMatchObject({
+        ok: false,
+        error: {
+          issues: [
+            {
+              path: ["application", "normalized_result", "evidence_links"],
+              reason: "invalid_value",
+              message: `${sourceKind === "runtime reconciliation" ? "Runtime reconciliation result" : "Managed application graph result"} references Evidence ${extraLink} outside its envelope.`,
+            },
+          ],
+        },
+      });
+    },
+  );
 });
 
 describe("JavaScript application workflow error diagnostics", () => {

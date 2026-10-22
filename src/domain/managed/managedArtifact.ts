@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
 
-const tokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
+/** Build-local ECMA-335 metadata token emitted as an eight-digit lowercase hex value. */
+export const managedMetadataTokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
 const offsetSchema = z.number().int().min(0);
 
 /** A 16-byte CLI metadata GUID without RFC 4122 version/variant restrictions. */
@@ -26,7 +27,7 @@ const assemblyIdentitySchema = z.object({
   flags: z.number().int().min(0).max(0xffff_ffff),
   hash_algorithm: z.number().int().min(0).max(0xffff_ffff),
   public_key: publicKeyIdentitySchema,
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
 });
 
@@ -36,8 +37,30 @@ const moduleIdentitySchema = z.object({
   mvid: cliMetadataGuidSchema.nullable(),
   enc_id: cliMetadataGuidSchema.nullable(),
   enc_base_id: cliMetadataGuidSchema.nullable(),
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
+});
+
+const managedArtifactReferenceSchema = z.object({
+  path: z.string().min(1),
+  sha256: digestSchema,
+  byte_length: z.number().int().min(0),
+  format: z.literal("pe"),
+});
+
+const managedMetadataSummarySchema = z.object({
+  status: z.enum(["absent", "complete", "partial", "malformed"]),
+  version: z.string().nullable(),
+  table_row_counts: z.record(
+    z.string(),
+    z.number().int().min(0).max(0xffff_ffff),
+  ),
+});
+
+const managedTokenIdentityScopeSchema = z.object({
+  token_identity: z.literal("build-local"),
+  requires_artifact_sha256: digestSchema,
+  requires_mvid: cliMetadataGuidSchema.nullable(),
 });
 
 const assemblyReferenceSchema = z.object({
@@ -48,7 +71,7 @@ const assemblyReferenceSchema = z.object({
   public_key_or_token: publicKeyIdentitySchema,
   hash_value_sha256: digestSchema.nullable(),
   hash_value_length: z.number().int().min(0),
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
 });
 
@@ -56,23 +79,23 @@ const managedResourceSchema = z.object({
   name: z.string(),
   flags: z.number().int().min(0).max(0xffff_ffff),
   visibility: z.enum(["public", "private", "unknown"]),
-  implementation_token: tokenSchema.nullable(),
+  implementation_token: managedMetadataTokenSchema.nullable(),
   embedded: z.boolean(),
   declared_offset: z.number().int().min(0).max(0xffff_ffff),
   data_length: z.number().int().min(0).nullable(),
   data_sha256: digestSchema.nullable(),
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
 });
 
 const customAttributeSchema = z.object({
-  parent_token: tokenSchema,
-  constructor_token: tokenSchema.nullable(),
+  parent_token: managedMetadataTokenSchema,
+  constructor_token: managedMetadataTokenSchema.nullable(),
   type_name: z.string().nullable(),
   value_length: z.number().int().min(0),
   value_sha256: digestSchema,
   decoded_fixed_string: z.string().nullable(),
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
 });
 
@@ -98,7 +121,7 @@ const managedSignatureSchema = z.object({
 });
 
 const managedTypeSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   namespace: z.string(),
   name: z.string(),
@@ -110,8 +133,8 @@ const managedTypeSchema = z.object({
       "Framed nominal namespace/name/enclosing-name digest, independent of build-local rows. Null for historical Evidence or unresolved nesting; defining assemblies and CLR runtime identity are not established.",
     ),
   flags: z.number().int().min(0).max(0xffff_ffff),
-  extends_token: tokenSchema.nullable(),
-  enclosing_type_token: tokenSchema
+  extends_token: managedMetadataTokenSchema.nullable(),
+  enclosing_type_token: managedMetadataTokenSchema
     .nullable()
     .default(null)
     .describe(
@@ -131,20 +154,20 @@ const managedTypeSchema = z.object({
 
 /** One ExportedType row: a type this assembly exports from another module or forwards. */
 const managedExportedTypeSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   namespace: z.string(),
   name: z.string(),
   flags: z.number().int().min(0).max(0xffff_ffff),
   forwarder: z.boolean(),
   type_def_id: z.number().int().min(0).max(0xffff_ffff),
-  implementation_token: tokenSchema.nullable(),
+  implementation_token: managedMetadataTokenSchema.nullable(),
 });
 
 const managedFieldSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
-  declaring_type_token: tokenSchema.nullable(),
+  declaring_type_token: managedMetadataTokenSchema.nullable(),
   declaring_type: z.string().nullable(),
   name: z.string(),
   flags: z.number().int().min(0).max(0xffff),
@@ -157,7 +180,7 @@ const managedExceptionRegionSchema = z.object({
   try_length: z.number().int().min(0),
   handler_offset: z.number().int().min(0),
   handler_length: z.number().int().min(0),
-  class_token: tokenSchema.nullable(),
+  class_token: managedMetadataTokenSchema.nullable(),
   filter_offset: z.number().int().min(0).nullable(),
 });
 
@@ -188,7 +211,7 @@ const managedMethodBodySchema = z.object({
   file_offset: offsetSchema.nullable(),
   max_stack: z.number().int().min(0).nullable(),
   init_locals: z.boolean().nullable(),
-  local_var_sig_token: tokenSchema.nullable(),
+  local_var_sig_token: managedMetadataTokenSchema.nullable(),
   il_size: z.number().int().min(0),
   il_sha256: digestSchema
     .nullable()
@@ -210,9 +233,9 @@ const managedMethodBodySchema = z.object({
 });
 
 const managedMethodSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
-  declaring_type_token: tokenSchema.nullable(),
+  declaring_type_token: managedMetadataTokenSchema.nullable(),
   declaring_type: z.string().nullable(),
   name: z.string(),
   rva: z.number().int().min(0).max(0xffff_ffff),
@@ -228,9 +251,9 @@ const managedMethodSchema = z.object({
 const declaringTypeNameSchema = z.string().nullable().default(null);
 
 const managedMemberReferenceSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
-  parent_token: tokenSchema.nullable(),
+  parent_token: managedMetadataTokenSchema.nullable(),
   parent_name: declaringTypeNameSchema.describe(
     "Name of a TypeDef, TypeRef, or generic-instantiation TypeSpec parent; null for other parents or when unknown",
   ),
@@ -239,7 +262,7 @@ const managedMemberReferenceSchema = z.object({
 });
 
 const managedUserStringSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   offset: offsetSchema.describe("File offset of the #US item"),
   value: z
     .string()
@@ -249,21 +272,21 @@ const managedUserStringSchema = z.object({
 });
 
 const managedModuleReferenceSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   name: z.string(),
 });
 
 const managedNativeImportSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   mapping_flags: z.number().int().min(0).max(0xffff),
   mapping_flags_hex: z.string().regex(/^0x[0-9a-f]{4}$/u),
-  member_token: tokenSchema.nullable(),
+  member_token: managedMetadataTokenSchema.nullable(),
   member_kind: z.enum(["method", "field", "unknown"]),
   member_name: z.string().nullable(),
   import_name: z.string(),
-  import_scope_token: tokenSchema.nullable(),
+  import_scope_token: managedMetadataTokenSchema.nullable(),
   import_scope_name: z.string().nullable(),
   no_mangle: z.boolean(),
   char_set: z.enum(["not-specified", "ansi", "unicode", "auto", "unknown"]),
@@ -288,7 +311,7 @@ const managedNativeImportSchema = z.object({
 });
 
 const managedNativeImplementationSchema = z.object({
-  token: tokenSchema,
+  token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   name: z.string(),
   rva: z.number().int().min(0).max(0xffff_ffff),
@@ -313,10 +336,10 @@ const managedNativeImplementationSchema = z.object({
 });
 
 const managedCallEdgeSchema = z.object({
-  caller_token: tokenSchema,
+  caller_token: managedMetadataTokenSchema,
   caller: z.string().nullable(),
   opcode: z.string(),
-  target_token: tokenSchema,
+  target_token: managedMetadataTokenSchema,
   target_kind: z.enum(["method-def", "member-ref", "method-spec", "unknown"]),
   target_name: z
     .string()
@@ -328,10 +351,10 @@ const managedCallEdgeSchema = z.object({
 });
 
 const managedFieldAccessSchema = z.object({
-  method_token: tokenSchema,
+  method_token: managedMetadataTokenSchema,
   method: z.string().nullable(),
   opcode: z.string(),
-  field_token: tokenSchema,
+  field_token: managedMetadataTokenSchema,
   field_name: z.string().nullable(),
   field_declaring_type: declaringTypeNameSchema.describe(
     "Declaring type of the accessed field; null when unknown",
@@ -362,12 +385,7 @@ const managedParseIssueSchema = z.object({
 
 /** Provider-neutral, execution-free PE/CLI triage and identity result. */
 export const managedArtifactInspectionSchema = z.object({
-  artifact: z.object({
-    path: z.string().min(1),
-    sha256: digestSchema,
-    byte_length: z.number().int().min(0),
-    format: z.literal("pe"),
-  }),
+  artifact: managedArtifactReferenceSchema,
   pe: z.object({
     machine: z.number().int().min(0).max(0xffff),
     machine_hex: z.string().regex(/^0x[0-9a-f]{4}$/u),
@@ -464,26 +482,10 @@ export const managedMemberInspectionSchema = z.object({
     .describe(
       "Signature type-name resolution was examined, including unresolved operands; null means historical Evidence without this attestation.",
     ),
-  artifact: z.object({
-    path: z.string().min(1),
-    sha256: digestSchema,
-    byte_length: z.number().int().min(0),
-    format: z.literal("pe"),
-  }),
+  artifact: managedArtifactReferenceSchema,
   module: moduleIdentitySchema.nullable(),
-  metadata: z.object({
-    status: z.enum(["absent", "complete", "partial", "malformed"]),
-    version: z.string().nullable(),
-    table_row_counts: z.record(
-      z.string(),
-      z.number().int().min(0).max(0xffff_ffff),
-    ),
-  }),
-  identity_scope: z.object({
-    token_identity: z.literal("build-local"),
-    requires_artifact_sha256: digestSchema,
-    requires_mvid: cliMetadataGuidSchema.nullable(),
-  }),
+  metadata: managedMetadataSummarySchema,
+  identity_scope: managedTokenIdentityScopeSchema,
   types: z.array(managedTypeSchema),
   // Member Evidence recorded before NestedClass rows were read omits this
   // field; null is historical uncertainty. False means a current NestedClass
@@ -531,26 +533,10 @@ export const managedMemberInspectionSchema = z.object({
 
 /** Provider-neutral managed/native boundary observations from PE/CLI metadata. */
 export const managedNativeBoundaryInspectionSchema = z.object({
-  artifact: z.object({
-    path: z.string().min(1),
-    sha256: digestSchema,
-    byte_length: z.number().int().min(0),
-    format: z.literal("pe"),
-  }),
+  artifact: managedArtifactReferenceSchema,
   module: moduleIdentitySchema.nullable(),
-  metadata: z.object({
-    status: z.enum(["absent", "complete", "partial", "malformed"]),
-    version: z.string().nullable(),
-    table_row_counts: z.record(
-      z.string(),
-      z.number().int().min(0).max(0xffff_ffff),
-    ),
-  }),
-  identity_scope: z.object({
-    token_identity: z.literal("build-local"),
-    requires_artifact_sha256: digestSchema,
-    requires_mvid: cliMetadataGuidSchema.nullable(),
-  }),
+  metadata: managedMetadataSummarySchema,
+  identity_scope: managedTokenIdentityScopeSchema,
   cli_native: z
     .object({
       il_only: z.boolean(),

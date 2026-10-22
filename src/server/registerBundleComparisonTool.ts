@@ -37,11 +37,13 @@ export const registerBundleComparisonTool = (
               input.left_bundle_path,
               context.mcpReq.signal,
               resources,
+              contract.name,
             ),
             readImmutableEvidenceBundle(
               input.right_bundle_path,
               context.mcpReq.signal,
               resources,
+              contract.name,
             ),
           ]);
           if (!left.ok) return server.delivery.toCallToolResult(left, contract);

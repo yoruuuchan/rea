@@ -5,6 +5,10 @@ import { z } from "zod";
 
 import { IDENTIFIER_PATTERN } from "./stringPatterns.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
+import {
+  compareAsciiStrings,
+  isSortedUniqueAscii,
+} from "./canonicalOrdering.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const claimIdSchema = z.string().regex(IDENTIFIER_PATTERN);
@@ -57,15 +61,6 @@ type EvidenceCompletionLedgerValue = z.infer<
   typeof completionLedgerObjectSchema
 >;
 
-const compareIdentifiers = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;
-
-const isSortedUnique = (values: readonly string[]): boolean =>
-  values.every(
-    (value, index) =>
-      index === 0 || compareIdentifiers(values[index - 1] ?? "", value) < 0,
-  );
-
 const summarize = (
   records: readonly EvidenceCompletionRecord[],
 ): EvidenceCompletionLedger["summary"] => {
@@ -104,14 +99,14 @@ const ledgerIssues = (
   ledger: EvidenceCompletionLedgerValue,
   context: z.RefinementCtx,
 ): void => {
-  if (!isSortedUnique(ledger.records.map((record) => record.claim_id)))
+  if (!isSortedUniqueAscii(ledger.records.map((record) => record.claim_id)))
     context.addIssue({
       code: "custom",
       path: ["records"],
       message: "Completion records must be sorted by unique claim ID",
     });
   for (const [index, record] of ledger.records.entries())
-    if (!isSortedUnique(record.evidence_ids))
+    if (!isSortedUniqueAscii(record.evidence_ids))
       context.addIssue({
         code: "custom",
         path: ["records", index, "evidence_ids"],
@@ -149,13 +144,13 @@ export const createEvidenceCompletionLedger = (
     .map((record) => evidenceCompletionRecordSchema.parse(record))
     .map((record) => ({
       ...record,
-      evidence_ids: [...record.evidence_ids].sort(compareIdentifiers),
+      evidence_ids: [...record.evidence_ids].sort(compareAsciiStrings),
     }))
-    .sort((left, right) => compareIdentifiers(left.claim_id, right.claim_id));
-  if (!isSortedUnique(records.map((record) => record.claim_id)))
+    .sort((left, right) => compareAsciiStrings(left.claim_id, right.claim_id));
+  if (!isSortedUniqueAscii(records.map((record) => record.claim_id)))
     throw new TypeError("Completion claim IDs must be unique");
   for (const record of records)
-    if (!isSortedUnique(record.evidence_ids))
+    if (!isSortedUniqueAscii(record.evidence_ids))
       throw new TypeError("Completion Evidence IDs must be unique per claim");
   return evidenceCompletionLedgerSchema.parse({
     ledger_id: computeLedgerId(records),

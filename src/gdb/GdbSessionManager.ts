@@ -1,3 +1,4 @@
+import { snapshotGdbCommandRecords } from "./GdbCommandRecords.js";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { isUtf8 } from "node:buffer";
@@ -958,16 +959,7 @@ export class GdbSessionManager {
             ? {
                 command: "GDB startup",
                 mi: "",
-                records: [...session.lines],
-                console: session.lines
-                  .filter((line) => line.startsWith("~"))
-                  .join("\n"),
-                target: session.lines
-                  .filter((line) => line.startsWith("@"))
-                  .join("\n"),
-                log: session.lines
-                  .filter((line) => line.startsWith("&"))
-                  .join("\n"),
+                ...snapshotGdbCommandRecords(session.lines),
                 process_exit_observed: true,
                 process_exit_code: session.exitCode,
                 process_exit_signal: session.exitSignal,
@@ -981,16 +973,7 @@ export class GdbSessionManager {
           ? {
               command: "GDB startup",
               mi: "",
-              records: [...session.lines],
-              console: session.lines
-                .filter((line) => line.startsWith("~"))
-                .join("\n"),
-              target: session.lines
-                .filter((line) => line.startsWith("@"))
-                .join("\n"),
-              log: session.lines
-                .filter((line) => line.startsWith("&"))
-                .join("\n"),
+              ...snapshotGdbCommandRecords(session.lines),
               output_truncated: session.recentRecordsTruncated,
               completion_status: "unknown" as const,
             }
@@ -1641,18 +1624,11 @@ export class GdbSessionManager {
           clearTimeout(pending.timer);
           session.pending.delete(token);
           pending.cleanup();
-          const records = [...pending.lines];
+
           pending.resolve({
             command: "",
             mi: pending.terminalRecord ?? "",
-            records,
-            console: records
-              .filter((record) => record.startsWith("~"))
-              .join("\n"),
-            target: records
-              .filter((record) => record.startsWith("@"))
-              .join("\n"),
-            log: records.filter((record) => record.startsWith("&")).join("\n"),
+            ...snapshotGdbCommandRecords(pending.lines),
             output_truncated: pending.outputTruncated,
             ...(pending.outputInvalidUtf8
               ? { output_invalid_utf8: true as const }
@@ -1677,14 +1653,11 @@ export class GdbSessionManager {
       clearTimeout(pending.timer);
       session.pending.delete(token);
       pending.cleanup();
-      const records = [...pending.lines];
+
       pending.resolve({
         command: "",
         mi: line,
-        records,
-        console: records.filter((record) => record.startsWith("~")).join("\n"),
-        target: records.filter((record) => record.startsWith("@")).join("\n"),
-        log: records.filter((record) => record.startsWith("&")).join("\n"),
+        ...snapshotGdbCommandRecords(pending.lines),
         output_truncated: pending.outputTruncated,
         ...(pending.outputInvalidUtf8
           ? { output_invalid_utf8: true as const }
@@ -1723,15 +1696,12 @@ export class GdbSessionManager {
     for (const pending of session.pending.values()) {
       clearTimeout(pending.timer);
       pending.cleanup();
-      const records = [...pending.lines];
+
       pending.reject(
         new GdbProtocolFailureError(message, {
           command: pending.command,
           mi: "",
-          records,
-          console: records.filter((line) => line.startsWith("~")).join("\n"),
-          target: records.filter((line) => line.startsWith("@")).join("\n"),
-          log: records.filter((line) => line.startsWith("&")).join("\n"),
+          ...snapshotGdbCommandRecords(pending.lines),
           output_truncated: pending.outputTruncated,
           ...(pending.outputInvalidUtf8
             ? { output_invalid_utf8: true as const }
@@ -1915,14 +1885,7 @@ export class GdbSessionManager {
         new GdbCommandProcessExitError({
           command: pending.command,
           mi: "",
-          records: [...pending.lines],
-          console: pending.lines
-            .filter((line) => line.startsWith("~"))
-            .join("\n"),
-          target: pending.lines
-            .filter((line) => line.startsWith("@"))
-            .join("\n"),
-          log: pending.lines.filter((line) => line.startsWith("&")).join("\n"),
+          ...snapshotGdbCommandRecords(pending.lines),
           process_exit_observed: true,
           process_exit_code: code,
           process_exit_signal: signalCode,
@@ -1991,14 +1954,7 @@ export class GdbSessionManager {
         const partial: GdbCommandResult = {
           command: pending.evidenceCommand,
           mi: "",
-          records: [...pending.lines],
-          console: pending.lines
-            .filter((line) => line.startsWith("~"))
-            .join("\n"),
-          target: pending.lines
-            .filter((line) => line.startsWith("@"))
-            .join("\n"),
-          log: pending.lines.filter((line) => line.startsWith("&")).join("\n"),
+          ...snapshotGdbCommandRecords(pending.lines),
           output_truncated: pending.outputTruncated,
           ...(pending.outputInvalidUtf8
             ? { output_invalid_utf8: true as const }
@@ -2122,14 +2078,7 @@ export class GdbSessionManager {
         const partial: GdbCommandResult = {
           command: pending.evidenceCommand,
           mi: "",
-          records: [...pending.lines],
-          console: pending.lines
-            .filter((line) => line.startsWith("~"))
-            .join("\n"),
-          target: pending.lines
-            .filter((line) => line.startsWith("@"))
-            .join("\n"),
-          log: pending.lines.filter((line) => line.startsWith("&")).join("\n"),
+          ...snapshotGdbCommandRecords(pending.lines),
           output_truncated: pending.outputTruncated,
           ...(pending.outputInvalidUtf8
             ? { output_invalid_utf8: true as const }

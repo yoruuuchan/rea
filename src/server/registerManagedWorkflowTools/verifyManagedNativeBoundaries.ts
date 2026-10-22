@@ -49,9 +49,7 @@ export const registerVerifyManagedNativeBoundaries = (
               nativeObservations,
               nativeVerificationContract,
             );
-          const managedBoundary = managedBoundaries.value[0];
-          if (managedBoundary === undefined)
-            throw new TypeError("Managed boundary Evidence resolution failed");
+          const managedBoundary = managedBoundaries.value;
           const parsed = {
             ...input,
             managed_boundaries: managedBoundary,

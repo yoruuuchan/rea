@@ -8,10 +8,7 @@ import {
   CDP_DISCOVERY_RESPONSE_TIMEOUT_MS,
   selectedCdpCommandTimeoutMs,
 } from "../domain/browserDeadline.js";
-import {
-  AnalysisCancelledError,
-  AnalysisTimeoutError,
-} from "../domain/analysisErrorCore.js";
+import { AnalysisTimeoutError } from "../domain/analysisErrorCore.js";
 import { browserObservationEndpointSchema } from "../domain/browserObservation.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { CdpConnection } from "./CdpConnection.js";
@@ -44,47 +41,6 @@ const serviceWorkerPolicyCheckTimeout = (): AnalysisTimeoutError => {
   });
 };
 
-const withServiceWorkerPolicyDeadline = <Value>(
-  work: () => Promise<Value>,
-  signal: AbortSignal,
-): Promise<Value> => {
-  if (signal.aborted)
-    return Promise.reject(
-      new AnalysisCancelledError(OPERATION, { cause: signal.reason }),
-    );
-  return new Promise<Value>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      fail(serviceWorkerPolicyCheckTimeout());
-    }, SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS);
-    timer.unref();
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-    };
-    const succeed = (value: Value): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(value);
-    };
-    const fail = (error: unknown): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-    const onAbort = (): void => {
-      fail(new AnalysisCancelledError(OPERATION, { cause: signal.reason }));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    void work().then(succeed, fail);
-  });
-};
 const scriptResponse = z.object({ identifier: z.string() });
 const restorationResponse = z.object({
   result: z.object({ value: z.literal("policy_owned").nullable() }),
@@ -136,9 +92,11 @@ export class PlaywrightScenarioServiceWorkers {
   }
 
   private async install(): Promise<void> {
-    await withServiceWorkerPolicyDeadline(
+    await withPlaywrightExecutionBoundary(
       () => this.assertBlocked(),
+      SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS,
       this.#setup.signal,
+      serviceWorkerPolicyCheckTimeout,
     );
     // Discovery stays on its fixed deadline. The following handshake and
     // Target.attachToTarget each use command_timeout_ms.

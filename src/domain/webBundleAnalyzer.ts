@@ -1,10 +1,10 @@
 import type { WebPageInspection } from "./browserObservationSchemas.js";
+import { analyzeScript } from "./webBundleAnalyzerInspection.js";
 import {
-  analyzeScript,
-  emptyAccumulator,
+  createWebBundleAnalysisAccumulator,
   isIncludedScript,
   type IncludedScript,
-} from "./webBundleAnalyzerInspection.js";
+} from "./webBundleAnalyzerState.js";
 import { buildCapturedWebBundleAnalysis } from "./webBundleAnalyzerResult.js";
 import type { WebBundleAnalysis } from "./webBundleAnalysis.js";
 import {
@@ -16,7 +16,7 @@ import {
 export const analyzeCapturedWebScript = (
   script: IncludedScript,
 ): WebBundleScriptAnalysis => {
-  const accumulator = emptyAccumulator();
+  const accumulator = createWebBundleAnalysisAccumulator();
   analyzeScript(script, accumulator);
   const failed = accumulator.failedScripts.length > 0;
   const recovered = accumulator.recoveredScripts.length > 0;

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { javascriptSourceRangeSchema } from "./javascriptSourceCoordinates.js";
+
 import {
   applicationGraphEvidenceContextSchema,
   applicationGraphEvidenceLocationSchema,
@@ -188,32 +190,12 @@ const relativePathSchema = z
     "Expected a normalized relative POSIX path without traversal",
   );
 
-const sourcePointSchema = z.strictObject({
-  line: z.number().int().min(1),
-  column: z.number().int().min(0),
-});
-
-const sourceRangeSchema = z
-  .strictObject({ start: sourcePointSchema, end: sourcePointSchema })
-  .superRefine((range, context) => {
-    if (
-      range.end.line < range.start.line ||
-      (range.end.line === range.start.line &&
-        range.end.column < range.start.column)
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["end"],
-        message: "Source range end must not precede its start",
-      });
-  });
-
 const semanticPropertiesSchema = z.record(z.string().min(1), jsonValueSchema);
 
 const semanticNodeIdentitySchema = z.strictObject({
   artifact_sha256: digestSchema,
   module_path: relativePathSchema,
-  source_range: sourceRangeSchema.nullable(),
+  source_range: javascriptSourceRangeSchema.nullable(),
   role_key: z.string().min(1),
 });
 

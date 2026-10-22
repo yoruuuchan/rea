@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { localPathStringSchema } from "../localPath.js";
+import { absoluteLocalPathStringSchema } from "../localPath.js";
 
 const uint = z.number().int().min(0).max(0xffffffff);
 const range = z.strictObject({ offset: uint, bytes: uint });
@@ -21,7 +21,7 @@ export const MAX_INSPECT_PE_DIRECTORY_ENTRIES = 65536;
 
 /** Complete bounded inspection of a caller-selected PE image, without execution. */
 export const inspectPeResourcesInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to a PE image",
   ),
   max_file_bytes: z

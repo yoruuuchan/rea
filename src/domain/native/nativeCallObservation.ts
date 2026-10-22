@@ -29,6 +29,15 @@ const objcMethodBreakpoint = {
   ),
 };
 
+/** Outcome labels shared by the LLDB bridge and observed Evidence. */
+export const nativeCallProcessOutcomeSchema = z.enum([
+  "exited",
+  "duration-elapsed",
+  "event-limit",
+  "stop-limit",
+  "resource-limit",
+]);
+
 /** One function or Objective-C method whose entries are observed. */
 export const nativeCallBreakpointSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -170,13 +179,7 @@ export const nativeCallObservationResultSchema = z.strictObject({
   }),
   process: z.strictObject({
     pid: z.number().int().positive(),
-    outcome: z.enum([
-      "exited",
-      "duration-elapsed",
-      "event-limit",
-      "stop-limit",
-      "resource-limit",
-    ]),
+    outcome: nativeCallProcessOutcomeSchema,
     exit_status: z.number().int().nullable(),
     exit_description: z.string().nullable(),
     /** REA confirmed the process is gone when observation ended. */

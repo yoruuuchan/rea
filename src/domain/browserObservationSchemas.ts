@@ -1,9 +1,13 @@
 import { z } from "zod";
 
 import { browserCompletenessSchema } from "./browserCompleteness.js";
-import { webTextArtifactSchema } from "./webContentArtifact.js";
+import {
+  cdpDomNodeSchema,
+  cdpScriptSourceSchema,
+  cdpScriptMetadataSchema,
+} from "./cdpObservationSchemas.js";
 import { jsonShapeSchema } from "./jsonShape.js";
-import { prefixedDigestSchema } from "./../domain/digests.js";
+import { prefixedDigestSchema } from "./digests.js";
 
 /** Shared CDP/browser version identity carried on observation Evidence. */
 export const browserVersionSchema = z.object({
@@ -47,14 +51,6 @@ const browserFrameSchema = z.object({
   url: z.string(),
   origin: z.string().nullable(),
 });
-const browserDomNodeSchema = z.object({
-  index: z.number().int().min(0),
-  parent_index: z.number().int().min(-1),
-  node_type: z.number().int().min(0),
-  node_name: z.string(),
-  node_value_length: z.number().int().min(0),
-  attribute_names: z.array(z.string()),
-});
 const browserAxNodeSchema = z.object({
   node_id: z.string(),
   parent_id: z.string().nullable(),
@@ -71,13 +67,6 @@ const browserAxNodeSchema = z.object({
     )
     .default([]),
 });
-const browserScriptSourceSchema = z.discriminatedUnion("included", [
-  z.object({ included: z.literal(false), reason: z.string() }),
-  z.object({
-    included: z.literal(true),
-    artifact: webTextArtifactSchema,
-  }),
-]);
 const browserResourceReconciliationSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("exact"), resource_key: z.string() }),
   z.object({
@@ -94,26 +83,10 @@ const browserScriptSchema = z.object({
   frame_id: z.string().nullable().default(null),
   url: z.string(),
   origin: z.string().nullable(),
-  cdp_hash: z
-    .string()
-    .nullable()
-    .describe("Producer-reported script hash; null when unavailable."),
-  length: z
-    .number()
-    .int()
-    .min(0)
-    .nullable()
-    .describe("Producer-reported script length; null when unavailable."),
-  is_module: z
-    .boolean()
-    .nullable()
-    .describe(
-      "Producer-reported module classification; null when unavailable.",
-    ),
-  language: z.string().nullable(),
+  ...cdpScriptMetadataSchema.shape,
   source_map_url: z.string().nullable(),
   resource_reconciliation: browserResourceReconciliationSchema,
-  source: browserScriptSourceSchema,
+  source: cdpScriptSourceSchema,
 });
 const browserResourceSchema = z.object({
   resource_key: prefixedDigestSchema("res"),
@@ -297,7 +270,7 @@ export const webPageInspectionSchema = z.object({
   frames: z.array(browserFrameSchema),
   dom: z.object({
     total_nodes: z.number().int().min(0),
-    nodes: z.array(browserDomNodeSchema),
+    nodes: z.array(cdpDomNodeSchema),
   }),
   accessibility: z.object({
     total_nodes: z.number().int().min(0),

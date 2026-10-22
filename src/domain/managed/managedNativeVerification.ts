@@ -1,14 +1,10 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
-
+import { digestCanonicalValue } from "../canonicalDigest.js";
 import type { Evidence } from "../evidence.js";
 import {
   managedNativeBoundaryInspectionSchema,
   type ManagedNativeBoundaryInspection,
 } from "./managedArtifact.js";
 import { parseManagedInspectionEvidence } from "./managedInspectionEvidence.js";
-import type { JsonValue } from "../jsonValue.js";
 import {
   managedNativeVerificationResultSchema,
   type ManagedNativeVerificationInput,
@@ -19,13 +15,6 @@ import {
   collectNativeSymbols,
   verifyPinvoke,
 } from "./managedNativeVerificationMatch.js";
-
-const sha256 = (value: JsonValue): string => {
-  const serialized = canonicalize(value);
-  if (serialized === undefined)
-    throw new TypeError("Managed/native verification canonicalization failed");
-  return createHash("sha256").update(serialized).digest("hex");
-};
 
 const parseManagedBoundary = (
   input: ManagedNativeVerificationInput,
@@ -65,6 +54,9 @@ export const verifyManagedNativeBoundaries = (
   });
   return managedNativeVerificationResultSchema.parse({
     ...withoutId,
-    verification_id: `mnv_${sha256(withoutId)}`,
+    verification_id: `mnv_${digestCanonicalValue(
+      withoutId,
+      "Managed/native verification",
+    )}`,
   });
 };

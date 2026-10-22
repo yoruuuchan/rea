@@ -1,13 +1,10 @@
-import { createHash } from "node:crypto";
 import { basename } from "node:path";
 
-import canonicalize from "canonicalize";
-
 import { parseEvidence } from "../evidence.js";
+import { digestCanonicalValue } from "../canonicalDigest.js";
 import { functionDossierSchema } from "../hopperValues.js";
 import { inspectMachoSchema } from "../native/nativeInspection.js";
 import type { ManagedNativeBoundaryInspection } from "./managedArtifact.js";
-import type { JsonValue } from "../jsonValue.js";
 import {
   pinvokeVerificationSchema,
   type ManagedNativeVerificationInput,
@@ -15,13 +12,6 @@ import {
   type NativeSymbol,
   type PinvokeVerification,
 } from "./managedNativeVerificationSchemas.js";
-
-const digest = (value: JsonValue): string => {
-  const serialized = canonicalize(value);
-  if (serialized === undefined)
-    throw new TypeError("Managed/native verification canonicalization failed");
-  return createHash("sha256").update(serialized).digest("hex");
-};
 
 type PinvokeImport = ManagedNativeBoundaryInspection["pinvoke_imports"][number];
 type VerifiedPinvoke = {
@@ -326,13 +316,16 @@ export const verifyPinvoke = ({
   const limitations = pinvokeLimitations(selection.match, item);
   return {
     verification: pinvokeVerificationSchema.parse({
-      item_id: `mnv_pinvoke_${digest({
-        managedEvidenceId,
-        token: item.token,
-        importName: item.import_name,
-        importScope: item.import_scope_name,
-        candidates: selection.match.candidates,
-      })}`,
+      item_id: `mnv_pinvoke_${digestCanonicalValue(
+        {
+          managedEvidenceId,
+          token: item.token,
+          importName: item.import_name,
+          importScope: item.import_scope_name,
+          candidates: selection.match.candidates,
+        },
+        "Managed/native verification",
+      )}`,
       managed,
       ...selection.match,
       evidence_links: [

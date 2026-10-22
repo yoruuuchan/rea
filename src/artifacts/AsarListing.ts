@@ -2,6 +2,7 @@ import { setImmediate } from "node:timers/promises";
 import { z } from "zod";
 
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
+import { assertAsarReadActive } from "./AsarFailure.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 
 /** Capacity for expanded paths and listing records, independent of packed bytes. */
@@ -48,12 +49,7 @@ export const readAsarListing = async (
   while (pending.length > 0) {
     if (examined++ % 128 === 0) {
       await setImmediate();
-      if (signal?.aborted)
-        throw new ArtifactReaderFailure(
-          "cancelled",
-          "ASAR operation cancelled",
-          { cause: signal.reason },
-        );
+      assertAsarReadActive(signal);
     }
     const frame = pending.at(-1);
     if (frame === undefined) break;

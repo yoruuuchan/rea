@@ -1,15 +1,15 @@
 import { createEvidence } from "../domain/evidence.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
-import {
-  READINESS_REQUIRED_CHECKS,
-  READINESS_STAGE_IDS,
-} from "../domain/reconstructionReadinessJourneyFindings.js";
+import { READINESS_REQUIRED_CHECKS } from "../domain/reconstructionReadinessJourneyFindings.js";
 import {
   reconstructionObligationLedgerClosureDigest,
   summarizeReconstructionObligations,
 } from "../domain/reconstructionObligationLedgerIntegrity.js";
 import type { ReconstructionObligationLedger } from "../domain/reconstructionObligationLedgerSchemas.js";
-import type { ReconstructionReadinessInput } from "../domain/reconstructionReadinessSchemas.js";
+import {
+  readinessStageIdSchema,
+  type ReconstructionReadinessInput,
+} from "../domain/reconstructionReadinessSchemas.js";
 
 const HASH = "a".repeat(64);
 const sourceEvidence = (variant: string) =>
@@ -397,7 +397,7 @@ export const RECONSTRUCTION_READINESS_EXAMPLE: ReconstructionReadinessInput = {
     stale_input_detected: true,
     evidence_ids: [EVIDENCE_ID],
   },
-  stages: READINESS_STAGE_IDS.map((stageId) => ({
+  stages: readinessStageIdSchema.options.map((stageId) => ({
     stage_id: stageId,
     required: true,
     status: "pass",

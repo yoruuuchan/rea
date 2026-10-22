@@ -7,7 +7,7 @@ import { withArtifactFileHandle } from "../artifacts/ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { jsonParts } from "../domain/jsonSerialization.js";
-import type { IncludedScript } from "../domain/webBundleAnalyzerInspection.js";
+import type { IncludedScript } from "../domain/webBundleAnalyzerState.js";
 import {
   webBundleScriptAnalysisSchema,
   type WebBundleScriptAnalysis,

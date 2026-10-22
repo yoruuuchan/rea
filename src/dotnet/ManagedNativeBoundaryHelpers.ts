@@ -16,7 +16,7 @@ import {
   metadataToken,
   readMetadataString,
 } from "./ManagedMetadataHeaps.js";
-import { managedTableRowCounts } from "./ManagedMetadataInventory.js";
+import { managedPeInspectionEnvelope } from "./ManagedPeInspectionEnvelope.js";
 import type { ManagedMetadataInventory } from "./ManagedMetadataInventory.js";
 import {
   managedCli32BitRequirement,
@@ -439,23 +439,13 @@ export const buildNativeBoundaryInspection = ({
   managedNativeBoundaryInspectionSchema.parse(
     admitManagedProjection(
       {
-        artifact: {
-          path: target.path,
-          sha256: target.sha256,
-          byte_length: bytes.length,
-          format: "pe",
-        },
-        module: inventory.module,
-        metadata: {
-          status: issues.length === 0 ? "complete" : "partial",
-          version: layout.version,
-          table_row_counts: managedTableRowCounts(layout),
-        },
-        identity_scope: {
-          token_identity: "build-local",
-          requires_artifact_sha256: target.sha256,
-          requires_mvid: inventory.module?.mvid ?? null,
-        },
+        ...managedPeInspectionEnvelope(
+          target,
+          bytes.length,
+          layout,
+          inventory.module,
+          issues,
+        ),
         cli_native: cliNative(pe.cli),
         module_refs: moduleRefs,
         pinvoke_imports: imports,

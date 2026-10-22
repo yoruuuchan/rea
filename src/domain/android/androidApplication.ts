@@ -1,3 +1,7 @@
+import {
+  bridgeCandidateCoverageSchema,
+  projectCartesianCandidates,
+} from "../bridgeCandidateProjection.js";
 import { z } from "zod";
 
 import {
@@ -9,8 +13,7 @@ import { prefixedDigestSchema } from "../digests.js";
 import { nativeRuntimeConvention } from "../nativeConvention.js";
 import {
   applicationInventoryProjectionInputSchema,
-  bridgeCandidateCoverageSchema,
-  projectCartesianCandidates,
+  type MobileApplicationProjectionWithSources,
   projectedBridgeCandidateSchema,
   projectedComponentSchema,
   projectedInventoryEntries,
@@ -85,7 +88,7 @@ type Component = z.infer<typeof componentSchema>;
 /** Project exact APK paths and hashes without decoding or executing target code. */
 export const projectAndroidApplication = (
   input: AndroidApplicationProjectionInput,
-): AndroidApplicationProjectionResult => {
+): MobileApplicationProjectionWithSources<AndroidApplicationProjectionResult> => {
   const parsed = androidApplicationProjectionInputSchema.parse(input);
   const { evidence, inventory } = parseArtifactInventoryEvidence(
     parsed.inventory_evidence,
@@ -149,10 +152,13 @@ export const projectAndroidApplication = (
     ),
     limitations,
   };
-  return androidApplicationProjectionResultSchema.parse({
-    ...withoutId,
-    projection_id: `adp_${projectionDigest(withoutId, "Android application projection")}`,
-  });
+  return {
+    projection: androidApplicationProjectionResultSchema.parse({
+      ...withoutId,
+      projection_id: `adp_${projectionDigest(withoutId, "Android application projection")}`,
+    }),
+    sources: evidence,
+  };
 };
 
 const classify = (all: readonly Component[]) => ({

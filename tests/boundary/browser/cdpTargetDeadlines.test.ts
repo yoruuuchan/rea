@@ -401,6 +401,8 @@ it("stops a stalled blocked-service-worker check before discovery", async () => 
     "allowed-page",
     commandTimeoutMs,
   );
+  // Keep the monotonic deadline and its explicitly expired timer in sync.
+  const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
   const pending = workers.initialize();
   try {
     await vi.waitFor(() =>
@@ -411,6 +413,7 @@ it("stops a stalled blocked-service-worker check before discovery", async () => 
     expect(browser.httpRequests).toHaveLength(0);
     expect(browser.commands).toHaveLength(0);
     expect(activeTimers(commandTimeoutMs)).toHaveLength(0);
+    clock.mockReturnValue(1_000 + SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS);
     expireTimer(SERVICE_WORKER_POLICY_CHECK_TIMEOUT_MS);
     const failure = await pending.catch((cause: unknown) => cause);
     expect(failure).toBeInstanceOf(AnalysisTimeoutError);
@@ -424,6 +427,7 @@ it("stops a stalled blocked-service-worker check before discovery", async () => 
     expect(browser.httpRequests).toHaveLength(0);
     expect(activeTimers(commandTimeoutMs)).toHaveLength(0);
   } finally {
+    clock.mockRestore();
     const closing = workers.close().catch(() => undefined);
     await browser.close();
     await closing;

@@ -815,6 +815,24 @@ describe("JavaScript Application Graph: identity strategy requirements", () => {
     );
   });
 
+  it.each([
+    { start: { line: 2, column: 0 }, end: { line: 1, column: 9 } },
+    { start: { line: 1, column: 9 }, end: { line: 1, column: 0 } },
+  ])("rejects reversed source locations on graph facts: %j", (range) => {
+    const evidence = artifactEvidence(
+      APPLICATION_GRAPH_DIGESTS.asar,
+      "dist/module.js",
+      "ast-static-analysis",
+    );
+    evidence.location = {
+      available: true,
+      value: { kind: "source-range", source: "dist/module.js", ...range },
+    };
+    expect(() => graphForNode(contentNode(evidence))).toThrow(
+      /Source range end must not precede its start/u,
+    );
+  });
+
   it("prevents static authorities from claiming runtime locations", () => {
     const evidence = artifactEvidence(
       APPLICATION_GRAPH_DIGESTS.asar,

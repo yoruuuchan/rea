@@ -18,6 +18,7 @@ import {
   functionBodyEntryAgrees,
   functionInstructionWindowSchema,
   functionDossierSchema,
+  availableReferenceKindSchema,
   type FunctionDossier,
 } from "../domain/hopperValues.js";
 import {
@@ -139,26 +140,10 @@ const localVariable = z
     provenance: z.literal("ghidra-function-database"),
   })
   .strict();
-const referenceKind = z
-  .object({
-    available: z.literal(true),
-    provenance: z.literal("ghidra-reference-manager"),
-    type: z.string().min(1),
-    flow: z.boolean(),
-    call: z.boolean(),
-    jump: z.boolean(),
-    data: z.boolean(),
-    read: z.boolean(),
-    write: z.boolean(),
-    indirect: z.boolean(),
-    computed: z.boolean(),
-    conditional: z.boolean(),
-    terminal: z.boolean(),
-    primary: z.boolean(),
-    operand_index: z.number().int(),
-    external: z.boolean(),
-  })
-  .strict();
+const referenceKind = availableReferenceKindSchema.safeExtend({
+  provenance: z.literal("ghidra-reference-manager"),
+  type: z.string().min(1),
+});
 const referenceEdge = z
   .object({
     source_address: ghidraCanonicalAddressSchema,

@@ -75,6 +75,16 @@ export const compareBrowserScenarios = (
     input.after_scenario,
     normalization.rules,
   );
+  const familyIncomparableReason = eventFamilyCoverageReason(
+    input.before_scenario,
+    input.after_scenario,
+  );
+  const incomparableReason = eventCoverageReason(
+    familyIncomparableReason,
+    networkContentCoverageReason(input.before_scenario, input.after_scenario),
+    beforeEvents.coverageReason,
+    afterEvents.coverageReason,
+  );
   const alignment = alignScenarioSteps(
     input.before_scenario,
     input.after_scenario,
@@ -86,6 +96,8 @@ export const compareBrowserScenarios = (
     rules: normalization.rules,
     beforeEvents,
     afterEvents,
+    incomparableReason,
+    familyIncomparableReason,
   });
   const failures = [...alignment.failures, ...compared.failures];
   const alignmentStatus =
@@ -180,6 +192,8 @@ interface CompareAlignedStepsInput {
   readonly rules: readonly BrowserScenarioNormalizationRule[];
   readonly beforeEvents: ReturnType<typeof prepareScenarioEvents>;
   readonly afterEvents: ReturnType<typeof prepareScenarioEvents>;
+  readonly incomparableReason: string | undefined;
+  readonly familyIncomparableReason: string | undefined;
 }
 
 const compareAlignedSteps = (
@@ -206,6 +220,8 @@ const compareAlignedSteps = (
       rules: input.rules,
       beforeEvents: input.beforeEvents,
       afterEvents: input.afterEvents,
+      incomparableReason: input.incomparableReason,
+      familyIncomparableReason: input.familyIncomparableReason,
     });
     const reportable = artifacts.flatMap(({ diff }) =>
       diff === null ? [] : [diff],
@@ -290,6 +306,8 @@ interface CompareStepArtifactsInput {
   readonly rules: readonly BrowserScenarioNormalizationRule[];
   readonly beforeEvents: ReturnType<typeof prepareScenarioEvents>;
   readonly afterEvents: ReturnType<typeof prepareScenarioEvents>;
+  readonly incomparableReason: string | undefined;
+  readonly familyIncomparableReason: string | undefined;
 }
 
 const compareStepArtifacts = (
@@ -353,16 +371,8 @@ const compareStepArtifacts = (
       after: captured(input.afterEvents.forStep(input.afterStep.step_index)),
       beforeState: eventEvidenceState(input.beforeCapture, input.beforeStep),
       afterState: eventEvidenceState(input.afterCapture, input.afterStep),
-      incomparableReason: eventCoverageReason(
-        input.beforeCapture,
-        input.afterCapture,
-        input.beforeEvents.coverageReason,
-        input.afterEvents.coverageReason,
-      ),
-      familyIncomparableReason: eventFamilyCoverageReason(
-        input.beforeCapture,
-        input.afterCapture,
-      ),
+      incomparableReason: input.incomparableReason,
+      familyIncomparableReason: input.familyIncomparableReason,
     }),
   ];
 };
@@ -486,14 +496,14 @@ const digestScenarioEvents = (
 };
 
 const eventCoverageReason = (
-  before: BrowserScenarioCapture,
-  after: BrowserScenarioCapture,
+  familyReason: string | undefined,
+  networkContentReason: string | undefined,
   beforeNetworkReason: string | undefined,
   afterNetworkReason: string | undefined,
 ): string | undefined => {
   const reasons = [
-    eventFamilyCoverageReason(before, after),
-    networkContentCoverageReason(before, after),
+    familyReason,
+    networkContentReason,
     beforeNetworkReason,
     afterNetworkReason,
   ].filter((reason) => reason !== undefined);

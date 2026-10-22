@@ -6,7 +6,7 @@ import type { EvidenceWriter } from "../application/investigation/InvestigationR
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
-import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import { applicationToolRegistrationOptions } from "./toolRegistrationOptions.js";
 import {
   requireAnalysisViewRetention,
   summarizeRetainedAnalysis,
@@ -49,7 +49,7 @@ export const registerDesktopApplicationTool = (
   );
   server.registerTool(
     contract.name,
-    toolRegistrationOptions(contract),
+    applicationToolRegistrationOptions(contract),
     handler(contract),
   );
 };

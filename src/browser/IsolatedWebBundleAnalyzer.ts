@@ -8,7 +8,7 @@ import {
   type WebBundleAnalysis,
 } from "../domain/webBundleAnalysis.js";
 import { buildCapturedWebBundleAnalysis } from "../domain/webBundleAnalyzerResult.js";
-import { isIncludedScript } from "../domain/webBundleAnalyzerInspection.js";
+import { isIncludedScript } from "../domain/webBundleAnalyzerState.js";
 import type { WebBundleScriptAnalysis } from "../domain/webBundleScriptAnalysis.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import {

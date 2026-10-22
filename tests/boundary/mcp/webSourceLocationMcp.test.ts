@@ -86,7 +86,12 @@ it("publishes valid SDK schemas and records the named module trace without a bin
     name: "trace_web_source_location",
     arguments: { ...args, manifest_path: "relative.json" },
   });
-  expect(invalid.isError).toBe(true);
+  expect(parseMcpToolError(invalid).error).toMatchObject({
+    code: "invalid_request",
+    details: {
+      issues: [{ path: ["manifest_path"], reason: "invalid_format" }],
+    },
+  });
 });
 
 it("preserves missing Linux ps capability and recovery through source-map tracing", async () => {

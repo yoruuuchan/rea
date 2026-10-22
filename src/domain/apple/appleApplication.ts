@@ -25,6 +25,7 @@ import {
   bridgeCandidateCoverageSchema,
   projectCartesianCandidates,
 } from "../bridgeCandidateProjection.js";
+import type { MobileApplicationProjectionWithSources } from "../mobileApplicationGraphProjection.js";
 import {
   projectedComponentSchema,
   projectedInventoryEntries,
@@ -113,7 +114,7 @@ type RootFormat = (typeof APPLE_ROOT_FORMATS)[number];
 /** Project exact Apple application paths and hashes without parsing or executing target code. */
 export const projectAppleApplication = (
   input: AppleApplicationProjectionInput,
-): AppleApplicationProjectionResult => {
+): MobileApplicationProjectionWithSources<AppleApplicationProjectionResult> => {
   const parsed = appleApplicationProjectionInputSchema.parse(input);
   const { evidence, inventory } = parseArtifactInventoryEvidence(
     parsed.inventory_evidence,
@@ -200,10 +201,13 @@ export const projectAppleApplication = (
     },
     limitations,
   };
-  return appleApplicationProjectionResultSchema.parse({
-    ...withoutId,
-    projection_id: appleProjectionId(withoutId),
-  });
+  return {
+    projection: appleApplicationProjectionResultSchema.parse({
+      ...withoutId,
+      projection_id: appleProjectionId(withoutId),
+    }),
+    sources: evidence,
+  };
 };
 
 /** Identify the complete projection, including source Evidence provenance. */

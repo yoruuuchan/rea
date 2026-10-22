@@ -14,7 +14,10 @@ import { wasmArtifactModule } from "../composition/wasm.js";
 import type { Logger } from "pino";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
-import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import {
+  applicationToolRegistrationOptions,
+  toolRegistrationOptions,
+} from "./toolRegistrationOptions.js";
 
 /** Bind the named WASM contract to shared validation and session Evidence recording. */
 export const registerWasmTools = (
@@ -86,7 +89,7 @@ export const registerWasmTools = (
   );
   server.registerTool(
     contract.name,
-    toolRegistrationOptions(contract),
+    applicationToolRegistrationOptions(contract),
     handler(contract),
   );
 };

@@ -1,11 +1,9 @@
-import { isAbsolute } from "node:path";
 import { z } from "zod";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { EvmInterfacePort } from "./EvmInterfacePort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisInputError,
   AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
 import type { Evidence } from "../../domain/evidence.js";
@@ -46,16 +44,6 @@ export class EvmInterfaceService {
         analysisInputErrorFromIssues(OPERATION, input.error.issues, rawInput, {
           cause: input.error,
         }),
-      );
-    if (!isAbsolute(input.data.path))
-      return err(
-        new AnalysisInputError(OPERATION, undefined, [
-          {
-            path: ["path"],
-            reason: "invalid_format",
-            message: "Expected an absolute filesystem path on this host.",
-          },
-        ]),
       );
     const inspected = await this.provider.inspect(input.data, options);
     if (!inspected.ok) return inspected;

@@ -5,7 +5,6 @@ import type {
   Il2cppSeedWriterPort,
   Il2cppSeedReceipt,
 } from "./Il2cppSeedWriterPort.js";
-import { isAbsolute } from "node:path";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import {
   requireAnalysisViewRetention,
@@ -111,19 +110,6 @@ export class Il2cppMetadataService {
           cause: input.error,
         }),
       );
-    for (const field of ["path", "binary_path"] as const) {
-      const value = input.data[field];
-      if (value !== undefined && !isAbsolute(value))
-        return err(
-          new AnalysisInputError(OPERATION, undefined, [
-            {
-              path: [field],
-              reason: "invalid_format",
-              message: "Expected an absolute filesystem path on this host.",
-            },
-          ]),
-        );
-    }
     if (
       input.data.binary_architecture !== undefined &&
       input.data.binary_path === undefined

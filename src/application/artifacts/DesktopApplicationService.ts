@@ -1,4 +1,3 @@
-import { isAbsolute } from "node:path";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { DesktopApplicationPort } from "./DesktopApplicationPort.js";
 import { ARTIFACT_GRAPH_PROVIDER } from "../InvestigationProviders.js";
@@ -40,16 +39,6 @@ export class DesktopApplicationService {
         analysisInputErrorFromIssues(operation, parsed.error.issues, rawInput, {
           cause: parsed.error,
         }),
-      );
-    if (!isAbsolute(parsed.data.path))
-      return err(
-        new AnalysisInputError(operation, undefined, [
-          {
-            path: ["path"],
-            reason: "invalid_format",
-            message: "Expected an absolute directory path on this host.",
-          },
-        ]),
       );
     const result = await this.reader.inspect(parsed.data, options);
     if (!result.ok) return result;

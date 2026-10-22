@@ -111,6 +111,7 @@ const registerImportEvidenceTool = ({
             path,
             signal,
             resources,
+            importContract.name,
           );
           if (!loaded.ok)
             return server.delivery.toCallToolResult(loaded, importContract);

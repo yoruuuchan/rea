@@ -1,6 +1,9 @@
 import { z } from "incur";
 
 import { inspectAnalysisViewValidatedWithFiles } from "../application/analysisView/AnalysisViewService.js";
+import { inspectAnalysisViewFromBundle } from "../application/EvidenceBundleCommands.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { ANALYSIS_VIEW_PROVIDER } from "../application/InvestigationProviders.js";
 import { readEvidenceBundle } from "../application/EvidenceBundleFiles.js";
 import { inspectEvidenceBundle } from "../application/investigation/InspectEvidenceBundle.js";
 import {
@@ -12,9 +15,11 @@ import { parseCliJsonInput, resolveCliJsonPaths } from "../cliJsonInput.js";
 import { logCliCommand } from "../cliLogging.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
-import { jsonValueSchema } from "../domain/jsonValue.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
+import { localPathStringSchema } from "../domain/localPath.js";
+import { withCommandCancellation } from "./commandCancellation.js";
+import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 
 import { inspectAnalysisViewInputSchema } from "../domain/analysisView/analysisView.js";
 /** Project selected views of completed analysis Evidence through the CLI. */
@@ -54,7 +59,12 @@ export const registerAnalysisViewCommands = (
               ),
             ),
           };
-        const loaded = await readEvidenceBundle(parsed.data.path);
+        const loaded = await readEvidenceBundle(
+          parsed.data.path,
+          undefined,
+          undefined,
+          "get_evidence_bundle",
+        );
         if (!loaded.ok)
           return {
             error: "Evidence bundle inspection failed",
@@ -75,34 +85,63 @@ export const registerAnalysisViewCommands = (
     args: z.object({
       inputJson: z.string().describe("Inline workflow JSON or JSON file path"),
     }),
-    run: ({ args }) =>
-      logCliCommand(logger, CLI_COMMANDS.inspectAnalysisView, async () => {
-        const input = await parseCliJsonInput(
-          args.inputJson,
-          CLI_COMMANDS.inspectAnalysisView,
-        );
-        if (!input.ok) return input.error;
-        // An evidence-file path is resolved against the operator's working directory.
-        const value = resolveCliJsonPaths(input.value, [["source", "path"]]);
-        const parsed = inspectAnalysisViewInputSchema.safeParse(value);
-        if (!parsed.success)
-          return {
-            error: "Application workflow failed",
-            ...projectAnalysisError(
-              analysisInputErrorFromIssues(
-                CLI_COMMANDS.inspectAnalysisView,
-                parsed.error.issues,
-                value,
-              ),
-            ),
-          };
-        const result = await inspectAnalysisViewValidatedWithFiles(parsed.data);
-        return result.ok
-          ? jsonValueSchema.parse(result.value)
-          : {
+    options: z.object({
+      evidenceBundle: localPathStringSchema
+        .optional()
+        .describe(
+          "Read the exact retained-evidence source ID from this local Evidence bundle without reopening the target; omit for inline Evidence",
+        ),
+    }),
+    run: ({ args, options }) =>
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, CLI_COMMANDS.inspectAnalysisView, async () => {
+          const input = await parseCliJsonInput(
+            args.inputJson,
+            CLI_COMMANDS.inspectAnalysisView,
+            signal,
+          );
+          if (!input.ok) return input.error;
+          // An evidence-file path is resolved against the operator's working directory.
+          const value = resolveCliJsonPaths(input.value, [["source", "path"]]);
+          const parsed = inspectAnalysisViewInputSchema.safeParse(value);
+          if (!parsed.success)
+            return {
               error: "Application workflow failed",
-              ...projectAnalysisError(result.error),
+              ...projectAnalysisError(
+                analysisInputErrorFromIssues(
+                  CLI_COMMANDS.inspectAnalysisView,
+                  parsed.error.issues,
+                  value,
+                ),
+              ),
             };
-      }),
+          const resources = new ArtifactResourceScope();
+          const bundlePath = options.evidenceBundle;
+          const result = await finishAnalysisCommand(
+            () =>
+              bundlePath === undefined
+                ? inspectAnalysisViewValidatedWithFiles(
+                    parsed.data,
+                    undefined,
+                    { signal, resources },
+                  )
+                : inspectAnalysisViewFromBundle(
+                    parsed.data,
+                    bundlePath,
+                    resources,
+                    signal,
+                  ),
+            resources,
+            ANALYSIS_VIEW_PROVIDER.id,
+            "inspect_analysis_view",
+            signal,
+          );
+          // Preserve the inline command's existing error label without copying
+          // the authenticated completed Evidence or its partial observation.
+          return bundlePath === undefined && "code" in result
+            ? { error: "Application workflow failed", ...result }
+            : result;
+        }),
+      ),
   });
 };

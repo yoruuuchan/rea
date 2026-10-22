@@ -37,16 +37,13 @@ export const resolveSourceToBundleReference = async (
       }),
     );
   if (!("kind" in reference)) return ok({ reference });
-  const read = await readJsonFileWithSource(reference.path, signal, resources);
-  if (!read.ok) {
-    return read.error instanceof AnalysisCancelledError
-      ? err(
-          new AnalysisCancelledError("compare_source_to_bundle", {
-            cause: read.error.cause,
-          }),
-        )
-      : read;
-  }
+  const read = await readJsonFileWithSource(
+    reference.path,
+    signal,
+    resources,
+    "compare_source_to_bundle",
+  );
+  if (!read.ok) return read;
   await setImmediate();
   if (cancelled())
     return err(

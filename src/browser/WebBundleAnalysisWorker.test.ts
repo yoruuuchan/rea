@@ -3,7 +3,7 @@ import { access } from "node:fs/promises";
 import { expect, it } from "vitest";
 
 import { createWebTextArtifact } from "../domain/webContentArtifact.js";
-import type { IncludedScript } from "../domain/webBundleAnalyzerInspection.js";
+import type { IncludedScript } from "../domain/webBundleAnalyzerState.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,

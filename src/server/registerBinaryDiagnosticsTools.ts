@@ -7,7 +7,9 @@ import type { EvidenceWriter } from "../application/investigation/InvestigationR
 import { toolContract } from "../contracts/toolContracts.js";
 import type { Logger } from "pino";
 import { logToolExecution } from "./toolLogging.js";
-import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import { applicationToolRegistrationOptions } from "./toolRegistrationOptions.js";
+import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
+import { err } from "../domain/result.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
 import { runAdmittedToolOperation } from "./admittedToolOperation.js";
 
@@ -23,9 +25,23 @@ export const registerBinaryDiagnosticsTools = (
   const contract = toolContract("inspect_binary_layout");
   server.registerTool(
     contract.name,
-    toolRegistrationOptions(contract),
-    async ({ detail, ...request }, context) =>
-      runAdmittedToolOperation(
+    applicationToolRegistrationOptions(contract),
+    async (rawInput, context) => {
+      const parsed = contract.inputSchema.safeParse(rawInput);
+      if (!parsed.success)
+        return server.delivery.toCallToolResult(
+          err(
+            analysisInputErrorFromIssues(
+              contract.name,
+              parsed.error.issues,
+              rawInput,
+              { cause: parsed.error },
+            ),
+          ),
+          contract,
+        );
+      const { detail, ...request } = parsed.data;
+      return runAdmittedToolOperation(
         server,
         withAdmittedAnalysis,
         contract.name,
@@ -55,6 +71,7 @@ export const registerBinaryDiagnosticsTools = (
             recorded,
           );
         },
-      ),
+      );
+    },
   );
 };

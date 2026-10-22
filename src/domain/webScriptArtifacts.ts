@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { digestSchema } from "./digests.js";
-import { localPathStringSchema } from "./localPath.js";
+import { absoluteLocalPathStringSchema } from "./localPath.js";
 import { webScriptExportManifestSchema } from "./webScriptExport.js";
 
 /** Select one source from an existing captured-script export. */
 export const selectedWebScriptInputSchema = z.strictObject({
-  manifest_path: localPathStringSchema.describe(
+  manifest_path: absoluteLocalPathStringSchema.describe(
     "Absolute export_web_scripts manifest path",
   ),
   script_index: z

@@ -4,8 +4,7 @@ import { STABLE_IDENTIFIER_PATTERN } from "./stringPatterns.js";
 
 import { evidenceBundleSchema } from "./evidenceBundle.js";
 import { reconstructionObligationLedgerSchema } from "./reconstructionObligationLedgerSchemas.js";
-import { digestSchema } from "./../domain/digests.js";
-import { prefixedDigestSchema } from "./../domain/digests.js";
+import { digestSchema, prefixedDigestSchema } from "./digests.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const stableIdSchema = z.string().regex(STABLE_IDENTIFIER_PATTERN);
@@ -185,6 +184,22 @@ const stageSchema = z.strictObject({
   checks: z.array(stageCheckSchema),
 });
 
+const readinessStagesSchema = z
+  .array(stageSchema)
+  .length(readinessStageIdSchema.options.length)
+  .superRefine((stages, context) => {
+    const seen = new Set<string>();
+    stages.forEach((stage, index) => {
+      if (seen.has(stage.stage_id))
+        context.addIssue({
+          code: "custom",
+          path: [index, "stage_id"],
+          message: "Readiness stage IDs must be unique",
+        });
+      seen.add(stage.stage_id);
+    });
+  });
+
 const replaySchema = z.strictObject({
   expected_source_digest: digestSchema.nullable(),
   deterministic: z.boolean(),
@@ -220,21 +235,7 @@ export const reconstructionReadinessInputSchema = z.strictObject({
   closure_history: z.array(closureObservationSchema).min(2),
   delegation_checks: z.array(delegationCheckSchema).min(1),
   replay: replaySchema,
-  stages: z
-    .array(stageSchema)
-    .length(9)
-    .superRefine((stages, context) => {
-      const seen = new Set<string>();
-      stages.forEach((stage, index) => {
-        if (seen.has(stage.stage_id))
-          context.addIssue({
-            code: "custom",
-            path: [index, "stage_id"],
-            message: "Readiness stage IDs must be unique",
-          });
-        seen.add(stage.stage_id);
-      });
-    }),
+  stages: readinessStagesSchema,
 });
 
 const findingSchema = z.strictObject({
@@ -271,21 +272,7 @@ export const reconstructionReadinessReportSchema = z.strictObject({
     cleanup_leak_count: z.number().int().min(0),
     nondeterministic_replay_count: z.number().int().min(0),
   }),
-  stages: z
-    .array(stageSchema)
-    .length(9)
-    .superRefine((stages, context) => {
-      const seen = new Set<string>();
-      stages.forEach((stage, index) => {
-        if (seen.has(stage.stage_id))
-          context.addIssue({
-            code: "custom",
-            path: [index, "stage_id"],
-            message: "Readiness stage IDs must be unique",
-          });
-        seen.add(stage.stage_id);
-      });
-    }),
+  stages: readinessStagesSchema,
   findings: z.array(findingSchema),
   evidence_links: z.array(evidenceIdSchema),
   snapshot: reconstructionReadinessInputSchema,

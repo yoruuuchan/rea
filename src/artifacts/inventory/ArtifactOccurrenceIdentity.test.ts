@@ -133,7 +133,7 @@ describe("content identity and occurrence facts", () => {
             },
           ),
         ],
-      });
+      }).projection;
       expect(
         projection.components.javascript.map((component) => component.path),
       ).toEqual(["Demo.app/Contents/Resources/a.js"]);

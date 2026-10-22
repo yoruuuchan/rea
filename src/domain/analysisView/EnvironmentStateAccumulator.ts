@@ -51,8 +51,6 @@ type StateFields = Pick<
   | "limitations"
 >;
 
-export { STATE_BODY_LIMIT_BYTES };
-
 /**
  * Levels the state's own nesting adds above a recorded value: Evidence, a `data/get` reply and a
  * JSON-RPC response hold a body's members about ten levels down, so a body must leave this much

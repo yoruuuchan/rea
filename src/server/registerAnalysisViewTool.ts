@@ -9,10 +9,7 @@ import { toolContract } from "../contracts/toolContracts.js";
 import type { Logger } from "pino";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
-import {
-  toolRegistrationOptions,
-  applicationValidatedInputSchema,
-} from "./toolRegistrationOptions.js";
+import { applicationToolRegistrationOptions } from "./toolRegistrationOptions.js";
 
 /** Bind selected-view projection to its named contract and session Evidence owner. */
 export const registerAnalysisViewTool = (
@@ -24,7 +21,7 @@ export const registerAnalysisViewTool = (
   artifactResources?: ArtifactResourceScope,
 ): void => {
   const contract = toolContract("inspect_analysis_view");
-  const registration = toolRegistrationOptions(contract);
+  const registration = applicationToolRegistrationOptions(contract);
   const handler = createEvidenceToolHandler(
     server,
     (input, options) =>
@@ -38,12 +35,5 @@ export const registerAnalysisViewTool = (
     recordEvidence,
     withAdmittedAnalysis,
   );
-  server.registerTool(
-    contract.name,
-    {
-      ...registration,
-      inputSchema: applicationValidatedInputSchema(registration.inputSchema),
-    },
-    handler(contract),
-  );
+  server.registerTool(contract.name, registration, handler(contract));
 };

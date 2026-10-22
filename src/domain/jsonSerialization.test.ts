@@ -5,6 +5,7 @@ import {
   bufferedJsonParts,
   canonicalJsonParts,
   jsonParts,
+  equalJsonText,
 } from "./jsonSerialization.js";
 
 /** Compact and pretty streamed JSON must equal native JSON. */
@@ -102,5 +103,30 @@ describe("iterative JSON encoding", () => {
     const smallParts = [...jsonParts(small)];
     expect(smallParts.join("")).toBe(JSON.stringify(small));
     expect(smallParts.length).toBeLessThan(20);
+  });
+});
+
+describe("JSON text equality without whole-document strings", () => {
+  it.each([
+    [null, null],
+    [-0, 0],
+    [
+      { first: 1, omitted: undefined, second: 2 },
+      { first: 1, second: 2 },
+    ],
+    [
+      { first: 1, second: 2 },
+      { second: 2, first: 1 },
+    ],
+    [
+      { ["\u0000".repeat(9000)]: "\u0001😀\ud800".repeat(20000) },
+      { ["\u0000".repeat(9000)]: "\u0001😀\ud800".repeat(20000) },
+    ],
+    ["prefix".repeat(20000) + "a", "prefix".repeat(20000) + "b"],
+    ["prefix".repeat(20000), "prefix".repeat(20000) + "a"],
+  ])("preserves native JSON comparison semantics", (left, right) => {
+    expect(equalJsonText(left, right)).toBe(
+      JSON.stringify(left) === JSON.stringify(right),
+    );
   });
 });

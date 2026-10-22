@@ -1,7 +1,6 @@
 import { redactExplicitFailure } from "../domain/explicitSensitiveFailure.js";
 import { excludeCaptureCoordinates } from "../domain/webNetworkCaptureCoordinates.js";
 import { redactExplicitText } from "../domain/explicitSensitiveValues.js";
-import { isAbsolute } from "node:path";
 import type { ExecutionOptions } from "./AnalysisProvider.js";
 import type { WebNetworkCapturePort } from "./WebNetworkCapturePort.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -57,16 +56,6 @@ export class WebNetworkCaptureService {
         }),
       );
     const input = parsed.data;
-    if (!isAbsolute(input.capture_path))
-      return failure(
-        new AnalysisInputError(OPERATION, undefined, [
-          {
-            path: ["capture_path"],
-            reason: "invalid_format",
-            message: "Expected an absolute filesystem path on this host.",
-          },
-        ]),
-      );
     if (
       input.record_ordinals !== undefined &&
       new Set(input.record_ordinals).size !== input.record_ordinals.length
@@ -88,19 +77,6 @@ export class WebNetworkCaptureService {
             reason: "invalid_format",
             message:
               "Protobuf options require explicit producer record ordinals.",
-          },
-        ]),
-      );
-    if (
-      input.protobuf?.schema !== undefined &&
-      !isAbsolute(input.protobuf.schema.descriptor_set_path)
-    )
-      return failure(
-        new AnalysisInputError(OPERATION, undefined, [
-          {
-            path: ["protobuf", "schema", "descriptor_set_path"],
-            reason: "invalid_format",
-            message: "Expected an absolute descriptor-set path on this host.",
           },
         ]),
       );

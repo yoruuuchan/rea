@@ -18,6 +18,7 @@ import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js"
 import type { NativeCallPartialObservation } from "../domain/native/nativeCallPartialObservation.js";
 import {
   nativeCallEventSchema,
+  nativeCallProcessOutcomeSchema,
   nativeCodeLocationSchema,
   type NativeCallObservationInput,
 } from "../domain/native/nativeCallObservation.js";
@@ -85,13 +86,7 @@ const tracedSchema = z.strictObject({
   status: z.literal("traced"),
   version: z.string(),
   pid: z.number().int().positive(),
-  outcome: z.enum([
-    "exited",
-    "duration-elapsed",
-    "event-limit",
-    "stop-limit",
-    "resource-limit",
-  ]),
+  outcome: nativeCallProcessOutcomeSchema,
   exit_status: z.number().int().nullable(),
   exit_description: z.string().nullable(),
   killed: z.boolean(),

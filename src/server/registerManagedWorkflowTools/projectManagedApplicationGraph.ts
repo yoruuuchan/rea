@@ -61,9 +61,9 @@ export const registerProjectManagedApplicationGraph = (
               graphContract,
             );
           const parsed = {
-            managed_artifact: managedArtifact?.value[0],
-            managed_members: managedMembers?.value[0],
-            managed_native_boundaries: managedBoundaries?.value[0],
+            managed_artifact: managedArtifact?.value,
+            managed_members: managedMembers?.value,
+            managed_native_boundaries: managedBoundaries?.value,
           };
           const result = await logToolExecution(
             options.logger,

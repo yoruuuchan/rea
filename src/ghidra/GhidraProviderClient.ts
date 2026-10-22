@@ -9,6 +9,7 @@ import {
   type AnalysisClient,
   type AnalysisClientContext,
   type AnalysisOperation,
+  type ExecutionOptions,
 } from "../application/AnalysisProvider.js";
 import type { AppConfig } from "../config/types.js";
 import {
@@ -478,6 +479,24 @@ export const createGhidraProviderClient = (input: {
           operation,
         );
   };
+  const startSession = async (
+    operation: AnalysisOperation,
+    options?: ExecutionOptions,
+  ): Promise<Result<GhidraSessionInfo, AnalysisError>> => {
+    const started = await client.start(options?.signal, options?.progress);
+    if (!started.ok)
+      return err(
+        projectSessionError(
+          operation,
+          started.error,
+          config.ghidraStartupTimeoutMs,
+          lostProviderHealth(),
+        ),
+      );
+    providerStarted = true;
+    const failed = await checkSessionObservations(operation, started.value);
+    return failed === undefined ? started : err(failed);
+  };
   const releaseLimitation = unverifiedGhidraBuildLimitation(
     prerequisites.value.providerVersion,
   );
@@ -603,19 +622,8 @@ export const createGhidraProviderClient = (input: {
           ),
         );
       if (operation === "health") {
-        const started = await client.start(options?.signal, options?.progress);
-        if (started.ok) providerStarted = true;
-        if (!started.ok)
-          return err(
-            projectSessionError(
-              operation,
-              started.error,
-              config.ghidraStartupTimeoutMs,
-              lostProviderHealth(),
-            ),
-          );
-        const failed = await checkSessionObservations(operation, started.value);
-        if (failed !== undefined) return err(failed);
+        const started = await startSession(operation, options);
+        if (!started.ok) return started;
         return ok(
           createAnalysisExecution(started.value, committedProfile.provider, {
             analysisProfile: committedProfile,
@@ -633,19 +641,8 @@ export const createGhidraProviderClient = (input: {
         seeds !== undefined ||
         softFloat
       ) {
-        const started = await client.start(options?.signal, options?.progress);
-        if (started.ok) providerStarted = true;
-        if (!started.ok)
-          return err(
-            projectSessionError(
-              operation,
-              started.error,
-              config.ghidraStartupTimeoutMs,
-              lostProviderHealth(),
-            ),
-          );
-        const failed = await checkSessionObservations(operation, started.value);
-        if (failed !== undefined) return err(failed);
+        const started = await startSession(operation, options);
+        if (!started.ok) return started;
       }
       const called = await client.callTool(operation, input.value, {
         ...(options?.signal === undefined ? {} : { signal: options.signal }),

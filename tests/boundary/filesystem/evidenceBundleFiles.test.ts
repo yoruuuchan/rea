@@ -18,20 +18,26 @@ import {
   readImmutableEvidenceBundle,
   writeEvidenceBundle,
 } from "../../../src/application/EvidenceBundleFiles.js";
-import { compareEvidenceBundlesCommand } from "../../../src/application/EvidenceBundleCommands.js";
+import {
+  compareEvidenceBundlesCommand,
+  deliverAnalysisEvidence,
+} from "../../../src/application/EvidenceBundleCommands.js";
 import { EvidenceLedger } from "../../../src/application/investigation/EvidenceLedger.js";
 import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
+import { OwnedStagedOutput } from "../../../src/filesystem/OwnedStagedOutput.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
-import { createEvidence } from "../../../src/domain/evidence.js";
+import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { writeTextParts } from "../../../src/application/JsonFiles.js";
 import { failFileReadAfterAbort } from "../../support/failFileReadAfterAbort.js";
 import { holdFirstFileRead } from "../../support/holdFirstFileRead.js";
 import { JsonInputPhysicalReadFailure } from "../../../src/application/JsonInputFile.js";
 import {
   createEvidenceBundle,
+  parseEvidenceBundle,
   serializeEvidenceBundle,
 } from "../../../src/domain/evidenceBundle.js";
+import { analysisViewLayoutEvidence } from "../../fixtures/analysisView.js";
 
 const bundle = (result = true) =>
   createEvidenceBundle([
@@ -58,6 +64,7 @@ it.each([
       error: {
         _tag: "AnalysisCancelledError",
         operation: "import_evidence_bundle",
+        cause: controller.signal.reason,
       },
     });
     if (result.ok) throw new Error("Expected cancelled bundle read");
@@ -194,6 +201,32 @@ it("preserves the failed-close owner when import is also cancelled", async () =>
 });
 
 describe("evidence bundle export cancellation", () => {
+  it("retains the completed parent and exact reason when delivery is cancelled before publication", async () => {
+    const root = await createTestTempDirectory("rea-delivery-cancel-");
+    const parent = analysisViewLayoutEvidence();
+    const controller = new AbortController();
+    const reason = new Error("cancel before bundle publication");
+    controller.abort(reason);
+    const result = await deliverAnalysisEvidence(
+      parent,
+      join(root, "bundle.json"),
+      "summary",
+      controller.signal,
+    );
+    if (result.ok) throw new Error("Cancelled delivery reported success");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisCancelledError",
+      operation: parent.operation,
+    });
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "cancelled",
+      details: { operation: parent.operation },
+    });
+    expect(result.error.cause).toBe(reason);
+    expect(result.error.partialObservation).toBe(parent);
+    expect(await readdir(root)).toEqual([]);
+  });
+
   it("does not inspect the path or advance a source cancelled before writing", async () => {
     const root = await createTestTempDirectory("rea-export-pre-cancel-");
     const controller = new AbortController();
@@ -213,6 +246,7 @@ describe("evidence bundle export cancellation", () => {
       error: {
         _tag: "AnalysisCancelledError",
         operation: "export_evidence_bundle",
+        cause: controller.signal.reason,
       },
     });
     expect(advanced).toBe(false);
@@ -224,7 +258,13 @@ describe("evidence bundle export cancellation", () => {
         false,
         controller.signal,
       ),
-    ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+    ).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisCancelledError",
+        cause: controller.signal.reason,
+      },
+    });
     expect(await readdir(root)).toEqual([]);
   });
 
@@ -296,6 +336,68 @@ describe("evidence bundle export cancellation", () => {
   });
 });
 
+it.each([1, 2])(
+  "reports only unresolved cancellation cleanup after %s failed close attempts",
+  async (failedAttempts) => {
+    const root = await createTestTempDirectory("rea-delivery-cleanup-retry-");
+    const parent = analysisViewLayoutEvidence();
+    const controller = new AbortController();
+    const reason = new Error("cancel before bundle publication");
+    const cleanupCause = new Error("fixture staged-output close failure");
+    const ready = OwnedStagedOutput.prototype.assertReadyForPublication;
+    const close = OwnedStagedOutput.prototype.close;
+    let owner: OwnedStagedOutput | undefined;
+    let attempts = 0;
+    const publication = vi
+      .spyOn(OwnedStagedOutput.prototype, "assertReadyForPublication")
+      .mockImplementationOnce(async function (this: OwnedStagedOutput, staged) {
+        await ready.call(this, staged);
+        controller.abort(reason);
+      });
+    const cleanup = vi
+      .spyOn(OwnedStagedOutput.prototype, "close")
+      .mockImplementation(async function (this: OwnedStagedOutput) {
+        owner = this;
+        if (++attempts <= failedAttempts) throw cleanupCause;
+        await close.call(this);
+      });
+    try {
+      const result = await deliverAnalysisEvidence(
+        parent,
+        join(root, "bundle.json"),
+        "summary",
+        controller.signal,
+      );
+      if (result.ok) throw new Error("Cancelled delivery reported success");
+      expect(attempts).toBe(2);
+      expect(result.error._tag).toBe("AnalysisCancelledError");
+      expect(result.error.partialObservation).toBe(parent);
+      expect(result.error.cause).toBe(reason);
+      expect(result.error.cleanupPrimary).toMatchObject({
+        operation: parent.operation,
+      });
+      expect(result.error.cleanupPrimary?.cause).toBe(reason);
+      expect(result.error.cleanup?.reason).toBe(cleanupCause.message);
+      const incomplete = failedAttempts === 2;
+      expect(result.error.cleanupIncomplete).toBe(incomplete);
+      expect(result.error.cleanupResources).toEqual(
+        incomplete ? [owner?.directory] : [],
+      );
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: incomplete ? "cleanup_incomplete" : "cancelled",
+        details: { operation: parent.operation },
+      });
+      expect((await readdir(root)).map((entry) => join(root, entry))).toEqual(
+        incomplete ? [owner?.directory] : [],
+      );
+    } finally {
+      publication.mockRestore();
+      cleanup.mockRestore();
+      await owner?.close();
+    }
+  },
+);
+
 const writeBundle = (
   value: ReturnType<typeof bundle>,
   path: string,
@@ -320,6 +422,50 @@ const writeParts = (
   );
 
 describe("evidence bundle publication", () => {
+  it("retains the committed bundle receipt when cancellation arrives during final cleanup", async () => {
+    const root = await createTestTempDirectory(
+      "rea-delivery-published-cancel-",
+    );
+    const path = join(root, "bundle.json");
+    const parent = analysisViewLayoutEvidence();
+    const controller = new AbortController();
+    const reason = new Error("cancel after actual staged-output cleanup");
+    const close = OwnedStagedOutput.prototype.close;
+    const seam = vi
+      .spyOn(OwnedStagedOutput.prototype, "close")
+      .mockImplementationOnce(async function (this: OwnedStagedOutput) {
+        await close.call(this);
+        controller.abort(reason);
+      });
+    let result: Awaited<ReturnType<typeof deliverAnalysisEvidence>>;
+    try {
+      result = await deliverAnalysisEvidence(
+        parent,
+        path,
+        "summary",
+        controller.signal,
+      );
+    } finally {
+      seam.mockRestore();
+    }
+    if (result.ok) throw new Error("Cancelled delivery reported success");
+    expect(result.error._tag).toBe("AnalysisCancelledError");
+    expect(result.error.cause).toBe(reason);
+    const bytes = await readFile(path);
+    expect(result.error.diagnostics?.evidence_bundle).toEqual({
+      path,
+      bytes: bytes.length,
+    });
+    expect(
+      parseEvidence(result.error.partialObservation).evidence_links,
+    ).toEqual([parent.evidence_id]);
+    expect(
+      parseEvidenceBundle(JSON.parse(bytes.toString("utf8"))).records[0]
+        ?.evidence_id,
+    ).toBe(parent.evidence_id);
+    expect(await readdir(root)).toEqual(["bundle.json"]);
+  });
+
   it.each([false, true])(
     "never publishes a partial streamed file (overwrite: %s)",
     async (overwrite) => {

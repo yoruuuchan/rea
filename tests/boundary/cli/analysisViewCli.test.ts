@@ -4,8 +4,13 @@ import {
 } from "../../fixtures/historicalHar.js";
 import { inspectAnalysisView } from "../../../src/application/analysisView/AnalysisViewService.js";
 import { createHash } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  analysisCliErrorEnvelopeSchema,
+  analysisErrorProjectionSchema,
+} from "../../../src/contracts/errorSchemas.js";
 
 import { expect } from "vitest";
 import { TextReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
@@ -28,6 +33,101 @@ import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { inspectEvidenceBundle } from "../../../src/application/investigation/InspectEvidenceBundle.js";
+
+cliTest(
+  "authenticates an exact portable parent for non-managed views and rejects ambiguous or altered sources",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-analysis-bundle-cli-");
+    const path = join(root, "bundle.json");
+    const parent = analysisViewLayoutEvidence();
+    const view = {
+      kind: "item",
+      collection: "sections",
+      selector: { name: ".data" },
+    };
+    const request = {
+      source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
+      view,
+    };
+    const bundle = createEvidenceBundle([
+      analysisViewJavaScriptEvidence(),
+      parent,
+    ]);
+    const original = JSON.stringify(bundle);
+    await writeFile(path, original);
+    const result = await cli.run({
+      arguments: [
+        "inspect-analysis-view",
+        JSON.stringify(request),
+        "--evidence-bundle",
+        path,
+        "--json",
+      ],
+    });
+    expect(result.exitCode).toBe(0);
+    const expected = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view,
+    });
+    if (!expected.ok) throw expected.error;
+    const evidence = parseEvidence(result.json);
+    expect(evidence.evidence_id).toBe(expected.value.evidence_id);
+    expect(evidence.normalized_result).toEqual(
+      expected.value.normalized_result,
+    );
+    expect(evidence.evidence_links).toEqual([parent.evidence_id]);
+    expect(await readFile(path, "utf8")).toBe(original);
+
+    for (const [source, expectedCode] of [
+      [{ kind: "inline", evidence: parent }, "invalid_request"],
+      [
+        { kind: "retained-evidence", evidence_id: `ev_${"f".repeat(64)}` },
+        "evidence_integrity_mismatch",
+      ],
+    ] as const) {
+      const rejected = await cli.run({
+        arguments: [
+          "inspect-analysis-view",
+          JSON.stringify({ source, view }),
+          "--evidence-bundle",
+          path,
+          "--json",
+        ],
+      });
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.json).toMatchObject({ code: expectedCode });
+      expect(rejected.json).not.toHaveProperty("evidence_id");
+    }
+    for (const [contents, expectedCode] of [
+      [JSON.stringify(parent), "invalid_request"],
+      ["{invalid JSON", "evidence_integrity_mismatch"],
+      [
+        JSON.stringify({
+          ...bundle,
+          records: bundle.records.map((record) => ({
+            ...record,
+            normalized_result: "altered",
+          })),
+        }),
+        "evidence_integrity_mismatch",
+      ],
+    ] as const) {
+      await writeFile(path, contents);
+      const rejected = await cli.run({
+        arguments: [
+          "inspect-analysis-view",
+          JSON.stringify(request),
+          "--evidence-bundle",
+          path,
+          "--json",
+        ],
+      });
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.json).toMatchObject({ code: expectedCode });
+      expect(rejected.json).not.toHaveProperty("evidence_id");
+    }
+  },
+);
 
 cliTest(
   "preserves native relationship coverage independently of exhausted CLI pages",
@@ -757,5 +857,68 @@ cliTest(
       },
     });
     expect(JSON.stringify(result.json)).not.toContain("probe folder");
+  },
+);
+
+cliTest.for(
+  (process.platform === "win32"
+    ? (["event"] as const)
+    : (["event", "os"] as const)
+  ).flatMap((delivery) => [
+    { signal: "SIGINT" as const, status: 130, delivery },
+    { signal: "SIGTERM" as const, status: 143, delivery },
+  ]),
+)(
+  "retains inline projection when $signal ($delivery) is queued during final sealing",
+  async ({ signal, status, delivery }, { cli }) => {
+    const root = await createTestTempDirectory("rea-inline-view-signal-");
+    const parent = analysisViewLayoutEvidence(),
+      marker = join(root, "signal.json");
+    const preload = resolve(
+      "tests/fixtures/evidenceCompletionSignalPreload.mjs",
+    );
+    const reply = await cli.run({
+      arguments: [
+        "inspect-analysis-view",
+        JSON.stringify({
+          source: { kind: "inline", evidence: parent },
+          view: { kind: "summary" },
+        }),
+        "--json",
+      ],
+      environment: {
+        HOME: root,
+        REA_LOG_LEVEL: "silent",
+        REA_TEST_EVIDENCE_COMPLETION: JSON.stringify({
+          operation: "inspect_analysis_view",
+          parent_evidence_id: parent.evidence_id,
+          marker,
+          signal,
+          delivery,
+        }),
+        NODE_OPTIONS: `--max-old-space-size=2048 --import=${pathToFileURL(preload).href}`,
+      },
+    });
+    expect(reply.exitCode).toBe(status);
+    const { error: label, ...projection } =
+      analysisCliErrorEnvelopeSchema.parse(reply.json);
+    expect(label).toBe("Application workflow failed");
+    const error = analysisErrorProjectionSchema.parse(projection);
+    expect(error.code).toBe("cancelled");
+    expect(error.details?.operation).toBe("inspect_analysis_view");
+    const partial = parseEvidence(error.details?.partial_observation);
+    expect(partial.operation).toBe("inspect_analysis_view");
+    expect(partial.evidence_links).toEqual([parent.evidence_id]);
+    expect(partial.normalized_result).toMatchObject({
+      parent_evidence_id: parent.evidence_id,
+      kind: "summary",
+    });
+    const proof = JSON.parse(await readFile(marker, "utf8"));
+    expect(proof).toMatchObject({
+      evidence_id: partial.evidence_id,
+      signal,
+      delivery,
+    });
+    expect(proof.listeners).toBeGreaterThan(0);
   },
 );

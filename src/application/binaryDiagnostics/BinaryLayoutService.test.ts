@@ -25,10 +25,18 @@ it.each([
         throw new Error("must not run");
       },
     });
-    expect(await service.inspect(input)).toMatchObject({
+    const result = await service.inspect(input);
+    expect(result).toMatchObject({
       ok: false,
       error: { _tag: "AnalysisInputError" },
     });
+    if (input.path === "relative.elf")
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          issues: [{ path: ["path"], reason: "invalid_format" }],
+        },
+      });
   },
 );
 

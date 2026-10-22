@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
-import { localPathStringSchema } from "../localPath.js";
+import {
+  absoluteLocalPathStringSchema,
+  localPathStringSchema,
+} from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 
 /** Unsigned little-endian signature observed at file offset zero. */
@@ -86,7 +89,7 @@ const indexWidth = z.union([z.literal(1), z.literal(2), z.literal(4)]);
 
 /** One explicit local file; detail selects delivery, never decoding coverage. */
 export const inspectIl2cppMetadataInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to a Unity IL2CPP global-metadata.dat file",
   ),
   detail: z
@@ -95,7 +98,7 @@ export const inspectIl2cppMetadataInputSchema = z.strictObject({
     .describe(
       "summary (default) retains complete Evidence and returns identity and collection counts; complete returns every image, type, method, member, parameter and string-literal row inline",
     ),
-  binary_path: localPathStringSchema
+  binary_path: absoluteLocalPathStringSchema
     .optional()
     .describe(
       "Absolute path to the caller-selected matching 64-bit IL2CPP binary (Mach-O GameAssembly.dylib, PE GameAssembly.dll or ELF libil2cpp.so); static reading, never executed",

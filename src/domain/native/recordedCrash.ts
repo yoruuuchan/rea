@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { BinaryArchitecture } from "../binaryTargetTypes.js";
 import { pwntoolsTimeoutField } from "./nativeDeadlines.js";
-import { localPathStringSchema } from "../localPath.js";
+import { absoluteLocalPathStringSchema } from "../localPath.js";
 import { canonicalBase64Schema } from "../stringPatterns.js";
 import { recordedNoteCoverageIssues } from "./recordedCrashNoteCoverage.js";
 
@@ -141,7 +141,7 @@ const recordedCoreRegisterSets: Record<
 
 /** Select an explicit recording and optionally request debugger-derived mapping context. */
 export const inspectRecordedCrashInputSchema = z.strictObject({
-  path: localPathStringSchema.describe(
+  path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to a supplied Linux ELF core",
   ),
   include_debugger_context: z

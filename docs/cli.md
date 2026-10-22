@@ -63,6 +63,16 @@ or repeat it to select several types.
 Selection limits decoding to the selected types; member references remain an
 assembly-wide inventory, so the output can still be large.
 
+Select `--detail summary --evidence-bundle /absolute/path/members.json` to
+receive identity, selection, coverage, limitations and collection counts while
+saving the complete original Evidence in a new bundle. Summary requires that
+explicit destination; existing files are preserved. Later
+`inspect-analysis-view` calls can page the exact parent from the saved bundle
+without reopening the assembly. See
+[CLI summary and saved member rows](managed-code-analysis.md#cli-summary-and-saved-member-rows)
+for the complete command sequence. Omitted or `--detail complete` retains the
+full inline response.
+
 Choose the workflow from the artifact's contents rather than its `.exe` or
 `.dll` extension. The managed parser requires PE/CLI metadata; it does not
 unpack .NET single-file hosts or decode IL2CPP. For the image, type and method
@@ -279,7 +289,12 @@ Exports preserve an existing destination unless `--overwrite` is explicit.
 For application traces and version comparisons, see
 [JavaScript application workflows](javascript-application-workflows.md).
 MCP [retained Evidence references](mcp-contracts.md#retained-application-evidence-inputs)
-belong to one connection. Separate CLI calls consume full saved records.
+belong to one connection. Separate CLI calls can consume full saved records.
+`inspect-analysis-view REQUEST.json --evidence-bundle BUNDLE.json` resolves
+the request's `retained-evidence` source ID from that authenticated bundle,
+including bundles exported from an MCP session. The same view JSON works for
+every supported parent kind; no target is reopened and no record is selected
+by file order. Omit `--evidence-bundle` when the request supplies inline Evidence.
 
 ## Import historical source
 

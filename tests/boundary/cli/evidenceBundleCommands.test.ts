@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect } from "vitest";
@@ -51,6 +51,38 @@ const revisionBundle = () => {
   );
   return createEvidenceBundle(records, [initial, revised]);
 };
+
+cliTest.for([
+  "export_evidence_bundle",
+  "compare_bundles",
+  "get_evidence_bundle",
+])("attributes an early heap refusal to $0", async (operation, { cli }) => {
+  const root = await createTestTempDirectory("rea-bundle-operation-");
+  const path = join(root, "parent.json");
+  const output = join(root, "output.json");
+  await writeFile(path, JSON.stringify(revisionBundle()));
+  const preload =
+    "import v8 from 'node:v8';import {syncBuiltinESMExports} from 'node:module';const read=v8.getHeapStatistics;v8.getHeapStatistics=()=>({...read(),total_available_size:0});syncBuiltinESMExports();";
+  const arguments_ =
+    operation === "export_evidence_bundle"
+      ? ["evidence-export", path, output]
+      : operation === "compare_bundles"
+        ? ["compare", path, path]
+        : ["inspect-evidence-bundle", JSON.stringify({ path })];
+  const result = await cli.run({
+    arguments: [...arguments_, "--json"],
+    environment: {
+      REA_LOG_LEVEL: "silent",
+      NODE_OPTIONS: `--max-old-space-size=2048 --import=data:text/javascript;base64,${Buffer.from(preload).toString("base64")}`,
+    },
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.json).toMatchObject({
+    code: "resource_constraint",
+    details: { operation },
+  });
+  expect(await readdir(root)).toEqual(["parent.json"]);
+});
 
 cliTest(
   "reports standalone import counts for every unknown revision",

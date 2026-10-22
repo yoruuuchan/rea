@@ -7,7 +7,7 @@ import {
   selectedBrowserDeadlineMs,
 } from "./browserDeadline.js";
 import { jsonValueSchema } from "./jsonValue.js";
-import { localPathStringSchema } from "./localPath.js";
+import { absoluteLocalPathStringSchema } from "./localPath.js";
 import {
   protobufDecodingSchema,
   protobufOptionsSchema,
@@ -49,7 +49,7 @@ export const WEB_NETWORK_CAPTURE_FORMATS = [
 
 /** Inspect an explicit retained capture without contacting its recorded destinations. */
 export const inspectWebNetworkCaptureInputSchema = z.strictObject({
-  capture_path: localPathStringSchema.describe(
+  capture_path: absoluteLocalPathStringSchema.describe(
     "Absolute local HAR, mitmproxy, Fiddler SAZ or aioquic qlog capture path.",
   ),
   format: z.enum(WEB_NETWORK_CAPTURE_FORMATS),

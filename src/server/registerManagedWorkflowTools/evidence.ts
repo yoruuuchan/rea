@@ -4,26 +4,12 @@ import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import type { Result } from "../../domain/result.js";
 import { err, ok } from "../../domain/result.js";
 
-/**
- * Authenticate caller-supplied records. When `expectedOperations` is omitted,
- * the shared workflow owns which authentic operations it can use.
- */
-const parseExpectedEvidence = (
-  rawEvidence: readonly Evidence[],
-  expectedOperations?: readonly string[],
-): Result<Evidence[], EvidenceIntegrityError> => {
+/** Authenticate one caller-supplied record and preserve Evidence errors. */
+const parseEvidenceRecord = (
+  rawEvidence: Evidence,
+): Result<Evidence, EvidenceIntegrityError> => {
   try {
-    const evidence = rawEvidence.map(parseEvidence);
-    if (expectedOperations !== undefined)
-      for (const record of evidence)
-        if (
-          !expectedOperations.includes(record.operation) ||
-          record.predicate_type !== "rea.analysis"
-        )
-          throw new TypeError(
-            `Expected ${expectedOperations.join(" or ")} Evidence, received ${record.operation}`,
-          );
-    return ok(evidence);
+    return ok(parseEvidence(rawEvidence));
   } catch (cause: unknown) {
     return err(
       new EvidenceIntegrityError(
@@ -33,20 +19,50 @@ const parseExpectedEvidence = (
   }
 };
 
+const parseEvidenceRecords = (
+  rawEvidence: readonly Evidence[],
+): Result<Evidence[], EvidenceIntegrityError> => {
+  const evidence: Evidence[] = [];
+  for (const rawRecord of rawEvidence) {
+    const record = parseEvidenceRecord(rawRecord);
+    if (!record.ok) return err(record.error);
+    evidence.push(record.value);
+  }
+  return ok(evidence);
+};
+
+const resolveExpectedEvidence = (
+  rawEvidence: Evidence,
+  expectedOperation: string,
+): Result<Evidence, EvidenceIntegrityError> => {
+  const evidence = parseEvidenceRecord(rawEvidence);
+  if (!evidence.ok) return evidence;
+  if (
+    evidence.value.operation !== expectedOperation ||
+    evidence.value.predicate_type !== "rea.analysis"
+  )
+    return err(
+      new EvidenceIntegrityError(
+        `Expected ${expectedOperation} Evidence, received ${evidence.value.operation}`,
+      ),
+    );
+  return evidence;
+};
+
 export const resolveManagedEvidence = (
   evidence: Evidence,
-): Result<Evidence[], EvidenceIntegrityError> =>
-  parseExpectedEvidence([evidence], ["inspect_managed_members"]);
+): Result<Evidence, EvidenceIntegrityError> =>
+  resolveExpectedEvidence(evidence, "inspect_managed_members");
 
 export const resolveManagedArtifactEvidence = (
   evidence: Evidence,
-): Result<Evidence[], EvidenceIntegrityError> =>
-  parseExpectedEvidence([evidence], ["inspect_managed_artifact"]);
+): Result<Evidence, EvidenceIntegrityError> =>
+  resolveExpectedEvidence(evidence, "inspect_managed_artifact");
 
 export const resolveManagedBoundaryEvidence = (
   evidence: Evidence,
-): Result<Evidence[], EvidenceIntegrityError> =>
-  parseExpectedEvidence([evidence], ["inspect_managed_native_boundaries"]);
+): Result<Evidence, EvidenceIntegrityError> =>
+  resolveExpectedEvidence(evidence, "inspect_managed_native_boundaries");
 
 /**
  * Authenticate native observations without an operation allowlist: the domain
@@ -54,8 +70,7 @@ export const resolveManagedBoundaryEvidence = (
  */
 export const resolveNativeEvidence = (
   evidence: readonly Evidence[],
-): Result<Evidence[], EvidenceIntegrityError> =>
-  parseExpectedEvidence(evidence);
+): Result<Evidence[], EvidenceIntegrityError> => parseEvidenceRecords(evidence);
 
 export const sourceEvidence = (input: {
   readonly managed_artifact?: Evidence | undefined;

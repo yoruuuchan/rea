@@ -1,8 +1,11 @@
+import type {
+  AnalysisAccumulator,
+  IncludedScript,
+} from "./webBundleAnalyzerState.js";
 import * as t from "@babel/types";
 
 import { sanitizeEndpointCandidate } from "./browserObservation.js";
 import { compositeKey } from "./unicodeCodePointOrder.js";
-import type { WebPageInspection } from "./browserObservationSchemas.js";
 import type { WebBundleAnalysis } from "./webBundleAnalysis.js";
 import { traverseJavaScriptAst } from "./javascript/javascriptSemanticTraversal.js";
 import { indexJavaScriptBindingsWithReceiversSteps } from "./javascript/javascriptSemanticAnalysis.js";
@@ -37,26 +40,6 @@ type ChunkEdge = BundleObservations["chunks"]["edges"][number];
 type Finding = BundleObservations["routes"][number];
 type WebMcpDeclaration = BundleObservations["webmcp_declarations"][number];
 type Inference = WebBundleAnalysis["inferences"][number];
-type BrowserScript = WebPageInspection["scripts"]["items"][number];
-type IncludedSource = Extract<BrowserScript["source"], { included: true }>;
-export type IncludedScript = Omit<BrowserScript, "source"> & {
-  readonly source: IncludedSource;
-};
-
-export interface AnalysisAccumulator {
-  readonly edges: ChunkEdge[];
-  readonly routes: Finding[];
-  readonly endpoints: Finding[];
-  readonly webMcp: WebMcpDeclaration[];
-  readonly inferences: Inference[];
-  readonly seen: Set<string>;
-  visitedNodes: number;
-  parsedScripts: number;
-  readonly failedScripts: string[];
-  readonly recoveredScripts: string[];
-  readonly widenedScripts: string[];
-}
-
 export const analyzeScript = (
   script: IncludedScript,
   accumulator: AnalysisAccumulator,
@@ -500,24 +483,6 @@ const basis = (script: IncludedScript, detector: string) => ({
   column: null,
   detector,
 });
-
-export const emptyAccumulator = (): AnalysisAccumulator => ({
-  edges: [],
-  routes: [],
-  endpoints: [],
-  webMcp: [],
-  inferences: [],
-  seen: new Set(),
-  visitedNodes: 0,
-  parsedScripts: 0,
-  failedScripts: [],
-  recoveredScripts: [],
-  widenedScripts: [],
-});
-
-export const isIncludedScript = (
-  script: BrowserScript,
-): script is IncludedScript => script.source.included;
 
 const routeCallNames = [
   "route",

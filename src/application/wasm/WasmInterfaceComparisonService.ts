@@ -3,6 +3,7 @@ import {
   wasmInterfaceEntryRepresentationBytes,
 } from "../../domain/wasm/wasmInterface.js";
 import { setImmediate } from "node:timers/promises";
+import { ARTIFACT_COMPARISON_PROVIDER } from "../../domain/comparisonEvidenceIdentity.js";
 import {
   compareWasmInterfacesInputSchema,
   wasmInterfaceComparisonSchema,
@@ -26,7 +27,6 @@ import { fixedAllowanceOptions } from "../../domain/fixedAllowanceRemediation.js
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
-import { ARTIFACT_COMPARISON_PROVIDER } from "../InvestigationProviders.js";
 import {
   resolvePairedEvidenceRequest,
   type EvidenceLookup,

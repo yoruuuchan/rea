@@ -374,7 +374,8 @@ it("attributes rejected WASM paths to their selected fields before provider work
       paths.map((path) => ({
         path,
         reason: "invalid_format",
-        message: "Expected an absolute filesystem path on this host.",
+        expected: "regex",
+        message: "must be an absolute local filesystem path",
       })),
     );
   }

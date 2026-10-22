@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import { matchNativeFunctionsFromBundles } from "../application/native/NativeFunctionMatchingService.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { matchNativeFunctionsInputSchema } from "../contracts/native/functionMatchingContracts.js";
+import { FUNCTION_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { parseCliJsonInput } from "../cliJsonInput.js";
 import { logCliCommand } from "../cliLogging.js";
@@ -66,7 +67,7 @@ export const registerNativeFunctionMatchingCommands = (
               ),
             );
           const delivery = {
-            providerId: "rea-function-comparison",
+            providerId: FUNCTION_COMPARISON_PROVIDER.id,
             operation: "match_native_functions",
             signal,
             detail: parsed.data.detail,

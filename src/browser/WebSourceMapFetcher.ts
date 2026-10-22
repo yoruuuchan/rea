@@ -522,7 +522,6 @@ const promiseWithAbort = (
   signal: AbortSignal | undefined,
 ): Promise<Response> => {
   if (signal === undefined) return promise;
-  if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     let settled = false;
     const cleanup = (): void => signal.removeEventListener("abort", abort);
@@ -555,6 +554,7 @@ const promiseWithAbort = (
         reject(cause);
       },
     );
+    if (signal.aborted) abort();
   });
 };
 

@@ -161,7 +161,7 @@ const inventoryEvidence = (
 };
 
 const project = (evidence: Evidence) =>
-  projectAppleApplication({ inventory_evidence: [evidence] });
+  projectAppleApplication({ inventory_evidence: [evidence] }).projection;
 
 const macho = (path: string): FixtureEntry => ({ path, format: "mach-o" });
 
@@ -849,7 +849,7 @@ it.each(["file", "slice"] as const)(
           },
         ]),
       ],
-    });
+    }).projection;
     expect(projection.unavailable_components).toEqual([
       {
         path: "Payload/Fixture.app/libentry.dylib",

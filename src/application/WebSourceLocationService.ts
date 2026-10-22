@@ -1,6 +1,5 @@
 import { closeOwnedWebResources } from "./closeOwnedWebResources.js";
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path";
 import { z } from "zod";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
@@ -209,15 +208,6 @@ const invalid = (
 const admitContext = (
   input: WebSourceLocationInput,
 ): Result<null, AnalysisError> => {
-  for (const [path, value] of [
-    ["manifest_path", input.manifest_path],
-    ["source_map.path", input.source_map.path],
-  ] as const)
-    if (!isAbsolute(value))
-      return invalid(
-        path.split("."),
-        "Expected an absolute filesystem path on this host.",
-      );
   if (!URL.canParse(input.source_map.url))
     return invalid(
       ["source_map", "url"],

@@ -17,6 +17,8 @@ import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { registerProjectManagedApplicationGraph } from "./managedProjectGraphCommand.js";
 import { managedMembersInputSchema } from "../contracts/managed/managedToolContracts.js";
+import { localPathStringSchema } from "../domain/localPath.js";
+import { withCommandCancellation } from "./commandCancellation.js";
 
 export const registerManagedCommands = (
   cli: CliInstance,
@@ -64,14 +66,33 @@ const registerInspectManagedMembers = (
       type: managedMembersInputSchema.shape.type_names.describe(
         "Inspect only members declared by this exact type full name, and the string literals they load, such as System.Threading.Monitor; a nested type is named by its bare name, which selects every nested type of that name (repeatable)",
       ),
+      detail: managedMembersInputSchema.shape.detail.describe(
+        "complete returns full Evidence (default); summary returns identity, selection, coverage, limitations and collection counts and requires --evidence-bundle",
+      ),
+      evidenceBundle: localPathStringSchema
+        .optional()
+        .describe(
+          "Write complete parent Evidence to a new local bundle for later inspect-analysis-view calls; never replaces an existing path",
+        ),
     }),
     run: ({ args, options }) =>
-      logCliCommand(logger, "inspect-managed-members", () =>
-        runProviderAnalysis(
-          args.path,
-          "inspect_managed_members",
-          options.type === undefined ? {} : { type_names: options.type },
-          logger,
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, "inspect-managed-members", () =>
+          runProviderAnalysis(
+            args.path,
+            "inspect_managed_members",
+            options.type === undefined ? {} : { type_names: options.type },
+            logger,
+            signal,
+            {
+              ...(options.detail === undefined
+                ? {}
+                : { detail: options.detail }),
+              ...(options.evidenceBundle === undefined
+                ? {}
+                : { evidenceBundlePath: options.evidenceBundle }),
+            },
+          ),
         ),
       ),
   });

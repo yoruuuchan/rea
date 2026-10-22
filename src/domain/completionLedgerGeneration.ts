@@ -4,6 +4,10 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { IDENTIFIER_PATTERN } from "./stringPatterns.js";
+import {
+  compareAsciiStrings,
+  isSortedUniqueAscii,
+} from "./canonicalOrdering.js";
 
 import {
   createEvidenceCompletionLedger,
@@ -121,15 +125,6 @@ const completionManifestObjectSchema = z.strictObject({
 });
 type CompletionManifestValue = z.infer<typeof completionManifestObjectSchema>;
 
-const compareIdentifiers = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;
-
-const isSortedUnique = (values: readonly string[]): boolean =>
-  values.every(
-    (value, index) =>
-      index === 0 || compareIdentifiers(values[index - 1] ?? "", value) < 0,
-  );
-
 const canonicalJson = (value: unknown): string => {
   const serialized = canonicalize(value);
   if (serialized === undefined)
@@ -148,20 +143,22 @@ const manifestIssues = (
   manifest: CompletionManifestValue,
   context: z.RefinementCtx,
 ): void => {
-  if (!isSortedUnique(manifest.claims.map(({ claim_id }) => claim_id)))
+  if (!isSortedUniqueAscii(manifest.claims.map(({ claim_id }) => claim_id)))
     context.addIssue({
       code: "custom",
       path: ["claims"],
       message: "Manifest claims must be sorted by unique claim ID",
     });
-  if (!isSortedUnique(manifest.skill_digests.map(({ skill_id }) => skill_id)))
+  if (
+    !isSortedUniqueAscii(manifest.skill_digests.map(({ skill_id }) => skill_id))
+  )
     context.addIssue({
       code: "custom",
       path: ["skill_digests"],
       message: "Skill digests must be sorted by unique skill ID",
     });
   for (const [index, claim] of manifest.claims.entries())
-    if (!isSortedUnique(claim.artifact_sha256s))
+    if (!isSortedUniqueAscii(claim.artifact_sha256s))
       context.addIssue({
         code: "custom",
         path: ["claims", index, "artifact_sha256s"],
@@ -194,10 +191,10 @@ const canonicalClaims = (
   claims
     .map((claim) => ({
       ...claim,
-      artifact_sha256s: [...claim.artifact_sha256s].sort(compareIdentifiers),
-      evidence_ids: [...claim.evidence_ids].sort(compareIdentifiers),
+      artifact_sha256s: [...claim.artifact_sha256s].sort(compareAsciiStrings),
+      evidence_ids: [...claim.evidence_ids].sort(compareAsciiStrings),
     }))
-    .sort((left, right) => compareIdentifiers(left.claim_id, right.claim_id));
+    .sort((left, right) => compareAsciiStrings(left.claim_id, right.claim_id));
 
 /** Generate canonical manifest and ledger artifacts from live verifier output. */
 export const createCompletionLedgerArtifacts = (
@@ -206,18 +203,18 @@ export const createCompletionLedgerArtifacts = (
 ): CompletionLedgerArtifacts => {
   const report = completionVerifierReportSchema.parse(input);
   const claims = canonicalClaims(report.claims);
-  if (!isSortedUnique(claims.map(({ claim_id }) => claim_id)))
+  if (!isSortedUniqueAscii(claims.map(({ claim_id }) => claim_id)))
     throw new TypeError("Completion verifier claim IDs must be unique");
   for (const claim of claims) {
-    if (!isSortedUnique(claim.artifact_sha256s))
+    if (!isSortedUniqueAscii(claim.artifact_sha256s))
       throw new TypeError("Artifact digests must be unique per claim");
-    if (!isSortedUnique(claim.evidence_ids))
+    if (!isSortedUniqueAscii(claim.evidence_ids))
       throw new TypeError("Evidence IDs must be unique per claim");
   }
   const skills = skillDigests
     .map((skill) => skillDigestSchema.parse(skill))
-    .sort((left, right) => compareIdentifiers(left.skill_id, right.skill_id));
-  if (!isSortedUnique(skills.map(({ skill_id }) => skill_id)))
+    .sort((left, right) => compareAsciiStrings(left.skill_id, right.skill_id));
+  if (!isSortedUniqueAscii(skills.map(({ skill_id }) => skill_id)))
     throw new TypeError("Completion skill IDs must be unique");
   const projection = {
     verifier: report.verifier,

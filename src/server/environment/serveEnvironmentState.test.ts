@@ -1,3 +1,4 @@
+import { STATE_INTAKE_LIMIT_BYTES } from "../../application/environment/environmentStateDocument.js";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -57,11 +58,7 @@ import {
   type ServedEnvironment,
   type ServeEnvironmentOptions,
 } from "./serveEnvironment.js";
-import {
-  DEFAULT_STATE_INTAKE,
-  STATE_INTAKE_LIMIT_BYTES,
-  type StateIntake,
-} from "./stateIntake.js";
+import { DEFAULT_STATE_INTAKE, type StateIntake } from "./stateIntake.js";
 
 const { source, state } = environmentStateServeInputs();
 
