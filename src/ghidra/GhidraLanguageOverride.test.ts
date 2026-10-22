@@ -18,6 +18,7 @@ import {
   readGhidraLanguageCatalog,
 } from "./GhidraLanguageCatalog.js";
 import { GhidraProvider } from "./GhidraProvider.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
 // Abbreviated from Ghidra 12.1.4 Processors/x86/data/languages/x86.ldefs.
 const X86_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -197,10 +198,15 @@ describe("Ghidra language catalog", () => {
       },
       { id: "x86:LE:16:Real Mode", compilerSpecIds: ["default"] },
     ]);
-    expect(await readGhidraLanguageCatalog(installDir)).toHaveLength(2);
-    expect(await readGhidraLanguageCatalog(join(installDir, "absent"))).toEqual(
-      [],
-    );
+    expect(
+      await readGhidraLanguageCatalog(installDir, new ArtifactResourceScope()),
+    ).toHaveLength(2);
+    expect(
+      await readGhidraLanguageCatalog(
+        join(installDir, "absent"),
+        new ArtifactResourceScope(),
+      ),
+    ).toEqual([]);
   });
 
   it("reads a UTF-8 signed definition beside an unsigned sibling", async () => {
@@ -219,7 +225,9 @@ describe("Ghidra language catalog", () => {
       ]),
     );
     await writeFile(join(module("x86"), "x86.ldefs"), X86_LDEFS);
-    expect(await readGhidraLanguageCatalog(root)).toEqual([
+    expect(
+      await readGhidraLanguageCatalog(root, new ArtifactResourceScope()),
+    ).toEqual([
       { id: "probe:LE:32:default", compilerSpecIds: [] },
       ...parseGhidraLanguageDefinitions(X86_LDEFS),
     ]);

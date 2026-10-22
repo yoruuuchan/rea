@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import { artifactIntegrityDetails } from "../domain/artifactIntegrity.js";
 import { constants, createWriteStream, type Stats } from "node:fs";
 import {
@@ -142,7 +143,11 @@ export class AsarArtifactReader implements ArtifactReader {
     try {
       admission = {
         ok: true,
-        value: await admitAsarHeader(headerHandle, signal),
+        value: await admitAsarHeader(
+          headerHandle,
+          signal,
+          this.options.headerAdmission,
+        ),
       };
     } catch (cause: unknown) {
       admission = { ok: false, cause };
@@ -622,7 +627,9 @@ type OwnedAsarHandle = {
   source?: Readable;
   output?: Readable;
 };
-type AsarArtifactReaderOptions = {
+export type AsarArtifactReaderOptions = {
+  /** Header/index admission resolved by the caller's composition root; default otherwise. */
+  readonly headerAdmission?: AsarHeaderAdmission;
   readonly openFile?: OpenAsarFile;
   readonly openUnpackedFile?: OpenAsarFile;
   readonly removeSnapshot?: (path: string) => Promise<void>;

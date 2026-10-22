@@ -1,3 +1,4 @@
+import { resolveAsarHeaderAdmission } from "./AsarHeader.js";
 import { artifactTargetRefusal } from "../domain/apple/artifactTargetApplicability.js";
 import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -480,6 +481,7 @@ class ArtifactClient implements AnalysisClient {
     return inventoryArtifact(this.target.sourcePath ?? this.target.path, {
       resourceScope: this.#resourceScope,
       environment: this.environment,
+      asarHeaderAdmission: resolveAsarHeaderAdmission(this.environment),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: { mode: parsed.integrity_policy },
     });

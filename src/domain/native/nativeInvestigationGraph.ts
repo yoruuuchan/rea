@@ -102,8 +102,8 @@ export const nativeInvestigationCoverageSchema = z.strictObject({
   facet: z.string().min(1),
   status: z.enum(["complete", "partial", "unsupported", "not_requested"]),
   reason: z.string().nullable(),
-  examined: z.number().int().nonnegative(),
-  omitted: z.number().int().nonnegative(),
+  examined: z.int().nonnegative(),
+  omitted: z.int().nonnegative(),
 });
 
 export const nativeInvestigationProviderSchema = z.strictObject({
@@ -131,9 +131,9 @@ export type NativeInvestigationGraph = z.infer<
 
 /** Caller-controlled hard limits for a bounded relationship trace. */
 export const nativeInvestigationTraceLimitsSchema = z.strictObject({
-  max_depth: z.number().int().min(0).max(32).default(8),
-  max_nodes: z.number().int().min(1).max(2000).default(250),
-  max_edges: z.number().int().min(1).max(5000).default(500),
+  max_depth: z.int().min(0).max(32).default(8),
+  max_nodes: z.int().min(1).max(2000).default(250),
+  max_edges: z.int().min(1).max(5000).default(500),
 });
 
 export type NativeInvestigationTraceLimits = z.infer<
@@ -152,7 +152,7 @@ export const nativeInvestigationTraceSchema = z.strictObject({
   nodes: z.array(nativeInvestigationNodeSchema),
   edges: z.array(nativeInvestigationEdgeSchema),
   unresolved: z.array(nativeInvestigationEdgeSchema),
-  reached_depth: z.number().int().nonnegative(),
+  reached_depth: z.int().nonnegative(),
   truncated: z.boolean(),
   reason: z.string().nullable(),
   coverage: z.array(nativeInvestigationCoverageSchema),

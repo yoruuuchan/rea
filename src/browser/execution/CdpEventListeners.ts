@@ -24,10 +24,10 @@ export const captureWebEventListeners = async (
       await session.enable(domain);
     await session.assertDocument();
     const document = z
-      .object({ root: z.object({ nodeId: z.number().int().min(1) }) })
+      .object({ root: z.object({ nodeId: z.int().min(1) }) })
       .parse(await session.command("DOM.getDocument", { depth: 0 }));
     const selected = z
-      .object({ nodeId: z.number().int().min(0) })
+      .object({ nodeId: z.int().min(0) })
       .parse(
         await queryListenerSelector(
           session,
@@ -39,7 +39,7 @@ export const captureWebEventListeners = async (
     let descriptors: z.infer<typeof runtimeListenersSchema>["listeners"] = [];
     if (selected.nodeId !== 0) {
       const described = z
-        .object({ node: z.object({ backendNodeId: z.number().int().min(1) }) })
+        .object({ node: z.object({ backendNodeId: z.int().min(1) }) })
         .parse(
           await session.command("DOM.describeNode", {
             nodeId: selected.nodeId,

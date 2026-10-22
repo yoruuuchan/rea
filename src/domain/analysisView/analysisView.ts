@@ -1,3 +1,12 @@
+import { byteEntropySchema } from "../native/byteEntropy.js";
+import {
+  byteEntropySummarySchema,
+  projectByteEntropyView,
+} from "./byteEntropyView.js";
+import {
+  parseAnalysisViewResult,
+  analysisViewResultInputError,
+} from "./analysisViewParent.js";
 import {
   sourceToBundleViewRequestSchema,
   sourceToBundleViewItemsSchema,
@@ -100,7 +109,10 @@ import { evidenceSchema, type Evidence } from "../evidence.js";
 import { jsonObjectSchema, jsonValueSchema } from "../jsonValue.js";
 import { err, ok, type Result } from "../result.js";
 import type { AnalysisError } from "../analysisErrorBase.js";
-import { safeParseOwnedBinaryLayout } from "../native/binaryLayout.js";
+import {
+  binaryLayoutSchema,
+  safeParseOwnedBinaryLayout,
+} from "../native/binaryLayout.js";
 import { bundleResourceRootSchema } from "../apple/bundleResourceRoot.js";
 import { functionDossierSchema } from "../hopperValues.js";
 import {
@@ -112,7 +124,6 @@ import {
   parseOwnedJavaScriptApplicationAnalysisSteps,
   type JavaScriptApplicationAnalysisResult,
 } from "../javascript/javascriptApplicationAnalysis.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
 import { projectBinaryLayoutView } from "./binaryLayoutView.js";
 import { projectJavaScriptApplicationView } from "./javascriptApplicationView.js";
 import {
@@ -223,7 +234,7 @@ const facetViewSchema = z.strictObject({
   facet: z.enum(["mitigations", "linkage"]),
 });
 const indexSelectorSchema = z.strictObject({
-  index: z.number().int().nonnegative(),
+  index: z.int().nonnegative(),
 });
 const nameSelectorSchema = z.strictObject({ name: z.string() });
 const pathSelectorSchema = z.strictObject({
@@ -261,8 +272,8 @@ const itemViewSchema = z.discriminatedUnion("collection", [
 const pageViewSchema = z.strictObject({
   kind: z.literal("page"),
   collection: z.enum(["sections", "symbols", "modules"]),
-  offset: z.number().int().nonnegative(),
-  limit: z.number().int().positive(),
+  offset: z.int().nonnegative(),
+  limit: z.int().positive(),
 });
 
 /** Bounded native function facets of already authenticated analyze_function Evidence. */
@@ -291,8 +302,8 @@ const nativeViewSchema = z.strictObject({
     "value_flow_parameters",
     "value_flow_parameter_uses",
   ]),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 });
 
 /** Caller-selected projection of already completed analysis Evidence. */
@@ -364,9 +375,9 @@ export const inspectAnalysisViewInputSchema = z.strictObject({
 
 const coverageSchema = z.strictObject({
   status: z.enum(["complete-within-view", "page", "empty"]),
-  examined: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative(),
-  next_offset: z.number().int().nonnegative().nullable(),
+  examined: z.int().nonnegative(),
+  total: z.int().nonnegative(),
+  next_offset: z.int().nonnegative().nullable(),
   exhausted: z.boolean(),
 });
 
@@ -380,26 +391,22 @@ const artifactSchema = z.strictObject({
 });
 
 const layoutSummarySchema = z.strictObject({
-  bytes: z.number().int().nonnegative(),
-  format: z.literal("elf"),
-  architecture: z.strictObject({
-    machine: z.literal("EM_X86_64"),
-    bits: z.literal(64),
-    byte_order: z.literal("little"),
-  }),
-  image_type: z.enum(["ET_EXEC", "ET_DYN", "ET_REL"]),
+  bytes: binaryLayoutSchema.shape.artifact.shape.bytes,
+  format: binaryLayoutSchema.shape.format,
+  architecture: binaryLayoutSchema.shape.architecture,
+  image_type: binaryLayoutSchema.shape.image_type,
   entry: z.strictObject({
     reported_value: z.string().min(1),
     meaning: z.enum(["linked-virtual-address", "not-applicable", "absent"]),
     execution_status: z.literal("unknown"),
   }),
   counts: z.strictObject({
-    sections: z.number().int().nonnegative(),
-    segments: z.number().int().nonnegative(),
-    symbols: z.number().int().nonnegative(),
-    relocations: z.number().int().nonnegative(),
+    sections: z.int().nonnegative(),
+    segments: z.int().nonnegative(),
+    symbols: z.int().nonnegative(),
+    relocations: z.int().nonnegative(),
   }),
-  limitation_count: z.number().int().nonnegative(),
+  limitation_count: z.int().nonnegative(),
 });
 
 const javascriptSummarySchema = z.strictObject({
@@ -410,12 +417,13 @@ const javascriptSummarySchema = z.strictObject({
   statistics: jsonObjectSchema,
   electron: jsonObjectSchema,
   coverage: jsonObjectSchema,
-  limitation_count: z.number().int().nonnegative(),
+  limitation_count: z.int().nonnegative(),
 });
 
 const viewResultBase = {
   parent_evidence_id: prefixedDigestSchema("ev"),
   parent_operation: z.enum([
+    "inspect_byte_entropy",
     "inspect_binary_layout",
     "inspect_go_binary",
     "gdb_console",
@@ -455,6 +463,12 @@ const summaryViewResultBase = {
   view: summaryViewSchema,
   ...viewResultBase,
 } as const;
+
+export const byteEntropySummaryViewResultSchema = z.strictObject({
+  ...summaryViewResultBase,
+  summary: byteEntropySummarySchema,
+  parent_operation: z.literal("inspect_byte_entropy"),
+});
 
 /** Opt-in command delivery keeps output once and retains the complete parent. */
 export const gdbCommandSummaryViewResultSchema = z.strictObject({
@@ -738,6 +752,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     view: environmentStateViewRequestSchema,
   }),
   z.discriminatedUnion("parent_operation", [
+    byteEntropySummaryViewResultSchema,
     gdbCommandSummaryViewResultSchema,
     objdumpSummaryViewResultSchema,
     fridaSessionStatusSummaryViewResultSchema,
@@ -984,17 +999,7 @@ const parseJavaScriptParent = (
     return ok(step.value);
   } catch (cause: unknown) {
     if (!(cause instanceof z.ZodError)) throw cause;
-    return err(
-      analysisInputErrorFromIssues(
-        INSPECT_ANALYSIS_VIEW_OPERATION,
-        cause.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: input } },
-        { cause },
-      ),
-    );
+    return err(analysisViewResultInputError(input, cause));
   }
 };
 
@@ -1123,6 +1128,22 @@ export const projectAnalysisView = (
     const projected = projectPcapCaptureView(parent, view);
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
+  if (parent.operation === "inspect_byte_entropy") {
+    const report = byteEntropySchema.safeParse(parent.normalizedResult);
+    if (!report.success)
+      return err(
+        analysisViewInputError([
+          {
+            path: ["source"],
+            reason: "invalid_value",
+            message:
+              "Parent Evidence result does not match inspect_byte_entropy.",
+          },
+        ]),
+      );
+    const projected = projectByteEntropyView(parent, report.data, view);
+    return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
+  }
   if (parent.operation === "inspect_binary_layout") {
     const layout = safeParseOwnedBinaryLayout(parent.normalizedResult);
     if (!layout.success)
@@ -1150,20 +1171,9 @@ export const projectAnalysisView = (
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
   if (parent.operation === "analyze_function") {
-    const native = functionDossierSchema.safeParse(parent.normalizedResult);
-    if (!native.success)
-      return err(
-        analysisInputErrorFromIssues(
-          INSPECT_ANALYSIS_VIEW_OPERATION,
-          native.error.issues.map((issue) => ({
-            ...issue,
-            path: ["source", "normalized_result", ...issue.path],
-          })),
-          { source: { normalized_result: parent.normalizedResult } },
-          { cause: native.error },
-        ),
-      );
-    const projected = projectNativeFunctionView(parent, native.data, view);
+    const native = parseAnalysisViewResult(functionDossierSchema, parent);
+    if (!native.ok) return native;
+    const projected = projectNativeFunctionView(parent, native.value, view);
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
   const project = retainedViewProjectors.get(parent.operation);

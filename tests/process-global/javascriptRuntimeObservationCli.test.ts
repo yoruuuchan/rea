@@ -150,7 +150,7 @@ describe("JavaScript runtime observation CLI parity", () => {
       },
     };
     const cli = Cli.create("rea-runtime-cleanup-test", { sync: false });
-    registerJavaScriptRuntimeObservationCommands(cli, silentLogger);
+    registerJavaScriptRuntimeObservationCommands(cli, silentLogger, {});
     let stdout = "";
     await cli.serve(
       ["list-javascript-runtime-targets", "http://127.0.0.1:9229", "--json"],

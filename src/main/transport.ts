@@ -8,6 +8,7 @@ import { StreamableHttpListenError } from "../server/http/streamableHttpListenEr
 import type { ToolResultDelivery } from "../server/toolResult.js";
 import type { McpServerHandle, RuntimeDependencies } from "./types.js";
 import type { OptionalProviderLoadResult } from "../application/OptionalObservationProviders.js";
+import { OwnedMcpServers } from "./OwnedMcpServers.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import {
   MCP_CONNECTION_LOST,
@@ -62,11 +63,9 @@ export const startMcpTransport = async (
     );
   }
   const androidProviders: AndroidAnalysisPort[] = [];
-  const servers = new Set<ReturnType<typeof createServer>>();
+  const servers = new OwnedMcpServers<ReturnType<typeof createServer>>();
   const closeServers = async (): Promise<void> => {
-    const results = await Promise.allSettled(
-      [...servers].map((server) => server.close()),
-    );
+    const results = await servers.closeAll();
     const failures = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
     );
@@ -110,32 +109,26 @@ export const startMcpTransport = async (
   let handle: McpServerHandle;
   try {
     handle = await dependencies.serve(
-      () => {
-        // The SDK can discard a discovery probe and construct a replacement server.
-        const android = createAndroidAnalysisProvider(
-          serverContext.environment,
-        );
-        androidProviders.push(android);
-        const server = (dependencies.createServer ?? createServer)(
-          { kind: "session", session },
-          {
-            logger: serverContext.logger,
-            environment: serverContext.environment,
-            delivery: serverContext.delivery,
-            ...optionalProviders,
-            optionalObservationProviderOwner: "caller",
-            androidAnalysis: android,
-          },
-        );
-        // The SDK can discard a server even when its provider cleanup failed.
-        servers.add(server);
-        const closeServer = server.close.bind(server);
-        server.close = async () => {
-          await closeServer();
-          servers.delete(server);
-        };
-        return server;
-      },
+      () =>
+        servers.create(() => {
+          // The SDK can discard a discovery probe and construct a replacement server.
+          const android = createAndroidAnalysisProvider(
+            serverContext.environment,
+          );
+          androidProviders.push(android);
+          const server = (dependencies.createServer ?? createServer)(
+            { kind: "session", session },
+            {
+              logger: serverContext.logger,
+              environment: serverContext.environment,
+              delivery: serverContext.delivery,
+              ...optionalProviders,
+              optionalObservationProviderOwner: "caller",
+              androidAnalysis: android,
+            },
+          );
+          return server;
+        }),
       {
         onerror: () => {
           serverLogger.error(MCP_CONNECTION_LOST);

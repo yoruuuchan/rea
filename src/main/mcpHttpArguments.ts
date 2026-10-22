@@ -2,6 +2,7 @@ import { Help, z } from "incur";
 
 import {
   MCP_HTTP_PORT_CONSTRAINT,
+  mcpHttpListenerPortSchema,
   mcpHttpPortSchema,
 } from "../config/mcpHttpEndpoint.js";
 
@@ -18,11 +19,7 @@ const MCP_HTTP_OPTIONS = z.object({
     .min(1)
     .optional()
     .describe("Listener address; default MCP_HOST, else 127.0.0.1"),
-  port: z
-    .number()
-    .int()
-    .min(0)
-    .max(65535)
+  port: mcpHttpListenerPortSchema
     .optional()
     .describe("Listener port; default MCP_PORT, else 0 for an ephemeral port"),
   help: z.boolean().optional().describe("Show help"),

@@ -1,3 +1,7 @@
+import {
+  javascriptSourceRangeKey,
+  javascriptSourceRangeContains,
+} from "../../domain/javascript/javascriptSourceCoordinates.js";
 import type { ApplicationNode } from "../../domain/javascript/javascriptApplicationGraphSchemas.js";
 import type { ElectronSenderValidationFinding } from "../../domain/javascript/electronStaticAnalysisTypes.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
@@ -21,8 +25,6 @@ import {
   addElectronInferenceEdge,
   electronFindingSourceNode,
   electronObservationIdentity,
-  electronRangeContains,
-  electronRangeKey,
 } from "./ElectronBoundaryGraphContext.js";
 
 interface IpcGraphState {
@@ -182,7 +184,7 @@ const addHandlerNode = (input: IpcHandlerInput): ApplicationNode => {
     identity: artifactLocalIdentity(
       file.sha256,
       "electron-ipc-handler",
-      `${finding.side}:${finding.operation}:${finding.channel ?? finding.channel_expression}:${electronRangeKey(handlerRange)}`,
+      `${finding.side}:${finding.operation}:${finding.channel ?? finding.channel_expression}:${javascriptSourceRangeKey(handlerRange)}`,
     ),
     observations: [
       {
@@ -338,7 +340,7 @@ const containingHandler = (
       (record) =>
         record.file.path === file.path &&
         record.finding.handler_location !== null &&
-        electronRangeContains(
+        javascriptSourceRangeContains(
           record.finding.handler_location,
           validation.location,
         ),

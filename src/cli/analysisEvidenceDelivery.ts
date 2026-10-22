@@ -4,12 +4,11 @@ import { parseEvidence, type Evidence } from "../domain/evidence.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import type { Result } from "../domain/result.js";
+import { ok, type Result } from "../domain/result.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
-import { writeEvidenceBundle } from "../application/EvidenceBundleFiles.js";
+import { publishEvidenceDelivery } from "../application/EvidenceBundleCommands.js";
 import { inspectAnalysisView } from "../application/analysisView/AnalysisViewService.js";
-import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 
@@ -106,7 +105,7 @@ export const publishCliAnalysisEvidence = async (
   value: JsonValue,
   input: CliEvidenceDelivery,
 ) => {
-  const { providerId, operation, signal, detail, evidenceOutput } = input;
+  const { operation, signal, detail, evidenceOutput } = input;
   if (!isEvidence(value)) return value;
   const complete = parseEvidence(value);
   const inputError = cliEvidenceDeliveryInputError(input);
@@ -115,43 +114,39 @@ export const publishCliAnalysisEvidence = async (
     return projectAnalysisError(inputError);
   }
   if (evidenceOutput === undefined) return complete;
-  const resources = new ArtifactResourceScope();
-  let receipt: { readonly path: string; readonly bytes: number } | undefined;
-  const delivered = await finishAnalysisCommand(
-    async () => {
-      const written = await writeEvidenceBundle(
-        createEvidenceBundle([
-          ...new Map(
-            [...(input.sourceEvidence ?? []), complete].map((record) => [
-              record.evidence_id,
-              record,
-            ]),
-          ).values(),
+  // Project before publication so a view failure cannot commit an
+  // unreported bundle; publication then owns every post-commit outcome.
+  const delivered =
+    detail === "summary"
+      ? inspectAnalysisView({
+          source: { kind: "inline", evidence: complete },
+          view: input.view ?? { kind: "summary" },
+        })
+      : ok(complete);
+  if (!delivered.ok)
+    return projectAnalysisError(
+      delivered.error.retainPartialObservation(complete),
+    );
+  const published = await publishEvidenceDelivery({
+    bundle: createEvidenceBundle([
+      ...new Map(
+        [...(input.sourceEvidence ?? []), complete].map((record) => [
+          record.evidence_id,
+          record,
         ]),
-        absoluteCallerPath(evidenceOutput),
-        false,
-        resources,
-        signal,
-      );
-      if (!written.ok) {
-        if (written.error.partialObservation === undefined)
-          written.error.retainPartialObservation(complete);
-        return written;
-      }
-      receipt = written.value;
-      return detail === "summary"
-        ? inspectAnalysisView({
-            source: { kind: "inline", evidence: complete },
-            view: input.view ?? { kind: "summary" },
-          })
-        : { ok: true as const, value: complete };
-    },
-    { close: () => resources.close() },
-    providerId,
+      ).values(),
+    ]),
+    complete,
+    delivered: delivered.value,
+    outputPath: absoluteCallerPath(evidenceOutput),
     operation,
     signal,
-  );
-  return isEvidence(delivered) && detail === "summary"
-    ? { summary: delivered, evidence_bundle: receipt }
-    : delivered;
+  });
+  if (!published.ok) return projectAnalysisError(published.error);
+  return detail === "summary"
+    ? {
+        summary: published.value.delivered,
+        evidence_bundle: published.value.evidenceBundle,
+      }
+    : published.value.delivered;
 };

@@ -46,7 +46,7 @@ export const traceNativeUiAction = async (
       },
       signal === undefined ? {} : { signal },
     ),
-    inspectNativeDispatch(analysis, 20_000, signal),
+    inspectNativeDispatch(analysis, 20_000, { signal }),
   ]);
   if (!uiExecution.ok && uiExecution.error._tag === "AnalysisCancelledError")
     return err(uiExecution.error);

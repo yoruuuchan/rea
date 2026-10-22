@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const offset = z.number().int().nonnegative();
+const offset = z.int().nonnegative();
 const reportedMetadata = z.strictObject({
   bytecodeOffset: offset,
   cborLength: offset,

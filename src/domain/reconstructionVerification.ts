@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { artifactComparisonResultSchema } from "./artifactComparison.js";
@@ -19,6 +16,7 @@ import { functionDossierSchema } from "./hopperValues.js";
 import { assessFunctionCallCoverage } from "./functionCallCoverage.js";
 import { processCaptureComparisonSchema } from "./process/processComparison.js";
 import { parseProcessCapture } from "./process/processCaptureParsing.js";
+import { digestCanonicalValue } from "./canonicalDigest.js";
 import {
   reconstructionClaimResultSchema,
   reconstructionSpecificationSchema,
@@ -72,12 +70,15 @@ export const verifyReconstruction = (
   );
   const output = {
     status: failed > 0 ? "fail" : unresolved > 0 ? "unknown" : "pass",
-    specification_sha256: digest({
-      ...specification,
-      claims: [...specification.claims].sort((left, right) =>
-        compareUnicodeCodePoints(left.claim_id, right.claim_id),
-      ),
-    }),
+    specification_sha256: digestCanonicalValue(
+      {
+        ...specification,
+        claims: [...specification.claims].sort((left, right) =>
+          compareUnicodeCodePoints(left.claim_id, right.claim_id),
+        ),
+      },
+      "Reconstruction specification",
+    ),
     summary: {
       total: results.length,
       passed: count(results, "pass"),
@@ -375,13 +376,6 @@ const classify = (
   if (observed === "unknown" || observed === "truncated" || unknowns.length > 0)
     return "unknown";
   return "pass";
-};
-
-const digest = (value: unknown): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError("Specification canonicalization failed");
-  return createHash("sha256").update(encoded).digest("hex");
 };
 
 const count = (

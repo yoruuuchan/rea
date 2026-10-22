@@ -22,7 +22,7 @@ import {
 } from "./environmentBundle.js";
 import type { EnvironmentSource } from "./environmentSource.js";
 import { prepareServedState } from "./environmentState.js";
-import { environmentToolAnswer } from "./environmentStateAnswer.js";
+import { environmentToolAnswer } from "./environmentToolAnswer.js";
 import { EnvironmentStateStore } from "./environmentStateStore.js";
 
 const fixture = environmentServeFixture();
@@ -218,7 +218,9 @@ describe("planEnvironmentBundle", () => {
     expect(readme).not.toContain("agent-env run grafana-example");
     expect(readme).toContain("## What the environment serves");
     expect(readme).not.toContain("What replay means");
-    expect(readme).toContain("write tools are not served yet");
+    expect(readme).toContain(
+      "write tools are served only where the capture's later reads confirmed\ntheir effect",
+    );
     expect(readme).toContain(
       "`rea environment-serve --replay-only` serves pure replay",
     );

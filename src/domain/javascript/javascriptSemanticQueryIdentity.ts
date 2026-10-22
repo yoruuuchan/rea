@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
+import { digestCanonicalValue } from "../canonicalDigest.js";
 
 import type { JavaScriptSemanticGraph } from "./javascriptSemanticGraph.js";
 import type { JavaScriptSemanticGraphNode } from "./javascriptSemanticGraphSchemas.js";
@@ -8,44 +6,30 @@ import { uniqueSorted } from "../canonicalOrdering.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import type { JavaScriptSemanticQueryInput } from "./javascriptSemanticQuerySchemas.js";
 
-/** Canonical JSON used by semantic query commitments and ordering. */
-export const canonicalJavaScriptSemanticQueryJson = (
-  value: unknown,
-): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError(
-      "JavaScript semantic query could not canonicalize data",
-    );
-  return encoded;
-};
-
-const digest = (value: unknown): string =>
-  createHash("sha256")
-    .update(canonicalJavaScriptSemanticQueryJson(value))
-    .digest("hex");
-
 /** Derive the stable identity for one graph-bound query. */
 export const javaScriptSemanticQueryIdentifier = (
   graph: JavaScriptSemanticGraph,
   input: JavaScriptSemanticQueryInput,
 ): string => {
   const semantic = input;
-  return `jsrq_${digest({
-    source_graph_id: graph.graph_id,
-    ...semantic,
-    allowed_relations:
-      semantic.allowed_relations === undefined
-        ? undefined
-        : uniqueSorted(semantic.allowed_relations),
-    expected:
-      semantic.expected === null
-        ? null
-        : {
-            ...semantic.expected,
-            classes: uniqueSorted(semantic.expected.classes),
-          },
-  })}`;
+  return `jsrq_${digestCanonicalValue(
+    {
+      source_graph_id: graph.graph_id,
+      ...semantic,
+      allowed_relations:
+        semantic.allowed_relations === undefined
+          ? undefined
+          : uniqueSorted(semantic.allowed_relations),
+      expected:
+        semantic.expected === null
+          ? null
+          : {
+              ...semantic.expected,
+              classes: uniqueSorted(semantic.expected.classes),
+            },
+    },
+    "JavaScript semantic query",
+  )}`;
 };
 
 /** Resolve deterministic seed candidates without applying traversal limits. */

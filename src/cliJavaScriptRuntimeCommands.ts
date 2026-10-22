@@ -37,6 +37,7 @@ const observeOptionsSchema = z.object({
 export const registerJavaScriptRuntimeObservationCommands = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
+  environment: Readonly<Record<string, string | undefined>>,
 ): void => {
   cli.command(CLI_COMMANDS.listJavaScriptRuntimeTargets, {
     description: "List Node/Electron V8 Inspector targets",
@@ -49,7 +50,7 @@ export const registerJavaScriptRuntimeObservationCommands = (
           logger,
           CLI_COMMANDS.listJavaScriptRuntimeTargets,
           async () => {
-            const context = runtimeContext();
+            const context = runtimeContext(environment);
             const input = {
               inspector_endpoint: args.endpoint,
             };
@@ -94,7 +95,7 @@ export const registerJavaScriptRuntimeObservationCommands = (
           logger,
           CLI_COMMANDS.observeJavaScriptRuntime,
           async () => {
-            const context = runtimeContext();
+            const context = runtimeContext(environment);
             const input = {
               inspector_endpoint: args.endpoint,
               target_id: args.targetId,
@@ -127,8 +128,10 @@ export const registerJavaScriptRuntimeObservationCommands = (
   });
 };
 
-const runtimeContext = () => ({
-  provider: createJavaScriptRuntimeObservationProvider(),
+const runtimeContext = (
+  environment: Readonly<Record<string, string | undefined>>,
+) => ({
+  provider: createJavaScriptRuntimeObservationProvider(environment),
 });
 
 const cliError = (

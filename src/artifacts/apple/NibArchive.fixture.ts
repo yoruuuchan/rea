@@ -75,7 +75,8 @@ const varint = (value: number): Buffer => {
 const encodeValue = (
   value: number | string | boolean | null | { ref: number },
 ): Buffer => {
-  if (typeof value === "boolean") return Buffer.from([value ? 4 : 5]);
+  // Tags as written by ibtool and read by AppKit: 4 is NO, 5 is YES.
+  if (typeof value === "boolean") return Buffer.from([value ? 5 : 4]);
   if (value === null) return Buffer.from([9]);
   if (typeof value === "number") {
     const bytes = Buffer.alloc(5);

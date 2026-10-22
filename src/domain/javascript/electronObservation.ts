@@ -27,7 +27,7 @@ export type ListElectronTargetsInput = z.infer<
 const inspectElectronPageFacts = {
   ...approvedElectronInput,
   target_id: z.string().trim().min(1),
-  observation_ms: z.number().int().min(0).default(100),
+  observation_ms: z.int().min(0).default(100),
   command_timeout_ms: webRuntimeCommandTimeoutSchema,
 } as const;
 export const inspectElectronPageInputSchema = z.union([
@@ -62,8 +62,8 @@ export const electronTargetListSchema = z.object({
   browser: browserVersionSchema,
   targets: z.array(electronTargetSchema),
   excluded: z.object({
-    unsupported_url: z.number().int().min(0),
-    non_page: z.number().int().min(0),
+    unsupported_url: z.int().min(0),
+    non_page: z.int().min(0),
   }),
   limitations: z.array(z.string()),
 });
@@ -76,7 +76,7 @@ export const electronPageInspectionSchema = z.object({
   capture_window: z.object({
     started_at: z.iso.datetime(),
     ended_at: z.iso.datetime(),
-    observation_ms: z.number().int().min(0),
+    observation_ms: z.int().min(0),
   }),
   completeness: browserCompletenessSchema,
   frames: z.array(
@@ -87,11 +87,11 @@ export const electronPageInspectionSchema = z.object({
     }),
   ),
   dom: z.object({
-    total_nodes: z.number().int().min(0),
+    total_nodes: z.int().min(0),
     nodes: z.array(cdpDomNodeSchema),
   }),
   scripts: z.object({
-    total: z.number().int().min(0),
+    total: z.int().min(0),
     items: z.array(
       z.object({
         script_key: prefixedDigestSchema("electron_script"),

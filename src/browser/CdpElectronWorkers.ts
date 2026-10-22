@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import type {
   ElectronPageInspection,
   InspectElectronPageInput,
@@ -20,6 +21,7 @@ export const captureElectronWorkers = async (input: {
   readonly frameIds: ReadonlySet<string>;
   readonly completeness: CdpCaptureCompleteness;
   readonly limitations: string[];
+  readonly asarHeaderAdmission: AsarHeaderAdmission;
 }): Promise<ElectronPageInspection["workers"]> => {
   const result = await optionalCdpCommand(
     {
@@ -64,6 +66,7 @@ export const captureElectronWorkers = async (input: {
       cdpStringValue(target.url) ?? "",
       input.signal,
       "inspect_electron_page",
+      input.asarHeaderAdmission,
     );
     if (path === undefined) {
       input.completeness.exclude("workers", "out_of_target_scope");

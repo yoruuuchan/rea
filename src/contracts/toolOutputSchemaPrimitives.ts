@@ -174,8 +174,8 @@ export const expandProviderCapabilities = (
   );
 
 const processCoordinates = {
-  launcher_pid: z.number().int().min(1),
-  process_group_id: z.number().int().min(1),
+  launcher_pid: z.int().min(1),
+  process_group_id: z.int().min(1),
 };
 
 const processLineageObservation = z.discriminatedUnion("status", [
@@ -189,12 +189,12 @@ const processLineageObservation = z.discriminatedUnion("status", [
     status: z.literal("verified"),
     observed_at: z.iso.datetime(),
     ...processCoordinates,
-    launcher_parent_pid: z.number().int().min(0),
+    launcher_parent_pid: z.int().min(0),
     descendants: z.array(
       z.object({
-        pid: z.number().int().min(1),
-        parent_pid: z.number().int().min(0),
-        process_group_id: z.number().int().min(1),
+        pid: z.int().min(1),
+        parent_pid: z.int().min(0),
+        process_group_id: z.int().min(1),
       }),
     ),
   }),
@@ -225,19 +225,19 @@ export const analysisActivity = z.object({
       provider: providerIdentity,
       active: z
         .object({
-          request_id: z.number().int().min(1),
+          request_id: z.int().min(1),
           operation: z.string().min(1),
-          elapsed_ms: z.number().int().min(0),
+          elapsed_ms: z.int().min(0),
           caller_state: z.enum(["waiting", "cancelled"]),
         })
         .nullable(),
-      queued_requests: z.number().int().min(0),
+      queued_requests: z.int().min(0),
     }),
   ),
 });
 
 const providerOperationRequest = z.object({
-  request_id: z.number().int().min(1),
+  request_id: z.int().min(1),
   operation: z.string().min(1),
   stage: z.enum(PROVIDER_FAILURE_STAGES),
 });
@@ -247,7 +247,7 @@ export const providerOperationHealth = z
     state: z.enum(PROVIDER_OPERATION_STATES),
     stage: z.enum(PROVIDER_FAILURE_STAGES).nullable(),
     retry_action: z.enum(PROVIDER_RETRY_ACTIONS).nullable(),
-    exit_code: z.number().int().nullable(),
+    exit_code: z.int().nullable(),
     requests: z.array(providerOperationRequest),
   })
   .nullable();
@@ -524,9 +524,9 @@ export const sessionProvider = z
       skill: z.object({ name: z.string(), expected_version: z.string() }),
       catalog: z.strictObject({
         counts: z.strictObject({
-          cli_commands: z.number().int().min(0),
-          mcp_tools: z.number().int().min(0),
-          mcp_prompts: z.number().int().min(0),
+          cli_commands: z.int().min(0),
+          mcp_tools: z.int().min(0),
+          mcp_prompts: z.int().min(0),
         }),
         digests: z.strictObject({
           tools_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -602,14 +602,14 @@ export const procedureInfoOutput = evidenceResultOf(procedureInfoSchema);
 export const symbolDiscoveryOutput = (property: "classes" | "protocols") =>
   evidenceResultOf(
     z.object({
-      count: z.number().int().min(0),
+      count: z.int().min(0),
       [property]: z.array(addressedEntry),
     }),
   );
 
 export const objcClassDiscoveryOutput = evidenceResultOf(
   z.object({
-    count: z.number().int().min(0),
+    count: z.int().min(0),
     classes: z.array(
       addressedEntry.extend({
         binding_identity: objcClassImportIdentitySchema

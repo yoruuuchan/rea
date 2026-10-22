@@ -1,3 +1,6 @@
+import { inspectByteEntropyInputSchema } from "../../domain/native/byteEntropy.js";
+import { publicInputStrictObject } from "../../domain/publicInput.js";
+import { byteEntropyOutputSchema } from "../toolOutputSchemaGroups.js";
 import {
   inspectRecordedCrashInputSchema,
   recordedCrashSchema,
@@ -18,13 +21,65 @@ import {
   inspectPeResourcesInputSchema,
   peResourcesSchema,
 } from "../../domain/native/peResources.js";
+import {
+  inspectElfNotesInputSchema,
+  elfNotesSchema,
+} from "../../domain/native/elfNotes.js";
 
 /** Caller-selected delivery of completed binary layout Evidence. */
 export const inspectBinaryLayoutRequestSchema =
   inspectBinaryLayoutInputSchema.extend({ detail: analysisDetailSchema });
 
+/**
+ * Public `inspect_byte_entropy` input. The shared constructor runs before
+ * `detail` is added so the advertised input stays closed.
+ */
+export const inspectByteEntropyRequestSchema = publicInputStrictObject(
+  inspectByteEntropyInputSchema.shape,
+).extend({ detail: analysisDetailSchema });
+
 /** Offline binary diagnostics are independent of macOS process/UI providers. */
 export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
+  {
+    name: "inspect_elf_notes",
+    ...toolContractMetadata("inspect_elf_notes"),
+    kind: "native-provider",
+    description:
+      "Inspect one explicit local ELF32/ELF64 image's PT_NOTE program headers and SHT_NOTE sections without executing it or opening a disassembler. Returns note-table file ranges, owners, types, descriptor SHA-256 and hex previews, plus GNU build-id, ABI-tag and gold-version fields when those descriptors match. A missing table is observed absence of those declarations, not proof the image never carried notes in another container. Reads a stable regular file; malformed ELF headers, truncated notes and exhausted budgets return no partial success. Portable on supported Node hosts; no debug package or catalog is required.",
+    inputSchema: inspectElfNotesInputSchema,
+    outputSchema: evidenceResultOf(elfNotesSchema),
+    examples: [
+      {
+        title: "Inspect ELF GNU build-id and ABI-tag notes",
+        input: { path: "/artifacts/program" },
+      },
+    ],
+  },
+  {
+    name: "inspect_byte_entropy",
+    ...toolContractMetadata("inspect_byte_entropy"),
+    kind: "native-provider",
+    description:
+      "Inspect Shannon byte entropy for one explicit local file offline, without execution, extraction or external tools. Returns file-wide SHA-256 and entropy, fixed-block entropy for an optional offset/length window, and adjacent high (>=7.2) and low (<=1.0) runs with exact file offsets. Block size is a power of two from 256 to 65536 (default 4096). Complete output can become very large because it includes one row per selected block, and summary detail still retains that full list. Use a shorter length or a larger block_size; the selected window is limited to 32,768 output blocks. Entropy cannot distinguish compression from encryption. Summary detail returns file entropy plus the ten longest runs; retrieve parent Evidence for the full series. The entire file is read even for a window.",
+    inputSchema: inspectByteEntropyRequestSchema,
+    outputSchema: byteEntropyOutputSchema,
+    examples: [
+      {
+        title: "Profile firmware bytes before extraction",
+        input: { path: "/artifacts/firmware.bin" },
+      },
+      {
+        title: "Summarize a selected byte window",
+        input: {
+          path: "/artifacts/firmware.bin",
+          offset: 4096,
+          length: 65536,
+          block_size: 4096,
+          detail: "summary",
+        },
+      },
+    ],
+  },
   {
     name: "inspect_pe_resources",
     ...toolContractMetadata("inspect_pe_resources"),

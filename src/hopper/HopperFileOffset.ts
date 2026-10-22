@@ -27,11 +27,7 @@ const MAX_FAT_ARCHITECTURES = 128;
 const PREFIX_BYTES = 8 + MAX_FAT_ARCHITECTURES * 32;
 const observationSchema = z.strictObject({
   address: z.string().regex(/^0x[0-9a-f]+$/u),
-  provider_file_offset: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(Number.MAX_SAFE_INTEGER),
+  provider_file_offset: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   provider_source_path: z.string().nullable(),
   provider_image_header_hex: z
     .string()

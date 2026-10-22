@@ -20,6 +20,34 @@ import {
   managedPeFixtureTarget,
 } from "../../../src/dotnet/ManagedPe.fixture.js";
 
+/** Tiny-format CIL method body. */
+const tinyIl = (il: readonly number[]): Buffer =>
+  Buffer.from([(il.length << 2) | 2, ...il]);
+
+const memberGraph = (bytes: Buffer) => {
+  const binary = managedPeFixtureTarget(bytes, "/fixture/ManagedCalls.exe");
+  const members = inspectManagedMembersBytes(bytes, binary);
+  const memberEvidence = createEvidence(binary, MANAGED_STATIC_PROVIDER, {
+    operation: "inspect_managed_members",
+    parameters: {},
+    result: members,
+    rawResult: null,
+    limitations: members.limitations,
+  });
+  const projection = projectManagedApplicationGraphEvidence({
+    managed_members: memberEvidence,
+  });
+  if (!projection.ok) throw new Error(JSON.stringify(projection.error));
+  const result = managedApplicationGraphResultSchema.parse(
+    parseEvidence(projection.value).normalized_result,
+  );
+  const graph = parseJavaScriptApplicationGraph(result.graph);
+  const labels = new Map(
+    graph.nodes.map((node) => [node.node_id, node.observations[0]?.label]),
+  );
+  return { members, memberEvidence, result, graph, labels };
+};
+
 const createManagedInteropEvidence = () => {
   const bytes = buildManagedPeFixture({
     pinvoke: {
@@ -720,8 +748,10 @@ describe("managed application graph coverage", () => {
 });
 
 describe("managed application graph type selection", () => {
-  const project = (result: Parameters<typeof createEvidence>[2]["result"]) => {
-    const bytes = buildManagedPeFixture();
+  const project = (
+    result: Parameters<typeof createEvidence>[2]["result"],
+    bytes = buildManagedPeFixture(),
+  ) => {
     const binary = managedPeFixtureTarget(bytes, "/fixture/ManagedInterop.exe");
     const projection = projectManagedApplicationGraphEvidence({
       managed_members: createEvidence(binary, MANAGED_STATIC_PROVIDER, {
@@ -757,7 +787,10 @@ describe("managed application graph type selection", () => {
   });
 
   it("accepts member Evidence recorded before type selection existed", () => {
-    const bytes = buildManagedPeFixture();
+    // Only in-module relations, so nothing else makes the graph partial.
+    const bytes = buildManagedPeFixture({
+      ilBody: tinyIl([0x02, 0x7b, 0x01, 0, 0, 0x04, 0x26, 0x2a]),
+    });
     const binary = managedPeFixtureTarget(bytes, "/fixture/ManagedInterop.exe");
     const { selection: _selection, ...legacy } = inspectManagedMembersBytes(
       bytes,
@@ -765,8 +798,152 @@ describe("managed application graph type selection", () => {
     );
 
     expect(managedMemberInspectionSchema.parse(legacy).selection).toBeNull();
-    expect(project(legacy).coverage).toMatchObject({
+    expect(project(legacy, bytes).coverage).toMatchObject({
       status: "complete-within-inputs",
     });
+  });
+});
+
+describe("managed call and field-access relations", () => {
+  // Both fixture methods share this body: 0x06000001 and 0x06000002.
+  const relationsFixture = () =>
+    buildManagedPeFixture({
+      methodRowCount: 2,
+      ilBody: tinyIl([
+        ...[0x28, 0x02, 0, 0, 0x06], // call 0x06000002
+        ...[0x6f, 0x02, 0, 0, 0x06], // callvirt 0x06000002
+        ...[0x28, 0x01, 0, 0, 0x06], // call 0x06000001
+        ...[0xfe, 0x06, 0x02, 0, 0, 0x06], // ldftn 0x06000002
+        ...[0x28, 0x01, 0, 0, 0x0a], // call MemberRef 0x0a000001
+        0x02,
+        ...[0x7b, 0x01, 0, 0, 0x04], // ldfld 0x04000001
+        0x02,
+        0x02,
+        ...[0x7d, 0x01, 0, 0, 0x04], // stfld 0x04000001
+        0x02,
+        ...[0x7c, 0x01, 0, 0, 0x04], // ldflda 0x04000001
+        0x26,
+        0x2a,
+      ]),
+    });
+
+  it("links in-module calls and field accesses once per source and target", () => {
+    const { members, memberEvidence, result, graph, labels } =
+      memberGraph(relationsFixture());
+    expect(members.call_edges).toHaveLength(10);
+    expect(members.field_accesses).toHaveLength(6);
+    const relation = (name: string) =>
+      graph.edges
+        .filter((edge) => edge.relation === name)
+        .map((edge) => ({
+          source: labels.get(edge.source_node_id),
+          target: labels.get(edge.target_node_id),
+          properties: edge.properties,
+          evidence_ids: edge.evidence.evidence_ids,
+        }))
+        .sort((left, right) =>
+          `${left.source}${left.target}` < `${right.source}${right.target}`
+            ? -1
+            : 1,
+        );
+    const [first, second] = members.methods.map(
+      ({ declaring_type, name }) => `${declaring_type}.${name}`,
+    );
+    const field = `${members.fields[0]?.declaring_type}.${members.fields[0]?.name}`;
+    const evidence_ids = [memberEvidence.evidence_id];
+
+    expect(relation("calls")).toEqual(
+      [
+        {
+          source: first,
+          target: second,
+          properties: {
+            kind: "managed-call",
+            site_count: 2,
+            opcodes: { call: 1, callvirt: 1 },
+          },
+          evidence_ids,
+        },
+        {
+          source: second,
+          target: first,
+          properties: {
+            kind: "managed-call",
+            site_count: 1,
+            opcodes: { call: 1 },
+          },
+          evidence_ids,
+        },
+      ].sort((left, right) =>
+        `${left.source}${left.target}` < `${right.source}${right.target}`
+          ? -1
+          : 1,
+      ),
+    );
+    for (const source of [first, second])
+      expect(relation("accesses")).toContainEqual({
+        source,
+        target: field,
+        properties: {
+          kind: "managed-field-access",
+          access: ["address", "read", "write"],
+          site_count: 3,
+          opcodes: { ldfld: 1, ldflda: 1, stfld: 1 },
+        },
+        evidence_ids,
+      });
+    expect(result.summary).toMatchObject({ calls: 2, field_accesses: 2 });
+    // Two MemberRef calls, two ldftn loads and three self-calls stay counted.
+    expect(result.coverage).toEqual({ status: "partial" });
+    expect(result.graph.coverage).toEqual({
+      status: "partial",
+      truncated: false,
+      omitted_count: 7,
+      limits: [],
+    });
+    expect(result.limitations).toContain(
+      "Calls edges link only method nodes in the inspected module; these call sites are omitted: 2 member-reference, 2 function-pointer (ldftn/ldvirtftn), 3 recursive self-call.",
+    );
+  });
+
+  it("reads graph Evidence projected before relation counters existed", () => {
+    const { result } = memberGraph(relationsFixture());
+    const {
+      calls: _calls,
+      field_accesses: _fieldAccesses,
+      ...summary
+    } = result.summary;
+
+    expect(
+      managedApplicationGraphResultSchema.parse({ ...result, summary }).summary,
+    ).toMatchObject({ calls: null, field_accesses: null });
+  });
+
+  it("counts relations whose endpoints a type selection omitted", () => {
+    const bytes = relationsFixture();
+    const binary = managedPeFixtureTarget(bytes, "/fixture/ManagedCalls.exe");
+    const members = inspectManagedMembersBytes(bytes, binary);
+    const projection = projectManagedApplicationGraphEvidence({
+      managed_members: createEvidence(binary, MANAGED_STATIC_PROVIDER, {
+        operation: "inspect_managed_members",
+        parameters: {},
+        // Drop the second method, as a narrower selection would.
+        result: { ...members, methods: members.methods.slice(0, 1) },
+        rawResult: null,
+        limitations: [],
+      }),
+    });
+    if (!projection.ok) throw new Error(JSON.stringify(projection.error));
+    const result = managedApplicationGraphResultSchema.parse(
+      parseEvidence(projection.value).normalized_result,
+    );
+
+    expect(result.summary).toMatchObject({ calls: 0, field_accesses: 1 });
+    expect(
+      result.limitations.find((text) => text.startsWith("Calls edges")),
+    ).toContain("missing-node");
+    expect(
+      result.limitations.find((text) => text.startsWith("Accesses edges")),
+    ).toContain("3 missing-node");
   });
 });

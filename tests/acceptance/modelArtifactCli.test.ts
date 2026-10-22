@@ -483,3 +483,30 @@ cliTest(
     });
   },
 );
+
+cliTest(
+  "rejects malformed model view JSON before opening the selected path",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-model-view-json-");
+    const missing = join(root, "not-created.gguf");
+    const result = await cli.run({
+      arguments: ["inspect-model-artifact", missing, "--view", "{", "--json"],
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.json).toMatchObject({
+      code: "invalid_request",
+      details: {
+        operation: "inspect_model_artifact",
+        issues: [
+          {
+            path: ["view"],
+            reason: "invalid_format",
+            message: "view must be a JSON model page selection",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result.json)).not.toContain("ENOENT");
+  },
+);

@@ -13,8 +13,8 @@ import { ROUTE_RULES } from "./webNetworkRouteTemplates.js";
 
 export const apiSurfaceViewSchema = z.strictObject({
   kind: z.literal("api-surface"),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(50),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(50),
   include_query_parameter_names: z
     .boolean()
     .optional()
@@ -29,20 +29,20 @@ const groupSchema = z.strictObject({
   path_template: z.string(),
   templated_segments: z.array(
     z.strictObject({
-      segment_index: z.number().int().nonnegative(),
+      segment_index: z.int().nonnegative(),
       rule: ruleSchema,
       basis: z.literal("inferred"),
       observed_values: z.array(z.string()),
     }),
   ),
-  record_ordinals: z.array(z.number().int().nonnegative()),
+  record_ordinals: z.array(z.int().nonnegative()),
   statuses: z.array(z.number()),
   content_types: z.array(z.string()),
   query_parameter_names: z
     .array(
       z.strictObject({
         name: z.string(),
-        record_ordinals: z.array(z.number().int().nonnegative()),
+        record_ordinals: z.array(z.int().nonnegative()),
       }),
     )
     .optional(),
@@ -52,12 +52,11 @@ const groupSchema = z.strictObject({
 });
 export const apiSurfaceFields = {
   records: z.strictObject({
-    examined: z.number().int().nonnegative(),
-    total: z.number().int().nonnegative(),
-    excluded: z.number().int().nonnegative(),
+    examined: z.int().nonnegative(),
+    total: z.int().nonnegative(),
+    excluded: z.int().nonnegative(),
   }),
   templated_groups: z
-    .number()
     .int()
     .nonnegative()
     .describe(
@@ -66,7 +65,7 @@ export const apiSurfaceFields = {
   groups: z.array(groupSchema),
   excluded_records: z.array(
     z.strictObject({
-      ordinal: z.number().int().nonnegative(),
+      ordinal: z.int().nonnegative(),
       reason: z.enum([
         "url-redacted",
         "url-unparseable",

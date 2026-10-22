@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const integer = z.number().int().min(0);
+const integer = z.int().min(0);
 const contextAuxDataSchema = z
   .object({
     frameId: z.string().optional(),

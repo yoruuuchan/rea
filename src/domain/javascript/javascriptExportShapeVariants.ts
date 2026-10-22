@@ -1,7 +1,5 @@
-import {
-  canonicalExportShapeValue,
-  digestExportShapeValue,
-} from "./javascriptExportShapeComparisonIdentity.js";
+import { canonicalJson } from "../comparisonSemantics.js";
+import { digestCanonicalValue } from "../canonicalDigest.js";
 import type {
   JavaScriptExportShapeComparisonChange,
   JavaScriptExportShapeComparisonResult,
@@ -195,7 +193,10 @@ const discriminantOccurrences = (
       const value = literalValue(field);
       if (!value.found) continue;
       const discriminant = { path: field.path, value: value.value };
-      const key = canonicalExportShapeValue(discriminant);
+      const key = canonicalJson(
+        discriminant,
+        "JavaScript export shape comparison",
+      );
       const current = output.get(key);
       output.set(key, {
         discriminant,
@@ -254,8 +255,8 @@ const compareDiscriminants = (
   right: Discriminant,
 ): number =>
   compareUnicodeCodePoints(
-    canonicalExportShapeValue(left),
-    canonicalExportShapeValue(right),
+    canonicalJson(left, "JavaScript export shape comparison"),
+    canonicalJson(right, "JavaScript export shape comparison"),
   );
 
 const selectionUnknownChange = (
@@ -385,8 +386,8 @@ const fieldChangeStatus = ({
   if (
     leftField !== undefined &&
     rightField !== undefined &&
-    canonicalExportShapeValue(leftField) ===
-      canonicalExportShapeValue(rightField)
+    canonicalJson(leftField, "JavaScript export shape comparison") ===
+      canonicalJson(rightField, "JavaScript export shape comparison")
   )
     return null;
   if (leftPresence === "absent" && rightPresence === "absent") return null;
@@ -502,7 +503,7 @@ const changeWithId = (
   semantic: Omit<JavaScriptExportShapeComparisonChange, "change_id">,
 ): JavaScriptExportShapeComparisonChange => ({
   ...semantic,
-  change_id: `jesc_change_${digestExportShapeValue(semantic)}`,
+  change_id: `jesc_change_${digestCanonicalValue(semantic, "JavaScript export shape comparison")}`,
 });
 
 const literalValue = (

@@ -11,7 +11,7 @@ import {
 } from "./WindowsNativeLoader.js";
 
 const launchSchema = z.strictObject({
-  pid: z.number().int().positive().max(0xffff_ffff),
+  pid: z.int().positive().max(0xffff_ffff),
   handle: windowsHandleSchema,
   jobAssigned: z.literal(true),
   killOnOwnerClose: z.literal(true),
@@ -21,18 +21,14 @@ const pollSchema = z.strictObject({
   stderr: z.instanceof(Buffer),
   stdoutEnded: z.boolean(),
   stderrEnded: z.boolean(),
-  exitCode: z.number().int().nonnegative().max(0xffff_ffff).nullable(),
-  activeProcesses: z.number().int().nonnegative(),
+  exitCode: z.int().nonnegative().max(0xffff_ffff).nullable(),
+  activeProcesses: z.int().nonnegative(),
 });
 // A commit-limited job reports its applied limit at launch and its
 // notification state on every poll; an unlimited job reports neither.
 const limitedPollSchema = pollSchema.extend({
   memoryLimitReached: z.boolean(),
-  peakJobMemoryBytes: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(Number.MAX_SAFE_INTEGER),
+  peakJobMemoryBytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 
 /** Optional native job controls for one owned Windows process tree. */
@@ -194,7 +190,6 @@ export class WindowsOwnedProcess extends EventEmitter {
   async #writeInput(chunk: unknown): Promise<void> {
     const bytes = z.instanceof(Buffer).parse(chunk);
     const written = z
-      .number()
       .int()
       .nonnegative()
       .max(Number.MAX_SAFE_INTEGER)

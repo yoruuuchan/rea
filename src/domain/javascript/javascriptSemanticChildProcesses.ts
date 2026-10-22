@@ -2,6 +2,7 @@ import * as t from "@babel/types";
 
 import type {
   JavaScriptSemanticCallable,
+  JavaScriptSemanticProjectedResultBinding,
   JavaScriptSemanticChildProcessInteraction,
   JavaScriptSemanticChildProcessSpawn,
 } from "./javascriptSemanticIr.js";
@@ -49,11 +50,7 @@ interface SpawnCandidate {
   readonly method: JavaScriptSemanticChildProcessSpawn["method"];
   readonly ownerCallableId: string | null;
   readonly resultBindingId: string | null;
-  readonly projectedResultBindings: readonly {
-    readonly bindingId: string;
-    readonly projectionPath: readonly (string | number | null)[];
-    readonly resolution: "complete" | "partial";
-  }[];
+  readonly projectedResultBindings: readonly JavaScriptSemanticProjectedResultBinding[];
 }
 
 interface ChildInteractionContext {

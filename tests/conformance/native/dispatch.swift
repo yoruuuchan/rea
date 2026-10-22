@@ -10,3 +10,15 @@ public class ReaVtableFixture {
   public init() {}
   public func fixtureValue() -> Int { 23 }
 }
+
+public enum ReaDeclFixtureEnum { case first, second(Int) }
+public struct ReaDeclFixtureOuter {
+  public struct Inner { public init() {} }
+}
+public struct ReaDeclFixtureGeneric<Value> {
+  public var value: Value
+  public init(_ value: Value) { self.value = value }
+}
+public actor ReaDeclFixtureActor {
+  public init() {}
+}

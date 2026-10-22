@@ -11,7 +11,7 @@ import {
 import type { BrowserScenarioSecrets } from "./BrowserScenarioSecrets.js";
 
 const historyValueSchema = z.strictObject({
-  length: z.number().int().min(0),
+  length: z.int().min(0),
   navigation_entries: z.array(
     z.strictObject({
       type: z.string(),

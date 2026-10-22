@@ -7,8 +7,8 @@ import { canonicalBase64Schema } from "../stringPatterns.js";
 import { recordedNoteCoverageIssues } from "./recordedCrashNoteCoverage.js";
 
 const hex = z.string().regex(/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/);
-const index = z.number().int().nonnegative();
-const signed32 = z.number().int().min(-2147483648).max(2147483647);
+const index = z.int().nonnegative();
+const signed32 = z.int().min(-2147483648).max(2147483647);
 const base64 = canonicalBase64Schema;
 const range = z.strictObject({ offset: hex, bytes: hex });
 const diagnostics = z.strictObject({
@@ -241,7 +241,7 @@ const recordedCrashObjectSchema = z.strictObject({
     z.strictObject({
       note_index: index,
       historical_pid: signed32,
-      recorded_current_signal: z.number().int().min(-32768).max(32767),
+      recorded_current_signal: z.int().min(-32768).max(32767),
       registers: z.array(
         z.strictObject({
           name: z.string().min(1),

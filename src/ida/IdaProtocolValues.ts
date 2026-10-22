@@ -57,7 +57,7 @@ export const modernHealthSchema = z
 
 /** An upstream cursor must either finish or advance strictly to avoid replay loops. */
 export const cursorSchema = z.union([
-  z.object({ next: z.number().int().nonnegative() }),
+  z.object({ next: z.int().nonnegative() }),
   z.object({ done: z.literal(true) }),
 ]);
 export const nextOffset = (
@@ -74,13 +74,13 @@ export const nextOffset = (
 
 export const legacyPageSchema = z.object({
   data: z.array(jsonValueSchema),
-  next_offset: z.number().int().nonnegative().nullable(),
+  next_offset: z.int().nonnegative().nullable(),
 });
 export const modernPageSchema = z
   .array(
     z.object({
       data: z.array(jsonValueSchema),
-      next_offset: z.number().int().nonnegative().nullable(),
+      next_offset: z.int().nonnegative().nullable(),
     }),
   )
   .length(1);
@@ -126,14 +126,14 @@ export const modernDecompileSchema = z.object({
   code: z.string().nullable(),
   error: z.string().optional(),
   cursor: cursorSchema,
-  line_count: z.number().int().nonnegative().optional(),
-  total_lines: z.number().int().nonnegative().optional(),
+  line_count: z.int().nonnegative().optional(),
+  total_lines: z.int().nonnegative().optional(),
 });
 
 export const legacyStringSchema = z.object({
   address: idaAddressSchema,
   string: z.string(),
-  length: z.number().int().nonnegative(),
+  length: z.int().nonnegative(),
 });
 export const idaStringsPageSchema = z.object({
   matches: z.array(z.object({ addr: idaAddressSchema, string: z.string() })),
@@ -200,7 +200,7 @@ export const modernCallGraphSchema = z
         ),
         truncated: z.boolean().optional(),
         limit_reason: z.string().nullable().optional(),
-        max_edges_per_func: z.number().int().positive().optional(),
+        max_edges_per_func: z.int().positive().optional(),
         per_func_capped: z.boolean().optional(),
       })
       .passthrough(),
@@ -271,7 +271,7 @@ const hexCoordinate = z
 export const surveySegmentsSchema = z
   .object({
     statistics: z
-      .object({ total_segments: z.number().int().nonnegative().optional() })
+      .object({ total_segments: z.int().nonnegative().optional() })
       .passthrough()
       .optional(),
     segments: z

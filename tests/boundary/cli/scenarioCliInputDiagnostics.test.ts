@@ -1,3 +1,4 @@
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { describe, expect } from "vitest";
@@ -103,3 +104,43 @@ for (const field of [
     expect(JSON.stringify(result.json)).toContain(missing);
   });
 }
+
+cliTest.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "reports a search-denied Electron application_path as access denied",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-electron-denied-");
+    const denied = join(root, "denied");
+    await mkdir(denied);
+    const application = join(denied, "main.js");
+    await writeFile(application, "module.exports = {};\n");
+    await chmod(denied, 0o000);
+    let result;
+    try {
+      result = await cli.run({
+        arguments: [
+          "capture-electron-scenario",
+          JSON.stringify({
+            executable_path: process.execPath,
+            application_path: application,
+            actions: [],
+          }),
+          "--json",
+        ],
+        environment: { REA_LOG_LEVEL: "silent" },
+      });
+    } finally {
+      await chmod(denied, 0o700);
+    }
+    expect(result.exitCode).toBe(1);
+    expect(result.json).toMatchObject({
+      code: "access_denied",
+      category: "unavailable",
+      details: {
+        operation: "capture_electron_scenario",
+        path: application,
+        system_code: "EACCES",
+        boundary: "filesystem-read",
+      },
+    });
+  },
+);

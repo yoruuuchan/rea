@@ -56,10 +56,10 @@ export const changedBehaviorResultSchema = z
       "truncated",
     ]),
     summary: z.object({
-      observed_changes: z.number().int().min(0),
-      static_candidates: z.number().int().min(0),
-      contradictions: z.number().int().min(0),
-      unresolved: z.number().int().min(0),
+      observed_changes: z.int().min(0),
+      static_candidates: z.int().min(0),
+      contradictions: z.int().min(0),
+      unresolved: z.int().min(0),
     }),
     findings: z.object({
       items: z.array(findingSchema),

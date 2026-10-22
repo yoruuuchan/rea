@@ -174,7 +174,7 @@ const replySchema = z.discriminatedUnion("ok", [
     version: z.literal("0.9.3"),
     bytecode: z.strictObject({
       sha256: z.string().regex(/^[a-f0-9]{64}$/),
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       hex: z.string().regex(/^(?:[a-f0-9]{2})*$/),
       metadata: solidityMetadataSchema.optional(),
     }),

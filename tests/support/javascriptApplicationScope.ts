@@ -1,6 +1,9 @@
 import { withArtifactResourceScope } from "../fixtures/artifactInventory.js";
 import type { ExecutionOptions } from "../../src/application/AnalysisProvider.js";
-import { analyzeJavaScriptApplication as analyzeOwned } from "../../src/application/javascript/JavaScriptApplicationService.js";
+import {
+  analyzeJavaScriptApplication as analyzeOwned,
+  type JavaScriptApplicationOptions,
+} from "../../src/application/javascript/JavaScriptApplicationService.js";
 import { reconstructJavaScriptArtifact as reconstructOwned } from "../../src/application/javascript/JavaScriptArtifactReconstruction.js";
 import type { ProgressReporter } from "../../src/application/ProgressReporter.js";
 import { readJavaScriptArtifactFiles as readOwned } from "../../src/artifacts/javascript/JavaScriptArtifactFiles.js";
@@ -21,7 +24,7 @@ export const readJavaScriptArtifactFiles = (
 /** Run a JavaScript analysis with an awaited, test-owned artifact scope. */
 export const analyzeJavaScriptApplication = (
   input: unknown,
-  options: ExecutionOptions = {},
+  options: JavaScriptApplicationOptions = {},
 ) => withArtifactResourceScope((scope) => analyzeOwned(input, scope, options));
 
 /** Reconstruct a fixture with an awaited, test-owned artifact scope. */

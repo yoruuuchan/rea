@@ -10,8 +10,8 @@ import {
 export const scenarioReplayResultSchema = z.strictObject({
   scenario_id: z.string().min(1),
   status: z.enum(["pass", "fail", "error", "skipped"]),
-  exit_code: z.number().int().nullable(),
-  duration_ms: z.number().int().nonnegative(),
+  exit_code: z.int().nullable(),
+  duration_ms: z.int().nonnegative(),
   output: z.string().default(""),
   error: z.string().nullable(),
 });
@@ -20,11 +20,11 @@ export const scenarioReplayResultSchema = z.strictObject({
 export const packageReplayResultSchema = z
   .strictObject({
     package_id: z.string().min(1),
-    total_scenarios: z.number().int().positive(),
-    passed: z.number().int().nonnegative(),
-    failed: z.number().int().nonnegative(),
-    errored: z.number().int().nonnegative(),
-    skipped: z.number().int().nonnegative(),
+    total_scenarios: z.int().positive(),
+    passed: z.int().nonnegative(),
+    failed: z.int().nonnegative(),
+    errored: z.int().nonnegative(),
+    skipped: z.int().nonnegative(),
     scenario_results: z.array(scenarioReplayResultSchema),
     trust_gate_results: z.array(trustGateResultSchema),
     drift_detected: z.boolean(),

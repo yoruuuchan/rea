@@ -1,3 +1,4 @@
+import { javascriptSourceRangeKey } from "./javascriptSourceCoordinates.js";
 import * as t from "@babel/types";
 
 import type {
@@ -340,7 +341,7 @@ const indexReturnSites = (
 ): ReadonlyMap<string, string> => {
   const output = new Map<string, string>();
   for (const site of callable.returnSites) {
-    const key = returnSiteKey(site.location);
+    const key = javascriptSourceRangeKey(site.location);
     if (!output.has(key)) output.set(key, site.returnSiteId);
   }
   return output;
@@ -366,7 +367,7 @@ const createReturnSiteLookup = (
       returnSiteIds = indexReturnSites(callable);
       returnSiteIdsByCallable.set(callableId, returnSiteIds);
     }
-    return returnSiteIds.get(returnSiteKey(location)) ?? null;
+    return returnSiteIds.get(javascriptSourceRangeKey(location)) ?? null;
   };
 };
 
@@ -380,11 +381,6 @@ const indexCallablesById = (
   }
   return output;
 };
-
-const returnSiteKey = (
-  location: JavaScriptSemanticPromiseOperation["location"],
-): string =>
-  `${location.start.line}:${location.start.column}:${location.end.line}:${location.end.column}`;
 
 const promiseSources = (
   candidate: PromiseCandidate,

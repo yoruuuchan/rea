@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import {
@@ -141,11 +138,3 @@ export const projectedFileComponents = (
       ? [component]
       : [],
   );
-
-/** Digest a canonical JSON projection payload for its stable identifier. */
-export const projectionDigest = (value: unknown, label: string): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError(`${label} is not canonical JSON`);
-  return createHash("sha256").update(encoded).digest("hex");
-};

@@ -7,7 +7,7 @@ import { compareKunaAddresses } from "./KunaAddress.js";
 import { KunaJsonDocumentReader, parseKunaRow } from "./KunaJsonStream.js";
 import { KUNA_STRING_MIN_LENGTH } from "./KunaLimits.js";
 
-const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const count = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 const address = z.string().regex(/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/u);
 const header = z.object({
   binary: z.string(),

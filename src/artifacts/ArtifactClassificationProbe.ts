@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import {
   createAsarHeaderSignatureProbe,
   type FinalAsarHeaderProbeObservation,
@@ -105,9 +106,11 @@ const finishClassificationEvidence = (
 };
 
 /** Share acquisition bounds and signature observations across files and streams. */
-export const createArtifactClassificationProbe = () => {
+export const createArtifactClassificationProbe = (
+  asarHeaderAdmission?: AsarHeaderAdmission,
+) => {
   const xml = createXmlPlistSignatureProbe();
-  const asar = createAsarHeaderSignatureProbe();
+  const asar = createAsarHeaderSignatureProbe(asarHeaderAdmission);
   const blocks: Buffer[] = [];
   let retainedBytes = 0;
   let observedBytes = 0;

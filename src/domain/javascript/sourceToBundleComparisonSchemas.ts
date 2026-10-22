@@ -38,7 +38,7 @@ export const compareSourceToBundleInputSchema = z.strictObject({
 
 const sourceToBundleSignalSchema = z.strictObject({
   kind: sourceToBundleSignalKindSchema,
-  weight: z.number().int().min(1).max(100),
+  weight: z.int().min(1).max(100),
   source_value: textSchema,
   current_values: z.array(textSchema).min(1),
 });
@@ -46,7 +46,7 @@ const sourceToBundleSignalSchema = z.strictObject({
 const sourceToBundleCandidateSchema = z.strictObject({
   current_node_id: nodeIdSchema,
   current_node_kind: z.enum(JAVASCRIPT_APPLICATION_NODE_KINDS),
-  score: z.number().int().min(1),
+  score: z.int().min(1),
   confidence: z.enum(["exact", "high", "medium", "low"]),
   signals: z.array(sourceToBundleSignalSchema).min(1),
 });
@@ -89,18 +89,18 @@ export const sourceToBundleComparisonResultSchema = z.strictObject({
     weights: z.array(
       z.strictObject({
         signal: sourceToBundleSignalKindSchema,
-        weight: z.number().int().min(1).max(100),
+        weight: z.int().min(1).max(100),
       }),
     ),
   }),
   summary: z.strictObject({
-    unchanged: z.number().int().min(0),
-    modified: z.number().int().min(0),
-    removed: z.number().int().min(0),
-    split: z.number().int().min(0),
-    merged: z.number().int().min(0),
-    duplicated: z.number().int().min(0),
-    unknown: z.number().int().min(0),
+    unchanged: z.int().min(0),
+    modified: z.int().min(0),
+    removed: z.int().min(0),
+    split: z.int().min(0),
+    merged: z.int().min(0),
+    duplicated: z.int().min(0),
+    unknown: z.int().min(0),
   }),
   items: z.array(sourceToBundleItemSchema),
   unmapped_current_node_ids: z.array(nodeIdSchema),
@@ -113,9 +113,9 @@ export const sourceToBundleComparisonResultSchema = z.strictObject({
       "unknown",
       "unavailable",
     ]),
-    retained_source_files: z.number().int().min(0),
-    retained_application_nodes: z.number().int().min(0),
-    candidate_evaluations: z.number().int().min(0),
+    retained_source_files: z.int().min(0),
+    retained_application_nodes: z.int().min(0),
+    candidate_evaluations: z.int().min(0),
   }),
   evidence_links: z.array(evidenceIdSchema).length(1),
   limitations: z.array(textSchema),

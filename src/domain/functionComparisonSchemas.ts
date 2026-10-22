@@ -24,15 +24,15 @@ export const functionComparisonInputSchema = z.strictObject({
 });
 
 const textDeltaSchema = z.object({
-  added_lines: z.number().int().min(0),
-  removed_lines: z.number().int().min(0),
-  hunks: z.number().int().min(0),
+  added_lines: z.int().min(0),
+  removed_lines: z.int().min(0),
+  hunks: z.int().min(0),
 });
 
 const functionDimensionContextShape = {
   dimension: functionComparisonDimensionNameSchema,
-  left_count: z.number().int().min(0).nullable(),
-  right_count: z.number().int().min(0).nullable(),
+  left_count: z.int().min(0).nullable(),
+  right_count: z.int().min(0).nullable(),
   evidence_links: z.array(evidenceIdSchema).min(2),
   limitations: z.array(z.string()),
 };
@@ -87,9 +87,9 @@ export const functionComparisonResultSchema = z
     left_subject_sha256: digestSchema,
     right_subject_sha256: digestSchema,
     summary: z.object({
-      unchanged: z.number().int().min(0),
-      changed: z.number().int().min(0),
-      unknown: z.number().int().min(0),
+      unchanged: z.int().min(0),
+      changed: z.int().min(0),
+      unknown: z.int().min(0),
     }),
     dimensions: z.array(functionDimensionSchema).length(8),
     changes: z.array(functionDimensionSchema),

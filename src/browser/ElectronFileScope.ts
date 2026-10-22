@@ -19,8 +19,12 @@ import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
 import {
   admitAsarHeader,
-  MAX_ASAR_HEADER_BYTES,
+  asarHeaderAdmissionFailure,
 } from "../artifacts/AsarHeader.js";
+import {
+  DEFAULT_ASAR_HEADER_ADMISSION,
+  type AsarHeaderAdmission,
+} from "../config/asarHeaderAdmission.js";
 
 type ElectronFileOperation =
   | "inspect_electron_page"
@@ -37,10 +41,12 @@ export const authorizedElectronFile = async (
   value: string,
   signal?: AbortSignal,
   operation: ElectronFileOperation = "inspect_electron_page",
+  asarHeaderAdmission: AsarHeaderAdmission = DEFAULT_ASAR_HEADER_ADMISSION,
 ): Promise<string | undefined> => {
   try {
     return await resources.run(
-      async () => await resolveAuthorizedElectronFile(value, signal),
+      async () =>
+        await resolveAuthorizedElectronFile(value, signal, asarHeaderAdmission),
     );
   } catch (cause: unknown) {
     if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined)
@@ -110,7 +116,8 @@ export const mapElectronFileAuthorizationFailure = (
 
 const resolveAuthorizedElectronFile = async (
   value: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  asarHeaderAdmission: AsarHeaderAdmission,
 ): Promise<string | undefined> => {
   throwIfAborted(signal);
   if (/%(?:2f|5c)/iu.test(value)) return undefined;
@@ -153,7 +160,7 @@ const resolveAuthorizedElectronFile = async (
     void cause;
   }
   throwIfAborted(signal);
-  return await authorizedAsarMember(path, signal);
+  return await authorizedAsarMember(path, signal, asarHeaderAdmission);
 };
 
 /**
@@ -163,7 +170,8 @@ const resolveAuthorizedElectronFile = async (
  */
 const authorizedAsarMember = async (
   path: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  asarHeaderAdmission: AsarHeaderAdmission,
 ): Promise<string | undefined> => {
   const segments = path.split(sep);
   for (let index = 1; index < segments.length - 1; index += 1) {
@@ -179,7 +187,13 @@ const authorizedAsarMember = async (
       if (!metadata.isFile()) continue;
       const canonical = await realpath(archive);
       throwIfAborted(signal);
-      const files = await asarFiles(canonical, metadata, signal, resources);
+      const files = await asarFiles(
+        canonical,
+        metadata,
+        asarHeaderAdmission,
+        signal,
+        resources,
+      );
       throwIfAborted(signal);
       return isAsarRegularFile(files, member)
         ? join(canonical, ...member)
@@ -207,6 +221,7 @@ const headerCache = new Map<
     readonly identity: string;
     readonly files: unknown;
     readonly bytes: number;
+    readonly headerBytes: number;
   }
 >();
 const archiveIdentity = (metadata: ArchiveIdentity): string =>
@@ -216,13 +231,19 @@ const archiveIdentity = (metadata: ArchiveIdentity): string =>
 const asarFiles = async (
   archive: string,
   metadata: ArchiveIdentity,
+  admission: AsarHeaderAdmission,
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
 ): Promise<unknown> => {
   throwIfAborted(signal);
   const identity = archiveIdentity(metadata);
   const cached = headerCache.get(archive);
-  if (cached?.identity === identity) return cached.files;
+  if (cached?.identity === identity) {
+    // A header cached under a larger caller's admission stays refused here.
+    if (cached.headerBytes > admission.maximumBytes)
+      throw asarHeaderAdmissionFailure(admission);
+    return cached.files;
+  }
   const handle = await open(archive, "r");
   const admitted = await withArtifactFileHandle(
     archive,
@@ -231,14 +252,16 @@ const asarFiles = async (
     signal,
     async (file) => {
       let jsonBytes: number;
+      let headerBytes: number;
       throwIfAborted(signal);
       const opened = await file.stat();
       throwIfAborted(signal);
       if (!opened.isFile() || archiveIdentity(opened) !== identity)
         throw new Error("ASAR identity changed before header read");
-      const header = await admitAsarHeader(file, signal);
+      const header = await admitAsarHeader(file, signal, admission);
       throwIfAborted(signal);
       jsonBytes = header.jsonBytes;
+      headerBytes = header.headerBytes;
       const json = Buffer.alloc(jsonBytes);
       let offset = 0;
       while (offset < json.length) {
@@ -262,7 +285,7 @@ const asarFiles = async (
       );
       if (!isRecord(parsed) || !isRecord(parsed.files))
         throw new Error("ASAR header has no file tree");
-      return { files: parsed.files, jsonBytes };
+      return { files: parsed.files, jsonBytes, headerBytes };
     },
   );
   throwIfAborted(signal);
@@ -271,12 +294,13 @@ const asarFiles = async (
     identity,
     files: admitted.files,
     bytes: admitted.jsonBytes,
+    headerBytes: admitted.headerBytes,
   });
   const retainedBytes = () =>
     [...headerCache.values()].reduce((sum, entry) => sum + entry.bytes, 0);
   while (
     headerCache.size > MAX_CACHED_HEADERS ||
-    retainedBytes() > MAX_ASAR_HEADER_BYTES
+    retainedBytes() > admission.maximumBytes
   )
     headerCache.delete(headerCache.keys().next().value ?? archive);
   return admitted.files;

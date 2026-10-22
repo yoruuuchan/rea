@@ -47,19 +47,19 @@ export type BrowserExclusionReason = z.infer<
 const browserExclusionSchema = z.object({
   section: browserSectionSchema,
   reason: browserExclusionReasonSchema,
-  count: z.number().int().min(0).nullable(),
+  count: z.int().min(0).nullable(),
 });
 export type BrowserExclusion = z.infer<typeof browserExclusionSchema>;
 
 const browserDroppedEventsSchema = z.object({
-  scripts: z.number().int().min(0),
-  network_requests: z.number().int().min(0),
-  console_events: z.number().int().min(0),
-  websocket_connections: z.number().int().min(0),
-  websocket_frames: z.number().int().min(0),
-  webmcp_tools: z.number().int().min(0),
-  timeline_events: z.number().int().min(0),
-  total: z.number().int().min(0),
+  scripts: z.int().min(0),
+  network_requests: z.int().min(0),
+  console_events: z.int().min(0),
+  websocket_connections: z.int().min(0),
+  websocket_frames: z.int().min(0),
+  webmcp_tools: z.int().min(0),
+  timeline_events: z.int().min(0),
+  total: z.int().min(0),
 });
 export type BrowserDroppedEvents = z.infer<typeof browserDroppedEventsSchema>;
 export type BrowserDroppedEventKind = Exclude<

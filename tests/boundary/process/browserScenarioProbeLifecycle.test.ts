@@ -22,7 +22,7 @@ it("keeps the shared browser scenario provider open when the SDK discards its di
   const browserClose = vi
     .spyOn(browserObservation, "close")
     .mockResolvedValue(undefined);
-  const electronObservation = createElectronObservationProvider();
+  const electronObservation = createElectronObservationProvider({});
   const electronClose = vi
     .spyOn(electronObservation, "close")
     .mockResolvedValue(undefined);
@@ -119,7 +119,7 @@ it("closes optional providers when MCP server startup throws", async () => {
   const browserClose = vi
     .spyOn(browserObservation, "close")
     .mockResolvedValue(undefined);
-  const electronObservation = createElectronObservationProvider();
+  const electronObservation = createElectronObservationProvider({});
   const electronClose = vi
     .spyOn(electronObservation, "close")
     .mockResolvedValue(undefined);

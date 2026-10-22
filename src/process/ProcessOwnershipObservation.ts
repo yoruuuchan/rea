@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat as statPath } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -9,7 +9,11 @@ import {
   type ProcessExitSettlementBudget,
 } from "./ProcessLifecycle.js";
 import { parseLinuxProcessStat } from "./LinuxProcessStat.js";
-import { parseLinuxProcessEffectiveUid } from "./LinuxProcessStatus.js";
+import {
+  linuxEnvironmentRestriction,
+  parseLinuxProcessIds,
+  type LinuxEnvironmentRestriction,
+} from "./LinuxProcessStatus.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 
 import { launcherIdentityFailure } from "./ProcessOwnershipIdentity.js";
@@ -679,7 +683,7 @@ const readIdentityFacts = async (
   host: ProcessOwnershipHost,
   phase: "before" | "after",
   signal?: AbortSignal,
-  effectiveUidPids?: ReadonlySet<number>,
+  credentialPids?: ReadonlySet<number>,
 ): Promise<ReadonlyMap<number, ProcessIdentityObservation>> => {
   signal?.throwIfAborted();
   if (host.processIdentities === undefined)
@@ -696,7 +700,7 @@ const readIdentityFacts = async (
     const observations = await host.processIdentities(
       processes,
       signal,
-      effectiveUidPids,
+      credentialPids,
     );
     signal?.throwIfAborted();
     return new Map<number, ProcessIdentityObservation>(
@@ -733,6 +737,8 @@ export const settleExitingProcessIdentities = async (
   initial: ReadonlyMap<number, ProcessIdentityObservation>,
   signal?: AbortSignal,
   budget: ProcessExitSettlementBudget = { deadline: undefined },
+  /** Keep the initial read's selective Linux credential facts on refresh. */
+  credentialPids?: ReadonlySet<number>,
 ): Promise<ReadonlyMap<number, ProcessIdentityObservation>> => {
   signal?.throwIfAborted();
   let pending = processes.filter(({ pid }) =>
@@ -755,7 +761,13 @@ export const settleExitingProcessIdentities = async (
       signal?.throwIfAborted();
       throw cause;
     }
-    const refreshed = await readNativeProcessIdentityMap(pending, host, signal);
+    const refreshed = await readIdentityFacts(
+      pending,
+      host,
+      "before",
+      signal,
+      credentialPids,
+    );
     for (const { pid } of pending)
       identities.set(pid, identityFact(refreshed, pid, "after"));
     pending = pending.filter(({ pid }) => {
@@ -818,7 +830,7 @@ export const readProcessOwnershipFacts = async (
   }
   signal?.throwIfAborted();
 
-  const effectiveUidPids = new Set(
+  const credentialPids = new Set(
     processes
       .filter(({ pid }) => tokens.get(pid)?.state !== "readable")
       .map(({ pid }) => pid),
@@ -828,7 +840,7 @@ export const readProcessOwnershipFacts = async (
     host,
     "after",
     signal,
-    effectiveUidPids,
+    credentialPids,
   );
   const identityAfter = await settleExitingProcessIdentities(
     processes,
@@ -836,6 +848,7 @@ export const readProcessOwnershipFacts = async (
     observedAfter,
     signal,
     options.exitSettlement,
+    credentialPids,
   );
   signal?.throwIfAborted();
   const deriveFact = (
@@ -958,7 +971,7 @@ export const createSystemProcessOwnershipHost = (
   };
   const processIdentities: NonNullable<
     ProcessOwnershipHost["processIdentities"]
-  > = async (processes, signal, effectiveUidPids) => {
+  > = async (processes, signal, credentialPids) => {
     if (processes.length === 0) return new Map();
     if (platform === "linux")
       return new Map<number, ProcessIdentityObservation>(
@@ -987,10 +1000,14 @@ export const createSystemProcessOwnershipHost = (
               const readableIdentity = (
                 facts: typeof parsed,
                 effectiveUid?: number,
+                environmentRestriction?: LinuxEnvironmentRestriction,
               ) => ({
                 state: "readable" as const,
                 identity: `linux-starttime:${facts.startTime}`,
                 ...(effectiveUid === undefined ? {} : { effectiveUid }),
+                ...(environmentRestriction === undefined
+                  ? {}
+                  : { environmentRestriction }),
                 lifecycle:
                   facts.lifecycle === undefined
                     ? {
@@ -1008,7 +1025,7 @@ export const createSystemProcessOwnershipHost = (
                 },
               });
 
-              if (!effectiveUidPids?.has(pid))
+              if (!credentialPids?.has(pid))
                 return [pid, readableIdentity(parsed)] as const;
 
               let status: string;
@@ -1022,9 +1039,26 @@ export const createSystemProcessOwnershipHost = (
                 return [pid, readableIdentity(parsed)] as const;
               }
               signal?.throwIfAborted();
-              const effectiveUid = parseLinuxProcessEffectiveUid(status);
-              if (effectiveUid === undefined)
+              const uids = parseLinuxProcessIds(status, "Uid");
+              if (uids === undefined)
                 return [pid, readableIdentity(parsed)] as const;
+              // procfs reports root ownership of environ while a process is non-dumpable.
+              let procfsOwnerUid: number | undefined;
+              try {
+                procfsOwnerUid = (
+                  await statPath(`/proc/${String(pid)}/environ`)
+                ).uid;
+              } catch (cause: unknown) {
+                void cause;
+              }
+              signal?.throwIfAborted();
+              const environmentRestriction = linuxEnvironmentRestriction({
+                uids,
+                gids: parseLinuxProcessIds(status, "Gid"),
+                procfsOwnerUid,
+                callerUid: process.geteuid?.(),
+                callerGid: process.getegid?.(),
+              });
 
               let afterStatus: string;
               try {
@@ -1052,7 +1086,10 @@ export const createSystemProcessOwnershipHost = (
                 ] as const;
               if (verified === undefined || verified.pid !== pid)
                 return [pid, readableIdentity(parsed)] as const;
-              return [pid, readableIdentity(verified, effectiveUid)] as const;
+              return [
+                pid,
+                readableIdentity(verified, uids[1], environmentRestriction),
+              ] as const;
             } catch (cause: unknown) {
               if (isExpectedAbort(cause, signal)) throw cause;
               if (

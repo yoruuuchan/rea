@@ -37,7 +37,7 @@ export const createOptionalObservationFactories = (
     electronObservation: async () =>
       (
         await import("./electronObservation.js")
-      ).createElectronObservationProvider(),
+      ).createElectronObservationProvider(environment),
     electronActiveObservation: async () =>
       (await import("./electronScenario.js")).createElectronScenarioProvider(
         environment,
@@ -45,7 +45,7 @@ export const createOptionalObservationFactories = (
     javascriptRuntimeObservation: async () =>
       (
         await import("./javascriptRuntimeObservation.js")
-      ).createJavaScriptRuntimeObservationProvider(),
+      ).createJavaScriptRuntimeObservationProvider(environment),
   };
 };
 

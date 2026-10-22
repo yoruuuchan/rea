@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { evidenceSchema } from "../../domain/evidence.js";
+import { compareManagedMembersInputSchema } from "../../domain/managed/managedMemberComparison.js";
 import { managedNativeVerificationInputSchema } from "../../domain/managed/managedNativeVerificationSchemas.js";
 
 import { managedReconstructionImportInputSchema } from "../../domain/managed/managedReconstruction.js";
@@ -14,31 +15,13 @@ import {
 import { toolContractMetadata } from "../toolEffects.js";
 import { requireOutputSchema } from "../toolOutputSchemaPrimitives.js";
 
-/** Inputs for comparing two managed observations carried inline. */
-export const compareManagedMembersReferenceInputSchema = z
-  .strictObject({
-    left: evidenceSchema,
-    right: evidenceSchema,
-  })
-  .superRefine((input, context) => {
-    if (input.left.evidence_id === input.right.evidence_id)
-      context.addIssue({
-        code: "custom",
-        path: ["right"],
-        message: "Managed member Evidence must be distinct",
-      });
-  });
-
 /** Inline Evidence input for importing reconstruction. */
 export const managedReconstructionReferenceInputSchema =
   managedReconstructionImportInputSchema.extend({
     static_members: evidenceSchema,
   });
 
-const managedApplicationGraphReferenceFacts = {} as const;
-
 const managedApplicationGraphReferenceShape = z.strictObject({
-  ...managedApplicationGraphReferenceFacts,
   managed_artifact: evidenceSchema.optional(),
   managed_members: evidenceSchema.optional(),
   managed_native_boundaries: evidenceSchema.optional(),
@@ -100,7 +83,7 @@ export const MANAGED_WORKFLOW_TOOL_CONTRACTS = [
     description:
       "Compare two authenticated inspect_managed_members Evidence records using unique-only tiers: exact declared type, name, and CIL/signature; exact declared type, name, and signature (decoded or not); exact declared type, name, and decoded structural method shape; then exact CIL/signature or decoded structural method shape alone, which never takes a member whose own declared type and name remain unpaired on the other side or whose declaring type is unresolved. Signatures compare type operands by name, not by build-local metadata row. Names alone are never a matching basis; a member whose signature was not decoded, or whose same-named counterpart's was not, stays unknown rather than added or removed. Metadata tokens remain build-local coordinates bound to each artifact SHA-256 and MVID, and the tuple digest does not itself remap them.",
     kind: "application",
-    inputSchema: compareManagedMembersReferenceInputSchema,
+    inputSchema: compareManagedMembersInputSchema,
     outputSchema: comparisonOutputSchema,
     examples: [
       {
@@ -156,7 +139,7 @@ export const MANAGED_WORKFLOW_TOOL_CONTRACTS = [
     name: "project_managed_application_graph",
     ...toolContractMetadata("project_managed_application_graph"),
     description:
-      "Project authenticated managed artifact, member, and native-boundary Evidence into the provider-neutral application graph without executing managed code, loading assemblies, or translating managed metadata tokens to native addresses. The graph preserves managed static observations as managed-specific nodes linked to source Evidence.",
+      "Project authenticated managed artifact, member, and native-boundary Evidence into the provider-neutral application graph without executing managed code, loading assemblies, or translating managed metadata tokens to native addresses. The graph preserves managed static observations as managed-specific nodes linked to source Evidence, with in-module calls and field-access edges; other call and field-access sites are counted in limitations.",
     kind: "application",
     inputSchema: managedApplicationGraphReferenceInputSchema,
     outputSchema: managedApplicationGraphOutputSchema,

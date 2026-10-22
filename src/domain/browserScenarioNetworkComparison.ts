@@ -7,8 +7,8 @@ import { normalizeScenarioValue } from "./browserScenarioNormalization.js";
 /** Numeric links are temporary local indices, never durable transaction identity. */
 export const scenarioNetworkTransactionSchema = z.strictObject({
   events: z.array(z.unknown()),
-  predecessor: z.number().int().min(-2),
-  step_index: z.number().int().min(0),
+  predecessor: z.int().min(-2),
+  step_index: z.int().min(0),
 });
 export type ScenarioNetworkTransaction = z.infer<
   typeof scenarioNetworkTransactionSchema

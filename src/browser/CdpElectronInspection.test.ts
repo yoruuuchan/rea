@@ -1,3 +1,4 @@
+import { DEFAULT_ASAR_HEADER_ADMISSION } from "../config/asarHeaderAdmission.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +55,7 @@ describe("Electron frame capture", () => {
           },
         },
         completeness,
+        DEFAULT_ASAR_HEADER_ADMISSION,
       );
 
       expect(frames.map((frame) => frame.frame_id)).toEqual(["frame-main"]);
@@ -133,6 +135,7 @@ describe("Electron frame capture", () => {
       scripts,
       frameIds: new Set(["frame-old", "frame-new"]),
       completeness,
+      asarHeaderAdmission: DEFAULT_ASAR_HEADER_ADMISSION,
     });
 
     expect(capture.total).toBe(4);
@@ -212,6 +215,7 @@ it("admits a prefix and fitting suffix around an oversized Electron source", asy
     scripts,
     frameIds: new Set(),
     completeness,
+    asarHeaderAdmission: DEFAULT_ASAR_HEADER_ADMISSION,
   });
   const byHash = new Map(
     capture.items.map((item) => [item.cdp_hash, item.source]),

@@ -30,13 +30,13 @@ const responseSchema = z.strictObject({
   results: z.array(
     z.discriminatedUnion("state", [
       z.strictObject({
-        pid: z.number().int().positive(),
+        pid: z.int().positive(),
         state: z.literal("readable"),
         run_id: z.string().optional(),
         reason: z.null().optional(),
       }),
       z.strictObject({
-        pid: z.number().int().positive(),
+        pid: z.int().positive(),
         state: z.literal("unavailable"),
         run_id: z.union([z.string(), z.null()]).optional(),
         reason: z.string().min(1),
@@ -48,28 +48,28 @@ const identityResponseSchema = z.strictObject({
   results: z.array(
     z.discriminatedUnion("state", [
       z.strictObject({
-        pid: z.number().int().positive(),
+        pid: z.int().positive(),
         state: z.literal("absent"),
         identity: z.null().optional(),
         reason: z.literal("not-in-snapshot"),
       }),
       z.strictObject({
-        pid: z.number().int().positive(),
+        pid: z.int().positive(),
         state: z.literal("readable"),
         identity: z.string().min(1),
-        effective_uid: z.number().int().nonnegative().optional(),
+        effective_uid: z.int().nonnegative().optional(),
         lifecycle: z.enum(["non-zombie", "zombie"]).optional(),
         relation: z
           .strictObject({
             state: z.literal("observed"),
-            parent_pid: z.number().int().nonnegative(),
-            process_group_id: z.number().int().nonnegative(),
+            parent_pid: z.int().nonnegative(),
+            process_group_id: z.int().nonnegative(),
           })
           .optional(),
         reason: z.null().optional(),
       }),
       z.strictObject({
-        pid: z.number().int().positive(),
+        pid: z.int().positive(),
         state: z.literal("unavailable"),
         identity: z.null().optional(),
         reason: z.string().min(1),

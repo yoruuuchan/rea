@@ -630,16 +630,8 @@ export const inspectSqliteDatabaseSnapshot = (
     const limits: unknown = db.limits;
     const supported = z
       .object({
-        length: z
-          .number()
-          .int()
-          .positive()
-          .max(SQLITE_DATABASE_LIMITS.outputBytes),
-        sqlLength: z
-          .number()
-          .int()
-          .positive()
-          .max(SQLITE_DATABASE_LIMITS.outputBytes),
+        length: z.int().positive().max(SQLITE_DATABASE_LIMITS.outputBytes),
+        sqlLength: z.int().positive().max(SQLITE_DATABASE_LIMITS.outputBytes),
       })
       .safeParse(limits);
     if (!supported.success)

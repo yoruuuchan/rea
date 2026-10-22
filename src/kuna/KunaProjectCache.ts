@@ -87,7 +87,7 @@ export const kunaProjectKey = (inputs: KunaProjectKeyInputs): string =>
 
 const fileSchema = z.strictObject({
   path: z.string().min(1),
-  bytes: z.number().int().nonnegative(),
+  bytes: z.int().nonnegative(),
   sha256: z.string().regex(SHA256_PATTERN),
 });
 
@@ -98,7 +98,7 @@ const manifestSchema = z.strictObject({
     target_sha256: z.string().regex(SHA256_PATTERN),
     kuna_sha256: z.string().regex(SHA256_PATTERN),
     kuna_version: z.string().min(1),
-    jobs: z.number().int().positive(),
+    jobs: z.int().positive(),
   }),
   files: z.strictObject({
     c: fileSchema,
@@ -108,8 +108,8 @@ const manifestSchema = z.strictObject({
     inventory: fileSchema,
   }),
   summary: z.strictObject({
-    decompiled: z.number().int().nonnegative(),
-    failed: z.number().int().nonnegative(),
+    decompiled: z.int().nonnegative(),
+    failed: z.int().nonnegative(),
   }),
   created_at: z.string().datetime(),
 });

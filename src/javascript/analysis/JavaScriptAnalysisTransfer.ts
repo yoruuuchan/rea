@@ -45,13 +45,13 @@ const recordSchema = z.discriminatedUnion("kind", [
 
 /** Complete-file coordinates authenticated before adopting any worker facts. */
 export const javaScriptAnalysisTransferDescriptorSchema = z.strictObject({
-  bytes: z.number().int().nonnegative().max(MAX_TRANSFER_BYTES),
+  bytes: z.int().nonnegative().max(MAX_TRANSFER_BYTES),
   sha256: digestSchema,
-  records: z.number().int().nonnegative(),
-  module_bytes: z.number().int().nonnegative(),
-  module_records: z.number().int().nonnegative(),
-  graph_bytes: z.number().int().nonnegative(),
-  graph_records: z.number().int().nonnegative(),
+  records: z.int().nonnegative(),
+  module_bytes: z.int().nonnegative(),
+  module_records: z.int().nonnegative(),
+  graph_bytes: z.int().nonnegative(),
+  graph_records: z.int().nonnegative(),
 });
 type Descriptor = z.output<typeof javaScriptAnalysisTransferDescriptorSchema>;
 

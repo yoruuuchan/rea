@@ -1,3 +1,4 @@
+import { metadataReportSubjectFormat } from "../../domain/apple/machoTargetSelection.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { RustBinaryPort } from "./RustBinaryPort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
@@ -9,6 +10,7 @@ import { createEvidence, type Evidence } from "../../domain/evidence.js";
 import {
   rustArchitectureForSubject,
   rustBinarySchema,
+  type InspectRustBinaryInput,
 } from "../../domain/rust/rustBinary.js";
 import { inspectRustBinaryRequestSchema } from "../../domain/rust/rustBinaryQuery.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
@@ -82,7 +84,7 @@ export class RustBinaryService {
 
 const evidenceFor = (
   provider: RustBinaryPort["identity"],
-  parameters: { readonly path: string },
+  parameters: InspectRustBinaryInput,
   value: ReturnType<typeof rustBinarySchema.parse>,
 ): Evidence => {
   const architecture = rustArchitectureForSubject(value.architecture);
@@ -91,7 +93,7 @@ const evidenceFor = (
     {
       path: value.artifact.path,
       sha256: value.artifact.sha256,
-      format: value.format === "macho" ? "mach-o" : value.format,
+      format: metadataReportSubjectFormat(value),
       ...(architecture === undefined ? {} : { architecture }),
     },
     provider,

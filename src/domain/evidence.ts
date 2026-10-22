@@ -104,12 +104,12 @@ export const evidenceLocationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("artifact-path"), path: z.string().min(1) }),
   z.strictObject({
     kind: z.literal("file-offset"),
-    offset: z.number().int().min(0),
+    offset: z.int().min(0),
   }),
   z.strictObject({
     kind: z.literal("file-offset-range"),
-    start: z.number().int().min(0),
-    end: z.number().int().min(0),
+    start: z.int().min(0),
+    end: z.int().min(0),
   }),
 ]);
 

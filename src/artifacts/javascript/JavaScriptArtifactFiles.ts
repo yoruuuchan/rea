@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { Readable } from "node:stream";
@@ -52,6 +53,7 @@ interface ReadContext {
   readonly files: JavaScriptArtifactFile[];
   readonly containers: JavaScriptArtifactContainer[];
   readonly signal: AbortSignal | undefined;
+  readonly asarHeaderAdmission: AsarHeaderAdmission | undefined;
   readonly selectedPaths: ReadonlyMap<string, number> | undefined;
   textBytes: number;
   invalidUtf8: number;
@@ -70,6 +72,7 @@ export const readJavaScriptArtifactFiles = async (
   resources: ArtifactResourceScope,
   signal?: AbortSignal,
   sourcePaths?: readonly string[],
+  asarHeaderAdmission?: AsarHeaderAdmission,
 ): Promise<JavaScriptArtifactFileSet> => {
   const inventory = expectedInventory(snapshot);
   const expected = inventory.files;
@@ -129,6 +132,7 @@ export const readJavaScriptArtifactFiles = async (
     files: [],
     containers: [],
     signal,
+    asarHeaderAdmission,
     selectedPaths,
     textBytes: 0,
     invalidUtf8: 0,
@@ -250,7 +254,12 @@ const visitReader = async (
           context.signal,
         );
         context.containers.push(inventory);
-        const nested = new AsarArtifactReader(entry.adapterKey);
+        const nested = new AsarArtifactReader(
+          entry.adapterKey,
+          context.asarHeaderAdmission === undefined
+            ? {}
+            : { headerAdmission: context.asarHeaderAdmission },
+        );
         ownedReaders.push({ reader: nested, path });
         stack.push({
           reader: nested,

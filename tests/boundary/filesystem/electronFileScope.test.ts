@@ -1,4 +1,10 @@
-import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -116,6 +122,36 @@ describe("Electron file scope", () => {
     expect(
       await authorizedElectronFile(
         pathToFileURL(join(malformed, "index.html")).href,
+      ),
+    ).toBeUndefined();
+  });
+  it("authorizes ASAR members only under the provider's selected header admission", async () => {
+    const root = await createTestTempDirectory("rea-electron-admission-");
+    const source = join(root, "source");
+    await mkdir(source);
+    await writeFile(join(source, "index.html"), "page");
+    const archive = join(root, "app.asar");
+    await createPackageWithOptions(source, archive, {});
+    const headerBytes = (await readFile(archive)).readUInt32LE(4);
+    const page = pathToFileURL(join(archive, "index.html")).href;
+    const admission = (maximumBytes: number) =>
+      ({ maximumBytes, source: "setting" }) as const;
+    // The first read caches the header under an admission that fits it.
+    expect(
+      await authorizedElectronFile(
+        page,
+        undefined,
+        "inspect_electron_page",
+        admission(headerBytes),
+      ),
+    ).toBe(join(await realpath(archive), "index.html"));
+    // A provider with a lower admission must not reuse that cached header.
+    expect(
+      await authorizedElectronFile(
+        page,
+        undefined,
+        "inspect_electron_page",
+        admission(headerBytes - 1),
       ),
     ).toBeUndefined();
   });

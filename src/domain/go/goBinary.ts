@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { BINARY_ARCHITECTURES } from "../binaryTargetTypes.js";
+import {
+  machoSelectionContainsRange,
+  selectedSliceAgreesWithReport,
+  machoSliceArchitectureSchema,
+  machoTargetSelectionSchema,
+} from "../apple/machoTargetSelection.js";
 import { digestSchema } from "../digests.js";
 import {
   absoluteLocalPathStringSchema,
@@ -22,8 +28,8 @@ export const goArchitectureForSubject = (architecture: string) => {
 };
 
 const sourceRangeSchema = z.strictObject({
-  offset: z.number().int().nonnegative(),
-  bytes: z.number().int().nonnegative(),
+  offset: z.int().nonnegative(),
+  bytes: z.int().nonnegative(),
 });
 const moduleIdentitySchema = z.strictObject({
   path: z.string(),
@@ -52,6 +58,7 @@ export const inspectGoBinaryInputSchema = z.strictObject({
   path: absoluteLocalPathStringSchema.describe(
     "Absolute filesystem path to the selected executable or library",
   ),
+  architecture: machoSliceArchitectureSchema.exactOptional(),
   detail: z
     .enum(["complete", "summary"])
     .default("complete")
@@ -62,7 +69,7 @@ export const inspectGoBinaryInputSchema = z.strictObject({
 
 /** Compiler-written build information and its original file-backed source ranges. */
 export const goBuildInfoSchema = z.strictObject({
-  header_offset: z.number().int().nonnegative(),
+  header_offset: z.int().nonnegative(),
   encoding: z.enum(["inline", "pointer"]),
   go_version: z.string().nullable(),
   go_version_bytes_base64: canonicalBase64Schema,
@@ -79,17 +86,54 @@ export const goBinarySchema = z
     artifact: z.strictObject({
       path: localPathStringSchema,
       sha256: digestSchema,
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
     }),
     format: z.enum(["elf", "pe", "macho"]),
     architecture: z.string(),
     bits: z.union([z.literal(32), z.literal(64)]),
     byte_order: z.enum(["little", "big"]),
+    /** The universal slice that was read; source ranges stay file offsets inside it. */
+    selected_slice: machoTargetSelectionSchema.exactOptional(),
     build_info: goBuildInfoSchema.nullable(),
     limitations: z.array(z.string()),
   })
   .superRefine((report, context) => {
     const info = report.build_info;
+    const slice = report.selected_slice;
+    if (
+      slice !== undefined &&
+      (!selectedSliceAgreesWithReport(
+        slice,
+        report.format,
+        goArchitectureForSubject(report.architecture),
+      ) ||
+        !machoSelectionContainsRange(
+          slice,
+          report.artifact.bytes,
+          slice.offset,
+          0,
+        ) ||
+        (info !== null &&
+          [
+            { offset: info.header_offset, bytes: 32 },
+            info.version_location,
+            info.module_location,
+          ].some(
+            (range) =>
+              !machoSelectionContainsRange(
+                slice,
+                report.artifact.bytes,
+                range.offset,
+                range.bytes,
+              ),
+          )))
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["selected_slice"],
+        message:
+          "Selected universal slice must be a FAT slice of the artifact whose CPU matches the report's Mach-O architecture and that contains the build-info source ranges.",
+      });
     if (info === null) return;
     if (info.header_offset > report.artifact.bytes - 32)
       context.addIssue({

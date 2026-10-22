@@ -5,6 +5,7 @@ import {
   wasmArtifactExecution,
 } from "../../../tests/fixtures/wasm/artifact.js";
 import { ok } from "../../domain/result.js";
+import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 it.each([
   { path: "relative" },
   { path: "/module", glue_paths: ["relative"] },
@@ -119,30 +120,54 @@ it("cancels before provider work and delivers observed Evidence on success", asy
   });
 });
 
-it("retains completed Evidence when cancellation arrives after provider return", async () => {
-  const value = wasmArtifactFixture();
-  const controller = new AbortController();
-  const service = new WasmArtifactService({
-    close: () => Promise.resolve(),
-    inspect: async () => {
-      controller.abort();
-      return ok(wasmArtifactExecution(value));
-    },
-  });
+it.each([false, true])(
+  "retains provider provenance after completion (late cancellation: %s)",
+  async (cancel) => {
+    const value = wasmArtifactFixture();
+    const execution = wasmArtifactExecution(value);
+    const profile = createAnalysisProfile(
+      { ...execution.provider, version: "1" },
+      {
+        features: "selected",
+      },
+    );
+    const coverage = {
+      status: "unknown",
+      reason: "No call graph examined",
+    } as const;
+    const controller = new AbortController();
+    const service = new WasmArtifactService({
+      close: () => Promise.resolve(),
+      inspect: async () => {
+        if (cancel) controller.abort();
+        return ok({
+          ...execution,
+          rawResult: { stdout: "retained command output" },
+          analysisProfile: profile,
+          relationshipCoverage: coverage,
+        });
+      },
+    });
 
-  expect(
-    await service.inspect(
+    const result = await service.inspect(
       { path: value.artifact.path },
       { signal: controller.signal },
-    ),
-  ).toMatchObject({
-    ok: false,
-    error: {
-      _tag: "AnalysisCancelledError",
-      partialObservation: { normalized_result: value },
-    },
-  });
-});
+    );
+    if (cancel)
+      expect(result).toMatchObject({
+        ok: false,
+        error: { _tag: "AnalysisCancelledError" },
+      });
+    else expect(result.ok).toBe(true);
+    const evidence = result.ok ? result.value : result.error.partialObservation;
+    expect(evidence).toMatchObject({
+      normalized_result: value,
+      raw_result: { stdout: "retained command output" },
+      analysis_profile: profile,
+      relationship_coverage: coverage,
+    });
+  },
+);
 
 it("preserves malformed-output failure when cancellation arrives with it", async () => {
   const value = wasmArtifactFixture();

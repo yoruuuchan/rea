@@ -17,6 +17,82 @@ const ROOT_UPDATE_OUTPUT_FLAGS = new Set([
   "--token-count",
 ]);
 
+/** Valueless flags Incur removes from every position before command parsing. */
+const INCUR_BUILTIN_FLAGS = new Set([
+  "--full-output",
+  "--llms",
+  "--llms-full",
+  "--mcp",
+  "--help",
+  "-h",
+  "--update",
+  // Incur's internal update-check flag.
+  "--incur-update-check",
+  "--schema",
+  "--json",
+  "--token-count",
+]);
+
+/**
+ * Incur's message when its builtin pass rejects this spaced value of a valued
+ * output flag, or undefined when Incur accepts it.
+ */
+export const cliOutputValueRejection = (
+  flag: string,
+  value: string,
+): string | undefined => {
+  if (flag === "--format")
+    return INCUR_OUTPUT_FORMATS.has(value)
+      ? undefined
+      : `Invalid format: "${value}". Expected one of: ${[...INCUR_OUTPUT_FORMATS].join(", ")}`;
+  if (
+    (flag === "--token-limit" || flag === "--token-offset") &&
+    (!Number.isFinite(Number(value)) || value.trim() === "")
+  )
+    return `Invalid value for ${flag}: "${value}"`;
+  return undefined;
+};
+
+/** Command tokens and output-flag values as Incur's builtin pass assigns them. */
+export interface IncurBuiltinArgumentSplit {
+  /** Tokens left for command resolution and command option parsing. */
+  readonly command: readonly string[];
+  /** Positions of nonempty values consumed by valued output flags. */
+  readonly outputValues: readonly {
+    readonly flag: string;
+    readonly index: number;
+  }[];
+}
+
+/**
+ * Mirror Incur's builtin pass over normalized arguments without stopping at a
+ * rejected value, so callers can still see every later token. REA configures
+ * neither a config flag nor global options, which Incur would also remove.
+ */
+export const splitIncurBuiltinArguments = (
+  arguments_: readonly string[],
+): IncurBuiltinArgumentSplit => {
+  const command: string[] = [];
+  const outputValues: { readonly flag: string; readonly index: number }[] = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index]!;
+    const next = arguments_[index + 1];
+    if (
+      INCUR_BUILTIN_FLAGS.has(argument) ||
+      // A following value belongs to a command-local `--version` option.
+      (argument === "--version" && (next === undefined || next.startsWith("-")))
+    )
+      continue;
+    if (VALUED_OUTPUT_FLAGS.has(argument) && next) {
+      outputValues.push({ flag: argument, index: index + 1 });
+      index += 1;
+      continue;
+    }
+    command.push(argument);
+  }
+  return { command, outputValues };
+};
+
 /**
  * Route the root update alias and split `--flag=value` output forms. Incur reads these
  * flags only in spaced form, so `--format=json` otherwise reaches the command
@@ -115,7 +191,8 @@ export const parseCliOutputArguments = (
       if (value) {
         // Incur stops parsing at an invalid format before applying any later
         // output controls. Let it report that malformed flag itself.
-        if (!INCUR_OUTPUT_FORMATS.has(value)) return parsed(true);
+        if (cliOutputValueRejection(argument, value) !== undefined)
+          return parsed(true);
         format = value;
         index += 1;
       } else missingValue ??= argument;
@@ -131,9 +208,9 @@ export const parseCliOutputArguments = (
     if (argument === "--token-limit" || argument === "--token-offset") {
       const value = arguments_[index + 1];
       if (value) {
-        const numericValue = Number(value);
-        if (!Number.isFinite(numericValue) || value.trim() === "")
+        if (cliOutputValueRejection(argument, value) !== undefined)
           return parsed(true);
+        const numericValue = Number(value);
         if (argument === "--token-limit") tokenLimit = numericValue;
         else tokenOffset = numericValue;
         index += 1;

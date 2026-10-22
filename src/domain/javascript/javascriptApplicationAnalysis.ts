@@ -22,7 +22,7 @@ import {
   javaScriptSourceSelectionSchema,
 } from "./javascriptSourceSelection.js";
 
-const countSchema = z.number().int().min(0);
+const countSchema = z.int().min(0);
 
 /** Public target-free request for static JavaScript application analysis. */
 export const analyzeJavaScriptApplicationInputSchema = z.strictObject({

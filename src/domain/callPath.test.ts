@@ -269,7 +269,7 @@ describe("call path topology and capacity", () => {
       search_scope: { exhaustive: true },
     });
     expect(result.limitations).toContain(goalLimitation);
-    expect(result.explored.nodes).toBe(2);
+    expect(result.explored).toEqual({ nodes: 2, edges: 1, depth_reached: 1 });
     expect(result.limitations).not.toContain(
       "No analyze_function Evidence covers reachable function 0x5000",
     );
@@ -373,6 +373,122 @@ describe("directional call relationship coverage", () => {
   );
 });
 
+describe("call path search extent", () => {
+  type Graph = Readonly<Record<string, readonly string[]>>;
+  const search = (graph: Graph, goal: string, start = "0x1000") =>
+    run(
+      Object.entries(graph).map(([address, callees]) =>
+        observe(address, callees),
+      ),
+      { start: { address: start }, goal: { address: goal } },
+    );
+  const withoutGoalDossier = (graph: Graph, goal: string): Graph =>
+    Object.fromEntries(
+      Object.entries(graph).filter(([address]) => address !== goal),
+    );
+
+  // Each case states what the forward search discovers and expands. A terminal
+  // goal is discovered but never expanded, so its callees are not explored.
+  it.each([
+    {
+      label: "goal at depth one with an outgoing edge",
+      graph: { "0x1000": ["0x4000"], "0x4000": ["0x5000"] },
+      goal: "0x4000",
+      status: "found",
+      explored: { nodes: 2, edges: 1, depth_reached: 1 },
+    },
+    {
+      label: "zero hops from a start with callees",
+      graph: { "0x1000": ["0x2000"] },
+      goal: "0x1000",
+      status: "found",
+      explored: { nodes: 1, edges: 0, depth_reached: 0 },
+    },
+    {
+      label: "zero hops from a self-recursive start",
+      graph: { "0x1000": ["0x1000"] },
+      goal: "0x1000",
+      status: "found",
+      explored: { nodes: 1, edges: 0, depth_reached: 0 },
+    },
+    {
+      label: "self-recursive goal",
+      graph: { "0x1000": ["0x4000"], "0x4000": ["0x4000"] },
+      goal: "0x4000",
+      status: "found",
+      explored: { nodes: 2, edges: 1, depth_reached: 1 },
+    },
+    {
+      label: "deep goal calling back into and beyond the closure",
+      graph: {
+        "0x1000": ["0x2000", "0x3000"],
+        "0x2000": ["0x4000"],
+        "0x3000": [],
+        "0x4000": ["0x1000", "0x6000"],
+      },
+      goal: "0x4000",
+      status: "found",
+      explored: { nodes: 4, edges: 3, depth_reached: 2 },
+    },
+    {
+      label: "goal with several expanded callers",
+      graph: {
+        "0x1000": ["0x2000", "0x3000"],
+        "0x2000": ["0x4000"],
+        "0x3000": ["0x4000"],
+        "0x4000": ["0x5000"],
+      },
+      goal: "0x4000",
+      status: "found",
+      explored: { nodes: 4, edges: 4, depth_reached: 2 },
+    },
+    {
+      label: "expanded cycle without the goal",
+      graph: { "0x1000": ["0x2000"], "0x2000": ["0x1000", "0x2000"] },
+      goal: "0x4000",
+      status: "not_found",
+      explored: { nodes: 2, edges: 3, depth_reached: 1 },
+    },
+    {
+      label: "unreachable goal with its own dossier",
+      graph: { "0x1000": ["0x2000"], "0x2000": [], "0x4000": ["0x5000"] },
+      goal: "0x4000",
+      status: "not_found",
+      explored: { nodes: 2, edges: 1, depth_reached: 1 },
+    },
+    {
+      label: "reachable function without Evidence",
+      graph: { "0x1000": ["0x2000"] },
+      goal: "0x4000",
+      status: "unknown",
+      explored: { nodes: 2, edges: 1, depth_reached: 1 },
+    },
+  ])(
+    "counts only expanded edges: $label",
+    ({ graph, goal, status, explored }) => {
+      expect(search(graph, goal)).toMatchObject({ status, explored });
+    },
+  );
+
+  it("keeps explored extent independent of the terminal goal's dossier", () => {
+    for (const graph of [
+      { "0x1000": ["0x4000"], "0x4000": ["0x5000", "0x6000"] },
+      { "0x1000": ["0x4000"], "0x4000": ["0x4000", "0x1000"] },
+      {
+        "0x1000": ["0x2000", "0x3000"],
+        "0x2000": ["0x4000"],
+        "0x3000": ["0x4000"],
+        "0x4000": ["0x2000", "0x7000", "0x8000"],
+      },
+    ]) {
+      const supplied = search(graph, "0x4000");
+      const omitted = search(withoutGoalDossier(graph, "0x4000"), "0x4000");
+      expect(supplied.status).toBe("found");
+      expect(supplied.explored).toEqual(omitted.explored);
+    }
+  });
+});
+
 describe("explicit call relationship coverage", () => {
   it("accumulates 150,000 partial reasons without argument-stack exhaustion", () => {
     const result = run([
@@ -436,7 +552,7 @@ describe("explicit call relationship coverage", () => {
     expect(result).toMatchObject({
       status: "found",
       search_scope: { exhaustive: true },
-      explored: { nodes: 2 },
+      explored: { nodes: 2, edges: 1, depth_reached: 1 },
     });
     expect(result.limitations).toEqual([reason]);
   });

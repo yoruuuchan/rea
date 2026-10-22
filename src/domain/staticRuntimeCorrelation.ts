@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
+import { digestCanonicalValue } from "./canonicalDigest.js";
 import { z } from "zod";
 
 import { artifactComparisonResultSchema } from "./artifactComparison.js";
@@ -124,9 +122,9 @@ const correlationItemSchema = z.object({
 export const staticRuntimeCorrelationResultSchema = z.object({
   status: z.enum(["correlated", "contradicted", "unknown", "truncated"]),
   summary: z.object({
-    hypotheses: z.number().int().min(0),
-    contradictions: z.number().int().min(0),
-    unresolved: z.number().int().min(0),
+    hypotheses: z.int().min(0),
+    contradictions: z.int().min(0),
+    unresolved: z.int().min(0),
   }),
   correlations: z.object({
     items: z.array(correlationItemSchema),
@@ -238,7 +236,7 @@ const correlate = (
     hypothesis: mapping.hypothesis,
   } satisfies JsonValue;
   return correlationItemSchema.parse({
-    correlation_id: `cor_${sha256(canonicalJson(projection))}`,
+    correlation_id: `cor_${digestCanonicalValue(projection, "Static/runtime correlation")}`,
     static: { ...mapping.static, ...selectedStatic },
     runtime: { ...mapping.runtime, status: runtimeStatus },
     side_alignment: mapping.side_alignment,
@@ -410,16 +408,4 @@ const assertUnique = (evidence: readonly Evidence[], label: string): void => {
     throw new TypeError(
       `Static/runtime correlation rejects duplicate ${label}`,
     );
-};
-
-const sha256 = (value: string): string =>
-  createHash("sha256").update(value).digest("hex");
-
-const canonicalJson = (value: JsonValue): string => {
-  const serialized = canonicalize(value);
-  if (serialized === undefined)
-    throw new TypeError(
-      "RFC 8785 canonicalization rejected correlation mapping",
-    );
-  return serialized;
 };

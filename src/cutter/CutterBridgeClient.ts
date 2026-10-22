@@ -31,11 +31,11 @@ import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 
 const descriptorSchema = z.object({
   session_id: z.string().uuid(),
-  pid: z.number().int().positive(),
+  pid: z.int().positive(),
   host: z.literal("127.0.0.1"),
-  port: z.number().int().min(1).max(65535),
+  port: z.int().min(1).max(65535),
   token: z.string().min(20),
-  document_generation: z.number().int().nonnegative(),
+  document_generation: z.int().nonnegative(),
   current_file: z.string().nullable(),
   cutter_version: z.string().nullable(),
   identity_status: z.literal("partial"),
@@ -53,7 +53,7 @@ const responseSchema = z.object({
   output: z.unknown().optional(),
   current_file: z.string().nullable().optional(),
   cutter_version: z.string().nullable().optional(),
-  document_generation: z.number().int().nonnegative().optional(),
+  document_generation: z.int().nonnegative().optional(),
   identity_status: z.literal("partial").optional(),
   error: z.string().optional(),
   message: z.string().optional(),

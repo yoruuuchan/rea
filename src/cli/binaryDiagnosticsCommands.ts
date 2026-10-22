@@ -1,7 +1,10 @@
+import { inspectByteEntropyInputSchema } from "../domain/native/byteEntropy.js";
 import { z } from "incur";
 import {
+  createByteEntropyService,
   createRecordedCrashService,
   createBinaryLayoutService,
+  createElfNotesService,
   createPeResourcesService,
 } from "../composition/binaryDiagnostics.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
@@ -12,6 +15,7 @@ import { withCommandCancellation } from "./commandCancellation.js";
 import { inspectBinaryLayoutInputSchema } from "../domain/native/binaryLayout.js";
 import { inspectRecordedCrashInputSchema } from "../domain/native/recordedCrash.js";
 import { inspectPeResourcesInputSchema } from "../domain/native/peResources.js";
+import { inspectElfNotesInputSchema } from "../domain/native/elfNotes.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
@@ -22,6 +26,77 @@ export const registerBinaryDiagnosticsCommands = (
   logger: Logger,
   environment: Readonly<NodeJS.ProcessEnv>,
 ): void => {
+  cli.command(CLI_COMMANDS.inspectElfNotes, {
+    description:
+      "Inspect ELF PT_NOTE and SHT_NOTE identities without executing the image",
+    args: z.object({ path: z.string().describe("Local ELF32/ELF64 image") }),
+    options: z.object({
+      maxFileBytes: inspectElfNotesInputSchema.shape.max_file_bytes,
+      maxEntries: inspectElfNotesInputSchema.shape.max_entries,
+    }),
+    run: ({ args, options }) =>
+      withCommandCancellation(async (signal) => {
+        const elf = createElfNotesService();
+        return await logCliCommand(
+          logger,
+          CLI_COMMANDS.inspectElfNotes,
+          async () =>
+            finishAnalysisCommand(
+              () =>
+                elf.inspect(
+                  {
+                    path: absoluteCallerPath(args.path),
+                    max_file_bytes: options.maxFileBytes,
+                    max_entries: options.maxEntries,
+                  },
+                  { signal },
+                ),
+              elf,
+              "rea-elf-notes",
+              "inspect_elf_notes",
+              signal,
+            ),
+        );
+      }),
+  });
+  const entropy = createByteEntropyService();
+  cli.command(CLI_COMMANDS.inspectByteEntropy, {
+    description:
+      "Inspect file-wide and block byte entropy without executing the file",
+    args: z.object({ path: z.string().describe("Local file") }),
+    options: z.object({
+      blockSize: inspectByteEntropyInputSchema.shape.block_size.describe(
+        "Power-of-two block size from 256 to 65536 bytes (default 4096)",
+      ),
+      offset: inspectByteEntropyInputSchema.shape.offset.describe(
+        "Window start as a decimal file byte offset (default 0)",
+      ),
+      length: inspectByteEntropyInputSchema.shape.length.describe(
+        "Window length in bytes; omit to extend through EOF",
+      ),
+    }),
+    run: ({ args, options }) =>
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, CLI_COMMANDS.inspectByteEntropy, async () => {
+          return await finishAnalysisCommand(
+            () =>
+              entropy.inspect(
+                {
+                  path: absoluteCallerPath(args.path),
+                  block_size: options.blockSize,
+                  offset: options.offset,
+                  length: options.length,
+                },
+                { signal },
+              ),
+            entropy,
+            "rea-byte-entropy",
+            "inspect_byte_entropy",
+            signal,
+          );
+        }),
+      ),
+  });
   cli.command(CLI_COMMANDS.inspectPeResources, {
     description:
       "Inspect PE resource identities, payload ranges, hashes and icon-group relationships",

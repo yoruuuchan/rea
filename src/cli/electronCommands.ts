@@ -38,10 +38,10 @@ export const registerElectronCommands = (
     ) => ElectronActiveObservationPort;
   } = {},
 ): void => {
-  registerElectronObservationCommands(cli, logger);
+  registerElectronObservationCommands(cli, logger, environment);
   registerElectronFuseCommand(cli, logger);
   registerElectronActiveCommand(cli, logger, environment, options);
-  registerJavaScriptApplicationCommand(cli, logger);
+  registerJavaScriptApplicationCommand(cli, logger, environment);
   registerJavaScriptRuntimeReconciliationCommand(cli, logger);
 };
 
@@ -199,14 +199,16 @@ const registerJavaScriptRuntimeReconciliationCommand = (
 const registerElectronObservationCommands = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
+  environment: Readonly<Record<string, string | undefined>>,
 ): void => {
-  registerElectronTargetList(cli, logger);
-  registerElectronPageInspection(cli, logger);
+  registerElectronTargetList(cli, logger, environment);
+  registerElectronPageInspection(cli, logger, environment);
 };
 
 const registerElectronTargetList = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
+  environment: Readonly<Record<string, string | undefined>>,
 ): void => {
   cli.command(CLI_COMMANDS.listElectronTargets, {
     description:
@@ -217,7 +219,7 @@ const registerElectronTargetList = (
     run: ({ args }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, "list-electron-targets", async () => {
-          const context = await electronObservationContext();
+          const context = await electronObservationContext(environment);
           const input = {
             cdp_endpoint: args.endpoint,
           };
@@ -250,6 +252,7 @@ const registerElectronTargetList = (
 const registerElectronPageInspection = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
+  environment: Readonly<Record<string, string | undefined>>,
 ): void => {
   cli.command(CLI_COMMANDS.inspectElectronPage, {
     description: "Passively inspect one Electron file page",
@@ -261,7 +264,7 @@ const registerElectronPageInspection = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, "inspect-electron-page", async () => {
-          const context = await electronObservationContext();
+          const context = await electronObservationContext(environment);
           const input = {
             cdp_endpoint: args.endpoint,
             target_id: args.targetId,
@@ -298,6 +301,7 @@ const registerElectronPageInspection = (
 const registerJavaScriptApplicationCommand = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
+  environment: Readonly<Record<string, string | undefined>>,
 ): void => {
   cli.command(CLI_COMMANDS.analyzeJavaScriptApplication, {
     description:
@@ -344,6 +348,7 @@ const registerJavaScriptApplicationCommand = (
                 ? {}
                 : { analysis_timeout_ms: options.analysisTimeoutMs }),
             },
+            environment,
             signal,
           ),
         ),
@@ -351,10 +356,12 @@ const registerJavaScriptApplicationCommand = (
   });
 };
 
-const electronObservationContext = async () => {
+const electronObservationContext = async (
+  environment: Readonly<Record<string, string | undefined>>,
+) => {
   const { createElectronObservationProvider } =
     await import("../composition/electronObservation.js");
-  return { provider: createElectronObservationProvider() };
+  return { provider: createElectronObservationProvider(environment) };
 };
 
 const inputError = (

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import canonicalize from "canonicalize";
 import { z } from "zod";
 
-const positiveBudget = z.number().int().safe().positive();
+const positiveBudget = z.int().safe().positive();
 /** Read the explicitly committed output budget without applying scenario defaults. */
 export const processScenarioOutputBudgetProjectionSchema = z
   .object({ output_bytes: positiveBudget })
@@ -13,7 +13,7 @@ export const processScenarioOutputBudgetProjectionSchema = z
  * before row objects, serialization strings, and retained frame copies.
  */
 export const PROCESS_TERMINAL_CELL_BUDGET = 1_000_000;
-const timedEventBase = { at_ms: z.number().int().safe().nonnegative() };
+const timedEventBase = { at_ms: z.int().safe().nonnegative() };
 const reservedRunIdEnvironmentName = "REA_PROCESS_RUN_ID";
 const ENVIRONMENT_NAME_CHARACTER = "[^=\\x00]";
 
@@ -159,9 +159,9 @@ export const processScenarioSchema = z
       .default([]),
     terminal: z
       .strictObject({
-        columns: z.number().int().min(1).max(65_535).default(80),
-        rows: z.number().int().min(1).max(65_535).default(24),
-        scrollback: z.number().int().safe().nonnegative().default(1_000),
+        columns: z.int().min(1).max(65_535).default(80),
+        rows: z.int().min(1).max(65_535).default(24),
+        scrollback: z.int().safe().nonnegative().default(1_000),
       })
       .describe(
         "The visible terminal and scrollback together must use at most 1,000,000 xterm renderer cells: columns × (rows + scrollback). Resize events use the same scrollback and limit. This release has no runtime override.",
@@ -179,8 +179,8 @@ export const processScenarioSchema = z
           z.strictObject({
             ...timedEventBase,
             type: z.literal("resize"),
-            columns: z.number().int().min(1).max(65_535),
-            rows: z.number().int().min(1).max(65_535),
+            columns: z.int().min(1).max(65_535),
+            rows: z.int().min(1).max(65_535),
           }),
           z.strictObject({
             ...timedEventBase,
@@ -192,9 +192,8 @@ export const processScenarioSchema = z
       .default([]),
     timeout_ms: positiveBudget.default(30_000),
     idle_timeout_ms: positiveBudget.default(30_000),
-    settle_ms: z.number().int().safe().nonnegative().default(100),
+    settle_ms: z.int().safe().nonnegative().default(100),
     finalization_ms: z
-      .number()
       .int()
       .safe()
       .nonnegative()
@@ -208,7 +207,7 @@ export const processScenarioSchema = z
         files: positiveBudget.default(10_000),
         file_bytes: positiveBudget.default(10_000_000),
         processes: positiveBudget.default(1_000),
-        filesystem_depth: z.number().int().safe().nonnegative().default(16),
+        filesystem_depth: z.int().safe().nonnegative().default(16),
       })
       .strict()
       .default({

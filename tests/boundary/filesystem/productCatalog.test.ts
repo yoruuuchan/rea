@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
+import { BYTE_ENTROPY_PROVIDER } from "../../../src/application/InvestigationProviders.js";
 import { SUPPORTED_CLIENT_DEFINITIONS } from "../../../src/application/SupportedClients.js";
 import { CLI_COMMAND_NAMES } from "../../../src/cliCommandNames.js";
 import { createCli } from "../../../src/cli.js";
@@ -22,6 +23,7 @@ import {
 import { OBJDUMP_PROVIDER_IDENTITY } from "../../../src/objdump/ObjdumpCommand.js";
 import { RIZIN_PROVIDER_IDENTITY } from "../../../src/rizin/RizinCommand.js";
 import { GDB_PROVIDER_IDENTITY } from "../../../src/gdb/GdbSessionManager.js";
+import { PWNTOOLS_PROVIDER_IDENTITY } from "../../../src/native/pwntools/PwntoolsRelease.js";
 import {
   documentationFactIssues,
   skillReferenceIssues,
@@ -100,6 +102,18 @@ describe("canonical product catalog", () => {
         .map(({ name }) => name)
         .sort(),
     );
+    expect(
+      catalog.providers.find(({ id }) => id === BYTE_ENTROPY_PROVIDER.id),
+    ).toEqual({
+      id: "byte-entropy",
+      name: "REA byte entropy",
+      version: "1",
+      capabilities: ["inspect_byte_entropy"],
+    });
+    expect(
+      catalog.providers.find(({ id }) => id === PWNTOOLS_PROVIDER_IDENTITY.id)
+        ?.capabilities,
+    ).toEqual(["inspect_binary_layout", "inspect_recorded_crash"]);
     expect(
       JSON.parse(await readFile("docs/public/product-catalog.json", "utf8")),
     ).toEqual(catalog);

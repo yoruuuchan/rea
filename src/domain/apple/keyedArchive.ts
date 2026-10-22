@@ -25,13 +25,13 @@ export class KeyedArchiveKindError extends TypeError {
 export const keyedArchiveInputSchema = z.strictObject({
   path: localPathStringSchema.default("."),
   root: z.string().optional(),
-  offset: z.number().int().min(0).default(0),
-  limit: z.number().int().min(1).max(20_000).default(20_000),
+  offset: z.int().min(0).default(0),
+  limit: z.int().min(1).max(20_000).default(20_000),
 });
 const linkSchema = z.strictObject({
-  source: z.number().int().nonnegative().nullable(),
-  path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
-  target: z.number().int().nonnegative().nullable(),
+  source: z.int().nonnegative().nullable(),
+  path: z.array(z.union([z.string(), z.int().nonnegative()])),
+  target: z.int().nonnegative().nullable(),
   status: z.enum(["resolved", "nil", "unresolved", "malformed"]),
   raw: jsonValueSchema,
 });
@@ -45,7 +45,7 @@ export const keyedArchiveResultSchema = bundleResourceBoundResultSchema(
     roots: z.record(z.string(), jsonValueSchema),
     objects: z.array(
       z.strictObject({
-        id: z.number().int().nonnegative(),
+        id: z.int().nonnegative(),
         kind: z.enum([
           "nil",
           "scalar",
@@ -54,7 +54,7 @@ export const keyedArchiveResultSchema = bundleResourceBoundResultSchema(
           "class-descriptor",
           "archived-object",
         ]),
-        class_id: z.number().int().nonnegative().nullable(),
+        class_id: z.int().nonnegative().nullable(),
         class_name: z.string().nullable(),
         status: z.enum([
           "observed",
@@ -66,10 +66,10 @@ export const keyedArchiveResultSchema = bundleResourceBoundResultSchema(
       }),
     ),
     references: z.array(linkSchema),
-    total_objects: z.number().int().nonnegative(),
-    total_references: z.number().int().nonnegative(),
-    offset: z.number().int().nonnegative(),
-    next_offset: z.number().int().nonnegative().nullable(),
+    total_objects: z.int().nonnegative(),
+    total_references: z.int().nonnegative(),
+    offset: z.int().nonnegative(),
+    next_offset: z.int().nonnegative().nullable(),
     truncated: z.boolean(),
     limitations: z.array(z.string()),
   },

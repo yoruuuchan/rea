@@ -26,6 +26,13 @@ export const providerSelectionOption = analysisProviderSelectorSchema
     "Bind deep analysis to a provider ID or use deterministic auto selection",
   );
 
+/** Optional path to the local analysis snapshot loaded or updated by a command. */
+export const snapshotSelectionOption = z
+  .string()
+  .min(1)
+  .optional()
+  .describe("Load and update a local analysis snapshot");
+
 /** Explicit interpretation for headerless native executable formats. */
 export const formatSelectionOption = executableFormatHintSchema
   .optional()

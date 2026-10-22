@@ -1,3 +1,4 @@
+import { metadataReportSubjectFormat } from "../apple/machoTargetSelection.js";
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
 import {
@@ -30,6 +31,7 @@ export const rustBinarySummarySchema = z.strictObject({
   architecture: rustBinarySchema.shape.architecture,
   bits: rustBinarySchema.shape.bits,
   byte_order: rustBinarySchema.shape.byte_order,
+  selected_slice: rustBinarySchema.shape.selected_slice,
   auditable_metadata: rustAuditableMetadataSchema
     .omit({
       packages: true,
@@ -108,6 +110,9 @@ const summarize = (
     architecture: report.architecture,
     bits: report.bits,
     byte_order: report.byte_order,
+    ...(report.selected_slice === undefined
+      ? {}
+      : { selected_slice: report.selected_slice }),
     bytes: artifact.bytes,
     auditable_metadata: section,
     rustc_commit:
@@ -143,7 +148,7 @@ export const projectRustBinaryView = (
     subject == null ||
     subject.local_path !== report.artifact.path ||
     subject.digest.sha256 !== report.artifact.sha256 ||
-    subject.format !== (report.format === "macho" ? "mach-o" : report.format) ||
+    subject.format !== metadataReportSubjectFormat(report) ||
     subject.architecture !==
       (rustArchitectureForSubject(report.architecture) ?? null)
   )

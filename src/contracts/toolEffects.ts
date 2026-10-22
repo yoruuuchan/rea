@@ -251,7 +251,9 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
     executesForeignCode: true,
     idempotent: false,
   }),
+  inspect_byte_entropy: evidence,
   inspect_pe_resources: evidence,
+  inspect_elf_notes: evidence,
   inspect_analysis_view: evidence,
   inspect_firmware_regions: effects({
     mutatesSession: true,

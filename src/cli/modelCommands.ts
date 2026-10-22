@@ -2,6 +2,7 @@ import { inspectModelArtifactInputSchema } from "../domain/model/modelArtifactQu
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { safeParseJson } from "../domain/safeJson.js";
 import { z } from "incur";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
@@ -44,21 +45,26 @@ export const registerModelCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.inspectModelArtifact, async () => {
-          let view: unknown;
-          try {
-            view =
-              options.view === undefined ? undefined : JSON.parse(options.view);
-          } catch (cause) {
+          const decoded =
+            options.view === undefined
+              ? { ok: true as const, value: undefined }
+              : safeParseJson(options.view);
+          if (!decoded.ok) {
             return projectAnalysisError(
-              new AnalysisInputError("inspect_model_artifact", { cause }, [
-                {
-                  path: ["view"],
-                  reason: "invalid_format",
-                  message: "view must be a JSON model page selection",
-                },
-              ]),
+              new AnalysisInputError(
+                "inspect_model_artifact",
+                { cause: decoded.cause },
+                [
+                  {
+                    path: ["view"],
+                    reason: "invalid_format",
+                    message: "view must be a JSON model page selection",
+                  },
+                ],
+              ),
             );
           }
+          const view = decoded.value;
           const selected = inspectModelArtifactInputSchema.safeParse({
             path: absoluteCallerPath(args.path),
             hash: options.hash,

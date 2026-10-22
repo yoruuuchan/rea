@@ -225,6 +225,14 @@ export type ProviderProcessStopResult =
       readonly cleanupResult?: ProcessCleanupFailure;
     };
 
+const incompleteCleanup = (
+  failure: ProcessCleanupFailure,
+): ProviderProcessStopResult => ({
+  status: "incomplete",
+  reason: failure.reason,
+  cleanupResult: failure,
+});
+
 /**
  * Spawn a provider in an owned Windows job or dedicated POSIX process group.
  *
@@ -675,23 +683,24 @@ export class ProviderProcessSupervisor {
     try {
       if (!this.launch.ownsProcessLifetime) return { status: "not-owned" };
       if (this.launch.cleanup !== undefined) {
-        const cleanup = await this.#ownedCleanup(options.cleanupResult);
-        if (!cleanup.cleaned)
-          return {
-            status: "incomplete",
-            reason: cleanup.reason,
-            cleanupResult: cleanup,
-          };
         const graceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+        const exitObservedBeforeCleanup = this.#exitObservation !== undefined;
+        const cleanup = await this.#ownedCleanup(options.cleanupResult);
+        if (!cleanup.cleaned) {
+          // Process tables can show the launcher mid-exit until verification
+          // gives up. The supervisor's own exit observation is positive proof
+          // that verification lacked, so verify again only after it arrives.
+          if (exitObservedBeforeCleanup || !(await this.waitForExit(graceMs)))
+            return incompleteCleanup(cleanup);
+          const settled = await this.launch.cleanup();
+          return settled.cleaned
+            ? { status: "verified-cleanup" }
+            : incompleteCleanup(settled);
+        }
         if (await this.waitForExit(graceMs))
           return { status: "verified-cleanup" };
         const retried = await this.launch.cleanup();
-        if (!retried.cleaned)
-          return {
-            status: "incomplete",
-            reason: retried.reason,
-            cleanupResult: retried,
-          };
+        if (!retried.cleaned) return incompleteCleanup(retried);
         if (await this.waitForExit(graceMs))
           return { status: "verified-cleanup" };
         return {

@@ -94,12 +94,12 @@ export const javaScriptSemanticQueryResultSchema = z.strictObject({
   unknowns: z.array(javaScriptSemanticUnknownSchema),
   expected_match_node_ids: z.array(semanticNodeIdSchema),
   summary: z.strictObject({
-    total_seed_matches: z.number().int().min(0),
-    traversed_nodes: z.number().int().min(0),
-    traversed_relations: z.number().int().min(0),
-    traversed_functions: z.number().int().min(0),
-    traversed_modules: z.number().int().min(0),
-    relevant_unknowns: z.number().int().min(0),
+    total_seed_matches: z.int().min(0),
+    traversed_nodes: z.int().min(0),
+    traversed_relations: z.int().min(0),
+    traversed_functions: z.int().min(0),
+    traversed_modules: z.int().min(0),
+    relevant_unknowns: z.int().min(0),
   }),
   coverage: z.strictObject({
     status: z.enum(["complete", "partial", "unavailable"]),

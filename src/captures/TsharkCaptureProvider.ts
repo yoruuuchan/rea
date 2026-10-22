@@ -60,6 +60,7 @@ import {
   OwnedCommandFailure,
 } from "../process/OwnedCommand.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
+import { privateWorkspaceFailure } from "../process/privateWorkspaceFailure.js";
 
 const OPERATION = "inspect_packet_capture";
 export const TSHARK_PROVIDER_IDENTITY = {
@@ -498,32 +499,13 @@ export class TsharkCaptureProvider implements PacketCapturePort {
         effectiveLimits,
         operation,
       );
-    if (phase === "workspace") {
-      const code =
-        cause instanceof Error &&
-        "code" in cause &&
-        typeof cause.code === "string"
-          ? cause.code
-          : null;
-      if (code === "ENOSPC" || code === "EDQUOT" || code === "EFBIG")
-        return new AnalysisResourceConstraintError(
-          operation,
-          "file-size",
-          `Private analysis workspace failed (${code}): ${reason}`,
-          { workspace_path: workspacePath, system_code: code },
-          { cause },
-        );
-      return new ProviderAdapterError(TSHARK_PROVIDER_IDENTITY.id, operation, {
+    if (phase === "workspace")
+      return privateWorkspaceFailure(
+        TSHARK_PROVIDER_IDENTITY.id,
+        operation,
         cause,
-        userMessage: `Cannot prepare the private analysis workspace: ${reason}`,
-        diagnostics: {
-          stage: "workspace",
-          workspace_path: workspacePath,
-          system_code: code,
-          reason,
-        },
-      });
-    }
+        workspacePath,
+      );
     if (phase === "integrity") {
       const detail = {
         cause,

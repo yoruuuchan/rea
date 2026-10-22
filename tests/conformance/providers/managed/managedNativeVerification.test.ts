@@ -6,6 +6,7 @@ import { createEvidence } from "../../../../src/domain/evidence.js";
 import {
   managedNativeVerificationInputSchema,
   managedNativeVerificationResultSchema,
+  pinvokeVerificationSchema,
 } from "../../../../src/domain/managed/managedNativeVerificationSchemas.js";
 import { managedNativeBoundaryInspectionSchema } from "../../../../src/domain/managed/managedArtifact.js";
 import { inspectMachoSchema } from "../../../../src/domain/native/nativeInspection.js";
@@ -88,6 +89,31 @@ const inputWithImportScope = (scope: string | null) => {
     }),
   };
 };
+
+it("keeps empty import names readable in managed Evidence but invalid in verification output", () => {
+  const input = exampleInput();
+  const parsed = managedNativeBoundaryInspectionSchema.parse(
+    input.managed_boundaries.normalized_result,
+  );
+  const declaration = parsed.pinvoke_imports[0];
+  if (declaration === undefined) throw new Error("missing P/Invoke example");
+
+  const historicalBoundary = managedNativeBoundaryInspectionSchema.parse({
+    ...parsed,
+    pinvoke_imports: [{ ...declaration, import_name: "" }],
+  });
+  expect(historicalBoundary.pinvoke_imports[0]?.import_name).toBe("");
+
+  const verification = verifyManagedNativeBoundaries(input).pinvoke_imports[0];
+  if (verification === undefined)
+    throw new Error("missing verification result");
+  expect(
+    pinvokeVerificationSchema.safeParse({
+      ...verification,
+      managed: { ...verification.managed, import_name: "" },
+    }).success,
+  ).toBe(false);
+});
 
 describe("managed/native boundary Evidence identity", () => {
   it("rejects managed boundary Evidence whose subject digest differs from its artifact", () => {

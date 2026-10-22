@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import { digestCanonicalValue } from "../domain/canonicalDigest.js";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
 import type {
@@ -38,6 +39,8 @@ interface ElectronContext {
   readonly discovery: CdpEndpointDiscovery;
   readonly target: CdpEndpointTarget;
   readonly input: InspectElectronPageInput;
+  /** Header admission resolved by the provider's composition root. */
+  readonly asarHeaderAdmission: AsarHeaderAdmission;
   readonly signal?: AbortSignal;
   readonly progress?: ProgressReporter;
 }
@@ -157,6 +160,7 @@ const authorizeInitialFrames = async (
   const frames = await captureFrames(
     result,
     state.completeness,
+    context.asarHeaderAdmission,
     context.signal,
   );
   if (frames[0] === undefined)
@@ -200,6 +204,7 @@ const captureElectronContent = async (
     scripts: state.scripts,
     frameIds,
     completeness: state.completeness,
+    asarHeaderAdmission: context.asarHeaderAdmission,
   });
   const workers = await captureElectronWorkers({
     connection: context.connection,
@@ -209,6 +214,7 @@ const captureElectronContent = async (
     frameIds,
     completeness: state.completeness,
     limitations: state.limitations,
+    asarHeaderAdmission: context.asarHeaderAdmission,
   });
   return { dom, scripts, resources, workers };
 };
@@ -224,7 +230,11 @@ const assertStableMainFrame = async (
     context.sessionId,
     context.signal,
   );
-  const afterPath = await mainFilePath(result, context.signal);
+  const afterPath = await mainFilePath(
+    result,
+    context.asarHeaderAdmission,
+    context.signal,
+  );
   if (afterPath === undefined)
     throw new BrowserObservationError("inspect_web_page", "target_not_allowed");
   if (state.navigationDuringCapture || afterPath !== expectedPath)
@@ -244,6 +254,7 @@ const navigatedFrameId = (event: CdpEvent): string | undefined => {
 export const captureFrames = async (
   result: unknown,
   completeness: CdpCaptureCompleteness,
+  asarHeaderAdmission: AsarHeaderAdmission,
   signal?: AbortSignal,
 ): Promise<ElectronPageInspection["frames"]> => {
   const frameTree = recordValue(requiredRecord(result).frameTree);
@@ -264,6 +275,7 @@ export const captureFrames = async (
       cdpStringValue(frame.url) ?? "",
       signal,
       "inspect_electron_page",
+      asarHeaderAdmission,
     );
     if (path === undefined) {
       completeness.exclude("frames", "out_of_target_scope");
@@ -301,6 +313,7 @@ const captureResources = async (
       cdpStringValue(resource.url) ?? "",
       context.signal,
       "inspect_electron_page",
+      context.asarHeaderAdmission,
     );
     if (path === undefined) {
       completeness.exclude("resources", "out_of_target_scope");
@@ -361,6 +374,7 @@ const captureDom = async (
         documentUrl,
         context.signal,
         "inspect_electron_page",
+        context.asarHeaderAdmission,
       )) === undefined
     ) {
       completeness.exclude("dom", "out_of_target_scope");
@@ -399,6 +413,7 @@ const captureDom = async (
 
 const mainFilePath = async (
   result: unknown,
+  asarHeaderAdmission: AsarHeaderAdmission,
   signal?: AbortSignal,
 ): Promise<string | undefined> => {
   const frameTree = recordValue(requiredRecord(result).frameTree);
@@ -407,6 +422,7 @@ const mainFilePath = async (
     cdpStringValue(frame?.url) ?? "",
     signal,
     "inspect_electron_page",
+    asarHeaderAdmission,
   );
 };
 

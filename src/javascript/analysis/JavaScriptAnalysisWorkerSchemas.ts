@@ -17,7 +17,7 @@ import {
 
 const range =
   javaScriptSemanticNodeSchema.shape.identity.shape.source_range.unwrap();
-const count = z.number().int().nonnegative();
+const count = z.int().nonnegative();
 const strings = z.array(z.string());
 const pathContext = z.enum(["module-specifier", "filesystem-expression"]);
 const findingContext = {

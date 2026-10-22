@@ -23,7 +23,7 @@ const identity = z.object({
   artifact: z.object({
     path: z.string(),
     sha256: z.string(),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
   }),
 });
 export const wasmInterfaceComparisonSchema = z.object({

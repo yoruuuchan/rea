@@ -1,0 +1,198 @@
+import type { JsonValue } from "../jsonValue.js";
+import { overlapsWrite } from "./environmentStateWriteAttribution.js";
+import {
+  collectionPathOf,
+  isObject,
+  lastSegmentValue,
+  listItems,
+  pointerTo,
+  scalarText,
+  type JsonObject,
+  type StateEntity,
+  type StateRecordFacts,
+  type StateView,
+} from "./environmentStateRules.js";
+
+/** Where an observed entity object was found: the record and a JSON pointer into its response. */
+export interface Observed {
+  readonly ordinal: number;
+  readonly pointer: string;
+  readonly object: JsonObject;
+  readonly id: string;
+}
+
+/** Objects a response carries where an entity may be, in precedence tiers: the root, one member, then the element of a one-element array at the root or in one member. */
+const entitySlots = (body: JsonValue): [string, JsonValue][][] => {
+  const members = isObject(body) ? Object.entries(body) : [];
+  const elements: [string, JsonValue][] =
+    Array.isArray(body) && body.length === 1 ? [["/0", body[0]!]] : [];
+  for (const [name, item] of members)
+    if (Array.isArray(item) && item.length === 1)
+      elements.push([`${pointerTo(name)}/0`, item[0]!]);
+  return [
+    [["", body]],
+    members.map(([name, item]): [string, JsonValue] => [pointerTo(name), item]),
+    elements,
+  ];
+};
+
+/** The entity object a response carries with an identity value the state does not hold yet: the only one in the first tier that has one. */
+export const newEntityIn = (
+  ordinal: number,
+  body: JsonValue | undefined,
+  idField: string,
+  held: (id: string) => boolean,
+): Observed | undefined => {
+  if (body === undefined) return undefined;
+  for (const tier of entitySlots(body)) {
+    const found = tier.flatMap(([pointer, object]) => {
+      const id = isObject(object) ? scalarText(object[idField]) : undefined;
+      // An object holding only the identity names the entity without showing it.
+      return isObject(object) &&
+        id !== undefined &&
+        !held(id) &&
+        Object.keys(object).some((key) => key !== idField)
+        ? [{ ordinal, pointer, object, id }]
+        : [];
+    });
+    if (found.length > 0) return found.length === 1 ? found[0] : undefined;
+  }
+  return undefined;
+};
+
+/** The fields an item or list view shows; undefined for any other view. */
+export const viewFields = (
+  view: StateView | undefined,
+): readonly string[] | undefined =>
+  view?.shape === "item" || view?.shape === "list" ? view.fields : undefined;
+
+/** The fields of the view a read observed an entity with, when that view had shown the entity before. */
+export const shownBefore = (
+  viewOf: (ordinal: number) => StateView | undefined,
+  entity: Pick<StateEntity, "record_ordinals">,
+  ordinal: number,
+): readonly string[] => {
+  const view = viewOf(ordinal);
+  const shown = entity.record_ordinals.some(
+    (earlier) => viewOf(earlier)?.tool === view?.tool,
+  );
+  return (shown ? viewFields(view) : undefined) ?? [];
+};
+
+/** What a forward search for an observation reads: records after a position, read views and response bodies. */
+export interface ObservationSearch {
+  readonly records: readonly StateRecordFacts[];
+  readonly from: number;
+  /** A timed write's completion. A read begun while it still ran may show the prior state. */
+  readonly after?: number;
+  readonly viewOf: (ordinal: number) => StateView | undefined;
+  readonly withBody: <T>(
+    ordinal: number,
+    use: (body: JsonValue | undefined) => T,
+  ) => T;
+}
+
+const succeeded = (record: StateRecordFacts): boolean =>
+  record.status !== null && record.status >= 200 && record.status < 300;
+
+/**
+ * The first later read, before the next write, that shows a written entity: an item read of
+ * `id` when given, else an item read of an unheld id or a collection read listing exactly one.
+ * A read begun while the write still ran may show the earlier state, so it is not chosen.
+ */
+export const laterObservation = (
+  search: ObservationSearch,
+  target: {
+    readonly type: string;
+    readonly collection: string;
+    readonly idField: string;
+    readonly id?: string;
+    readonly held: (id: string) => boolean;
+    readonly isWrite: (record: StateRecordFacts) => boolean;
+    /** An item read matches by this instead of equal collection strings. */
+    readonly sameItem?: (record: StateRecordFacts) => boolean;
+    /** Skip read views that do not cover the facts needed by this observation. */
+    readonly covers?: (
+      view: Extract<StateView, { readonly shape: "item" | "list" }>,
+    ) => boolean;
+  },
+): Observed | undefined => {
+  for (const record of search.records.slice(search.from + 1)) {
+    if (target.isWrite(record)) return undefined;
+    // The same overlap the check path ignores: the write was still running when this read began.
+    if (search.after !== undefined && overlapsWrite(search.after, record.start))
+      continue;
+    const view = search.viewOf(record.ordinal);
+    if (
+      !succeeded(record) ||
+      (view?.shape !== "item" && view?.shape !== "list") ||
+      view.type !== target.type
+    )
+      continue;
+    if (target.covers !== undefined && !target.covers(view)) continue;
+    const found =
+      view.shape === "item"
+        ? itemObservation(search, record, view.pointer, target)
+        : listObservation(search, record, view.pointer, target);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
+const itemObservation = (
+  search: ObservationSearch,
+  record: StateRecordFacts,
+  pointer: string,
+  target: Parameters<typeof laterObservation>[1],
+): Observed | undefined => {
+  const pathId = lastSegmentValue(record.path);
+  const named =
+    target.sameItem?.(record) ??
+    (collectionPathOf(record, true) === target.collection &&
+      (target.id === undefined ? !target.held(pathId) : pathId === target.id));
+  if (!named) return undefined;
+  const id = target.id ?? pathId;
+  return search.withBody(record.ordinal, (body) => {
+    const object =
+      body === undefined
+        ? undefined
+        : entitySlots(body)
+            .flat()
+            .find(([at]) => at === pointer)?.[1];
+    return isObject(object) && scalarText(object[target.idField]) === id
+      ? { ordinal: record.ordinal, pointer, object, id }
+      : undefined;
+  });
+};
+
+const listObservation = (
+  search: ObservationSearch,
+  record: StateRecordFacts,
+  pointer: string,
+  target: Parameters<typeof laterObservation>[1],
+): Observed | undefined => {
+  if (collectionPathOf(record, false) !== target.collection) return undefined;
+  return search.withBody(record.ordinal, (body) => {
+    const items = body === undefined ? undefined : listItems(body, pointer);
+    const unheld = (items ?? [])
+      .map((object, index) => ({
+        object,
+        index,
+        id: scalarText(object[target.idField]),
+      }))
+      .filter(
+        (entry): entry is { object: JsonObject; index: number; id: string } =>
+          entry.id !== undefined &&
+          !target.held(entry.id) &&
+          (target.id === undefined || entry.id === target.id),
+      );
+    return unheld.length === 1
+      ? {
+          ordinal: record.ordinal,
+          pointer: `${pointer}/${String(unheld[0]!.index)}`,
+          object: unheld[0]!.object,
+          id: unheld[0]!.id,
+        }
+      : undefined;
+  });
+};

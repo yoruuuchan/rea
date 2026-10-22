@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import type {
   ElectronPageInspection,
   InspectElectronPageInput,
@@ -26,6 +27,7 @@ interface ElectronScriptCaptureInput {
   readonly scripts: readonly ElectronScriptDraft[];
   readonly frameIds: ReadonlySet<string>;
   readonly completeness: CdpCaptureCompleteness;
+  readonly asarHeaderAdmission: AsarHeaderAdmission;
 }
 
 /** Normalize local script metadata and optionally approved source. */
@@ -51,6 +53,7 @@ export const captureElectronScripts = async (
         script.rawUrl,
         input.signal,
         "inspect_electron_page",
+        input.asarHeaderAdmission,
       );
       if (path === undefined) {
         input.completeness.exclude("scripts", "out_of_target_scope");

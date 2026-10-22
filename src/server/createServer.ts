@@ -12,8 +12,13 @@ import { wasmArtifactModule } from "../composition/wasm.js";
 import { registerWasmTools } from "./registerWasmTools.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { captureProviderEnvironment } from "./providerEnvironment.js";
-import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
+import {
+  createElfNotesService,
+  createPeResourcesService,
+} from "../composition/binaryDiagnostics.js";
+import type { ElfNotesService } from "../application/binaryDiagnostics/ElfNotesService.js";
 import type { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
+import { registerElfNotesTool } from "./registerElfNotesTool.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
 import {
@@ -46,8 +51,12 @@ import { registerAnalysisViewTool } from "./registerAnalysisViewTool.js";
 import { registerBinaryDiagnosticsTools } from "./registerBinaryDiagnosticsTools.js";
 import { FridaInstrumentationManager } from "../frida/FridaInstrumentationManager.js";
 import { registerFridaTools } from "./registerFridaTools.js";
-import { createBinaryLayoutService } from "../composition/binaryDiagnostics.js";
+import {
+  createByteEntropyService,
+  createBinaryLayoutService,
+} from "../composition/binaryDiagnostics.js";
 import type { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayoutService.js";
+import { createCatalogIdentity } from "../catalogIdentity.js";
 import { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import {
   createToolResultDelivery,
@@ -161,6 +170,10 @@ const RECOVERY_INSTRUCTIONS =
   "Recovery: For invalid arguments, read the connected tool's input schema (refresh tools/list if stale), fix the reported fields and do not repeat the unchanged call. A returned REA provider_timeout is a server/provider deadline: follow its remediation and reuse accessible partial Evidence. A host error such as 'timed out awaiting tools/call' without a REA result is a client deadline, not proof that work or cleanup stopped. Do not repeat the unchanged analysis. Increase the host's tool deadline with execution/cleanup/delivery headroom; when configuration is not editable, report the required setting (Codex: mcp_servers.<server>.tool_timeout_sec, seconds). Server analysis_timeout_ms, when advertised, is a separate millisecond budget; raising it cannot fix a shorter client deadline. Session state does not establish completion of every target-free operation.";
 
 export interface CreateServerOptions {
+  /** Preserve the connection's creation time when materializing its runtime. */
+  readonly startedAt?: string;
+  /** Existing SDK server whose deferred registrations are being materialized. */
+  readonly mcpServer?: EvidenceMcpServer;
   readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly delivery?: ToolResultDelivery;
   readonly packetCapture?: PacketCaptureService;
@@ -298,6 +311,10 @@ const createMcpServer = (
     delivery,
     compactPresentation,
     omitOutputSchemas,
+    createCatalogIdentity(
+      compactPresentation,
+      omitOutputSchemas ? "off" : "full",
+    ),
   );
 
 /**
@@ -338,6 +355,7 @@ export const createServer = (
   const il2cppMetadata =
     options.il2cppMetadata ?? createIl2cppMetadataService();
   const peResources = createPeResourcesService();
+  const elfNotes = createElfNotesService();
   const electronFuses = options.electronFuses ?? createElectronFuseService();
   const webNetworkCapture =
     options.webNetworkCapture ?? createWebNetworkCaptureService(environment);
@@ -361,14 +379,28 @@ export const createServer = (
     webModuleTrace,
     javascriptRecovery,
   };
-  const startedAt = new Date().toISOString();
+  const startedAt = options.startedAt ?? new Date().toISOString();
   const logger = options.logger ?? silentLogger;
-  const server = createMcpServer(
-    session,
-    delivery,
-    selectCompactInputSchemaPresentation(environment),
-    omitOutputSchemas,
-  );
+  const server =
+    options.mcpServer ??
+    createMcpServer(
+      session,
+      delivery,
+      selectCompactInputSchemaPresentation(environment),
+      omitOutputSchemas,
+    );
+  if (options.mcpServer !== undefined) {
+    server.attachRuntime(
+      session === undefined
+        ? undefined
+        : (evidence) => session.recordEvidence(evidence),
+      delivery,
+      createCatalogIdentity(
+        selectCompactInputSchemaPresentation(environment),
+        omitOutputSchemas ? "off" : "full",
+      ),
+    );
+  }
   const gdbSessions = new GdbSessionManager({
     environment: providerEnvironment,
   });
@@ -425,6 +457,7 @@ export const createServer = (
       modelArtifact.close(),
       gpuCodeObjects.close(),
       peResources.close(),
+      elfNotes.close(),
       electronFuses.close(),
       webNetworkCapture.close(),
       javascriptRecovery.close?.() ?? Promise.resolve(),
@@ -488,6 +521,7 @@ export const createServer = (
     rustBinary,
     il2cppMetadata,
     peResources,
+    elfNotes,
     electronFuses,
     webNetworkCapture,
   };
@@ -719,6 +753,7 @@ const registerConfiguredAnalysisTools = (
     rustBinary,
     il2cppMetadata,
     peResources,
+    elfNotes,
     webNetworkCapture,
     artifactResources,
   }: ServerToolContext,
@@ -747,6 +782,7 @@ const registerConfiguredAnalysisTools = (
   registerBinaryDiagnosticsTools(
     server,
     options.binaryLayout ?? createBinaryLayoutService(environment),
+    createByteEntropyService(artifactResources),
     toolLogger,
     recordEvidence,
     evidenceById,
@@ -763,6 +799,13 @@ const registerConfiguredAnalysisTools = (
   registerPeResourcesTool(
     server,
     peResources,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerElfNotesTool(
+    server,
+    elfNotes,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -900,6 +943,7 @@ interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly rustBinary: RustBinaryService;
   readonly il2cppMetadata: Il2cppMetadataService;
   readonly peResources: PeResourcesService;
+  readonly elfNotes: ElfNotesService;
   readonly electronFuses: ElectronFuseService;
   readonly webNetworkCapture: WebNetworkCaptureService;
   readonly artifactResources: ArtifactResourceScope;
@@ -980,6 +1024,7 @@ const registerObservationTools = ({
   recordEvidenceWithUnknown,
   withAdmittedAnalysis,
   artifactResources,
+  environment,
 }: ServerToolContext): void => {
   const common = { logger, recordEvidence, withAdmittedAnalysis };
   registerWebScriptTool(server, { ...common, artifactResources });
@@ -996,6 +1041,7 @@ const registerObservationTools = ({
   registerElectronTools(server, {
     ...common,
     artifactResources,
+    environment,
     evidenceById,
     electron: options.electronObservation,
     electronActive: options.electronActiveObservation,

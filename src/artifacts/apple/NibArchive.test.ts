@@ -77,6 +77,37 @@ describe("NIBArchive decoder", () => {
     expect(decoded.coder_version).toBe(10);
   });
 
+  it("reads boolean value tags with AppKit's polarity", () => {
+    // Raw tags, independent of the fixture encoder's boolean encoding: AppKit's
+    // decodeBoolForKey: returns NO for tag 4 and YES for tag 5 in compiled nibs.
+    const archive = encodeArchive({
+      classes: ["NSButton"],
+      objects: [
+        {
+          classIndex: 0,
+          values: {
+            NSControlContinuous: null,
+            NSControlRefusesFirstResponder: null,
+            NSEnabled: 0,
+          },
+        },
+      ],
+    });
+    const values = archive.readUInt32LE(38);
+    // Value records: key varint, then type tag; both fields start as nil (9).
+    expect([...archive.subarray(values, values + 4)]).toEqual([
+      0x80, 9, 0x81, 9,
+    ]);
+    const tagged = Buffer.from(archive);
+    tagged[values + 1] = 4;
+    tagged[values + 3] = 5;
+    expect(decodeNibArchive(tagged).objects[0]?.values).toEqual({
+      NSControlContinuous: false,
+      NSControlRefusesFirstResponder: true,
+      NSEnabled: 0,
+    });
+  });
+
   it("counts AppKit outlet, action, and binding connector objects", () => {
     const archive = encodeArchive({
       classes: [

@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import { createHash } from "node:crypto";
 import type { Readable } from "node:stream";
 
@@ -30,10 +31,11 @@ export const hashReadable = async (
   stream: Readable,
   signal?: AbortSignal,
   integrityAlgorithm?: "sha256" | "md5",
+  asarHeaderAdmission?: AsarHeaderAdmission,
 ): Promise<HashResult> => {
   const hash = createHash("sha256");
   const md5 = integrityAlgorithm === "md5" ? createHash("md5") : undefined;
-  const probe = createArtifactClassificationProbe();
+  const probe = createArtifactClassificationProbe(asarHeaderAdmission);
   let bytes = 0;
   for await (const raw of stream) {
     abortIfNeeded(signal);

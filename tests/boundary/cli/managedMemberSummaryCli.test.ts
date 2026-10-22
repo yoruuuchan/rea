@@ -386,9 +386,7 @@ cliTest.for(
     const target = join(root, "fixture.dll");
     const destination = join(root, "parent.json");
     const marker = join(root, "signal.json");
-    const preload = resolve(
-      "tests/fixtures/managedPublicationSignalPreload.mjs",
-    );
+    const preload = resolve("tests/fixtures/evidencePublicationPreload.mjs");
     const prefix = join(await realpath(root), ".rea-write-");
     await writeFile(target, memberFixture());
     const reply = await cli.run({
@@ -407,7 +405,7 @@ cliTest.for(
       environment: {
         HOME: root,
         REA_LOG_LEVEL: "silent",
-        REA_TEST_MANAGED_PUBLICATION: JSON.stringify({
+        REA_TEST_EVIDENCE_PUBLICATION: JSON.stringify({
           prefix,
           marker,
           signal,

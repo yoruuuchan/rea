@@ -19,6 +19,7 @@ import {
   type StateToolFacts,
   type StateView,
 } from "./environmentStateRules.js";
+import { pagesOnly } from "./environmentStatePaging.js";
 import { ENTRY_BYTES, textBytes } from "./webNetworkRouteTemplates.js";
 
 /** A read tool whose recordings locate entities of one type at one pointer. */
@@ -173,8 +174,9 @@ const listFacts = (
         body === undefined ? undefined : listItems(body, plan.pointer);
       if (body === undefined || items === undefined) return;
       items.forEach((item) => union.add(item));
-      // Once a list cannot be the whole collection, its membership is not compared again.
-      if (all && record.query === undefined) {
+      // Once a list cannot be the whole collection, its membership is not compared again; a line
+      // that only pages its list can still hold all of it.
+      if (all && pagesOnly(record.query)) {
         const ids = items.map((item) => scalarText(item[field]) ?? "");
         const expected = context
           .inCollection(plan.type, collectionPathOf(record, false))

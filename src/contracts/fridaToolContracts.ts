@@ -24,7 +24,6 @@ const remoteConnection = z.strictObject({
   certificate: z.string().min(1).optional(),
   origin: z.string().min(1).optional(),
   keepalive_interval: z
-    .number()
     .int()
     .positive()
     .describe(FRIDA_KEEPALIVE_INTERVAL_DESCRIPTION)
@@ -100,7 +99,7 @@ export const FRIDA_TOOL_CONTRACTS = [
       device_id: z.string(),
       processes: z.array(
         z.strictObject({
-          pid: z.number().int().nonnegative(),
+          pid: z.int().nonnegative(),
           name: z.string(),
           identifier: z.string().nullable(),
         }),
@@ -124,7 +123,7 @@ export const FRIDA_TOOL_CONTRACTS = [
       .strictObject({
         mode: z.enum(["attach", "spawn"]),
         ...deviceSelector.shape,
-        pid: z.number().int().positive().optional(),
+        pid: z.int().positive().optional(),
         program: localPathStringSchema.optional(),
         argv: z.array(z.string()).optional(),
       })
@@ -262,13 +261,13 @@ export const FRIDA_TOOL_CONTRACTS = [
       .strictObject({
         mode: z.enum(["attach", "spawn"]),
         ...deviceSelector.shape,
-        pid: z.number().int().positive().optional(),
+        pid: z.int().positive().optional(),
         program: localPathStringSchema.optional(),
         argv: z.array(z.string()).optional(),
         source_kind: z.enum(["inline", "file"]),
         source: z.string().optional(),
         path: localPathStringSchema.optional(),
-        duration_ms: z.number().int().min(0).max(60_000).default(1_000),
+        duration_ms: z.int().min(0).max(60_000).default(1_000),
       })
       .refine(
         (value) =>

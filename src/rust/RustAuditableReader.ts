@@ -23,11 +23,11 @@ const packageSchema = z.strictObject({
   version: z.string().min(1),
   source: z.string().min(1),
   kind: z.enum(["runtime", "build"]).optional(),
-  dependencies: z.array(z.number().int().nonnegative()).optional(),
+  dependencies: z.array(z.int().nonnegative()).optional(),
   root: z.boolean().optional(),
 });
 const documentVersionSchema = z.object({
-  format: z.number().int().nonnegative().max(0xffff_ffff).optional(),
+  format: z.int().nonnegative().max(0xffff_ffff).optional(),
 });
 const documentSchema = documentVersionSchema
   .extend({

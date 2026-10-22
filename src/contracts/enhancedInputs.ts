@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAXIMUM_DISPATCH_METADATA_INPUT_BYTES } from "../domain/native/objcSwiftMetadata.js";
 import { nativeValueTraceInputSchema } from "../domain/native/nativeValueTrace.js";
 const traceLiteralInputSchema = z.strictObject({
   query: z.string().min(1),
@@ -18,12 +19,7 @@ export type CallRelationshipDirection = z.output<
 export const enhancedInputSchemas = {
   trace_native_values: nativeValueTraceInputSchema,
   inspect_native_dispatch_metadata: z.strictObject({
-    max_records: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_ENHANCED_RECORDS)
-      .default(5_000),
+    max_records: z.int().min(1).max(MAX_ENHANCED_RECORDS).default(5_000),
     objc_class_import_addresses: z
       .array(z.string())
       .max(MAX_ENHANCED_RECORDS)
@@ -37,6 +33,15 @@ export const enhancedInputSchemas = {
         "Whether the candidate addresses include every selected class-label row; false keeps binding coverage partial when the existing record budget truncates the scan.",
       )
       .optional(),
+    max_input_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAXIMUM_DISPATCH_METADATA_INPUT_BYTES)
+      .optional()
+      .describe(
+        "Largest target file REA reads into memory for binary metadata, in bytes. Omitted: 67108864 (64 MiB). The whole file counts, including every slice of a universal Mach-O. At most 1073741824 (1 GiB).",
+      ),
   }),
   get_objc_classes: z.strictObject({ pattern: z.string().default("") }),
   get_objc_protocols: z.strictObject({}),
@@ -91,9 +96,9 @@ export const enhancedInputSchemas = {
       .describe(
         "A unique compiled UI action selector, interface object ID, native symbol or exact function address",
       ),
-    max_depth: z.number().int().min(0).max(32).default(8),
-    max_nodes: z.number().int().min(1).max(2_000).default(250),
-    max_edges: z.number().int().min(1).max(5_000).default(500),
+    max_depth: z.int().min(0).max(32).default(8),
+    max_nodes: z.int().min(1).max(2_000).default(250),
+    max_edges: z.int().min(1).max(5_000).default(500),
   }),
 } as const;
 

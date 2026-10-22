@@ -11,6 +11,7 @@ import { logCliCommand } from "../cliLogging.js";
 import { parseEnvironmentName } from "../config/environmentName.js";
 import {
   parseMcpHttpEndpoint,
+  mcpHttpListenerPortSchema,
   type McpHttpEndpoint,
 } from "../config/mcpHttpEndpoint.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -349,7 +350,7 @@ export const registerEnvironmentCommands = (
   registerExportCommand(cli, logger);
   cli.command(CLI_COMMANDS.environmentServe, {
     description:
-      "Serve an environment manifest as an agent environment over streamable HTTP until SIGINT or SIGTERM: read tools answer from the state the capture observed, derived at startup, or every tool replays retained capture records with --replay-only or when the state is unavailable",
+      "Serve an environment manifest as an agent environment over streamable HTTP until SIGINT or SIGTERM: read tools, and write tools whose effect the capture confirmed, answer from the state the capture observed, derived at startup, or every tool replays retained capture records with --replay-only or when the state is unavailable",
     args: z.object({ manifest: manifestArgument }),
     options: z.object({
       evidence: evidenceOption,
@@ -364,11 +365,7 @@ export const registerEnvironmentCommands = (
         .min(1)
         .optional()
         .describe("Listener address; default MCP_HOST, else 127.0.0.1"),
-      port: z
-        .number()
-        .int()
-        .min(0)
-        .max(65535)
+      port: mcpHttpListenerPortSchema
         .optional()
         .describe(
           "Listener port; default MCP_PORT, else 0 for an ephemeral port",

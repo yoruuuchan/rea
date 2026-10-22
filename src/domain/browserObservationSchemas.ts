@@ -37,9 +37,9 @@ export const browserTargetListSchema = z.object({
   browser: browserVersionSchema,
   targets: z.array(browserTargetSchema),
   excluded: z.object({
-    disallowed_origin: z.number().int().min(0),
-    unsupported_url: z.number().int().min(0),
-    non_page: z.number().int().min(0),
+    disallowed_origin: z.int().min(0),
+    unsupported_url: z.int().min(0),
+    non_page: z.int().min(0),
   }),
   limitations: z.array(z.string()),
 });
@@ -123,8 +123,8 @@ const browserNetworkRequestSchema = z.object({
   initiator: z.object({
     type: z.string(),
     url: z.string().nullable(),
-    line: z.number().int().min(0).nullable(),
-    column: z.number().int().min(0).nullable(),
+    line: z.int().min(0).nullable(),
+    column: z.int().min(0).nullable(),
   }),
   body_shapes: z.object({
     status: z.enum(["not_approved", "included", "partial", "unavailable"]),
@@ -147,24 +147,24 @@ const browserConsoleEventSchema = z.object({
       "CDP argument types by argument position; null when the producer argument inventory is absent or not an array.",
     ),
   url: z.string().nullable(),
-  line: z.number().int().min(0).nullable(),
-  column: z.number().int().min(0).nullable(),
+  line: z.int().min(0).nullable(),
+  column: z.int().min(0).nullable(),
   text_capture: z.object({
     status: z.enum(["not_approved", "included", "unavailable"]),
     values: z.array(
       z.object({
-        argument_index: z.number().int().min(0),
+        argument_index: z.int().min(0),
         type: z.string(),
         text: z.string(),
       }),
     ),
-    retained_bytes: z.number().int().min(0),
+    retained_bytes: z.int().min(0),
   }),
 });
 const browserWebSocketFrameSchema = z.object({
   direction: z.enum(["sent", "received"]),
-  opcode: z.number().int().min(0).max(15).nullable(),
-  payload_bytes: z.number().int().min(0).nullable(),
+  opcode: z.int().min(0).max(15).nullable(),
+  payload_bytes: z.int().min(0).nullable(),
   payload_shape: z
     .object({
       format: z.enum(["json", "text", "binary"]),
@@ -221,7 +221,7 @@ const browserSafeMetadataSchema = z.object({
       request_id: z.string(),
       url: z.string(),
       mime_type: z.string().nullable(),
-      content_length: z.number().int().min(0).nullable(),
+      content_length: z.int().min(0).nullable(),
       content_encoding: z.string().nullable(),
       csp: z.object({
         directives: z.array(
@@ -230,8 +230,8 @@ const browserSafeMetadataSchema = z.object({
             sources: z.array(browserCspSourceSchema),
           }),
         ),
-        nonce_count: z.number().int().min(0),
-        hash_count: z.number().int().min(0),
+        nonce_count: z.int().min(0),
+        hash_count: z.int().min(0),
       }),
       links: z.array(browserLinkMetadataSchema),
       policies: z.object({
@@ -246,14 +246,14 @@ const browserSafeMetadataSchema = z.object({
   ),
   dom_urls: z.array(
     z.object({
-      node_index: z.number().int().min(0),
+      node_index: z.int().min(0),
       attribute: z.enum(["href", "src", "action", "formaction", "poster"]),
       url: z.string().nullable(),
       destination_scope: z.enum(["approved", "outside_policy", "unsupported"]),
     }),
   ),
   agent_hints: z.array(browserAgentHintSchema),
-  excluded_dom_urls: z.number().int().min(0),
+  excluded_dom_urls: z.int().min(0),
   headers_allowlisted: z.literal(true),
 });
 
@@ -264,25 +264,25 @@ export const webPageInspectionSchema = z.object({
   capture_window: z.object({
     started_at: z.iso.datetime(),
     ended_at: z.iso.datetime(),
-    observation_ms: z.number().int().min(0),
+    observation_ms: z.int().min(0),
   }),
   completeness: browserCompletenessSchema,
   frames: z.array(browserFrameSchema),
   dom: z.object({
-    total_nodes: z.number().int().min(0),
+    total_nodes: z.int().min(0),
     nodes: z.array(cdpDomNodeSchema),
   }),
   accessibility: z.object({
-    total_nodes: z.number().int().min(0),
+    total_nodes: z.int().min(0),
     text_capture: z.object({
       status: z.enum(["not_approved", "included", "unavailable"]),
-      retained_bytes: z.number().int().min(0),
-      excluded_fields: z.number().int().min(0),
+      retained_bytes: z.int().min(0),
+      excluded_fields: z.int().min(0),
     }),
     nodes: z.array(browserAxNodeSchema),
   }),
   scripts: z.object({
-    total: z.number().int().min(0),
+    total: z.int().min(0),
     items: z.array(browserScriptSchema),
   }),
   resources: z.array(browserResourceSchema),

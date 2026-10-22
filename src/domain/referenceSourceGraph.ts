@@ -52,13 +52,13 @@ const sourceFileSchema = z.union([
   z.strictObject({
     ...sourceFileBaseShape,
     sha256: digestSchema,
-    size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    size: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
     content_state: z.literal("hashed"),
   }),
   z.strictObject({
     ...sourceFileBaseShape,
     sha256: z.null(),
-    size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+    size: z.int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
     content_state: z.enum([
       "redacted-secret",
       "excluded",
@@ -225,8 +225,8 @@ const historicalSourceManifestBaseSchema = z.strictObject({
   graph_sha256: digestSchema,
   root_sha256: digestSchema,
   inventory_state: z.enum(["complete", "partial", "unknown"]),
-  entry_count: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  relationship_count: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  entry_count: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+  relationship_count: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
 });
 
 export type HistoricalSourceGraph = z.infer<typeof historicalSourceGraphSchema>;

@@ -1,3 +1,4 @@
+import { javascriptSourceRangeKey } from "../../domain/javascript/javascriptSourceCoordinates.js";
 import type { ApplicationNode } from "../../domain/javascript/javascriptApplicationGraphSchemas.js";
 import type { ElectronCallPath } from "../../domain/javascript/electronStaticAnalysisTypes.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
@@ -10,7 +11,6 @@ import {
 import {
   addElectronInferenceEdge,
   electronFindingSourceNode,
-  electronRangeKey,
 } from "./ElectronBoundaryGraphContext.js";
 import {
   artifactLocalIdentity,
@@ -191,13 +191,15 @@ const matches = (
     path.steps.some(
       (step) =>
         step.kind === sourceStepKind &&
-        electronRangeKey(step.location) === electronRangeKey(finding.location),
+        javascriptSourceRangeKey(step.location) ===
+          javascriptSourceRangeKey(finding.location),
     ) &&
     (invocation === undefined ||
       path.steps.some(
         (step) =>
           (step.kind === "call" || step.kind === "exposure") &&
-          electronRangeKey(step.location) === electronRangeKey(invocation),
+          javascriptSourceRangeKey(step.location) ===
+            javascriptSourceRangeKey(invocation),
       ))
   );
 };

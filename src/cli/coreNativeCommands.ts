@@ -1,3 +1,4 @@
+import { enhancedInputSchemas } from "../contracts/enhancedInputs.js";
 import { z } from "incur";
 
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
@@ -7,6 +8,7 @@ import type { Logger } from "pino";
 import {
   directAnalysisOptionsFromCli,
   nativeOpenOptionFields,
+  snapshotSelectionOption,
 } from "./options.js";
 import type { CliInstance } from "./types.js";
 
@@ -271,11 +273,12 @@ const registerNativeDispatchMetadataCommand = (
         .max(20_000)
         .default(5_000)
         .describe("Maximum symbol records to inspect"),
-      snapshot: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Load or update the local analysis snapshot"),
+      maxInputBytes:
+        enhancedInputSchemas.inspect_native_dispatch_metadata.shape
+          .max_input_bytes,
+      snapshot: snapshotSelectionOption.describe(
+        "Load or update the local analysis snapshot",
+      ),
       ...nativeOpenOptionFields,
     }),
     run: async ({ args, options }) =>
@@ -283,7 +286,12 @@ const registerNativeDispatchMetadataCommand = (
         runDirectAnalysis(
           args.path,
           "inspect_native_dispatch_metadata",
-          { max_records: options.maxRecords },
+          {
+            max_records: options.maxRecords,
+            ...(options.maxInputBytes === undefined
+              ? {}
+              : { max_input_bytes: options.maxInputBytes }),
+          },
           directAnalysisOptionsFromCli(logger, options),
         ),
       ),
@@ -360,11 +368,7 @@ const registerNativeApiCommand = (
       address: z.string().describe("Procedure name or address"),
     }),
     options: z.object({
-      snapshot: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Load and update a local analysis snapshot"),
+      snapshot: snapshotSelectionOption,
       ...nativeOpenOptionFields,
     }),
     run: ({ args, options }) =>

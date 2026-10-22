@@ -91,7 +91,7 @@ const inputSchemas = {
       document,
       start: explicitAddress.optional(),
       end: explicitAddress.optional(),
-      limit: z.number().int().min(1).max(1000).default(100),
+      limit: z.int().min(1).max(1000).default(100),
       cursor: z.string().min(1).optional(),
     })
     .superRefine(validateBytePattern),
@@ -99,7 +99,7 @@ const inputSchemas = {
   read_bytes: z.strictObject({
     document,
     address: explicitAddress,
-    length: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).default(256),
+    length: z.int().min(1).max(Number.MAX_SAFE_INTEGER).default(256),
   }),
   address_to_file_offset: z.strictObject({
     document,
@@ -217,7 +217,7 @@ const stringFacts = z
   .object({
     encoding: z.string().min(1),
     termination: z.enum(["missing", "present_or_not_required"]),
-    byte_length: z.number().int().min(0),
+    byte_length: z.int().min(0),
   })
   .strict();
 const baseItem = {
@@ -298,8 +298,8 @@ const resultSchemas = {
     .strictObject({
       document: identifier,
       segments: z.array(segment),
-      procedure_count: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-      string_count: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      procedure_count: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+      string_count: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
     })
     .transform(projectBinaryOverview),
   search_bytes: byteSearchResultSchema.superRefine((value, context) => {
@@ -326,7 +326,7 @@ const resultSchemas = {
     .strict(),
   address_to_file_offset: z.strictObject({
     address: canonicalAddress,
-    file_offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    file_offset: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   }),
   address_name: z.string().nullable(),
   list_documents: z.array(z.string().min(1)).length(1),

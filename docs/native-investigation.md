@@ -462,11 +462,33 @@ complete observation.
   `rea inspect-native-dispatch-metadata <app-or-binary>` prefers a validated macOS Mach-O byte reader. It decodes
   64-bit little-endian Objective-C class/metaclass records, superclass pointers,
   absolute/relative method entries, ivar offsets/sizes/alignment and protocol
-  declarations. It also decodes simple Swift conformances, static synchronous
-  witness slots, signed-relative pointers and non-generic, non-resilient class
-  vtable descriptors. Records include exact virtual addresses/file offsets and
+  declarations. It also decodes Swift nominal type declarations, simple Swift
+  conformances, static synchronous witness slots, signed-relative pointers and
+  non-generic, non-resilient class vtable descriptors. Records include exact virtual addresses/file offsets and
   artifact evidence. Vtable indexes are metadata word offsets; witness indexes
   start after the conformance header. Names unavailable in metadata remain null.
+  The byte reader holds the whole selected file in memory, so it admits files up
+  to 64 MiB / 67108864 bytes by default. Select a larger budget with
+  `max_input_bytes` (CLI `--max-input-bytes`), at most 1 GiB / 1073741824
+  bytes. The whole file counts, including every slice of a universal Mach-O.
+  Results record `input_admission` with the effective budget, its source
+  (`default` or `caller`) and the bytes retained. A refusal names the observed
+  file size, the effective budget and its source, and either the budget to
+  select or, above 1 GiB, a deep analysis provider.
+  `swift_decls` lists each `__swift5_types` nominal type descriptor, which
+  survives stripping: `kind` (`class`, `struct`, `enum`, or `actor` from the
+  class actor flag), the descriptor's own `name`, `module`, `qualified_name`
+  (`Outer.Inner`), `generic`, the metadata `accessor_address`, the descriptor
+  `location`, and evidence citing its `__swift5_types` record.
+  Private and local types set `anonymous_context` because their anonymous
+  context is omitted from `qualified_name`. When a parent context cannot be
+  resolved, such as an extension of a type named only by a mangled name, a
+  missing module, or a cyclic chain, `qualified_name` is null and the entry is
+  partial with a reason. Access level, superclass, conformances, and fields are
+  not reported by this facet. The `swift_declarations` coverage counters count
+  examined type records and fully decoded declarations. Class vtable recovery
+  reads the same descriptors, so an unreadable type record also keeps
+  `swift_class_vtable_descriptors` partial.
   The `swift_class_vtable_descriptors` coverage counters count examined vtable
   slots and successfully decoded slots, rather than type-section entries.
   The `objc_class_method_ivar_metadata` counters count admitted class and

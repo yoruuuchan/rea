@@ -7,10 +7,13 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { expect, it } from "vitest";
 
-import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisAccessDeniedError,
+  AnalysisInputError,
+} from "../../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import {
   resolveExecutable,
@@ -169,6 +172,121 @@ it.skipIf(process.platform === "win32")(
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  },
+);
+
+const SKIP_PERMISSIONS =
+  process.platform === "win32" || process.getuid?.() === 0;
+
+/** Remove search permission from `directory` for the duration of `run`. */
+const withoutSearchPermission = async <T>(
+  directory: string,
+  run: () => Promise<T>,
+): Promise<T> => {
+  await chmod(directory, 0o000);
+  try {
+    return await run();
+  } finally {
+    await chmod(directory, 0o700);
+  }
+};
+
+const deniedFixture = async () => {
+  const root = await createTestTempDirectory("rea-process-denied-");
+  const denied = join(root, "denied");
+  await mkdir(join(denied, "cwd"), { recursive: true });
+  const tool = join(denied, "tool");
+  await writeFile(tool, "#!/bin/sh\n", { mode: 0o755 });
+  return { root, denied, tool };
+};
+
+const runtimePathOutcome = async (
+  scenario: Parameters<typeof parseProcessScenario>[0],
+): Promise<unknown> => {
+  try {
+    return await resolveProcessScenarioRuntimePaths(
+      parseProcessScenario(scenario),
+    );
+  } catch (cause: unknown) {
+    return cause;
+  }
+};
+
+it.skipIf(SKIP_PERMISSIONS)(
+  "reports a search-denied working directory as host access denial",
+  async () => {
+    const { denied } = await deniedFixture();
+    const selected = join(denied, "cwd");
+    const failure = await withoutSearchPermission(denied, () =>
+      runtimePathOutcome({
+        executable: process.execPath,
+        working_directory: selected,
+      }),
+    );
+    expect(failure).toBeInstanceOf(AnalysisAccessDeniedError);
+    if (!(failure instanceof AnalysisAccessDeniedError)) return;
+    expect(projectAnalysisError(failure)).toMatchObject({
+      code: "access_denied",
+      details: {
+        operation: "capture_process_scenario",
+        path: selected,
+        system_code: "EACCES",
+        boundary: "filesystem-read",
+      },
+    });
+  },
+);
+
+it.skipIf(SKIP_PERMISSIONS)(
+  "reports a search-denied explicit executable as host access denial",
+  async () => {
+    const { root, denied, tool } = await deniedFixture();
+    const failure = await withoutSearchPermission(denied, () =>
+      runtimePathOutcome({
+        executable: "denied/tool",
+        working_directory: root,
+      }),
+    );
+    expect(failure).toBeInstanceOf(AnalysisAccessDeniedError);
+    if (!(failure instanceof AnalysisAccessDeniedError)) return;
+    expect(projectAnalysisError(failure)).toMatchObject({
+      code: "access_denied",
+      details: { path: tool, system_code: "EACCES" },
+    });
+  },
+);
+
+it.skipIf(SKIP_PERMISSIONS)(
+  "continues a PATH search past a search-denied directory",
+  async () => {
+    const { root, denied } = await deniedFixture();
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const tool = join(bin, "tool");
+    await writeFile(tool, "#!/bin/sh\n", { mode: 0o755 });
+    await withoutSearchPermission(denied, async () => {
+      await expect(
+        resolveExecutable("tool", root, [denied, bin].join(delimiter)),
+      ).resolves.toBe(tool);
+      const failure = await runtimePathOutcome({
+        executable: "tool",
+        working_directory: root,
+        environment: { PATH: denied },
+      });
+      expect(failure).toBeInstanceOf(AnalysisInputError);
+      if (!(failure instanceof AnalysisInputError)) return;
+      expect(projectAnalysisError(failure)).toMatchObject({
+        code: "invalid_request",
+        details: {
+          issues: [
+            {
+              path: ["executable"],
+              message: `executable could not be resolved: tool; checked ${join(denied, "tool")} (EACCES)`,
+            },
+          ],
+        },
+      });
+    });
   },
 );
 

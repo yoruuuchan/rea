@@ -149,6 +149,7 @@ REA 需要 Node.js 22.x（>=22.19）、24.x（>=24.11）或 26+，以及 npm。�
 | WASM 工件             | 驗證、節、精確的匯入/匯出 WAT 形式及解碼後的 WAT                | 呼叫方提供的 WABT 1.0.42；`inspect_wasm_artifact`                                                                  |
 | EVM 位元組碼          | 分派選擇器、位元組偏移、推斷的參數和狀態可變性                  | Linux x64 上的本地原始位元組/十六進位輸入載體；[離線 EVM 指南](../evm-bytecode.md)                                 |
 | Rust binaries         | Embedded cargo-auditable dependency list                        | [Rust binaries](../rust-binaries.md)                                                                               |
+| ELF notes             | PT_NOTE/SHT_NOTE owners, types, GNU build-id and ABI-tag fields | Built-in static ELF inspection; [ELF notes](../elf-notes.md)                                                       |
 | 已記錄的 Linux 崩潰   | 原始 note 記錄、每個已記錄執行緒的暫存器/訊號及可選的對映候選項 | Linux x64 上由呼叫方提供的 pwntools；可選的 GDB/pwndbg；[已記錄崩潰](../recorded-crashes.md)                       |
 | 桌面安裝目錄          | 執行階段候選、支持檔案、元件標記與後續操作                      | 有界的目錄與檔頭檢查；[桌面應用](../desktop-applications.md)                                                       |
 | JavaScript / Electron | 模組、匯入、source map、路由、IPC 和原生附加元件關係            | Node.js 和 npm；[應用分析](../javascript-application-workflows.md)                                                 |

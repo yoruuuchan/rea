@@ -862,7 +862,12 @@ const hydrate = (
     parserBudgetExhausted("working-memory");
   let outputLength = 0;
   let cursor = 4;
-  const ensureOutput = (length: number): number => {
+  /** Reserve the next output bytes and return a view of the retained buffer.
+   * Writers must use only this view: growth replaces `output`, so a reference
+   * taken before reserving would write into the superseded buffer. Every byte
+   * of the view must be written because growth leaves new capacity
+   * uninitialized. */
+  const reserveOutput = (length: number): Buffer => {
     if (
       !Number.isSafeInteger(length) ||
       length < 0 ||
@@ -890,29 +895,26 @@ const hydrate = (
       output = expanded;
     }
     outputLength = required;
-    return start;
+    return output.subarray(start, required);
   };
   const append = (chunk: Buffer): void => {
     if (!budget.consumeWork(chunk.length)) parserBudgetExhausted("work");
-    chunk.copy(output, ensureOutput(chunk.length));
+    chunk.copy(reserveOutput(chunk.length));
   };
   const appendZero = (length: number): void => {
     if (!budget.consumeWork(length)) parserBudgetExhausted("work");
-    const start = ensureOutput(length);
-    output.fill(0, start, outputLength);
+    reserveOutput(length).fill(0);
   };
   const appendRel = (target: bigint): void => {
     if (!budget.consumeWork(4)) parserBudgetExhausted("work");
     const delta = target - (base + BigInt(outputLength));
     if (delta < -0x80000000n || delta > 0x7fffffffn)
       throw new Error("Hydrated relative pointer does not fit int32");
-    const offset = ensureOutput(4);
-    output.writeInt32LE(Number(delta), offset);
+    reserveOutput(4).writeInt32LE(Number(delta), 0);
   };
   const appendPtr = (target: bigint): void => {
     if (!budget.consumeWork(8)) parserBudgetExhausted("work");
-    const offset = ensureOutput(8);
-    output.writeBigUInt64LE(target, offset);
+    reserveOutput(8).writeBigUInt64LE(target, 0);
   };
   const readFixup = (index: number): bigint => {
     const fixupLocation = dehydrated.end + BigInt(index * 4);

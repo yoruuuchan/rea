@@ -20,12 +20,23 @@ export const NATIVE_DISPATCH_METADATA_SOURCES = {
 export const inspectNativeDispatch = async (
   analysis: AnalysisOperationPort,
   maxRecords: number,
-  signal?: AbortSignal,
-  objcClassImportAddresses?: readonly string[],
-  objcClassImportAddressesComplete?: boolean,
+  options: {
+    readonly signal?: AbortSignal | undefined;
+    readonly objcClassImportAddresses?: readonly string[] | undefined;
+    readonly objcClassImportAddressesComplete?: boolean | undefined;
+    /** Binary metadata input budget; symbol-only inventories ignore it. */
+    readonly maxInputBytes?: number | undefined;
+  } = {},
 ): EnhancedResult => {
+  const {
+    signal,
+    objcClassImportAddresses,
+    objcClassImportAddressesComplete,
+    maxInputBytes,
+  } = options;
   const input = {
     max_records: maxRecords,
+    ...(maxInputBytes === undefined ? {} : { max_input_bytes: maxInputBytes }),
     ...(objcClassImportAddresses === undefined
       ? {}
       : {

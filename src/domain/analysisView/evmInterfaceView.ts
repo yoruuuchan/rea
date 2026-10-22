@@ -20,8 +20,8 @@ import { analysisTextPage } from "./analysisViewText.js";
 export const evmViewRequestSchema = z.strictObject({
   kind: z.literal("evm"),
   facet: z.enum(["functions", "bytecode_hex", "stdout", "stderr"]),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 });
 
 export const evmViewItemSchema = z.union([
@@ -40,7 +40,7 @@ export const evmSummarySchema = z.strictObject({
   diagnostics: evmInterfaceSchema.shape.diagnostics
     .omit({ stdout: true })
     .extend({
-      stdout_code_units: z.number().int().nonnegative(),
+      stdout_code_units: z.int().nonnegative(),
     }),
   limitations: evmInterfaceSchema.shape.limitations,
 });

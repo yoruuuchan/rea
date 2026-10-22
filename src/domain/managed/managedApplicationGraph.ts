@@ -22,6 +22,7 @@ import {
   assessManagedGraphOmissions,
   managedGraphEvidenceCoverage,
   managedGraphResultCoverage,
+  type ManagedGraphProjectionOmissions,
 } from "./managedApplicationGraphCoverage.js";
 import {
   addArtifactNode,
@@ -29,6 +30,10 @@ import {
   addBoundaryNodes,
   addMemberNodes,
 } from "./managedApplicationGraphNodes.js";
+import {
+  addMemberRelations,
+  relationOmissionLimitations,
+} from "./managedApplicationGraphRelations.js";
 import { digestSchema } from "../digests.js";
 import { prefixedDigestSchema } from "../digests.js";
 import { parseManagedInspectionEvidence } from "./managedInspectionEvidence.js";
@@ -66,15 +71,31 @@ export const managedApplicationGraphResultSchema = z.strictObject({
     managed_native_boundaries_evidence_id: evidenceIdSchema.nullable(),
   }),
   summary: z.strictObject({
-    graph_nodes: z.number().int().min(0),
-    graph_edges: z.number().int().min(0),
-    assemblies: z.number().int().min(0),
-    modules: z.number().int().min(0),
-    types: z.number().int().min(0),
-    methods: z.number().int().min(0),
-    fields: z.number().int().min(0),
-    pinvoke_imports: z.number().int().min(0),
-    native_implementations: z.number().int().min(0),
+    graph_nodes: z.int().min(0),
+    graph_edges: z.int().min(0),
+    assemblies: z.int().min(0),
+    modules: z.int().min(0),
+    types: z.int().min(0),
+    methods: z.int().min(0),
+    fields: z.int().min(0),
+    pinvoke_imports: z.int().min(0),
+    native_implementations: z.int().min(0),
+    // Graphs projected before call and field-access edges existed omit these
+    // counters; null means those relations were not projected, not zero.
+    calls: z
+      .int()
+      .min(0)
+      .nullable()
+      .default(null)
+      .describe("calls edges; null for graphs projected before calls edges"),
+    field_accesses: z
+      .int()
+      .min(0)
+      .nullable()
+      .default(null)
+      .describe(
+        "accesses edges; null for graphs projected before accesses edges",
+      ),
   }),
   graph: javascriptApplicationGraphSchema,
   coverage: z.strictObject({
@@ -144,7 +165,15 @@ export const projectManagedApplicationGraph = (
   addArtifactIdentityNodes(state, artifactNode, parsed);
   addMemberNodes(state, artifactNode, parsed);
   addBoundaryNodes(state, artifactNode, parsed);
-  const omissions = omittedCounts(parsed);
+  const relations = addMemberRelations(state, parsed);
+  const omissions = assessManagedGraphOmissions(
+    {
+      artifact: parsed.artifact?.result ?? null,
+      members: parsed.members?.result ?? null,
+      boundaries: parsed.boundaries?.result ?? null,
+    },
+    relations,
+  );
   const limitations = projectionLimitations(parsed, omissions);
   const graph = createJavaScriptApplicationGraph({
     schema: "JavaScriptApplicationGraph",
@@ -176,6 +205,8 @@ export const projectManagedApplicationGraph = (
         graph.nodes,
         "managed-native-implementation",
       ),
+      calls: countEdges(graph.edges, "calls"),
+      field_accesses: countEdges(graph.edges, "accesses"),
     },
     graph,
     coverage: managedGraphResultCoverage(omissions),
@@ -195,6 +226,11 @@ const countNodes = (
   nodes: readonly ApplicationNode[],
   kind: ApplicationNode["kind"],
 ): number => nodes.filter((node) => node.kind === kind).length;
+
+const countEdges = (
+  edges: readonly ApplicationEdge[],
+  relation: ApplicationEdge["relation"],
+): number => edges.filter((edge) => edge.relation === relation).length;
 
 const parseManagedInputs = (
   input: ProjectManagedApplicationGraphInput,
@@ -298,16 +334,9 @@ const assertConsistentModuleIdentity = (
   }
 };
 
-const omittedCounts = (parsed: ParsedManagedGraphInput) =>
-  assessManagedGraphOmissions({
-    artifact: parsed.artifact?.result ?? null,
-    members: parsed.members?.result ?? null,
-    boundaries: parsed.boundaries?.result ?? null,
-  });
-
 const projectionLimitations = (
   parsed: ParsedManagedGraphInput,
-  omissions: ReturnType<typeof omittedCounts>,
+  omissions: ManagedGraphProjectionOmissions,
 ): string[] => [
   "Managed graph projection preserves static metadata observations only; it does not execute managed code, load assemblies, or map managed tokens to native addresses.",
   ...(parsed.members === null
@@ -338,4 +367,5 @@ const projectionLimitations = (
         "Managed boundary tokens were not linked to member nodes because matching module MVID scope was not established.",
       ]
     : []),
+  ...relationOmissionLimitations(omissions.relations),
 ];

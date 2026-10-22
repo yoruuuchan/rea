@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
+import { uniqueSorted, uniqueSortedBy } from "../domain/canonicalOrdering.js";
+import { digestCanonicalValue } from "../domain/canonicalDigest.js";
 
 import type { Evidence } from "../domain/evidence.js";
 import {
@@ -407,12 +406,12 @@ const addCandidate = (
   }
   candidates.set(candidate.obligation_id, {
     ...current,
-    authority_references: uniqueBy(
+    authority_references: uniqueSortedBy(
       [...current.authority_references, ...candidate.authority_references],
       (reference) =>
         `${reference.evidence_id}:${reference.state}:${reference.location}`,
     ),
-    observed_cases: uniqueBy(
+    observed_cases: uniqueSortedBy(
       [...current.observed_cases, ...candidate.observed_cases],
       (item) => `${item.kind}:${item.evidence_id}:${item.location}`,
     ),
@@ -421,14 +420,14 @@ const addCandidate = (
       ...candidate.authority_references,
     ]),
     // Each observation keeps its own unresolved authority and next steps.
-    unavailable_authority: uniqueBy(
-      [...current.unavailable_authority, ...candidate.unavailable_authority],
-      (item) => item,
-    ),
-    required_next_evidence: uniqueBy(
-      [...current.required_next_evidence, ...candidate.required_next_evidence],
-      (item) => item,
-    ),
+    unavailable_authority: uniqueSorted([
+      ...current.unavailable_authority,
+      ...candidate.unavailable_authority,
+    ]),
+    required_next_evidence: uniqueSorted([
+      ...current.required_next_evidence,
+      ...candidate.required_next_evidence,
+    ]),
     // A generated ID digests its derivation key, so two generated candidates
     // with one ID are the same claim seen by several records. Only another
     // reviewed definition can introduce a competing definition.
@@ -448,20 +447,5 @@ const sourceState = (
   return "unknown";
 };
 
-const uniqueBy = <Value>(
-  values: readonly Value[],
-  key: (value: Value) => string,
-): Value[] =>
-  [...new Map(values.map((value) => [key(value), value])).values()].sort(
-    (left, right) => compareUnicodeCodePoints(key(left), key(right)),
-  );
-
 const obligationId = (key: string): string =>
-  `obl_${digest({ schema: "ReconstructionObligation", key })}`;
-
-const digest = (value: unknown): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError("Reconstruction obligation key is not canonical JSON");
-  return createHash("sha256").update(encoded).digest("hex");
-};
+  `obl_${digestCanonicalValue({ schema: "ReconstructionObligation", key }, "Reconstruction obligation key")}`;

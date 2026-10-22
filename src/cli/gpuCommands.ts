@@ -2,6 +2,7 @@ import { inspectGpuCodeObjectsInputSchema } from "../domain/gpu/gpuCodeObjects.j
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { safeParseJson } from "../domain/safeJson.js";
 import { z } from "incur";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
@@ -59,19 +60,23 @@ export const registerGpuCommands = (cli: CliInstance, logger: Logger): void => {
           for (const name of ["object_ids", "targets", "view"] as const) {
             const value = options[name];
             if (value === undefined) continue;
-            try {
-              selectors[name] = JSON.parse(value);
-            } catch (cause) {
+            const decoded = safeParseJson(value);
+            if (!decoded.ok) {
               return projectAnalysisError(
-                new AnalysisInputError("inspect_gpu_code_objects", { cause }, [
-                  {
-                    path: [name],
-                    reason: "invalid_format",
-                    message: `${name} must be valid JSON`,
-                  },
-                ]),
+                new AnalysisInputError(
+                  "inspect_gpu_code_objects",
+                  { cause: decoded.cause },
+                  [
+                    {
+                      path: [name],
+                      reason: "invalid_format",
+                      message: `${name} must be valid JSON`,
+                    },
+                  ],
+                ),
               );
             }
+            selectors[name] = decoded.value;
           }
           const rawInput = {
             path: absoluteCallerPath(args.path),

@@ -31,14 +31,11 @@ const reportSchema = z.looseObject({
     }),
   ),
   warnings: z.array(warningSchema),
-  total: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  elapsed_ms: z.number().int().nonnegative(),
+  total: z.int().nonnegative(),
+  failed: z.int().nonnegative(),
+  elapsed_ms: z.int().nonnegative(),
 });
-const rangeSchema = z.tuple([
-  z.number().int().nonnegative(),
-  z.number().int().nonnegative(),
-]);
+const rangeSchema = z.tuple([z.int().nonnegative(), z.int().nonnegative()]);
 const provenanceSchema = z.looseObject({
   format: z.string(),
   strategy: z.string(),

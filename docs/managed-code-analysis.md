@@ -428,6 +428,32 @@ Declared import inventory supports a bounded positive claim. Its absence does
 not exclude dynamic resolution, generated code, protected code, native helpers,
 or server-side behavior.
 
+## Application graph relations
+
+`project_managed_application_graph` turns member Evidence into `contains`
+edges for declarations, `imports` edges for P/Invoke declarations, and two
+relation kinds read from method bodies:
+
+- `calls` links two `managed-method` nodes when a `call`, `callvirt`, `newobj`
+  or `jmp` site in the caller targets a MethodDef in the inspected module.
+- `accesses` links a `managed-method` node to a `managed-field` node for each
+  field it loads, stores or takes the address of.
+
+Each edge stands for every site between one source and one target. Its
+properties carry `site_count` and per-opcode `opcodes` counts; `accesses`
+edges also list `access` as `read`, `write` and/or `address`. Edge evidence
+links the member Evidence.
+
+Some sites are counted rather than projected: calls to MemberRefs (members of
+other assemblies or of generic type instantiations), generic method
+instantiations (`MethodSpec`), unknown targets, `ldftn`/`ldvirtftn` function
+pointer loads, recursive self-calls (the graph has no self-loops), MemberRef
+fields, and sites whose method or field node is absent, for example under a
+type selection. Limitations name each counted class, and graph coverage is
+`partial` with `omitted_count` equal to the omitted sites when nothing else is
+incomplete. A missing `calls` edge is therefore not evidence that a method is
+never called.
+
 ## Evidence record shape
 
 Member comparison, application graph projection, and managed/native verification

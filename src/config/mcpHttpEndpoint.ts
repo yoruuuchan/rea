@@ -11,12 +11,15 @@ export const DEFAULT_MCP_HTTP_HOST = "127.0.0.1";
 /** Port 0 asks the host for an ephemeral port, reported by the listening log line. */
 export const DEFAULT_MCP_HTTP_PORT = 0;
 
+/** A listener may request an ephemeral port with 0; connected endpoints may not. */
+export const mcpHttpListenerPortSchema = z.number().int().min(0).max(65535);
+
 /** Decimal TCP port text, shared by the `--port` flag and `MCP_PORT`. */
 export const mcpHttpPortSchema = z
   .string()
   .regex(/^(?:0|[1-9]\d*)$/u)
   .transform(Number)
-  .pipe(z.number().int().min(0).max(65535));
+  .pipe(mcpHttpListenerPortSchema);
 
 const mcpHttpHostSchema = z.string().trim().min(1);
 

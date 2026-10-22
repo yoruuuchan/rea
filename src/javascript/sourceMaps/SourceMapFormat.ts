@@ -17,8 +17,8 @@ const leafSchema = z.object({
   sourcesContent: z.array(z.string().nullable()).nullable().optional(),
   names: z.array(z.string()).default([]),
   mappings: sourceMapMappingsSchema.regex(/^[A-Za-z0-9+/,;]*$/u),
-  ignoreList: z.array(z.number().int().min(0)).optional(),
-  x_google_ignoreList: z.array(z.number().int().min(0)).optional(),
+  ignoreList: z.array(z.int().min(0)).optional(),
+  x_google_ignoreList: z.array(z.int().min(0)).optional(),
 });
 const mapHeaderSchema = z.object({
   version: z.literal(3),
@@ -27,8 +27,8 @@ const mapHeaderSchema = z.object({
 });
 const sectionSchema = z.object({
   offset: z.object({
-    line: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    column: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    line: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+    column: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   }),
   map: z.unknown().optional(),
   url: z.unknown().optional(),

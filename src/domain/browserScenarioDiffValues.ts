@@ -151,7 +151,7 @@ export const browserScenarioDiffSchema = z.strictObject({
   }),
   alignment: z.strictObject({
     status: z.enum(["aligned", "partial", "failed"]),
-    aligned_steps: z.number().int().min(0),
+    aligned_steps: z.int().min(0),
     before_only: z.array(z.string().min(1)),
     after_only: z.array(z.string().min(1)),
     failures: z.array(alignmentFailureSchema),
@@ -159,8 +159,8 @@ export const browserScenarioDiffSchema = z.strictObject({
   steps: z.array(
     z.strictObject({
       step_id: z.string().min(1),
-      before_step_index: z.number().int().min(0),
-      after_step_index: z.number().int().min(0),
+      before_step_index: z.int().min(0),
+      after_step_index: z.int().min(0),
       before_action: z.string().min(1),
       after_action: z.string().min(1),
       status: z.enum(["changed", "unchanged", "unknown"]),
@@ -168,7 +168,7 @@ export const browserScenarioDiffSchema = z.strictObject({
     }),
   ),
   artifact_diffs: z.strictObject({
-    total: z.number().int().min(0),
+    total: z.int().min(0),
   }),
   limitations: z.array(z.string().min(1)),
 });

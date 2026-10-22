@@ -3,12 +3,12 @@ import type { UnverifiedProcessCapture } from "./processCapture.js";
 import type { ProcessObservationSource } from "./processObservation.js";
 
 const byteRetentionSchema = z.strictObject({
-  budget_bytes: z.number().int().nonnegative(),
-  observed_bytes: z.number().int().nonnegative(),
-  retained_bytes: z.number().int().nonnegative(),
-  observed_frames: z.number().int().nonnegative(),
-  retained_frames: z.number().int().nonnegative(),
-  unknown_size_frames: z.number().int().nonnegative().optional(),
+  budget_bytes: z.int().nonnegative(),
+  observed_bytes: z.int().nonnegative(),
+  retained_bytes: z.int().nonnegative(),
+  observed_frames: z.int().nonnegative(),
+  retained_frames: z.int().nonnegative(),
+  unknown_size_frames: z.int().nonnegative().optional(),
 });
 
 const enumerationOmissionReasonSchema = z.enum([
@@ -19,8 +19,8 @@ const enumerationOmissionReasonSchema = z.enum([
 
 /** Filesystem enumeration and whole-file digest coverage for one checkpoint. */
 export const filesystemCoverageSchema = z.strictObject({
-  files_limit: z.number().int().nonnegative(),
-  depth_limit: z.number().int().nonnegative(),
+  files_limit: z.int().nonnegative(),
+  depth_limit: z.int().nonnegative(),
   enumeration_truncated: z.boolean(),
   enumeration_reasons: z.array(
     z.enum([
@@ -36,13 +36,13 @@ export const filesystemCoverageSchema = z.strictObject({
       system_code: z.string().nullable(),
     }),
   ),
-  hash_budget_bytes: z.number().int().nonnegative(),
-  hashed_bytes: z.number().int().nonnegative(),
+  hash_budget_bytes: z.int().nonnegative(),
+  hashed_bytes: z.int().nonnegative(),
   hash_omissions: z.array(
     z.strictObject({
       path: z.string(),
-      size_bytes: z.number().int().nonnegative(),
-      remaining_budget_bytes: z.number().int().nonnegative(),
+      size_bytes: z.int().nonnegative(),
+      remaining_budget_bytes: z.int().nonnegative(),
       reason: z.enum([
         "file_bytes_budget",
         "file_changed_or_short_read",
@@ -64,9 +64,9 @@ export const processCaptureTruncationDetailsSchema = z.strictObject({
   ),
   normalized_terminal: z
     .strictObject({
-      budget_bytes: z.number().int().nonnegative(),
-      retained_bytes: z.number().int().nonnegative(),
-      omitted_frames: z.number().int().nonnegative(),
+      budget_bytes: z.int().nonnegative(),
+      retained_bytes: z.int().nonnegative(),
+      omitted_frames: z.int().nonnegative(),
     })
     .optional()
     .describe(
@@ -75,11 +75,11 @@ export const processCaptureTruncationDetailsSchema = z.strictObject({
   filesystem_before: filesystemCoverageSchema,
   filesystem_after: filesystemCoverageSchema,
   process: z.strictObject({
-    sample_limit: z.number().int().nonnegative(),
+    sample_limit: z.int().nonnegative(),
     sampling_partial: z.boolean(),
-    retained_samples: z.number().int().nonnegative(),
+    retained_samples: z.int().nonnegative(),
     sample_limit_reached: z.boolean(),
-    sampling_failures: z.number().int().nonnegative(),
+    sampling_failures: z.int().nonnegative(),
     first_sampling_failure: z.string().nullable(),
     coverage: z.literal("sampled"),
   }),

@@ -1,3 +1,4 @@
+import { javascriptSourceRangeKey } from "../../domain/javascript/javascriptSourceCoordinates.js";
 import type { ApplicationNode } from "../../domain/javascript/javascriptApplicationGraphSchemas.js";
 import type {
   ElectronBrowserWindowFinding,
@@ -21,7 +22,6 @@ import {
   addElectronAstEdge,
   addElectronInferenceEdge,
   electronFindingSourceNode,
-  electronRangeKey,
 } from "./ElectronBoundaryGraphContext.js";
 import {
   artifactPathResolutionProperties,
@@ -86,11 +86,11 @@ const addBrowserWindow = (
     identity: artifactLocalIdentity(
       file.sha256,
       "electron-browser-window",
-      electronRangeKey(value.location),
+      javascriptSourceRangeKey(value.location),
     ),
     observations: [
       {
-        label: `BrowserWindow@${electronRangeKey(value.location)}`,
+        label: `BrowserWindow@${javascriptSourceRangeKey(value.location)}`,
         properties: {
           source_path: file.path,
           options_status: value.options_status,
@@ -202,7 +202,7 @@ const addContextBridge = (
     identity: artifactLocalIdentity(
       file.sha256,
       "electron-context-bridge",
-      `${value.world}:${value.api_key ?? value.api_key_expression ?? "[missing]"}:${electronRangeKey(value.location)}`,
+      `${value.world}:${value.api_key ?? value.api_key_expression ?? "[missing]"}:${javascriptSourceRangeKey(value.location)}`,
     ),
     observations: [
       {
@@ -271,7 +271,7 @@ const addUtilityProcess = (
     identity: artifactLocalIdentity(
       file.sha256,
       "electron-utility-process",
-      `${value.module_path ?? value.module_expression}:${electronRangeKey(value.location)}`,
+      `${value.module_path ?? value.module_expression}:${javascriptSourceRangeKey(value.location)}`,
     ),
     observations: [
       {

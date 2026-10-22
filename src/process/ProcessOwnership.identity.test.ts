@@ -219,6 +219,76 @@ it
   },
 );
 
+it
+  .skipIf(typeof process.getuid !== "function")
+  .each(["credentials", "non-dumpable"] as const)(
+  "records an unrelated same-UID Linux process whose environment is withheld for %s",
+  async (restriction) => {
+    const diagnostic = "EACCES: permission denied, open '/proc/908/environ'";
+    const verify = async (
+      processGroupId: number,
+      environmentRestriction: typeof restriction | undefined,
+    ) => {
+      const row: ProcessTableEntry = {
+        pid: 908,
+        parentPid: 1,
+        processGroupId,
+        uid: process.getuid!(),
+        state: "S",
+        command: "unrelated-process",
+      };
+      const host: ProcessOwnershipHost = {
+        platform: "linux",
+        signalGroup: vi.fn(),
+        listProcesses: () => Promise.resolve([row]),
+        environment: () => Promise.resolve({}),
+        runTokens: () =>
+          Promise.resolve(
+            new Map([
+              [908, { state: "unavailable", reason: diagnostic } as const],
+            ]),
+          ),
+        processIdentities: (entries) =>
+          Promise.resolve(
+            new Map(
+              entries.map((entry) => [
+                entry.pid,
+                {
+                  ...observedIdentity(entry, "current-generation"),
+                  effectiveUid: process.getuid!(),
+                  ...(environmentRestriction === undefined
+                    ? {}
+                    : { environmentRestriction }),
+                },
+              ]),
+            ),
+          ),
+      };
+      return verifyNoTokenOwnedProcesses("run-token", host, undefined, {
+        leaderPid: 100,
+        processGroupId: 100,
+        evidenceOwner: new ProcessOwnershipEvidenceOwner(),
+      });
+    };
+
+    await expect(verify(908, restriction)).resolves.toMatchObject({
+      cleaned: true,
+      unverified: [{ pid: 908, diagnostic }],
+    });
+    // EACCES alone and a withheld member of the owned group stay fail-closed.
+    for (const [processGroupId, environmentRestriction] of [
+      [908, undefined],
+      [100, restriction],
+    ] as const)
+      await expect(
+        verify(processGroupId, environmentRestriction),
+      ).resolves.toMatchObject({
+        cleaned: false,
+        failures: [{ pid: 908, reason: "environment-unreadable" }],
+      });
+  },
+);
+
 it.each(["omitted", "throws"] as const)(
   "keeps a matching token unresolved when the first native identity is %s",
   async (firstRead) => {

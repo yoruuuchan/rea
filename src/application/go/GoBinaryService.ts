@@ -1,3 +1,4 @@
+import { metadataReportSubjectFormat } from "../../domain/apple/machoTargetSelection.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { GoBinaryPort } from "./GoBinaryPort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
@@ -73,7 +74,7 @@ export class GoBinaryService {
         {
           path: value.artifact.path,
           sha256: value.artifact.sha256,
-          format: value.format === "macho" ? "mach-o" : value.format,
+          format: metadataReportSubjectFormat(value),
           ...(architecture === undefined ? {} : { architecture }),
         },
         this.provider.identity,

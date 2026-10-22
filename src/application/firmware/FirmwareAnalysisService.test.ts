@@ -8,6 +8,7 @@ import {
 } from "../../domain/firmware/firmwareAnalysis.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { err, ok } from "../../domain/result.js";
+import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 
 const fixture = (
   operation: FirmwareOperation,
@@ -68,15 +69,35 @@ it.each(["inspect_firmware_regions", "extract_firmware"] as const)(
   "retains %s Evidence after late cancellation and preserves provider failure precedence",
   async (operation) => {
     const { input, execution } = fixture(operation);
+    const profile = createAnalysisProfile(
+      { ...execution.provider, version: "1" },
+      {
+        signature_database: "caller-selected snapshot",
+      },
+    );
+    const coverage = {
+      status: "unknown",
+      reason: "No call graph examined",
+    } as const;
+    const observation = {
+      ...execution,
+      analysisProfile: profile,
+      relationshipCoverage: coverage,
+    };
     const control = await new FirmwareAnalysisService({
-      execute: async () => ok(execution),
+      execute: async () => ok(observation),
     }).execute(operation, input);
     if (!control.ok) throw control.error;
+    expect(control.value).toMatchObject({
+      raw_result: { source: "controlled producer" },
+      analysis_profile: profile,
+      relationship_coverage: coverage,
+    });
     const controller = new AbortController();
     const result = await new FirmwareAnalysisService({
       execute: async () => {
         controller.abort();
-        return ok(execution);
+        return ok(observation);
       },
     }).execute(operation, input, { signal: controller.signal });
     expect(result).toMatchObject({

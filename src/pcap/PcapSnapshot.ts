@@ -22,6 +22,7 @@ import {
 } from "../filesystem/RegularFile.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
 import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRootUnavailableError.js";
+import { privateWorkspaceFailure } from "../process/privateWorkspaceFailure.js";
 
 const OPERATION = "inspect_pcap_capture";
 const MAX_CAPTURE_BYTES = 2 * 1024 ** 3;
@@ -53,13 +54,7 @@ export class PcapSnapshot {
           cause.message,
           { cause, retryable: cause.retryable },
         );
-      throw new AnalysisResourceConstraintError(
-        OPERATION,
-        "file-size",
-        "Cannot allocate the owned capture workspace",
-        null,
-        { cause },
-      );
+      throw privateWorkspaceFailure("pcap", OPERATION, cause, null);
     }
   }
 
@@ -237,13 +232,7 @@ export class PcapSnapshot {
           cause: cancellation.reason,
         });
       if (cause instanceof AnalysisError) throw cause;
-      throw new AnalysisResourceConstraintError(
-        OPERATION,
-        "file-size",
-        "Owned capture snapshot I/O failed",
-        null,
-        { cause },
-      );
+      throw privateWorkspaceFailure("pcap", OPERATION, primary, this.root.path);
     }
   }
 

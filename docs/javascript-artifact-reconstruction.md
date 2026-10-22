@@ -106,13 +106,16 @@ only reduces delivery; source selection reduces text acquisition and analysis.
 Explicit native provider or snapshot routing rejects `--source-path` rather
 than ignoring it.
 
-ASAR header/index admission is a fixed 16 MiB / 16777216 bytes for this
-release. There is no runtime override. The archive index is read before any
-member can be selected, so `source_paths`, `--source-path`, `detail:
-"summary"`, `max_heap_mb`, and available host memory do not bypass or raise
-it. When the header exceeds that allowance, the failure names this budget.
-Analyze an extracted application directory, which does not admit an ASAR
-header, or supply an archive whose header fits. Repeating the unchanged
+ASAR header/index admission defaults to 16 MiB / 16777216 bytes. Set
+`REA_ASAR_MAX_HEADER_BYTES` in the environment that starts REA to a decimal
+byte count of at most 268435456 (256 MiB) to raise or lower it; restart REA
+after changing it. Invalid values are configuration errors, never a silent
+fallback. The archive index is read before any member can be selected, so
+`source_paths`, `--source-path`, `detail: "summary"`, `max_heap_mb`, and
+available host memory do not bypass or raise it. When the header exceeds the
+effective allowance, the failure names it, whether it came from the default or
+the setting, and the setting's limits. Alternatively, analyze an extracted
+application directory, which does not admit an ASAR header. Repeating the unchanged
 request fails the same way.
 
 ## Read the analysis

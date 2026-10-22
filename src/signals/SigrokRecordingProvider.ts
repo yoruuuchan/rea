@@ -63,6 +63,7 @@ import {
   OwnedCommandFailure,
 } from "../process/OwnedCommand.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
+import { privateWorkspaceFailure } from "../process/privateWorkspaceFailure.js";
 
 const OPERATION = "decode_signal_recording";
 export const SIGROK_PROVIDER_IDENTITY = {
@@ -475,32 +476,13 @@ export class SigrokRecordingProvider implements SignalRecordingPort {
         effectiveLimits,
         operation,
       );
-    if (phase === "workspace") {
-      const code =
-        cause instanceof Error &&
-        "code" in cause &&
-        typeof cause.code === "string"
-          ? cause.code
-          : null;
-      if (code === "ENOSPC" || code === "EDQUOT" || code === "EFBIG")
-        return new AnalysisResourceConstraintError(
-          operation,
-          "file-size",
-          `Private analysis workspace failed (${code}): ${reason}`,
-          { workspace_path: workspacePath, system_code: code },
-          { cause },
-        );
-      return new ProviderAdapterError(SIGROK_PROVIDER_IDENTITY.id, operation, {
+    if (phase === "workspace")
+      return privateWorkspaceFailure(
+        SIGROK_PROVIDER_IDENTITY.id,
+        operation,
         cause,
-        userMessage: `Cannot prepare the private analysis workspace: ${reason}`,
-        diagnostics: {
-          stage: "workspace",
-          workspace_path: workspacePath,
-          system_code: code,
-          reason,
-        },
-      });
-    }
+        workspacePath,
+      );
     if (phase === "integrity") {
       const detail = {
         cause,

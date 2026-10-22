@@ -15,6 +15,7 @@ import {
   deliverCliAnalysisEvidence,
 } from "./analysisEvidenceDelivery.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
+import { explicitSensitiveValueOptions } from "./explicitSensitiveArguments.js";
 
 /** Expose offline historical capture inspection with the same selection contract as MCP. */
 export const registerWebNetworkCaptureCommands = (
@@ -54,12 +55,7 @@ export const registerWebNetworkCaptureCommands = (
         .array(cliIntegerArgument(0))
         .optional()
         .describe("Zero-based producer ordinals; repeat to select several"),
-      sensitiveValue: z
-        .array(z.string().min(1))
-        .default([])
-        .describe(
-          "Literal string values explicitly marked sensitive; repeat as needed",
-        ),
+      ...explicitSensitiveValueOptions,
       captureTimeoutMs:
         inspectWebNetworkCaptureInputSchema.shape.capture_timeout_ms,
     }),

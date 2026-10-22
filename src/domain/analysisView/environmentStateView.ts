@@ -87,6 +87,131 @@ const viewSchema = z.discriminatedUnion("shape", [
   }),
 ]);
 
+const ordinalSchema = z.number().int().nonnegative();
+const clockFormatSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("iso"),
+    separator: z.enum(["T", " "]),
+    fraction: z.number().int().nonnegative(),
+    zone: z.string(),
+  }),
+  z.strictObject({ kind: z.literal("epoch"), unit: z.enum(["s", "ms"]) }),
+]);
+const ruled = { field: z.string() };
+const fieldRuleSchema = z.discriminatedUnion("rule", [
+  z.strictObject({
+    ...ruled,
+    rule: z.literal("identity"),
+    generator: z.enum(["sequence", "uuid", "token"]),
+  }),
+  z.strictObject({
+    ...ruled,
+    rule: z.literal("sequence"),
+    scope: z.enum(["collection", "type"]),
+  }),
+  z.strictObject({ ...ruled, rule: z.literal("unique") }),
+  z.strictObject({
+    ...ruled,
+    rule: z.literal("clock"),
+    format: clockFormatSchema,
+  }),
+  z.strictObject({ ...ruled, rule: z.literal("echo") }),
+  z.strictObject({ ...ruled, rule: z.literal("copy"), from: z.string() }),
+  z.strictObject({ ...ruled, rule: z.literal("path"), from: z.string() }),
+  z.strictObject({ ...ruled, rule: z.literal("slug"), from: z.string() }),
+  z.strictObject({ ...ruled, rule: z.literal("template"), from: z.string() }),
+  z.strictObject({ ...ruled, rule: z.literal("increment") }),
+  z.strictObject({
+    ...ruled,
+    rule: z.literal("constant"),
+    value: jsonValueSchema,
+  }),
+]);
+const insertRuleSchema = z.union([
+  z.strictObject({ rule: z.enum(["first", "last"]) }),
+  z.strictObject({
+    rule: z.literal("sorted"),
+    field: z.string(),
+    direction: z.enum(["ascending", "descending"]),
+  }),
+]);
+const writePlanSchema = z.strictObject({
+  tool: z.string(),
+  effect: z.enum(["create", "update", "delete", "document", "none"]),
+  target: z
+    .string()
+    .nullable()
+    .describe(
+      "The entity type an entity effect writes, or the document view a document write changes.",
+    ),
+  served: z.boolean(),
+  reason: z
+    .enum([
+      "no-state-target",
+      "no-call",
+      "body-unusable",
+      "no-observation",
+      "unexplained-change",
+      "contradicted",
+      "side-effect",
+      "unconfirmed",
+      "incomplete-entities",
+    ])
+    .nullable(),
+  exemplar_ordinal: ordinalSchema
+    .nullable()
+    .describe("The first successful recorded call the plan was built from."),
+  observation: z
+    .strictObject({ ordinal: ordinalSchema, pointer: z.string() })
+    .nullable()
+    .describe(
+      "The record whose response showed the written entity or document, and a JSON pointer to it.",
+    ),
+  response: z
+    .strictObject({
+      ordinal: ordinalSchema,
+      shape: z.enum(["entity", "identity", "empty", "recorded"]),
+      pointer: z.string().nullable(),
+    })
+    .nullable(),
+  body: z
+    .strictObject({
+      accepted: z.array(z.string()),
+      fixed: z.array(
+        z.strictObject({ member: z.string(), sent: jsonValueSchema }),
+      ),
+      required: z.array(z.string()),
+      identity: z.string().nullable(),
+      kinds: z.array(
+        z.strictObject({
+          member: z.string(),
+          kind: z.enum(["array", "boolean", "number", "object", "string"]),
+        }),
+      ),
+    })
+    .nullable()
+    .describe(
+      "Body members the application stored as sent (accepted), members accepted only with their recorded value (fixed), members every call sends (required), and the JSON type a later call stored an accepted member as when the observation does not show it (kinds).",
+    ),
+  rules: z
+    .array(fieldRuleSchema)
+    .describe(
+      "How written fields get their values; unlisted fields of a created entity keep the observed value.",
+    ),
+  collection: z
+    .string()
+    .nullable()
+    .describe(
+      "For a create whose recorded values are tied to its collection, the only collection it writes to.",
+    ),
+  insert: insertRuleSchema.nullable(),
+  merge: z.enum(["merge", "replace"]).nullable(),
+  checked_record_ordinals: z
+    .array(ordinalSchema)
+    .describe("Later reads that reproduced from the state after this write."),
+  contradicted_by: ordinalSchema.nullable(),
+});
+
 export const environmentStateFields = {
   origin: z
     .string()
@@ -146,6 +271,17 @@ export const environmentStateFields = {
     }),
   ),
   views: z.array(viewSchema),
+  writes: z
+    .array(writePlanSchema)
+    .describe(
+      "One plan per tool whose method may change state: its modelled effect, and whether the capture's later reads confirmed it (served).",
+    ),
+  write_clock: z
+    .string()
+    .nullable()
+    .describe(
+      "The instant a served clock starts from: the end of the capture's last timed record.",
+    ),
   unknowns: z.array(
     z.strictObject({
       kind: z.enum([

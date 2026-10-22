@@ -22,8 +22,8 @@ import {
 export const managedViewRequestSchema = z.strictObject({
   kind: z.literal("managed"),
   collection: z.enum(["references", "resources", "attributes"]),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 });
 
 export const managedViewItemSchema = z.union([
@@ -37,9 +37,9 @@ export const managedSummarySchema = managedArtifactInspectionSchema
   .omit({ references: true, resources: true, attributes: true })
   .extend({
     reported_counts: z.strictObject({
-      references: z.number().int().nonnegative(),
-      resources: z.number().int().nonnegative(),
-      attributes: z.number().int().nonnegative(),
+      references: z.int().nonnegative(),
+      resources: z.int().nonnegative(),
+      attributes: z.int().nonnegative(),
     }),
     identity_scope: managedMemberInspectionSchema.shape.identity_scope,
   });

@@ -226,3 +226,8 @@ keeps default valid calls and typed refusals while checking full producer
 constraints separately. Five isolated suites passed 14 tests across call paths,
 ADB start, browser scenarios, source selection and managed analysis. The first
 browser attempt failed and remains recorded; no performance cohort changed.
+
+The subsequent [startup audit](mcp-startup.md) extends this harness with
+source/bundle bindings and a post-materialization directory check. Its new
+measurements are a separate cohort; reproduce this report at its recorded
+revision when comparing the original timing and model-session receipts.

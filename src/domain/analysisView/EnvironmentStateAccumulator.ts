@@ -46,6 +46,8 @@ type StateFields = Pick<
   | "entities"
   | "documents"
   | "views"
+  | "writes"
+  | "write_clock"
   | "unknowns"
   | "coverage"
   | "limitations"
@@ -91,6 +93,17 @@ const redactedWriteSchema = z.object({
 const contentSchema = z.object({
   response: z.object({ content: z.object({ text: z.string() }) }),
 });
+const requestSchema = z.object({
+  request: z.object({
+    postData: z.object({ mimeType: z.string(), text: z.string() }),
+  }),
+});
+const responseSizeSchema = z.object({
+  response: z.object({
+    status: z.number(),
+    content: z.object({ text: z.string().optional() }).optional(),
+  }),
+});
 
 interface RecordEntry {
   readonly facts: StateRecordFacts;
@@ -115,7 +128,7 @@ const UNKNOWNS: StateView["unknowns"] = [
   {
     kind: "state-transition",
     statement:
-      "The state is one snapshot from before the first related recorded write; it states no effects of writes.",
+      "The state is one snapshot from before the first related recorded write; write effects are modelled only from the calls the capture recorded, and served only where its later reads confirmed them.",
   },
 ];
 
@@ -241,6 +254,43 @@ export class EnvironmentStateAccumulator extends EnvironmentManifestAccumulator 
     return value === undefined ? { kind: "unusable" } : { kind: "json", value };
   }
 
+  /** Parse one recorded request body as state JSON, as response bodies are admitted. */
+  #requestBody(ordinal: number): ParsedBody | null {
+    const entry = this.#entries.get(ordinal);
+    const request = requestSchema.safeParse(entry?.record.reported);
+    if (
+      entry === undefined ||
+      !request.success ||
+      !isJsonLike(mediaTypeEssence(request.data.request.postData.mimeType))
+    )
+      return { kind: "unusable" };
+    const { mimeType, text } = request.data.request.postData;
+    if (Buffer.byteLength(text, "utf8") > STATE_BODY_LIMIT_BYTES)
+      return { kind: "unusable" };
+    if (!this.temporary(RECORD_SCRATCH_BYTES + textBytes(text.length) * 4))
+      return null;
+    try {
+      const value = stateBodyJson(mimeType, { bodyText: text });
+      return value === undefined
+        ? { kind: "unusable" }
+        : { kind: "json", value };
+    } finally {
+      this.releaseTemporary();
+    }
+  }
+
+  /** Whether a record's response carried no body: a 204, or empty content. */
+  #emptyResponse(ordinal: number): boolean {
+    const parsed = responseSizeSchema.safeParse(
+      this.#entries.get(ordinal)?.record.reported,
+    );
+    return (
+      parsed.success &&
+      (parsed.data.response.status === 204 ||
+        (parsed.data.response.content?.text ?? "") === "")
+    );
+  }
+
   /** Project the init state of the manifest's primary origin; records keep timeline order. */
   finishState(): Result<StateFields, AnalysisError> {
     const manifest = this.finish();
@@ -274,6 +324,8 @@ export class EnvironmentStateAccumulator extends EnvironmentManifestAccumulator 
       timeline,
       budget: {
         body: (ordinal) => this.#body(ordinal),
+        requestBody: (ordinal) => this.#requestBody(ordinal),
+        emptyResponse: (ordinal) => this.#emptyResponse(ordinal),
         retain: (bytes) => this.retain(bytes),
         release: () => this.releaseTemporary(),
       },

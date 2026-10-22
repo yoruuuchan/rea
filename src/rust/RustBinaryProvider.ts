@@ -29,7 +29,11 @@ import {
 import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { readRustBinaryImage } from "./RustBinaryImage.js";
+import {
+  readRustBinaryImage,
+  type RustBinaryImage,
+} from "./RustBinaryImage.js";
+import { requireSelectedNativeImage } from "../native/metadata/MachoSliceSelection.js";
 import {
   RUST_BINARY_INPUT_BYTES,
   RUST_OUTPUT_BYTES,
@@ -85,7 +89,16 @@ export class RustBinaryProvider implements RustBinaryPort {
           this.#resources,
         );
         assertArtifactReadActive(options?.signal);
-        const image = readRustBinaryImage(snapshot.bytes);
+        const selected = requireSelectedNativeImage(
+          OPERATION,
+          input.path,
+          snapshot.bytes,
+          input.architecture,
+        );
+        const image = inFile(
+          readRustBinaryImage(selected.bytes),
+          selected.fileOffset,
+        );
         const report = {
           ...image,
           artifact: {
@@ -93,6 +106,9 @@ export class RustBinaryProvider implements RustBinaryPort {
             sha256: snapshot.sha256,
             bytes: snapshot.bytes.length,
           },
+          ...(selected.selection === null
+            ? {}
+            : { selected_slice: selected.selection }),
           limitations: limitationsFor(image),
         };
         if (
@@ -114,6 +130,31 @@ export class RustBinaryProvider implements RustBinaryPort {
     }
   }
 }
+
+/** Locate image-relative section and rustc-path offsets in the selected file. */
+const inFile = (image: RustBinaryImage, fileOffset: number): RustBinaryImage =>
+  fileOffset === 0
+    ? image
+    : {
+        ...image,
+        auditable_metadata:
+          image.auditable_metadata === null
+            ? null
+            : {
+                ...image.auditable_metadata,
+                file_offset: image.auditable_metadata.file_offset + fileOffset,
+              },
+        rustc_commit:
+          image.rustc_commit === null
+            ? null
+            : {
+                ...image.rustc_commit,
+                hashes: image.rustc_commit.hashes.map((entry) => ({
+                  ...entry,
+                  file_offset: entry.file_offset + fileOffset,
+                })),
+              },
+      };
 
 const outputLimit = (path: string) =>
   new AnalysisResourceConstraintError(

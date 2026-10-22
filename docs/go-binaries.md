@@ -109,11 +109,21 @@ module record and no dependency records has an observed empty dependency list.
 
 ## Supported boundary
 
-The built-in TypeScript reader supports ELF, PE and thin Mach-O images with Go's
-inline or historical pointer build-info encoding. Source ranges refer to the
-original stable file snapshot, including pointer-backed strings. It does not
-scan arbitrary byte strings as compiler metadata or interpret a fat Mach-O
-container as one selected architecture.
+The built-in TypeScript reader supports ELF, PE and thin Mach-O images, and one
+selected slice of a universal Mach-O, with Go's inline or historical pointer
+build-info encoding. Source ranges refer to the original stable file snapshot,
+including pointer-backed strings. It does not scan arbitrary byte strings as
+compiler metadata.
+
+A universal (FAT) Mach-O needs `architecture` (`x86`, `x86_64`, `arm`
+or `arm64`; CLI `--architecture`). REA reads its own FAT table, without `lipo`,
+and validates the selected slice's range, alignment and Mach-O header CPU
+against the table. The result keeps the universal file as `artifact` (its
+SHA-256 and size), adds `selected_slice` with the slice offset, length, raw CPU
+type/subtype and the FAT table digest, and reports every source range as a
+file offset inside that slice. Without `architecture`, or when the file has no
+such slice or several, the request fails on `architecture` and lists the slices
+present. `architecture` on any other image is rejected rather than ignored.
 
 For ELF images without a named build-info section, discovery checks each
 nonempty writable, non-executable load segment in program-header order. This

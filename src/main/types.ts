@@ -23,6 +23,9 @@ export type McpServe = (
 ) => McpServerHandle | Promise<McpServerHandle>;
 
 export interface RuntimeDependencies {
+  /** HTTP keeps the eager runtime; deferred materialization is stdio-only. */
+  readonly transport?: "stdio" | "http";
+  readonly captureShutdown?: (shutdown: () => Promise<void>) => void;
   readonly env: NodeJS.ProcessEnv;
   readonly serve: McpServe;
   readonly writeStderr: (text: string) => void;

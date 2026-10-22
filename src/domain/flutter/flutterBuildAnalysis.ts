@@ -89,7 +89,7 @@ export const flutterResultSchemas = {
   identify_flutter_build: z.strictObject({
     target: z.strictObject({
       path: localPathStringSchema,
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       sha256: digestSchema,
     }),
     flutter_detected: z.boolean(),
@@ -98,12 +98,12 @@ export const flutterResultSchemas = {
         abi: z.string().min(1),
         libapp: z.strictObject({
           present: z.boolean(),
-          bytes: z.number().int().nonnegative().nullable(),
+          bytes: z.int().nonnegative().nullable(),
           sha256: digestSchema.nullable(),
           /** Supported ELF header with table extents inside the library; table contents are not validated. */
           elf_header_valid: z.boolean().nullable(),
           /** Number of Dart snapshot sections found (vm + isolate). */
-          snapshot_hash_sources: z.number().int().nonnegative(),
+          snapshot_hash_sources: z.int().nonnegative(),
           /** Distinct hashes found; more than one means the sections disagree. */
           snapshot_hash_candidates: z.array(
             z.string().regex(/^[0-9a-f]{32}$/u),
@@ -116,7 +116,7 @@ export const flutterResultSchemas = {
         }),
         libflutter: z.strictObject({
           present: z.boolean(),
-          bytes: z.number().int().nonnegative().nullable(),
+          bytes: z.int().nonnegative().nullable(),
           sha256: digestSchema.nullable(),
           build_id: z
             .string()
@@ -150,7 +150,7 @@ export const flutterResultSchemas = {
   inspect_dart_aot: z.strictObject({
     target: z.strictObject({
       path: localPathStringSchema,
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       sha256: digestSchema,
     }),
     abi: z.string().min(1),
@@ -160,7 +160,7 @@ export const flutterResultSchemas = {
         .describe(
           "Coverage of ELF symbols, independent data headers, AOT kind, extents and agreeing hashes",
         ),
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       sha256: digestSchema,
       snapshot_hash: z
         .string()
@@ -169,17 +169,17 @@ export const flutterResultSchemas = {
       /** Distinct hashes found; more than one means the sections disagree. */
       snapshot_hash_candidates: z.array(z.string().regex(/^[0-9a-f]{32}$/u)),
       /** Distinct exported data headers with a valid hash at the header's fixed offset. */
-      snapshot_hash_sources: z.number().int().nonnegative(),
+      snapshot_hash_sources: z.int().nonnegative(),
       /** Snapshot symbols read from the dynamic symbol table. */
       sections: z.array(
         z.strictObject({
           name: z.string().min(1),
-          offset: z.number().int().nonnegative(),
-          size: z.number().int().nonnegative(),
+          offset: z.int().nonnegative(),
+          size: z.int().nonnegative(),
           magic_valid: z.boolean(),
-          kind: z.number().int().nonnegative().nullable(),
+          kind: z.int().nonnegative().nullable(),
           /** Raw declared snapshot length, excluding the four magic bytes. */
-          header_length: z.number().int().nonnegative().nullable(),
+          header_length: z.int().nonnegative().nullable(),
         }),
       ),
     }),
@@ -191,14 +191,14 @@ export const flutterResultSchemas = {
         ),
       /** Distinct package: source URIs, sorted, bounded. */
       package_uris: z.array(z.string().min(1)),
-      package_uri_count_at_least: z.number().int().nonnegative(),
+      package_uri_count_at_least: z.int().nonnegative(),
       /** Distinct dart: SDK URIs, sorted, bounded. */
       dart_uris: z.array(z.string().min(1)),
-      dart_uri_count_at_least: z.number().int().nonnegative(),
+      dart_uri_count_at_least: z.int().nonnegative(),
       /** Identifier-like tokens, bounded; includes incidental matches. */
       class_like_tokens: z.array(z.string().min(1)),
-      class_like_token_count_at_least: z.number().int().nonnegative(),
-      printable_run_count: z.number().int().nonnegative(),
+      class_like_token_count_at_least: z.int().nonnegative(),
+      printable_run_count: z.int().nonnegative(),
     }),
     coverage: z.enum(["complete", "partial"]),
   }),

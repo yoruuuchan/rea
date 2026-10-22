@@ -96,8 +96,8 @@ const sourceRangeSchema = javascriptSourceRangeSchema.safeExtend({
 const fileOffsetRangeSchema = z
   .strictObject({
     kind: z.literal("file-offset-range"),
-    start: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    end: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    start: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+    end: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   })
   .superRefine((location, context) => {
     if (location.end < location.start)
@@ -158,7 +158,7 @@ const applicationExtractorSchema = z.strictObject({
 
 const applicationLimitSchema = z.strictObject({
   name: z.string().min(1),
-  value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  value: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   unit: z.enum([
     "items",
     "bytes",
@@ -172,7 +172,7 @@ const applicationLimitSchema = z.strictObject({
 
 /** Bounded collection coverage without treating omission as absence. */
 const coverageLimitsSchema = z.array(applicationLimitSchema);
-const omittedCountSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const omittedCountSchema = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 export const applicationCoverageSchema = z.union([
   z.strictObject({

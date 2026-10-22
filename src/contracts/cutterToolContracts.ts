@@ -10,7 +10,7 @@ export const cutterListInputSchema = z.strictObject({});
 /** Execute a command in a selected live Cutter instance and observed document generation. */
 export const cutterCommandInputSchema = z.strictObject({
   session_id: z.string().uuid(),
-  expected_generation: z.number().int().nonnegative(),
+  expected_generation: z.int().nonnegative(),
   command: z
     .string()
     .min(1)
@@ -23,8 +23,8 @@ export const cutterCommandInputSchema = z.strictObject({
 
 export const cutterSessionSchema = z.strictObject({
   session_id: z.string().uuid(),
-  pid: z.number().int().positive(),
-  document_generation: z.number().int().nonnegative(),
+  pid: z.int().positive(),
+  document_generation: z.int().nonnegative(),
   current_file: z.string().nullable(),
   cutter_version: z.string().nullable(),
   identity_status: z.literal("partial"),
@@ -39,7 +39,7 @@ export const cutterCommandResultSchema = z.strictObject({
   output_truncated: z.boolean(),
   cutter_version: z.string().nullable(),
   current_file: z.string().nullable(),
-  document_generation: z.number().int().nonnegative(),
+  document_generation: z.int().nonnegative(),
   identity_status: z.literal("partial"),
 });
 

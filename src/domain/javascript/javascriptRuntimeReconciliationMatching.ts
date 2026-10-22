@@ -77,14 +77,13 @@ const reconcileEntity = (
       reason: "runtime-location-unresolved",
       candidates: [],
     });
-  const locations = candidatesWithLocation(entity, index, layers);
+  const { locations, mapped } = locateEntity(entity, index, layers);
   if (entity.sourceSha256 !== null)
-    return reconcileCapturedSource(
-      entity,
-      entity.sourceSha256,
+    return reconcileCapturedSource(entity, entity.sourceSha256, {
       locations,
+      mapped,
       index,
-    );
+    });
 
   const location = locations.at(0);
   if (locations.length === 1 && location !== undefined) {
@@ -103,19 +102,39 @@ const reconcileEntity = (
       reason: "ambiguous-static-candidates",
       candidates: locations.map(({ candidate }) => candidate),
     });
-  const mapped = layers.some(
-    (layer) => mappedRuntimePaths(layer, entity).length > 0,
-  );
-  return unresolved(entity, {
-    status: mapped ? "unmatched" : "unknown",
-    basis: "none",
-    confidence: "unknown",
-    reason: mapped
-      ? "no-static-content-match"
-      : "no-authorized-location-mapping",
-    candidates: [],
-  });
+  return withoutStaticCandidate(entity, mapped, "unknown");
 };
+
+/**
+ * Classify an entity with no qualifying static candidate. Absence is claimed
+ * only beneath an automatic or caller-declared mapping; without one, the
+ * runtime location has no authorized static counterpart and stays unknown.
+ * Captured bytes compared against every static digest support a high-confidence
+ * absence; a location-only absence does not.
+ */
+const withoutStaticCandidate = (
+  entity: RuntimeReconciliationEntity,
+  mapped: boolean,
+  absenceConfidence: JavaScriptRuntimeReconciliationItem["confidence"],
+): EvaluatedMatch =>
+  unresolved(
+    entity,
+    mapped
+      ? {
+          status: "unmatched",
+          basis: "none",
+          confidence: absenceConfidence,
+          reason: "no-static-content-match",
+          candidates: [],
+        }
+      : {
+          status: "unknown",
+          basis: "none",
+          confidence: "unknown",
+          reason: "no-authorized-location-mapping",
+          candidates: [],
+        },
+  );
 
 interface LocatedCandidate {
   readonly candidate: StaticRuntimeCandidate;
@@ -125,8 +144,15 @@ interface LocatedCandidate {
 const reconcileCapturedSource = (
   entity: RuntimeReconciliationEntity,
   sourceSha256: string,
-  locations: readonly LocatedCandidate[],
-  index: CandidateIndex,
+  {
+    locations,
+    mapped,
+    index,
+  }: {
+    readonly locations: readonly LocatedCandidate[];
+    readonly mapped: boolean;
+    readonly index: CandidateIndex;
+  },
 ): EvaluatedMatch => {
   // A known mapped candidate owns the comparison. Unrelated equal bytes cannot
   // repair a disagreement or establish the content of a candidate without a digest.
@@ -176,23 +202,19 @@ const reconcileCapturedSource = (
       candidates: locations.map(({ candidate: located }) => located),
     });
   }
-  return unresolved(entity, {
-    status: "unmatched",
-    basis: "none",
-    confidence: "high",
-    reason: "no-static-content-match",
-    candidates: [],
-  });
+  return withoutStaticCandidate(entity, mapped, "high");
 };
 
-const candidatesWithLocation = (
+const locateEntity = (
   entity: RuntimeReconciliationEntity,
   index: CandidateIndex,
   layers: readonly ParsedStaticLayer[],
-): LocatedCandidate[] => {
+): { readonly locations: LocatedCandidate[]; readonly mapped: boolean } => {
   const located = new Map<string, LocatedCandidate>();
+  let mapped = false;
   for (const layer of layers)
-    for (const mapping of mappedRuntimePaths(layer, entity))
+    for (const mapping of mappedRuntimePaths(layer, entity)) {
+      mapped = true;
       for (const candidate of [
         ...(index.byLayerCategoryPath.get(
           layerCategoryPathKey(layer.layerId, entity.staticKind, mapping.path),
@@ -215,12 +237,16 @@ const candidatesWithLocation = (
         const key = candidateKey(candidate);
         if (!located.has(key)) located.set(key, { candidate, mapping });
       }
-  return [...located.values()].sort((left, right) =>
-    compareUnicodeCodePoints(
-      candidateKey(left.candidate),
-      candidateKey(right.candidate),
+    }
+  return {
+    locations: [...located.values()].sort((left, right) =>
+      compareUnicodeCodePoints(
+        candidateKey(left.candidate),
+        candidateKey(right.candidate),
+      ),
     ),
-  );
+    mapped,
+  };
 };
 
 const indexCandidates = (

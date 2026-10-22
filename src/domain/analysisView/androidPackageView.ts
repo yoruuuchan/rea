@@ -17,7 +17,7 @@ const packageSchema = androidResultSchemas.inspect_android_package;
 /** All package declarations remain inline; decoded manifest text stays retained. */
 export const androidPackageSummarySchema = packageSchema.extend({
   manifest: packageSchema.shape.manifest.omit({ text: true }).extend({
-    text_code_units: z.number().int().nonnegative(),
+    text_code_units: z.int().nonnegative(),
     text_included: z.literal(false),
   }),
 });
@@ -26,8 +26,8 @@ export const androidPackageSummarySchema = packageSchema.extend({
 export const androidViewRequestSchema = z.strictObject({
   kind: z.literal("android"),
   facet: z.literal("manifest"),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive(),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive(),
 });
 
 export const androidManifestViewItemSchema = z.strictObject({

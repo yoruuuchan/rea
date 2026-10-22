@@ -3,7 +3,7 @@ import { nativeMetadataRecoverySummarySchema } from "./nativeMetadataRecovery.js
 import { jsonValueSchema } from "../jsonValue.js";
 import { binaryArchitectureSchema } from "../rawBinary.js";
 
-const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const integer = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const hexBytes = z.string().regex(/^(?:[a-f0-9]{2})*$/u);
 const address = z.string().min(1);
@@ -45,13 +45,9 @@ export const nativeLoadImageObservationSchema = z.strictObject({
       segment: integer.max(0xffff).nullable(),
       offset: integer.max(0xffff).nullable(),
       status: z.string().min(1),
-      type: z.number().int(),
+      type: z.int(),
       values: z.array(
-        z
-          .number()
-          .int()
-          .min(Number.MIN_SAFE_INTEGER)
-          .max(Number.MAX_SAFE_INTEGER),
+        z.int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
       ),
       original_bytes_hex: hexBytes.nullable(),
       memory_bytes_hex: hexBytes.nullable(),

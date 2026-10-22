@@ -14,6 +14,7 @@ export const TOOL_EXAMPLE_OVERRIDES: Readonly<
 > = {
   ...UNKNOWN_CONTRACT_EXAMPLES,
   ...INVESTIGATION_EXAMPLES,
+  inspect_byte_entropy: { path: "/artifacts/firmware.bin" },
   goto_address: { address: "0x1000" },
   procedure_address: { procedure: "main" },
   procedure_assembly: { procedure: "main" },

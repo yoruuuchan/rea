@@ -978,10 +978,11 @@ const withoutTrailingLineFeeds = (text: string): string => {
 };
 
 /**
- * Replace REA's TOML server tables and assignments. Comments that introduce a
- * following table stay. Codex also retains comments around REA's own table.
- * Text inside strings is not treated as a header. Only Grok Build reads the
- * root `disabled_mcp_servers` list that registration also edits.
+ * Replace REA's TOML server tables and assignments. Every comment line stays
+ * where it was, including comments before, inside, and after REA's own table;
+ * only blank lines that separated a removed table go with it. Text inside
+ * strings is not treated as a header. Only Grok Build reads the root
+ * `disabled_mcp_servers` list that registration also edits.
  */
 const upsertTomlServerSection = (
   originalText: string,
@@ -1005,6 +1006,8 @@ const upsertTomlServerSection = (
     cursor += line.length + 1;
   }
   const kept: string[] = [];
+  // Blank lines held until the next statement shows whether they belong to a
+  // removed REA table. Comments are user text and are never held.
   const pending: string[] = [];
   let skipping = false;
   let inlineServerTable = false;
@@ -1128,7 +1131,7 @@ const upsertTomlServerSection = (
       continue;
     }
     if (isBlankOrComment(line)) {
-      if (format === "toml" && line.trimStart().startsWith("#")) {
+      if (line.trimStart().startsWith("#")) {
         flushPending();
         kept.push(physical);
       } else pending.push(physical);
@@ -1168,6 +1171,9 @@ const upsertTomlServerSection = (
         ? `${fragment}${nl}`
         : `${trimmed}${nl}${nl}${fragment}${nl}`;
   }
+  // Removing a final table also drops the file's last line break.
+  if (originalText.endsWith("\n") && !body.endsWith("\n"))
+    body += originalText.endsWith("\r\n") ? "\r\n" : "\n";
   return bom ? `\uFEFF${body}` : body;
 };
 
@@ -1270,17 +1276,12 @@ const serializeCodexConfiguration = (
     isEmptyClientConfigurationText(originalText)
   )
     return stringifyToml(document);
-  const upserted = upsertTomlServerSection(
+  const edited = upsertTomlServerSection(
     originalText,
     PRODUCT_IDENTITY.mcpServerKey,
     tomlServerEntry(document, PRODUCT_IDENTITY.mcpServerKey),
     "toml",
   );
-  // Removing a final table also drops the file's last line break.
-  const edited =
-    originalText.endsWith("\n") && !upserted.endsWith("\n")
-      ? `${upserted}${originalText.endsWith("\r\n") ? "\r\n" : "\n"}`
-      : upserted;
   return tomlTextHolds(edited, document) ? edited : stringifyToml(document);
 };
 

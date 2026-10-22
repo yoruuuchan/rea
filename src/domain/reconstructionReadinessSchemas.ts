@@ -125,7 +125,7 @@ const contradictionSchema = z.strictObject({
 });
 
 const operationOutcomeSchema = z.strictObject({
-  sequence: z.number().int().min(0),
+  sequence: z.int().min(0),
   operation: stableIdSchema,
   surface: z.enum(["cli", "mcp"]),
   call_kind: z.enum([
@@ -138,7 +138,7 @@ const operationOutcomeSchema = z.strictObject({
     "operation",
   ]),
   expected_success: z.boolean(),
-  cli_exit_code: z.number().int().min(0).nullable(),
+  cli_exit_code: z.int().min(0).nullable(),
   mcp_status: z.enum(["success", "non-success"]).nullable(),
   error_code: stableIdSchema.nullable(),
   recovered: z.boolean(),
@@ -148,15 +148,15 @@ const operationOutcomeSchema = z.strictObject({
 const cleanupSchema = z.strictObject({
   run_id: stableIdSchema,
   cancelled: z.boolean(),
-  owned_resources_remaining: z.number().int().min(0),
+  owned_resources_remaining: z.int().min(0),
   diagnostic_evidence_ids: z.array(evidenceIdSchema),
 });
 
 const closureObservationSchema = z.strictObject({
-  sequence: z.number().int().min(0),
+  sequence: z.int().min(0),
   ledger_digest: digestSchema,
   status: z.enum(["ready", "open", "failed", "unknown"]),
-  required_open: z.number().int().min(0),
+  required_open: z.int().min(0),
   newly_verified_obligation_ids: z.array(stableIdSchema),
   evidence_ids: z.array(evidenceIdSchema).min(1),
 });
@@ -253,24 +253,24 @@ export const reconstructionReadinessReportSchema = z.strictObject({
   report_digest: digestSchema,
   status: readinessStatusSchema,
   summary: z.strictObject({
-    stages: z.number().int().min(0),
-    required_stages: z.number().int().min(0),
-    passed_required_stages: z.number().int().min(0),
-    findings: z.number().int().min(0),
-    failed_findings: z.number().int().min(0),
-    unknown_findings: z.number().int().min(0),
+    stages: z.int().min(0),
+    required_stages: z.int().min(0),
+    passed_required_stages: z.int().min(0),
+    findings: z.int().min(0),
+    failed_findings: z.int().min(0),
+    unknown_findings: z.int().min(0),
   }),
   metrics: z.strictObject({
     first_valid_workflow_selection_rate: z.number().min(0).max(1),
     malformed_or_over_limit_call_rate: z.number().min(0).max(1),
-    incompatible_provider_invocations: z.number().int().min(0),
-    failed_calls_before_prerequisites: z.number().int().min(0),
+    incompatible_provider_invocations: z.int().min(0),
+    failed_calls_before_prerequisites: z.int().min(0),
     recovery_rate: z.number().min(0).max(1),
     divergence_localization_precision: z.number().min(0).max(1),
-    false_equivalence_count: z.number().int().min(0),
-    unowned_obligation_count: z.number().int().min(0),
-    cleanup_leak_count: z.number().int().min(0),
-    nondeterministic_replay_count: z.number().int().min(0),
+    false_equivalence_count: z.int().min(0),
+    unowned_obligation_count: z.int().min(0),
+    cleanup_leak_count: z.int().min(0),
+    nondeterministic_replay_count: z.int().min(0),
   }),
   stages: readinessStagesSchema,
   findings: z.array(findingSchema),

@@ -1,3 +1,7 @@
+import {
+  DEFAULT_ASAR_HEADER_ADMISSION,
+  type AsarHeaderAdmission,
+} from "../config/asarHeaderAdmission.js";
 import type {
   ExecutionOptions,
   ProviderIdentity,
@@ -36,6 +40,7 @@ import {
   bindCdpTransportCleanup,
 } from "../browser/CdpTargetSessionOwner.js";
 import {
+  authorizeRuntimeLocation,
   authorizeRuntimeTargetLocation,
   inspectorExclusionKey,
   throwIfRuntimeObservationCancelled,
@@ -162,6 +167,15 @@ export interface CaptureState {
 
 /** Attach-only provider; sends only Runtime.enable and Debugger.enable. */
 export class V8InspectorProvider implements JavaScriptRuntimeObservationPort {
+  readonly #asarHeaderAdmission: AsarHeaderAdmission;
+
+  /** The admission comes from the composition root's environment; default otherwise. */
+  constructor(
+    asarHeaderAdmission: AsarHeaderAdmission = DEFAULT_ASAR_HEADER_ADMISSION,
+  ) {
+    this.#asarHeaderAdmission = asarHeaderAdmission;
+  }
+
   identity(): ProviderIdentity {
     return V8_INSPECTOR_PROVIDER_IDENTITY;
   }
@@ -221,6 +235,7 @@ export class V8InspectorProvider implements JavaScriptRuntimeObservationPort {
           { type: target.type, product: discovery.runtime.product },
           options.signal,
           "list_javascript_runtime_targets",
+          this.#asarHeaderAdmission,
         );
         if (!decision.allowed) {
           excluded[inspectorExclusionKey(decision.reason)] += 1;
@@ -346,6 +361,7 @@ export class V8InspectorProvider implements JavaScriptRuntimeObservationPort {
         discovery.targets,
         input,
         discovery.runtime.product,
+        this.#asarHeaderAdmission,
         options.signal,
       );
       if (input.runtime_kind !== undefined)
@@ -375,6 +391,13 @@ export class V8InspectorProvider implements JavaScriptRuntimeObservationPort {
         runtime: discovery.runtime,
         target,
         state: captureState,
+        authorizeLocation: (rawUrl, signal) =>
+          authorizeRuntimeLocation(
+            rawUrl,
+            signal,
+            "observe_javascript_runtime",
+            this.#asarHeaderAdmission,
+          ),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
       outcome = ok(javascriptRuntimeObservationSchema.parse(result));
@@ -496,6 +519,7 @@ const authorizedTarget = async (
   targets: readonly V8InspectorTarget[],
   input: ObserveJavaScriptRuntimeInput,
   product: string,
+  asarHeaderAdmission: AsarHeaderAdmission,
   signal?: AbortSignal,
 ): Promise<AuthorizedV8InspectorTarget> => {
   throwIfRuntimeObservationCancelled(signal);
@@ -510,6 +534,7 @@ const authorizedTarget = async (
     { type: target.type, product },
     signal,
     "observe_javascript_runtime",
+    asarHeaderAdmission,
   );
   throwIfRuntimeObservationCancelled(signal);
   if (

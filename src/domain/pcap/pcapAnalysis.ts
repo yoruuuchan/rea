@@ -48,19 +48,19 @@ const client = z.strictObject({
 
 const endpoint = z.strictObject({
   address: z.string().min(1),
-  port: z.number().int().positive().nullable(),
-  packet_count: z.number().int().positive(),
+  port: z.int().positive().nullable(),
+  packet_count: z.int().positive(),
 });
 
 const dnsQuery = z.strictObject({
   query: z.string().min(1),
   response_addresses: z.array(z.string().min(1)),
-  response_address_count: z.number().int().nonnegative(),
+  response_address_count: z.int().nonnegative(),
 });
 
 const protocolCount = z.strictObject({
   protocol: z.string().min(1),
-  packet_count: z.number().int().positive(),
+  packet_count: z.int().positive(),
 });
 
 /** Portable pcap observations with explicit coverage limitations. */
@@ -72,36 +72,36 @@ export const pcapResultSchemas = {
     client,
     target: z.strictObject({
       path: localPathStringSchema,
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       sha256: digestSchema,
     }),
     /** File format as capinfos reports it (pcap vs pcapng). */
     file_type: z.string().min(1).nullable(),
     encapsulation: z.string().min(1).nullable(),
-    packet_count: z.number().int().nonnegative().nullable(),
+    packet_count: z.int().nonnegative().nullable(),
     capture_start: z.string().nullable(),
     capture_end: z.string().nullable(),
     capture_duration_seconds: z.number().nonnegative().nullable(),
-    snapshot_length: z.number().int().positive().nullable(),
+    snapshot_length: z.int().positive().nullable(),
     /** Distinct endpoints with packet counts, bounded. */
     endpoints: z.array(endpoint),
-    endpoint_count: z.number().int().nonnegative(),
+    endpoint_count: z.int().nonnegative(),
     /** DNS queries with resolved addresses, bounded. */
     dns_queries: z.array(dnsQuery),
-    dns_query_count: z.number().int().nonnegative(),
+    dns_query_count: z.int().nonnegative(),
     /** TLS Server Name Indication values observed in handshakes. */
     tls_sni_values: z.array(z.string().min(1)),
-    tls_sni_count: z.number().int().nonnegative(),
+    tls_sni_count: z.int().nonnegative(),
     /** Protocol distribution (frame.protocols column counts). */
     protocol_distribution: z.array(protocolCount),
-    protocol_count: z.number().int().nonnegative(),
+    protocol_count: z.int().nonnegative(),
     /** HTTP request URIs seen on plain-text ports, bounded. */
     http_request_uris: z.array(z.string().min(1)),
-    http_request_uri_count: z.number().int().nonnegative(),
-    http_uri_redaction_count: z.number().int().nonnegative(),
+    http_request_uri_count: z.int().nonnegative(),
+    http_uri_redaction_count: z.int().nonnegative(),
     unattributed_dns_addresses: z.array(z.string().min(1)),
-    unattributed_dns_address_count: z.number().int().nonnegative(),
-    unattributed_dns_packet_count: z.number().int().nonnegative(),
+    unattributed_dns_address_count: z.int().nonnegative(),
+    unattributed_dns_packet_count: z.int().nonnegative(),
     coverage: z.enum(["complete", "partial"]),
     diagnostics: z
       .strictObject({ capinfos_stderr: z.string(), tshark_stderr: z.string() })

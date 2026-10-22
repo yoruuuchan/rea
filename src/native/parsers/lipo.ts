@@ -5,13 +5,13 @@ const architectureSchema = z.object({
   name: z.string().min(1),
   cpu_type: z.string().nullable(),
   cpu_subtype: z.string().nullable(),
-  cpu_type_code: z.number().int().nonnegative().nullable(),
-  cpu_subtype_code: z.number().int().nonnegative().nullable(),
-  cpu_subtype_base: z.number().int().nonnegative().nullable(),
+  cpu_type_code: z.int().nonnegative().nullable(),
+  cpu_subtype_code: z.int().nonnegative().nullable(),
+  cpu_subtype_base: z.int().nonnegative().nullable(),
   capabilities: z.string().nullable(),
-  file_offset: z.number().int().min(0).nullable(),
-  size: z.number().int().min(0).nullable(),
-  alignment: z.number().int().min(0).nullable(),
+  file_offset: z.int().min(0).nullable(),
+  size: z.int().min(0).nullable(),
+  alignment: z.int().min(0).nullable(),
 });
 
 export type LipoArchitecture = z.infer<typeof architectureSchema>;

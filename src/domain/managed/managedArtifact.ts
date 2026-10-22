@@ -3,7 +3,7 @@ import { digestSchema } from "../digests.js";
 
 /** Build-local ECMA-335 metadata token emitted as an eight-digit lowercase hex value. */
 export const managedMetadataTokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
-const offsetSchema = z.number().int().min(0);
+const offsetSchema = z.int().min(0);
 
 /** A 16-byte CLI metadata GUID without RFC 4122 version/variant restrictions. */
 export const cliMetadataGuidSchema = z
@@ -12,7 +12,7 @@ export const cliMetadataGuidSchema = z
 
 const publicKeyIdentitySchema = z.object({
   kind: z.enum(["none", "public-key", "public-key-token"]),
-  byte_length: z.number().int().min(0),
+  byte_length: z.int().min(0),
   sha256: digestSchema.nullable(),
   token: z
     .string()
@@ -24,8 +24,8 @@ const assemblyIdentitySchema = z.object({
   name: z.string(),
   version: z.string().regex(/^\d+\.\d+\.\d+\.\d+$/u),
   culture: z.string().nullable(),
-  flags: z.number().int().min(0).max(0xffff_ffff),
-  hash_algorithm: z.number().int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff_ffff),
+  hash_algorithm: z.int().min(0).max(0xffff_ffff),
   public_key: publicKeyIdentitySchema,
   token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
@@ -33,7 +33,7 @@ const assemblyIdentitySchema = z.object({
 
 const moduleIdentitySchema = z.object({
   name: z.string(),
-  generation: z.number().int().min(0).max(0xffff),
+  generation: z.int().min(0).max(0xffff),
   mvid: cliMetadataGuidSchema.nullable(),
   enc_id: cliMetadataGuidSchema.nullable(),
   enc_base_id: cliMetadataGuidSchema.nullable(),
@@ -44,17 +44,14 @@ const moduleIdentitySchema = z.object({
 const managedArtifactReferenceSchema = z.object({
   path: z.string().min(1),
   sha256: digestSchema,
-  byte_length: z.number().int().min(0),
+  byte_length: z.int().min(0),
   format: z.literal("pe"),
 });
 
 const managedMetadataSummarySchema = z.object({
   status: z.enum(["absent", "complete", "partial", "malformed"]),
   version: z.string().nullable(),
-  table_row_counts: z.record(
-    z.string(),
-    z.number().int().min(0).max(0xffff_ffff),
-  ),
+  table_row_counts: z.record(z.string(), z.int().min(0).max(0xffff_ffff)),
 });
 
 const managedTokenIdentityScopeSchema = z.object({
@@ -67,22 +64,22 @@ const assemblyReferenceSchema = z.object({
   name: z.string(),
   version: z.string().regex(/^\d+\.\d+\.\d+\.\d+$/u),
   culture: z.string().nullable(),
-  flags: z.number().int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff_ffff),
   public_key_or_token: publicKeyIdentitySchema,
   hash_value_sha256: digestSchema.nullable(),
-  hash_value_length: z.number().int().min(0),
+  hash_value_length: z.int().min(0),
   token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
 });
 
 const managedResourceSchema = z.object({
   name: z.string(),
-  flags: z.number().int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff_ffff),
   visibility: z.enum(["public", "private", "unknown"]),
   implementation_token: managedMetadataTokenSchema.nullable(),
   embedded: z.boolean(),
-  declared_offset: z.number().int().min(0).max(0xffff_ffff),
-  data_length: z.number().int().min(0).nullable(),
+  declared_offset: z.int().min(0).max(0xffff_ffff),
+  data_length: z.int().min(0).nullable(),
   data_sha256: digestSchema.nullable(),
   token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
@@ -92,7 +89,7 @@ const customAttributeSchema = z.object({
   parent_token: managedMetadataTokenSchema,
   constructor_token: managedMetadataTokenSchema.nullable(),
   type_name: z.string().nullable(),
-  value_length: z.number().int().min(0),
+  value_length: z.int().min(0),
   value_sha256: digestSchema,
   decoded_fixed_string: z.string().nullable(),
   token: managedMetadataTokenSchema,
@@ -100,7 +97,7 @@ const customAttributeSchema = z.object({
 });
 
 const managedSignatureSchema = z.object({
-  raw_length: z.number().int().min(0),
+  raw_length: z.int().min(0),
   raw_sha256: digestSchema,
   // Evidence recorded before this field existed reads back as null.
   resolved_sha256: digestSchema
@@ -112,8 +109,8 @@ const managedSignatureSchema = z.object({
   kind: z.enum(["method", "field", "unknown"]),
   parse_status: z.enum(["decoded", "partial", "unsupported", "malformed"]),
   calling_convention: z.string().nullable(),
-  generic_parameter_count: z.number().int().min(0).nullable(),
-  parameter_count: z.number().int().min(0).nullable(),
+  generic_parameter_count: z.int().min(0).nullable(),
+  parameter_count: z.int().min(0).nullable(),
   return_type: z.string().nullable(),
   parameter_types: z.array(z.string()),
   field_type: z.string().nullable(),
@@ -132,7 +129,7 @@ const managedTypeSchema = z.object({
     .describe(
       "Framed nominal namespace/name/enclosing-name digest, independent of build-local rows. Null for historical Evidence or unresolved nesting; defining assemblies and CLR runtime identity are not established.",
     ),
-  flags: z.number().int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff_ffff),
   extends_token: managedMetadataTokenSchema.nullable(),
   enclosing_type_token: managedMetadataTokenSchema
     .nullable()
@@ -141,14 +138,14 @@ const managedTypeSchema = z.object({
       "Observed enclosing TypeDef from NestedClass; null when no enclosing entry was available, which alone does not establish top-level identity.",
     ),
   field_list: z.object({
-    first_row: z.number().int().min(1).nullable(),
-    last_row: z.number().int().min(0).nullable(),
-    count: z.number().int().min(0),
+    first_row: z.int().min(1).nullable(),
+    last_row: z.int().min(0).nullable(),
+    count: z.int().min(0),
   }),
   method_list: z.object({
-    first_row: z.number().int().min(1).nullable(),
-    last_row: z.number().int().min(0).nullable(),
-    count: z.number().int().min(0),
+    first_row: z.int().min(1).nullable(),
+    last_row: z.int().min(0).nullable(),
+    count: z.int().min(0),
   }),
 });
 
@@ -158,9 +155,9 @@ const managedExportedTypeSchema = z.object({
   row_offset: offsetSchema,
   namespace: z.string(),
   name: z.string(),
-  flags: z.number().int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff_ffff),
   forwarder: z.boolean(),
-  type_def_id: z.number().int().min(0).max(0xffff_ffff),
+  type_def_id: z.int().min(0).max(0xffff_ffff),
   implementation_token: managedMetadataTokenSchema.nullable(),
 });
 
@@ -170,22 +167,22 @@ const managedFieldSchema = z.object({
   declaring_type_token: managedMetadataTokenSchema.nullable(),
   declaring_type: z.string().nullable(),
   name: z.string(),
-  flags: z.number().int().min(0).max(0xffff),
+  flags: z.int().min(0).max(0xffff),
   signature: managedSignatureSchema,
 });
 
 const managedExceptionRegionSchema = z.object({
-  flags: z.number().int().min(0).max(0xffff_ffff),
-  try_offset: z.number().int().min(0),
-  try_length: z.number().int().min(0),
-  handler_offset: z.number().int().min(0),
-  handler_length: z.number().int().min(0),
+  flags: z.int().min(0).max(0xffff_ffff),
+  try_offset: z.int().min(0),
+  try_length: z.int().min(0),
+  handler_offset: z.int().min(0),
+  handler_length: z.int().min(0),
   class_token: managedMetadataTokenSchema.nullable(),
-  filter_offset: z.number().int().min(0).nullable(),
+  filter_offset: z.int().min(0).nullable(),
 });
 
 const managedInstructionAnchorSchema = z.object({
-  il_offset: z.number().int().min(0),
+  il_offset: z.int().min(0),
   opcode: z.string().min(1),
   operand_kind: z.enum([
     "none",
@@ -207,12 +204,12 @@ const managedInstructionAnchorSchema = z.object({
 const managedMethodBodySchema = z.object({
   status: z.enum(["present", "partial", "absent", "malformed"]),
   header_format: z.enum(["tiny", "fat", "none", "unknown"]),
-  rva: z.number().int().min(0).max(0xffff_ffff),
+  rva: z.int().min(0).max(0xffff_ffff),
   file_offset: offsetSchema.nullable(),
-  max_stack: z.number().int().min(0).nullable(),
+  max_stack: z.int().min(0).nullable(),
   init_locals: z.boolean().nullable(),
   local_var_sig_token: managedMetadataTokenSchema.nullable(),
-  il_size: z.number().int().min(0),
+  il_size: z.int().min(0),
   il_sha256: digestSchema
     .nullable()
     .describe(
@@ -223,10 +220,10 @@ const managedMethodBodySchema = z.object({
     .describe(
       "Member-result-v1 SHA-256 of UTF-8 JSON [opcode, operand_kind, operand] tuples for a complete decode; retains build-local tokens, omits switch targets, and excludes headers, locals, and exception regions",
     ),
-  instruction_count: z.number().int().min(0),
-  decoded_instruction_count: z.number().int().min(0),
-  truncated_instructions: z.number().int().min(0),
-  opcode_counts: z.record(z.string(), z.number().int().min(1)),
+  instruction_count: z.int().min(0),
+  decoded_instruction_count: z.int().min(0),
+  truncated_instructions: z.int().min(0),
+  opcode_counts: z.record(z.string(), z.int().min(1)),
   anchors: z.array(managedInstructionAnchorSchema),
   exception_regions: z.array(managedExceptionRegionSchema),
   issue: z.string().nullable(),
@@ -238,9 +235,9 @@ const managedMethodSchema = z.object({
   declaring_type_token: managedMetadataTokenSchema.nullable(),
   declaring_type: z.string().nullable(),
   name: z.string(),
-  rva: z.number().int().min(0).max(0xffff_ffff),
-  impl_flags: z.number().int().min(0).max(0xffff),
-  flags: z.number().int().min(0).max(0xffff),
+  rva: z.int().min(0).max(0xffff_ffff),
+  impl_flags: z.int().min(0).max(0xffff),
+  flags: z.int().min(0).max(0xffff),
   signature: managedSignatureSchema,
   body: managedMethodBodySchema,
 });
@@ -277,10 +274,10 @@ const managedModuleReferenceSchema = z.object({
   name: z.string(),
 });
 
-const managedNativeImportSchema = z.object({
+export const managedNativeImportSchema = z.object({
   token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
-  mapping_flags: z.number().int().min(0).max(0xffff),
+  mapping_flags: z.int().min(0).max(0xffff),
   mapping_flags_hex: z.string().regex(/^0x[0-9a-f]{4}$/u),
   member_token: managedMetadataTokenSchema.nullable(),
   member_kind: z.enum(["method", "field", "unknown"]),
@@ -314,9 +311,9 @@ const managedNativeImplementationSchema = z.object({
   token: managedMetadataTokenSchema,
   row_offset: offsetSchema,
   name: z.string(),
-  rva: z.number().int().min(0).max(0xffff_ffff),
-  flags: z.number().int().min(0).max(0xffff),
-  impl_flags: z.number().int().min(0).max(0xffff),
+  rva: z.int().min(0).max(0xffff_ffff),
+  flags: z.int().min(0).max(0xffff),
+  impl_flags: z.int().min(0).max(0xffff),
   code_type: z.enum(["il", "native", "optil", "runtime", "unknown"]),
   managed_kind: z.enum(["managed", "unmanaged", "unknown"]),
   pinvoke_declared: z.boolean(),
@@ -387,31 +384,31 @@ const managedParseIssueSchema = z.object({
 export const managedArtifactInspectionSchema = z.object({
   artifact: managedArtifactReferenceSchema,
   pe: z.object({
-    machine: z.number().int().min(0).max(0xffff),
+    machine: z.int().min(0).max(0xffff),
     machine_hex: z.string().regex(/^0x[0-9a-f]{4}$/u),
     architecture: z.enum(["x86", "x86_64", "arm", "arm64"]),
     optional_header: z.enum(["pe32", "pe32-plus"]),
-    section_count: z.number().int().min(1).max(0xffff),
-    characteristics: z.number().int().min(0).max(0xffff),
+    section_count: z.int().min(1).max(0xffff),
+    characteristics: z.int().min(0).max(0xffff),
     cli: z
       .object({
         header_offset: offsetSchema,
-        header_size: z.number().int().min(72),
+        header_size: z.int().min(72),
         runtime_version: z.string(),
-        flags: z.number().int().min(0).max(0xffff_ffff),
+        flags: z.int().min(0).max(0xffff_ffff),
         flag_names: z.array(z.string()),
         entry_point: z.object({
           kind: z.enum(["metadata-token", "native-rva", "none"]),
           value: z.string().nullable(),
         }),
-        metadata_rva: z.number().int().min(1).max(0xffff_ffff),
-        metadata_size: z.number().int().min(1).max(0xffff_ffff),
-        resources_rva: z.number().int().min(0).max(0xffff_ffff),
-        resources_size: z.number().int().min(0).max(0xffff_ffff),
-        strong_name_rva: z.number().int().min(0).max(0xffff_ffff),
-        strong_name_size: z.number().int().min(0).max(0xffff_ffff),
-        managed_native_header_rva: z.number().int().min(0).max(0xffff_ffff),
-        managed_native_header_size: z.number().int().min(0).max(0xffff_ffff),
+        metadata_rva: z.int().min(1).max(0xffff_ffff),
+        metadata_size: z.int().min(1).max(0xffff_ffff),
+        resources_rva: z.int().min(0).max(0xffff_ffff),
+        resources_size: z.int().min(0).max(0xffff_ffff),
+        strong_name_rva: z.int().min(0).max(0xffff_ffff),
+        strong_name_size: z.int().min(0).max(0xffff_ffff),
+        managed_native_header_rva: z.int().min(0).max(0xffff_ffff),
+        managed_native_header_size: z.int().min(0).max(0xffff_ffff),
         ready_to_run_signature: z.boolean(),
       })
       .nullable(),
@@ -455,10 +452,7 @@ export const managedArtifactInspectionSchema = z.object({
     status: z.enum(["absent", "complete", "partial", "malformed"]),
     version: z.string().nullable(),
     stream_names: z.array(z.string()),
-    table_row_counts: z.record(
-      z.string(),
-      z.number().int().min(0).max(0xffff_ffff),
-    ),
+    table_row_counts: z.record(z.string(), z.int().min(0).max(0xffff_ffff)),
   }),
   module: moduleIdentitySchema.nullable(),
   assembly: assemblyIdentitySchema.nullable(),
@@ -544,17 +538,17 @@ export const managedNativeBoundaryInspectionSchema = z.object({
       strong_name_signed: z.boolean(),
       native_entry_point: z.boolean(),
       ready_to_run_signature: z.boolean(),
-      managed_native_header_rva: z.number().int().min(0).max(0xffff_ffff),
-      managed_native_header_size: z.number().int().min(0).max(0xffff_ffff),
+      managed_native_header_rva: z.int().min(0).max(0xffff_ffff),
+      managed_native_header_size: z.int().min(0).max(0xffff_ffff),
     })
     .nullable(),
   module_refs: z.array(managedModuleReferenceSchema),
   pinvoke_imports: z.array(managedNativeImportSchema),
   native_implementations: z.array(managedNativeImplementationSchema),
   summary: z.object({
-    module_ref_count: z.number().int().min(0),
-    pinvoke_import_count: z.number().int().min(0),
-    native_implementation_count: z.number().int().min(0),
+    module_ref_count: z.int().min(0),
+    pinvoke_import_count: z.int().min(0),
+    native_implementation_count: z.int().min(0),
     ready_to_run: z.boolean().nullable(),
     mixed_mode_or_native_header: z.boolean().nullable(),
   }),

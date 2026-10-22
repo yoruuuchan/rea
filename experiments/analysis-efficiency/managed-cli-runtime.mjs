@@ -6,8 +6,9 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 
-/** Bind a trial to its source checkout and the compiled CLI actually launched. */
-export const captureRuntimeBinding = async (runtime) => {
+/** Bind a trial to its source checkout and compiled runtime, including deferred assets. */
+export const captureRuntimeBinding = async (runtime, kind = "cli") => {
+  assert.ok(kind === "cli" || kind === "mcp", "Unknown runtime entry");
   const root = await realpath(runtime);
   const git = (args) =>
     execFileSync("git", args, { cwd: root, maxBuffer: 16 * 1024 * 1024 });
@@ -50,10 +51,16 @@ export const captureRuntimeBinding = async (runtime) => {
         files.push(relative(root, path));
     }
   };
-  await visit(join(root, "dist/cli-runtime"));
+  // MCP materializes additional workers and reads build-owned JSON after
+  // discovery. Bind every compiled JS/JSON asset, rather than only its entry.
+  await visit(join(root, kind === "mcp" ? "dist" : "dist/cli-runtime"));
   assert.ok(
-    files.includes(join("dist", "cli-runtime", "cli.js")),
-    "Missing compiled CLI entry",
+    files.includes(
+      kind === "mcp"
+        ? join("dist", "mcp", "main.js")
+        : join("dist", "cli-runtime", "cli.js"),
+    ),
+    "Missing compiled runtime entry",
   );
   const hash = createHash("sha256");
   let bytes = 0;
@@ -63,15 +70,23 @@ export const captureRuntimeBinding = async (runtime) => {
     hash.update(JSON.stringify([name, value.length, sha(value)]) + "\n");
   }
   return {
-    binding_version: 1,
+    binding_version: kind === "mcp" ? 2 : 1,
     root,
     node: process.version,
     git_revision: gitRevision,
     source_diff_sha256: sha(sourceDiff),
     untracked_source_sha256: sha(JSON.stringify(untrackedEntries)),
-    compiled_cli_sha256: hash.digest("hex"),
-    compiled_cli_files: files.length,
-    compiled_cli_bytes: bytes,
+    ...(kind === "mcp"
+      ? {
+          compiled_runtime_sha256: hash.digest("hex"),
+          compiled_runtime_files: files.length,
+          compiled_runtime_bytes: bytes,
+        }
+      : {
+          compiled_cli_sha256: hash.digest("hex"),
+          compiled_cli_files: files.length,
+          compiled_cli_bytes: bytes,
+        }),
   };
 };
 
@@ -82,6 +97,10 @@ export const assertRuntimeBinding = (actual, expected, mode) => {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   console.log(
-    JSON.stringify(await captureRuntimeBinding(process.argv[2]), null, 2),
+    JSON.stringify(
+      await captureRuntimeBinding(process.argv[2], process.argv[3]),
+      null,
+      2,
+    ),
   );
 }

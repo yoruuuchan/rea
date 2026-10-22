@@ -139,7 +139,6 @@ export const adbInputSchemas = {
       "Device serial exactly as `adb devices` reports it",
     ),
     count: z
-      .number()
       .int()
       .min(1)
       .max(10_000)
@@ -150,7 +149,6 @@ export const adbInputSchemas = {
       .default("main")
       .describe("Log buffer to read (logcat -b)"),
     pid: z
-      .number()
       .int()
       .positive()
       .optional()
@@ -466,7 +464,7 @@ const device = z.strictObject({
   product: z.string().nullable(),
   model: z.string().nullable(),
   device: z.string().nullable(),
-  transport_id: z.number().int().positive().nullable(),
+  transport_id: z.int().positive().nullable(),
   /**
    * Inferred device kind with its evidence basis. The serial prefix and the
    * `device:` metadata line are observations; the kind itself is derived.
@@ -479,7 +477,7 @@ const pulledArtifact = z.strictObject({
   device_path: z.string().min(1),
   file_name: z.string().min(1),
   local_path: z.string().min(1),
-  bytes: z.number().int().nonnegative(),
+  bytes: z.int().nonnegative(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   role: z.enum(["base", "split", "unknown"]),
   role_basis: z.literal("file_name"),
@@ -531,7 +529,7 @@ export const adbResultSchemas = {
     properties: z.array(
       z.strictObject({ name: z.string().min(1), value: z.string().min(1) }),
     ),
-    property_count: z.number().int().nonnegative(),
+    property_count: z.int().nonnegative(),
     emulator_observed: z.boolean().nullable(),
   }),
   list_adb_packages: z.strictObject({
@@ -560,11 +558,11 @@ export const adbResultSchemas = {
   read_adb_logcat: z.strictObject({
     client,
     serial: z.string().min(1),
-    count: z.number().int().positive(),
+    count: z.int().positive(),
     buffer: z.enum(["main", "system", "radio", "events", "crash"]),
-    pid: z.number().int().positive().nullable(),
+    pid: z.int().positive().nullable(),
     lines: z.array(z.string()),
-    total_bytes: z.number().int().nonnegative(),
+    total_bytes: z.int().nonnegative(),
     coverage: z.enum(["complete", "partial"]),
   }),
   inspect_adb_package: z.strictObject({
@@ -582,9 +580,9 @@ export const adbResultSchemas = {
     first_install_time: z.string().nullable(),
     last_update_time: z.string().nullable(),
     installer_package_name: z.string().nullable(),
-    user_id: z.number().int().nullable(),
+    user_id: z.int().nullable(),
     pkg_flags: z.string().nullable(),
-    requested_permissions_count: z.number().int().nonnegative().nullable(),
+    requested_permissions_count: z.int().nonnegative().nullable(),
     coverage: z.enum(["complete", "partial"]),
   }),
   pull_adb_file: z.strictObject({
@@ -592,7 +590,7 @@ export const adbResultSchemas = {
     serial: z.string().min(1),
     device_path: z.string().min(1),
     local_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   }),
   push_adb_file: z.strictObject({
@@ -600,7 +598,7 @@ export const adbResultSchemas = {
     serial: z.string().min(1),
     local_path: z.string().min(1),
     device_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
     device_sha256: z
       .string()
@@ -613,10 +611,10 @@ export const adbResultSchemas = {
     client,
     serial: z.string().min(1),
     local_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    width: z.number().int().positive().nullable(),
-    height: z.number().int().positive().nullable(),
+    width: z.int().positive().nullable(),
+    height: z.int().positive().nullable(),
   }),
   list_adb_processes: z.strictObject({
     client,
@@ -625,9 +623,9 @@ export const adbResultSchemas = {
     processes: z.array(
       z.strictObject({
         user: z.string(),
-        pid: z.number().int().nonnegative(),
-        ppid: z.number().int().nullable(),
-        rss: z.number().int().nullable(),
+        pid: z.int().nonnegative(),
+        ppid: z.int().nullable(),
+        rss: z.int().nullable(),
         state: z.string().nullable(),
         name: z.string(),
       }),
@@ -646,7 +644,7 @@ export const adbResultSchemas = {
         permissions: z.string().nullable(),
         owner: z.string().nullable(),
         group: z.string().nullable(),
-        bytes: z.number().int().nullable(),
+        bytes: z.int().nullable(),
         date: z.string().nullable(),
         link_target: z.string().nullable(),
       }),
@@ -660,7 +658,7 @@ export const adbResultSchemas = {
     features: z.array(
       z.strictObject({
         name: z.string().min(1),
-        version: z.number().int().nullable(),
+        version: z.int().nullable(),
       }),
     ),
     unparsed_lines: z.array(z.string().min(1)),
@@ -682,17 +680,17 @@ export const adbResultSchemas = {
     client,
     serial: z.string().min(1),
     physical_size: z.strictObject({
-      width: z.number().int().positive(),
-      height: z.number().int().positive(),
+      width: z.int().positive(),
+      height: z.int().positive(),
     }),
     override_size: z
       .strictObject({
-        width: z.number().int().positive(),
-        height: z.number().int().positive(),
+        width: z.int().positive(),
+        height: z.int().positive(),
       })
       .nullable(),
-    physical_density: z.number().int().positive().nullable(),
-    override_density: z.number().int().positive().nullable(),
+    physical_density: z.int().positive().nullable(),
+    override_density: z.int().positive().nullable(),
   }),
   inspect_adb_window: z.strictObject({
     client,
@@ -716,7 +714,7 @@ export const adbResultSchemas = {
     client,
     serial: z.string().min(1),
     local_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
     adb_reported_path: z.string().nullable(),
   }),
@@ -738,7 +736,7 @@ export const adbResultSchemas = {
     client,
     serial: z.string().min(1),
     apk_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
+    bytes: z.int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
     replace_requested: z.boolean(),
     replaced: z.boolean().nullable(),

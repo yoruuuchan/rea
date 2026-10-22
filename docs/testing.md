@@ -65,6 +65,18 @@ API dependency, and independent fixture compiler oracles keep their existing
 TypeScript versions.
 
 `npm run build:cached` compiles the CLI/MCP runtime and its packaged skill.
+The build also records `dist/mcp-catalog.json` (compact inputs) and
+`dist/mcp-catalog-full.json` from the canonical SDK registrations and binds
+each to the runtime with its own SHA-256 digest. These are
+runtime artifacts, separate from the test catalog below. Default target-free
+MCP startup serves its schemas without constructing analysis validators;
+the first tool or guided-workflow request materializes the canonical runtime
+on that same SDK server. Explicit compact/full input selections preserve
+their advertised schemas throughout materialization. Initial-target,
+HTTP and output-schema-off startup keep the eager path; source runs without
+recorded artifacts also use eager composition. Compare memory both after discovery and after a completed
+request; report diagnostic GC separately from normal resident memory.
+
 Turbo's strict task environment preserves caller-selected `GOMAXPROCS`,
 `GOMEMLIMIT`, and `UV_THREADPOOL_SIZE` for resource-constrained builds and
 checks. These execution controls do not change artifact content, so changing
@@ -1231,7 +1243,9 @@ host behavior or native process-supervision controls.
 real `.nib` with Xcode `ibtool`, wraps it in a temporary app bundle, and runs
 the compiled CLI and stdio MCP server with production providers. It compares
 their decoded results and checks the view hierarchy, outlet, action, evidence coverage, and truncation
-status. Storyboard compilation additionally requires an installed iOS platform.
+status. It also recompiles the XIB with toggled control booleans and requires
+both decodes to match `ibtool --export` for each source. Storyboard compilation
+additionally requires an installed iOS platform.
 
 Keep the provider-specific acceptance path independent from optional
 cross-compilers. Cross-format failures belong to the cross-format lane and must
@@ -1806,7 +1820,7 @@ the built CLI, packs the checkout with `npm pack`, exports the bundle with
 registry package, and runs `agent-env run` on the bundle. It checks that the
 export reports the planned file set with the inputs copied byte-exact and a
 bundle served from the derived state, which serves fewer tools than the
-manifest because write tools are not served, that the runner exits `0` with
+manifest because write tools the capture did not confirm are not served, that the runner exits `0` with
 `tasks/smoke.json` reported as passed and the verifier's description naming
 that served tool count, and that no container exists
 after the run that did not exist before; the container inventory runs even when

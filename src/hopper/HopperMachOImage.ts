@@ -48,19 +48,19 @@ const defaultHopperMachOImageFileSystem: HopperMachOImageFileSystem = { open };
 
 const hopperFatMachOImageSchema = z.strictObject({
   method: z.enum(["fat32_thin_slice", "fat64_thin_slice"]),
-  architecture_count: z.number().int().min(1).max(128),
+  architecture_count: z.int().min(1).max(128),
   container_table_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  source_offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  byte_length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  cpu_type: z.number().int().nonnegative(),
-  cpu_subtype: z.number().int().nonnegative(),
+  source_offset: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  byte_length: z.int().positive().max(Number.MAX_SAFE_INTEGER),
+  cpu_type: z.int().nonnegative(),
+  cpu_subtype: z.int().nonnegative(),
 });
 
 const hopperThinMachOImageSchema = z.strictObject({
   method: z.literal("thin_verified_copy"),
-  byte_length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  cpu_type: z.number().int().nonnegative(),
-  cpu_subtype: z.number().int().nonnegative(),
+  byte_length: z.int().positive().max(Number.MAX_SAFE_INTEGER),
+  cpu_type: z.int().nonnegative(),
+  cpu_subtype: z.int().nonnegative(),
 });
 
 /** Stable source coordinates committed before preparing an owned thin image. */

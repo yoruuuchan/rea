@@ -52,7 +52,7 @@ export const nativeDecompileSchema = z.object({
   addr: idaAddressSchema,
   ok: z.boolean(),
   pseudocode: z.string().min(1).optional(),
-  lines: z.number().int().nonnegative().optional(),
+  lines: z.int().nonnegative().optional(),
   error: z.string().optional(),
 });
 

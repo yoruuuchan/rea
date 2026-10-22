@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
+import { digestCanonicalValue } from "./canonicalDigest.js";
 
 import { compareUnicodeCodePoints } from "./unicodeCodePointOrder.js";
 
@@ -36,7 +34,7 @@ export const stableWebResources = (
 ): StableWebResource[] => {
   const keyed = resources.map((resource) => ({
     ...resource,
-    resource_key: `res_${digest(resource)}`,
+    resource_key: `res_${digestCanonicalValue(resource, "Web inventory")}`,
   }));
   return [
     ...new Map(
@@ -114,23 +112,19 @@ export const createCapturedWebScriptReconciler = (
 
 /** Stable script identity excludes target IDs, CDP script IDs, and timestamps. */
 export const stableWebScriptKey = (script: WebInventoryScriptInput): string =>
-  `scr_${digest({
-    url: script.url,
-    cdp_hash: script.cdp_hash,
-    length: script.length,
-    is_module: script.is_module,
-    language: script.language,
-    source_map_url: script.source_map_url,
-  })}`;
+  `scr_${digestCanonicalValue(
+    {
+      url: script.url,
+      cdp_hash: script.cdp_hash,
+      length: script.length,
+      is_module: script.is_module,
+      language: script.language,
+      source_map_url: script.source_map_url,
+    },
+    "Web inventory",
+  )}`;
 
 const uniqueResourceKeys = (
   resources: readonly StableWebResource[],
 ): string[] =>
   [...new Set(resources.map(({ resource_key }) => resource_key))].sort();
-
-const digest = (value: unknown): string => {
-  const encoded = canonicalize(value);
-  if (encoded === undefined)
-    throw new TypeError("Web inventory value is not canonical JSON");
-  return createHash("sha256").update(encoded).digest("hex");
-};

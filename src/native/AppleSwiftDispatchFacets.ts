@@ -47,7 +47,9 @@ export type SwiftRelativeField =
   | "typeName"
   | "witnessTablePattern"
   | "typeMetadataRecord"
-  | "classDescriptorName"
+  | "contextParent"
+  | "moduleName"
+  | "typeAccessFunction"
   | "methodImplementation";
 
 type SwiftRelativeFieldContract = {
@@ -67,7 +69,9 @@ const relativeFieldContracts = {
   typeName: { encoding: "direct", nullability: "nonnull" },
   witnessTablePattern: { encoding: "direct", nullability: "nullable" },
   typeMetadataRecord: { encoding: "taggedDirect", nullability: "nonnull" },
-  classDescriptorName: { encoding: "direct", nullability: "nonnull" },
+  contextParent: { encoding: "indirectable", nullability: "nullable" },
+  moduleName: { encoding: "direct", nullability: "nonnull" },
+  typeAccessFunction: { encoding: "direct", nullability: "nullable" },
   methodImplementation: {
     encoding: "compactFunction",
     nullability: "nullable",

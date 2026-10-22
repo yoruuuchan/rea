@@ -17,7 +17,7 @@ export const HOPPER_MEMORY_TOOL_DEFINITIONS = [
         document,
         start: address.optional(),
         end: address.optional(),
-        limit: z.number().int().min(1).max(1000).default(100),
+        limit: z.int().min(1).max(1000).default(100),
         cursor: z.string().min(1).optional(),
       })
       .superRefine(validateBytePattern),
@@ -28,7 +28,7 @@ export const HOPPER_MEMORY_TOOL_DEFINITIONS = [
       "Read analyzed bytes from one provider-normalized virtual address. The hexadecimal payload reports the exact returned length; incomplete reads remain explicit and unsupported provider APIs return typed capability unavailability.",
     inputSchema: z.object({
       address,
-      length: z.number().int().min(1).default(256),
+      length: z.int().min(1).default(256),
       document,
     }),
   },

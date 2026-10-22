@@ -24,7 +24,6 @@ const common = {
   mode: z.enum(["attached", "headless"]).default("attached"),
   protocol: z.literal("native").optional(),
   timeoutMs: z
-    .number()
     .int()
     .positive()
     .max(MAX_IDA_REQUEST_TIMEOUT_MS)

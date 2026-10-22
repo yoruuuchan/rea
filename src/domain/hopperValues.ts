@@ -81,7 +81,7 @@ export const analysisStringSchema = z.object({
           "Whether the provider declares the encoding or REA infers it from the typed bytes and native display. This does not establish the original source's intended encoding.",
         ),
       termination: z.enum(["missing", "present_or_not_required"]),
-      byte_length: z.number().int().min(0),
+      byte_length: z.int().min(0),
     })
     .exactOptional(),
 });
@@ -106,13 +106,8 @@ export const functionBodySchema = z.discriminatedUnion("available", [
             .describe("Inclusive last address of this observed body range."),
         }),
       ),
-      total_bytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-      span_bytes: z
-        .number()
-        .int()
-        .min(0)
-        .max(Number.MAX_SAFE_INTEGER)
-        .nullable(),
+      total_bytes: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+      span_bytes: z.int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
       non_contiguous: z.boolean(),
       contains_entry: z.boolean(),
     })
@@ -266,7 +261,7 @@ export const availableReferenceKindSchema = z
     conditional: z.boolean(),
     terminal: z.boolean(),
     primary: z.boolean(),
-    operand_index: z.number().int(),
+    operand_index: z.int(),
     external: z.boolean(),
   })
   .strict();
@@ -317,7 +312,7 @@ export const swiftStringLiteralSchema = z.discriminatedUnion("representation", [
 
 const swiftStringLiteralOmissionFields = {
   source_address: swiftStringLiteralFields.source_address,
-  byte_length: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  byte_length: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   reason: z
     .enum(["capacity", "unresolved_jump"])
     .describe(

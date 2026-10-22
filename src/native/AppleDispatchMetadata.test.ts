@@ -1569,6 +1569,10 @@ describe("malformed Apple dispatch metadata", () => {
       "EarlierClass",
       "LaterClass",
     ]);
+    expect(result.swift_decls.map(({ name }) => name)).toEqual([
+      "EarlierClass",
+      "LaterClass",
+    ]);
     const coverage = result.coverage.find(
       ({ facet }) => facet === "swift_class_vtable_descriptors",
     );
@@ -1576,7 +1580,7 @@ describe("malformed Apple dispatch metadata", () => {
       status: "partial",
       examined: 2,
       decoded: 2,
-      reason: expect.stringContaining("class name is empty"),
+      reason: expect.stringContaining("type descriptor name is empty"),
     });
   });
 

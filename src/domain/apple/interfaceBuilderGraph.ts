@@ -26,8 +26,8 @@ export const interfaceBuilderDocumentSchema = z.strictObject({
   relative_path: z.string().min(1),
   archive_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   document_kind: z.enum(["nib", "storyboard_scene"]),
-  object_count: z.number().int().nonnegative(),
-  connection_count: z.number().int().nonnegative(),
+  object_count: z.int().nonnegative(),
+  connection_count: z.int().nonnegative(),
   hierarchy_complete: z.boolean(),
 });
 
@@ -620,9 +620,9 @@ export const buildInterfaceBuilderAnalysis = (input: {
 
 /** Hard limits shared by Interface Builder archive aggregation and tracing. */
 export const interfaceBuilderLimitsSchema = z.strictObject({
-  max_documents: z.number().int().min(1).max(64).default(64),
-  max_objects: z.number().int().min(1).max(20_000).default(20_000),
-  max_connections: z.number().int().min(1).max(40_000).default(40_000),
+  max_documents: z.int().min(1).max(64).default(64),
+  max_objects: z.int().min(1).max(20_000).default(20_000),
+  max_connections: z.int().min(1).max(40_000).default(40_000),
   trace: nativeInvestigationTraceLimitsSchema.default({
     max_depth: 8,
     max_nodes: 250,

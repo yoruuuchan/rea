@@ -115,7 +115,7 @@ const coverageBlock = z
     segment: z.string(),
     start: z.string(),
     end: z.string(),
-    bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    bytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   })
   .superRefine((value, context) => {
     const start = addressCoordinate(value.start);
@@ -143,7 +143,6 @@ export const byteSearchResultSchema = z
           address: z.string(),
           segment: z.string(),
           file_offset: z
-            .number()
             .int()
             .nonnegative()
             .max(Number.MAX_SAFE_INTEGER)
@@ -156,7 +155,7 @@ export const byteSearchResultSchema = z
       .max(1000),
     searched: z.strictObject({
       blocks: z.array(coverageBlock),
-      bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      bytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
       skipped_uninitialized: z.array(coverageBlock),
       skipped_not_loaded: z.array(coverageBlock),
     }),

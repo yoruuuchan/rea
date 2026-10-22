@@ -20,7 +20,7 @@ export const windowsFileIdentitySchema = z.strictObject({
   filesystem: z.literal("NTFS"),
   volumeSerial: z.string().regex(/^[a-f0-9]{16}$/u),
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
-  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  size: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   directory: z.boolean(),
 });
 

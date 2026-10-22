@@ -379,6 +379,8 @@ const artifactStateErrorDetails = (
         : {
             admission: error.admission.kind,
             maximum_header_bytes: error.admission.maximumBytes,
+            maximum_header_bytes_source: error.admission.source,
+            setting: "REA_ASAR_MAX_HEADER_BYTES",
           }),
     };
   if (error instanceof UnknownRegistryError) return { reason: error.reason };

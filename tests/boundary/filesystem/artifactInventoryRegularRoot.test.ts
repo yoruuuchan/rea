@@ -19,7 +19,7 @@ import {
 import { asarHeaderBytes } from "../../fixtures/asarHeader.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { readWithoutFifoWriter } from "../../fixtures/fifoInput.js";
-import { MAX_ASAR_HEADER_BYTES } from "../../../src/artifacts/AsarHeader.js";
+import { DEFAULT_ASAR_MAX_HEADER_BYTES } from "../../../src/config/asarHeaderAdmission.js";
 
 it.skipIf(process.platform === "win32")(
   "rejects a FIFO artifact root without waiting for a writer",
@@ -136,7 +136,7 @@ it("reports the bounded probe limit for an oversized ASAR candidate without pena
   const candidatePath = join(root, "large.asar");
   const opaquePath = join(root, "opaque.bin");
   const jsonObject = Buffer.from('{"files":{}}');
-  const signatureOffset = MAX_ASAR_HEADER_BYTES + 9;
+  const signatureOffset = DEFAULT_ASAR_MAX_HEADER_BYTES + 9;
   const whitespaceBytes = signatureOffset - 16;
   const jsonBytes = whitespaceBytes + jsonObject.length;
   const headerBytes = 8 + Math.ceil(jsonBytes / 4) * 4;

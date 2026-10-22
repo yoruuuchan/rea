@@ -3,7 +3,10 @@ import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 
 import type { ProcessScenario } from "../../domain/process/processScenario.js";
-import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisAccessDeniedError,
+  AnalysisInputError,
+} from "../../domain/analysisErrorCore.js";
 import { snapshotEnvironment } from "../snapshotEnvironment.js";
 import { processCaptureCancelled } from "./ProcessCaptureError.js";
 
@@ -18,20 +21,26 @@ export const resolveProcessScenarioRuntimePaths = async (
   try {
     workingDirectory = await realpath(selectedWorkingDirectory);
   } catch (cause: unknown) {
-    throw invalidScenarioPath(
-      "working_directory",
-      `working directory could not be resolved: ${selectedWorkingDirectory}${osFailure(cause)}`,
-      cause,
+    throw (
+      hostAccessDenial(selectedWorkingDirectory, cause) ??
+      invalidScenarioPath(
+        "working_directory",
+        `working directory could not be resolved: ${selectedWorkingDirectory}${osFailure(cause)}`,
+        cause,
+      )
     );
   }
   let workingDirectoryStat;
   try {
     workingDirectoryStat = await stat(workingDirectory);
   } catch (cause: unknown) {
-    throw invalidScenarioPath(
-      "working_directory",
-      `working directory could not be inspected: ${workingDirectory}${osFailure(cause)}`,
-      cause,
+    throw (
+      hostAccessDenial(selectedWorkingDirectory, cause) ??
+      invalidScenarioPath(
+        "working_directory",
+        `working directory could not be inspected: ${workingDirectory}${osFailure(cause)}`,
+        cause,
+      )
     );
   }
   if (!workingDirectoryStat.isDirectory())
@@ -57,7 +66,12 @@ export const resolveProcessScenarioRuntimePaths = async (
   };
 };
 
-/** Resolve a selected executable through the caller's effective PATH. */
+/**
+ * Resolve a selected executable through the caller's effective PATH. A denied
+ * lookup of an explicitly selected path is a host access failure; PATH search
+ * continues past denied directories, and an existing file without execute
+ * permission remains an invalid selection.
+ */
 export const resolveExecutable = async (
   command: string,
   workingDirectory: string,
@@ -70,21 +84,33 @@ export const resolveExecutable = async (
         ? workingDirectory
         : resolve(workingDirectory, directory),
     );
-  const candidates =
+  const explicit =
     isAbsolute(command) ||
     command.includes("/") ||
-    (sep === "\\" && command.includes("\\"))
-      ? [resolve(workingDirectory, command)]
-      : directories.map((directory) => join(directory, command));
+    (sep === "\\" && command.includes("\\"));
+  const candidates = explicit
+    ? [resolve(workingDirectory, command)]
+    : directories.map((directory) => join(directory, command));
   const failures: string[] = [];
   for (const candidate of candidates) {
+    let metadata;
     try {
-      await access(candidate, fsConstants.X_OK);
-      if ((await stat(candidate)).isFile()) return candidate;
-      failures.push(`${candidate} (not a regular file)`);
+      metadata = await stat(candidate);
     } catch (cause: unknown) {
+      const denial = explicit ? hostAccessDenial(candidate, cause) : undefined;
+      if (denial !== undefined) throw denial;
       failures.push(`${candidate}${osFailure(cause)}`);
       continue;
+    }
+    if (!metadata.isFile()) {
+      failures.push(`${candidate} (not a regular file)`);
+      continue;
+    }
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch (cause: unknown) {
+      failures.push(`${candidate}${osFailure(cause)}`);
     }
   }
   throw invalidScenarioPath(
@@ -103,6 +129,24 @@ const invalidScenarioPath = (
     cause === undefined ? undefined : { cause },
     [{ path: [field], reason: "invalid_value", message }],
   );
+
+/** Host permissions denied resolving a selected path; not malformed input. */
+const hostAccessDenial = (
+  selected: string,
+  cause: unknown,
+): AnalysisAccessDeniedError | undefined => {
+  const code = osErrorCode(cause);
+  return code === "EACCES" || code === "EPERM"
+    ? new AnalysisAccessDeniedError(
+        "capture_process_scenario",
+        selected,
+        code,
+        {
+          cause,
+        },
+      )
+    : undefined;
+};
 
 const osErrorCode = (cause: unknown): string | undefined =>
   typeof cause === "object" &&

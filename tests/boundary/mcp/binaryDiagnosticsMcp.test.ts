@@ -1,3 +1,10 @@
+import { randomBytes } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { byteEntropySchema } from "../../../src/domain/native/byteEntropy.js";
+import { parseEvidence } from "../../../src/domain/evidence.js";
+import { TOOL_EFFECTS } from "../../../src/contracts/toolEffects.js";
 import {
   advertisedMcpToolSchemas,
   assertRecordedMcpEvidence,
@@ -103,4 +110,74 @@ it("advertises exact valid schemas and records inline layout without a binary ta
     ).isError,
   ).toBe(true);
   expect(providerCalls).toBe(1);
+});
+
+it("profiles real bytes with exact offsets, valid advertised schemas and read-only effects", async () => {
+  const root = await createTestTempDirectory("rea-entropy-mcp-");
+  const path = join(root, "firmware.bin");
+  await writeFile(
+    path,
+    Buffer.concat([
+      Buffer.alloc(4096),
+      randomBytes(4096),
+      Buffer.from("ordinary text ".repeat(400)),
+    ]),
+  );
+  const session = createTestBinarySession(() => {
+    throw new Error("No provider needed");
+  });
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "entropy-contract", version: "1" });
+  onTestFinished(async () => {
+    await client.close();
+    await server.close();
+    await session.close();
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const { ajv, inputSchema, outputSchema } = await advertisedMcpToolSchemas(
+    client,
+    "inspect_byte_entropy",
+  );
+  expect(ajv.validate(inputSchema, { path, surprise: true })).toBe(false);
+  const response = await client.callTool({
+    name: "inspect_byte_entropy",
+    arguments: { path },
+  });
+  expect(response.isError).not.toBe(true);
+  expect(
+    ajv.validate(outputSchema, response.structuredContent),
+    JSON.stringify(ajv.errors),
+  ).toBe(true);
+  const evidence = parseEvidence(response.structuredContent);
+  const report = byteEntropySchema.parse(evidence.normalized_result);
+  expect(report.runs).toEqual([
+    { offset: 0, length: 4096, classification: "low" },
+    { offset: 4096, length: 4096, classification: "high" },
+  ]);
+  expect(
+    report.blocks.map(({ offset, length }) => ({ offset, length })),
+  ).toEqual([
+    { offset: 0, length: 4096 },
+    { offset: 4096, length: 4096 },
+    { offset: 8192, length: 4096 },
+    { offset: 12288, length: 1504 },
+  ]);
+  expect(session.evidenceById(evidence.evidence_id)).toEqual(evidence);
+  expect(TOOL_EFFECTS.inspect_byte_entropy).toMatchObject({
+    launchesProcess: false,
+    writesFilesystem: false,
+    accessesNetwork: false,
+    mutatesTarget: false,
+  });
+  expect(
+    (
+      await client.callTool({
+        name: "inspect_byte_entropy",
+        arguments: { path, offset: 999999 },
+      })
+    ).isError,
+  ).toBe(true);
 });

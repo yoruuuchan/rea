@@ -17,7 +17,7 @@ import {
 import {
   environmentToolAnswer,
   type EnvironmentToolAnswer,
-} from "../../application/environment/environmentStateAnswer.js";
+} from "../../application/environment/environmentToolAnswer.js";
 import { EnvironmentStateStore } from "../../application/environment/environmentStateStore.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import {
@@ -450,7 +450,7 @@ export const serveEnvironment = async (
     options.state === undefined
       ? undefined
       : new EnvironmentStateStore(options.state);
-  const catalog = servedCatalog(source, store !== undefined, name);
+  const catalog = servedCatalog(source, options.state, name);
   if (!catalog.ok) return catalog;
   const { tools, dataPlane } = catalog.value;
   const card = environmentCard(name, tools, dataPlane);

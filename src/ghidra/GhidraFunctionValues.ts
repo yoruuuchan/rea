@@ -171,7 +171,7 @@ const procedureInfo = procedureInfoSchema
   .safeExtend({
     name: z.string().min(1),
     entrypoint: ghidraCanonicalAddressSchema,
-    length: z.number().int().min(0),
+    length: z.int().min(0),
     locals: z.array(localVariable),
     classification,
     body: ghidraFunctionBody,
@@ -413,7 +413,7 @@ const functionObservationEnvelope = z.strictObject({
   relationship_coverage: relationshipCoverageSchema.exactOptional(),
   selection: z
     .strictObject({
-      file_offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      file_offset: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
       mapped_address: ghidraCanonicalAddressSchema,
       procedure_address: ghidraCanonicalAddressSchema,
     })

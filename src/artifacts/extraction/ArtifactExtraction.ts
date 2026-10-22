@@ -1,3 +1,4 @@
+import { resolveAsarHeaderAdmission } from "../AsarHeader.js";
 import { locateGodotPck } from "../GodotPckLocation.js";
 import { withArtifactRegularFile } from "../ArtifactFileOperation.js";
 import type { ArtifactCleanupAttempt } from "../ArtifactResourceScope.js";
@@ -75,6 +76,7 @@ const extractArtifactInScope = async (
     resourceScope: input.resourceScope,
     signal,
     environment: input.environment,
+    asarHeaderAdmission: resolveAsarHeaderAdmission(input.environment),
     integrity: { mode: input.integrityPolicy },
   });
   return materializeArtifactInventoryInScope(
@@ -483,7 +485,10 @@ const createReader = async (
     return new PyInstallerArtifactReader(path);
   if (await requireExtractableFormat(path, input, signal))
     return new DirectoryArtifactReader(path);
-  if (format === "asar") return new AsarArtifactReader(path);
+  if (format === "asar")
+    return new AsarArtifactReader(path, {
+      headerAdmission: resolveAsarHeaderAdmission(input.environment),
+    });
   if (isZipPackageFormat(format)) return new ZipArtifactReader(path, format);
   return new MachOSliceArtifactReader(path, input.environment);
 };

@@ -829,15 +829,6 @@ export const registrationKey = (
     ]),
   ]);
 
-/** Sort values by a deterministic unique semantic key. */
-export const sortedUnique = <Value>(
-  values: readonly Value[],
-  key: (value: Value) => string,
-): Value[] =>
-  [...new Map(values.map((value) => [key(value), value])).values()].sort(
-    (left, right) => compareUnicodeCodePoints(key(left), key(right)),
-  );
-
 /** Hash exact UTF-8 source text. */
 export const sha256Text = (value: string): string =>
   createHash("sha256").update(value).digest("hex");

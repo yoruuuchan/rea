@@ -57,6 +57,7 @@ import {
   readSnapshotHeader,
 } from "./DartElf.js";
 import { readElfBuildIds } from "./ElfBuildId.js";
+import { privateWorkspaceFailure } from "../process/privateWorkspaceFailure.js";
 
 /** Stable identity for the Flutter build-identification provider. */
 export const FLUTTER_PROVIDER_IDENTITY = {
@@ -221,10 +222,15 @@ const inputFailureMessage = (path: string, cause: unknown): string => {
   return `The APK could not be read as a package: ${path}: ${message}`;
 };
 
-/** Provider-owned storage failures must never be attributed to caller input. */
+/**
+ * Provider-owned storage failures must never be attributed to caller input.
+ * `workspacePath` is the owned root once allocated, so a failure without its
+ * own errno path still names the workspace it occurred in.
+ */
 const mapOwnedIoFailure = (
   operation: string,
   cause: unknown,
+  workspacePath: string | null,
 ): AnalysisError => {
   if (cause instanceof AnalysisError) return cause;
   const cancellation = regularFileCancellation(cause);
@@ -239,24 +245,27 @@ const mapOwnedIoFailure = (
     "code" in cause &&
     typeof cause.code === "string"
   )
-    return new AnalysisResourceConstraintError(
+    return privateWorkspaceFailure(
+      FLUTTER_PROVIDER_IDENTITY.id,
       operation,
-      "file-size",
-      `Provider-owned Flutter snapshot storage failed (${cause.code}): ${cause.message}`,
-      null,
-      { cause },
+      cause,
+      workspacePath,
     );
   return new AnalysisProtocolError(operation, { cause });
 };
 
-/** ZIP format failures describe caller bytes; its descriptor is provider-owned. */
+/**
+ * ZIP format failures describe caller bytes. A system error comes from the
+ * provider-owned snapshot descriptor, so it propagates unchanged to the
+ * snapshot owner, which maps it against the owned workspace.
+ */
 const mapPackageFailure = (
   operation: string,
   path: string,
   cause: unknown,
-): AnalysisError =>
+): unknown =>
   cause instanceof Error && "code" in cause && typeof cause.code === "string"
-    ? mapOwnedIoFailure(operation, cause)
+    ? cause
     : mapInputFailure(operation, path, cause);
 
 interface FlutterLibrary {
@@ -382,7 +391,8 @@ export class FlutterBuildProvider {
     try {
       root = await mkdtemp(join(tmpdir(), "rea-flutter-"));
     } catch (cause) {
-      throw mapOwnedIoFailure(operation, cause);
+      // No workspace exists yet; the errno path names the attempted template.
+      throw mapOwnedIoFailure(operation, cause, null);
     }
     this.ownedRoots.set(root, new Set());
     const snapshotPath = join(root, "input.apk");
@@ -482,7 +492,7 @@ export class FlutterBuildProvider {
       await this.discardRoot(root);
       if (signal?.aborted === true)
         throw new AnalysisCancelledError(operation, { cause });
-      throw mapOwnedIoFailure(operation, cause);
+      throw mapOwnedIoFailure(operation, cause, root);
     }
   }
 
@@ -630,7 +640,9 @@ export class FlutterBuildProvider {
               libraries,
             );
     } catch (cause) {
-      result = err(mapOwnedIoFailure(request.operation, cause));
+      result = err(
+        mapOwnedIoFailure(request.operation, cause, snapshot?.root ?? null),
+      );
     } finally {
       if (snapshot !== undefined) await this.discardRoot(snapshot.root);
     }

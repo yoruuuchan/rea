@@ -98,26 +98,60 @@ export const deliverAnalysisEvidence = async (
         )
       : ok(evidence);
   if (!delivered.ok) return delivered;
-  const written = await persistEvidenceBundleCommand(
+  const published = await publishEvidenceDelivery({
     bundle,
+    complete: evidence,
+    delivered: delivered.value,
     outputPath,
+    operation: evidence.operation,
+    signal,
+  });
+  return published.ok ? ok(published.value.delivered) : published;
+};
+
+/** Selected Evidence delivered after its complete bundle was committed. */
+export interface PublishedEvidenceDelivery {
+  readonly delivered: Evidence;
+  readonly evidenceBundle: PublishedEvidenceFile;
+}
+
+/**
+ * Publish a complete bundle, then deliver Evidence already projected from it.
+ * Cancellation observed before commit leaves no output and retains the
+ * complete Evidence. A committed publication wins a later cancellation race;
+ * its receipt stays in the typed cancellation as diagnostics.evidence_bundle,
+ * and a cleanup failure after commit keeps its own published receipt.
+ */
+export const publishEvidenceDelivery = async (input: {
+  readonly bundle: EvidenceBundle;
+  readonly complete: Evidence;
+  readonly delivered: Evidence;
+  readonly outputPath: string;
+  readonly operation: string;
+  readonly signal?: AbortSignal | undefined;
+}): Promise<Result<PublishedEvidenceDelivery, AnalysisError>> => {
+  const { signal, operation } = input;
+  const written = await persistEvidenceBundleCommand(
+    input.bundle,
+    input.outputPath,
     false,
     signal,
-    evidence.operation,
+    operation,
   );
   // Deliver interrupts queued during final publication cleanup before the
   // command's signal owner accepts completion and removes its listeners.
   await dispatchQueuedInterrupts();
-  if (!written.ok) return err(written.error.retainPartialObservation(evidence));
+  if (!written.ok)
+    return err(written.error.retainPartialObservation(input.complete));
   if (signal?.aborted)
     return err(
-      new AnalysisCancelledError(evidence.operation, {
+      new AnalysisCancelledError(operation, {
         cause: signal.reason,
-        partialObservation: delivered.value,
+        partialObservation: input.delivered,
         diagnostics: { evidence_bundle: { ...written.value } },
       }),
     );
-  return delivered;
+  return ok({ delivered: input.delivered, evidenceBundle: written.value });
 };
 
 /** Resolve the caller's exact retained parent from an authenticated portable bundle. */

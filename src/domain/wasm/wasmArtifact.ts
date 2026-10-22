@@ -9,7 +9,7 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const artifact = z.strictObject({
   path: z.string().min(1),
   sha256: digest,
-  bytes: z.number().int().nonnegative(),
+  bytes: z.int().nonnegative(),
 });
 /** Default execution budget; upper bound is the runtime's signed 32-bit timer range. */
 export const DEFAULT_WASM_COMMAND_TIMEOUT_MS = 30_000;
@@ -39,9 +39,9 @@ export const wasmArtifactSchema = z
     sections: z.array(
       z.strictObject({
         kind: z.string().min(1),
-        start: z.number().int().nonnegative(),
-        end: z.number().int().nonnegative(),
-        bytes: z.number().int().nonnegative(),
+        start: z.int().nonnegative(),
+        end: z.int().nonnegative(),
+        bytes: z.int().nonnegative(),
         description: z.string(),
       }),
     ),
@@ -70,8 +70,8 @@ export const wasmArtifactSchema = z
           }),
         )
         .length(3),
-      timeout_ms: z.number().int().positive(),
-      output_budget_bytes: z.number().int().positive(),
+      timeout_ms: z.int().positive(),
+      output_budget_bytes: z.int().positive(),
     }),
     candidates: z.array(artifact),
     glue: z.array(
@@ -81,8 +81,8 @@ export const wasmArtifactSchema = z
         references: z.array(
           z.strictObject({
             value: z.string(),
-            line: z.number().int().positive(),
-            column: z.number().int().nonnegative(),
+            line: z.int().positive(),
+            column: z.int().nonnegative(),
             candidate_paths: z.array(z.string()),
             association: z.enum([
               "local-path-candidate",

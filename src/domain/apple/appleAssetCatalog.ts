@@ -29,20 +29,20 @@ export const appleResourceKeyFields = (
 
 /** Caller-controlled page bounds for compiled Apple asset metadata. */
 export const appleAssetCatalogInputSchema = z.strictObject({
-  offset: z.number().int().min(0).default(0),
-  limit: z.number().int().min(1).max(10_000).default(1_000),
+  offset: z.int().min(0).default(0),
+  limit: z.int().min(1).max(10_000).default(1_000),
 });
 
 const catalogSchema = z.strictObject({
   path: z.string().min(1),
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  record_count: z.number().int().nonnegative(),
+  record_count: z.int().nonnegative(),
 });
 
 const recordSchema = z.strictObject({
   catalog_path: z.string().min(1),
   catalog_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  index: z.number().int().nonnegative(),
+  index: z.int().nonnegative(),
   kind: z.enum(["catalog", "rendition"]),
   asset_name: z.string().nullable(),
   rendition_name: z.string().nullable(),
@@ -60,7 +60,7 @@ const resourceKeyMatchSchema = z.strictObject({
     z.strictObject({
       catalog_path: z.string().min(1),
       catalog_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-      record_index: z.number().int().nonnegative(),
+      record_index: z.int().nonnegative(),
       rendition_name: z.string().nullable(),
     }),
   ),
@@ -71,12 +71,12 @@ export const appleAssetCatalogResultSchema = bundleResourceBoundResultSchema(
   z.string().regex(/^[a-f0-9]{64}$/u),
   {
     catalogs: z.array(catalogSchema),
-    total_records: z.number().int().nonnegative(),
-    offset: z.number().int().nonnegative(),
-    limit: z.number().int().positive(),
+    total_records: z.int().nonnegative(),
+    offset: z.int().nonnegative(),
+    limit: z.int().positive(),
     records: z.array(recordSchema),
     resource_key_matches: z.array(resourceKeyMatchSchema),
-    next_offset: z.number().int().nonnegative().nullable(),
+    next_offset: z.int().nonnegative().nullable(),
     truncated: z.boolean(),
     limitations: z.array(z.string()),
   },

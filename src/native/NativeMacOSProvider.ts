@@ -296,9 +296,13 @@ class NativeMacOSClient implements AnalysisClient {
             this.target,
             input.data.max_records,
             this.#dispatchResources,
-            options?.signal,
-            input.data.objc_class_import_addresses,
-            input.data.objc_class_import_addresses_complete ?? true,
+            {
+              signal: options?.signal,
+              objcClassImportAddresses: input.data.objc_class_import_addresses,
+              objcClassImportAddressesComplete:
+                input.data.objc_class_import_addresses_complete ?? true,
+              maxInputBytes: input.data.max_input_bytes,
+            },
           ),
         );
         return ok(

@@ -195,6 +195,72 @@ const checkSwift = (metadata, mode) => {
     );
 };
 
+/** Declarations from dispatch.swift that survive stripping unchanged. */
+const EXPECTED_SWIFT_DECLS = [
+  ["struct", "ReaWitnessFixture", false],
+  ["class", "ReaVtableFixture", false],
+  ["enum", "ReaDeclFixtureEnum", false],
+  ["struct", "ReaDeclFixtureOuter", false],
+  ["struct", "ReaDeclFixtureOuter.Inner", false],
+  ["struct", "ReaDeclFixtureGeneric", true],
+  ["actor", "ReaDeclFixtureActor", false],
+];
+
+/** Stable declaration facts compared across the symbols and stripped builds. */
+const swiftDeclarations = (metadata) =>
+  metadata.swift_decls.map((item) => ({
+    kind: item.kind,
+    qualified_name: item.qualified_name,
+    module: item.module,
+    generic: item.generic,
+    descriptor: item.location.address,
+    accessor: item.accessor_address,
+    status: item.decode.status,
+  }));
+
+const checkSwiftDeclarations = (metadata, mode) => {
+  const declarations = swiftDeclarations(metadata);
+  for (const [kind, qualifiedName, generic] of EXPECTED_SWIFT_DECLS)
+    assert.ok(
+      declarations.some(
+        (item) =>
+          item.kind === kind &&
+          item.qualified_name === qualifiedName &&
+          item.module === "ReaWitnessFixture" &&
+          item.generic === generic &&
+          item.accessor !== null &&
+          item.status === "decoded",
+      ),
+      `Swift declaration ${qualifiedName} missing (${mode.mode}): ${JSON.stringify(declarations)}`,
+    );
+  assert.equal(
+    metadata.coverage.find(({ facet }) => facet === "swift_declarations")
+      ?.status,
+    "complete",
+  );
+  return declarations;
+};
+
+/** Descriptor and accessor addresses must be the compiler's Mn/Ma symbols. */
+const checkSwiftSymbolAddresses = async (path, declarations) => {
+  const { stdout } = await exec("/usr/bin/nm", ["--defined-only", path]);
+  const symbols = (suffix) =>
+    new Set(
+      stdout.split("\n").flatMap((line) => {
+        const [address, , name] = line.trim().split(/\s+/u);
+        return name?.endsWith(suffix) === true
+          ? [`0x${BigInt(`0x${address}`).toString(16)}`]
+          : [];
+      }),
+    );
+  const descriptors = symbols("Mn");
+  const accessors = symbols("Ma");
+  for (const item of declarations) {
+    assert.ok(descriptors.has(item.descriptor), JSON.stringify(item));
+    assert.ok(accessors.has(item.accessor), JSON.stringify(item));
+  }
+};
+
 const root = await mkdtemp(join(tmpdir(), "rea-dispatch-"));
 let report;
 try {
@@ -259,14 +325,21 @@ try {
       "-o",
       swiftPath,
     ]);
+    let unstrippedDeclarations;
     for (const variant of ["symbols", "stripped"]) {
       if (variant === "stripped")
         await exec("/usr/bin/strip", ["-x", swiftPath]);
       const { target, metadata } = await inspect(swiftPath);
       checkSwift(metadata, mode);
+      const declarations = checkSwiftDeclarations(metadata, mode);
+      if (variant === "symbols") {
+        await checkSwiftSymbolAddresses(swiftPath, declarations);
+        unstrippedDeclarations = declarations;
+      } else assert.deepEqual(declarations, unstrippedDeclarations);
       results.push({
         variant: `swift-${mode.mode}-${variant}`,
         target_sha256: target.sha256,
+        declarations: declarations.length,
         conformances: metadata.swift_conformances.length,
         slots: metadata.swift_dispatch_slots.length,
         fixups: fixupCoverage(metadata)?.reason,

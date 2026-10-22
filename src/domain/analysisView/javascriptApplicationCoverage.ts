@@ -11,8 +11,8 @@ export const javascriptApplicationSourceCoverageSchema = z.strictObject({
   semantic: javaScriptSemanticGraphInputSchema.shape.coverage.omit({
     families: true,
   }),
-  application_unknown_count: z.number().int().nonnegative(),
-  semantic_unknown_count: z.number().int().nonnegative(),
+  application_unknown_count: z.int().nonnegative(),
+  semantic_unknown_count: z.int().nonnegative(),
 });
 
 export type JavaScriptApplicationSourceCoverage = z.infer<

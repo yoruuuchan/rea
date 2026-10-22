@@ -3,7 +3,7 @@ import { analysisViewInputError } from "./analysisViewErrors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { AnalysisError } from "../analysisErrorBase.js";
-import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
+import { parseAnalysisViewResult } from "./analysisViewParent.js";
 import type { JsonValue } from "../jsonValue.js";
 import { err, ok, type Result } from "../result.js";
 import {
@@ -36,8 +36,8 @@ import {
 export const captureViewRequestSchema = z.strictObject({
   kind: z.literal("capture"),
   detail: z.enum(["preview", "complete"]).default("preview"),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 });
 
 const protobufSummarySchema = z.strictObject({
@@ -73,8 +73,8 @@ export const captureSummarySchema = z.strictObject({
   artifact: webNetworkCaptureArtifactSchema,
   decoder: webNetworkCaptureDecoderSchema,
   format: z.enum(WEB_NETWORK_CAPTURE_FORMATS),
-  total_records: z.number().int().nonnegative(),
-  retained_records: z.number().int().nonnegative(),
+  total_records: z.int().nonnegative(),
+  retained_records: z.int().nonnegative(),
   runtime_attribution: z.literal("unknown"),
   protobuf: protobufSummarySchema.exactOptional(),
   qlog: qlogSummarySchema.optional(),
@@ -413,25 +413,15 @@ const preview = (record: WebNetworkCaptureRecord, format: string) => {
   };
 };
 
+const captureParser = { safeParse: safeParseOwnedWebNetworkCapture };
+
 /** Authenticate the retained report and its subject at one owning boundary. */
 const parseCaptureParent = (
   parent: AnalysisViewParent,
 ): Result<WebNetworkCapture, AnalysisError> => {
-  const parsed = safeParseOwnedWebNetworkCapture(parent.normalizedResult);
-
-  if (!parsed.success)
-    return err(
-      analysisInputErrorFromIssues(
-        "inspect_analysis_view",
-        parsed.error.issues.map((issue) => ({
-          ...issue,
-          path: ["source", "normalized_result", ...issue.path],
-        })),
-        { source: { normalized_result: parent.normalizedResult } },
-        { cause: parsed.error },
-      ),
-    );
-  const report = parsed.data;
+  const parsed = parseAnalysisViewResult(captureParser, parent);
+  if (!parsed.ok) return parsed;
+  const report = parsed.value;
   if (
     report.artifact.sha256 !== null &&
     (parent.subject == null ||

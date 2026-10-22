@@ -7,10 +7,11 @@ import {
   type AnalysisErrorOptions,
 } from "./analysisErrorBase.js";
 
-/** Fixed admission named by the producing reader, with its effective byte ceiling. */
+/** Admission named by the producing reader, with its effective byte ceiling and its source. */
 export interface ArtifactAdmissionLimit {
   readonly kind: "asar-header";
   readonly maximumBytes: number;
+  readonly source: "default" | "setting";
 }
 
 /** Artifact inventory or extraction failed a typed safety boundary. */
@@ -25,6 +26,7 @@ export class ArtifactOperationError extends AnalysisError {
       | "inspect_artifact"
       | "inspect_desktop_application"
       | "inspect_pe_resources"
+      | "inspect_elf_notes"
       | "extract_artifact"
       | "decode_interface_builder"
       | "inspect_asset_catalog"

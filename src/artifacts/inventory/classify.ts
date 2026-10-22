@@ -1,3 +1,4 @@
+import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import { locateGodotPck } from "../GodotPckLocation.js";
 import { sameRegularFileState } from "../../filesystem/RegularFile.js";
 import type { FileHandle } from "node:fs/promises";
@@ -78,7 +79,10 @@ export const classifyAndHashRootForInventory = async (
   path: string,
   directory: boolean,
   expectedMetadata: Stats,
-  options: Pick<ArtifactInventoryOptions, "resourceScope" | "signal">,
+  options: Pick<
+    ArtifactInventoryOptions,
+    "resourceScope" | "signal" | "asarHeaderAdmission"
+  >,
 ): Promise<RootInventoryClassification> => {
   if (directory)
     return { format: "directory", digest: null, rootSource: undefined };
@@ -106,7 +110,12 @@ export const classifyAndHashRootForInventory = async (
         "integrity",
         `Root artifact changed before inventory: ${path}`,
       );
-    const format = await classifyRootFormat(path, handle, options.signal);
+    const format = await classifyRootFormat(
+      path,
+      handle,
+      options.signal,
+      options.asarHeaderAdmission,
+    );
     const digest = await hashStableRootArtifactHandle(
       path,
       handle,
@@ -144,8 +153,9 @@ const classifyRootFormat = async (
   path: string,
   handle: FileHandle,
   signal?: AbortSignal,
+  asarHeaderAdmission?: AsarHeaderAdmission,
 ): Promise<ArtifactOccurrence["artifact_format"]> => {
-  const probe = createArtifactClassificationProbe();
+  const probe = createArtifactClassificationProbe(asarHeaderAdmission);
   const chunk = Buffer.alloc(64 * 1024);
   while (probe.length < probe.limit) {
     abortIfNeeded(signal);

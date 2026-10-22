@@ -529,7 +529,8 @@ export const classifyArtifactContent = (
     path.toLowerCase().endsWith(".asar") &&
     asarHeader.state !== "rejected"
   ) {
-    if (asarHeader.state === "limit") throw asarHeaderAdmissionFailure();
+    if (asarHeader.state === "limit")
+      throw asarHeaderAdmissionFailure(asarHeader.admission);
     if (asarHeader.state === "matched")
       return { kind: "container", format: "asar" };
   }

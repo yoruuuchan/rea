@@ -1,10 +1,10 @@
 import type { ObjcSwiftMetadata } from "../domain/native/objcSwiftMetadata.js";
-import type { SwiftMetadataReaders } from "./AppleSwiftVtables.js";
+import type { SwiftNominalReaders } from "./AppleSwiftNominalTypes.js";
 
 /** Read protocol lists and absolute protocol method declarations with cycle-safe identities. */
 export const createObjcProtocolReader = (input: {
   readers: Pick<
-    SwiftMetadataReaders,
+    SwiftNominalReaders,
     "u32" | "string" | "location" | "evidence" | "admit"
   > & {
     pointer(address: bigint): bigint;

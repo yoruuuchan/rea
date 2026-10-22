@@ -84,6 +84,7 @@ export const scanCanonicalArtifactInventoryInScope = async (
       rootFormat,
       options.environment ?? {},
       rootSource,
+      options.asarHeaderAdmission,
     );
   } catch (cause: unknown) {
     readerCreationFailure = { cause };
@@ -101,7 +102,13 @@ export const scanCanonicalArtifactInventoryInScope = async (
       caseCollisionLimitation,
       unknownParentOccurrences,
       traversal,
-    } = await scanReader(reader, ownedReaders, options.signal, integrity);
+    } = await scanReader(
+      reader,
+      ownedReaders,
+      options.signal,
+      integrity,
+      options.asarHeaderAdmission,
+    );
     outcome = {
       kind: "completed",
       snapshot: await buildInventorySnapshot({

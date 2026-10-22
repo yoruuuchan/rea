@@ -5,7 +5,8 @@ environment: an MCP server whose tools answer from what one retained web
 network capture observed, plus the environment card the agentenv framework
 reads to discover it. By default the server derives the
 [state the capture observed](#the-state-a-capture-observed) at startup and
-answers read tools from it; `--replay-only` replays the capture's records
+answers read tools from it, and the write tools whose effect the capture
+confirmed by changing it; `--replay-only` replays the capture's records
 instead. Nothing is fetched from the recorded application; every answer comes
 from retained Evidence. `rea environment-export` writes the same pair as a
 bundle folder `agent-env run` builds and runs; see
@@ -271,11 +272,11 @@ document, with the same signal exit status.
 
 Three routes are served:
 
-| Route                             | Answer                                                                                                                                                         |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /mcp`                       | The MCP server: from the state, one tool per read tool, answering from the state where it backs them; in replay, one tool per manifest tool, replaying records |
-| `GET /.well-known/agent-env.json` | The environment card                                                                                                                                           |
-| `POST /agentenv`                  | From the state, `data/reset`, `data/add` and `data/get`; in replay, JSON-RPC `-32601 method not found: <method>` for every method                              |
+| Route                             | Answer                                                                                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /mcp`                       | The MCP server: from the state, one tool per read tool, answering from the state where it backs them, and one per write tool whose effect the capture confirmed, applying it to the state; in replay, one tool per manifest tool, replaying records |
+| `GET /.well-known/agent-env.json` | The environment card                                                                                                                                                                                                                                |
+| `POST /agentenv`                  | From the state, `data/reset`, `data/add` and `data/get`; in replay, JSON-RPC `-32601 method not found: <method>` for every method                                                                                                                   |
 
 Numeric JSON-RPC IDs outside JavaScript's safe range or whose precision would
 be lost are refused as invalid requests with a null ID. They are never echoed
@@ -376,8 +377,11 @@ In replay, `extensions`, `operations` and `children_environments` are fixed to
 `null`, `[]` and `null`: a replay environment declares no extensions, no
 data-plane operations and no children. Served
 [from the state](#serve-from-the-state), the card declares the three data-plane
-operations and one intake extension instead, leaves write tools out and
-describes each tool as answering from the state where the state backs it.
+operations and one intake extension instead, and the catalog holds the read
+tools and only the write tools whose effect the capture confirmed: a read tool
+is described as answering from the state where the state backs it, and a
+served write tool by the effect it applies to the state and the body members it
+accepts.
 
 ## Serve from the state
 
@@ -400,7 +404,8 @@ A state that is unavailable does not stop the server: it logs a warning naming
 the error `code` and message before it binds, then serves replay. The state is
 unavailable when it cannot be derived, such as from a
 `capture_browser_scenario` capture that selected header values but no response
-bodies or over the view's budget, and when its catalog under the served name
+bodies or over the view's budget, when `data/get` would write it past the 32 MiB
+`data/add` intake limit, and when its catalog under the served name
 exceeds the [discovery reservation](#what-a-manifest-is). That check runs
 first, so no state is derived for it, and replay is then admitted exactly as
 with `--replay-only`. `--replay-only`
@@ -417,26 +422,55 @@ member reports which applied:
 
 Each read tool answers according to its view in the state:
 
-| View       | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `item`     | The entity the path arguments name, rendered into the recorded envelope of `envelope_ordinal`. Arguments match as replay matches them: each collection segment equals the held collection's segment as written or after percent-decoding, and the identity is the last argument percent-decoded, then as written; values are never re-split on `/`. Any entity the state holds answers, including one `data/add` loaded; query arguments only decide `replay.exact_match`. An entity the state does not hold, or one lacking a field every recording carried, is a tool error; a body is never invented. |
-| `list`     | When the arguments name one of the lines the view checked exactly (its latest recordings before the first related write; every path and query value equal to the recording's, and every recorded query parameter supplied), that recorded envelope with its array rendered from the state: every entity of the collection in state order for `membership: "all"`, or the recorded members still held. A member lacking a field every recording carried makes the call a tool error rather than a partial list.                                                                                           |
-| `document` | When the arguments name the document's checked line exactly, the state's value for it; a tool error when the state holds none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `recorded` | The recording, as replay answers it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| View       | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `item`     | The entity the path arguments name, rendered into the recorded envelope of `envelope_ordinal`. Arguments match as replay matches them: each collection segment equals the held collection's segment as written or after percent-decoding, and the identity is the last argument percent-decoded, then as written; values are never re-split on `/`. Any entity the state holds answers, including one `data/add` loaded; query arguments only decide `replay.exact_match`. An entity the state does not hold answers the tool's latest recorded 400, 404 or 410 response with `state.view` `missing`, or is a tool error when none was recorded; one lacking a field every recording carried is a tool error; a body is never invented. |
+| `list`     | When the arguments name one of the lines the view checked exactly (its latest recordings before the first related write; every path and query value equal to the recording's, and every recorded query parameter supplied), that recorded envelope with its array rendered from the state: every entity of the collection in state order for `membership: "all"`, or the recorded members still held. A call with no query argument to a `membership: "all"` view answers from a checked line of the collection its path arguments name that only pages its list, with `replay.exact_match` false. A member lacking a field every recording carried makes the call a tool error rather than a partial list.                             |
+| `document` | When the arguments name the document's checked line exactly, the state's value for it; a tool error when the state holds none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `recorded` | The recording, as replay answers it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 A list or document call that names no checked line, including a line recorded
 after a write or with other query values, answers from the recording. Every
 answer has the replay shape plus `state`: `{"source": "state", "view": …}`
 naming the entity, collection or document path, or `{"source": "recording",
-"reason": …}` with the view's reason, `no-view` or `unrecorded-request`. A
+"reason": …}` with the view's reason, `no-view`, `unrecorded-request` or `page-exceeded` (a call naming a page of a whole list that the collection has outgrown). A
 state answer carries the base record's status, content type and `replay`
 provenance with `truncated: false`; one whose JSON would exceed 256 KiB is
 refused as a `resource_constraint` tool error rather than cut. Extraction does
 not state-back a document whose rendered JSON exceeds 256 KiB; that read stays
-recorded (`rendered-oversize`) and replays the captured body. Serving is
-read-only: `POST`, `PUT`, `PATCH` and `DELETE` tools, other than query `POST`s,
-are not served, so nothing a call does changes the state. Query `POST`s stay
-served and answer from their recordings with the reason `query-body`.
+recorded (`rendered-oversize`) and replays the captured body. Query `POST`s
+stay served and answer from their recordings with the reason `query-body`.
+
+`POST`, `PUT`, `PATCH` and `DELETE` tools are served only when the state's
+[write plan](web-network-captures.md#environment-state) for them is served:
+the capture's later reads confirmed the effect the plan models. Other write
+tools are not served, so no call claims a change it does not make; each one's
+plan states why in its `reason`. A served write changes the live state, which
+every MCP session and `data/get` then see:
+
+| Effect     | Call                                                                                                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create`   | Adds an entity to the collection the path names, built from the observed entity with each ruled field taken from the call or generated, at the plan's `insert` position. A plan tied to its exemplar's collection writes only there. |
+| `update`   | Sets the sent members on the entity the path names, constants for members accepted only with their recorded value, and the clock, increment and slug changes the plan models.                                                        |
+| `delete`   | Removes the entity the path names.                                                                                                                                                                                                   |
+| `document` | Merges the body into the plan's document object, or replaces it for `PUT`.                                                                                                                                                           |
+
+Its answer has the status and content type of the plan's recorded response,
+with the written entity or its identity rendered in, no body, or the recorded
+body. A call whose body is not an object, sends a member the capture did not
+show stored, sends a fixed member with another value or a member of another
+JSON type, or lacks a required member is a tool error naming the accepted
+members; so is a rendered answer missing a field the recorded response
+carried, and an update or delete of an entity the state does not hold answers
+the recorded 400, 404 or 410 of the tool or of an item view of the type, if
+any. A refused call leaves the state unchanged. Values a write generates are
+deterministic: the clock starts at `write_clock` and advances one second per
+served write, sequences take one past both the largest held value and the
+largest they generated, and UUIDs and tokens derive from the state Evidence
+id, tool, field and write count, skipping held values. `data/reset` and
+`data/add` restart the clock, counter and sequences, so the same calls after a
+reset give the same state. Answers carry `state: {"source": "state", "view":
+"create" | "update" | "delete", …}` or `"document-write"`.
 
 The data plane serves three JSON-RPC methods:
 
@@ -470,17 +504,28 @@ names its category in `error.data.reason`: `not-found`, `permission`,
 downloads, and `cancelled` for a download the server's stop or its caller's
 departure ended.
 
+Served creates also bound additional collection history since the last reset
+or `data/add` to 1 MiB of deterministic accounting: UTF-8 bytes for each new
+collection spelling and its possible sequence keys, plus a 64-byte allowance
+per collection and potential sequence-key record. The score bounds identifier
+payload and a fixed record allowance; it is not a measurement or guarantee of
+process memory. Collections
+already present in the Evidence or loaded state are part of the state itself;
+the store indexes their unique spellings so they remain known after deletion,
+but they do not consume this additional-history budget. A create that would
+exceed the budget is refused before the state changes. `data/reset` or `data/add`
+clears generated history; if the same calls would hit the limit again, use
+fewer distinct collection paths. The 1 MiB score ceiling is 1/32 of the
+separate 32 MiB state-intake ceiling, reserving a small, explicit allowance
+for identifiers retained beyond the loaded state. A loaded-state path that is
+later deleted and then introduced again may consume the additional-history
+budget when the store must retain it beyond the source entity.
+
 Stopping the server cancels every pending call, and a caller that leaves before
 its reply cancels its own: a download in progress ends, and calls not yet run
 are answered `-32000` with `error.data.reason` `cancelled` without running. A
 cancelled call leaves the state unchanged, and shutdown never waits for a
 download.
-
-A `file://` state file whose close fails stays owned by the server, and
-the `data/add` gets `-32000`. The next `file://` load retries that close first
-and, while it still fails, answers `-32000` without reading another file;
-inline and `https://` documents still load. Closing the server retries it once
-more and fails with the unfinished close rather than dropping the descriptor.
 
 One `/agentenv` response carries at most 64 MiB of replies, twice the 32 MiB
 a loaded document may hold: room for a `data/get` of a loaded state, while a
@@ -565,14 +610,17 @@ The card declares the operations and what `data/add` accepts:
 }
 ```
 
-The state is a projection of recorded reads. List and document calls answer
-from the state only for the lines their views checked, and every recorded view
-answers from recordings; item calls answer for any held entity but render only
-the envelope one recording carried. Values copied outside entity objects,
-derived values and counters other than those that count a list stay as
-recorded; no write has an effect. An exported bundle carries no state file:
-its server derives the state at startup, as the export does to predict what it
-serves.
+The state starts as a projection of recorded reads and changes only through
+served write tools and the data plane. List and document calls answer from the
+state only for the lines their views checked, and every recorded view answers
+from recordings; item calls answer for any held entity but render only the
+envelope one recording carried. Values copied outside entity objects, derived
+values and counters other than those that count a list stay as recorded, and a
+served write changes only the one entity or document it writes: side effects
+on counters, relations and copies of entities in other collections, reordering
+after an update and referential rules on delete are not modelled. An exported
+bundle carries no state file: its server derives the state at startup, as the
+export does to predict what it serves.
 
 ## Export a bundle
 
@@ -640,8 +688,8 @@ name from Python sources the image does not have.
 
 `verify.py` is the framework's `async def verify(mcp_url)` shape over its
 Python MCP client: it lists the tools and checks the count equals the number
-the bundle serves (the manifest's read tools from the state, every manifest
-tool in replay), calls one tool with no arguments and checks the call did not
+the bundle serves (from the state, the manifest's read tools and the write
+tools whose effect the capture confirmed; every manifest tool in replay), calls one tool with no arguments and checks the call did not
 fail and its `status` is the expected one, and returns one `serve` result
 whose description reports both checks. The tool is the first served `GET` tool
 without path parameters whose answer to no arguments is not an error, and the
@@ -659,8 +707,9 @@ The README written into the bundle records the capture artifact's SHA-256, the
 capture and manifest Evidence ids, the manifest view digest, the served tool
 count, the derived state's Evidence id or that no state is served, and the
 package source. It says what the environment serves: read tools from the state
-the capture observed, the `/agentenv` data plane on it and no write tools yet,
-replay when the state is unavailable, and `--replay-only` for pure replay; it
+the capture observed, the `/agentenv` data plane on it and the write tools
+whose effect the capture's later reads confirmed, replay when the state is
+unavailable, and `--replay-only` for pure replay; it
 says which applies to this bundle, with the error code and message when the
 state is unavailable, and that neither is emulation and served
 content is untrusted data. It states that the recorded content belongs to the

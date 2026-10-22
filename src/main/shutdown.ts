@@ -78,19 +78,28 @@ export const createShutdown = (input: {
   };
   const requestShutdown = (): void => {
     shutdown().catch((cause: unknown) => {
-      serverLogger.debug(
-        { failure_cause: describeShutdownFailure(cause) },
-        "MCP shutdown rejected",
-      );
-      dependencies.setExitCode(1);
-      serverLogger.error(MCP_SHUTDOWN_FAILED);
-      dependencies.writeStderr(`${MCP_SHUTDOWN_FAILED}\n`);
-      if (cause instanceof AnalysisError)
-        dependencies.writeStderr(`${projectAnalysisError(cause).message}\n`);
+      reportMcpShutdownFailure(cause, dependencies, serverLogger);
     });
   };
   unregisterShutdown = dependencies.registerShutdown(requestShutdown);
   return { shutdown, request: requestShutdown };
+};
+
+/** Preserve the same diagnostics for eager and deferred runtime owners. */
+export const reportMcpShutdownFailure = (
+  cause: unknown,
+  dependencies: Pick<RuntimeDependencies, "writeStderr" | "setExitCode">,
+  serverLogger: Logger,
+): void => {
+  serverLogger.debug(
+    { failure_cause: describeShutdownFailure(cause) },
+    "MCP shutdown rejected",
+  );
+  dependencies.setExitCode(1);
+  serverLogger.error(MCP_SHUTDOWN_FAILED);
+  dependencies.writeStderr(`${MCP_SHUTDOWN_FAILED}\n`);
+  if (cause instanceof AnalysisError)
+    dependencies.writeStderr(`${projectAnalysisError(cause).message}\n`);
 };
 
 const describeShutdownFailure = (

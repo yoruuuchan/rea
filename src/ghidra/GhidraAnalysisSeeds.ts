@@ -22,7 +22,7 @@ export const MAX_GHIDRA_SEED_ENTRIES = 1_000_000;
 export const MAX_GHIDRA_SEED_NAME_LENGTH = 2000;
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
-const count = z.number().int().nonnegative();
+const count = z.int().nonnegative();
 
 /** Caller-declared seeds committed into the analysis profile before import. */
 export const ghidraSeedCommitmentSchema = z.strictObject({

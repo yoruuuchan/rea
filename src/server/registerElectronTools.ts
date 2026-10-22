@@ -41,6 +41,8 @@ import { deliverEvidenceResult } from "./contractToolHandler.js";
 
 interface ElectronToolRegistration {
   readonly artifactResources: ArtifactResourceScope;
+  /** The server's selected environment; JavaScript analysis reads its admission settings. */
+  readonly environment: Readonly<Record<string, string | undefined>>;
   readonly logger: Logger;
   readonly observationLoadFailure?: OptionalProviderLoadFailure | undefined;
   readonly activeLoadFailure?: OptionalProviderLoadFailure | undefined;
@@ -115,7 +117,7 @@ export const registerElectronTools = (
           const analyzed = await analyzeJavaScriptApplicationValidated(
             request,
             options.artifactResources,
-            { signal, progress },
+            { signal, progress, environment: options.environment },
           );
           return detail === "summary" && analyzed.ok
             ? summarizeRetainedAnalysis(analyzed.value, options)

@@ -9,6 +9,10 @@ import {
   type BrowserScenarioCapture,
 } from "../browserScenarioCapture.js";
 import type { BrowserScenarioEvent } from "../browserScenarioCaptureValues.js";
+import {
+  indexBrowserScenarioTransactions,
+  type BrowserScenarioTransactionIndex,
+} from "../browserScenarioTransactions.js";
 import type { JsonValue } from "../jsonValue.js";
 import { err, ok, type Result } from "../result.js";
 import type { WebNetworkCaptureRecord } from "../webNetworkCapture.js";
@@ -18,7 +22,6 @@ import type { WebNetworkProjectionAccumulator } from "./WebNetworkProjectionAccu
 import { textBytes } from "./webNetworkRouteTemplates.js";
 
 type RequestEvent = Extract<BrowserScenarioEvent, { kind: "request" }>;
-type ResponseEvent = Extract<BrowserScenarioEvent, { kind: "response" }>;
 type ContentEvent = Extract<BrowserScenarioEvent, { kind: "network-content" }>;
 type CapturedBody = Extract<BrowserNetworkBody, { state: "captured" }>;
 
@@ -29,51 +32,9 @@ export interface ScenarioCaptureRecords {
   readonly limitations: readonly string[];
 }
 
-interface TransactionIndex {
-  readonly requests: { readonly event: RequestEvent; readonly item: number }[];
-  readonly requestCounts: Map<string, number>;
-  readonly responses: Map<string, ResponseEvent[]>;
-  /** Content events keyed by the sequence of the request or response event they belong to. */
-  readonly contents: Map<number, ContentEvent[]>;
-}
-
-const append = <Key, Value>(
-  map: Map<Key, Value[]>,
-  key: Key,
-  value: Value,
-): void => {
-  const existing = map.get(key);
-  if (existing === undefined) map.set(key, [value]);
-  else existing.push(value);
-};
-
-const indexTransactions = (
-  events: readonly BrowserScenarioEvent[],
-): TransactionIndex => {
-  const index: TransactionIndex = {
-    requests: [],
-    requestCounts: new Map(),
-    responses: new Map(),
-    contents: new Map(),
-  };
-  for (const [item, event] of events.entries()) {
-    if (event.kind === "request") {
-      index.requests.push({ event, item });
-      index.requestCounts.set(
-        event.transaction_id,
-        (index.requestCounts.get(event.transaction_id) ?? 0) + 1,
-      );
-    } else if (event.kind === "response")
-      append(index.responses, event.transaction_id, event);
-    else if (event.kind === "network-content")
-      append(index.contents, event.source_event_sequence, event);
-  }
-  return index;
-};
-
 /** The one content event of an exchange phase, or undefined when absent or ambiguous. */
 const onlyContent = (
-  index: TransactionIndex,
+  index: BrowserScenarioTransactionIndex,
   sequence: number | undefined,
 ): ContentEvent | undefined => {
   const found =
@@ -140,8 +101,8 @@ const reportedRequest = (
 
 const record = (
   ordinal: number,
-  observed: TransactionIndex["requests"][number],
-  index: TransactionIndex,
+  observed: { readonly event: RequestEvent; readonly item: number },
+  index: BrowserScenarioTransactionIndex,
   purpose: "manifest" | "replay",
 ): {
   readonly record: WebNetworkCaptureRecord;
@@ -226,13 +187,14 @@ export const scenarioCaptureRecords = (
   capture: BrowserScenarioCapture,
   purpose: "manifest" | "replay",
 ): ScenarioCaptureRecords => {
-  const index = indexTransactions(capture.events.items);
+  const index = indexBrowserScenarioTransactions(capture.events.items);
   const records: WebNetworkCaptureRecord[] = [];
   let withoutBody = 0;
   let representedCount = 0;
   let redactedBodies = 0;
-  for (const [ordinal, observed] of index.requests.entries()) {
-    const projected = record(ordinal, observed, index, purpose);
+  for (const [item, event] of capture.events.items.entries()) {
+    if (event.kind !== "request") continue;
+    const projected = record(records.length, { event, item }, index, purpose);
     records.push(projected.record);
     if (!projected.represented) continue;
     representedCount += 1;

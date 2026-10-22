@@ -1,3 +1,4 @@
+import { javascriptSourceRangeKey } from "../../domain/javascript/javascriptSourceCoordinates.js";
 import type { ElectronNativeAddonBindingFinding } from "../../domain/javascript/electronStaticAnalysisTypes.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
 import {
@@ -13,7 +14,6 @@ import {
   addElectronInferenceEdge,
   electronFindingSourceNode,
   electronObservationIdentity,
-  electronRangeKey,
 } from "./ElectronBoundaryGraphContext.js";
 
 interface NativeBindingInput {
@@ -65,7 +65,7 @@ const addNativeBinding = (input: NativeBindingInput): void => {
         value.members,
         value.namespace_access ?? null,
         value.dynamic_member_access ?? null,
-        electronRangeKey(value.location),
+        javascriptSourceRangeKey(value.location),
       ]),
     ),
     observations: [

@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-
-import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { IDENTIFIER_PATTERN } from "./stringPatterns.js";
@@ -9,6 +6,7 @@ import { evidenceSchema } from "./evidence.js";
 import { evidenceBundleSchema } from "./evidenceBundle.js";
 import { err, ok, type Result } from "./result.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
+import { digestCanonicalValue } from "./canonicalDigest.js";
 
 const conformancePackageIdSchema = prefixedDigestSchema("cp");
 
@@ -21,7 +19,7 @@ const scenarioManifestSchema = z.strictObject({
   /** Source-owned fixture path relative to the repository root. */
   fixture_path: z.string().min(1),
   /** Expected exit code or null if unspecified. */
-  expected_exit_code: z.number().int().nullable(),
+  expected_exit_code: z.int().nullable(),
   /** Expected output patterns that must appear in the capture. */
   expected_patterns: z.array(z.string()).default([]),
 });
@@ -35,7 +33,7 @@ const replayPlanSchema = z.strictObject({
         step_id: z.string().min(1),
         action: z.string().min(1),
         arguments: z.array(z.string()).default([]),
-        timeout_ms: z.number().int().positive(),
+        timeout_ms: z.int().positive(),
       }),
     )
     .min(1),
@@ -79,7 +77,7 @@ const verifierContractSchema = z.strictObject({
     )
     .min(1),
   /** Tolerance for timing differences in milliseconds. */
-  timing_tolerance_ms: z.number().int().nonnegative().default(0),
+  timing_tolerance_ms: z.int().nonnegative().default(0),
 });
 
 const conformancePackageContentsSchema = z.strictObject({
@@ -317,8 +315,5 @@ const packageContents = (
 });
 
 const computePackageId = (contents: ConformancePackageContents): string => {
-  const json = canonicalize(contents);
-  if (json === undefined)
-    throw new TypeError("Could not canonicalize parsed conformance package");
-  return `cp_${createHash("sha256").update(json).digest("hex")}`;
+  return `cp_${digestCanonicalValue(contents, "Conformance package")}`;
 };

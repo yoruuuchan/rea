@@ -25,7 +25,7 @@ export const webEventListenersSchema = z.object({
   selected_node: z.object({
     selector: z.string(),
     match: z.enum(["found", "not_found"]),
-    backend_node_id: z.number().int().min(1).nullable(),
+    backend_node_id: z.int().min(1).nullable(),
   }),
   listeners: z.array(
     z.object({

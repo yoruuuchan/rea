@@ -3,24 +3,25 @@ import {
   packetFieldsCatalogSchema,
   type InspectPacketFieldsInput,
 } from "../../domain/captures/packetFields.js";
-import type { JsonValue } from "../../domain/jsonValue.js";
-import type {
-  AnalysisExecution,
-  ExecutionOptions,
+import {
+  createAnalysisExecutionEvidence,
+  type AnalysisExecution,
+  type ExecutionOptions,
 } from "../AnalysisProvider.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
-import { createEvidence, type Evidence } from "../../domain/evidence.js";
+import type { Evidence } from "../../domain/evidence.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import {
   inspectPacketCaptureInputSchema,
   packetCaptureSchema,
   type InspectPacketCaptureInput,
 } from "../../domain/captures/packetCapture.js";
-import { err, ok, type Result } from "../../domain/result.js";
+import { err, type Result } from "../../domain/result.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 export interface PacketCapturePort {
   /** Release per-call resources before returning, or retain failed cleanup for close/retry. */
@@ -74,7 +75,15 @@ export class PacketCaptureService {
           "Capture analyzer returned malformed data or changed the selected artifact identity/options.",
         ),
       );
-    return this.#evidence(operation, input.data, execution, options);
+    return completeProviderEvidence(
+      createAnalysisExecutionEvidence(
+        operation,
+        input.data,
+        execution,
+        "observed",
+      ),
+      options?.signal,
+    );
   }
   async inspectFields(
     raw: unknown,
@@ -108,33 +117,14 @@ export class PacketCaptureService {
           "Field discovery returned malformed data or changed the selected installation/options.",
         ),
       );
-    return this.#evidence(operation, input.data, execution, options);
-  }
-  #evidence(
-    operation: string,
-    parameters: Readonly<Record<string, JsonValue>>,
-    execution: AnalysisExecution,
-    options?: ExecutionOptions,
-  ): Result<Evidence, AnalysisError> {
-    const evidence = createEvidence(
-      execution.subject ?? undefined,
-      execution.provider,
-      {
+    return completeProviderEvidence(
+      createAnalysisExecutionEvidence(
         operation,
-        parameters,
-        result: execution.result,
-        confidence: "observed",
-        locations: execution.locations,
-        limitations: execution.limitations,
-      },
+        input.data,
+        execution,
+        "observed",
+      ),
+      options?.signal,
     );
-    return options?.signal?.aborted
-      ? err(
-          new AnalysisCancelledError(operation, {
-            cause: options.signal.reason,
-            partialObservation: evidence,
-          }),
-        )
-      : ok(evidence);
   }
 }

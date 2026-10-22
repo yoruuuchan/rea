@@ -34,8 +34,8 @@ export const managedMembersViewRequestSchema = z.strictObject({
     "field_accesses",
     "user_strings",
   ]),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 });
 
 const rowsOf = <C extends string, S extends z.ZodArray>(
@@ -60,7 +60,7 @@ export const managedMembersViewPageSchema = z.discriminatedUnion("collection", [
 
 type ManagedMembersViewPage = z.infer<typeof managedMembersViewPageSchema>;
 
-const nullableCount = z.number().int().nonnegative().nullable();
+const nullableCount = z.int().nonnegative().nullable();
 
 /** Keep identity, selection and coverage; member collections remain retained. */
 export const managedMemberSummarySchema = z.strictObject({
@@ -80,13 +80,13 @@ export const managedMemberSummarySchema = z.strictObject({
     .nullable(),
   limitations: member.limitations,
   reported_counts: z.strictObject({
-    types: z.number().int().nonnegative(),
+    types: z.int().nonnegative(),
     exported_types: nullableCount,
-    fields: z.number().int().nonnegative(),
-    methods: z.number().int().nonnegative(),
-    member_refs: z.number().int().nonnegative(),
-    call_edges: z.number().int().nonnegative(),
-    field_accesses: z.number().int().nonnegative(),
+    fields: z.int().nonnegative(),
+    methods: z.int().nonnegative(),
+    member_refs: z.int().nonnegative(),
+    call_edges: z.int().nonnegative(),
+    field_accesses: z.int().nonnegative(),
     user_strings: nullableCount,
   }),
 });

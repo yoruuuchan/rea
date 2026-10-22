@@ -8,10 +8,7 @@ import {
   parseAtPath,
 } from "./javascriptRuntimeReconciliationInputValidation.js";
 
-import {
-  classifyBrowserCompleteness,
-  type BrowserCompleteness,
-} from "../browserCompleteness.js";
+import { classifyBrowserCompleteness } from "../browserCompleteness.js";
 import {
   electronActiveObservationResultSchema,
   type ElectronActiveObservationResult,
@@ -81,19 +78,10 @@ const assertIdentity = (evidence: Evidence): void => {
 };
 const normalizeInspection = (
   result: ElectronActiveObservationResult,
-): {
-  readonly target: {
-    readonly target_id: string;
-    readonly type: string;
-    readonly title: string;
-    readonly attached: boolean;
-    readonly file_path: string;
-  };
-  readonly frames: readonly [];
-  readonly scripts: { readonly items: readonly [] };
-  readonly workers: readonly [];
-  readonly completeness: BrowserCompleteness;
-} => ({
+): Extract<
+  ParsedRuntimeCapture,
+  { kind: "electron-active" }
+>["inspection"] => ({
   target: {
     target_id: `electron-active:${digestCanonicalValue(result.application.application_path, "Runtime reconciliation").slice(0, 32)}`,
     type: "electron-application",

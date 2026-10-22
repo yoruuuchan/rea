@@ -1,11 +1,14 @@
-import type { ExecutionOptions } from "../AnalysisProvider.js";
+import {
+  createAnalysisExecutionEvidence,
+  type ExecutionOptions,
+} from "../AnalysisProvider.js";
 import type { WasmArtifactPort } from "./WasmArtifactPort.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
-import { createEvidence, type Evidence } from "../../domain/evidence.js";
+import type { Evidence } from "../../domain/evidence.js";
 import {
   inspectWasmArtifactInputSchema,
   wasmArtifactSchema,
@@ -69,17 +72,12 @@ export class WasmArtifactService {
         ),
       );
     return completeProviderEvidence(
-      createEvidence(execution.subject, execution.provider, {
-        operation: OPERATION,
-        parameters: input.data,
-        result: report.data,
-        ...(execution.rawResult === null
-          ? {}
-          : { rawResult: execution.rawResult }),
-        confidence: "observed",
-        locations: execution.locations,
-        limitations: execution.limitations,
-      }),
+      createAnalysisExecutionEvidence(
+        OPERATION,
+        input.data,
+        { ...execution, result: report.data },
+        "observed",
+      ),
       options?.signal,
     );
   }

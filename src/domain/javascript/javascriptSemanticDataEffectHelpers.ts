@@ -8,7 +8,10 @@ import {
   semanticGlobalProcessOrigin,
   semanticMutableBuiltinOrigin,
 } from "./javascriptSemanticRequireOrigin.js";
-import type { JavaScriptModuleOrigin } from "./javascriptSemanticIr.js";
+import type {
+  JavaScriptModuleOrigin,
+  JavaScriptSemanticProjectedResultBinding,
+} from "./javascriptSemanticIr.js";
 import {
   evaluateSemanticProvenance,
   evaluateSemanticProvenanceAtRead,
@@ -35,11 +38,8 @@ import {
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 
-export interface SemanticProjectedBinding {
-  readonly bindingId: string;
+export interface SemanticProjectedBinding extends JavaScriptSemanticProjectedResultBinding {
   readonly identifier: t.Identifier;
-  readonly projectionPath: readonly (string | number | null)[];
-  readonly resolution: "complete" | "partial";
 }
 
 /** Resolve bindings written by the nearest variable or assignment owner. */
@@ -136,7 +136,7 @@ const projectedPatternBindings = (
 
 export const semanticProjectedBindingFacts = (
   bindings: readonly SemanticProjectedBinding[],
-): Omit<SemanticProjectedBinding, "identifier">[] =>
+): JavaScriptSemanticProjectedResultBinding[] =>
   bindings.map(({ identifier: _identifier, ...fact }) => fact);
 
 /** Return a scalar owner only for an unprojected identifier result. */

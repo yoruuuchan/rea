@@ -5,14 +5,14 @@ import { digestSchema } from "../domain/digests.js";
 import { uniqueSorted } from "../domain/canonicalOrdering.js";
 import { firmwareLogicalPath } from "./FirmwareFiles.js";
 
-const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const integer = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 const signature = z.object({
   id: z.string().min(1),
   offset: integer,
   size: integer,
   name: z.string(),
   description: z.string(),
-  confidence: z.number().int().min(0).max(255),
+  confidence: z.int().min(0).max(255),
   always_display: z.boolean(),
   extraction_declined: z.boolean(),
 });
